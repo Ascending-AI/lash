@@ -318,6 +318,46 @@ mod tests {
         );
     }
 
+    /// L21: source-backed event observation changes the journal schedule. The predecessor
+    /// keeps its drain lane and the successor refuses before decoding X.
+    #[tokio::test]
+    async fn l21_source_event_completion_refuses_predecessor_before_decode() {
+        use lash_core::engine::BuildGeneration;
+        let generation = |epoch: u32| {
+            let bytes = epoch.to_be_bytes();
+            BuildGeneration::from_digest([b'e', b's', bytes[0], bytes[1], bytes[2], bytes[3]])
+        };
+        const PREDECESSOR: u32 = crate::JOURNAL_LOGIC_EPOCH - 1;
+        let old = generation(PREDECESSOR);
+        let new = generation(crate::JOURNAL_LOGIC_EPOCH);
+        assert_ne!(old, new, "source observation moves the journal generation");
+        let entry = serde_json::json!({
+            BUILD_GENERATION_FIELD: old,
+            "record": "predecessor event observation",
+        });
+        let sentinel = crate::sentinel::FoldedSentinel::new("LashTurn/run", new);
+        let decoded = std::sync::atomic::AtomicBool::new(false);
+        let refusal = sentinel
+            .guard(async {
+                sentinel.check(entry.get(BUILD_GENERATION_FIELD)).await;
+                decoded.store(true, std::sync::atomic::Ordering::SeqCst);
+                decode_run_journal_entry("predecessor", entry.clone())
+            })
+            .await
+            .expect_err("refuse before decoding the predecessor X");
+        assert!(format!("{refusal:?}").contains("RetiredGeneration"));
+        assert!(!decoded.load(std::sync::atomic::Ordering::SeqCst));
+        let predecessor = crate::sentinel::FoldedSentinel::new("LashTurn/run", old.clone());
+        predecessor.check(entry.get(BUILD_GENERATION_FIELD)).await;
+        assert!(
+            crate::services::lash_service_routes(&crate::services::DEFAULT_NAMESPACE, &old)
+                .iter()
+                .any(|route| route.generation_lane_name().is_some_and(|lane| {
+                    crate::services::generation_lane_of(&lane) == Some(old.clone())
+                }))
+        );
+    }
+
     #[test]
     fn a_run_record_of_another_generation_parks_before_it_decodes() {
         for found in [

@@ -12,6 +12,8 @@ pub(super) async fn register(
     let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
     let registration = if metadata.revoked {
         RestateDurableWaitRegistration::Revoked
+    } else if let Some(terminal) = source_seal::event_terminal(registry, &ctx, &address).await? {
+        RestateDurableWaitRegistration::Resolved(terminal)
     } else if let Some(resolution) = object_state::get_stamped::<IndexedWait>(
         &ctx,
         &durable_wait_index_state_key(&address),
@@ -94,6 +96,10 @@ pub(super) async fn register_awakeable(
     // whether or not its wait ever registered: no resolve of it lands.
     if metadata.is_cancel_decided(&request.key.scope, &request.key.wait)? {
         resolve_durable_wait_awakeable(&ctx, &request, &Resolution::Cancelled);
+        return Ok(Reply::at(wire, RestateDurableWaitRegistration::Registered));
+    }
+    if let Some(terminal) = source_seal::event_terminal(registry, &ctx, &address).await? {
+        resolve_durable_wait_awakeable(&ctx, &request, &terminal);
         return Ok(Reply::at(wire, RestateDurableWaitRegistration::Registered));
     }
     if let Some(resolution) = object_state::get_stamped::<IndexedWait>(

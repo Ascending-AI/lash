@@ -293,20 +293,54 @@ pub(super) async fn resolve_completion(
             RestateSourceSealReply::Refused { refusal } => return Ok(refused(refusal)),
         }
     };
-    let seal = match &outcome {
-        SealOutcome::Sealed { seal } | SealOutcome::AlreadySealed { seal } => seal,
+    let (SealOutcome::Sealed { seal } | SealOutcome::AlreadySealed { seal }) = &outcome;
+    let terminal = resolution_of_seal(registry, &armed.descriptor, seal).await?;
+    Ok(Some(Response::Outcome(match outcome {
+        SealOutcome::Sealed { .. } => ResolveOutcome::Accepted,
+        SealOutcome::AlreadySealed { .. } => ResolveOutcome::AlreadyResolved { terminal },
+    })))
+}
+
+/// Event observers read the source's one authoritative seal. They do not
+/// create a second terminal in the event workflow or its index row.
+pub(super) async fn event_terminal(
+    registry: &LashDurableWaitRegistryImpl,
+    ctx: &ObjectContext<'_>,
+    address: &RestateDurableWaitAddress,
+) -> Result<Option<lash_core::Resolution>, TerminalError> {
+    let Some(armed) = load_source(ctx, address).await? else {
+        return Ok(None);
     };
-    let terminal = match seal {
-        SourceSeal::Cancelled => Resolution::Cancelled,
+    match armed.seal {
+        Some(seal) => resolution_of_seal(registry, &armed.descriptor, &seal)
+            .await
+            .map(Some),
+        None => Ok(None),
+    }
+}
+
+async fn resolution_of_seal(
+    registry: &LashDurableWaitRegistryImpl,
+    descriptor: &SourceDescriptor,
+    seal: &SourceSeal,
+) -> Result<lash_core::Resolution, TerminalError> {
+    match seal {
+        SourceSeal::Cancelled => Ok(lash_core::Resolution::Cancelled),
         SourceSeal::Resolved { result } => {
+            let materials = registry
+                .materials
+                .as_ref()
+                .ok_or_else(|| TerminalError::new("completion material store is unavailable"))?;
             let payload = materials
                 .read_material(
-                    &holder,
-                    result,
-                    &MaterialOwner::Source {
-                        source: key.clone(),
+                    &lash_core::tool_run::MaterialHolder::Source {
+                        source: descriptor.source.clone(),
                     },
-                    std::slice::from_ref(&armed.descriptor.resolver),
+                    result,
+                    &lash_core::tool_run::MaterialOwner::Source {
+                        source: descriptor.source.clone(),
+                    },
+                    std::slice::from_ref(&descriptor.resolver),
                 )
                 .await
                 .map_err(|error| {
@@ -314,13 +348,38 @@ pub(super) async fn resolve_completion(
                 })?;
             super::process_terminal::terminal_resolution(
                 serde_json::from_str(&payload.text).map_err(TerminalError::from_error)?,
-            )?
+            )
         }
-    };
-    Ok(Some(Response::Outcome(match outcome {
-        SealOutcome::Sealed { .. } => ResolveOutcome::Accepted,
-        SealOutcome::AlreadySealed { .. } => ResolveOutcome::AlreadyResolved { terminal },
-    })))
+    }
+}
+
+async fn wake_event_observers(
+    registry: &LashDurableWaitRegistryImpl,
+    ctx: &ObjectContext<'_>,
+    writer: object_state::StoredValueWriter,
+    address: &RestateDurableWaitAddress,
+    source: &AwaitEventKey,
+) -> Result<(), TerminalError> {
+    let mut metadata = load_durable_wait_index_metadata(ctx, writer).await?;
+    if !metadata
+        .awakeables
+        .iter()
+        .any(|observer| observer.key == *source)
+    {
+        return Ok(());
+    }
+    if let Some(terminal) = event_terminal(registry, ctx, address).await? {
+        super::wake_ended_waits(&registry.namespace, ctx, &mut metadata, &terminal, |key| {
+            key == source
+        });
+        object_state::set_stamped(
+            ctx,
+            super::DURABLE_WAIT_INDEX_METADATA_KEY,
+            writer,
+            metadata,
+        );
+    }
+    Ok(())
 }
 
 pub(super) async fn subscribe_source(
@@ -444,6 +503,7 @@ pub(super) async fn seal_descriptor(
             metadata,
         );
     }
+    wake_event_observers(registry, ctx, writer, &address, &request.source).await?;
     Ok(RestateSourceSealReply::Outcome { outcome })
 }
 

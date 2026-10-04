@@ -126,6 +126,34 @@ pub(super) async fn wait<'run, C: ContextClient<'run>>(
                         None => RestateTurnCancelRaceOutcome::Completed(Resolution::Cancelled),
                     })
                 } else {
+                    let registration = namespace
+                        .durable_wait_registry(context, address.index_key())
+                        .register(RestateDurableWaitIndexRequest {
+                            key: request.key.clone(),
+                        })
+                        .call()
+                        .await?
+                        .into_body();
+                    // An armed source owns this terminal; reread its seal
+                    // after the wake without settling a second event promise.
+                    match registration {
+                        RestateDurableWaitRegistration::Resolved(terminal) => {
+                            return Ok(TurnGateRace::Ended(
+                                RestateTurnCancelRaceOutcome::Completed(terminal),
+                            ));
+                        }
+                        RestateDurableWaitRegistration::Revoked => {
+                            return Ok(TurnGateRace::Ended(match request.key.scope.session_id() {
+                                Some(session_id) => RestateTurnCancelRaceOutcome::SessionRevoked {
+                                    session_id: session_id.clone(),
+                                },
+                                None => {
+                                    RestateTurnCancelRaceOutcome::Completed(Resolution::Cancelled)
+                                }
+                            }));
+                        }
+                        RestateDurableWaitRegistration::Registered => {}
+                    }
                     let terminal = namespace
                         .durable_wait_workflow(context, address.workflow_key.clone())
                         .peek()
