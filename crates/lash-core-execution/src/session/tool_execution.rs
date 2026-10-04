@@ -1,7 +1,6 @@
 use super::execution_context::RuntimeExecutionContext;
 use crate::tool_dispatch::{
-    ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
-    prepare_granted_tool_call_with_context, prepare_tool_call_with_context,
+    ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome, prepare_tool_call_with_context,
 };
 use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
@@ -31,79 +30,6 @@ use std::sync::Arc;
 /// )
 /// version_surface = "coexist"
 const TOOL_BATCH_FAMILY_VERSION: u8 = 3;
-
-enum ToolCallAuthorization {
-    Catalog(crate::ToolId),
-    Granted(Box<crate::ToolExecutionGrant>),
-    /// A replayed code cell's call on a host tool binding that drifted since
-    /// the pass that journaled the cell (FIG-3587): authorized under the
-    /// cell's recorded binding instead of the live catalog, and otherwise the
-    /// catalog call it was, so its attempt envelope is the recorded one.
-    Recorded(Box<crate::ToolDefinition>),
-}
-
-impl ToolCallAuthorization {
-    fn from_invocation(call: &mut ToolInvocation) -> Self {
-        if let Some(binding) = call.recorded_binding.take() {
-            return Self::Recorded(binding);
-        }
-        match call.execution_grant.take() {
-            Some(grant) => Self::Granted(grant),
-            None => Self::Catalog(call.tool_id.clone()),
-        }
-    }
-
-    fn tool_id(&self) -> &crate::ToolId {
-        match self {
-            Self::Catalog(tool_id) => tool_id,
-            Self::Granted(grant) => &grant.manifest().id,
-            Self::Recorded(binding) => &binding.manifest.id,
-        }
-    }
-
-    /// The manifest this call is authorized under: the catalog's answer for a
-    /// catalog call, the grant's carried manifest for a granted one. Kept whole
-    /// rather than reduced to a name because group formation retains it as the
-    /// child's admission (ADR 0099 §3).
-    fn resolve_manifest(
-        &self,
-        dispatch: &crate::tool_dispatch::ToolDispatchContext<'_>,
-    ) -> Option<crate::ToolManifest> {
-        match self {
-            Self::Catalog(tool_id) => {
-                crate::tool_dispatch::resolve_callable_manifest_by_id(dispatch, tool_id)
-            }
-            Self::Granted(grant) => Some(grant.manifest().clone()),
-            Self::Recorded(binding) => Some(binding.manifest.clone()),
-        }
-    }
-
-    async fn prepare(
-        &self,
-        dispatch: &crate::tool_dispatch::ToolDispatchContext<'_>,
-        pending: crate::sansio::PendingToolCall,
-    ) -> ToolPreparationOutcome {
-        match self {
-            Self::Catalog(_) => prepare_tool_call_with_context(dispatch, pending).await,
-            Self::Granted(grant) => {
-                prepare_granted_tool_call_with_context(dispatch, grant, pending).await
-            }
-            Self::Recorded(binding) => {
-                crate::tool_dispatch::prepare_recorded_tool_call_with_context(
-                    dispatch, binding, pending,
-                )
-                .await
-            }
-        }
-    }
-
-    fn execution_grant(&self) -> Option<&crate::ToolExecutionGrant> {
-        match self {
-            Self::Catalog(_) | Self::Recorded(_) => None,
-            Self::Granted(grant) => Some(grant),
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct ToolInvocation {
