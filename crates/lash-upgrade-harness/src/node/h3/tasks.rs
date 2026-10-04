@@ -138,8 +138,14 @@ impl SingletonToolHandlers for Pending {
     ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
         self.0.after_checks(call, capture).await
     }
-    fn run_cancel_requested(&self) -> bool {
-        self.0.run_cancel_requested()
+    async fn run_cancel_requested(&self) -> Result<bool, String> {
+        self.0.run_cancel_requested().await
+    }
+    async fn wait_run_retry(
+        &self,
+        timer: lash_core::tool_dispatch::RunRetryTimer<'_>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.0.wait_run_retry(timer).await
     }
     async fn realize_declarations(
         &self,

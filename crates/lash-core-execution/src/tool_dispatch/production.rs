@@ -812,8 +812,27 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         self.incorporate_capture(call_id, capture, presentation, observe)
     }
-    fn run_cancel_requested(&self) -> bool {
-        self.context.is_cancelled()
+    async fn run_cancel_requested(&self) -> Result<bool, String> {
+        self.context
+            .run_cancel_requested_in_recorded_step()
+            .await
+            .map_err(|error| error.to_string())
+    }
+    async fn wait_run_retry(
+        &self,
+        timer: crate::tool_dispatch::RunRetryTimer<'_>,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.context
+            .run_turn_step_body(|stop| async move {
+                match stop {
+                    Some(stop) => tokio::select! {
+                        result = timer => result,
+                        () = stop.cancelled() => Ok(()),
+                    },
+                    None => timer.await,
+                }
+            })
+            .await
     }
     async fn cancel_call(
         &self,

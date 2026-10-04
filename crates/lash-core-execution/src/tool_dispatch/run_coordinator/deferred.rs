@@ -151,7 +151,7 @@ impl<'a> RunCoordinator<'a> {
             .append(
                 record_name(&id, "start:admit"),
                 Box::pin(async move {
-                    let event = if closing || binding.run_cancel_requested() {
+                    let event = if closing || binding.run_cancel_requested().await? {
                         RunEvent::Decided {
                             call_id: id,
                             rank,

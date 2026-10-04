@@ -488,9 +488,16 @@ pub trait SingletonToolHandlers: Send + Sync {
         Ok(())
     }
 
-    /// Whether the owning Run's cancellation is requested, read once inside
-    /// the decision's step (D).
-    fn run_cancel_requested(&self) -> bool;
+    /// Observe the owning Run's authoritative cancellation inside the body
+    /// of its recorded decision (D), never from an unrecorded live flag.
+    async fn run_cancel_requested(&self) -> Result<bool, String>;
+
+    /// Wake a registered retry when its timer finishes or its owner stops.
+    /// This is readiness only: the subsequent recorded D chooses cancellation.
+    async fn wait_run_retry(
+        &self,
+        timer: crate::tool_dispatch::RunRetryTimer<'_>,
+    ) -> Result<(), RuntimeEffectControllerError>;
 
     /// Discharge eligible external cancellation at logical Closing. The
     /// call id is the dedup key; recovery can repeat an unacknowledged call.

@@ -123,7 +123,7 @@ pub(super) async fn discharge_start(
     let discharge_record = journal.record(Vec::new());
     let (step_call, launched_id) = (call_id.clone(), process_id.clone());
     let discharge = Box::pin(async move {
-        let cancel = (closing || handlers.run_cancel_requested())
+        let cancel = (closing || handlers.run_cancel_requested().await?)
             && matches!(
                 obligation.on_cancel(DeclaredStartPhase::Launched),
                 StartCancelDecision::RecoverAndDischarge {

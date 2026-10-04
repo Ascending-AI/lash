@@ -1021,8 +1021,14 @@ impl SingletonToolHandlers for Probe {
         Ok(Vec::new())
     }
 
-    fn run_cancel_requested(&self) -> bool {
-        self.cancel.load(Ordering::SeqCst)
+    async fn run_cancel_requested(&self) -> Result<bool, String> {
+        Ok(self.cancel.load(Ordering::SeqCst))
+    }
+    async fn wait_run_retry(
+        &self,
+        timer: lash_core::tool_dispatch::RunRetryTimer<'_>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        timer.await
     }
 
     async fn realize_declarations(

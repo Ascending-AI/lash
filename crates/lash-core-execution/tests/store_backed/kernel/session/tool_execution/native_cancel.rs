@@ -207,3 +207,219 @@ async fn l19_native_inline_cancel_retains_only_the_same_key_durable_sibling() {
 async fn l19_native_inline_cancel_retains_only_the_disjoint_key_durable_sibling() {
     cancelled_sibling(true).await;
 }
+
+struct RetryingTools(Arc<Mutex<Vec<(String, u32)>>>);
+
+fn retry_definition() -> crate::ToolDefinition {
+    definition().with_retry_policy(crate::ToolRetryPolicy::safe(2, 30_000, 30_000))
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for RetryingTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![retry_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, _: &str) -> Option<Arc<crate::ToolContract>> {
+        Some(Arc::new(retry_definition().contract()))
+    }
+
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        self.0.lock_recover().push((
+            call.args["symbol"].as_str().unwrap().into(),
+            call.context.attempt_number(),
+        ));
+        if call.context.attempt_number() == 1 {
+            crate::ToolOutcome::retryable_failure(
+                crate::ToolFailureClass::External,
+                "retry-first",
+                "reported first-attempt failure",
+                Some(30_000),
+            )
+            .into()
+        } else {
+            crate::ToolOutcome::ok(json!("retried")).into()
+        }
+    }
+}
+
+/// L03: the durable cancel gate, not a handler's live flag, owns the retry
+/// decision after the original owner dies with its backoff still pending.
+#[tokio::test]
+async fn l03_accepted_cancel_survives_crash_before_retry_wake_without_second_bodies() {
+    let double =
+        crate::support::kernel_double(0x493207, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let session = crate::SessionId::fixture("retry-cancel-session");
+    let catalog = backend.session_store_factory();
+    crate::SessionCatalogStore::admit_session(
+        catalog.as_ref(),
+        &crate::testing::store_fixtures::root_session_request(&session),
+    )
+    .await
+    .unwrap();
+    let bodies = Arc::new(Mutex::new(Vec::new()));
+    let attempt = |crash: bool| -> lash_restate_test::HandlerAttempt {
+        let backend = backend.clone();
+        let server = double.server().clone();
+        let bodies = bodies.clone();
+        Arc::new(move |scoped| {
+            let backend = backend.clone();
+            let server = server.clone();
+            let bodies = bodies.clone();
+            Box::pin(async move {
+                let host = backend.effect_host();
+                let control = Arc::new(
+                    crate::runtime::turn_control::ActiveTurnControl::new(
+                        host.await_event_resolver(),
+                        crate::TurnAddress::new("retry-cancel-session", "retry-cancel-turn"),
+                    )
+                    .await
+                    .unwrap(),
+                );
+                let factory = crate::plugin::StaticPluginFactory::new(
+                    crate::plugin::PluginDeclaration::initial(PLUGIN),
+                    crate::PluginSpec::new().with_tool_provider(Arc::new(RetryingTools(bodies))),
+                );
+                let mut factories = crate::testing::test_standard_protocol_factories();
+                factories.push(Arc::new(factory));
+                let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+                    .session_id("retry-cancel-session")
+                    .borrowed_effect_controller(scoped)
+                    .plugin_factories(factories)
+                    .build()
+                    .into_runtime()
+                    .with_recorded_turn_cancel(
+                        false,
+                        control,
+                        host.clone(),
+                        CancellationToken::new(),
+                    );
+                let grant = crate::ToolExecutionGrant::from_definition(
+                    crate::plugin::PluginRevision::new(
+                        PLUGIN,
+                        crate::plugin::BehaviorRevision::ONE,
+                    ),
+                    retry_definition(),
+                );
+                let calls = ["A", "B"]
+                    .into_iter()
+                    .map(|symbol| {
+                        crate::session::ToolInvocation::new(
+                            crate::ToolCallId::fixture(symbol),
+                            crate::ToolId::new("q5:append"),
+                            json!({"symbol":symbol}),
+                        )
+                        .with_execution_grant(grant.clone())
+                    })
+                    .collect();
+                let drive = context.drive_tool_run(None, |context| async move {
+                    let replies = context.call_tool_batch(calls).await;
+                    context.close_opener_groups().await.unwrap();
+                    replies
+                });
+                let cancel_or_wake = async {
+                    let wake_at = loop {
+                        let sleeps = server
+                            .timers()
+                            .into_iter()
+                            .filter(|timer| timer.kind == "sleep")
+                            .collect::<Vec<_>>();
+                        if sleeps.len() == 2 {
+                            break sleeps.iter().map(|timer| timer.fire_at_ms).max().unwrap();
+                        }
+                        tokio::task::yield_now().await;
+                    };
+                    if crash {
+                        let driver = crate::TurnWorkDriver::for_catalog(
+                            host,
+                            backend.session_store_factory(),
+                        );
+                        let receipt = driver
+                            .request_cancel(crate::TurnCancelRequest::new(
+                                crate::TurnAddress::new(
+                                    "retry-cancel-session",
+                                    "retry-cancel-turn",
+                                ),
+                                "cancel-before-owner-loss",
+                                None,
+                            ))
+                            .await
+                            .unwrap();
+                        assert!(matches!(
+                            receipt.outcome,
+                            crate::TurnCancelOutcome::Requested(_)
+                        ));
+                        panic!(
+                            "owner dies after accepted cancel with both durable retries pending"
+                        );
+                    }
+                    server.advance_to(wake_at);
+                };
+                let (replies, ()) = tokio::join!(drive, cancel_or_wake);
+                let replies = replies.unwrap();
+                assert_eq!(replies.replies.len(), 2);
+                assert!(replies.replies.iter().all(|reply| matches!(
+                    reply.output.outcome,
+                    crate::ToolCallOutcome::Cancelled(_)
+                )));
+                assert!(!context.has_nested_effect_error());
+            })
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        double.run_crashed_then_redriven(
+            crate::AdmittedScope::turn("retry-cancel-session", "retry-cancel-turn"),
+            attempt(true),
+            attempt(false),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let mut actual = bodies.lock_recover().clone();
+    actual.sort();
+    assert_eq!(
+        actual,
+        [("A".into(), 1), ("B".into(), 1)],
+        "accepted cancellation started a retry body after cold recovery"
+    );
+    let events = double
+        .server()
+        .invocations()
+        .into_iter()
+        .flat_map(|invocation| {
+            double
+                .server()
+                .journal(&invocation.id)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|entry| entry.run_completion().and_then(Result::ok))
+                .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .filter_map(|value| value.get("record").cloned())
+                .filter_map(|record| {
+                    serde_json::from_value::<crate::tool_run::RunRecord>(record).ok()
+                })
+                .flat_map(|record| record.events)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                crate::tool_run::RunEvent::Decided {
+                    decision: crate::tool_run::CallDecision::Cancelled,
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        crate::tool_run::RunEvent::RetryScheduled { .. }
+            | crate::tool_run::RunEvent::DeclarationsIssued { .. }
+    )));
+}

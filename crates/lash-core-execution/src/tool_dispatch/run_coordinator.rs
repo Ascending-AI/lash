@@ -535,7 +535,7 @@ async fn decision_entry(
             (BeforeSelection::Cancel, _) => (CallDecision::CheckCancelled, None),
             (BeforeSelection::AbortRun, _) => (CallDecision::Aborted, None),
             (_, None) => return Err("a result candidate has no capture".to_owned()),
-            (_, Some(_)) if !protected_source && handlers.run_cancel_requested() => {
+            (_, Some(_)) if !protected_source && handlers.run_cancel_requested().await? => {
                 (CallDecision::Cancelled, None)
             }
             (_, Some((source, capture))) => {

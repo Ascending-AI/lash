@@ -1333,6 +1333,30 @@ impl ActiveTurnControl {
             .await
     }
 
+    /// Execution-side read inside a recorded Run decision. The enclosing
+    /// record owns this answer; replay serves that record without reading
+    /// either promise again. AfterStep alone leaves the current step running.
+    pub(crate) async fn peek_immediate(
+        &self,
+        resolver: &dyn AwaitEventResolver,
+    ) -> Result<bool, RuntimeError> {
+        let Some(resolution) = resolver.peek_await_event(&self.cancel_key).await? else {
+            return Ok(false);
+        };
+        let TurnGateTerminal::CancelRequested(base) = decode_gate(resolution)? else {
+            return Ok(false);
+        };
+        if base.mode.is_immediate() {
+            return Ok(true);
+        }
+        Ok(resolver
+            .peek_await_event(&self.escalation_key)
+            .await?
+            .map(decode_gate::<TurnEscalationTerminal>)
+            .transpose()?
+            .is_some_and(|terminal| matches!(terminal, TurnEscalationTerminal::Escalated(_))))
+    }
+
     fn gate_pair(&self) -> TurnCancelGatePair {
         TurnCancelGatePair {
             cancel: self.cancel_key.clone(),

@@ -410,7 +410,7 @@ impl<'a> RunCoordinator<'a> {
                         if retryable
                             && eligible(&member.policy.retry, ordinal)
                             && !aborted
-                            && !handlers.run_cancel_requested()
+                            && !handlers.run_cancel_requested().await?
                         {
                             record.events.push(RunEvent::RetryTimerRegistered {
                                 call_id,
@@ -443,7 +443,7 @@ impl<'a> RunCoordinator<'a> {
                         if !timer {
                             return Err("an X handle returned a timer wake".to_owned());
                         }
-                        let event = if aborted || handlers.run_cancel_requested() {
+                        let event = if aborted || handlers.run_cancel_requested().await? {
                             RunEvent::Decided {
                                 call_id,
                                 rank,
@@ -652,8 +652,9 @@ impl<'a> RunCoordinator<'a> {
                     let controller = self.journal.scoped.controller();
                     self.journal.scoped.admit_journal_write()?;
                     let timer = controller.start_run_retry(delay);
+                    let waiting_handlers = std::sync::Arc::clone(&handlers);
                     let handle = async move {
-                        timer.await?;
+                        waiting_handlers.wait_run_retry(timer).await?;
                         Ok(Ready::Timer)
                     }
                     .boxed()

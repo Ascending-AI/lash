@@ -8,6 +8,29 @@ use super::{
     RuntimeExecutionTracing, RuntimeProcessExecution, ToolDispatchContext,
 };
 
+impl RuntimeExecutionContext<'_> {
+    /// Called only by the body of a Run record. Its decision captures the
+    /// authoritative gate answer, including on a cold owner's first retry;
+    /// the context's previously materialized fact cannot discover that stop.
+    pub(crate) async fn run_cancel_requested_in_recorded_step(
+        &self,
+    ) -> Result<bool, crate::RuntimeError> {
+        if self.turn_cancel.is_observed() {
+            return Ok(true);
+        }
+        if let (Some(control), Some(host)) = (&self.turn_cancel.control, &self.turn_cancel.host) {
+            return control.peek_immediate(host.await_event_resolver()).await;
+        }
+        // A process has no turn gate; its own cooperative stop is captured
+        // by this same recorded decision. A lent turn token is never authority.
+        Ok(!self.token_is_lent_stop
+            && self
+                .cancellation_token
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled))
+    }
+}
+
 pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     fn new(
         dispatch: Arc<ToolDispatchContext<'run>>,
