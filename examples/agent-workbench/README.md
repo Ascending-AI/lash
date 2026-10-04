@@ -100,6 +100,40 @@ SQLite records and actual Restate V7 tool outcomes while killing and restarting
 the independently owned HTTP peer. `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=mcp-fixture`
 provides deterministic RLM requests without a model service.
 
+From an isolated Kiln fork, run either browser scenario with one command:
+
+```sh
+python3 scripts/workbench-e2e-gate.py s28_workbench_mcp_peer_restart
+python3 scripts/workbench-e2e-gate.py s29_workbench_kill_after_acceptance
+```
+
+The runner enters the fork's private Kiln gate, prebuilds the workbench and VM
+worker, starts pinned Restate, and forwards the harness environment to an exact,
+uncached local `kiln test`. It prepares a Python environment with
+`playwright==1.62.0` through `uv`; Chromium must already be installed in
+`~/.cache/ms-playwright`. Any later workbench browser test in `e2e_hosts` can
+use the same command with its full test name. Runs serialize within the fork
+and write fresh artifacts under `target/workbench-e2e/`, or a fresh in-fork
+directory supplied with `--artifacts`. The final line reports executed, passed
+and failed counts from Kiln's JUnit output and the artifact path. A failed
+scenario exits nonzero and retains its logs, SQLite data and cleanup receipts.
+
+S28 and S29 keep their `full` and `release` tiers in `scripts/lash-e2e-manifest.json`.
+For exact-source execution through the planner on a clean committed checkout:
+
+```sh
+python3 scripts/lash-e2e.py run --tier full --scenario S28 \
+  --case S28/default/sqlite_file/live/rlm --sha "$(git rev-parse HEAD)" \
+  --artifacts target/s28-plan
+python3 scripts/lash-e2e.py run --tier full --scenario S29 \
+  --case S29/default/sqlite_file/live/standard --sha "$(git rev-parse HEAD)" \
+  --artifacts target/s29-plan
+```
+
+These commands write execution results; tier certification still requires the
+complete receipts checked by `lash-e2e.py reconcile`. PostgreSQL and S28 replay
+permutations remain held until their own oracles are implemented.
+
 ## Coverage
 
 The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the

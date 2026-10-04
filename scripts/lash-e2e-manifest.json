@@ -3061,7 +3061,8 @@
           "registration": {
             "commit": "701146c054b6a4345de747db539d999076389e2e",
             "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s28_workbench_mcp_peer_restart"
+            "test": "s28_workbench_mcp_peer_restart",
+            "runner": "scripts/workbench-e2e-gate.py"
           },
           "host": "workbench"
         },
@@ -3191,9 +3192,14 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "f3eda494c9528a2ae176853495970ec0a7e0c041",
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s29_workbench_kill_after_acceptance",
+            "runner": "scripts/workbench-e2e-gate.py"
+          }
         },
         {
           "variant": "default",
@@ -3219,7 +3225,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL workbench recovery oracle; the browser runner registers SQLite-file/live/standard only.",
           "registration": null
         }
       ],

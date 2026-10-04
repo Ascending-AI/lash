@@ -191,6 +191,40 @@ class ReceiptLaws(unittest.TestCase):
         with patch.object(e2e, "ancestor", return_value=False), self.assertRaisesRegex(ValueError, "not landed"):
             e2e.reconcile(expected, receipt, self.root, manifest)
 
+    def test_r8_browser_execution_selects_its_exact_oracle_without_certifying_a_tier(self):
+        key = "S28/default/sqlite_file/live/rlm"
+        expected = e2e.plan(self.manifest, "b" * 64, "full", ["S28"], SOURCE, [key])
+        self.assertEqual([e2e.case_key(row) for row in expected["cases"]], [key])
+        self.assertEqual(expected["held"], [])
+        self.assertIsNone(self.manifest["controller"])
+        with self.assertRaisesRegex(ValueError, "release certification"):
+            e2e.plan(self.manifest, "b" * 64, "release", [], SOURCE, [key])
+        with self.assertRaisesRegex(ValueError, "absent"):
+            e2e.plan(self.manifest, "b" * 64, "full", ["S29"], SOURCE, [key])
+
+        def browser_run(command, **kwargs):
+            self.assertEqual(command[2], "s28_workbench_mcp_peer_restart")
+            directory = Path(command[-1])
+            directory.mkdir()
+            e2e.write(directory / "execution.json", {
+                "scenario": command[2], "source_sha": SOURCE,
+                "counts": {"executed": 1, "passed": 0, "failed": 1},
+            })
+            return 32
+
+        with patch.object(e2e, "ancestor", return_value=True), \
+             patch.object(e2e.subprocess, "check_output", side_effect=[SOURCE + "\n", ""]), \
+             patch.object(e2e.subprocess, "call", side_effect=browser_run):
+            result = e2e.run_workbench(expected, self.root)
+        self.assertEqual(result["counts"], {"selected": 1, "executed": 1, "passed": 0, "failed": 1, "not_run": 0})
+        self.assertIs(result["certified"], False)
+        self.assertFalse((self.root / "conclusion.json").exists())
+        held = e2e.plan(self.manifest, "b" * 64, "full", ["S28"], SOURCE)
+        with self.assertRaisesRegex(ValueError, "unavailable registrations"), \
+             patch.object(e2e.subprocess, "call") as command:
+            e2e.run_workbench(held, self.root)
+            command.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

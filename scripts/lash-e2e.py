@@ -24,6 +24,7 @@ SMOKE = {"S01", "S02", "S17", "S18", "S26", "S30"}
 AUDITS = {"F04", "Z0A", "Z0P", "Z01", "Z02", "Z03", "Z04", "Z05"}
 GATES = {"phase_a", "facade", "schema"}
 COUNTS = ("selected", "executed", "passed", "failed", "not_run")
+WORKBENCH_RUNNER = "scripts/workbench-e2e-gate.py"
 SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 AXES = ("scenario", "variant", "store", "leg", "channel")
@@ -79,6 +80,9 @@ def load_manifest(path: Path = MANIFEST) -> dict:
                 require(SHA.fullmatch(registration["commit"]) is not None, f"{key}: invalid registration commit")
                 require(registration["label"].startswith("//crates/lash-upgrade-harness:"), f"{key}: wrong controller owner")
                 require(bool(registration["test"]) and not registration["test"].startswith("-") and not any(c.isspace() for c in registration["test"]), f"{key}: need full test path")
+                if "runner" in registration:
+                    require(registration["runner"] == WORKBENCH_RUNNER and registration["label"] == "//crates/lash-upgrade-harness:e2e_hosts__test", f"{key}: invalid browser runner")
+                    require(case["store"] == "sqlite_file" and case["leg"] == "live", f"{key}: browser runner needs its implemented SQLite-file/live oracle")
             require({"journal", "store", "host", "trace", "cleanup", "junit", "provenance"} <= set(case["artifacts"]), f"{key}: incomplete required artifacts")
         require(len(keys) == len(set(keys)), f"{scenario['id']}: duplicate permutation")
     smoke = select(manifest, "smoke", [])
@@ -111,10 +115,14 @@ def ancestor(commit: str, source: str) -> bool:
     return subprocess.run(["git", "merge-base", "--is-ancestor", commit, source], cwd=ROOT, check=False).returncode == 0
 
 
-def plan(manifest: dict, manifest_sha: str, tier: str, scenarios: list[str], source: str) -> dict:
+def plan(manifest: dict, manifest_sha: str, tier: str, scenarios: list[str], source: str, cases: list[str] | None = None) -> dict:
     require(SHA.fullmatch(source) is not None, "source must be an exact commit SHA")
-    require(tier != "release" or not scenarios, "release certification cannot select a subset")
+    require(tier != "release" or not (scenarios or cases), "release certification cannot select a subset")
     rows = select(manifest, tier, scenarios)
+    if cases:
+        require(len(cases) == len(set(cases)), "duplicate case selector")
+        require(set(cases) <= {case_key(row) for row in rows}, "case selector absent from tier/scenarios")
+        rows = [row for row in rows if case_key(row) in cases]
     return {"source_sha": source, "manifest_sha256": manifest_sha, "tier": tier,
             "selectors": scenarios, "selected": len(rows), "cases": rows,
             "guarded": [case_key(r) for r in rows if any(g["commit"] is None or not ancestor(g["commit"], source) or not ancestor(g["commit"], "origin/main") for g in r["arc_guards"])],
@@ -245,6 +253,36 @@ def run_controller(expected: dict, manifest: dict, artifacts: Path) -> Path:
     return artifacts / "receipt.json"
 
 
+def run_workbench(expected: dict, artifacts: Path) -> dict:
+    require(not expected["held"], f"unavailable registrations: {', '.join(expected['held'])}")
+    require(not expected["guarded"], f"unlanded arc guards: {', '.join(expected['guarded'])}")
+    require(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() == expected["source_sha"], "checkout differs from exact source SHA")
+    require(not subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True).strip(), "execution requires a clean source checkout")
+    for row in expected["cases"]:
+        require(row["registration"].get("runner") == WORKBENCH_RUNNER, "selection mixes browser and controller registrations")
+        require(ancestor(row["registration"]["commit"], expected["source_sha"]), f"{case_key(row)}: registration not landed")
+    rows = []
+    for index, row in enumerate(expected["cases"]):
+        directory = artifacts / f"case-{index}"
+        code = subprocess.call([
+            "python3", str(ROOT / WORKBENCH_RUNNER), row["registration"]["test"],
+            "--artifacts", str(directory),
+        ], cwd=ROOT)
+        execution = json.loads((directory / "execution.json").read_text())
+        require(execution["scenario"] == row["registration"]["test"], "wrong browser scenario report")
+        executed = execution["counts"]["executed"] == 1
+        if executed:
+            require(execution["source_sha"] == expected["source_sha"], "wrong browser source report")
+        status = "passed" if executed and code == 0 and execution["counts"]["passed"] == 1 else ("failed" if executed else "not_run")
+        rows.append({"key": case_key(row), "executed": executed, "status": status, "artifacts": str(directory)})
+    # These are execution results. Tier certification still requires reconcile's
+    # complete journal/store/trace/cleanup/provenance receipts and release gates.
+    result = {"source_sha": expected["source_sha"], "manifest_sha256": expected["manifest_sha256"],
+              "tier": expected["tier"], "cases": rows, "counts": counts(rows), "certified": False}
+    write(artifacts / "execution.json", result)
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=MANIFEST)
@@ -253,6 +291,7 @@ def main() -> int:
         command = commands.add_parser(name)
         command.add_argument("--tier", choices=("smoke", "full", "release", "live"), required=True)
         command.add_argument("--scenario", action="append", default=[])
+        command.add_argument("--case", action="append", default=[], help="exact scenario/variant/store/leg/channel permutation (non-release tiers)")
         command.add_argument("--sha", required=True)
         command.add_argument("--artifacts", type=Path, required=True)
         if name == "reconcile":
@@ -260,7 +299,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         manifest = load_manifest(args.manifest)
-        expected = plan(manifest, digest(args.manifest), args.tier, args.scenario, args.sha)
+        expected = plan(manifest, digest(args.manifest), args.tier, args.scenario, args.sha, args.case)
         args.artifacts = args.artifacts.resolve()
         args.artifacts.mkdir(parents=True, exist_ok=True)
         destination = args.artifacts / "plan.json"
@@ -271,6 +310,10 @@ def main() -> int:
             print(json.dumps(expected, indent=2))
             return 0
         if args.command == "run":
+            if any((row["registration"] or {}).get("runner") == WORKBENCH_RUNNER for row in expected["cases"]):
+                result = run_workbench(expected, args.artifacts)
+                print(json.dumps(result))
+                return int(result["counts"]["passed"] != result["counts"]["selected"])
             args.receipt = run_controller(expected, manifest, args.artifacts)
         result = reconcile(expected, json.loads(args.receipt.read_text()), args.receipt.parent, manifest)
         result["receipt_sha256"] = digest(args.receipt)
