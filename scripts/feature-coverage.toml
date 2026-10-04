@@ -600,5 +600,5 @@ commands = [
 [[lane]]
 name = "turn-admission-synthetic-next"
 commands = [
-  ["cargo", "test", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "restate,testing,synthetic-next", "--locked", "formats::tests::plugin_transition_generation::atomic_root_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane", "formats::tests::plugin_transition_generation::process_run_environment_refuses_predecessor_journals_and_keeps_their_drain_lane", "--", "--exact"],
+  ["cargo", "test", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "restate,testing,synthetic-next", "--locked", "formats::tests::plugin_transition_generation::atomic_root_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane", "formats::tests::plugin_transition_generation::process_run_environment_refuses_predecessor_journals_and_keeps_their_drain_lane", "formats::tests::plugin_transition_generation::borrowed_run_schedules_refuse_predecessor_journals_and_keep_their_drain_lane", "--", "--exact"],
 ]

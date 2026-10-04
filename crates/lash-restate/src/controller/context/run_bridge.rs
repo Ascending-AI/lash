@@ -9,7 +9,7 @@ use std::task::{Context, Poll, Waker};
 
 use lash_sansio::sync::MutexExt;
 
-/// Register every callback with the SDK, including journaled work nested in V.
+/// Register owned callbacks with the SDK, including journaled work nested in V.
 /// Borrowing Run::poll can discard a not-yet-executable nested closure; start
 /// retains it until engine progress selects it.
 pub(super) fn register<'run, 'ctx, C, T, F>(
@@ -43,6 +43,33 @@ where
         body,
         super::wake::guard_restate_run_future(run.start(), relay),
     )
+}
+
+/// D borrows its callback instead of adding it to the SDK's owned progress set.
+/// An owned D waiting for X prevents the suspension that acknowledges X.
+/// Run::poll registers D before invoking this body, preserving selection order.
+pub(super) fn schedule<'run, C, T, F>(
+    context: &'run C,
+    name: String,
+    body: F,
+) -> impl Future<Output = Result<restate_sdk::serde::Json<T>, restate_sdk::errors::TerminalError>>
++ Send
++ 'run
+where
+    C: restate_sdk::context::ContextSideEffects<'run>,
+    T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+    F: Future<Output = Result<T, String>> + Send + 'run,
+{
+    let relay = Arc::new(super::wake::ClosureWakeRelay::default());
+    let closure_relay = relay.clone();
+    let run = restate_sdk::context::ContextSideEffects::run(context, move || async move {
+        super::wake::relay_closure_wakes(body, closure_relay)
+            .await
+            .map(restate_sdk::serde::Json)
+            .map_err(|fault| restate_sdk::errors::HandlerError::from(std::io::Error::other(fault)))
+    });
+    let run = restate_sdk::context::RunFuture::name(run, name);
+    super::wake::guard_restate_run_future(run, relay)
 }
 
 struct State<T> {

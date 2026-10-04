@@ -1194,6 +1194,7 @@ FEATURE_LANE_TEST_ARGS = {
     "//crates/lash:lash__unit_test__fv_f554e6b8": [
         "formats::tests::plugin_transition_generation::atomic_root_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane",
         "formats::tests::plugin_transition_generation::process_run_environment_refuses_predecessor_journals_and_keeps_their_drain_lane",
+        "formats::tests::plugin_transition_generation::borrowed_run_schedules_refuse_predecessor_journals_and_keep_their_drain_lane",
         "--exact"
     ]
 }

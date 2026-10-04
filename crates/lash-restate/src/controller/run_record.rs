@@ -69,7 +69,7 @@ where
         let first = build_generation.is_some();
         let Json(mut entry) = self
             .context
-            .run_json_eager_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
+            .run_json_schedule_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
                 let record = step.await?;
                 let mut entry =
                     serde_json::to_value(stamped(&record)).map_err(|error| error.to_string())?;

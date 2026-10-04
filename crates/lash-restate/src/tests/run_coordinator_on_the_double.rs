@@ -2288,3 +2288,67 @@ async fn l03_deferred_replay_after_cancel_keeps_the_subscription_and_source_winn
         );
     }
 }
+
+/// L02: D must let the invocation suspend while its owned X awaits acknowledgment.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn l02_a_schedule_suspends_until_its_owned_attempt_is_acknowledged() {
+    let backend = lash_restate_test::backend(0x4943, ServerConfig::default().always_replay(true))
+        .await
+        .unwrap();
+    let call = call("schedule-ack", &Kind::IntentFree);
+    let probe = Arc::new(Probe::new(&[(call.clone(), Kind::IntentFree)]));
+    let records = Arc::new(Mutex::new(Vec::new()));
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let probe = Arc::clone(&probe);
+        let records = Arc::clone(&records);
+        let call = call.clone();
+        Arc::new(move |scoped| {
+            let probe = Arc::clone(&probe);
+            let records = Arc::clone(&records);
+            let call = call.clone();
+            Box::pin(async move {
+                let mut run =
+                    RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                run.decide_round(std::slice::from_ref(&call), probe, Default::default())
+                    .await
+                    .unwrap();
+                let terminals = run.drain().await.unwrap();
+                assert_eq!(terminals.len(), 1);
+                assert!(matches!(terminals[0].1, SingletonTerminal::Final { .. }));
+                run.close().await.unwrap();
+                *records.lock().unwrap() = run.into_records();
+            })
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+    )
+    .await
+    .expect("a recorded schedule can suspend for X acknowledgment")
+    .unwrap();
+    assert_eq!(probe.executions_of(&call.call_id), 1);
+    let records = records.lock().unwrap();
+    let events: Vec<_> = records.iter().flat_map(|record| &record.events).collect();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, RunEvent::AttemptRecorded { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, RunEvent::Decided { .. }))
+            .count(),
+        1
+    );
+    assert!(
+        backend
+            .server()
+            .invocations()
+            .iter()
+            .any(|view| view.suspensions > 0)
+    );
+}

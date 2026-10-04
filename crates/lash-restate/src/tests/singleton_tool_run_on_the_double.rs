@@ -32,7 +32,7 @@ use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use lash_sansio::ToolIntentKind;
 
-/// Q2/K3: a public plugin task owns its tool's A/X/D/V in its operation Run.
+/// Q2/K3: singleton, parallel and deferred tools settle in their operation Run on replay.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn public_plugin_task_records_its_tool_in_the_operation_run() {
     use lash_core::facade_support::{PluginOperation, PluginTask, SessionParam};
@@ -67,12 +67,92 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
                 };
                 call.owner =
                     EffectOpener::session_operation(session_id.clone(), operation_id.clone());
-                // Admission, decision and presentation borrow their call and handlers.
-                let result =
-                    run_singleton_tool(&ctx.scoped_effect_controller, &call, probe.as_ref())
+                if label == "singleton" {
+                    // Admission, decision and presentation borrow their call and handlers.
+                    let result =
+                        run_singleton_tool(&ctx.scoped_effect_controller, &call, probe.as_ref())
+                            .await
+                            .map_err(|error| error.to_string())?;
+                    assert!(matches!(result.terminal, SingletonTerminal::Final { .. }));
+                } else {
+                    use lash_core::tool_dispatch::RunCoordinator;
+                    use lash_core::tool_run::{
+                        RecordedRetryPolicy, SourceAuthority, SourceDescriptor, SourceSeal,
+                    };
+                    call.declaration = ToolDeclaration::deferring();
+                    let mut run = RunCoordinator::open(
+                        &ctx.scoped_effect_controller,
+                        call.owner.clone(),
+                        call.segment,
+                        call.available.clone(),
+                    );
+                    if label == "parallel" {
+                        let mut sibling = call.clone();
+                        sibling.call_id = ToolCallId::fixture("parallel-sibling");
+                        run.decide_round(&[call, sibling], probe, RecordedRetryPolicy::Never)
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        ctx.scoped_effect_controller
+                            .controller()
+                            .start_run_retry(1)
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        assert_eq!(
+                            run.drain().await.map_err(|error| error.to_string())?.len(),
+                            2
+                        );
+                    } else {
+                        let source = ctx
+                            .scoped_effect_controller
+                            .controller()
+                            .await_event_key(
+                                call.owner.admitted_scope().scope(),
+                                lash_core::AwaitEventWaitIdentity::tool_completion(
+                                    call.call_id.clone(),
+                                ),
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        let deferred = Probe::new(
+                            SingletonBodyOutcome::Deferred {
+                                source: source.clone(),
+                            },
+                            CancelAt::Never,
+                        );
+                        run.decide_round(
+                            std::slice::from_ref(&call),
+                            deferred,
+                            RecordedRetryPolicy::Never,
+                        )
                         .await
                         .map_err(|error| error.to_string())?;
-                assert!(matches!(result.terminal, SingletonTerminal::Final { .. }));
+                        let seal = ctx
+                            .scoped_effect_controller
+                            .controller()
+                            .cancel_run_source(SourceDescriptor {
+                                source,
+                                call_id: call.call_id.clone(),
+                                owner: call.owner.clone(),
+                                resolver: revision(1),
+                                authority: SourceAuthority::ExternalCompletion,
+                                cancel: call.cancel,
+                            })
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        assert_eq!(seal, SourceSeal::Cancelled);
+                        run.await_deferred()
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        let terminals = run.drain().await.map_err(|error| error.to_string())?;
+                        assert!(matches!(
+                            &terminals[0].1,
+                            SingletonTerminal::Withheld {
+                                decision: CallDecision::Cancelled
+                            }
+                        ));
+                    }
+                    run.close().await.map_err(|error| error.to_string())?;
+                }
                 Ok(lash_core::plugin::PluginOperationOutcome::new(
                     PRESENTATION.to_owned(),
                 ))
@@ -123,65 +203,146 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
         .await
         .unwrap();
     let session = core.session("operation-tool-law").open().await.unwrap();
-    let task = session
-        .plugin_operations()
-        .start_task::<Task>("singleton".into(), "singleton")
-        .await
-        .unwrap();
-    let run = task.run().clone();
-    let result = tokio::time::timeout(Duration::from_secs(5), task.result())
-        .await
-        .expect("the operation settles its tool")
-        .expect("native operation tool call succeeds");
-    assert_eq!(result.output, serde_json::json!(PRESENTATION));
-    assert_eq!(probe.executions(), 1, "replay serves the accepted attempt");
+    let mut runs = Vec::new();
+    for label in ["singleton", "parallel", "deferred"] {
+        let task = session
+            .plugin_operations()
+            .start_task::<Task>(label.into(), label)
+            .await
+            .unwrap();
+        runs.push((label, task.run().clone()));
+        let result = tokio::time::timeout(Duration::from_secs(5), task.result())
+            .await
+            .unwrap_or_else(|error| {
+                let journals: Vec<_> = backend
+                    .server()
+                    .invocations()
+                    .into_iter()
+                    .map(|invocation| {
+                        (
+                            invocation.target,
+                            backend
+                                .server()
+                                .journal(&invocation.id)
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|entry| (entry.ty, entry.name))
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                    .collect();
+                panic!("{label} must settle its tool: {error:?}; {journals:?}");
+            })
+            .expect("native operation tool call succeeds");
+        assert_eq!(result.output, serde_json::json!(PRESENTATION));
+    }
+    assert_eq!(probe.executions(), 3, "replay serves the accepted attempts");
     assert_eq!(
         probe.prepares.load(Ordering::SeqCst),
-        1,
+        3,
         "replay serves admission"
     );
-    let key = crate::recorded_turn_invocation_key(
-        backend.stores().session_store_factory().as_ref(),
-        &lash_core::SessionId::from("operation-tool-law"),
-        &run,
-    )
-    .await
-    .unwrap()
-    .expect("the operation has a physical executor");
     let journals: Vec<_> = backend
         .server()
         .invocations()
         .into_iter()
         .filter_map(|invocation| {
-            let names: Vec<_> = backend
-                .server()
-                .journal(&invocation.id)
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|entry| entry.name)
+            let entries = backend.server().journal(&invocation.id).unwrap_or_default();
+            let names: Vec<_> = entries
+                .iter()
+                .filter_map(|entry| entry.name.as_ref())
                 .filter(|name| name.starts_with("lash:run:"))
+                .cloned()
                 .collect();
-            (!names.is_empty()).then_some((invocation.target, names))
+            let records: Vec<RunRecord> = entries
+                .iter()
+                .filter_map(|entry| {
+                    let Ok(bytes) = entry.run_completion()? else {
+                        return None;
+                    };
+                    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    value.get("record").cloned().map(|record| {
+                        serde_json::from_value(record).expect("a completed Run records its events")
+                    })
+                })
+                .collect();
+            (!names.is_empty()).then_some((invocation.target, names, records))
         })
         .collect();
     assert_eq!(
         journals.len(),
-        1,
-        "one operation journal owns the entire call"
+        3,
+        "one operation journal owns each task's entire call"
     );
-    let journal = journals
-        .iter()
-        .find(|(target, _)| target.ends_with(&format!("/{key}/run")))
-        .expect("the journal belongs to the public task Run");
-    assert!(
-        journal.0.starts_with("LashTurn"),
-        "operation Run uses the turn service: {journal:?}"
-    );
-    for name in ["admit", "attempt", "decide", "present"] {
+    for (label, run) in runs {
+        let key = crate::recorded_turn_invocation_key(
+            backend.stores().session_store_factory().as_ref(),
+            &lash_core::SessionId::from("operation-tool-law"),
+            &run,
+        )
+        .await
+        .unwrap()
+        .expect("the operation has a physical executor");
+        let journal = journals
+            .iter()
+            .find(|(target, _, _)| target.ends_with(&format!("/{key}/run")))
+            .expect("the journal belongs to the public task Run");
         assert!(
-            journal.1.iter().any(|entry| entry.contains(name)),
-            "missing {name}: {journal:?}"
+            journal.0.starts_with("LashTurn/"),
+            "operation Run uses the turn service: {journal:?}"
         );
+        let steps = match label {
+            "singleton" => &["admit", "attempt", "decide", "present"][..],
+            "parallel" => &["admit", "attempt", "schedule", "present"][..],
+            "deferred" => &["admit", "attempt", "schedule"][..],
+            _ => unreachable!(),
+        };
+        let events: Vec<_> = journal.2.iter().flat_map(|record| &record.events).collect();
+        let admitted: std::collections::BTreeSet<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                RunEvent::Admitted { round } => Some(&round.members),
+                _ => None,
+            })
+            .flatten()
+            .map(|member| &member.call_id)
+            .collect();
+        let decided: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                RunEvent::Decided {
+                    call_id, decision, ..
+                } => Some((call_id, decision)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(admitted.len(), if label == "parallel" { 2 } else { 1 });
+        assert_eq!(
+            decided.len(),
+            admitted.len(),
+            "one decision per selected call"
+        );
+        assert_eq!(
+            decided
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<std::collections::BTreeSet<_>>(),
+            admitted,
+            "the recorded decisions belong to the admitted calls",
+        );
+        for (_, decision) in decided {
+            if label == "deferred" {
+                assert!(matches!(decision, CallDecision::Cancelled));
+            } else {
+                assert!(matches!(decision, CallDecision::Final { .. }));
+            }
+        }
+        for name in steps {
+            assert!(
+                journal.1.iter().any(|entry| entry.contains(name)),
+                "missing {name}: {journal:?}"
+            );
+        }
     }
 }
 

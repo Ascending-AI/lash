@@ -317,6 +317,15 @@ async fn process_run_environment_refuses_predecessor_journals_and_keeps_their_dr
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn borrowed_run_schedules_refuse_predecessor_journals_and_keep_their_drain_lane() {
+    predecessor_journal_keeps_its_lane(
+        crate::restate::JOURNAL_LOGIC_EPOCH - 1,
+        PredecessorShape::RootAdmission,
+    )
+    .await;
+}
+
 enum PredecessorShape {
     UntaggedTransition,
     TaggedTransition,
