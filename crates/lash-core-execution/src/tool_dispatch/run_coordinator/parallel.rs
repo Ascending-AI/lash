@@ -337,12 +337,23 @@ impl<'a> RunCoordinator<'a> {
             let owner = self.journal.materials.owner.clone();
             let available = self.journal.materials.available.clone();
 
-            // Wait for durable X outside the schedule's SDK run. An executing
-            // schedule callback that awaited X would prevent suspension while
-            // the engine withheld X's acknowledgement for replay.
-            let (ready, chosen, _) = select_all(choices.iter().map(|entry| entry.0.clone())).await;
-            let selected_work = choices[chosen].1.clone();
+            // Register a replayed D before polling an unfinished X. Only a
+            // fresh schedule requests selection; its owner waits for X outside
+            // the SDK callback and sends the acknowledged receipt back.
+            let needs_selection = std::sync::Arc::new(tokio::sync::Notify::new());
+            let needed = std::sync::Arc::clone(&needs_selection);
+            let (send_choice, receive_choice) = tokio::sync::oneshot::channel();
+            let selector = async move {
+                needs_selection.notified().await;
+                let (ready, chosen, _) =
+                    select_all(choices.iter().map(|entry| entry.0.clone())).await;
+                let _ = send_choice.send((ready, choices[chosen].1.clone()));
+            };
             let step = Box::pin(async move {
+                needed.notify_one();
+                let (ready, selected_work) = receive_choice
+                    .await
+                    .map_err(|_| "the owning selection frame ended".to_owned())?;
                 let ready = ready.map_err(|error| error.to_string())?;
                 let (work, ordinal, timer, delay) = match selected_work {
                     SelectedWork::AggregateTimer { key, leaf } => {
@@ -460,12 +471,18 @@ impl<'a> RunCoordinator<'a> {
                 }
             });
             self.journal.scoped.admit_journal_write()?;
-            let selected = self
+            let selection = self
                 .journal
                 .scoped
                 .controller()
-                .record_run_schedule(name, step)
-                .await?;
+                .record_run_schedule(name, step);
+            tokio::pin!(selection);
+            tokio::pin!(selector);
+            let selected = tokio::select! {
+                biased;
+                result = &mut selection => result?,
+                () = &mut selector => selection.await?,
+            };
             let event = selected
                 .record
                 .events

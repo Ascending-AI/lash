@@ -503,3 +503,198 @@ async fn l03_accepted_cancel_survives_crash_before_retry_wake_without_second_bod
 async fn l03_native_cancel_accepted_before_inline_ack_discards_the_unrecorded_sibling() {
     cancelled_sibling_with_delivery(false, false).await;
 }
+
+/// L03: a cancelled inline loser whose X was not acknowledged must inherit
+/// the accepted stop on cold replay, while its durable winner stays final.
+#[tokio::test]
+async fn l03_native_cancel_replays_before_the_inline_loser_ack() {
+    use crate::session::{
+        ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateOutcome, ToolAggregateRequest,
+    };
+    use lash_restate_test::{CrashCount, CrashPoint, CrashRule};
+
+    let double =
+        crate::support::kernel_double(0x496603, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    double
+        .server()
+        .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
+            name: Some(format!(
+                "lash:run:{}:attempt:1",
+                crate::ToolCallId::fixture("A")
+            )),
+        }));
+    let crashes = CrashCount::new();
+    assert!(double.server().on_crash(crashes.listener()));
+    let cold_prefix = Arc::new(Mutex::new(None));
+    let (entered, mut stops) = tokio::sync::mpsc::unbounded_channel();
+    let reductions = Arc::new(Mutex::new(Vec::new()));
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let server = double.server().clone();
+        let crashes = crashes.clone();
+        let cold_prefix = cold_prefix.clone();
+        let backend = backend.clone();
+        let reductions = reductions.clone();
+        Arc::new(move |scoped| {
+            let backend = backend.clone();
+            let entered = entered.clone();
+            let reductions = reductions.clone();
+            let server = server.clone();
+            let crashes = crashes.clone();
+            let cold_prefix = cold_prefix.clone();
+            Box::pin(async move {
+                if crashes.get() > 0 && cold_prefix.lock_recover().is_none() {
+                    let entries = server
+                        .invocations()
+                        .iter()
+                        .flat_map(|view| server.journal(&view.id).unwrap_or_default())
+                        .collect::<Vec<_>>();
+                    let cancel_durable = entries.iter().filter_map(|entry| entry.run_completion().and_then(Result::ok))
+                        .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                        .filter_map(|value| value.get("record").cloned())
+                        .filter_map(|record| serde_json::from_value::<crate::tool_run::RunRecord>(record).ok())
+                        .any(|record| record.events.iter().any(|event| matches!(event,
+                            crate::tool_run::RunEvent::CancelDischarged { call_id } if *call_id == crate::ToolCallId::fixture("A")
+                        )));
+                    let loser_durable = entries
+                        .iter()
+                        .filter_map(|entry| entry.run_completion().and_then(Result::ok))
+                        .filter_map(|bytes| {
+                            serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+                        })
+                        .any(|value| {
+                            value.get("call_id") == Some(&json!(crate::ToolCallId::fixture("A")))
+                        });
+                    *cold_prefix.lock_recover() = Some((cancel_durable, loser_durable));
+                }
+                let reduced = reductions.clone();
+                let factory = crate::plugin::StaticPluginFactory::new(
+                    crate::plugin::PluginDeclaration::initial(PLUGIN),
+                    crate::PluginSpec::new()
+                        .with_state_reducer(
+                            "append",
+                            Arc::new(move |input| {
+                                reduced.lock_recover().push(input.input.clone());
+                                Ok(Some(input.input.clone()))
+                            }),
+                        )
+                        .with_tool_provider(Arc::new(Tools {
+                            entered,
+                            // The loser never answers: Closing must stop its native body.
+                            release: Arc::new(tokio::sync::Notify::new()),
+                        })),
+                );
+                let mut factories = crate::testing::test_standard_protocol_factories();
+                factories.push(Arc::new(factory));
+                let parent_stop = CancellationToken::new();
+                let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+                    .session_id("inline-close-session")
+                    .borrowed_effect_controller(scoped)
+                    .plugin_factories(factories)
+                    .build()
+                    .into_runtime()
+                    .with_cancellation_token(parent_stop.clone());
+                let grant = crate::ToolExecutionGrant::from_definition(
+                    crate::plugin::PluginRevision::new(
+                        PLUGIN,
+                        crate::plugin::BehaviorRevision::ONE,
+                    ),
+                    definition(),
+                );
+                let leaves = ["A", "B"]
+                    .into_iter()
+                    .map(|symbol| {
+                        ToolAggregateLeaf::Tool(
+                            crate::session::ToolInvocation::new(
+                                crate::ToolCallId::fixture(symbol),
+                                crate::ToolId::new("q5:append"),
+                                json!({"symbol":symbol,"key":"value"}),
+                            )
+                            .with_execution_grant(grant.clone()),
+                        )
+                    })
+                    .collect();
+                context
+                    .drive_tool_run(None, |context| async move {
+                        let outcome = context
+                            .call_tool_aggregate(ToolAggregateRequest {
+                                leaves,
+                                consumer: ToolAggregateConsumer::Race,
+                                settled_value_after: None,
+                                command: crate::CommandReplayKey::new("inline-close-race"),
+                            })
+                            .await;
+                        assert!(matches!(
+                            outcome,
+                            ToolAggregateOutcome::Selected { leaf: 1, .. }
+                        ));
+                        context.close_opener_groups().await.unwrap();
+                    })
+                    .await
+                    .unwrap();
+                assert!(
+                    !parent_stop.is_cancelled(),
+                    "a loser's stop must not cancel its siblings"
+                );
+                assert!(!context.has_nested_effect_error());
+            })
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        double.run_in_handler(
+            crate::AdmittedScope::turn("inline-close-session", "inline-close-turn"),
+            attempt,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        *cold_prefix.lock_recover(),
+        Some((true, false)),
+        "cold replay starts after accepted cancel and before the loser's X ACK"
+    );
+    assert_eq!(
+        crashes.get(),
+        1,
+        "the owner crashes before the loser's X becomes durable"
+    );
+    let mut observed = Vec::new();
+    while let Ok(stop) = stops.try_recv() {
+        observed.push(stop);
+    }
+    assert_eq!(
+        observed.len(),
+        1,
+        "the accepted cancel prevents the cold owner from invoking the loser again"
+    );
+    assert!(observed.iter().all(CancellationToken::is_cancelled));
+    assert_eq!(reductions.lock_recover().as_slice(), [json!("B")]);
+    let events = double
+        .server()
+        .invocations()
+        .into_iter()
+        .flat_map(|invocation| {
+            double
+                .server()
+                .journal(&invocation.id)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|entry| entry.run_completion().and_then(Result::ok))
+                .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .filter_map(|value| value.get("record").cloned())
+                .filter_map(|record| {
+                    serde_json::from_value::<crate::tool_run::RunRecord>(record).ok()
+                })
+                .flat_map(|record| record.events)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(events.iter().filter(|event| matches!(event,
+        crate::tool_run::RunEvent::CancelDischarged { call_id } if *call_id == crate::ToolCallId::fixture("A")
+    )).count(), 1, "the cold owner reuses the accepted cancellation");
+    assert!(events.iter().any(|event| matches!(event,
+        crate::tool_run::RunEvent::Decided { call_id, decision: crate::tool_run::CallDecision::Cancelled, .. }
+        if *call_id == crate::ToolCallId::fixture("A")
+    )));
+}
