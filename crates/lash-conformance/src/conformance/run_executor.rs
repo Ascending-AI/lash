@@ -24,7 +24,7 @@ use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::{SessionId, TurnId};
 use pretty_assertions::assert_eq;
 
-use super::shift_admission::{ShiftParts, driver_scope, on_tier};
+use super::shift_admission::{ShiftParts, on_tier};
 use crate::admit;
 
 /// How long a law waits for a step the tier owes it.
@@ -414,16 +414,9 @@ impl Fixture {
     }
 }
 
-/// A slow acceptor past its claim TTL is never executed twice (FIG-4765).
-///
-/// The acceptor accepts its input and stalls before its admission. Its claim
-/// lapses, a relay pass retakes it, and the session's shift admits the run
-/// and runs it as the engine's own run: the run's admission records that
-/// executor. The acceptor then wakes while the run is still running. It
-/// seals nothing and admits nothing: its admission is refused retryably,
-/// naming the wait, and the recorded executor executes the run to its end
-/// under the one fence that was ever sealed. The acceptor's retry then finds
-/// its input answered, runs nothing, and answers the run's outcome.
+/// Atomic admission records one executor and one fence in either admitter order.
+/// The other executor cannot even prepare a competing root commit; the recorded
+/// owner executes and settles the input once without its fence being superseded.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -434,119 +427,98 @@ pub async fn a_run_recorded_under_one_executor_is_never_admitted_by_another(
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let f = Fixture::new(prefix, "one-executor", &host, &stores, true).await;
-    let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
-    let accepting = tokio::spawn({
-        let runner = Arc::clone(&runner);
-        let scope = f.acceptor_scope();
-        let attempt = f.acceptor(answers.clone());
-        async move { runner.run_turn(scope, attempt).await }
-    });
-    within("the acceptor reaches its admission", f.gate.held.notified()).await;
-    let input = f.accepted_input().await;
-    f.relay_retakes_the_lapsed_claim(&input).await;
-
-    let executing = f.spawn_session_shift(&runner);
-    within("the run's execution asks its model", f.asked.notified()).await;
-    let sealed = f.epoch().await;
-    let unfinished = f.unfinished().await.expect("the run is admitted");
-    assert_eq!(unfinished.run, f.turn_id);
-    assert!(
-        matches!(unfinished.executor, RunExecutor::Run { .. }),
-        "the run records its engine invocation"
-    );
-
-    // The acceptor wakes while the run executes under its recorded executor.
-    f.gate.resume();
-    let refused = within("the acceptor decides its admission", async {
-        tokio::select! {
-            answer = answered.recv() => Some(answer.expect("the acceptor's attempt reports")),
-            () = f.gate.redecided() => None,
-        }
-    })
-    .await;
-    assert_eq!(
-        f.calls(),
-        1,
-        "the acceptor never executes a run recorded under another executor"
-    );
-    assert_eq!(
-        f.epoch().await,
-        sealed,
-        "the acceptor seals nothing over the recorded executor's fence"
-    );
-    // In process the refused attempt returns; on Restate it ends inside its
-    // admission step and the engine retries the open invocation.
-    if let Some(refused) = &refused {
-        let refusal = refused
-            .as_ref()
-            .expect_err("the acceptor waits for the run's recorded executor");
+    for (first, other) in [("owner", "other"), ("other", "owner")] {
+        let parts =
+            ShiftParts::new(prefix, &format!("one-executor-{first}"), &host, &stores, 1).await;
+        let input = parts
+            .enqueue("the accepted words", Some("one-executor-turn"))
+            .await;
+        let admission = super::run_admission_fixture::admit(&parts, &runner, first).await;
+        let run = admission.run().clone();
+        let executor = RunExecutor::run(admission.admission());
+        let sealed = parts.epoch().await;
+        assert_eq!(sealed.epoch, 1, "the atomic root seals exactly once");
         assert_eq!(
-            refusal.code,
-            crate::RuntimeErrorCode::SessionRunPending,
-            "{refusal:?}"
+            parts
+                .store
+                .run_executor(&parts.session_id, &run)
+                .await
+                .expect("recorded executor"),
+            Some(executor.clone())
         );
-        assert!(refusal.is_retryable(), "{refusal:?}");
-    }
-
-    // The recorded executor executes the run to its end.
-    f.answer.notify_one();
-    let outcome = within("the run's execution ends", executing)
+        let other_identity = crate::store::AdmissionId::new(format!("{other}#0"));
+        let other_executor = RunExecutor::run(&other_identity);
+        let refused = parts
+            .store
+            .prepare_shift_admission(&parts.session_id, &other_identity, &other_executor)
+            .await;
+        assert!(
+            matches!(refused, Err(crate::StoreError::RunHeldByAnotherExecutor {
+            recorded, admitting, ..
+        }) if *recorded == executor && *admitting == other_executor),
+            "the second admitter cannot prepare an atomic commit over its owner's fence"
+        );
+        assert_eq!(
+            parts.epoch().await,
+            sealed,
+            "the refused preparation seals nothing"
+        );
+        assert!(
+            parts
+                .store
+                .read_shift_admission(&parts.session_id, &other_identity)
+                .await
+                .expect("refused root receipt")
+                .is_none()
+        );
+        assert_eq!(
+            parts
+                .store
+                .run_of_input(&parts.session_id, &input)
+                .await
+                .expect("the admitted input's owner"),
+            Some(run.clone())
+        );
+        assert_eq!(parts.calls(), 0, "only admission ran so far");
+        let outcome = on_tier(&runner, &parts, move |mut runtime, scope| {
+            let admission = admission.clone();
+            Box::pin(async move {
+                lash_core::shift::execute_admitted_run(&mut runtime, &scope, admission).await
+            })
+        })
         .await
-        .expect("the session's shift ran")
-        .expect("the run's one executor commits it");
-    assert!(
-        matches!(
-            &outcome,
+        .expect("the recorded executor completes its run");
+        assert!(matches!(
+            outcome,
             RunOutcome::Committed {
-                kind: crate::store::RunTerminalKind::Answered,
+                kind: RunTerminalKind::Answered,
                 ..
             }
-        ),
-        "{outcome:?}"
-    );
-
-    // The acceptor's retry finds its input answered and executes nothing.
-    f.gate.settle();
-    if refused.is_some() {
-        within("the acceptor's first attempt ends", accepting)
-            .await
-            .expect("the acceptor ran");
-        runner
-            .run_turn(f.acceptor_scope(), f.acceptor(answers))
-            .await;
-    } else {
-        within("the acceptor's retry ends", accepting)
-            .await
-            .expect("the acceptor ran");
+        ));
+        assert_eq!(parts.calls(), 1);
+        assert_eq!(parts.applications().await, vec![(input, run.clone())]);
+        assert!(
+            parts
+                .store
+                .unfinished_run(&parts.session_id)
+                .await
+                .expect("completed root")
+                .is_none()
+        );
+        assert!(
+            parts
+                .store
+                .load_turn_park(&parts.session_id)
+                .await
+                .expect("no park")
+                .is_none()
+        );
+        assert_eq!(
+            parts.epoch().await,
+            sealed,
+            "only the recorded owner's atomic fence was sealed"
+        );
     }
-    let retried = within("the acceptor's retry answers", answered.recv())
-        .await
-        .expect("the acceptor's retry reports");
-    let adopted = retried.expect("the acceptor answers what its run's executor committed");
-    assert!(
-        matches!(&adopted, crate::TurnOutcome::Finished(_)),
-        "{adopted:?}"
-    );
-    let intent = f.parts.request("relay-ask");
-    assert_eq!(
-        f.parts
-            .store
-            .run_executor(&f.parts.session_id, &f.turn_id)
-            .await
-            .expect("terminal run executor"),
-        Some(RunExecutor::run(&crate::store::AdmissionId::new(format!(
-            "{}#0",
-            intent.request.as_str()
-        )))),
-        "the committed head retains the invocation that admitted this run"
-    );
-    f.assert_executed_once_to_its_end().await;
-    assert_eq!(
-        f.epoch().await,
-        sealed,
-        "one seal: nothing superseded the run's executor"
-    );
 }
 
 /// A lost acceptor's run is still executed to its end exactly once
@@ -830,244 +802,6 @@ pub async fn a_refused_acceptor_adopts_the_outcome_its_runs_executor_recorded(
     );
     f.assert_executed_once_to_its_end().await;
     assert_eq!(f.epoch().await, sealed, "the acceptor seals nothing");
-}
-
-/// What one executor did to the session's shift, in the order the store
-/// answered.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Drove {
-    /// `by`'s seal raised the shift epoch to `epoch`.
-    Sealed { by: &'static str, epoch: u64 },
-    /// `by`'s admission recorded the run, or read its record back.
-    Admitted { by: &'static str },
-}
-
-/// Records what one actor's seals and run admissions answered.
-struct ShiftLog {
-    inner: Arc<dyn crate::RuntimeStore>,
-    by: &'static str,
-    log: Arc<std::sync::Mutex<Vec<Drove>>>,
-}
-
-impl ShiftLog {
-    fn record(&self, drove: Drove) {
-        self.log
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(drove);
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::store::RuntimeStoreDecorator for ShiftLog {
-    type Inner = dyn crate::RuntimeStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn seal_shift_epoch(
-        &self,
-        session_id: &SessionId,
-        admission: &crate::store::AdmissionId,
-        observed_epoch: u64,
-        run_start: &crate::store::RunStartNonce,
-        hold: Option<&crate::store::RunHold>,
-    ) -> Result<crate::store::ShiftEpochSeal, crate::StoreError> {
-        let before = self.inner.shift_epoch(session_id).await?.epoch;
-        let seal = self
-            .inner
-            .seal_shift_epoch(session_id, admission, observed_epoch, run_start, hold)
-            .await?;
-        if let crate::store::ShiftEpochSeal::Sealed(fence) = &seal
-            && fence.epoch() > before
-        {
-            self.record(Drove::Sealed {
-                by: self.by,
-                epoch: fence.epoch(),
-            });
-        }
-        Ok(seal)
-    }
-
-    async fn admit_run(
-        &self,
-        request: &crate::store::AdmitRunRequest,
-    ) -> Result<Option<crate::store::RunAdmission>, crate::StoreError> {
-        let admission = self.inner.admit_run(request).await?;
-        if admission.is_some() {
-            self.record(Drove::Admitted { by: self.by });
-        }
-        Ok(admission)
-    }
-}
-
-/// No order of a run's owner and another admitter supersedes the owner's
-/// fence (FIG-4814).
-///
-/// Two executions an engine holds race for one accepted row: its acceptor,
-/// and the session's shift a relay pass asked for it. Each is held before it
-/// reads the shift epoch its admission observes, before its seal, before
-/// its run admission, and before the acceptor reads the run that took its
-/// input, and the explorer runs every order of those calls. An engine
-/// retries a refused admission and a waiting acceptor, so each is bounded
-/// to two steps ahead of the other. Whatever the order, once a run's admission is recorded no
-/// seal raises the shift epoch again: the executor the record names keeps
-/// its fence to the run's end, the run is executed once, and it ends
-/// answered.
-#[expect(
-    clippy::expect_used,
-    clippy::panic,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn no_order_of_a_runs_owner_and_another_admitter_supersedes_the_owners_fence(
-    prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    use crate::StoreOp;
-    let mut explorer = crate::interleave::Explorer::new("owner-versus-admitter").holding(&[
-        StoreOp::shift_epoch.into(),
-        StoreOp::seal_shift_epoch.into(),
-        StoreOp::admit_run.into(),
-        StoreOp::run_of_input.into(),
-    ]);
-    let mut raced = 0;
-    while let Some(mut schedule) = explorer.next_schedule() {
-        let law = format!("explore-owner-{}", schedule.index());
-        let f = Fixture::new(prefix, &law, &host, &stores, false).await;
-        // The explorer holds the actors; the fixture's own gate holds none.
-        f.gate.resume();
-        f.gate.settle();
-        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut actor = |by: &'static str| {
-            let logged: Arc<dyn crate::RuntimeStore> = Arc::new(ShiftLog {
-                inner: Arc::clone(&f.parts.store),
-                by,
-                log: Arc::clone(&log),
-            });
-            let mut parts = f.parts.clone();
-            parts.store = schedule.actor(by, logged);
-            parts
-        };
-        let (owner, acceptor) = (actor("session"), actor("acceptor"));
-        schedule.yields_after("session", 2);
-        schedule.yields_after("acceptor", 2);
-
-        // The relay's ask: the session's shift, retried while its admission
-        // is refused.
-        let session_shift = async {
-            let (reports, mut reported) = tokio::sync::mpsc::unbounded_channel();
-            let parts = owner.clone();
-            let request = owner.request("relay-ask");
-            let attempt: crate::ConformanceTurnAttempt = Arc::new(move |scope| {
-                let parts = parts.clone();
-                let request = request.clone();
-                let reports = reports.clone();
-                Box::pin(async move {
-                    let mut runtime = parts.runtime().await;
-                    let drove = match lash_core::shift::admit_shift(
-                        &mut runtime,
-                        &scope,
-                        &request,
-                        0,
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(AdmitVerdict::Admit(admitted)) => {
-                            lash_core::shift::execute_admitted_run(&mut runtime, &scope, admitted)
-                                .await
-                                .map(Some)
-                        }
-                        Ok(_) => Ok(None),
-                        Err(abort) => Err(abort),
-                    }
-                    .map_err(lash_core::engine::ShiftAbort::into_error);
-                    let end = crate::ConformanceTurnEnd::of(&drove);
-                    let _ = reports.send(drove);
-                    end
-                })
-            });
-            loop {
-                runner
-                    .run_turn(driver_scope(&owner), Arc::clone(&attempt))
-                    .await;
-                match reported.recv().await.expect("the session's shift reports") {
-                    Err(refusal) if refusal.code == crate::RuntimeErrorCode::SessionRunPending => {}
-                    drove => break drove.map(|_| ()),
-                }
-            }
-        };
-        // The acceptor's turn, retried while its run's executor runs it.
-        let accepting = async {
-            let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
-            let attempt = Fixture::acceptor_of(&acceptor, &f.turn_id, answers);
-            loop {
-                runner
-                    .run_turn(f.acceptor_scope(), Arc::clone(&attempt))
-                    .await;
-                match answered.recv().await.expect("the acceptor reports") {
-                    Err(refusal) if refusal.code == crate::RuntimeErrorCode::SessionRunPending => {}
-                    answer => break answer.map(|_| ()),
-                }
-            }
-        };
-        schedule
-            .run(vec![
-                ("session", Box::pin(session_shift)),
-                ("acceptor", Box::pin(accepting)),
-            ])
-            .await;
-
-        let drove = log
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        let rendered = schedule.rendered();
-        let recorded = drove
-            .iter()
-            .position(|drove| matches!(drove, Drove::Admitted { .. }))
-            .unwrap_or_else(|| panic!("no executor recorded the run: {drove:?} in `{rendered}`"));
-        let Drove::Admitted { by: owner } = drove[recorded] else {
-            unreachable!("the position names an admission")
-        };
-        let superseding: Vec<&Drove> = drove[recorded..]
-            .iter()
-            .filter(|drove| matches!(drove, Drove::Sealed { .. }))
-            .collect();
-        assert!(
-            superseding.is_empty(),
-            "a seal superseded the fence of `{owner}`, the run's recorded executor: {drove:?} \
-             in `{rendered}`"
-        );
-        assert!(
-            drove[recorded..]
-                .iter()
-                .all(|drove| *drove == Drove::Admitted { by: owner }),
-            "only `{owner}` admits the run it recorded: {drove:?} in `{rendered}`"
-        );
-        if drove[..recorded]
-            .iter()
-            .filter(|drove| matches!(drove, Drove::Sealed { .. }))
-            .count()
-            > 1
-            || schedule
-                .trace()
-                .iter()
-                .filter(|call| {
-                    call.op == StoreOp::seal_shift_epoch.into()
-                        && call.phase == lash_core::testing::Phase::Before
-                })
-                .count()
-                > 1
-        {
-            raced += 1;
-        }
-        f.assert_executed_once_to_its_end().await;
-    }
-    assert!(raced > 0, "no schedule had both executors seal");
 }
 
 /// A parent-turn acceptor's run is recorded as an acceptor's, and the store

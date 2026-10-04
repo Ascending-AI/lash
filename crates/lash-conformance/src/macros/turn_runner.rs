@@ -198,7 +198,6 @@ macro_rules! shift_admission_tests {
             (admit_run_refuses_another_engine_held_executor, "run-admission-executor"),
             (first_admission_wins_without_changing_business_identity, "trace-first-writer"),
             (a_refused_acceptor_adopts_the_outcome_its_runs_executor_recorded, "shift-run-acceptor-adopts"),
-            (no_order_of_a_runs_owner_and_another_admitter_supersedes_the_owners_fence, "shift-run-owner-fence"),
             (a_parent_turn_acceptors_run_is_closed_to_a_later_drive, "shift-run-acceptor-recorded"),
             (a_command_runs_redrive_replays_its_recorded_outcome, "shift-command-run-redrive"),
             (a_host_task_is_admitted_as_its_own_operation_run, "shift-operation-run"),

@@ -1898,7 +1898,7 @@
     "tests::shift_laws_on_the_double::frame_open_under_replay::pressure_hooks_sharing_an_id_crashed_after_the_turns_commit_keep_their_records_apart": 278,
     "tests::shift_laws_on_the_double::frame_open_under_replay::raising_the_budget_settles_a_stranded_command": 139,
     "tests::shift_laws_on_the_double::frame_open_under_replay::terminal_callback_append_does_not_deadlock": 510,
-    "tests::shift_laws_on_the_double::fresh_execution_of_started_run_is_substrate_lost": 100,
+    "tests::shift_laws_on_the_double::a_fresh_root_journal_refuses_the_retained_admission_nonce": 100,
     "tests::shift_laws_on_the_double::host_append_crashed_after_its_commit_applies_once": 260,
     "tests::shift_laws_on_the_double::host_append_crashed_after_its_lane_read_applies_once": 309,
     "tests::shift_laws_on_the_double::host_append_crashed_before_its_commit_applies_once": 248,

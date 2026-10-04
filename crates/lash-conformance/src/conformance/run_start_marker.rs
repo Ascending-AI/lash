@@ -1,24 +1,12 @@
-//! L-S8 (ADR 0105 §2, O6): a fresh execution of a run that already started
-//! is `SubstrateLost`, and runs nothing.
-//!
-//! A run's execution is its engine execution: a Restate `LashTurn` invocation and
-//! its journal. When that journal is gone (purged, or past retention) and the
-//! engine runs the same admitted run again, the new execution cannot read
-//! what the first one did, so it must not run the run again: a false
-//! abandonment is accepted, a duplicate effect is not (FIG-3588). The
-//! engine's start marker (a nonce drawn in the run's own journal and set
-//! if absent in the store) tells a retry of the first execution from a fresh
-//! one.
-//!
-//! The law runs the same admission twice, each time on a fresh execution the
-//! tier admits: the first runs and commits the run; the second must answer
-//! `Refused { SubstrateLost }` without asking the model.
+//! A fresh root journal cannot reuse an admission whose nonce was drawn in
+//! a lost predecessor journal. Atomic admission retains the original fence;
+//! the new journal receives ExecutionLost and executes no provider or tool.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::engine::{AdmitVerdict, Admitted, RunOutcome, ShiftRequest, ShiftRequestId};
-use lash_sansio::{SessionId, TurnId};
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
 #[derive(Clone)]
@@ -112,13 +100,13 @@ fn execute_run_on<'a>(
     })
 }
 
-/// L-S8: a fresh execution of a started run is `SubstrateLost` and runs
-/// nothing.
+/// L-S8: admission's retained nonce distinguishes a retry from a fresh root
+/// journal. The fresh journal refuses before the body and keeps the first fence.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn fresh_execution_of_started_run_is_substrate_lost(
+pub async fn a_fresh_root_journal_refuses_the_retained_admission_nonce(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -172,51 +160,101 @@ pub async fn fresh_execution_of_started_run_is_substrate_lost(
 
     let admission_scope =
         lash_core::engine::shift_admission_scope(&request.session, &request.request);
-    let verdict = fresh_execution(&runner, &parts, admission_scope, {
+    let (run, first) = fresh_execution(&runner, &parts, admission_scope.clone(), {
         let request = request.clone();
         move |mut runtime, scoped| {
             let request = request.clone();
             Box::pin(async move {
-                lash_core::shift::admit_shift(&mut runtime, &scoped, &request, 0, None)
-                    .await
-                    .expect("admission runs")
+                let AdmitVerdict::Admit(admitted) =
+                    lash_core::shift::admit_shift(&mut runtime, &scoped, &request, 0, None)
+                        .await
+                        .expect("the first root admits its input")
+                else {
+                    panic!("the first root admits pending work");
+                };
+                assert!(matches!(
+                    admitted.root().expect("retained atomic receipt").seal,
+                    crate::store::ShiftEpochSeal::Sealed(_)
+                ));
+                let run = admitted.run().clone();
+                let outcome = execute_run_on(runtime, scoped, admitted).await;
+                (run, outcome)
             })
         }
     })
     .await;
-    let admitted: Admitted = match verdict {
-        AdmitVerdict::Admit(admitted) => admitted,
-        other => panic!("admission admits the pending run: {other:?}"),
-    };
-    let run = admitted.run().clone();
-    let run_scope = |run: &TurnId| lash_core::engine::shift_run_scope(&session_id, run);
+    assert!(matches!(first, RunOutcome::Committed { .. }), "{first:?}");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let epoch = parts
+        .store
+        .shift_epoch(&session_id)
+        .await
+        .expect("retained fence");
+    let identity = lash_core::store::AdmissionId::new(format!("{}#0", request.request.as_str()));
+    let retained = parts
+        .store
+        .read_shift_admission(&session_id, &identity)
+        .await
+        .expect("read atomic admission")
+        .expect("first root retained its receipt");
 
-    let first = fresh_execution(&runner, &parts, run_scope(&run), {
-        let admitted = admitted.clone();
-        move |runtime, scoped| execute_run_on(runtime, scoped, admitted.clone())
-    })
+    let second = fresh_execution(
+        &runner,
+        &parts,
+        admission_scope,
+        move |mut runtime, scoped| {
+            let request = request.clone();
+            Box::pin(async move {
+                let AdmitVerdict::Admit(admitted) =
+                    lash_core::shift::admit_shift(&mut runtime, &scoped, &request, 0, None)
+                        .await
+                        .expect("the fresh root reads the retained admission")
+                else {
+                    panic!("the fresh root returns the nonce refusal with the admission");
+                };
+                assert!(
+                    matches!(
+                        admitted.root().expect("retained atomic receipt").seal,
+                        crate::store::ShiftEpochSeal::ExecutionLost
+                    ),
+                    "the fresh root refuses the predecessor's nonce at admission"
+                );
+                execute_run_on(runtime, scoped, admitted).await
+            })
+        },
+    )
     .await;
     assert!(
-        matches!(first, RunOutcome::Committed { .. }),
-        "the run's first execution runs it: {first:?}"
+        matches!(second, RunOutcome::Refused { run: ref refused,
+        refusal: lash_core::engine::SealRefusal::ExecutionLost } if *refused == run),
+        "{second:?}"
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-
-    let second = fresh_execution(&runner, &parts, run_scope(&run), move |runtime, scoped| {
-        execute_run_on(runtime, scoped, admitted.clone())
-    })
-    .await;
-    match second {
-        RunOutcome::Refused {
-            run: refused,
-            refusal: lash_core::engine::SealRefusal::ExecutionLost,
-        } => assert_eq!(refused, run),
-        other => panic!("a fresh execution of a started run is refused ExecutionLost: {other:?}"),
-    }
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
-        "the fresh execution asks the model nothing"
+        "the lost journal executes nothing again"
+    );
+    assert_eq!(
+        parts
+            .store
+            .shift_epoch(&session_id)
+            .await
+            .expect("read unchanged fence"),
+        epoch
+    );
+    let after = parts
+        .store
+        .read_shift_admission(&session_id, &identity)
+        .await
+        .expect("read retained admission after refusal")
+        .expect("retained receipt");
+    assert_eq!(
+        after.run_start, retained.run_start,
+        "the original nonce is retained"
+    );
+    assert!(
+        matches!(after.seal, crate::store::ShiftEpochSeal::Sealed(_)),
+        "the fresh journal never replaces the predecessor's retained authority"
     );
 }
 
@@ -229,7 +267,7 @@ pub async fn fresh_execution_of_started_run_is_substrate_lost(
 macro_rules! run_start_marker_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::run_start_marker_tests!(@law [$(#[$attr])*] $fixture;
-            (fresh_execution_of_started_run_is_substrate_lost, "run-start-marker"));
+            (a_fresh_root_journal_refuses_the_retained_admission_nonce, "run-start-marker"));
     };
     (@law [$(#[$attr:meta])*] $fixture:block; ($law:ident, $label:literal)) => {
         $(#[$attr])*
