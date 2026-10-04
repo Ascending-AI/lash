@@ -83,8 +83,8 @@ impl SingletonToolHandlers for Probe {
         &self,
         _: &SingletonToolCall,
         _: &SingletonPreparedRequest,
-    ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
-        Vec::new()
+    ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
+        Ok(Vec::new())
     }
 
     async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String> {

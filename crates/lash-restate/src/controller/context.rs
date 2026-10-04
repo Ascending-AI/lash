@@ -10,7 +10,6 @@
 use lash_sansio::SessionId;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::{
@@ -22,7 +21,7 @@ use restate_sdk::context::{
     Context as RestateContext, ContextAwakeables, ContextClient, ObjectContext, RunRetryPolicy,
     SharedObjectContext, SharedWorkflowContext, WorkflowContext,
 };
-use restate_sdk::errors::{HandlerError, TerminalError};
+use restate_sdk::errors::TerminalError;
 use restate_sdk::serde::Json;
 
 pub use super::process_scheduling::ProcessWorkflowStartFailure;

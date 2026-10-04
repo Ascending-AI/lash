@@ -100,10 +100,19 @@ impl<'run> ProductionToolHandlers<'run> {
             declarations: Mutex::default(),
         }
     }
-    fn dispatch(&self, input: &CallInput) -> ToolDispatchContext<'run> {
+    async fn dispatch(&self, input: &CallInput) -> Result<ToolDispatchContext<'run>, String> {
         let mut dispatch = self.context.dispatch().as_ref().clone();
         dispatch.parent_invocation = input.parent.clone();
-        dispatch
+        dispatch.execution_env_spec = self
+            .context
+            .recorded_tool_run_env_spec(&input.environment)
+            .await
+            .map_err(|error| {
+                let message = error.to_string();
+                self.context.record_nested_effect_error(error.into());
+                message
+            })?;
+        Ok(dispatch)
     }
     async fn capture_output(
         &self,
@@ -114,7 +123,7 @@ impl<'run> ProductionToolHandlers<'run> {
         messages: Vec<crate::PluginMessage>,
         triggers: Vec<super::ToolTriggerEffectOutcome>,
     ) -> Result<Captured, String> {
-        let dispatch = self.dispatch(&prepared.input);
+        let dispatch = self.dispatch(&prepared.input).await?;
         let view = crate::plugin::PreparedCallReadView::new(prepared.call.clone());
         let hook = hooks::context(&dispatch, &prepared);
         let (original, control) = crate::plugin::ToolResultCandidate::split(output.clone());
@@ -246,7 +255,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .get(&call.call_id)
             .cloned()
             .ok_or("an admitted call has no preparation binding")?;
-        let mut dispatch = self.dispatch(&input);
+        let mut dispatch = self.dispatch(&input).await?;
         dispatch.tools = dispatch
             .plugins
             .resolve_context_tool_bindings(&[input.binding.preparation.clone()])
@@ -352,13 +361,13 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         &self,
         call: &SingletonToolCall,
         request: &SingletonPreparedRequest,
-    ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
+    ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
         self.check_before(call, request).await
     }
     async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String> {
         let prepared: Prepared = serde_json::from_value(attempt.request.prepared.clone())
             .map_err(|error| error.to_string())?;
-        let mut dispatch = self.dispatch(&prepared.input);
+        let mut dispatch = self.dispatch(&prepared.input).await?;
         dispatch.observer = attempt.stream.clone();
         dispatch.checkpoint_messages = Default::default();
         dispatch.trigger_outcomes = Default::default();
@@ -384,6 +393,11 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .with_effect_attempt(Some(effect_attempt.clone()));
         let dispatch = Arc::new(dispatch);
         let mut context = crate::ToolContext::from_dispatch(dispatch.clone(), &prepared.call)
+            .runtime_execution_context(
+                self.context
+                    .clone()
+                    .with_execution_env_spec(dispatch.execution_env_spec.clone()),
+            )
             .build()
             .with_attempt_dispatch(dispatch.clone(), invocation);
         context.install_prederived_completion_key(attempt.completion_key.cloned());
@@ -742,7 +756,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .cloned()
             .ok_or("the final has no admitted preparation")?;
         let outcomes = intent_executor::execute_final_tool_intents(
-            &self.dispatch(&prepared.input),
+            &self.dispatch(&prepared.input).await?,
             call_id,
             &captured.intents,
             None,

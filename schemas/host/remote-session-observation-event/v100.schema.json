@@ -1,5 +1,193 @@
 {
   "$defs": {
+    "AdmissionRefusal": {
+      "description": "Why a round was refused. One refused member admits no member.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "duplicate_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "member": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "operand_out_of_range",
+              "type": "string"
+            },
+            "slot": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "refusal",
+            "slot",
+            "member"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "member": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "unreferenced_member",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "member"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "member": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "request_not_owned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "member"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/DeclarationRefusal"
+            },
+            "member": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "declaration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "member",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "member": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "unsupported_isolation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "member"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "member": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "unreduced_checks",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "member"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "member": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "cached_not_owned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "member"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/PluginExecutionRefusal"
+            },
+            "member": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "binding_unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "member",
+            "cause"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ArtifactName": {
       "description": "One artifact, by the store that holds it and its reference there.",
       "properties": {
@@ -766,6 +954,21 @@
         "invalid_bounds"
       ],
       "type": "string"
+    },
+    "BoundaryReason": {
+      "description": "Why a run crossed a segment boundary into a new invocation.",
+      "oneOf": [
+        {
+          "const": "journal_budget",
+          "description": "The invocation's journal reached its budget.",
+          "type": "string"
+        },
+        {
+          "const": "hand_over",
+          "description": "The build the invocation runs on is draining, and the run handed its\nwork to a successor on the newest build: a process segment its open\nsignal wait (FIG-3799), a Run its next protocol step or the wait its\ncode cell is parked on (FIG-4739). The successor waits again on the\nsame wait.",
+          "type": "string"
+        }
+      ]
     },
     "CancelOrigin": {
       "description": "The runtime or actor decision that requested cancellation of a process.",
@@ -2167,6 +2370,15 @@
         }
       ]
     },
+    "DeclaredStartObligationRefusal": {
+      "description": "Why a registration cannot be a declared start.",
+      "enum": [
+        "keyless",
+        "no_environment",
+        "no_consumer_hold"
+      ],
+      "type": "string"
+    },
     "DefinitionIdSchema": {
       "additionalProperties": false,
       "description": "The typed definition reference a durable process row pins: the engine that\nowns the definition, the engine-owned definition value, and the signature\nclaimed for it. The claim is never authority (ADR 0095) \u2014 a peer's claim is\nchecked against the owning engine before any local row is created.",
@@ -2707,6 +2919,27 @@
         }
       ]
     },
+    "HookCause": {
+      "additionalProperties": false,
+      "description": "A recorded typed hook cause: a plugin's declared error type, its version\nand payload. Unknown payloads survive replay unchanged.",
+      "properties": {
+        "error_type": {
+          "type": "string"
+        },
+        "error_version": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "payload": true
+      },
+      "required": [
+        "error_type",
+        "error_version",
+        "payload"
+      ],
+      "type": "object"
+    },
     "InfrastructureOutcome": {
       "oneOf": [
         {
@@ -2845,6 +3078,87 @@
         "array"
       ],
       "type": "string"
+    },
+    "IsolatedStartRefusal": {
+      "description": "A process binding or physical termination that cannot honor admission.",
+      "oneOf": [
+        {
+          "enum": [
+            "NotEngine",
+            "TerminationOwner",
+            "TerminationMissing"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Unavailable": {
+              "properties": {
+                "kind": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Unavailable"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Boundary": {
+              "properties": {
+                "available": {
+                  "$ref": "#/$defs/ProcessExecutionBoundary"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "recorded": {
+                  "$ref": "#/$defs/ProcessExecutionBoundary"
+                }
+              },
+              "required": [
+                "kind",
+                "recorded",
+                "available"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Boundary"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Start": {
+              "properties": {
+                "cause": {
+                  "$ref": "#/$defs/DeclaredStartObligationRefusal"
+                }
+              },
+              "required": [
+                "cause"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Start"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "JsonSchema": {
       "anyOf": [
@@ -3228,6 +3542,11 @@
         {
           "const": "attempt_output",
           "description": "One attempt's output and captures (X), or a cached success a\nbefore-check supplied in its place.",
+          "type": "string"
+        },
+        {
+          "const": "check_contributions",
+          "description": "Messages and observations declared by after-checks in D.",
           "type": "string"
         },
         {
@@ -4292,6 +4611,22 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "ProcessExecutionBoundary": {
+      "description": "The execution boundary a registered process implementation supplies.\nAn invocation has independent lifetime, but no OS isolation guarantee.",
+      "oneOf": [
+        {
+          "enum": [
+            "invocation"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "worker_process",
+          "description": "The implementation runs the work in a separate worker process and\ncan terminate and reap it before acknowledging cancellation.",
+          "type": "string"
+        }
+      ]
     },
     "ProcessStatus": {
       "description": "Durable lifecycle status of a process row.\n\n# Rollout: adding a variant is a one-way door for readers\n\nThis enum has no `#[serde(other)]` fallback arm, by design \u2014 a store that\nsilently folded an unknown status into a known one would corrupt the very\nfold the registry exists to keep honest. The consequence is that a variant\nis only readable by binaries that know it: an older binary sharing a\nregistry with a newer one hard-errors with `unknown variant\ncaller_departed` on any read that touches such a row. That includes\n[`ProcessRegistry::processes_changed_since`](crate::ProcessRegistry::processes_changed_since),\nwhere the failure is not \"skip one row\" but a stalled feed \u2014 the projector\nstops advancing its cursor at all.\n\n[`ProcessStatus::CallerDeparted`] therefore ships without a store schema\nbump, deliberately: no column shape changed, and every backend already\nfilters the `status` column it is written to. For SQLite that is also the\nonly tenable choice \u2014 its stores have no migration chain and refuse any\ndatabase whose `user_version` does not match exactly, so a bump would make\nevery existing process database unopenable to buy nothing. Postgres *does*\nhave a migration ladder, so a bump was possible there; it was skipped for\nrollout simplicity and vocabulary parity across backends, not because it\ncould not be done.\n\nOperationally: upgrade readers before any writer can emit a new status.\nA mixed-version fleet sharing one registry must roll all binaries forward\nfirst; rolling a writer out ahead of its readers stalls their feeds.",
@@ -10447,6 +10782,39 @@
       ],
       "type": "object"
     },
+    "RunCutRefusal": {
+      "description": "Why a physical boundary cannot admit work or capture the Run.",
+      "oneOf": [
+        {
+          "enum": [
+            "InvocationFailed",
+            "NotRequested",
+            "NotQuiescent"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "AdmissionFrozen": {
+              "properties": {
+                "reason": {
+                  "$ref": "#/$defs/BoundaryReason"
+                }
+              },
+              "required": [
+                "reason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "AdmissionFrozen"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "RunDefinitionRefusal": {
       "additionalProperties": false,
       "description": "Why a registered definition refused to shape a run: deterministic, so it\nis recorded as the run's failure. `refusal` is the definition's own\nrefusal type, serialized, and `message` its display text.",
@@ -11376,6 +11744,104 @@
           "type": "object"
         },
         {
+          "properties": {
+            "kind": {
+              "const": "tool_run_cut_refused",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/RunCutRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "tool_run_isolation_refused",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/IsolatedStartRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "drift": {
+              "$ref": "#/$defs/SingletonDrift"
+            },
+            "kind": {
+              "const": "tool_run_drift",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "call_id",
+            "drift"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "aborted": {
+              "type": "boolean"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "cause": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/HookCause"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "tool_run_control",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "call_id",
+            "aborted"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "tool_run_admission_refused",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/AdmissionRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
           "description": "A physical boundary or successor refused the logical Run's transfer.",
           "properties": {
             "kind": {
@@ -12212,6 +12678,16 @@
           "type": "object"
         }
       ]
+    },
+    "SingletonDrift": {
+      "description": "What a recorded admission names differently from the call replaying it.",
+      "enum": [
+        "CallId",
+        "ToolName",
+        "Arguments",
+        "IsolationBinding"
+      ],
+      "type": "string"
     },
     "SourceRefusal": {
       "description": "Why the index refused a source request; nothing was written.",

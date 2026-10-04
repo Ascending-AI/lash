@@ -834,12 +834,12 @@ impl SingletonToolHandlers for Probe {
         &self,
         _call: &SingletonToolCall,
         _request: &SingletonPreparedRequest,
-    ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
+    ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
         self.before_checks.fetch_add(1, Ordering::SeqCst);
-        vec![AttributedVerdict {
+        Ok(vec![AttributedVerdict {
             callback: binding(1).executable,
             verdict: BeforeCheckReply::Allow,
-        }]
+        }])
     }
 
     async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String> {

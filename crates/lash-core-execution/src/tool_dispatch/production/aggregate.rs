@@ -42,6 +42,27 @@ fn refused_reply(input: &serde_json::Value) -> Result<ToolAggregateLeafReply, Si
     Ok(ToolAggregateLeafReply::Tool(Box::new(reply)))
 }
 
+fn validate_request(
+    tool: &crate::ToolId,
+    arguments: &serde_json::Value,
+    invocation: &crate::session::tool_execution::ToolInvocation,
+) -> Result<(), SingletonRunError> {
+    let drift = if tool != &invocation.tool_id {
+        Some(SingletonDrift::ToolName)
+    } else if arguments != &invocation.args {
+        Some(SingletonDrift::Arguments)
+    } else {
+        None
+    };
+    match drift {
+        Some(drift) => Err(SingletonRunError::Drift {
+            call_id: invocation.id.clone(),
+            drift,
+        }),
+        None => Ok(()),
+    }
+}
+
 impl<'run> ProductionToolHandlers<'run> {
     pub(crate) async fn admit_aggregate<'owner>(
         self: &Arc<Self>,
@@ -59,6 +80,17 @@ impl<'run> ProductionToolHandlers<'run> {
             settled_value_after,
             command,
         } = request;
+        let mut requested =
+            BTreeMap::<crate::ToolCallId, &crate::session::tool_execution::ToolInvocation>::new();
+        for leaf in &leaves {
+            if let ToolAggregateLeaf::Tool(invocation) = leaf {
+                if let Some(original) = requested.get(&invocation.id) {
+                    validate_request(&original.tool_id, &original.args, invocation)?;
+                } else {
+                    requested.insert(invocation.id.clone(), invocation);
+                }
+            }
+        }
         let key = self.context.command_group_key(&command);
         if self.context.process_id().is_some() {
             let requested = leaves
@@ -119,6 +151,16 @@ impl<'run> ProductionToolHandlers<'run> {
                                 error.to_string(),
                             )
                         })?;
+                    if let Some(prepared) = &recorded {
+                        validate_request(
+                            &prepared.call.tool_id,
+                            prepared
+                                .original_args
+                                .as_ref()
+                                .unwrap_or(&prepared.call.args),
+                            &invocation,
+                        )?;
+                    }
                     let definition = recorded
                         .as_ref()
                         .map(|prepared| prepared.input.definition.clone())
@@ -598,7 +640,7 @@ impl<'run> ProductionToolHandlers<'run> {
                 );
                 error.cause = Some(crate::RuntimeErrorCause::ToolRunControl {
                     cause: run.withheld_cause(&call_id).map(Box::new),
-                    call_id,
+                    call_id: Box::new(call_id),
                     aborted: decision == CallDecision::Aborted,
                 });
                 error.journaled = true;

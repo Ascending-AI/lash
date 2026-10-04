@@ -841,6 +841,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    pub(crate) async fn recorded_tool_run_env_spec(
+        &self,
+        reference: &crate::ProcessExecutionEnvRef,
+    ) -> Result<crate::ProcessExecutionEnvSpec, crate::PluginError> {
+        crate::load_process_execution_env(self.process_env_store.as_ref(), reference)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) fn tool_run_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
         self.execution_env_spec.clone()
     }

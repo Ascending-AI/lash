@@ -19,7 +19,7 @@
 //! completed during preparation, a leaf the caller resolved itself — and the
 //! caller's first plain operand form a source-ordered prefix ahead of every
 //! dispatched settlement (L5). The prefix may decide the aggregate, but only
-//! after every pending leaf has been admitted: a group is opened first, and
+//! after every pending leaf has been admitted in the logical Run, and
 //! its losers belong to the opener from that moment (§11 clause 3). Nothing
 //! about a loser's value is ever synthesized (L6).
 

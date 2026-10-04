@@ -262,8 +262,8 @@ impl SingletonToolHandlers for Probe {
         &self,
         call: &SingletonToolCall,
         _request: &SingletonPreparedRequest,
-    ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
-        vec![AttributedVerdict {
+    ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
+        Ok(vec![AttributedVerdict {
             callback: binding().executable,
             verdict: if self.cancel_before.as_ref() == Some(&call.call_id) {
                 BeforeCheckReply::Cancel {
@@ -276,7 +276,7 @@ impl SingletonToolHandlers for Probe {
             } else {
                 BeforeCheckReply::Allow
             },
-        }]
+        }])
     }
 
     async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String> {

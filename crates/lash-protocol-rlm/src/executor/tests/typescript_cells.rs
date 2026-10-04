@@ -1477,3 +1477,79 @@ fn l06_race_loser_stays_owned_across_cells_until_logical_closing() {
         );
     });
 }
+
+/// L12: an admitted logical identity cannot be reused with another request.
+#[test]
+fn l12_reused_call_identity_refuses_argument_drift_before_execution() {
+    block_on(async {
+        use lash_core::facade_support::ToolInvocation;
+        use lash_core::session::{ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateRequest};
+        let double =
+            crate::testing::kernel_double(SEED + 1867, lash_restate_test::ServerConfig::default())
+                .await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open handler");
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            crate::testing::double_ports(&double, &handler),
+            Arc::new(EchoToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
+        );
+        context
+            .drive_tool_run(None, |context| async move {
+                let request = |command: &str, text: &str| ToolAggregateRequest {
+                    leaves: vec![ToolAggregateLeaf::Tool(ToolInvocation::new(
+                        lash_core::ToolCallId::fixture("same-admitted-call"),
+                        "tool:echo".into(),
+                        serde_json::json!({"text": text}),
+                    ))],
+                    consumer: ToolAggregateConsumer::All,
+                    settled_value_after: None,
+                    command: lash_core::CommandReplayKey::new(command),
+                };
+                let cursor = context
+                    .admit_tool_run_aggregate(request("first", "recorded"))
+                    .await
+                    .expect("first admission");
+                context
+                    .await_tool_run_aggregate(&cursor, ToolAggregateConsumer::All)
+                    .await
+                    .expect("first result");
+                let aliases = ToolAggregateRequest {
+                    leaves: ["recorded", "changed"]
+                        .into_iter()
+                        .map(|text| {
+                            ToolAggregateLeaf::Tool(ToolInvocation::new(
+                                lash_core::ToolCallId::fixture("fresh-alias"),
+                                "tool:echo".into(),
+                                serde_json::json!({"text": text}),
+                            ))
+                        })
+                        .collect(),
+                    consumer: ToolAggregateConsumer::All,
+                    settled_value_after: None,
+                    command: lash_core::CommandReplayKey::new("aliases"),
+                };
+                for conflict in [request("second", "changed"), aliases] {
+                    let refusal = context
+                        .admit_tool_run_aggregate(conflict)
+                        .await
+                        .expect_err("the identity must refuse changed arguments");
+                    assert!(matches!(
+                        refusal.cause.as_ref(),
+                        Some(lash_core::RuntimeErrorCause::ToolRunDrift { drift, .. })
+                            if **drift == lash_core::tool_run::SingletonDrift::Arguments
+                    ));
+                }
+                context
+                    .close_opener_groups()
+                    .await
+                    .expect("logical closing");
+            })
+            .await
+            .expect("owned program");
+        drop(context);
+        handler.close().await.expect("close handler");
+    });
+}

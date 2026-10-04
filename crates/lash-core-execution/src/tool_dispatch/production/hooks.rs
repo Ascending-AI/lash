@@ -26,35 +26,19 @@ impl ProductionToolHandlers<'_> {
         &self,
         call: &SingletonToolCall,
         request: &SingletonPreparedRequest,
-    ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
-        let prepared: Prepared = match serde_json::from_value(request.prepared.clone()) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                return vec![AttributedVerdict {
-                    callback: call.binding.preparation.clone(),
-                    verdict: BeforeCheckReply::Deny {
-                        cause: cause(
-                            "tool_failure",
-                            &crate::ToolFailure::runtime(
-                                crate::ToolFailureClass::Internal,
-                                "prepared_request_unreadable",
-                                error.to_string(),
-                            ),
-                        ),
-                    },
-                }];
-            }
-        };
+    ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
+        let prepared: Prepared =
+            serde_json::from_value(request.prepared.clone()).map_err(|error| error.to_string())?;
         let host = prepared.input.binding.preparation.clone();
         if let Some(failure) = &prepared.failure {
-            return vec![AttributedVerdict {
+            return Ok(vec![AttributedVerdict {
                 callback: host,
                 verdict: BeforeCheckReply::Deny {
                     cause: cause("tool_failure", failure),
                 },
-            }];
+            }]);
         }
-        let dispatch = self.dispatch(&prepared.input);
+        let dispatch = self.dispatch(&prepared.input).await?;
         let record = match dispatch
             .plugins
             .check_tool_args(
@@ -71,12 +55,12 @@ impl ProductionToolHandlers<'_> {
         {
             Ok(record) => record,
             Err(failure) => {
-                return vec![AttributedVerdict {
+                return Ok(vec![AttributedVerdict {
                     callback: host,
                     verdict: BeforeCheckReply::Deny {
                         cause: cause("tool_failure", &failure),
                     },
-                }];
+                }]);
             }
         };
         let winner = record.winner().map(|reply| reply.callback.clone());
@@ -120,18 +104,8 @@ impl ProductionToolHandlers<'_> {
                             intents: ToolIntents::default(),
                         })
                     };
-                    match captured.and_then(|capture| encode(&capture)) {
-                        Ok(output) => BeforeCheckReply::Cached { output },
-                        Err(message) => BeforeCheckReply::Deny {
-                            cause: cause(
-                                "tool_failure",
-                                &crate::ToolFailure::runtime(
-                                    crate::ToolFailureClass::Internal,
-                                    "cached_result_failed",
-                                    message,
-                                ),
-                            ),
-                        },
+                    BeforeCheckReply::Cached {
+                        output: encode(&captured?)?,
                     }
                 }
             };
@@ -140,7 +114,7 @@ impl ProductionToolHandlers<'_> {
                 verdict,
             });
         }
-        answers
+        Ok(answers)
     }
 
     pub(super) async fn check_after(
@@ -155,7 +129,7 @@ impl ProductionToolHandlers<'_> {
             .get(call_id)
             .cloned()
             .ok_or("the final has no hydrated admission")?;
-        let dispatch = self.dispatch(&prepared.input);
+        let dispatch = self.dispatch(&prepared.input).await?;
         let original = captured.original.unwrap_or_else(|| captured.output.clone());
         let (original, _) = ToolResultCandidate::split(original);
         let (candidate, _) = ToolResultCandidate::split(captured.output);
@@ -248,7 +222,7 @@ impl ProductionToolHandlers<'_> {
             .get(call_id)
             .cloned()
             .ok_or_else(|| fault("the final has no hydrated admission".to_owned()))?;
-        let dispatch = self.dispatch(&prepared.input);
+        let dispatch = self.dispatch(&prepared.input).await.map_err(fault)?;
         let outcomes = self
             .declarations
             .lock_recover()
@@ -287,7 +261,7 @@ impl ProductionToolHandlers<'_> {
                 projection,
                 settlement,
                 &prepared.input.binding.presentation,
-                self.context.attachment_acceptance(),
+                &dispatch.execution_env_spec.policy.attachment_acceptance,
             )
             .await
             .map_err(|error| {

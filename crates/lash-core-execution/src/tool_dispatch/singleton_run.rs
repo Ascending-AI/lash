@@ -389,11 +389,12 @@ pub trait SingletonToolHandlers: Send + Sync {
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String>;
 
     /// Every before-check's reply on the one prepared request (A).
+    /// A hydration or callback fault fails the invocation rather than denying the call.
     async fn before_checks(
         &self,
         call: &SingletonToolCall,
         request: &SingletonPreparedRequest,
-    ) -> Vec<AttributedVerdict<BeforeCheckReply>>;
+    ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String>;
 
     /// Execute the body once (X).
     async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String>;

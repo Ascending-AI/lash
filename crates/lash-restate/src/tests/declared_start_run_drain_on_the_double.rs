@@ -306,8 +306,8 @@ impl SingletonToolHandlers for Starter {
         &self,
         _call: &SingletonToolCall,
         _request: &SingletonPreparedRequest,
-    ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
-        Vec::new()
+    ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
+        Ok(Vec::new())
     }
 
     async fn execute(

@@ -404,7 +404,7 @@ async fn prepare_admitted_call(
     )?;
     minted.push(request_entry);
     let mut checks = Vec::new();
-    for reply in handlers.before_checks(call, &request).await {
+    for reply in handlers.before_checks(call, &request).await? {
         checks.push(before_verdict(owner, reply, handlers, &mut minted)?);
     }
     Ok((
@@ -1312,7 +1312,7 @@ enum AttemptCaptured {
     Captured(SingletonCapture),
     Pending {
         source: AwaitEventKey,
-        metadata: MaterialRef,
+        metadata: Box<MaterialRef>,
         start: Option<Box<crate::tool_run::PendingStart>>,
     },
     Deferred(AwaitEventKey),
@@ -1394,7 +1394,7 @@ async fn attempt(
             ..
         }) => Ok(AttemptCaptured::Pending {
             source: source.clone(),
-            metadata: metadata.clone(),
+            metadata: Box::new(metadata.clone()),
             start: start.clone(),
         }),
         Some(RunEvent::AttemptRecorded {

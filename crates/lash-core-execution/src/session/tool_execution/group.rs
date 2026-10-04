@@ -357,9 +357,7 @@ impl RuntimeExecutionContext<'_> {
         let session_facts = self.tool_child_session_facts(opener_context);
         let mut envelopes = Vec::with_capacity(children.len());
         for (position, child) in children.iter().enumerate() {
-            let leaf = match child {
-                PreparedGroupChild::Tool(leaf) => leaf,
-            };
+            let PreparedGroupChild::Tool(leaf) = child;
             let call_id = leaf.call.call.call_id.clone();
             let mut call = leaf.call.call.clone();
             if let Some(Some(retained)) = retained_payloads.get(position) {

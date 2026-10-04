@@ -117,7 +117,6 @@
       "src/runtime/work/awaiter/tests.rs",
       "src/session/execution_context/tests.rs",
       "src/session/settlement_incorporation_tests.rs",
-      "src/session/tool_execution/turn_cancel_gate_tests.rs",
       "src/tool_dispatch/tests/context_source.rs",
       "src/tool_dispatch/tests/rebind_checklist.rs",
       "src/tool_registry/admission_tests.rs",
