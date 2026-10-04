@@ -190,7 +190,7 @@ pub struct TurnHookContext {
     /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub state: SessionReadView,
-    pub sessions: Arc<dyn SessionStateService>,
+    pub sessions: Arc<dyn SessionReadService>,
     pub turn_context: crate::TurnContext,
 }
 
@@ -277,8 +277,7 @@ pub struct TurnResultHookContext {
     /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub turn: Arc<TurnHookReport>,
-    pub sessions: Arc<dyn SessionStateService>,
-    pub session_graph: Arc<dyn SessionGraphService>,
+    pub sessions: Arc<dyn SessionReadService>,
 }
 
 #[derive(Clone)]
@@ -291,9 +290,7 @@ pub struct CheckpointHookContext {
     pub plugin_config: super::AdmittedPluginConfig,
     pub checkpoint: CheckpointKind,
     pub state: SessionReadView,
-    pub sessions: Arc<dyn SessionStateService>,
-    pub session_lifecycle: Arc<dyn SessionLifecycleService>,
-    pub session_graph: Arc<dyn SessionGraphService>,
+    pub sessions: Arc<dyn SessionReadService>,
 }
 
 #[derive(Clone)]

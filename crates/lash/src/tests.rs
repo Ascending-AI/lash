@@ -1099,6 +1099,7 @@ mod standard_compaction_persistence;
 mod store_faults;
 mod tool_intent_ingress;
 mod tool_restore_report;
+mod turn_callback_replay;
 mod turn_streaming;
 #[cfg(feature = "rlm")]
 #[cfg(feature = "rlm")]

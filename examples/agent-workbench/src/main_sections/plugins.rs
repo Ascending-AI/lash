@@ -3,7 +3,6 @@ use lash::SessionId;
 
 pub(crate) struct WorkbenchPluginFactory {
     pub(crate) mail_world: mail::MailWorld,
-    pub(crate) derived_notes: WorkbenchDerivedNotes,
     pub(crate) config_changes: WorkbenchConfigChanges,
     pub(crate) context_budget: WorkbenchContextBudget,
     pub(crate) deferred_tools: deferred_tools::WorkbenchDeferredTools,
@@ -19,7 +18,6 @@ impl WorkbenchPluginFactory {
     pub(crate) fn new() -> Self {
         Self {
             mail_world: mail::MailWorld::new(),
-            derived_notes: WorkbenchDerivedNotes::default(),
             config_changes: WorkbenchConfigChanges::default(),
             context_budget: WorkbenchContextBudget::default(),
             deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
@@ -45,13 +43,6 @@ impl WorkbenchPluginFactory {
     pub(crate) fn with_approvals(mut self, approvals: approvals::WorkbenchApprovals) -> Self {
         self.approvals = approvals;
         self
-    }
-
-    /// Handle on the annotator's decision log, so a harness can read what the
-    /// append fence did with each derived note.
-    #[cfg(test)]
-    pub(crate) fn derived_notes(&self) -> WorkbenchDerivedNotes {
-        self.derived_notes.clone()
     }
 
     #[cfg(test)]
@@ -102,7 +93,6 @@ impl PluginFactory for WorkbenchPluginFactory {
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(WorkbenchSessionPlugin {
             mail_world: self.mail_world.clone(),
-            derived_notes: self.derived_notes.clone(),
             config_changes: self.config_changes.clone(),
             context_budget: self.context_budget.clone(),
             deferred_tools: self.deferred_tools.clone(),
@@ -113,7 +103,6 @@ impl PluginFactory for WorkbenchPluginFactory {
 
 pub(crate) struct WorkbenchSessionPlugin {
     pub(crate) mail_world: mail::MailWorld,
-    pub(crate) derived_notes: WorkbenchDerivedNotes,
     pub(crate) config_changes: WorkbenchConfigChanges,
     pub(crate) context_budget: WorkbenchContextBudget,
     pub(crate) deferred_tools: deferred_tools::WorkbenchDeferredTools,
@@ -148,48 +137,30 @@ impl SessionPlugin for WorkbenchSessionPlugin {
         )))?;
         reg.context()
             .prepare_turn(0, Arc::new(self.context_budget.clone()))?;
-        let derived_notes = self.derived_notes.clone();
-        reg.turn().before(
-            lash::hook_key!("derive-note"),
-            Arc::new(move |ctx| {
-                let derived_notes = derived_notes.clone();
-                Box::pin(async move {
-                    if ctx.state.turn_index() > 0 {
-                        derived_notes.derive_note(&ctx.state);
-                    }
-                    Ok(lash::plugins::TurnContributions::default())
-                })
-            }),
-        )?;
-        let derived_notes = self.derived_notes.clone();
         reg.turn().after(
             lash::hook_key!("write-back-notes"),
-            Arc::new(move |ctx| {
-                let derived_notes = derived_notes.clone();
+            Arc::new(|ctx| {
                 Box::pin(async move {
-                    for note in derived_notes.take_pending() {
-                        derived_notes.write_back(&ctx, note).await;
-                    }
-                    Ok(lash::plugins::AfterTurnContributions::default())
+                    let snapshot = ctx.sessions.snapshot_current().await?;
+                    let state = lash::persistence::SessionReadView::from_snapshot(&snapshot);
+                    Ok(lash::plugins::AfterTurnContributions {
+                        session: lash::plugins::SessionContributions {
+                            graph_appends: workbench_derived_note(&state).into_iter().collect(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
                 })
             }),
         )?;
         let config_changes = self.config_changes.clone();
-        let derived_notes = self.derived_notes.clone();
         reg.session().on_event(
             lash::hook_key!("observe"),
             Arc::new(move |event| {
                 let config_changes = config_changes.clone();
-                let derived_notes = derived_notes.clone();
                 Box::pin(async move {
-                    match event {
-                        lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {
-                            config_changes.observe(&ctx).await?;
-                        }
-                        lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {
-                            derived_notes.observe_committed(&ctx.state);
-                        }
-                        _ => {}
+                    if let lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) = event {
+                        config_changes.observe(&ctx).await?;
                     }
                     Ok(())
                 })
@@ -320,166 +291,30 @@ impl WorkbenchConfigChanges {
     }
 }
 
-/// The workbench's derive-then-append annotator: a background worker that
-/// summarizes a committed turn and writes the summary back into the session's
-/// own history, so it survives a restart and travels with the branch.
-///
-/// Deriving a summary is slow — in a real deployment it is a model call — so a
-/// note is always written back *after* the commit it describes, into a session
-/// whose head has already moved on. That is the whole reason each note carries
-/// [`lash::plugins::AppendSessionNodesRequest::requires_ancestor_node_id`]: the
-/// worker keeps no session bookkeeping at all (session ids change when an
-/// operator rewinds a branch, and the queue would be wrong the moment they
-/// did), and instead lets the append itself decide. A head that merely moved
-/// on keeps the note; a base that is no longer on the session's active path
-/// throws it away, because the conversation it summarizes is not the one this
-/// session is having.
-#[derive(Clone, Default)]
-pub(crate) struct WorkbenchDerivedNotes {
-    pub(crate) inner: Arc<WorkbenchDerivedNotesState>,
-}
-
-#[derive(Default)]
-pub(crate) struct WorkbenchDerivedNotesState {
-    pub(crate) pending: Mutex<Vec<WorkbenchPendingNote>>,
-    pub(crate) settled: Mutex<Vec<WorkbenchSettledNote>>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct WorkbenchPendingNote {
-    /// The node the summary was read at. Not where the note lands.
-    pub(crate) base_node_id: String,
-    pub(crate) summary: String,
-}
-
-/// What the append fence decided about one derived note.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum WorkbenchSettledNote {
-    /// Kept: `node_id` is where it actually landed, which is the leaf as of
-    /// the append and generally *not* `base_node_id`.
-    Written {
-        base_node_id: String,
-        node_id: String,
-        leaf_node_id: String,
-    },
-    /// Dropped: the branch `base_node_id` sat on is not the one this session
-    /// executes any more, so the summary describes history that is gone.
-    AbandonedBranch { base_node_id: String },
-}
-
-impl WorkbenchDerivedNotes {
-    pub(crate) fn derive_note(&self, state: &lash::persistence::SessionReadView) {
-        let mut pending = self.inner.pending.lock_recover();
-        if pending.is_empty()
-            && let Some(base_node_id) = state.session_graph().leaf_node_id.clone()
-        {
-            pending.push(WorkbenchPendingNote {
-                base_node_id: base_node_id.to_string(),
-                summary: workbench_note_summary(state),
-            });
-        }
+/// Summarize the previously committed turn. The runtime records the request
+/// returned by the after-turn callback before appending it to the new leaf.
+/// Its ancestor fence keeps the summary on the branch it describes.
+pub(crate) fn workbench_derived_note(
+    state: &lash::persistence::SessionReadView,
+) -> Option<lash::plugins::AppendSessionNodesRequest> {
+    if state.turn_index() == 0 {
+        return None;
     }
-
-    pub(crate) async fn write_back(
-        &self,
-        ctx: &lash::plugins::TurnResultHookContext,
-        note: WorkbenchPendingNote,
-    ) {
-        let request = lash::plugins::AppendSessionNodesRequest {
-            operation_id: format!("workbench-derived-note:{}", note.base_node_id),
-            nodes: vec![lash::plugins::SessionAppendNode::plugin(
-                WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE,
-                json!({
-                    // The base rides in the payload: the note's position in the
-                    // graph says nothing about what it was derived from.
-                    "derived_from_node_id": note.base_node_id,
-                    "summary": note.summary,
-                }),
-            )],
-            requires_ancestor_node_id: lash::NodeId::parse(note.base_node_id.clone()).ok(),
-        };
-        let settled = match ctx
-            .session_graph
-            .append_session_nodes(&ctx.session_id, request)
-            .await
-        {
-            Ok(lash::plugins::AppendSessionNodesOutcome::Appended {
-                node_ids,
-                leaf_node_id,
-            }) => WorkbenchSettledNote::Written {
-                base_node_id: note.base_node_id,
-                node_id: node_ids
-                    .into_iter()
-                    .next()
-                    .or_else(|| leaf_node_id.clone())
-                    .map(lash::NodeId::into_inner)
-                    .unwrap_or_default(),
-                leaf_node_id: leaf_node_id
-                    .map(lash::NodeId::into_inner)
-                    .unwrap_or_default(),
-            },
-            Ok(lash::plugins::AppendSessionNodesOutcome::StaleBranch { required_node_id }) => {
-                WorkbenchSettledNote::AbandonedBranch {
-                    base_node_id: required_node_id.to_string(),
-                }
-            }
-            Err(error) => {
-                // A store or plugin failure is not a verdict about the branch;
-                // keep the note and let the next persisted turn retry it.
-                eprintln!("workbench derived note write-back failed: {error}");
-                self.inner.pending.lock_recover().push(note);
-                return;
-            }
-        };
-        if let WorkbenchSettledNote::AbandonedBranch { base_node_id } = &settled {
-            println!(
-                "workbench derived note dropped: `{base_node_id}` is no longer on \
-                 session `{}`'s active path",
-                ctx.session_id
-            );
-        }
-        let mut log = self.inner.settled.lock_recover();
-        log.push(settled);
-        // The decision log is a rolling operator aid, not a record: a long-lived
-        // workbench must not accumulate one entry per turn forever.
-        let overflow = log.len().saturating_sub(WORKBENCH_DERIVED_NOTE_LOG_LIMIT);
-        log.drain(..overflow);
-    }
-
-    // The decision log observes committed IDs; pending execution never reads it.
-    pub(crate) fn observe_committed(&self, state: &lash::persistence::SessionReadView) {
-        for settled in self.inner.settled.lock_recover().iter_mut() {
-            if let WorkbenchSettledNote::Written {
-                base_node_id,
-                node_id,
-                leaf_node_id,
-            } = settled
-                && let Some(node) = state.session_graph().nodes.iter().find(|node| {
-                    matches!(&node.payload,
-                        lash::persistence::SessionNodePayload::Plugin { plugin_type, body }
-                        if plugin_type == WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE
-                            && body.as_ref().get("derived_from_node_id").and_then(Value::as_str)
-                                == Some(base_node_id.as_str()))
-                })
-            {
-                *node_id = node.node_id.to_string();
-                *leaf_node_id = node.node_id.to_string();
-            }
-        }
-    }
-
-    pub(crate) fn take_pending(&self) -> Vec<WorkbenchPendingNote> {
-        std::mem::take(&mut *self.inner.pending.lock_recover())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn settled(&self) -> Vec<WorkbenchSettledNote> {
-        self.inner.settled.lock_recover().clone()
-    }
+    let base_node_id = state.session_graph().leaf_node_id.clone()?;
+    Some(lash::plugins::AppendSessionNodesRequest {
+        operation_id: format!("workbench-derived-note:{base_node_id}"),
+        nodes: vec![lash::plugins::SessionAppendNode::plugin(
+            WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE,
+            json!({
+                "derived_from_node_id": base_node_id,
+                "summary": workbench_note_summary(state),
+            }),
+        )],
+        requires_ancestor_node_id: Some(base_node_id),
+    })
 }
 
 pub(crate) const WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE: &str = "workbench.turn_note";
-pub(crate) const WORKBENCH_DERIVED_NOTE_LOG_LIMIT: usize = 64;
 
 /// Stand-in for the expensive derivation: in a deployment this is a model call
 /// over the transcript, which is exactly why the write-back lands a commit late.

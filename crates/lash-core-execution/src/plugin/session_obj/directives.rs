@@ -35,17 +35,19 @@ fn recorded_contributions<O>(
         Vec<PluginMessage>,
         Vec<PluginRuntimeEvent>,
         Vec<PluginRecordContribution>,
+        SessionContributions,
     ),
 ) -> Vec<RecordedTurnContribution> {
     contributions
         .into_iter()
         .map(|PluginOwned { plugin_id, value }| {
-            let (messages, events, records) = split(value);
+            let (messages, events, records, session) = split(value);
             RecordedTurnContribution {
                 plugin_id,
                 messages,
                 events,
                 records,
+                session,
             }
         })
         .collect()
@@ -60,14 +62,17 @@ impl PluginSession {
     ) -> TurnPreparation {
         let message_scope_id = format!("{turn_scope_id}:before_turn");
         let mut events = Vec::new();
+        let mut session = Vec::new();
         let mut next_message_ordinal = 0usize;
         for RecordedTurnContribution {
             plugin_id,
             messages: plugin_messages,
             events: plugin_events,
+            session: session_changes,
             ..
         } in recorded
         {
+            session.push(session_changes);
             append_plugin_messages(
                 &mut messages,
                 &plugin_messages,
@@ -79,7 +84,11 @@ impl PluginSession {
                 plugin_events,
             ));
         }
-        TurnPreparation { messages, events }
+        TurnPreparation {
+            messages,
+            events,
+            session,
+        }
     }
 
     /// Whether any before-turn callback is registered: a turn records the
@@ -111,14 +120,20 @@ impl PluginSession {
         let contributions = self.at_checkpoint(ctx).await?;
         let mut messages = Vec::new();
         let mut events = Vec::new();
+        let mut session = Vec::new();
         for PluginOwned { plugin_id, value } in contributions {
+            session.push(value.session);
             messages.extend(value.messages);
             events.extend(crate::plugin::plugin_runtime_session_events(
                 &plugin_id,
                 value.events,
             ));
         }
-        Ok(CheckpointApplication { messages, events })
+        Ok(CheckpointApplication {
+            messages,
+            events,
+            session,
+        })
     }
 }
 
@@ -133,8 +148,11 @@ impl PluginDispatchContext<'_> {
         Ok(recorded_contributions(
             self.before_turn(ctx).await?,
             |TurnContributions {
-                 messages, events, ..
-             }| (messages, events, Vec::new()),
+                 messages,
+                 events,
+                 session,
+                 ..
+             }| (messages, events, Vec::new(), session),
         ))
     }
 
@@ -151,8 +169,9 @@ impl PluginDispatchContext<'_> {
                  messages,
                  events,
                  records,
+                 session,
                  ..
-             }| (messages, events, records),
+             }| (messages, events, records, session),
         ))
     }
 
@@ -174,6 +193,7 @@ impl PluginDispatchContext<'_> {
             messages,
             events: plugin_events,
             records,
+            ..
         } in recorded
         {
             events.extend(crate::plugin::plugin_runtime_session_events(

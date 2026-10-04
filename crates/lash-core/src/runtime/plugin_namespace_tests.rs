@@ -245,7 +245,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     }
     struct Sessions;
     #[async_trait::async_trait]
-    impl crate::plugin::SessionStateService for Sessions {}
+    impl crate::plugin::SessionReadService for Sessions {}
     let hosts = Arc::new(Mutex::new(Vec::new()));
     let restores = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut factories = vec![

@@ -46,6 +46,34 @@ impl PluginAbort {
     }
 }
 
+/// Session changes declared by a turn or checkpoint callback. The owning
+/// step records these values before the runtime applies them, including on
+/// replay. No callback can publish a session change through a service handle.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionContributions {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_membership: Vec<ToolMembershipContribution>,
+    /// Appends retain their caller-stable operation identities and ancestor
+    /// requirements. They join the turn draft after durable acknowledgement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graph_appends: Vec<AppendSessionNodesRequest>,
+}
+
+impl SessionContributions {
+    pub fn is_empty(&self) -> bool {
+        self.tool_membership.is_empty() && self.graph_appends.is_empty()
+    }
+}
+
+/// A catalog membership change, preserving the tool's state and identity.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolMembershipContribution {
+    pub tool_id: crate::ToolId,
+    pub present: bool,
+}
+
 /// What one before-turn or checkpoint observer contributes: messages the
 /// turn sees, runtime events the session publishes, and commands against
 /// its own plugin state namespace. Contributions are applied at the turn's
@@ -56,6 +84,7 @@ pub struct TurnContributions {
     pub events: Vec<PluginRuntimeEvent>,
     /// Published with the callback's recorded decision (K10).
     pub state: super::StateCommands,
+    pub session: SessionContributions,
 }
 
 /// What one after-turn observer contributes, applied before the turn's
@@ -69,6 +98,7 @@ pub struct AfterTurnContributions {
     pub records: Vec<PluginRecordContribution>,
     /// Published with the callback's recorded decision (K10).
     pub state: super::StateCommands,
+    pub session: SessionContributions,
 }
 
 /// A durable plugin record an after-turn observer appends to the turn.
@@ -92,16 +122,20 @@ pub struct RecordedTurnContribution {
     pub events: Vec<PluginRuntimeEvent>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub records: Vec<PluginRecordContribution>,
+    #[serde(default, skip_serializing_if = "SessionContributions::is_empty")]
+    pub session: SessionContributions,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct TurnPreparation {
+    pub session: Vec<SessionContributions>,
     pub messages: crate::MessageSequence,
     pub events: Vec<crate::SessionStreamEvent>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct CheckpointApplication {
+    pub session: Vec<SessionContributions>,
     pub messages: Vec<PluginMessage>,
     pub events: Vec<crate::SessionStreamEvent>,
 }

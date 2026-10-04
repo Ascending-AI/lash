@@ -508,6 +508,13 @@ impl LashRuntime {
         )?))
     }
 
+    pub fn session_read_service(
+        &self,
+    ) -> Result<Arc<dyn crate::plugin::SessionReadService>, PluginOperationInvokeError> {
+        self.runtime_session_services()
+            .map(|services| services.read_service())
+    }
+
     pub fn session_state_service(
         &self,
     ) -> Result<Arc<dyn crate::plugin::SessionStateService>, PluginOperationInvokeError> {

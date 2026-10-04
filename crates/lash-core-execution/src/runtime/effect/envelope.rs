@@ -1067,6 +1067,10 @@ type CheckpointOutcome = Result<CheckpointDelivery, RuntimeEffectControllerError
 /// the rows its run holds in its final commit, and never reads the queue.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CheckpointAdmittedSet {
+    /// Session changes returned by the checkpoint callbacks. The driver applies
+    /// them after this outcome is durable, on the live pass and on replay.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub session_contributions: Vec<crate::plugin::SessionContributions>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued_work: Vec<crate::AdmittedQueuedWork>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

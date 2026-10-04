@@ -4,4 +4,4 @@ error[E0560]: struct `AfterTurnContributions` has no field named `abort`
 5 |         abort: Some("after-turn observers cannot abort"),
   |         ^^^^^ `AfterTurnContributions` does not have this field
   |
-  = note: available fields are: `messages`, `events`, `records`, `state`
+  = note: available fields are: `messages`, `events`, `records`, `state`, `session`

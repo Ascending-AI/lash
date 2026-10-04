@@ -109,7 +109,7 @@ registration error. Context hooks use their trait's `id()` as the key.
 | `tool_calls().check_args` | Every check on one prepared call; reduce per §2. |
 | `tool_calls().transform_result` | Chain once in recorded order over original and current. |
 | `tool_calls().check_result` | Every check on one final result; Allow, Deny, Cancel or AbortRun; reduce per §2. |
-| `turn().before`, `turn().after`, `turn().checkpoint` | Ordered observers returning declared contributions (messages, events; after-turn also records). No abort or veto. A callback error fails the phase. |
+| `turn().before`, `turn().after`, `turn().checkpoint` | Ordered observers returning declared contributions (messages, events, tool membership and graph appends; after-turn also records). No abort or veto. A callback error fails the phase. |
 | `output().stream` | Ordered chunk transforms; a stop request is sticky. |
 | `output().stream_finished` | Ordered collection of end-of-stream state; a response reads the state of the finished callback it names. |
 | `output().response` | Ordered full-response transforms. `stream_state_from` names one finished callback of the same plugin, validated at registration. |
@@ -129,7 +129,12 @@ The decision values are S01's typed records in
 result decisions belongs to call admission and the resolved result decision
 (FIG-4877). Namespace state commands proposed by turn, checkpoint and
 result-check callbacks belong to the durable command publisher (FIG-4878).
-Recorded replay invokes no completed hook or reducer.
+Recorded replay invokes no completed hook or reducer. Turn and checkpoint
+contexts expose only `SessionReadService`. Their `SessionContributions`
+record tool membership changes by tool identity and graph appends with their
+operation identities and ancestor requirements. The runtime applies them
+after the owning step acknowledges, on the live pass and on replay. A graph
+append joins the turn draft and lands with its commit.
 
 A route without a recorded result decision refuses command-bearing result
 checks as `tool_result_check_state_unrecorded`, with the proposing plugin in

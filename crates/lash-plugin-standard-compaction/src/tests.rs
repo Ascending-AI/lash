@@ -7,7 +7,7 @@ use lash_sansio::sync::MutexExt;
 use std::sync::Mutex;
 
 use lash_core::SessionGraph;
-use lash_core::plugin::{PluginTraceEmitter, SessionStateService};
+use lash_core::plugin::{PluginTraceEmitter, SessionReadService};
 use serde_json::json;
 
 fn prompt_usage(used_tokens: usize) -> TokenUsage {
@@ -869,7 +869,7 @@ fn history_with_record(
 #[tokio::test]
 async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
     let manager = Arc::new(mock_manager());
-    let sessions: Arc<dyn SessionStateService> = manager.clone();
+    let sessions: Arc<dyn SessionReadService> = manager.clone();
 
     let overflow = lash_core::plugin::TurnResultHookContext {
         session_id: SessionId::from("root"),
@@ -878,7 +878,6 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         )),
         sessions: sessions.clone(),
         plugin_config: Default::default(),
-        session_graph: manager.clone(),
     };
     let contributions = overflow_recovery_after_turn(&overflow)
         .await
@@ -896,7 +895,6 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         )),
         sessions,
         plugin_config: Default::default(),
-        session_graph: manager.clone(),
     };
     assert!(
         overflow_recovery_after_turn(&provider_error)
@@ -918,7 +916,6 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         }),
         sessions: Arc::new(MockSessionManager::default()),
         plugin_config: Default::default(),
-        session_graph: manager.clone(),
     };
     assert!(
         overflow_recovery_after_turn(&guided)

@@ -466,6 +466,7 @@ impl lash_core::plugin::PluginFactory for FeedbackPlugin {
                             )],
                             events: Vec::new(),
                             state: Default::default(),
+                            session: Default::default(),
                         })
                     } else {
                         Ok(lash_core::plugin::TurnContributions::default())

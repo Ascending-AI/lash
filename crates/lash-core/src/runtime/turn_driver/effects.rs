@@ -235,9 +235,14 @@ impl RuntimeTurnDriver<'_> {
             Err(refusal) => Err(refusal),
         }
         .map_err(RuntimeEffectControllerError::from);
+        let (result, session_contributions) = match result {
+            Ok((delivery, contributions)) => (Ok(delivery), contributions),
+            Err(error) => (Err(error), Vec::new()),
+        };
         Ok(RuntimeEffectOutcome::Checkpoint {
             result,
             admitted: Box::new(crate::runtime::effect::CheckpointAdmittedSet {
+                session_contributions,
                 // A checkpoint outcome is a self-contained snapshot of the
                 // rows the turn holds. Replay must never reconstruct it from
                 // mutations to the driver's resident sets. Work withheld from
@@ -278,6 +283,7 @@ impl RuntimeTurnDriver<'_> {
             )
             .await?;
         let crate::runtime::effect::CheckpointAdmittedSet {
+            session_contributions,
             queued_work,
             turn_inputs,
             incorporation,
@@ -302,7 +308,20 @@ impl RuntimeTurnDriver<'_> {
         // outcome: the journal holds it, and every redrive replays it. It is
         // therefore an outcome whatever its code (FIG-3528, FIG-3575), never
         // an abort a redrive would reproduce forever.
-        result.map_err(RuntimeEffectControllerError::into_journaled)
+        let delivery = result.map_err(RuntimeEffectControllerError::into_journaled)?;
+        self.turn_pipeline
+            .graph_appends()
+            .apply_session_contributions(
+                &self.session_id,
+                self.session.plugins(),
+                &session_contributions,
+            )
+            .map_err(|err| {
+                RuntimeEffectControllerError::from(
+                    err.into_turn_failure(RuntimeErrorCode::PluginCheckpoint),
+                )
+            })?;
+        Ok(delivery)
     }
 
     fn absorb_checkpoint_admissions(
@@ -450,7 +469,13 @@ impl RuntimeTurnDriver<'_> {
         step: &str,
         admission: crate::store::CheckpointAdmission,
         event_tx: &TurnObserver,
-    ) -> Result<crate::CheckpointDelivery, RuntimeError> {
+    ) -> Result<
+        (
+            crate::CheckpointDelivery,
+            Vec<crate::plugin::SessionContributions>,
+        ),
+        RuntimeError,
+    > {
         let mut committed = self.checkpoint_messages.drain();
         let mut transient_messages = Vec::new();
         let mut committed_user_messages = Vec::new();
@@ -550,9 +575,7 @@ impl RuntimeTurnDriver<'_> {
                 plugin_config: plugins.admitted_plugin_config(),
                 checkpoint,
                 state: self.checkpoint_state_view(messages, protocol_iteration),
-                sessions: self.session_services.state_service(),
-                session_lifecycle: self.session_services.lifecycle_service(),
-                session_graph: self.session_services.graph_service(),
+                sessions: self.session_services.read_service(),
             })
             .await
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginCheckpoint))?;
@@ -583,12 +606,15 @@ impl RuntimeTurnDriver<'_> {
             );
         }
 
-        Ok(crate::CheckpointDelivery {
-            committed_user_messages,
-            messages: committed,
-            transient_messages,
-            turn_causes,
-        })
+        Ok((
+            crate::CheckpointDelivery {
+                committed_user_messages,
+                messages: committed,
+                transient_messages,
+                turn_causes,
+            },
+            applied.session,
+        ))
     }
 
     pub(in crate::runtime) async fn run_exec_code(
@@ -728,6 +754,7 @@ mod checkpoint_admission_determinism_tests {
                 "the checkpoint hook refused",
             )),
             admitted: Box::new(crate::runtime::effect::CheckpointAdmittedSet {
+                session_contributions: Vec::new(),
                 queued_work: vec![admitted, fresh],
                 turn_inputs: None,
                 incorporation: Default::default(),

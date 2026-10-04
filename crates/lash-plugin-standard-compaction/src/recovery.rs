@@ -398,22 +398,11 @@ pub(crate) async fn overflow_recovery_after_turn(
     }
     let body = serde_json::to_value(OverflowRecoveryRecord::Pending {})
         .map_err(|error| PluginError::Invoke(error.to_string()))?;
-    ctx.session_graph
-        .emit_trace_event(
-            lash_core::TraceContext::default().for_session(ctx.session_id.clone()),
-            lash_core::TraceEvent::Custom {
-                name: format!(
-                    "plugin.{}.{TRACE_OVERFLOW_RECOVERY_TRIGGER}",
-                    crate::STANDARD_COMPACTION_PLUGIN_ID
-                ),
-                payload: serde_json::json!({
-                    "trigger": "persisted_context_overflow",
-                    "marker": "queued",
-                }),
-            },
-        )
-        .await?;
     Ok(AfterTurnContributions {
+        events: vec![lash_core::PluginRuntimeEvent::Custom {
+            name: TRACE_OVERFLOW_RECOVERY_TRIGGER.to_string(),
+            payload: serde_json::json!({"trigger": "persisted_context_overflow", "marker": "queued"}),
+        }],
         records: vec![PluginRecordContribution {
             plugin_type: OVERFLOW_RECOVERY_PLUGIN_TYPE.to_string(),
             body,

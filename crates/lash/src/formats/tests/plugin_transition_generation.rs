@@ -282,6 +282,16 @@ async fn state_only_result_checks_refuse_predecessor_journals_and_keep_their_dra
         .await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn callback_session_contributions_refuse_predecessor_journals_and_keep_their_drain_lane() {
+    let epoch = if cfg!(feature = "synthetic-next") {
+        20
+    } else {
+        19
+    };
+    predecessor_journal_keeps_its_lane(epoch, PredecessorShape::TurnCallbacks).await;
+}
+
 fn admission_envelope() -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
@@ -343,6 +353,7 @@ enum PredecessorShape {
     RunInvocation,
     EnvironmentPrelude,
     ResultCheckCommands,
+    TurnCallbacks,
 }
 
 async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: PredecessorShape) {
@@ -358,6 +369,20 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
         "changed handler logic needs a new lane"
     );
     let envelope = match shape {
+        PredecessorShape::TurnCallbacks => RuntimeEffectEnvelope::new(
+            RuntimeEffectInvocation::new(
+                EffectAddress::new(
+                    lash_core::ExecutionScope::turn(SESSION, RUN),
+                    "plugin-callbacks:after-turn",
+                )
+                .unwrap(),
+                RuntimeAttribution::for_session(SESSION),
+                "callbacks",
+            ),
+            RuntimeEffectCommand::PluginCallbacks {
+                phase: lash_core::plugin::RecordedCallbackPhase::AfterTurn,
+            },
+        ),
         PredecessorShape::AdmittedHead | PredecessorShape::RunInvocation => admission_envelope(),
         PredecessorShape::EnvironmentPrelude => RuntimeEffectEnvelope::new(
             RuntimeEffectInvocation::new(
@@ -417,6 +442,9 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
         PredecessorShape::ResultCheckCommands => serde_json::json!({
             "type": "plugin_callbacks",
             "result": {"Ok": []},
+        }),
+        PredecessorShape::TurnCallbacks => serde_json::json!({
+            "type": "plugin_callbacks", "result": {"Ok": [{"plugin_id": "predecessor"}]}
         }),
         PredecessorShape::AdmittedHead => predecessor_admission_outcome(),
         PredecessorShape::EnvironmentPrelude => {

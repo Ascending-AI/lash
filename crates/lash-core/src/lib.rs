@@ -243,9 +243,10 @@ pub mod facade_support {
     pub use crate::plugin::TurnTransformContext;
     pub use crate::plugin::{
         AfterToolContributions, AfterToolDecision, BeforeToolDecision, CachedToolSuccess, HookKey,
-        PluginAbort, PluginRecordContribution, PreparedCallReadView, ToolArgsCheckInput,
-        ToolArgsTransformInput, ToolHookContext, ToolHookOccurrence, ToolResultCandidate,
-        ToolResultCheckInput, ToolResultTransformInput, TurnContributions,
+        PluginAbort, PluginRecordContribution, PreparedCallReadView, SessionContributions,
+        ToolArgsCheckInput, ToolArgsTransformInput, ToolHookContext, ToolHookOccurrence,
+        ToolMembershipContribution, ToolResultCandidate, ToolResultCheckInput,
+        ToolResultTransformInput, TurnContributions,
     };
     pub use crate::plugin::{
         HookCause, KeyRejection, PluginStateError, PluginStateView, StateCommand,

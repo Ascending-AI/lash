@@ -119,6 +119,7 @@ impl RlmProtocolSession {
                 )),
             }],
             state: Default::default(),
+            session: Default::default(),
         })
     }
 }
@@ -233,7 +234,7 @@ mod tests {
     struct NoopPromptManager;
 
     #[async_trait::async_trait]
-    impl lash_core::plugin::runtime_host::SessionStateService for NoopPromptManager {
+    impl lash_core::plugin::SessionReadService for NoopPromptManager {
         async fn snapshot_current(
             &self,
         ) -> Result<lash_core::SessionSnapshot, lash_core::plugin::PluginError> {
@@ -258,22 +259,6 @@ mod tests {
             Ok(Vec::new())
         }
     }
-
-    #[async_trait::async_trait]
-    impl lash_core::plugin::runtime_host::SessionLifecycleService for NoopPromptManager {
-        async fn create_session(
-            &self,
-            _request: lash_core::SessionCreateRequest,
-        ) -> Result<lash_core::facade_support::SessionHandle, lash_core::plugin::PluginError>
-        {
-            Err(lash_core::plugin::PluginError::Session(
-                "not used".to_string(),
-            ))
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl lash_core::plugin::runtime_host::SessionGraphService for NoopPromptManager {}
 
     fn test_session(config: RlmProtocolPluginConfig) -> RlmProtocolSession {
         let runtime_state = Arc::new(RlmRuntimeState::new_for_tests().expect("runtime state"));
@@ -458,8 +443,6 @@ mod tests {
                 checkpoint: lash_core::CheckpointKind::AfterWork,
                 state: lash_core::SessionReadView::from_snapshot(&state),
                 sessions: Arc::new(NoopPromptManager),
-                session_lifecycle: Arc::new(NoopPromptManager),
-                session_graph: Arc::new(NoopPromptManager),
                 plugin_config: Default::default(),
             })
             .expect("warning contributions");
@@ -505,8 +488,6 @@ mod tests {
                 checkpoint: lash_core::CheckpointKind::AfterWork,
                 state: lash_core::SessionReadView::from_snapshot(&state),
                 sessions: Arc::new(NoopPromptManager),
-                session_lifecycle: Arc::new(NoopPromptManager),
-                session_graph: Arc::new(NoopPromptManager),
                 plugin_config: Default::default(),
             })
             .expect("warning contributions");
@@ -558,8 +539,6 @@ mod tests {
             checkpoint: lash_core::CheckpointKind::AfterWork,
             state: lash_core::SessionReadView::from_snapshot(&state),
             sessions: Arc::new(NoopPromptManager),
-            session_lifecycle: Arc::new(NoopPromptManager),
-            session_graph: Arc::new(NoopPromptManager),
             plugin_config,
         }
     }

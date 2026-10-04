@@ -12,9 +12,7 @@
 //! write. Killed after the shift read the command, before its commit, or
 //! after it, and redriven, the command applies once.
 //!
-//! Beside the command laws: a terminal callback's append, made under the
-//! ended run's fence, never waits on a command settlement and never
-//! deadlocks its shift; a dirty park while the bound turn owns the head is
+//! Beside the command laws: a dirty park while the bound turn owns the head is
 //! refused busy, keeps its runtime and loses nothing, and lands once the
 //! boundary passed, while a clean park writes nothing; a plugin-state-dirty
 //! park re-parks from the recorded head once the bound turn moved it
@@ -26,8 +24,8 @@
 //! task whose shift died after its code returned and before its settlement
 //! runs again under a signal the cancel still reaches (FIG-4453).
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pretty_assertions::assert_eq;
 
@@ -357,19 +355,6 @@ struct HostPluginProbe {
     returns_once_task_rerun: Arc<tokio::sync::Notify>,
     /// Holds the plugin command's code after it counted its run.
     command_hold: Option<SummaryHold>,
-    /// Whether the terminal callback appends a note on every persisted turn.
-    terminal_note: Arc<AtomicBool>,
-    /// How each terminal callback's append ended.
-    terminal_appends: Arc<Mutex<Vec<Result<crate::AppendSessionNodesOutcome, String>>>>,
-}
-
-impl HostPluginProbe {
-    fn terminal_appends(&self) -> Vec<Result<crate::AppendSessionNodesOutcome, String>> {
-        self.terminal_appends
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
 }
 
 /// Appends `text` through `graph`, the services a plugin operation's code
@@ -412,7 +397,6 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
     let task_probe = probe.clone();
     let cancellable_probe = probe.clone();
     let returns_once_probe = probe.clone();
-    let event_probe = probe.clone();
     Arc::new(crate::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial(HOST_PLUGIN_ID),
         crate::facade_support::PluginSpec::new()
@@ -452,53 +436,8 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
                     ctx.cancellation_token.cancelled().await;
                     append_note(&ctx.session_graph, ctx.session_id, &args).await
                 }
-            })
-            .with_after_turn(
-                crate::hook_key!("terminal-note"),
-                Arc::new(move |ctx| {
-                    let probe = event_probe.clone();
-                    Box::pin(async move {
-                        if !probe.terminal_note.load(Ordering::SeqCst) {
-                            return Ok(crate::plugin::AfterTurnContributions::default());
-                        }
-                        let ordinal = probe
-                            .terminal_appends
-                            .lock()
-                            .unwrap_or_else(PoisonError::into_inner)
-                            .len()
-                            + 1;
-                        let appended = ctx
-                            .session_graph
-                            .append_session_nodes(
-                                &ctx.session_id,
-                                crate::AppendSessionNodesRequest {
-                                    operation_id: format!("terminal-note-{ordinal}"),
-                                    nodes: vec![crate::SessionAppendNode::message(
-                                        crate::PluginMessage::text(
-                                            crate::MessageRole::Assistant,
-                                            terminal_note(ordinal),
-                                        ),
-                                    )],
-                                    requires_ancestor_node_id: None,
-                                },
-                            )
-                            .await
-                            .map_err(|error| error.to_string());
-                        probe
-                            .terminal_appends
-                            .lock()
-                            .unwrap_or_else(PoisonError::into_inner)
-                            .push(appended);
-                        Ok(crate::plugin::AfterTurnContributions::default())
-                    })
-                }),
-            ),
+            }),
     ))
-}
-
-/// The note the terminal callback of the `ordinal`th persisted turn appends.
-fn terminal_note(ordinal: usize) -> String {
-    format!("the terminal callback's note {ordinal}")
 }
 
 /// A host's append of `text`.
@@ -1053,65 +992,6 @@ pub async fn host_frame_open_applies_at_the_boundary(
     );
     assert_eq!(model.summary_calls.load(Ordering::SeqCst), 1);
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 3);
-}
-
-/// A terminal execution callback's append rides the turn's draft (FIG-4202),
-/// so it never waits on a command settlement and each note lands after its
-/// turn's messages and before the next turn.
-pub async fn terminal_callback_append_does_not_deadlock(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    let protocol = StandardFrameLawProtocol::shared();
-    let model = law_model(ModelScript {
-        turns: vec![
-            (protocol.answer("answer 1"), 1),
-            (protocol.answer("answer 2"), 1),
-        ],
-    });
-    let mut law = LawSession::open(
-        prefix,
-        "terminal-callback-append",
-        effect_host,
-        stores,
-        runner,
-        protocol,
-        model.provider.clone(),
-    )
-    .await;
-    let probe = HostPluginProbe::default();
-    probe.terminal_note.store(true, Ordering::SeqCst);
-    law.parts.host_plugins.push(host_plugin(&probe));
-
-    law.enqueue("first question").await;
-    law.execute_run("run-1").await;
-    law.enqueue("second question").await;
-    law.execute_run("run-2").await;
-
-    let appends = probe.terminal_appends();
-    assert!(
-        appends.len() >= 2,
-        "each persisted turn's callback appended: {appends:?}"
-    );
-    assert!(
-        appends.iter().all(|append| matches!(
-            append,
-            Ok(crate::AppendSessionNodesOutcome::Appended { .. })
-        )),
-        "every callback append landed under its run's fence: {appends:?}"
-    );
-    let path = active_path(&law.head().await.graph);
-    let first = position_of_once(&path, &terminal_note(1));
-    let second = position_of_once(&path, &terminal_note(2));
-    assert!(
-        position_of_once(&path, "answer 1") < first
-            && first < position_of_once(&path, "second question")
-            && position_of_once(&path, "answer 2") < second,
-        "each callback's note follows its turn: {path:?}"
-    );
-    assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
 }
 
 /// A park is recoverable (FIG-4202). While a run holds its pressure

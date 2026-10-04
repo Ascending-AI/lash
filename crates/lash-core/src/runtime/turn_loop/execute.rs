@@ -212,7 +212,7 @@ impl LashRuntime {
                     turn_policy.clone(),
                     effective_protocol_turn_options.clone(),
                 ),
-                sessions: manager.state_service(),
+                sessions: manager.read_service(),
                 turn_context: turn_context.clone(),
             };
             let callbacks = Arc::clone(plugins);
@@ -326,6 +326,9 @@ impl LashRuntime {
                 turn_scope_id: &trace_turn_id,
             })
             .await?;
+        turn_graph_appends
+            .apply_session_contributions(&self.state.session_id, &plugins, &prepared.session)
+            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?;
         prelude.context.messages = prepared.messages.clone();
         if plugins.has_before_turn_hooks() {
             prelude.before_turn = Some(

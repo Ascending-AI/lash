@@ -59,7 +59,7 @@ impl RecordedFrameSwitch {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct TurnGraphAppendDraftInner {
     /// Node ids on the resident active path when the turn began, plus every
     /// node minted by a recorded append: the set an ancestor requirement is
@@ -125,6 +125,19 @@ impl TurnGraphAppendDraft {
         session_id: &SessionId,
         request: &crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
+        Self::record_append(&mut self.inner.lock_recover(), session_id, request)
+    }
+
+    fn record_append(
+        inner: &mut TurnGraphAppendDraftInner,
+        session_id: &SessionId,
+        request: &crate::AppendSessionNodesRequest,
+    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
+        if request.operation_id.trim().is_empty() {
+            return Err(crate::PluginError::Session(
+                "session graph append requires a non-empty stable operation_id".into(),
+            ));
+        }
         let operation =
             boundary_operation(session_id, &request.operation_id, "append-session-nodes");
         let draft_namespace = operation
@@ -137,7 +150,6 @@ impl TurnGraphAppendDraft {
         )
         .map_err(|err| crate::PluginError::Session(err.to_string()))?
         .append_request_identity;
-        let mut inner = self.inner.lock_recover();
         if let Some(existing) = inner
             .recorded
             .iter()
@@ -176,6 +188,52 @@ impl TurnGraphAppendDraft {
             outcome: outcome.clone(),
         });
         Ok(outcome)
+    }
+
+    /// Apply accepted callback output only after the owning step acknowledges.
+    /// Stage the whole batch before changing the registry or graph. Reapplying
+    /// an unchanged membership keeps its generation, including after a checkpoint.
+    pub(in crate::runtime) fn apply_session_contributions(
+        &self,
+        session_id: &SessionId,
+        plugins: &crate::PluginSession,
+        contributions: &[crate::plugin::SessionContributions],
+    ) -> Result<(), crate::PluginError> {
+        use crate::facade_support::ToolStateFacadeOps;
+        if contributions
+            .iter()
+            .all(crate::plugin::SessionContributions::is_empty)
+        {
+            return Ok(());
+        }
+        let registry = plugins.tool_registry();
+        let mut tools = registry.export_state();
+        let mut changed = false;
+        for contribution in contributions {
+            for membership in &contribution.tool_membership {
+                let entry = tools.get(&membership.tool_id).ok_or_else(|| {
+                    crate::PluginError::Session(format!("unknown tool `{}`", membership.tool_id))
+                })?;
+                changed |= entry.is_member() != membership.present;
+                tools
+                    .set_membership(&membership.tool_id, membership.present)
+                    .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+            }
+        }
+        let mut inner = self.inner.lock_recover();
+        let mut staged = inner.clone();
+        for contribution in contributions {
+            for append in &contribution.graph_appends {
+                Self::record_append(&mut staged, session_id, append)?;
+            }
+        }
+        if changed {
+            registry
+                .apply_state(tools)
+                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        }
+        *inner = staged;
+        Ok(())
     }
 
     /// Overlays every recorded append on a turn-scoped read snapshot.

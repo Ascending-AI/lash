@@ -22,6 +22,7 @@ pub(super) fn tool_policy_plugin(
                             )],
                             events: Vec::new(),
                             state: Default::default(),
+                            session: Default::default(),
                         })
                     })
                 }),

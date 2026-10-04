@@ -1859,7 +1859,6 @@ macro_rules! frame_open_redrive_tests {
             a_fork_made_during_an_open_never_sees_its_seed,
             a_refused_frame_commit_leaves_nothing_visible,
             a_lane_less_append_names_the_bound_head_owner,
-            terminal_callback_append_does_not_deadlock,
             dirty_park_while_busy_is_recoverable_and_loses_nothing,
             plugin_state_dirty_park_reparks_from_the_recorded_head,
             command_cancellation_before_admission_withdraws_it,

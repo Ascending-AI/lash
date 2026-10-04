@@ -52,7 +52,7 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
         crate::plugin::TurnHookContext {
             session_id: id.into(),
             state: runtime.read_view(),
-            sessions: runtime.session_state_service().unwrap(),
+            sessions: runtime.session_read_service().unwrap(),
             turn_context: crate::TurnContext::default(),
             plugin_config: Default::default(),
         },

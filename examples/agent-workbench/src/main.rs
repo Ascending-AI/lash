@@ -190,9 +190,6 @@ pub(crate) use plugins::*;
 mod prompt;
 pub(crate) use prompt::*;
 #[cfg(test)]
-#[path = "main_sections/tests/derived_notes.rs"]
-mod derived_notes_tests;
-#[cfg(test)]
 #[path = "main_sections/tests/process_work.rs"]
 mod process_work_tests;
 #[cfg(test)]

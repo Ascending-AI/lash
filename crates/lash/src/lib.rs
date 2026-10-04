@@ -848,9 +848,9 @@ pub mod plugins {
         CheckpointHook, CheckpointHookContext, CompactionContext, ContextCompaction,
         ContextCompactor, ContextError, ContextPressureContext, ContextPressureDecision,
         ContextPressureHook, HookKey, PluginExtensionContribution, PluginRecordContribution,
-        PluginSessionMaterialization, PluginSpecBuilder, PluginTraceEmitter, StaticPluginFactory,
-        ToolCatalogContext, ToolPresentationPresenter, ToolResultProjectionContext,
-        TurnContributions, TurnHookReport,
+        PluginSessionMaterialization, PluginSpecBuilder, PluginTraceEmitter, SessionContributions,
+        StaticPluginFactory, ToolCatalogContext, ToolMembershipContribution,
+        ToolPresentationPresenter, ToolResultProjectionContext, TurnContributions, TurnHookReport,
     };
     /// What a plugin factory declares about itself: its behaviour revision
     /// and the formats it reads and writes. The build generation is computed

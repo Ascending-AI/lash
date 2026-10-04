@@ -139,8 +139,8 @@ pub use state::{
 };
 pub use tool_catalog::{
     AfterTurnContributions, CheckpointApplication, PluginAbort, PluginRecordContribution,
-    RecordedTurnContribution, ToolCatalogContext, TurnContributions, TurnFinalization,
-    TurnPreparation,
+    RecordedTurnContribution, SessionContributions, ToolCatalogContext, ToolMembershipContribution,
+    TurnContributions, TurnFinalization, TurnPreparation,
 };
 pub use tool_catalog::{observe_plugin_runtime_events, plugin_runtime_session_events};
 pub use tool_hooks::{

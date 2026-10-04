@@ -775,8 +775,7 @@ impl LashRuntime {
                 session_id: assembled.state.session_id.clone(),
                 plugin_config: plugins.admitted_plugin_config(),
                 turn: Arc::new(crate::plugin::TurnHookReport::from_assembled(&assembled)),
-                sessions: manager.state_service(),
-                session_graph: manager.graph_service(),
+                sessions: manager.read_service(),
             };
             let callbacks = Arc::clone(&plugins);
             let probe = self.turn_phase_probe.clone();
@@ -808,6 +807,18 @@ impl LashRuntime {
         } else {
             Vec::new()
         };
+        let session_contributions = recorded
+            .iter()
+            .map(|item| item.session.clone())
+            .collect::<Vec<_>>();
+        turn_pipeline
+            .graph_appends()
+            .apply_session_contributions(
+                &assembled.state.session_id,
+                &plugins,
+                &session_contributions,
+            )
+            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginFinalizeTurn))?;
         let finalized = plugins
             .dispatch(self.turn_phase_probe.as_ref())
             .finalize_turn(
