@@ -711,7 +711,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                     receiver,
                     retained_path,
                     event_type,
-                    namespace: workbench_restate_namespace()?,
                 },
             ))
         } else {

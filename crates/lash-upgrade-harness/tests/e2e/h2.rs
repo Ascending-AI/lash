@@ -84,6 +84,8 @@ impl Row {
 
 struct Shared {
     host: Mutex<WorkbenchHost>,
+    successor: Mutex<Option<WorkbenchHost>>,
+    generation_drain: Mutex<Option<serde_json::Value>>,
     view: RestateView,
     callbacks: Mutex<BodyCallbacks>,
     directory: PathBuf,
@@ -139,6 +141,9 @@ impl Shared {
         self.retained_cancel(work, &mut evidence).await?;
         let host = self.host.lock().await;
         evidence.effects.extend(host.trace_records()?);
+        if let Some(receipt) = self.generation_drain.lock().await.as_ref() {
+            evidence.effects.push(receipt.clone());
+        }
         if let Some(process) = self.receiver.lock().await.as_ref() {
             evidence.effects.push(
                 host.control(
@@ -288,12 +293,81 @@ impl HostAdapter for Host {
                         .into(),
                 );
             }
+            if previous.is_none()
+                && let Some(successor) = self.0.successor.lock().await.as_mut()
+            {
+                let mut next_lease = CaseLease {
+                    gate_id: lease.gate_id.clone(),
+                    namespace: lease.namespace.clone(),
+                    authority: lease.authority.clone(),
+                    directory: lease.directory.join("successor"),
+                    postgres_url: lease.postgres_url.clone(),
+                    ports: lease.ports.clone(),
+                    deadline: lease.deadline,
+                    processes: Vec::new(),
+                    cleanup: Vec::new(),
+                };
+                std::fs::create_dir_all(&next_lease.directory)?;
+                let next = successor.boot(artifact, &mut next_lease).await?;
+                ensure!(
+                    next.process.pid != ready.process.pid,
+                    "successor reused the predecessor process"
+                );
+                lease.processes.extend(next_lease.processes);
+                lease.cleanup.extend(next_lease.cleanup);
+            }
             *self.0.ready.lock().await = Some(ready.clone());
             Ok(ready)
         })
     }
     fn command<'a>(&'a mut self, command: HostCommand) -> Step<'a, HostObservation> {
         Box::pin(async move {
+            if let HostCommand::Transfer { run } = &command {
+                let admitted = self
+                    .0
+                    .admitted
+                    .lock()
+                    .await
+                    .clone()
+                    .context("no bound admission")?;
+                ensure!(
+                    admitted.run == *run,
+                    "handover targeted another logical Run"
+                );
+                let predecessor = self.0.host.lock().await;
+                let generation = predecessor
+                    .control(reqwest::Method::GET, "/api/e2e/generation", None)
+                    .await?;
+                let generation: lash::BuildGeneration = serde_json::from_value(generation)?;
+                let mut next = self.0.successor.lock().await;
+                let next = next.as_mut().context("no replacing workbench generation")?;
+                let next_generation = next
+                    .control(reqwest::Method::GET, "/api/e2e/generation", None)
+                    .await?;
+                let next_generation: lash::BuildGeneration =
+                    serde_json::from_value(next_generation)?;
+                ensure!(
+                    generation != next_generation,
+                    "successor shares the predecessor generation"
+                );
+                let output = next
+                    .control(
+                        reqwest::Method::POST,
+                        &format!("/api/admin/generations/{generation}/drain"),
+                        None,
+                    )
+                    .await?;
+                ensure!(
+                    output["changed"] == true,
+                    "generation was not newly marked draining"
+                );
+                let receipt = json!({"kind":"h2_generation_drain","generation":generation,"successor_generation":next_generation,"output":output});
+                *self.0.generation_drain.lock().await = Some(receipt);
+                return Ok(HostObservation {
+                    work: admitted,
+                    output,
+                });
+            }
             let submitting = matches!(command, HostCommand::Submit { .. });
             let mut observation = self.0.host.lock().await.command(command).await?;
             if submitting {
@@ -322,7 +396,18 @@ impl HostAdapter for Host {
         bail!("use the owned async host transcript in evidence")
     }
     fn stop(&mut self) -> Step<'_, Vec<CleanupReceipt>> {
-        Box::pin(async move { self.0.host.lock().await.stop().await })
+        Box::pin(async move {
+            // Teardown both owned processes even if one stop reports failure.
+            let first = self.0.host.lock().await.stop().await;
+            let next = if let Some(host) = self.0.successor.lock().await.as_mut() {
+                host.stop().await
+            } else {
+                Ok(Vec::new())
+            };
+            let mut cleanup = first?;
+            cleanup.extend(next?);
+            Ok(cleanup)
+        })
     }
 }
 struct Reader(Snapshot);
@@ -464,6 +549,10 @@ pub async fn run(row: Row) -> Result<()> {
     let base: u16 = std::env::var("LASH_E2E_PORT_BASE")?.parse()?;
     ensure!(base <= u16::MAX - 50, "private port range overflow");
     lease.ports = (base + 10..base + 14).collect();
+    let needs_successor = matches!(row, Row::InlineLoser | Row::DeferredLoser);
+    if needs_successor {
+        lease.ports.extend([base + 20, base + 21]);
+    }
     let server = super::artifact(
         "restate-server",
         std::env::var("LASH_RESTATE_SERVER_BIN")?.into(),
@@ -498,26 +587,58 @@ pub async fn run(row: Row) -> Result<()> {
     };
     let fixture_path = lease.directory.join("tool-fixture.json");
     super::write(&fixture_path, &fixture)?;
-    let host = WorkbenchHost::new(
-        boot.nodes[0].ingress_url.clone(),
-        boot.nodes[0].admin_url.clone(),
-        base + 10,
-        base + 11,
-    )?
-    .configure(BTreeMap::from([
+    let mut environment = BTreeMap::from([
         (
             "AGENT_WORKBENCH_TOOL_FIXTURE".into(),
             fixture_path.display().to_string(),
         ),
         ("OPENROUTER_API_KEY".into(), "case-owned-fixture".into()),
         ("AGENT_WORKBENCH_PROTOCOL".into(), protocol.into()),
-        (
-            "AGENT_WORKBENCH_RESTATE_ADVERTISE_URL".into(),
-            advertised_uri,
-        ),
-    ]))?;
+    ]);
+    let successor = if needs_successor {
+        // The existing opt-in shutdown factory adds a real composition
+        // declaration. Normal core construction computes and binds a distinct
+        // generation from it; no caller supplies a fabricated generation id.
+        let mut next_environment = environment.clone();
+        next_environment.insert(
+            "LASH_HOST_SHUTDOWN_MARKER".into(),
+            lease
+                .directory
+                .join("successor/shutdown.jsonl")
+                .display()
+                .to_string(),
+        );
+        next_environment.insert(
+            "AGENT_WORKBENCH_DATA_DIR".into(),
+            lease.directory.join("workbench-data").display().to_string(),
+        );
+        Some(
+            WorkbenchHost::new(
+                boot.nodes[0].ingress_url.clone(),
+                boot.nodes[0].admin_url.clone(),
+                base + 20,
+                base + 21,
+            )?
+            .configure(next_environment)?,
+        )
+    } else {
+        None
+    };
+    environment.insert(
+        "AGENT_WORKBENCH_RESTATE_ADVERTISE_URL".into(),
+        advertised_uri,
+    );
+    let host = WorkbenchHost::new(
+        boot.nodes[0].ingress_url.clone(),
+        boot.nodes[0].admin_url.clone(),
+        base + 10,
+        base + 11,
+    )?
+    .configure(environment)?;
     let shared = Arc::new(Shared {
         host: Mutex::new(host),
+        successor: Mutex::new(successor),
+        generation_drain: Mutex::new(None),
         view: RestateView::new(&boot.nodes[0].admin_url, &lease.namespace)?,
         callbacks: Mutex::new(callbacks),
         directory: callback_dir.clone(),

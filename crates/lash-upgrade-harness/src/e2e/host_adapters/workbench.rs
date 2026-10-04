@@ -74,6 +74,8 @@ impl WorkbenchHost {
                     | "AGENT_WORKBENCH_PROVIDER_URL"
                     | "AGENT_WORKBENCH_PROTOCOL"
                     | "AGENT_WORKBENCH_TOOL_FIXTURE"
+                    | "AGENT_WORKBENCH_DATA_DIR"
+                    | "LASH_HOST_SHUTDOWN_MARKER"
                     | "AGENT_WORKBENCH_RESTATE_ADVERTISE_URL"
                     | "OPENROUTER_API_KEY"
                     | "OPENROUTER_MODEL"
@@ -225,6 +227,9 @@ impl WorkbenchHost {
         format!("http://127.0.0.1:{}", self.http_port)
     }
     pub fn data_directory(&self) -> Result<PathBuf> {
+        if let Some(directory) = self.environment.get("AGENT_WORKBENCH_DATA_DIR") {
+            return Ok(PathBuf::from(directory));
+        }
         Ok(self
             .directory
             .as_ref()
@@ -508,21 +513,8 @@ impl HostAdapter for WorkbenchHost {
                         json!({"snapshot":self.snapshot(session).await?})
                     }
                 }
-                HostCommand::Transfer { run } => {
-                    let session = self.subjects.get(&run).context("unknown run")?;
-                    work = self
-                        .transcript
-                        .iter()
-                        .find(|o| o.work.run == run)
-                        .context("unknown accepted run")?
-                        .work
-                        .clone();
-                    self.control(
-                        reqwest::Method::POST,
-                        &format!("/api/e2e/sessions/{session}/handover"),
-                        None,
-                    )
-                    .await?
+                HostCommand::Transfer { .. } => {
+                    bail!("physical handover requires a replacing workbench generation")
                 }
                 HostCommand::Process { action, input } => match action.as_str() {
                     "kill-host" => {

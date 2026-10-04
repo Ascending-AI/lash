@@ -60,7 +60,6 @@ pub(crate) struct ReceiverState {
     pub(crate) receiver: Arc<OnceLock<lash::ProcessId>>,
     pub(crate) retained_path: PathBuf,
     pub(crate) event_type: String,
-    pub(crate) namespace: lash::restate::RestateNamespace,
 }
 
 impl ReceiverState {
@@ -178,24 +177,8 @@ async fn resolve(
     ))
 }
 
-async fn handover(
-    State(state): State<ReceiverState>,
-    Path(chat): Path<String>,
-) -> AppResult<Json<lash::restate::Reply<u64>>> {
-    Ok(Json(
-        state
-            .ingress()
-            .call_object_json(
-                &state.namespace.service_name("LashDurableWaitIndex"),
-                &chat,
-                "hand_over_turns",
-                &lash::restate::Call::new(lash::restate::RestateDurableWaitHandOverRequest {
-                    generation: state.app.core.build_generation().clone(),
-                }),
-            )
-            .await
-            .map_err(error)?,
-    ))
+async fn generation(State(state): State<ReceiverState>) -> Json<lash::BuildGeneration> {
+    Json(state.app.core.build_generation().clone())
 }
 
 pub(crate) fn routes(state: ReceiverState) -> Router {
@@ -205,10 +188,7 @@ pub(crate) fn routes(state: ReceiverState) -> Router {
             axum::routing::get(attach),
         )
         .route("/api/e2e/completions", axum::routing::post(resolve))
-        .route(
-            "/api/e2e/sessions/{chat_id}/handover",
-            axum::routing::post(handover),
-        )
+        .route("/api/e2e/generation", axum::routing::get(generation))
         .route("/api/e2e/receiver/{chat_id}", axum::routing::post(setup))
         .route(
             "/api/e2e/receiver/{process_id}/receipts",
