@@ -230,6 +230,20 @@ async fn s30() -> Result<()> {
         ensure!(entered["call_id"].as_str().is_some_and(|id| !id.is_empty()), "body receipt has no original tool identity");
         let run = host.binding(&accepted.work.ingress).await?;
         ensure!(!run.is_empty(), "durable acceptance never reached a Run");
+        let binding = host.binding_receipt(&accepted.work.ingress).await?;
+        let key = binding["invocation_key"].as_str().context("consumer has no retained executor admission")?;
+        let view = lash_upgrade_harness::restate_view::RestateView::new(&required("RESTATE_ADMIN_URL")?, &lease.namespace)?;
+        let prefix = view.service_name("LashTurn");
+        let invocations: Vec<serde_json::Value> = view.query(&format!("SELECT id,target_service_name,pinned_service_protocol_version FROM sys_invocation WHERE target_service_key='{}' AND target_handler_name='run'", key.replace('\'', "''"))).await?;
+        let invocations: Vec<_> = invocations.iter().filter(|row| row["target_service_name"].as_str().is_some_and(|name| name == prefix || name.starts_with(&format!("{prefix}_g")))).collect();
+        ensure!(invocations.len() == 1, "consumer public Run has no unique actual invocation: {invocations:?}");
+        let invocation = invocations[0]["id"].as_str().context("invocation has no id")?;
+        ensure!(invocations[0]["pinned_service_protocol_version"] == 7,"consumer invocation did not negotiate V7");
+        let work = lash_upgrade_harness::e2e::control::WorkIdentity {
+            ingress:accepted.work.ingress.clone(),run:run.clone(),segment:invocation.into(),
+            call:Some(entered["call_id"].as_str().context("body call absent")?.into()),
+            ordinal:Some(entered["attempt"].as_u64().context("body ordinal absent")?.try_into()?),
+        };
         host.release("hold:follow").await?;
         let first = host.command(HostCommand::Attach { run: accepted.work.ingress.clone() }).await?;
         let second = host.command(HostCommand::Attach { run: accepted.work.ingress.clone() }).await?;
@@ -267,9 +281,17 @@ async fn s30() -> Result<()> {
         let bodies = bodies.as_array().context("body receipts must be an array")?;
         ensure!(bodies.len() == 3, "expected one body per accepted turn/task, got {}", bodies.len());
         ensure!(bodies.iter().filter(|body| body["key"] == "hold:follow").count() == 1, "follower restarted the tool body");
+        let journals = loop {
+            let journals = view.journal(&work, invocation, ready.protocol).await?;
+            if journals.iter().any(|fact| matches!(&fact.decoded,
+                Some(lash_upgrade_harness::e2e::evidence::DecodedRecord::Attempt(entry))
+                if Some(entry.call_id.to_string()) == work.call)) { break journals; }
+            ensure!(Instant::now() < lease.deadline,"original consumer Attempt receipt was not independently journaled");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
         std::fs::write(root.join("s30-evidence.json"), serde_json::to_vec_pretty(&json!({
             "scenario":"S30", "rules":["R7","L03","L08","L21"], "selected":1,"executed":1,
-            "ready":ready,"run":run,"outcome":first,"cancelled":terminal,"bodies":bodies,"transcript":host.transcript()?
+            "ready":ready,"run":run,"binding":binding,"work":work,"invocation":invocations[0],"journals":journals,"outcome":first,"cancelled":terminal,"bodies":bodies,"transcript":host.transcript()?
         }))?)?;
         anyhow::Ok(())
     }.await;

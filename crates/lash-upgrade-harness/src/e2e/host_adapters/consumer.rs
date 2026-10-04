@@ -172,6 +172,20 @@ impl ConsumerHost {
         self.request(reqwest::Method::GET, "/control/entered", None)
             .await
     }
+
+    pub async fn binding_receipt(&self, ingress: &str) -> Result<Value> {
+        let (session, input, operation) = self
+            .subjects
+            .get(ingress)
+            .context("unknown accepted subject")?;
+        ensure!(!operation, "task binding is already its public run");
+        self.request(
+            reqwest::Method::GET,
+            &format!("/sessions/{session}/inputs/{input}/binding"),
+            None,
+        )
+        .await
+    }
 }
 
 impl HostAdapter for ConsumerHost {

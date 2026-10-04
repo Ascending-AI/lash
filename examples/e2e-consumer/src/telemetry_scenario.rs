@@ -119,6 +119,7 @@ impl Scenario {
                         Ok(answer("S34 one logical answer"))
                     } else {
                         Ok(LlmResponse {
+                            terminal_reason: lash::direct::LlmTerminalReason::ToolUse,
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "s34-provider-correlation".into(),
                                 tool_name: "s34_retry".into(),
@@ -148,7 +149,6 @@ impl Scenario {
                 get(move |Path(session): Path<String>| {
                     let stores = stores.clone();
                     async move {
-                        use lash::persistence::SessionCommitStore as _;
                         let head = stores
                             .session_store_factory()
                             .load_session_head_meta(&lash::SessionId::fixture(session))
@@ -230,6 +230,7 @@ fn text(request: &LlmRequest) -> String {
 
 fn answer(text: &str) -> LlmResponse {
     LlmResponse {
+        terminal_reason: lash::direct::LlmTerminalReason::Stop,
         parts: vec![LlmOutputPart::Text {
             text: text.into(),
             response_meta: None,

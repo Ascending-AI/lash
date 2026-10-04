@@ -5,3 +5,4 @@ pub mod consumer;
 pub mod live;
 pub mod process;
 pub mod slack;
+pub mod workbench;

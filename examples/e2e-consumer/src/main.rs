@@ -20,6 +20,7 @@ mod telemetry_scenario;
 #[derive(Clone)]
 struct Host {
     core: LashCore,
+    stores: Arc<lash::sqlite::SqliteStoreSet>,
     controls: Arc<fixture::Controls>,
     telemetry: Option<Arc<telemetry::HostTelemetry>>,
 }
@@ -100,9 +101,10 @@ async fn cancel(
     State(host): State<Host>,
     Path((session, input)): Path<(String, String)>,
 ) -> ApiResult {
+    let session_id = SessionId::fixture(session);
     let session = host
         .core
-        .session(SessionId::fixture(session))
+        .session(session_id.clone())
         .durable()
         .await
         .map_err(api_error)?;
@@ -118,9 +120,10 @@ async fn binding(
     State(host): State<Host>,
     Path((session, input)): Path<(String, String)>,
 ) -> ApiResult {
+    let session_id = SessionId::fixture(session);
     let session = host
         .core
-        .session(SessionId::fixture(session))
+        .session(session_id.clone())
         .durable()
         .await
         .map_err(api_error)?;
@@ -129,7 +132,17 @@ async fn binding(
         .run()
         .await
         .map_err(api_error)?;
-    Ok(Json(json!({"run":run})))
+    let invocation_key = match &run {
+        Some(run) => lash::restate::recorded_turn_invocation_key(
+            host.stores.session_store_factory().as_ref(),
+            &session_id,
+            run,
+        )
+        .await
+        .map_err(api_error)?,
+        None => None,
+    };
+    Ok(Json(json!({"run":run,"invocation_key":invocation_key})))
 }
 
 async fn task(
@@ -312,6 +325,7 @@ async fn main() -> Result<()> {
             )
             .with_state(Host {
                 core: core.clone(),
+                stores: stores.clone(),
                 controls,
                 telemetry: telemetry.clone(),
             });

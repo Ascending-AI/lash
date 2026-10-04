@@ -24,8 +24,8 @@ use tokio::sync::Notify;
 #[derive(Clone, Debug, Serialize)]
 pub struct BodyReceipt {
     pub key: String,
-    pub call_id: String,
-    pub attempt: u32,
+    pub call_id: Option<String>,
+    pub attempt: Option<u32>,
 }
 
 #[derive(Default)]
@@ -119,6 +119,11 @@ fn response(request: &LlmRequest) -> LlmResponse {
     };
     LlmResponse {
         parts: vec![part],
+        terminal_reason: if completed {
+            lash::direct::LlmTerminalReason::Stop
+        } else {
+            lash::direct::LlmTerminalReason::ToolUse
+        },
         ..LlmResponse::default()
     }
 }
@@ -178,8 +183,8 @@ impl SessionPlugin for ConsumerPlugin {
                             .enter(
                                 BodyReceipt {
                                     key: text.clone(),
-                                    call_id: "operation-task".into(),
-                                    attempt: 1,
+                                    call_id: None,
+                                    attempt: None,
                                 },
                                 &ctx.cancellation_token,
                             )
@@ -217,8 +222,8 @@ impl StaticToolExecute for Echo {
                 .enter(
                     BodyReceipt {
                         key: args.text.clone(),
-                        call_id: call.context.call_id().to_string(),
-                        attempt: call.context.attempt_number(),
+                        call_id: Some(call.context.call_id().to_string()),
+                        attempt: Some(call.context.attempt_number()),
                     },
                     &stop,
                 )
@@ -226,8 +231,8 @@ impl StaticToolExecute for Echo {
         } else {
             self.0.entered.lock_recover().push(BodyReceipt {
                 key: args.text.clone(),
-                call_id: call.context.call_id().to_string(),
-                attempt: call.context.attempt_number(),
+                call_id: Some(call.context.call_id().to_string()),
+                attempt: Some(call.context.attempt_number()),
             });
         }
         ToolOutcome::ok(Value::String(args.text)).into()

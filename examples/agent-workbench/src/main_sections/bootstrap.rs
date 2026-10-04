@@ -181,8 +181,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         );
         scenario.provider()
     } else {
+        let provider_url = std::env::var("AGENT_WORKBENCH_PROVIDER_URL")
+            .unwrap_or_else(|_| OPENROUTER_BASE_URL.to_owned());
+        reqwest::Url::parse(&provider_url).context("invalid AGENT_WORKBENCH_PROVIDER_URL")?;
         ProviderHandle::new(crate::e2e_live_budget::install(
-            OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
+            OpenAiCompatibleProvider::new(api_key, provider_url)
                 .with_compat(OpenAiCompat::openrouter())
                 .into_components(),
         )?)

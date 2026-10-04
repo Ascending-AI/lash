@@ -1,0 +1,432 @@
+//! The real workbench HTTP and recoverable-chat observation transport.
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use anyhow::{Context as _, Result, bail, ensure};
+use lash::remote::{Negotiated, Negotiation, REMOTE_PROTOCOL};
+use serde_json::{Value, json};
+
+use super::process::{HostProcess, ready};
+use crate::e2e::{
+    Step,
+    case::{ArtifactIdentity, CaseLease},
+    control::{CleanupReceipt, WorkIdentity},
+    host::{HostAdapter, HostCommand, HostObservation, HostReady},
+};
+
+pub struct WorkbenchHost {
+    ingress: String,
+    admin: String,
+    http_port: u16,
+    endpoint_port: u16,
+    environment: BTreeMap<String, String>,
+    http: reqwest::Client,
+    process: Option<HostProcess>,
+    directory: Option<PathBuf>,
+    sessions: BTreeMap<String, String>,
+    subjects: BTreeMap<String, String>,
+    transcript: Vec<HostObservation>,
+}
+
+impl WorkbenchHost {
+    pub fn new(ingress: String, admin: String, http_port: u16, endpoint_port: u16) -> Result<Self> {
+        Ok(Self {
+            ingress,
+            admin,
+            http_port,
+            endpoint_port,
+            environment: BTreeMap::new(),
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(90))
+                .build()?,
+            process: None,
+            directory: None,
+            sessions: BTreeMap::new(),
+            subjects: BTreeMap::new(),
+            transcript: Vec::new(),
+        })
+    }
+
+    pub fn configure(mut self, environment: BTreeMap<String, String>) -> Result<Self> {
+        ensure!(
+            environment.keys().all(|key| matches!(
+                key.as_str(),
+                "AGENT_WORKBENCH_PROVIDER_URL"
+                    | "OPENROUTER_API_KEY"
+                    | "OPENROUTER_MODEL"
+                    | "OPENROUTER_MODEL_VARIANT"
+                    | "AGENT_WORKBENCH_OUTPUT_TOKEN_CAP"
+            )),
+            "unsupported workbench configuration"
+        );
+        self.environment = environment;
+        Ok(self)
+    }
+    fn base(&self) -> String {
+        format!("http://127.0.0.1:{}", self.http_port)
+    }
+    pub fn data_directory(&self) -> Result<PathBuf> {
+        Ok(self
+            .directory
+            .as_ref()
+            .context("workbench not booted")?
+            .join("workbench-data"))
+    }
+    pub fn trace_path(&self) -> Result<PathBuf> {
+        Ok(self.data_directory()?.join("trace.jsonl"))
+    }
+    pub fn session_id(&self, alias: &str) -> Result<&str> {
+        Ok(self
+            .sessions
+            .get(alias)
+            .context("unknown workbench session alias")?)
+    }
+
+    pub async fn control(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        input: Option<Value>,
+    ) -> Result<Value> {
+        ensure!(path.starts_with("/api/"), "not a workbench API path");
+        let mut request = self.http.request(method, format!("{}{path}", self.base()));
+        if let Some(input) = input {
+            request = request.json(&input);
+        }
+        let response = request.send().await?;
+        let status = response.status();
+        let bytes = response.bytes().await?;
+        ensure!(
+            status.is_success(),
+            "workbench {path}: {status} {}",
+            String::from_utf8_lossy(&bytes)
+        );
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+    async fn session(&mut self, alias: &str) -> Result<String> {
+        if let Some(id) = self.sessions.get(alias) {
+            return Ok(id.clone());
+        }
+        let created = self
+            .control(
+                reqwest::Method::POST,
+                "/api/sessions",
+                Some(json!({"name":alias})),
+            )
+            .await?;
+        let id = created["session_id"]
+            .as_str()
+            .context("new session has no actual id")?
+            .to_owned();
+        self.sessions.insert(alias.into(), id.clone());
+        Ok(id)
+    }
+    pub async fn snapshot(&self, session: &str) -> Result<Value> {
+        let query = serde_url_query(session, None);
+        self.control(reqwest::Method::GET, &format!("/api/state?{query}"), None)
+            .await
+    }
+    /// The caller owns the stream. Preserve headers/chunks and drop it after
+    /// collecting the scenario's actual terminal replay; no local projection.
+    pub async fn observations(&self, session: &str, cursor: &str) -> Result<reqwest::Response> {
+        ensure!(
+            !session.is_empty() && !cursor.is_empty(),
+            "late observation requires actual session and pre-input cursor"
+        );
+        let response = self
+            .http
+            .get(format!(
+                "{}/api/observations?{}",
+                self.base(),
+                serde_url_query(session, Some(cursor))
+            ))
+            .header(
+                "x-lash-protocol-hello",
+                serde_json::to_string(&Negotiation::Hello {
+                    supported: REMOTE_PROTOCOL,
+                })?,
+            )
+            .send()
+            .await?
+            .error_for_status()?;
+        let accept: Negotiation = serde_json::from_str(
+            response
+                .headers()
+                .get("x-lash-protocol-accept")
+                .context("workbench omitted protocol Accept")?
+                .to_str()?,
+        )?;
+        Negotiated::from_accept(REMOTE_PROTOCOL, &accept)?;
+        Ok(response)
+    }
+}
+
+// reqwest uses the URL crate's serializer, preserving opaque cursor bytes.
+#[expect(
+    clippy::expect_used,
+    reason = "the fixed local URL is valid before query serialization"
+)]
+fn serde_url_query(session: &str, cursor: Option<&str>) -> String {
+    let mut url = reqwest::Url::parse("http://localhost/").expect("literal URL");
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("session_id", session);
+        if let Some(cursor) = cursor {
+            query.append_pair("cursor", cursor);
+        }
+    }
+    url.query().unwrap_or_default().to_owned()
+}
+
+impl HostAdapter for WorkbenchHost {
+    fn boot<'a>(
+        &'a mut self,
+        artifact: &'a ArtifactIdentity,
+        lease: &'a mut CaseLease,
+    ) -> Step<'a, HostReady> {
+        Box::pin(async move {
+            ensure!(self.process.is_none(), "workbench already booted");
+            self.directory = Some(lease.directory.clone());
+            let mut environment = BTreeMap::from([
+                (
+                    "AGENT_WORKBENCH_ADDR".into(),
+                    format!("127.0.0.1:{}", self.http_port),
+                ),
+                (
+                    "AGENT_WORKBENCH_RESTATE_ADDR".into(),
+                    format!("127.0.0.1:{}", self.endpoint_port),
+                ),
+                (
+                    "AGENT_WORKBENCH_RESTATE_NAMESPACE".into(),
+                    lease.namespace.clone(),
+                ),
+                (
+                    "AGENT_WORKBENCH_DATA_DIR".into(),
+                    self.data_directory()?.display().to_string(),
+                ),
+                ("AGENT_WORKBENCH_OPEN".into(), "0".into()),
+                ("RESTATE_AUTHORITY_ID".into(), lease.authority.clone()),
+                ("RESTATE_INGRESS_URL".into(), self.ingress.clone()),
+                ("RESTATE_ADMIN_URL".into(), self.admin.clone()),
+            ]);
+            environment.extend(self.environment.clone());
+            self.process = Some(
+                HostProcess::spawn(
+                    artifact,
+                    lease,
+                    "workbench",
+                    environment.clone(),
+                    vec![self.http_port, self.endpoint_port],
+                )
+                .await?,
+            );
+            let health = format!("{}/healthz", self.base());
+            ready(
+                self.process.as_mut().context("workbench child missing")?,
+                &self.http,
+                &health,
+                "agent-workbench",
+                lease.deadline,
+            )
+            .await?;
+            let mut registration = HostProcess::spawn_with_args(
+                artifact,
+                lease,
+                "workbench-registration",
+                environment,
+                Vec::new(),
+                &[
+                    "register-deployment".into(),
+                    format!("http://127.0.0.1:{}", self.endpoint_port),
+                ],
+            )
+            .await?;
+            let result = registration.finish(lease.deadline).await;
+            let cleanup = registration
+                .stop(Instant::now() + Duration::from_secs(10), None)
+                .await;
+            if let Ok(receipts) = &cleanup {
+                lease.cleanup.extend(receipts.clone());
+            }
+            result?;
+            cleanup?;
+            let listing: Value = self
+                .http
+                .get(format!("{}/deployments", self.admin))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            let uri = format!("http://127.0.0.1:{}", self.endpoint_port);
+            let deployment = listing["deployments"]
+                .as_array()
+                .context("no registered deployments")?
+                .iter()
+                .find(|row| {
+                    row["uri"]
+                        .as_str()
+                        .is_some_and(|u| u.trim_end_matches('/') == uri)
+                })
+                .context("workbench endpoint not registered")?;
+            let deployment: Value = self
+                .http
+                .get(format!(
+                    "{}/deployments/{}",
+                    self.admin,
+                    deployment["id"].as_str().context("deployment id missing")?
+                ))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            ensure!(
+                deployment["max_protocol_version"] == 7,
+                "workbench did not negotiate V7"
+            );
+            std::fs::write(
+                lease.directory.join("workbench-deployment.json"),
+                serde_json::to_vec_pretty(&deployment)?,
+            )?;
+            Ok(HostReady {
+                endpoint: self.base(),
+                process: self
+                    .process
+                    .as_ref()
+                    .context("workbench child missing")?
+                    .receipt
+                    .clone(),
+                protocol: 7,
+            })
+        })
+    }
+    fn command<'a>(&'a mut self, command: HostCommand) -> Step<'a, HostObservation> {
+        Box::pin(async move {
+            let mut work = WorkIdentity {
+                ingress: String::new(),
+                run: String::new(),
+                segment: String::new(),
+                call: None,
+                ordinal: None,
+            };
+            let output = match command {
+                HostCommand::Submit {
+                    session,
+                    idempotency_key: _,
+                    input,
+                } => {
+                    let session = self.session(&session).await?;
+                    let input = if input.is_string() {
+                        json!({"text":input})
+                    } else {
+                        input
+                    };
+                    let accepted = self
+                        .control(
+                            reqwest::Method::POST,
+                            &format!("/api/turn?{}", serde_url_query(&session, None)),
+                            Some(input),
+                        )
+                        .await?;
+                    ensure!(accepted["accepted"] == true, "workbench refused input");
+                    work.run = accepted["turn_id"].as_str().unwrap_or_default().into();
+                    work.ingress = accepted["queued_input"]["input_id"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .into();
+                    if !work.run.is_empty() {
+                        self.subjects.insert(work.run.clone(), session.clone());
+                    }
+                    if !work.ingress.is_empty() {
+                        self.subjects.insert(work.ingress.clone(), session.clone());
+                    }
+                    json!({"session_id":session,"receipt":accepted})
+                }
+                HostCommand::Cancel { run } => {
+                    let session = self
+                        .subjects
+                        .get(&run)
+                        .context("unknown workbench run")?
+                        .clone();
+                    work.run = run;
+                    self.control(
+                        reqwest::Method::POST,
+                        &format!(
+                            "/api/turn/cancel?{}&mode=abort",
+                            serde_url_query(&session, None)
+                        ),
+                        None,
+                    )
+                    .await?
+                }
+                HostCommand::Attach { run } => {
+                    let session = self
+                        .subjects
+                        .get(&run)
+                        .context("unknown workbench subject")?;
+                    work.run = run;
+                    json!({"snapshot":self.snapshot(session).await?})
+                }
+                HostCommand::Process { action, input } => match action.as_str() {
+                    "create-session" => {
+                        json!({"session_id":self.session(input["session"].as_str().context("session alias required")?).await?})
+                    }
+                    "snapshot" => {
+                        self.snapshot(
+                            input["session_id"]
+                                .as_str()
+                                .context("actual session required")?,
+                        )
+                        .await?
+                    }
+                    "waits" => {
+                        self.control(
+                            reqwest::Method::GET,
+                            &format!(
+                                "/api/sessions/{}/waits",
+                                input["session_id"]
+                                    .as_str()
+                                    .context("actual session required")?
+                            ),
+                            None,
+                        )
+                        .await?
+                    }
+                    "trace" => {
+                        let records: Vec<Value> = std::fs::read_to_string(self.trace_path()?)?
+                            .lines()
+                            .filter(|line| !line.trim().is_empty())
+                            .map(serde_json::from_str)
+                            .collect::<std::result::Result<_, _>>()?;
+                        json!({"records":records})
+                    }
+                    _ => bail!("unsupported workbench control {action}"),
+                },
+                _ => bail!("unsupported workbench command"),
+            };
+            let observation = HostObservation { work, output };
+            self.transcript.push(observation.clone());
+            Ok(observation)
+        })
+    }
+    fn transcript(&self) -> Result<Vec<HostObservation>> {
+        Ok(self.transcript.clone())
+    }
+    fn stop(&mut self) -> Step<'_, Vec<CleanupReceipt>> {
+        Box::pin(async move {
+            match self.process.as_mut() {
+                Some(process) => {
+                    process
+                        .stop(
+                            Instant::now() + Duration::from_secs(30),
+                            Some("agent-workbench shutdown complete"),
+                        )
+                        .await
+                }
+                None => Ok(Vec::new()),
+            }
+        })
+    }
+}
