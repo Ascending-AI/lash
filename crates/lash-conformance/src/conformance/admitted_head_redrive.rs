@@ -274,7 +274,10 @@ pub async fn a_turn_redriven_after_its_commit_replays_at_its_admitted_head(
             crate::QueuedWorkBatchingConfig::new(1),
         );
     host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
-    let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
+    let receipts = Arc::new(super::frame_open_redrive::receipts::CommitReceipts::new(
+        crate::conformance::law_session_store(stores.as_ref(), &session_id).await,
+    ));
+    let store: Arc<dyn crate::RuntimeStore> = receipts.clone();
     let parts = RedriveParts {
         session_id: session_id.clone(),
         host,
@@ -333,11 +336,7 @@ pub async fn a_turn_redriven_after_its_commit_replays_at_its_admitted_head(
             committed.turn_index, ordinal,
             "turn {ordinal}: the head holds the turn once, at its admitted index"
         );
-        assert_eq!(
-            committed.head_revision,
-            revision + 1,
-            "turn {ordinal}: the turn committed once and the redrive commits nothing again"
-        );
+        receipts.assert_since(revision, committed.head_revision, 0, 1, 0, 1);
         let execution_state = committed
             .execution_state_hydration()
             .expect("hydrate the committed execution state")

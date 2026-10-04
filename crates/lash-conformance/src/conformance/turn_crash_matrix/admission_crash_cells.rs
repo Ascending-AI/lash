@@ -159,10 +159,12 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
     F: Fn(&str) -> Arc<S>,
     S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
-    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimeStore>;
+    let scenario = "final-commit-reply-lost";
+    let receipts =
+        Arc::new(super::super::frame_open_redrive::receipts::CommitReceipts::new(make(scenario)));
+    let make = |_scenario: &str| receipts.clone() as Arc<dyn RuntimeStore>;
     let host = LawSeamHost::over(host);
     let law = matrix_law(&stores, &make, &host, &runner);
-    let scenario = "final-commit-reply-lost";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let reader = make(scenario);
     seed_reference_ingress_for_shift(&reader, &identity).await;
@@ -214,11 +216,7 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
         .await
         .expect("read the head after the redrive")
         .expect("the run committed");
-    assert_eq!(
-        head.head_revision,
-        before + 1,
-        "the run's one physical turn committed once"
-    );
+    receipts.assert_since(before, head.head_revision, 0, 1, 0, 1);
     let applications = reader
         .list_turn_input_applications(&identity.session_id)
         .await

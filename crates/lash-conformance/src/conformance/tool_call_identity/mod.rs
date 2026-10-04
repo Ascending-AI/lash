@@ -403,6 +403,7 @@ pub(crate) fn text(text: &str) -> crate::LlmResponse {
 /// model's call count.
 #[derive(Clone)]
 pub(crate) struct World {
+    pub(crate) observed_store: Option<Arc<dyn crate::RuntimeStore>>,
     tier: ToolCallIdentityTier,
     pub(crate) session_id: SessionId,
     pub(crate) witness: Arc<Witness>,
@@ -458,6 +459,7 @@ impl World {
     pub(crate) fn new(tier: &ToolCallIdentityTier, law: &str) -> Self {
         Self {
             tier: tier.clone(),
+            observed_store: None,
             session_id: SessionId::fixture(format!("{}-{law}", tier.prefix)),
             witness: Arc::new(Witness::default()),
             model_calls: Arc::new(AtomicUsize::new(0)),
@@ -615,6 +617,9 @@ impl World {
         reason = "the identity fixture installs its protocol"
     )]
     pub(crate) async fn store(&self) -> Arc<dyn crate::RuntimeStore> {
+        if let Some(store) = &self.observed_store {
+            return Arc::clone(store);
+        }
         let (_, factories) = self.host_and_factories();
         let host = crate::facade_support::PluginHost::new(factories);
         let mut config = crate::PersistedSessionConfig::from(crate::testing::mock_session_policy());

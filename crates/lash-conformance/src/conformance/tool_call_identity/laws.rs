@@ -310,7 +310,11 @@ pub async fn reported_failure_retry_preserves_call_id(tier: ToolCallIdentityTier
 pub async fn one_turn_commits_history_once_and_never_replaces_existing_nodes(
     tier: ToolCallIdentityTier,
 ) {
-    let world = World::new(&tier, "single-history-commit");
+    let mut world = World::new(&tier, "single-history-commit");
+    let receipts = Arc::new(
+        super::super::frame_open_redrive::receipts::CommitReceipts::new(world.store().await),
+    );
+    world.observed_store = Some(receipts.clone());
     let seed = world.turn("seed", vec![text("immutable prefix")]);
     assert_finished("seed", &world.run(&seed).await);
     let store = world.store().await;
@@ -336,11 +340,7 @@ pub async fn one_turn_commits_history_once_and_never_replaces_existing_nodes(
         .await
         .expect("read completed turn")
         .expect("completed window");
-    assert_eq!(
-        after.head_revision,
-        before.head_revision + 1,
-        "model and tool progress commits one graph append"
-    );
+    receipts.assert_since(before.head_revision, after.head_revision, 0, 1, 0, 1);
     let old_ids = before
         .window
         .nodes
@@ -364,7 +364,11 @@ pub async fn one_turn_commits_history_once_and_never_replaces_existing_nodes(
 pub async fn suspended_tool_keeps_turn_and_history_head_until_resolution(
     tier: ToolCallIdentityTier,
 ) {
-    let world = World::new(&tier, "suspended-history");
+    let mut world = World::new(&tier, "suspended-history");
+    let receipts = Arc::new(
+        super::super::frame_open_redrive::receipts::CommitReceipts::new(world.store().await),
+    );
+    world.observed_store = Some(receipts.clone());
     assert_finished(
         "seed",
         &world
@@ -397,16 +401,20 @@ pub async fn suspended_tool_keeps_turn_and_history_head_until_resolution(
                 .expect("unsettled wait")
                 .is_none()
         );
+        let waiting = store
+            .load_session_head_meta(&world.session_id)
+            .await
+            .expect("head while waiting")
+            .expect("retained head");
+        receipts.assert_since(before.head_revision, waiting.head_revision, 0, 0, 0, 1);
         assert_eq!(
-            format!(
-                "{:?}",
-                store
-                    .load_session_head_meta(&world.session_id)
-                    .await
-                    .expect("head while waiting")
-            ),
-            format!("{:?}", Some(before.clone()))
+            waiting.leaf_node_id, before.leaf_node_id,
+            "the plugin transition cannot append a history node while the tool waits"
         );
+        assert_eq!(waiting.current_frame_node_id, before.current_frame_node_id);
+        assert_eq!(waiting.config, before.config);
+        assert_eq!(waiting.pending_follow_on, before.pending_follow_on);
+        assert_eq!(waiting.published_by_shift, before.published_by_shift);
         world.witness.gate.open();
     });
     assert_finished("resolved suspended turn", &assembled);
@@ -415,7 +423,7 @@ pub async fn suspended_tool_keeps_turn_and_history_head_until_resolution(
         .await
         .expect("head after resolution")
         .expect("head");
-    assert_eq!(after.head_revision, before.head_revision + 1);
+    receipts.assert_since(before.head_revision, after.head_revision, 0, 1, 0, 1);
     assert_eq!(world.witness.of("suspended").len(), 1);
     assert_eq!(outputs(&assembled).len(), 1);
 }
