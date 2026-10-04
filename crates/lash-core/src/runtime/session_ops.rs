@@ -212,28 +212,29 @@ impl LashRuntime {
     }
 
     /// Explicitly restore protocol-local execution state from a hydrated snapshot.
+    ///
+    /// While session capabilities are deferred, this stages the components for
+    /// the next journal-scoped operation's recorded activation. It does not
+    /// construct a live executor; observe live state after that operation runs.
     pub async fn restore_execution_state(
         &mut self,
         snapshot: &crate::plugin::HydratedExecutionState,
     ) -> Result<(), SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
-        let Some(session) = self.session.as_mut() else {
-            return Err(SessionError::Protocol(
-                "runtime session not available".to_string(),
-            ));
-        };
-        let code_executor = session
-            .plugins()
-            .code_executor()
-            .ok_or(SessionError::CodeExecutionUnavailable)?;
-        let session_id = self.state.session_id.clone();
-        code_executor
-            .restore_execution_state(
-                crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
-                snapshot,
-            )
-            .await?;
+        if let Some(session) = self.session.as_mut() {
+            let code_executor = session
+                .plugins()
+                .code_executor()
+                .ok_or(SessionError::CodeExecutionUnavailable)?;
+            let session_id = self.state.session_id.clone();
+            code_executor
+                .restore_execution_state(
+                    crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
+                    snapshot,
+                )
+                .await?;
+        }
         self.state
             .set_execution_state_components(crate::plugin::ExecutionStateCapture::from_hydrated(
                 snapshot.clone(),

@@ -1192,6 +1192,9 @@ impl SessionStateAdmin {
     }
 
     /// Restores durable process execution from a snapshot.
+    ///
+    /// A deferred executor receives the staged snapshot when the next recorded
+    /// runtime operation activates it. Observe live state after that operation.
     pub async fn restore_execution(
         &self,
         snapshot: &lash_core::plugin::HydratedExecutionState,

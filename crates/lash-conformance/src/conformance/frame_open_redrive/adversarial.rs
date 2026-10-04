@@ -30,6 +30,7 @@ use super::{
     frame_chain, law_model,
 };
 use crate::admit;
+use lash_core::testing::TestTurnExecution as _;
 
 /// Prompt usage over the standard compactor's pressure threshold on the
 /// laws' model (a 200k window less its 20k buffer).
@@ -863,7 +864,7 @@ pub async fn every_open_restarts_the_live_execution_state(
         .expect("the protocol under test has live execution state");
     let global = script.global;
     let model = law_model(ModelScript {
-        turns: vec![(script.set_global, 1)],
+        turns: vec![(script.set_global, 1), (protocol.answer("restored"), 1)],
     });
     let law = LawSession::open(
         prefix,
@@ -956,6 +957,26 @@ pub async fn every_open_restarts_the_live_execution_state(
                         .restore_execution_state(&snapshot)
                         .await
                         .expect("restore the live execution state without a store");
+                    let activated = Box::pin(
+                        storeless.execute_turn(
+                            crate::TurnInput::text("activate the restored interpreter"),
+                            crate::TurnOptions::new(
+                                tokio_util::sync::CancellationToken::new(),
+                                scope
+                                    .rescope(admit(crate::ExecutionScope::turn(
+                                        &parts.session_id,
+                                        crate::TurnId::fixture("restore-activation"),
+                                    )))
+                                    .expect("admit the restored executor's activation turn"),
+                            ),
+                        ),
+                    )
+                    .await
+                    .expect("the recorded turn activates the restored executor");
+                    assert!(
+                        matches!(activated.outcome, crate::TurnOutcome::Finished(_)),
+                        "{activated:?}"
+                    );
                     assert!(live_holds(&mut storeless, global).await);
                     assert!(
                         matches!(
