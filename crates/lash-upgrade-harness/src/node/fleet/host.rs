@@ -331,6 +331,39 @@ async fn command_host(state: &State, command: HostCommand) -> Result<HostObserva
                 }
                 serde_json::to_value(receipt)?
             }
+            "receiver-bind" => {
+                let receipt: lash::process::ProcessStartReceipt =
+                    serde_json::from_value(input.clone())?;
+                let record = state
+                    .core
+                    .process_registry()
+                    .get_process(&receipt.process_id)
+                    .await?
+                    .context("receiver binding names no retained process")?;
+                ensure!(
+                    record.start_key == receipt.start_key && receipt.start_key.is_some(),
+                    "receiver binding does not match its actual start receipt"
+                );
+                ensure!(
+                    record.input.as_ref()
+                        == &lash::process::ProcessInput::External {
+                            metadata: serde_json::json!({"fixture":"h2-receiver","session":&session_id}),
+                        },
+                    "receiver binding names another fixture or session"
+                );
+                ensure!(
+                    record
+                        .event_types
+                        .iter()
+                        .any(|kind| kind.name == "tool_receipt"),
+                    "receiver did not admit tool_receipt events"
+                );
+                state
+                    .receiver
+                    .set(receipt.process_id.clone())
+                    .map_err(|_| anyhow::anyhow!("receiver already bound"))?;
+                serde_json::to_value(receipt)?
+            }
             "receiver-events" => serde_json::to_value(
                 crate::node::tools::receiver_events(
                     &state.core,

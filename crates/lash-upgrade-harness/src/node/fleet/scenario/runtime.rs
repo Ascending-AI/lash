@@ -581,23 +581,33 @@ impl FleetFixture for RuntimeFixture {
                 "fleet dependency manifest changed"
             );
             let mut selected = spec.clone();
-            let landings = [
-                ("FIG-4894", "736db467f4"),
-                ("FIG-4878", "07a7f2cf8b"),
-                ("FIG-4739", "82b99419d3"),
-            ];
+            let mut landings = Vec::new();
             for requirement in &selected.requires {
-                let (_, tip) = landings
-                    .iter()
-                    .find(|(ticket, _)| ticket == requirement)
-                    .context("unknown fleet prerequisite")?;
+                let trailer = format!("^Closes {requirement}$");
+                let output = Command::new("git")
+                    .args([
+                        "log",
+                        "origin/main",
+                        "-1",
+                        "--format=%H",
+                        "--grep",
+                        &trailer,
+                    ])
+                    .output()?;
+                ensure!(
+                    output.status.success(),
+                    "read {requirement} main landing failed"
+                );
+                let tip = String::from_utf8(output.stdout)?.trim().to_owned();
+                ensure!(!tip.is_empty(), "{requirement} has no main landing trailer");
                 ensure!(
                     Command::new("git")
-                        .args(["merge-base", "--is-ancestor", tip, "HEAD"])
+                        .args(["merge-base", "--is-ancestor", &tip, "HEAD"])
                         .status()?
                         .success(),
                     "{requirement} prerequisite {tip} has not landed in candidate"
                 );
+                landings.push((requirement.clone(), tip));
             }
             selected.requires.clear();
             selected.validate()?;
@@ -682,10 +692,7 @@ impl FleetFixture for RuntimeFixture {
                     .primary
                     .setup("receiver-register", serde_json::Value::Null)
                     .await?;
-                let b = self
-                    .follower
-                    .setup("receiver-register", serde_json::Value::Null)
-                    .await?;
+                let b = self.follower.setup("receiver-bind", a.clone()).await?;
                 ensure!(
                     a == b,
                     "two fleet hosts admitted different mutation receivers"

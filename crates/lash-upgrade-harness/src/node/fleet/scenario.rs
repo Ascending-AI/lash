@@ -310,6 +310,10 @@ pub async fn s14_leader_loss_retains_accepted_work(
         restarted.incarnation > original.incarnation,
         "server was not restarted"
     );
+    // Wait for actual membership and leader views after restart before a
+    // worker issues fresh SQL observations through the restarted frontend.
+    let ready = cluster.converge().await?;
+    assert_live_cluster(&ready, 3)?;
     control.tool(ToolControl::Release(b)).await?;
     let answer = fixture
         .follower()
