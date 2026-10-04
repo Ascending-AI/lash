@@ -89,7 +89,13 @@ async fn commit_switch(
             .expect("the initial frame is current"),
     );
     store
-        .commit_runtime_state(terminal_commit(&state, SWITCHING_TURN, Some(owed.clone())))
+        .commit_runtime_state(
+            crate::conformance::admission_support::prepare_final_commit(
+                store,
+                terminal_commit(&state, SWITCHING_TURN, Some(owed.clone())),
+            )
+            .await,
+        )
         .await
         .expect("the switch commit writes its follow-on");
     (loaded_conformance_state(store, &session()).await, owed)
@@ -118,7 +124,13 @@ pub async fn pending_follow_on_is_written_by_its_switch_and_cleared_by_its_termi
 
     // Its own terminal commit clears it, whatever the outcome.
     let receipt = store
-        .commit_runtime_state(terminal_commit(&state, FOLLOW_ON_TURN, None))
+        .commit_runtime_state(
+            crate::conformance::admission_support::prepare_final_commit(
+                &store,
+                terminal_commit(&state, FOLLOW_ON_TURN, None),
+            )
+            .await,
+        )
         .await
         .expect("the follow-on's terminal commit clears its fact");
     assert_eq!(receipt.pending_follow_on, None);
@@ -239,7 +251,13 @@ pub async fn pending_follow_on_refuses_every_other_commit_that_would_drop_it(
     // Another turn's terminal commit is refused, whatever it carries.
     for carried in [None, Some(owed.clone())] {
         let error = store
-            .commit_runtime_state(terminal_commit(&state, "another-turn", carried))
+            .commit_runtime_state(
+                crate::conformance::admission_support::prepare_final_commit(
+                    &store,
+                    terminal_commit(&state, "another-turn", carried),
+                )
+                .await,
+            )
             .await
             .expect_err("another turn's commit is refused while a follow-on is owed");
         assert!(matches!(
@@ -269,9 +287,9 @@ pub async fn pending_follow_on_refuses_every_other_commit_that_would_drop_it(
         matches!(
             error,
             StoreError::SessionHeadOwned {
-                owner: crate::store::SessionHeadOwner::FollowOn { ref follow_on },
+                owner: crate::store::SessionHeadOwner::Run { ref run },
                 ..
-            } if *follow_on == owed.follow_on_turn_id
+            } if run.as_str() == SWITCHING_TURN
         ),
         "{error:?}"
     );
@@ -306,7 +324,13 @@ pub async fn pending_follow_on_frame_is_current_on_every_head_write(store: Arc<d
     state.ensure_agent_frame_initialized();
     let elsewhere = follow_on(crate::session_graph::frame_node_id(&session(), "elsewhere"));
     let error = store
-        .commit_runtime_state(terminal_commit(&state, SWITCHING_TURN, Some(elsewhere)))
+        .commit_runtime_state(
+            crate::conformance::admission_support::prepare_final_commit(
+                &store,
+                terminal_commit(&state, SWITCHING_TURN, Some(elsewhere)),
+            )
+            .await,
+        )
         .await
         .expect_err("a follow-on off the committed frame is unrepresentable");
     assert!(matches!(error, StoreError::FollowOnFrameNotCurrent { .. }));
@@ -395,7 +419,13 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
     ));
     // Its terminal clears the fact, and with it the count.
     store
-        .commit_runtime_state(terminal_commit(&stale, FOLLOW_ON_TURN, None))
+        .commit_runtime_state(
+            crate::conformance::admission_support::prepare_final_commit(
+                &store,
+                terminal_commit(&stale, FOLLOW_ON_TURN, None),
+            )
+            .await,
+        )
         .await
         .expect("the follow-on's terminal clears its fact");
     let successor = seal_shift_fence_for_test(&store, &session(), "after").await;

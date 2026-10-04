@@ -111,7 +111,9 @@ impl PinLaw {
                 .expect("build the turn's commit");
         let receipt = self
             .store()
-            .commit_runtime_state(final_commit(commit, fence, settlement))
+            .commit_runtime_state(
+                prepare_final_commit(self.store(), final_commit(commit, fence, settlement)).await,
+            )
             .await
             .expect("the turn's final commit lands");
         CommittedTurn {

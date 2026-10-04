@@ -89,6 +89,7 @@ async fn commit_turn(
         &state,
         crate::store::OperationId::turn(session_id.clone(), TurnId::fixture(turn_id), "final"),
     );
+    let commit = super::prepare_final_commit(store, commit).await;
     commit_runtime_state_for_test(store, commit, owner_id).await
 }
 

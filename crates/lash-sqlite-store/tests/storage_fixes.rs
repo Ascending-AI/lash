@@ -469,7 +469,7 @@ async fn run_handover_commits_material_ownership_with_the_head() {
             Some(stores) => stores.session_store_factory(),
             None => Arc::new(SqliteStore::open_file_for_testing(&path).await.unwrap()),
         };
-        lash_conformance::material_retention::run_handover_commits_material_ownership_with_the_head(
+        Box::pin(lash_conformance::material_retention::run_handover_commits_material_ownership_with_the_head(
             store.clone(), store, async || {
                 let reopened = match &memory {
                     Some(stores) => stores.session_store_factory(),
@@ -477,6 +477,6 @@ async fn run_handover_commits_material_ownership_with_the_head() {
                 };
                 (reopened.clone() as Arc<dyn lash_core::RuntimeStore>, reopened as Arc<dyn lash_core::store::ToolMaterialStore>)
             },
-        ).await;
+        )).await;
     }
 }

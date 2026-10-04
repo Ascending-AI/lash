@@ -114,7 +114,12 @@ pub async fn run_terminal_evidence_commits_in_the_head_transaction(store: Arc<dy
     let state = state(&session_id);
     assert_eq!(terminal_of(&store, &session_id, "r").await, None);
 
-    let mut conflicted = turn_commit(&state, "r", Some(ends("r", 0, None)), None);
+    let landed = prepare_final_commit(
+        &store,
+        turn_commit(&state, "r", Some(ends("r", 0, None)), None),
+    )
+    .await;
+    let mut conflicted = landed.clone();
     conflicted.expected_head_revision = 7;
     assert!(
         matches!(
@@ -129,7 +134,6 @@ pub async fn run_terminal_evidence_commits_in_the_head_transaction(store: Arc<dy
         "a refused head commit leaves no evidence"
     );
 
-    let landed = turn_commit(&state, "r", Some(ends("r", 0, None)), None);
     let receipt = store
         .commit_runtime_state(landed.clone())
         .await
@@ -146,7 +150,7 @@ pub async fn run_terminal_evidence_commits_in_the_head_transaction(store: Arc<dy
     );
 
     store
-        .commit_runtime_state(landed)
+        .commit_runtime_state(landed.clone())
         .await
         .expect("a retried commit replays its receipt");
     assert_eq!(
@@ -157,12 +161,16 @@ pub async fn run_terminal_evidence_commits_in_the_head_transaction(store: Arc<dy
 
     let revision = head_revision(&store, &session_id).await;
     let resumed = loaded_conformance_state(&store, &session_id).await;
-    let other = turn_commit(
-        &resumed,
-        "r:1",
-        Some(ends("r", 1, Some(crate::TurnStop::ToolFailure))),
-        None,
-    );
+    let other = prepare_final_commit(
+        &store,
+        turn_commit(
+            &resumed,
+            "r:1",
+            Some(ends("r", 1, Some(crate::TurnStop::ToolFailure))),
+            None,
+        ),
+    )
+    .await;
     assert!(
         matches!(
             store.commit_runtime_state(other).await,
@@ -190,7 +198,13 @@ pub async fn run_terminal_evidence_commits_in_the_head_transaction(store: Arc<dy
             .expect("admit delimiter-bearing session");
         let state = self::state(&session_id);
         store
-            .commit_runtime_state(turn_commit(&state, run, Some(ends(run, 0, None)), None))
+            .commit_runtime_state(
+                prepare_final_commit(
+                    &store,
+                    turn_commit(&state, run, Some(ends(run, 0, None)), None),
+                )
+                .await,
+            )
             .await
             .expect("distinct typed scope-close keys cannot collide");
         assert!(terminal_of(&store, &session_id, run).await.is_some());
@@ -210,7 +224,7 @@ pub async fn a_commit_sealed_under_a_superseded_admission_is_refused(store: Arc<
     let session_id = SessionId::from("run-terminal-fence");
     let state = state(&session_id);
     store
-        .commit_runtime_state(turn_commit(&state, "seed", None, None))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("the seed commit creates the session");
     let seal = |admission: &'static str, observed: u64| {
@@ -265,12 +279,13 @@ pub async fn a_commit_sealed_under_a_superseded_admission_is_refused(store: Arc<
     assert_eq!(terminal_of(&store, &session_id, "r").await, None);
 
     store
-        .commit_runtime_state(turn_commit(
-            &resumed,
-            "r",
-            Some(ends("r", 0, None)),
-            Some(current),
-        ))
+        .commit_runtime_state(
+            prepare_final_commit(
+                &store,
+                turn_commit(&resumed, "r", Some(ends("r", 0, None)), Some(current)),
+            )
+            .await,
+        )
         .await
         .expect("the successor's commit lands");
     assert!(terminal_of(&store, &session_id, "r").await.is_some());
@@ -321,6 +336,7 @@ pub async fn a_queued_headed_run_writes_its_terminal_like_any_run(store: Arc<dyn
         &authority,
         completing_admission("q", &admission),
     );
+    let commit = prepare_final_commit(&store, commit).await;
     let receipt = store
         .commit_runtime_state(commit)
         .await

@@ -454,6 +454,7 @@ pub async fn run_handover_commits_material_ownership_with_the_head(
     )
     .unwrap();
     commit.pending_follow_on = Some(owed.clone());
+    let commit = crate::conformance::admission_support::prepare_final_commit(&store, commit).await;
     let mut stale = commit.clone();
     stale.expected_head_revision = 1;
     let rejected = store.commit_runtime_state(stale).await;
@@ -539,6 +540,8 @@ pub async fn run_handover_commits_material_ownership_with_the_head(
         .unwrap()
         .0;
     terminal.pending_follow_on = None;
+    let terminal =
+        crate::conformance::admission_support::prepare_final_commit(&reopened, terminal).await;
     reopened.commit_runtime_state(terminal).await.unwrap();
     assert!(matches!(
         material_reopened
@@ -591,6 +594,8 @@ pub async fn run_handover_commits_material_ownership_with_the_head(
         .unwrap()
         .0;
     cancelled.pending_follow_on = None;
+    let cancelled =
+        crate::conformance::admission_support::prepare_final_commit(&reopened, cancelled).await;
     reopened.commit_runtime_state(cancelled).await.unwrap();
     assert!(matches!(
         material_reopened

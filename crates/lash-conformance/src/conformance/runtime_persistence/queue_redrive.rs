@@ -595,6 +595,8 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
     let turn_commit =
         RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", "turn-atomic", "final"));
     base_commit.turn_commit = turn_commit.clone();
+    base_commit.shift_fence = Some(Box::new(fence.clone()));
+    base_commit = prepare_final_commit(&store, base_commit).await;
 
     let mut unadmitted = settlement.clone();
     unadmitted

@@ -383,6 +383,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
         );
         commit.turn_commit =
             RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", turn_id, "final"));
+        let commit = prepare_final_commit(&factory.open, commit).await;
         let result = factory
             .open
             .commit_runtime_state(commit)
@@ -714,12 +715,11 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state)
         .with_operation(operation.clone())
         .expect("derive and stamp first commit");
+    let stamped_commit = prepare_final_commit(&store, stamped_commit).await;
     let turn_commit_hash = stamped_commit
         .turn_commit_hash()
         .expect("first commit hash");
 
-    let _session_lease =
-        seal_shift_fence_for_test(&store, &SessionId::from("root"), "provider-turn").await;
     let first = store
         .commit_runtime_state(stamped_commit.clone())
         .await
@@ -731,6 +731,12 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     let (replay_commit, _) = RuntimeCommit::persisted_state_for_test(&replay_state)
         .with_operation(operation.clone())
         .expect("derive and stamp replay");
+    let mut replay_commit = replay_commit;
+    replay_commit.shift_fence = stamped_commit.shift_fence.clone();
+    replay_commit.park_run = stamped_commit.park_run.clone();
+    replay_commit.ingress = stamped_commit.ingress.clone();
+    replay_commit.run_terminal = stamped_commit.run_terminal.clone();
+    replay_commit.interrupted_turn = stamped_commit.interrupted_turn.clone();
     let replay_hash = replay_commit
         .turn_commit_hash()
         .expect("replay commit hash");
@@ -753,6 +759,11 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .expect("stamp retry from advanced head")
         .0;
     retry_from_new_head.expected_head_revision = first.head_revision;
+    retry_from_new_head.shift_fence = stamped_commit.shift_fence.clone();
+    retry_from_new_head.park_run = stamped_commit.park_run.clone();
+    retry_from_new_head.ingress = stamped_commit.ingress.clone();
+    retry_from_new_head.run_terminal = stamped_commit.run_terminal.clone();
+    retry_from_new_head.interrupted_turn = stamped_commit.interrupted_turn.clone();
     let retry_hash = retry_from_new_head
         .turn_commit_hash()
         .expect("retry commit hash");
@@ -825,6 +836,7 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
         )],
         "operation stamping must return the append-id mapping"
     );
+    let first = prepare_final_commit(&store, first).await;
     commit_runtime_state_for_test(&store, first.clone(), "realization-guard")
         .await
         .expect("first guarded commit");

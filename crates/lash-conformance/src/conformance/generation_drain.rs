@@ -181,6 +181,7 @@ impl AdmittedRun {
             self.run.as_str(),
             &self.admission,
         ));
+        let commit = super::prepare_final_commit(&self.store, commit).await;
         self.store
             .commit_runtime_state(commit)
             .await

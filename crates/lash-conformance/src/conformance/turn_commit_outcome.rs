@@ -1,5 +1,6 @@
 //! Durable terminal classifications shared by both SQL stores.
 
+use crate::conformance::admission_support::prepare_final_commit;
 use crate::store::ConformanceDeployment;
 use crate::{RuntimeCommit, RuntimeSessionState};
 use lash_core::store::{
@@ -35,6 +36,8 @@ async fn law(store: Arc<dyn ConformanceDeployment>, expected: TurnCommitOutcome)
     )
     .expect("build turn commit");
     commit.outcome = Some(expected.clone());
+    let runtime_store: Arc<dyn crate::RuntimeStore> = store.clone();
+    let commit = prepare_final_commit(&runtime_store, commit).await;
     let first = store
         .commit_runtime_state(commit.clone())
         .await
@@ -107,6 +110,8 @@ pub async fn unread_terminals_survive_retention(store: Arc<dyn ConformanceDeploy
     commit.outcome = Some(TurnCommitOutcome::Failed(
         TurnCommitFailureCause::ProviderError,
     ));
+    let runtime_store: Arc<dyn crate::RuntimeStore> = store.clone();
+    let commit = prepare_final_commit(&runtime_store, commit).await;
     store
         .commit_runtime_state(commit)
         .await
@@ -231,6 +236,8 @@ pub async fn terminal_feed_is_ordered_and_replay_stable(store: Arc<dyn Conforman
         )
         .expect("build commit");
         commit.outcome = Some(outcome.clone());
+        let runtime_store: Arc<dyn crate::RuntimeStore> = store.clone();
+        let commit = prepare_final_commit(&runtime_store, commit).await;
         let operation = commit.turn_commit.operation.clone();
         store
             .commit_runtime_state(commit.clone())

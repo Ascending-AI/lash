@@ -430,6 +430,7 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
             session_id, turn_id, "final",
         ));
+        let commit = prepare_final_commit(&store, commit).await;
         if turn_index == 1 {
             replay = Some(commit.clone());
         }

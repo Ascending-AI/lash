@@ -335,7 +335,13 @@ async fn commit_switch_owing(
         attempts: 0,
     };
     store
-        .commit_runtime_state(steering_commit(&state, switching_turn, Some(owed.clone())))
+        .commit_runtime_state(
+            prepare_final_commit(
+                store,
+                steering_commit(&state, switching_turn, Some(owed.clone())),
+            )
+            .await,
+        )
         .await
         .expect("the switch commit writes its follow-on");
     owed

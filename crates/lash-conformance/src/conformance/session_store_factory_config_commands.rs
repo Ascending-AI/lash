@@ -45,6 +45,7 @@ pub async fn ingress_follow_on_fork_and_command_run_matrix(
         crate::OperationId::turn(&request.session_id, "matrix-switch", "final"),
     );
     switch.pending_follow_on = Some(owed.clone());
+    let switch = super::prepare_final_commit(store.store(), switch).await;
     state.apply_persisted_commit_result(
         store
             .commit_runtime_state(switch.clone())
@@ -185,6 +186,7 @@ pub async fn ingress_follow_on_fork_and_command_run_matrix(
         crate::OperationId::turn(&request.session_id, "unrelated", "final"),
     );
     unrelated.pending_follow_on = None;
+    let unrelated = super::prepare_final_commit(store.store(), unrelated).await;
     let refusal = store
         .commit_runtime_state(unrelated)
         .await
@@ -204,6 +206,7 @@ pub async fn ingress_follow_on_fork_and_command_run_matrix(
     // The follow-on's terminal is its shift's commit: it presents the shift's
     // fence, as every head write while commands are open must (FIG-4202).
     terminal.shift_fence = Some(Box::new(lease.clone()));
+    let terminal = super::prepare_final_commit(store.store(), terminal).await;
     store
         .commit_runtime_state(terminal)
         .await

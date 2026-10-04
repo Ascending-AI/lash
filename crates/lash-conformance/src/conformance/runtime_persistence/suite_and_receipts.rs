@@ -501,6 +501,7 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(store: Arc<
         attempts: 0,
     });
 
+    let commit = prepare_final_commit(&store, commit).await;
     store
         .commit_runtime_state(commit)
         .await

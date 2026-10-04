@@ -200,6 +200,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
         &state,
         crate::store::OperationId::turn(session_id.clone(), TurnId::from("another-turn"), "final"),
     );
+    let other = prepare_final_commit(&store, other).await;
     commit_runtime_state_for_test(&store, other, "other-owner")
         .await
         .expect("commit another turn");
@@ -219,6 +220,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
         &after_other,
         crate::store::OperationId::turn(session_id.clone(), parked_turn.clone(), "final"),
     );
+    let own = prepare_final_commit(&store, own).await;
     commit_runtime_state_for_test(&store, own, "settling-owner")
         .await
         .expect("commit the parked turn");

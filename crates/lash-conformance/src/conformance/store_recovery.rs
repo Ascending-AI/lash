@@ -363,6 +363,7 @@ where
         &lease,
         completing_admission(&run_of(source), &admission),
     );
+    let commit = prepare_final_commit(&writer, commit).await;
     let first = writer
         .commit_runtime_state(commit.clone())
         .await
