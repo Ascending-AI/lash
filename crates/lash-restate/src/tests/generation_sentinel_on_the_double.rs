@@ -374,6 +374,15 @@ async fn a_successor_the_sentinel_parked_before_its_admission_is_never_re_sent()
         .register(
             Endpoint::builder()
                 .bind(swappable(Arc::clone(&current)))
+                .bind(
+                    crate::durable_wait::LashDurableWaitRegistryImpl::new(
+                        Default::default(),
+                        Default::default(),
+                        crate::RestateAdminClient::new(connection.clone()),
+                    )
+                    .serve(),
+                )
+                .bind(crate::durable_wait::LashDurableWaitWorkflowImpl::default().serve())
                 .build(),
         )
         .await
