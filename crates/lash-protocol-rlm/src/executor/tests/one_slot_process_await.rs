@@ -386,7 +386,8 @@ async fn saturated_process_create_retries_without_recording_a_tool_refusal() {
             let outputs = Arc::clone(&outputs);
             let tool_id = definition.manifest.id.clone();
             Box::pin(async move {
-                let reply = ctx.call_command_tool(
+                ctx.drive_tool_run(None, |ctx| async move {
+                    let reply = ctx.call_command_tool(
                     &lash_core::CommandReplayKey::new("create-process"),
                     lash_core::facade_support::ToolInvocation::new(
                         lash_core::ToolCallId::fixture("create-process"), tool_id,
@@ -396,11 +397,17 @@ async fn saturated_process_create_retries_without_recording_a_tool_refusal() {
                         }),
                     ),
                 ).await;
-                assert!(ctx.take_nested_effect_error().is_none());
-                outputs
-                    .lock()
-                    .expect("tool observations")
-                    .push(reply.output);
+                    assert!(ctx.take_nested_effect_error().is_none());
+                    outputs
+                        .lock()
+                        .expect("tool observations")
+                        .push(reply.output);
+                    ctx.close_opener_groups()
+                        .await
+                        .expect("close the create Run");
+                })
+                .await
+                .expect("drive the create Run");
             })
         })
     };
