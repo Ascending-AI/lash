@@ -581,6 +581,10 @@ impl LashRuntime {
             .as_deref()
             .filter(|owed| owed.is_turn(&turn_trace_turn_id))
             .map(|owed| (*owed.resolved_run).clone());
+        // Activation publishes the protocol capabilities that config resolution
+        // records, including its renderer. Physical preparation consumes them.
+        self.materialize_turn_session(&scoped_effect_controller)
+            .await?;
         self.resolve_turn_config(
             &scoped_effect_controller,
             &turn_trace_turn_id,

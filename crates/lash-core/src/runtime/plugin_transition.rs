@@ -90,3 +90,76 @@ impl RuntimeEffectLocalRunner for NativeTransitionRunner {
         })
     }
 }
+
+impl crate::runtime::LashRuntime {
+    /// Publish the native plugin view before resolving a run's protocol config.
+    /// A deferred session supplies no driver or renderer until this activation.
+    pub(in crate::runtime) async fn materialize_turn_session(
+        &mut self,
+        scoped_effect_controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<(), crate::RuntimeError> {
+        if self.session.is_none() {
+            let plugins = &self.services.plugins;
+            if self.is_store_backed() {
+                return Err(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::Plugin,
+                    "store-backed preparation requires a published plugin transition",
+                ));
+            }
+            let target = match plugins.plugin_admission() {
+                Some(admission) => admission,
+                None => crate::runtime::plugin_transition::native_plugin_admission(plugins.host())
+                    .map_err(|error| {
+                        crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+                    })?,
+            };
+            let address = crate::EffectAddress::new(
+                scoped_effect_controller.execution_scope().clone(),
+                "plugin-transition",
+            )
+            .map_err(crate::RuntimeError::from)?;
+            let request = crate::plugin::PluginTransitionRequest {
+                id: crate::plugin::PluginTransitionId(address),
+                owner: crate::RuntimeOwner::Session(self.state.session_id.clone()),
+                base: crate::plugin::PluginTransitionBase::Session {
+                    head: crate::store::SessionHeadRef {
+                        generation: 0,
+                        revision: self.state.head_revision,
+                        leaf: self.state.session_graph.leaf_node_id.clone(),
+                        checkpoint: self.state.checkpoint_ref.clone(),
+                    },
+                },
+                target,
+            };
+            let record = crate::runtime::plugin_transition::record_native_transition(
+                scoped_effect_controller,
+                plugins.host().clone(),
+                request,
+                plugins.export_state(),
+                self.state.authority.plugin_config.clone(),
+            )
+            .await
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            })?;
+            plugins.adopt_plugin_transition(&record).map_err(|error| {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            })?;
+            if let Some(bytes) = plugins.native_view().map_err(|error| {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            })? {
+                self.state.set_plugin_admission_snapshot(bytes);
+            }
+            self.state.authority.plugin_config = (*plugins.admitted_plugin_config().config).clone();
+            Box::pin(self.materialize_published_session())
+                .await
+                .map_err(|error| {
+                    crate::RuntimeError::new(
+                        crate::RuntimeErrorCode::SessionHeadRefresh,
+                        error.to_string(),
+                    )
+                })?;
+        }
+        Ok(())
+    }
+}
