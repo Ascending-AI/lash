@@ -751,6 +751,14 @@ impl LashRuntime {
             .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
             .await
             .map_err(|source| session_commit_error("failed to persist runtime state", source))?;
+        if result.receipt_replayed {
+            // A repeated capture can name an already committed park. Its
+            // receipt does not advance this resident head.
+            self.invalidate_resident_session_state();
+            return self
+                .reload_invalidated_resident_session_state_for_session()
+                .await;
+        }
         flushed.apply_persisted_commit_result(result);
         flushed.mark_node_ids_persisted(persisted_node_ids);
         self.state = flushed;
