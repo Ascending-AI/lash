@@ -554,3 +554,92 @@ fn reset_response_carries_the_replacement_sessions_durable_transcript() {
         let _ = server.await;
     });
 }
+
+/// FIG-5036: deleting a chat from the sidebar retires that one session, takes
+/// its row off the roster, and hands the page the most recent chat left. The
+/// other chats keep their rows and their state.
+#[test]
+fn deleting_a_chat_removes_only_its_row_and_hands_back_the_most_recent_one() {
+    run_async_test_on_stack_budget("workbench-delete-chat", || async {
+        let double = crate::tests::test_double_backend(0).await;
+        let mut state = recoverable_chat_test_state(&double, 16).await;
+        let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+        state.restate_ingress_url = restate_ingress_url;
+        let first = state.current_session_id();
+        state.sessions.ensure(&first);
+        let create = |name: &str| {
+            create_session(
+                State(state.clone()),
+                Json(SessionCreateRequest {
+                    name: Some(name.to_string()),
+                }),
+            )
+        };
+        let Json(kept) = create("kept").await.expect("create the kept chat");
+        let Json(doomed) = create("doomed").await.expect("create the doomed chat");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        state
+            .sessions
+            .record_prompt(&kept.session_id, "the latest prompt");
+        state
+            .sessions
+            .select(&doomed.session_id)
+            .expect("select the doomed chat");
+
+        let Json(deleted) = Box::pin(delete_session(
+            AxumPath(doomed.session_id.to_string()),
+            State(state.clone()),
+        ))
+        .await
+        .expect("delete the open chat");
+
+        assert_eq!(deleted.session_id, doomed.session_id);
+        assert_eq!(deleted.successor_session_id, kept.session_id);
+        assert_eq!(state.sessions.current(), kept.session_id);
+        let listed = state
+            .sessions
+            .list()
+            .into_iter()
+            .map(|entry| entry.session_id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            listed,
+            BTreeSet::from([first.clone(), kept.session_id.clone()]),
+            "only the deleted chat leaves the roster, and no replacement joins it"
+        );
+        assert_eq!(
+            state.active_turns.retirement(&doomed.session_id),
+            Some(SessionRetirement::Retired)
+        );
+        assert!(
+            Box::pin(app_state(
+                State(state.clone()),
+                Query(SessionQuery {
+                    session_id: Some(doomed.session_id.clone()),
+                }),
+            ))
+            .await
+            .is_err(),
+            "the deleted chat's state is gone"
+        );
+        for survivor in [&first, &kept.session_id] {
+            assert_eq!(state.active_turns.retirement(survivor), None);
+            let Json(snapshot) = Box::pin(app_state(
+                State(state.clone()),
+                Query(SessionQuery {
+                    session_id: Some(survivor.clone()),
+                }),
+            ))
+            .await
+            .expect("an untouched chat still reads");
+            assert_eq!(&snapshot.state.settings.session_id, survivor);
+        }
+        let paths = captured_restate_paths(&mut restate_requests);
+        assert!(
+            paths
+                .iter()
+                .any(|path| path.starts_with("WorkbenchSessionDeleteWorkflow/")),
+            "the durable delete must be submitted: {paths:?}"
+        );
+    });
+}

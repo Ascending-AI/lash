@@ -139,8 +139,13 @@ fn assert_delivered_provider_evidence(
     assert_eq!(evidence["reasoning_output_tokens"], reasoning_tokens);
 }
 
-pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value {
-    let mut scenarios = Vec::new();
+/// Real provider turns deliver their model-call ledgers, attempt evidence
+/// included, on the record surfaces consumers read: the remote observation
+/// stream and the product snapshot's `model_call_recorded` events. The page no
+/// longer renders these records (FIG-5036); E2E, the load-test measurements and
+/// the provider tests read them here.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provider_execution_evidence_reaches_the_record_surfaces() {
     for (provider_kind, response_id, served_model, finish, reasoning_tokens) in [
         (
             lash_sim::runtime_providers::GOOGLE_OAUTH,
@@ -239,7 +244,7 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         let mut chat_recovery = observable.subscribe_recoverable_chat(initial.cursor);
 
         let first_turn_id = TurnId::fixture(format!("{provider_kind}-evidence-turn-1"));
-        let (first_observation_line, first_terminal_replacement_line, first_execution) = tokio::join!(
+        let (first_observation_line, _, first_execution) = tokio::join!(
             next_remote_model_call(&mut observation_recovery),
             next_terminal_replacement(&mut chat_recovery, 0),
             run_provider_evidence_turn(&state, &session, &first_turn_id),
@@ -306,10 +311,9 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         .await
         .expect("workbench publishes the first runtime turn output");
         state.active_turns.remove(&session_id, &first_turn_id);
-        let first_snapshot = provider_state_snapshot(&state, &session_id).await;
 
         let second_turn_id = TurnId::fixture(format!("{provider_kind}-evidence-turn-2"));
-        let (second_observation_line, second_terminal_replacement_line, second_execution) = tokio::join!(
+        let (second_observation_line, _, second_execution) = tokio::join!(
             next_remote_model_call(&mut observation_recovery),
             next_terminal_replacement(&mut chat_recovery, 1),
             run_provider_evidence_turn(&state, &session, &second_turn_id),
@@ -358,24 +362,6 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
             "the product snapshot must contain the exact runtime-published ledgers"
         );
 
-        scenarios.push(serde_json::json!({
-            "provider_kind": provider_kind,
-            "first_observation_line": first_observation_line,
-            "first_terminal_replacement_line": first_terminal_replacement_line,
-            "first_snapshot": first_snapshot,
-            "second_observation_line": second_observation_line,
-            "second_terminal_replacement_line": second_terminal_replacement_line,
-            "final_snapshot": final_snapshot,
-            "expected": {
-                "first_call_id": first_record.call_id.0,
-                "second_call_id": second_record.call_id.0,
-                "response_id": response_id,
-                "served_model": served_model,
-                "finish": finish,
-                "reasoning_tokens": reasoning_tokens,
-                "failed_attempt_error_class": failed_error.class,
-            },
-        }));
         drop(observation_recovery);
         drop(chat_recovery);
         drop(observable);
@@ -384,5 +370,4 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
             .await
             .expect("close provider evidence session");
     }
-    serde_json::json!({ "providers": scenarios })
 }

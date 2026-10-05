@@ -754,6 +754,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/reset", post(reset_chat))
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/select", post(select_session))
+        .route("/api/sessions/{session_id}", delete(delete_session))
         .route("/api/button-trigger", post(button_trigger))
         .route("/api/triggers", get(list_triggers))
         .route(

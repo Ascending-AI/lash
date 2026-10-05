@@ -189,7 +189,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
             .filter_map(|message| message
                 .provenance
                 .as_ref()
-                .map(ChatMessageProvenance::turn_id))
+                .and_then(ChatMessageProvenance::turn_id))
             .cloned()
             .collect::<Vec<_>>(),
         vec![switched_reply_turn_id, ordinary_turn_id]

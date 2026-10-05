@@ -25,14 +25,6 @@ const stopReceipt = { accepted: true, cancellations: [{ terminal: stopTerminal }
 const multiAttachmentMessage = JSON.parse(
   process.env.LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE ?? "null",
 );
-const executionEvidenceScenarios = JSON.parse(
-  process.env.LASH_WORKBENCH_EXECUTION_EVIDENCE_SCENARIOS ?? "null",
-);
-assert.equal(
-  executionEvidenceScenarios?.providers?.length,
-  2,
-  "execution evidence must come from real Rust runtime scenarios",
-);
 assert.ok(
   multiAttachmentMessage,
   "LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE must come from the Rust projection gate",
@@ -90,7 +82,10 @@ function markedSource(begin, end) {
   return block;
 }
 
-test("committed-cancelled Stop renders its request evidence", async () => {
+// FIG-5036: a committed Stop is reported once, by the shared event row every
+// viewer of the session receives. The stopping tab used to add a local note
+// with the same request evidence, so it saw the stop twice.
+test("a committed Stop adds no local duplicate of the shared stop row", async () => {
   const notes = [];
   const errors = [];
   let busyRefreshes = 0;
@@ -124,9 +119,7 @@ test("committed-cancelled Stop renders its request evidence", async () => {
   stopContext.stopTurn();
   await completed;
 
-  assert.deepEqual(notes, [
-    "turn stopped after step 0 · request workbench-stop-browser-projection",
-  ]);
+  assert.deepEqual(notes, []);
   assert.deepEqual(errors, []);
   assert.equal(busyRefreshes, 1);
 });
@@ -209,8 +202,6 @@ test("resident replacement async refetch preserves an actual provisional tool ro
     resetInFlight: false,
     clearCalls: 0,
     transcriptRenderCalls: 0,
-    executionScorecardState: new Map(),
-    executionScorecard: element("executionScorecard"),
     shellAvailability: {},
     document: {
       createElement: element,
@@ -233,11 +224,8 @@ test("resident replacement async refetch preserves an actual provisional tool ro
     renderApprovals() {},
     renderIngressReceipt() {},
     recordTurnInputApplications() {},
-    rebuildExecutionScorecard() {},
     renderStreamingUsage() {},
     renderQueuedWorkStarted() {},
-    applyExecutionScorecardRecord() {},
-    renderExecutionScorecard() {},
     setBusy(value) { this.busy = value; },
     __LASH_WORKBENCH_TURN_EVENT_HOOK__() {},
     async fetchStateSnapshot() {
@@ -1068,262 +1056,6 @@ function snapshot(sessionId, cursor, eventIds = []) {
   };
 }
 
-test("real provider turns survive cursor replay, recovery races, terminal replacement, and production snapshot rendering", async () => {
-  for (const scenario of executionEvidenceScenarios.providers) {
-    const target = { textContent: "" };
-    const snapshots = [];
-    const scheduledStateRetries = [];
-    const stateRetryDelays = [];
-    let nextStateRetryTimerId = 0;
-    let resolveDelayedSnapshot;
-    let handledModelCalls = 0;
-    const element = () => ({
-      value: "",
-      innerHTML: "",
-      textContent: "",
-      hidden: false,
-      className: "",
-      appendChild() {},
-      addEventListener() {},
-      classList: { toggle() {} },
-    });
-    const scorecardContext = {
-      Map,
-      Set,
-      Math,
-      Number,
-      executionScorecard: target,
-      finishTransientRows() {},
-      async fetchStateSnapshot() {
-        const next = snapshots.shift();
-        return next === "delayed"
-          ? new Promise(resolve => { resolveDelayedSnapshot = resolve; })
-          : next;
-      },
-      renderShellStatus() {},
-      setTimeout(callback, delay) {
-        const timer = { id: ++nextStateRetryTimerId, callback };
-        scheduledStateRetries.push(timer);
-        stateRetryDelays.push(delay);
-        return timer.id;
-      },
-      clearTimeout(timerId) {
-        const index = scheduledStateRetries.findIndex(timer => timer.id === timerId);
-        if (index >= 0) scheduledStateRetries.splice(index, 1);
-      },
-      renderError() {},
-      snapshotFailureReason(error) { return String(error); },
-      __LASH_WORKBENCH_TURN_EVENT_HOOK__(event) {
-        if (event.type === "model_call_recorded") handledModelCalls += 1;
-      },
-      modelInput: element(),
-      modelPending: element(),
-      variantSelect: element(),
-      knownModels: new Set(),
-      modelListenersBound: false,
-      document: { getElementById: element, createElement: element },
-      clearTerminalTurnTombstones() {},
-      clearTranscript() {},
-      validateModel() {},
-      knownSessionLabel: null,
-      renderUsage() {},
-      renderQueuedWork() {},
-      renderApprovals() {},
-      renderStateTranscript() {},
-      renderIngressReceipt() {},
-      recordTurnInputApplications() {},
-      busy: false,
-      streamGeneration: 1,
-      restartEventStreams() {},
-      setBusy(value) { this.busy = value; },
-    };
-    vm.runInNewContext(
-      `${markedSource("WORKBENCH_MODEL_SELECTION", "WORKBENCH_MODEL_SELECTION")}
-       const modelSelection = createModelSelection();
-       ${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
-       ${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
-       ${markedSource("WORKBENCH_SHELL_AVAILABILITY", "WORKBENCH_SHELL_AVAILABILITY")}
-       this.executionScorecardState = createExecutionScorecardState();
-       this.projectionState = createWorkbenchProjectionState();
-       this.shellAvailability = createShellAvailability();
-       this.renderedProductEvents = projectionState.renderedProductEvents;
-       this.appliedObservationEvents = projectionState.appliedObservationEvents;
-       ${markedSource("WORKBENCH_TURN_EVENT_REDUCER", "WORKBENCH_TURN_EVENT_REDUCER")}
-       ${markedSource("WORKBENCH_STATE_SNAPSHOT", "WORKBENCH_STATE_SNAPSHOT")}
-       ${markedSource("WORKBENCH_STATE_RETRY", "WORKBENCH_STATE_RETRY")}
-       ${markedSource("WORKBENCH_REMOTE_STREAM_RECOVERY", "WORKBENCH_REMOTE_STREAM_RECOVERY")}`,
-      scorecardContext,
-    );
-    scorecardContext.applyProjectionSnapshot(
-      scorecardContext.projectionState,
-      scenario.first_snapshot,
-      true,
-    );
-    scorecardContext.markShellHydrated(scorecardContext.shellAvailability);
-
-    const firstLine = JSON.stringify(scenario.first_observation_line);
-    scorecardContext.handleObservationStreamLine(firstLine);
-    scorecardContext.handleObservationStreamLine(firstLine);
-    assert.equal(handledModelCalls, 1, "cursor dedupe must stop a second reducer dispatch");
-    const firstRows = target.textContent
-      .split("\n")
-      .filter(row => row.includes(scenario.expected.first_call_id));
-    assert.equal(firstRows.length, 2, "the real retry call must render both attempt rows");
-    assert.match(firstRows[0], /#1 failed/);
-    assert.match(firstRows[0], /position no_response/);
-    assert.match(
-      firstRows[0],
-      new RegExp(`error ${scenario.expected.failed_attempt_error_class}`),
-    );
-    assert.match(firstRows[0], /retry scheduled/);
-    assert.doesNotMatch(firstRows[0], / · (?:model|response|finish|reasoning) /);
-    assert.match(firstRows[1], /#2 completed/);
-    assert.match(firstRows[1], /position terminal_observed/);
-    assert.match(firstRows[1], new RegExp(`model ${scenario.expected.served_model}`));
-    assert.match(firstRows[1], new RegExp(`response ${scenario.expected.response_id}`));
-    assert.match(firstRows[1], new RegExp(`finish ${scenario.expected.finish}`));
-    assert.match(firstRows[1], /reasoning 0/);
-
-    snapshots.push(scenario.first_snapshot);
-    scorecardContext.handleObservationStreamLine(
-      JSON.stringify(scenario.first_terminal_replacement_line),
-    );
-    await new Promise(resolve => setImmediate(resolve));
-    assert.match(
-      target.textContent,
-      new RegExp(scenario.expected.first_call_id),
-      "the production snapshot renderer must retain the first runtime ledger",
-    );
-    assert.equal(
-      target.textContent
-        .split("\n")
-        .filter(row => row.includes(scenario.expected.first_call_id)).length,
-      2,
-      "terminal replacement must retain both retry attempts",
-    );
-
-    const retriesBeforeGap = scheduledStateRetries.length;
-    snapshots.push("delayed");
-    scorecardContext.executionScorecardState.delete(scenario.expected.first_call_id);
-    scorecardContext.renderExecutionScorecard(
-      scorecardContext.executionScorecardState,
-      target,
-    );
-    assert.doesNotMatch(
-      target.textContent,
-      new RegExp(scenario.expected.first_call_id),
-      "the replay gap must contain a scorecard row that only a snapshot can backfill",
-    );
-    scorecardContext.handleObservationStreamLine(JSON.stringify({
-      type: "replay_gap",
-      gap: { latest_cursor: scenario.first_snapshot.observation.cursor },
-    }));
-    await new Promise(resolve => setImmediate(resolve));
-    scorecardContext.handleObservationStreamLine(
-      JSON.stringify(scenario.second_observation_line),
-    );
-    assert.equal(handledModelCalls, 2);
-    resolveDelayedSnapshot(scenario.first_snapshot);
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(
-      scheduledStateRetries.length,
-      retriesBeforeGap + 1,
-      "an overtaken replay-gap snapshot must schedule a fresh recovery",
-    );
-    assert.match(
-      target.textContent,
-      new RegExp(scenario.expected.second_call_id),
-      "an observation arriving during recovery must survive the older snapshot",
-    );
-    assert.doesNotMatch(
-      target.textContent,
-      new RegExp(scenario.expected.first_call_id),
-      "the overtaken snapshot itself must not erase the newer observation",
-    );
-
-    snapshots.push("delayed");
-    const firstRetry = scheduledStateRetries.shift();
-    assert.ok(firstRetry, "the stale replay-gap response must arm the production retry");
-    firstRetry.callback();
-    await new Promise(resolve => setImmediate(resolve));
-    const racingObservation = JSON.parse(JSON.stringify(scenario.second_observation_line));
-    racingObservation.event.cursor += "-retry-race";
-    scorecardContext.handleObservationStreamLine(JSON.stringify(racingObservation));
-    resolveDelayedSnapshot(scenario.final_snapshot);
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(
-      scheduledStateRetries.length,
-      1,
-      "a second stale response must keep the bounded production retry chain alive",
-    );
-    assert.equal(
-      scorecardContext.shellAvailability.channels.state,
-      true,
-      "a stale retry answered by the server must leave the state channel reachable",
-    );
-    assert.equal(
-      scorecardContext.shellStatusModel(scorecardContext.shellAvailability).banner.hidden,
-      true,
-      "a stale retry is not an outage: the reconnecting banner must stay hidden",
-    );
-    assert.doesNotMatch(
-      target.textContent,
-      new RegExp(scenario.expected.first_call_id),
-      "the second stale response must not pretend the missing row was repaired",
-    );
-
-    snapshots.push(scenario.final_snapshot);
-    const secondRetry = scheduledStateRetries.shift();
-    assert.ok(secondRetry, "the second stale response must arm the next bounded retry");
-    secondRetry.callback();
-    await new Promise(resolve => setImmediate(resolve));
-    assert.match(
-      target.textContent,
-      new RegExp(scenario.expected.first_call_id),
-      "the armed production retry must backfill the scorecard row after a quiet window",
-    );
-    assert.match(
-      target.textContent,
-      new RegExp(scenario.expected.second_call_id),
-      "fresh gap recovery must retain the observation that overtook the stale snapshot",
-    );
-    assert.deepEqual(
-      target.textContent
-        .split("\n")
-        .filter(row => row.includes(scenario.expected.first_call_id))
-        .map(row => row.match(/#\d+/)?.[0]),
-      ["#1", "#2"],
-      "gap recovery must restore retry attempt identity and order",
-    );
-    assert.deepEqual(
-      stateRetryDelays,
-      [900, 1800],
-      "stale recovery must retain the production retry backoff",
-    );
-    assert.equal(scorecardContext.shellAvailability.channels.state, true);
-    assert.equal(
-      scorecardContext.shellStatusModel(scorecardContext.shellAvailability).banner.hidden,
-      true,
-      "the successful retry must clear the reconnecting banner",
-    );
-    assert.equal(scheduledStateRetries.length, 0);
-
-    snapshots.push(scenario.final_snapshot);
-    scorecardContext.handleObservationStreamLine(
-      JSON.stringify(scenario.second_terminal_replacement_line),
-    );
-    await new Promise(resolve => setImmediate(resolve));
-    for (const callId of [scenario.expected.first_call_id, scenario.expected.second_call_id]) {
-      assert.match(target.textContent, new RegExp(callId));
-    }
-    assert.equal(
-      target.textContent.split("\n").length,
-      3,
-      "the real terminal replacement must converge to two retry rows plus the second call",
-    );
-  }
-});
-
 test("one running process is one row in the work rail", () => {
   // `/api/work` names a process by incarnation and `/api/lashlang-graphs` names
   // the same process without one, so matching the two key strings de-duplicated
@@ -1405,82 +1137,6 @@ test("a graph-only process still renders, and an incarnation is not needed to ma
   // A work item whose surface reported no graph key at all still de-duplicates
   // its graph row, and a process only the graph surface knows about is kept.
   assert.equal(rows.map(row => row.title).join(" | "), "__process_keep_me | in-the-w");
-});
-
-test("execution scorecard ordering follows attempt start time with call id as tie-breaker", () => {
-  const target = { textContent: "" };
-  const scorecardContext = { Map };
-  vm.runInNewContext(
-    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
-     this.scorecard = createExecutionScorecardState();`,
-    scorecardContext,
-  );
-  for (const [call_id, started_at_ms] of [["a-call", 30], ["!call", 20], ["A-call", 10]]) {
-    scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
-      call_id,
-      attempts: [{ ordinal: 1, started_at_ms, outcome: "completed", evidence: { reasoning_output_tokens: 0 } }],
-    });
-  }
-  scorecardContext.renderExecutionScorecard(scorecardContext.scorecard, target);
-  assert.deepEqual(
-    target.textContent.split("\n").map(line => line.split(" #", 1)[0]),
-    ["A-call", "!call", "a-call"],
-  );
-});
-
-test("execution scorecard renders cached input components separately", () => {
-  const target = { textContent: "" };
-  const scorecardContext = { Map, Math, Number };
-  vm.runInNewContext(
-    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
-     this.scorecard = createExecutionScorecardState();`,
-    scorecardContext,
-  );
-  scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
-    call_id: "cached-call",
-    attempts: [{
-      ordinal: 1,
-      started_at_ms: 1,
-      outcome: "completed",
-      usage: {
-        input_tokens: 1747,
-        cache_read_input_tokens: 21120,
-        cache_write_input_tokens: 0,
-        output_tokens: 63,
-      },
-    }],
-  });
-  scorecardContext.renderExecutionScorecard(scorecardContext.scorecard, target);
-  assert.equal(
-    target.textContent,
-    "cached-call #1 completed · usage input=1747 cache_read=21120 cache_write=0 output=63",
-  );
-});
-
-test("execution scorecard explains collection interruption only when reported", () => {
-  const target = { textContent: "" };
-  const scorecardContext = { Map, Math, Number };
-  vm.runInNewContext(
-    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
-     this.scorecard = createExecutionScorecardState();`,
-    scorecardContext,
-  );
-  scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
-    call_id: "partial",
-    attempts: [{
-      ordinal: 1,
-      started_at_ms: 1,
-      outcome: "aborted",
-      evidence: { collection_interruption: "protocol_abort" },
-    }],
-  });
-  scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
-    call_id: "complete",
-    attempts: [{ ordinal: 1, started_at_ms: 2, outcome: "completed", evidence: {} }],
-  });
-  scorecardContext.renderExecutionScorecard(scorecardContext.scorecard, target);
-  assert.equal(target.textContent.match(/collection interrupted:/g)?.length, 1);
-  assert.match(target.textContent, /collection interrupted: protocol_abort/);
 });
 
 test("a snapshot overtaken by a live event cannot erase its row", () => {
@@ -1590,7 +1246,7 @@ test("non-turn queued work requests authoritative busy state instead of latching
   vm.runInNewContext(
     `${block}
      renderQueuedWorkStarted({
-       causes: [{ event_type: "process.wake", text: "wake" }],
+       causes: [{ event_type: "process.yield", origin: { kind: "process", process_id: "p_1" }, text: "wake" }],
        batch_ids: ["batch-a"]
      });`,
     {
@@ -1653,10 +1309,6 @@ test("every tab refetches authoritative busy state for product-lane turn boundar
       renderedProductEvents: new Set(),
       renderMessage() {},
       renderIngressReceipt() {},
-      applyExecutionScorecardRecord() {},
-      renderExecutionScorecard() {},
-      executionScorecardState: new Map(),
-      executionScorecard: {},
       finishTransientRows() {},
       refreshTerminalState(turnId) { calls.push(`refresh:${turnId ?? "none"}`); },
       recoverFromState() {},
@@ -3072,6 +2724,7 @@ test("pending ingress receipts survive transcript replay until their turn commit
     renderedMessages: new Set(),
     renderedIngressInputs: new Set(),
     appliedTurnInputs: new Map(),
+    occurrenceStarts: new Map(),
     assistantDraft: null,
     assistantDraftTurnId: null,
     assistantDraftText: "",
@@ -3530,37 +3183,6 @@ test("a typed model survives an intervening snapshot and is what the turn sends"
   assert.doesNotMatch(snapshot, /modelInput\.value\s*=/);
 });
 
-test("execution scorecard renders typed retry decisions and policy evidence", () => {
-  const context = { Map, Math, Number };
-  vm.runInNewContext(
-    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
-     this.scorecard = createExecutionScorecardState();`,
-    context,
-  );
-  context.applyExecutionScorecardRecord(context.scorecard, {
-    call_id: "typed-retries",
-    attempts: [
-      { ordinal: 1, outcome: "failed", retry_decision: {
-        outcome: "scheduled", delay_ms: 250, wait: "backoff",
-        class: { class: "charge_authorized", tokens_at_stake: 42, attempt_number: 1 },
-      } },
-      { ordinal: 2, outcome: "failed", retry_decision: {
-        outcome: "declined", cause: "charge_safety", reason: "duplicate_cost_limit_exceeded",
-        tokens_at_stake: 50, attempt_number: 2,
-      } },
-      { ordinal: 3, outcome: "failed", retry_decision: {
-        outcome: "declined", cause: "retry_after_exceeds_cap",
-      } },
-    ],
-  });
-  assert.equal(context.executionScorecardText(context.scorecard), [
-    "typed-retries #1 failed · retry scheduled · delay 250ms · retry wait backoff · retry class charge_authorized · tokens at stake 42 · unsafe attempt 1",
-    "typed-retries #2 failed · retry declined · retry cause charge_safety · policy duplicate_cost_limit_exceeded · tokens at stake 50 · unsafe attempt 2",
-    "typed-retries #3 failed · retry declined · retry cause retry_after_exceeds_cap",
-  ].join("\n"));
-});
-
-
 test("canonical reply adoption removes only the matching typed preview", () => {
   const removed = [];
   const target = {children: [], appendChild(node) { this.children.push(node); }};
@@ -3618,4 +3240,328 @@ test("the session sidebar titles, orders and highlights chats", () => {
   assert.equal(context.sessionAge(now - 5 * 60 * 1000, now), "5m");
   assert.equal(context.sessionAge(now - 3 * 3600 * 1000, now), "3h");
   assert.equal(context.sessionAge(now - 2 * 24 * 3600 * 1000, now), "2d");
+});
+
+/* A small DOM for the laws below: compound selectors (tag, classes,
+   [attr], [attr="value"], :not([attr])), data-* attributes through
+   `dataset`, and the tree edits the production renderers use. */
+function fakeDom() {
+  const camel = name => name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+  function parse(selector) {
+    const compound = { tag: null, classes: [], attrs: [], not: [] };
+    const pattern = /^([a-z]+)|\.([\w-]+)|:not\(\[([\w-]+)\]\)|\[([\w-]+)(?:="([^"]*)")?\]/gy;
+    let match;
+    while ((match = pattern.exec(selector))) {
+      if (match[1]) compound.tag = match[1];
+      if (match[2]) compound.classes.push(match[2]);
+      if (match[3]) compound.not.push(match[3]);
+      if (match[4]) compound.attrs.push([match[4], match[5]]);
+      if (pattern.lastIndex === selector.length) break;
+    }
+    assert.equal(pattern.lastIndex, selector.length, `unsupported selector ${selector}`);
+    return compound;
+  }
+  function attr(node, name) {
+    if (name.startsWith("data-")) return node.dataset[camel(name.slice(5))];
+    return node.attributes[name];
+  }
+  function matches(node, compound) {
+    const classes = node.className.split(" ").filter(Boolean);
+    return (!compound.tag || node.tagName === compound.tag)
+      && compound.classes.every(name => classes.includes(name))
+      && compound.attrs.every(([name, value]) => value === undefined
+        ? attr(node, name) !== undefined
+        : attr(node, name) === value)
+      && compound.not.every(name => attr(node, name) === undefined);
+  }
+  function descendants(node) {
+    return node.children.flatMap(child => [child, ...descendants(child)]);
+  }
+  function element(tagName) {
+    const node = {
+      tagName,
+      className: "",
+      dataset: {},
+      attributes: {},
+      children: [],
+      parentNode: null,
+      ownText: "",
+      hidden: false,
+      open: false,
+      get textContent() {
+        return this.ownText + this.children.map(child => child.textContent).join("");
+      },
+      set textContent(value) {
+        this.ownText = String(value);
+        for (const child of this.children) child.parentNode = null;
+        this.children = [];
+      },
+      set innerHTML(value) {
+        assert.equal(value, "", "the laws only clear markup");
+        this.textContent = "";
+      },
+      get isConnected() {
+        let at = this;
+        while (at.parentNode) at = at.parentNode;
+        return at.root === true;
+      },
+      classList: {
+        add: name => { if (!node.classList.contains(name)) node.className = (node.className + " " + name).trim(); },
+        remove: name => { node.className = node.className.split(" ").filter(c => c && c !== name).join(" "); },
+        toggle: (name, force) => {
+          const on = force ?? !node.classList.contains(name);
+          if (on) node.classList.add(name); else node.classList.remove(name);
+          return on;
+        },
+        contains: name => node.className.split(" ").includes(name),
+      },
+      appendChild(child) {
+        child.remove?.();
+        child.parentNode = this;
+        this.children.push(child);
+        return child;
+      },
+      append(...children) {
+        for (const child of children) {
+          if (typeof child === "string") this.ownText += child;
+          else this.appendChild(child);
+        }
+      },
+      replaceChildren(...children) {
+        this.textContent = "";
+        this.append(...children);
+      },
+      remove() {
+        if (!this.parentNode) return;
+        const siblings = this.parentNode.children;
+        siblings.splice(siblings.indexOf(this), 1);
+        this.parentNode = null;
+      },
+      replaceWith(next) {
+        const parent = this.parentNode;
+        next.remove();
+        parent.children.splice(parent.children.indexOf(this), 1, next);
+        next.parentNode = parent;
+        this.parentNode = null;
+      },
+      insertAdjacentElement(position, next) {
+        assert.equal(position, "afterend");
+        const parent = this.parentNode;
+        next.remove();
+        parent.children.splice(parent.children.indexOf(this) + 1, 0, next);
+        next.parentNode = parent;
+        return next;
+      },
+      setAttribute(name, value) {
+        if (name.startsWith("data-")) this.dataset[camel(name.slice(5))] = String(value);
+        else this.attributes[name] = String(value);
+      },
+      getAttribute(name) { return attr(this, name) ?? null; },
+      removeAttribute(name) { delete this.attributes[name]; },
+      addEventListener() {},
+      querySelectorAll(selector) {
+        const compound = parse(selector);
+        return descendants(this).filter(child => matches(child, compound));
+      },
+      querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; },
+    };
+    return node;
+  }
+  const root = element("section");
+  root.root = true;
+  return { root, document: { createElement: element } };
+}
+
+/* The renderer blocks the FIG-5036 laws drive, with stubs for the page
+   furniture they reach but do not decide. */
+function timelineRenderer() {
+  const dom = fakeDom();
+  const timeline = dom.root;
+  const context = {
+    Set,
+    Map,
+    String,
+    Array,
+    JSON,
+    CSS: { escape: value => value },
+    timeline,
+    document: dom.document,
+    renderedIngressInputs: new Set(),
+    appliedTurnInputs: new Map(),
+    assistantDraft: null,
+    assistantDraftTurnId: null,
+    assistantDraftText: "",
+    assistantDraftChunks: [],
+    reasoning: null,
+    reasoningChunks: [],
+    pendingCodeBlock: null,
+    pendingTools: [],
+    lastUserText: "",
+    eventRows: [],
+    busyRefreshes: 0,
+    clearRetryStatus() {},
+    clearStreamingUsage() {},
+    renderShellStatus() {},
+    scrollToEnd() {},
+    clearEmpty() {
+      for (const child of [...timeline.children]) if (child.id === "timelineEmpty") child.remove();
+    },
+    roleLabel(role) { return role === "user" ? "you" : role; },
+    setMessageBody(body, role, text) { body.textContent = text; },
+    renderMessageAttachments() {},
+    timeStamp() { return null; },
+    fillEventLane(node, body, kind, text) { body.textContent = text; },
+    appendReasoning() {},
+    appendCodeBlock() {},
+    renderNote() {},
+    renderEventRow(label, detail) { context.eventRows.push([label, detail]); },
+    refreshBusyState() { context.busyRefreshes += 1; },
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_MESSAGE_RENDER", "WORKBENCH_MESSAGE_RENDER")}
+     ${markedSource("WORKBENCH_INGRESS_RECEIPTS", "WORKBENCH_INGRESS_RECEIPTS")}
+     ${markedSource("WORKBENCH_PROCESS_WAKE_PARSE", "WORKBENCH_PROCESS_WAKE_PARSE")}
+     ${markedSource("WORKBENCH_OCCURRENCE_ROWS", "WORKBENCH_OCCURRENCE_ROWS")}
+     ${markedSource("WORKBENCH_TRANSCRIPT_CLEAR", "WORKBENCH_TRANSCRIPT_CLEAR")}
+     ${markedSource("WORKBENCH_SETTLED_TRANSCRIPT", "WORKBENCH_SETTLED_TRANSCRIPT")}`,
+    context,
+  );
+  return context;
+}
+
+function pendingInput(inputId, text, status) {
+  return {
+    input: {
+      input_id: inputId,
+      ingress: { scope: "next_turn" },
+      state: "deferred_next_turn",
+      input: { items: [{ type: "text", text }] },
+    },
+    status,
+  };
+}
+
+// FIG-5036: a send to an idle session is admitted to the turn it starts at
+// once, and the pending-input read lists it as admitted to that turn. The page
+// rendered every pending input as a "queued next" card, so the message showed
+// twice — as the turn's user row and as a card that stayed for the whole turn.
+test("input a run already admitted is its run's user row, never a queued receipt", () => {
+  const page = timelineRenderer();
+  const timeline = page.timeline;
+  const text = "let me know when a button is pressed";
+
+  page.renderStateTranscript({
+    transcript: [],
+    product_events: {
+      events: [{
+        event_id: "message:user-2",
+        type: "message",
+        message: { id: "user-2", role: "user", text, provenance: { kind: "turn_input", turn_id: "turn-2" } },
+      }],
+    },
+    pending_turn_inputs: [pendingInput("ti:2", text, { kind: "admitted", run: "turn-2" })],
+  });
+  assert.equal(timeline.querySelectorAll(".ingress-receipt").length, 0);
+  assert.equal(timeline.querySelectorAll(".message.user").length, 1);
+
+  // Input that really waits behind a running turn is a receipt until its own
+  // run starts; then it is that run's user row, in the receipt's place.
+  page.clearTranscript();
+  page.renderIngressReceipt({ input_id: "ti:3", ingress: { scope: "next_turn" }, text: "now say ok" });
+  page.reconcilePendingTurnInputs([pendingInput("ti:3", "now say ok", { kind: "open" })]);
+  assert.deepEqual(
+    timeline.querySelectorAll(".ingress-receipt").map(row => row.textContent),
+    ["queued nextnow say ok"],
+  );
+  page.reconcilePendingTurnInputs([pendingInput("ti:3", "now say ok", { kind: "admitted", run: "turn-3" })]);
+  assert.equal(timeline.querySelectorAll(".ingress-receipt").length, 0);
+  const promoted = timeline.querySelectorAll(".message.user");
+  assert.equal(promoted.length, 1);
+  assert.equal(promoted[0].dataset.promotedInput, "ti:3");
+  assert.equal(promoted[0].dataset.turnId, "turn-3");
+
+  // The run's committed row takes the promoted row's place: still one row.
+  page.renderMessage({ id: "user-3", role: "user", text: "now say ok", provenance: { kind: "turn_input", turn_id: "turn-3" } });
+  const users = timeline.querySelectorAll(".message.user");
+  assert.equal(users.length, 1);
+  assert.equal(users[0].dataset.promotedInput, undefined);
+});
+
+const OCCURRENCE = {
+  id: "trigger:workbench-button-trigger:press-1",
+  role: "event",
+  text: "red pressed",
+  at: null,
+  provenance: {
+    kind: "trigger_occurrence",
+    occurrence_id: "trigger:workbench-button-trigger:press-1",
+    process_ids: ["p_watch_1"],
+  },
+};
+const WAKE_TEXT = "Background process wake\nProcess: p_watch_1\nEvent: process.yield #4\nWake input:\n{\"button\":\"Red\"}";
+const WAKE_STARTED = {
+  type: "queued_work_started",
+  boundary: "idle",
+  batch_ids: ["qwb:1"],
+  causes: [{
+    id: "wake:1",
+    event_type: "process.yield",
+    origin: {
+      kind: "process",
+      process_id: "p_watch_1",
+      event_type: "process.yield",
+      sequence: 4,
+      wake_id: "wake:1",
+      caused_by: {
+        type: "trigger_occurrence",
+        occurrence_id: "trigger:workbench-button-trigger:press-1",
+        subscription_id: "trigger-subscription:watch",
+        subscription_incarnation: "incarnation:watch",
+        subscription_revision: 1,
+      },
+    },
+    text: WAKE_TEXT,
+  }],
+};
+
+// FIG-5036: one red press rendered three rows ("red button trigger
+// occurrence", "button trigger occurrence emitted", "queued turn started ·
+// 1 batch"), and a reload added the durable wake as a fourth. The occurrence
+// is one row; the turn its processes start folds into it.
+test("one trigger occurrence is one row, live and settled", () => {
+  const page = timelineRenderer();
+  const timeline = page.timeline;
+  const eventRows = () => timeline.querySelectorAll(".message.event");
+
+  page.renderMessage(OCCURRENCE);
+  page.renderQueuedWorkStarted(WAKE_STARTED);
+  assert.equal(eventRows().length, 1);
+  assert.equal(eventRows()[0].dataset.turnStarted, "true");
+  assert.match(eventRows()[0].textContent, /^red pressed→ turn started/);
+  assert.match(eventRows()[0].textContent, /wake input: \{"button":"Red"\}/);
+  assert.deepEqual(page.eventRows, [], "the wake must not render a row of its own");
+
+  // The turn can start before the occurrence row arrives.
+  page.clearTranscript();
+  page.renderQueuedWorkStarted(WAKE_STARTED);
+  assert.equal(eventRows().length, 0);
+  page.renderMessage(OCCURRENCE);
+  assert.equal(eventRows().length, 1);
+  assert.equal(eventRows()[0].dataset.turnStarted, "true");
+
+  // Settled: the durable wake row and the occurrence are one row, where the
+  // wake sits in the conversation.
+  page.clearTranscript();
+  page.renderStateTranscript({
+    transcript: [
+      { row_id: "wake-row", kind: "event", provenance: {}, content: { text: WAKE_TEXT, reasoning: [], attachments: [] } },
+      { row_id: "reply-row", kind: "assistant_reply", provenance: { turn_id: "shift-run-1" }, content: { text: "Red was pressed.", reasoning: [], attachments: [] } },
+    ],
+    product_events: { events: [{ event_id: `message:${OCCURRENCE.id}`, type: "message", message: OCCURRENCE }] },
+    pending_turn_inputs: [],
+  });
+  assert.equal(eventRows().length, 1);
+  assert.equal(timeline.children[0], eventRows()[0], "the occurrence row stands where the wake was");
+  assert.equal(eventRows()[0].dataset.turnStarted, "true");
+  assert.equal(timeline.children.length, 2);
 });

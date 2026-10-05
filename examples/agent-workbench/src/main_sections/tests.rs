@@ -122,7 +122,6 @@ mod mail_payload_tests;
 #[cfg(test)]
 #[path = "tests/provider_execution_evidence.rs"]
 mod provider_execution_evidence_tests;
-pub(crate) use provider_execution_evidence_tests::provider_execution_evidence_scenarios;
 #[cfg(test)]
 #[path = "tests/remote_execution_evidence.rs"]
 mod remote_execution_evidence_tests;
@@ -1202,12 +1201,6 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
     let selected_llm_profile = state.selected_llm_profile();
     assert_eq!(selected_llm_profile.model, "button-model");
     assert_eq!(selected_llm_profile.model_variant.as_deref(), Some("high"));
-    assert!(
-        state.messages_snapshot().iter().any(|message| {
-            message.role == "event" && message.text == "blue button trigger occurrence"
-        }),
-        "button click should publish the local accepted event"
-    );
 
     let request = tokio::time::timeout(Duration::from_secs(2), restate_requests.recv())
         .await
@@ -1244,6 +1237,83 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         Some("high")
     );
     let _ = std::fs::remove_dir_all(data_dir);
+}
+
+/// FIG-5036: one button press used to render three rows: one from the route,
+/// one from the workflow, and the turn its watcher woke. The press is one row
+/// now, published by the workflow with the occurrence it recorded, once
+/// however often a replay publishes it, and naming the processes it started so
+/// the page folds the woken turn into it.
+#[test]
+fn a_button_press_is_one_row_published_by_its_workflow() {
+    run_async_test_on_stack_budget("workbench-press-one-row", || async {
+        let double = crate::tests::test_double_backend(0).await;
+        let mut state = recoverable_chat_tests::recoverable_chat_test_state(&double, 16).await;
+        let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+        state.restate_ingress_url = restate_ingress_url;
+
+        let Json(accepted) = button_trigger(
+            State(state.clone()),
+            Query(SessionQuery::default()),
+            Json(ButtonEventRequest {
+                button: ButtonChoice::Red,
+                model: None,
+                model_variant: None,
+            }),
+        )
+        .await
+        .expect("button command");
+        assert!(accepted.accepted);
+        let request = tokio::time::timeout(Duration::from_secs(5), restate_requests.recv())
+            .await
+            .expect("Restate request")
+            .expect("Restate request payload");
+        assert!(
+            request
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| path.starts_with("WorkbenchButtonTriggerWorkflow/")),
+            "the press is submitted to its workflow: {request}"
+        );
+        assert!(
+            state
+                .messages_snapshot()
+                .iter()
+                .all(|message| message.role != "event"),
+            "the button route must not publish a row of its own"
+        );
+
+        let report = lash::triggers::TriggerEmitReport {
+            occurrence_id: "trigger:workbench-button-trigger:press-1".to_string(),
+            deliveries: vec![lash::triggers::TriggerDeliveryEmitReceipt {
+                occurrence_id: "trigger:workbench-button-trigger:press-1".to_string(),
+                subscription_id: "trigger-subscription:watch".to_string(),
+                outcome: lash::triggers::TriggerDeliveryEmitOutcome::Started {
+                    process_id: lash::ProcessId::fixture("p_watch"),
+                },
+            }],
+        };
+        for _ in 0..2 {
+            state.push_trigger_occurrence_for_session(
+                &state.current_session_id(),
+                "red pressed",
+                &report,
+            );
+        }
+        let rows = state
+            .messages_snapshot()
+            .into_iter()
+            .filter(|message| message.role == "event")
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 1, "one occurrence is one row: {rows:?}");
+        assert_eq!(rows[0].text, "red pressed");
+        assert!(matches!(
+            &rows[0].provenance,
+            Some(ChatMessageProvenance::TriggerOccurrence { occurrence_id, process_ids })
+                if *occurrence_id == report.occurrence_id
+                    && *process_ids == vec![lash::ProcessId::fixture("p_watch")]
+        ));
+    });
 }
 
 pub(super) async fn spawn_restate_ingress_capture() -> (String, mpsc::UnboundedReceiver<Value>) {

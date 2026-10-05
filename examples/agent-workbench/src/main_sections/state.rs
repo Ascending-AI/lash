@@ -192,14 +192,27 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum ChatMessageProvenance {
-    TurnInput { turn_id: TurnId },
-    TurnOutput { turn_id: TurnId },
+    TurnInput {
+        turn_id: TurnId,
+    },
+    TurnOutput {
+        turn_id: TurnId,
+    },
+    /// The one row a host trigger occurrence shows (a button press, a mail
+    /// delivery). It names the processes the occurrence started, so the page
+    /// folds the wake those processes cause, and the turn it starts, into
+    /// this row instead of rendering them as rows of their own (FIG-5036).
+    TriggerOccurrence {
+        occurrence_id: String,
+        process_ids: Vec<ProcessId>,
+    },
 }
 
 impl ChatMessageProvenance {
-    pub(crate) fn turn_id(&self) -> &TurnId {
+    pub(crate) fn turn_id(&self) -> Option<&TurnId> {
         match self {
-            Self::TurnInput { turn_id } | Self::TurnOutput { turn_id } => turn_id,
+            Self::TurnInput { turn_id } | Self::TurnOutput { turn_id } => Some(turn_id),
+            Self::TriggerOccurrence { .. } => None,
         }
     }
 }
@@ -398,6 +411,13 @@ pub(crate) struct SessionView {
 pub(crate) struct SessionListResponse {
     pub(crate) sessions: Vec<SessionView>,
     pub(crate) current_session_id: SessionId,
+}
+
+/// A deleted chat and the one that takes its place in the sidebar.
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct SessionDeleted {
+    pub(crate) session_id: SessionId,
+    pub(crate) successor_session_id: SessionId,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -884,7 +904,8 @@ impl SessionEventRegistry {
             let owned_by_turn = message
                 .provenance
                 .as_ref()
-                .is_some_and(|provenance| provenance.turn_id() == turn_id);
+                .and_then(ChatMessageProvenance::turn_id)
+                .is_some_and(|owner| owner == turn_id);
             if owned_by_turn {
                 retired.insert(message.id.clone());
             }

@@ -53,14 +53,14 @@ Available host features:
       return true;
     };
 
-    const handle = await triggers.register({
+    await triggers.register({
       source: ui.button.pressed({}),
       target: { definition: on_button },
       inputs: (event) => ({ event: event }),
       name: "button watcher"
     });
     const registrations = await triggers.list({ name: "button watcher" });
-    finish("Registered button watcher `" + handle.subscription_key + "`. Active matching registrations: " + registrations.length + ".");
+    finish("Watching the red and blue buttons as \"button watcher\" (" + registrations.length + " active).");
     </typescript>
 
 - For schedule requests, build `cron.Schedule(...)` values and register a process definition with a stable literal `subscription_key`. The fired event is the parameter of the `inputs` arrow, for example `inputs: (event) => ({ tick: event })`; a one-parameter target may omit `inputs` entirely. The workbench syncs enabled `cron.Schedule` registrations to Restate cron objects by stored source key, then emits trigger occurrences with `cron.Tick { fired_at: str }`; use a seconds expression such as `*/10 * * * * *` when the user wants a quick smoke test. Use `await triggers.list({})` to discover registrations and `await triggers.disable({ subscription_key: "schedule-key", expected_revision: 1 })` to disable future occurrence delivery.
@@ -85,14 +85,16 @@ Available host features:
       return true;
     };
 
-    const handle = await triggers.register({
+    await triggers.register({
       source: mail.received({}),
       target: { definition: on_mail },
       inputs: (event) => ({ event: event }),
       name: "inbox concierge"
     });
-    finish("Inbox concierge registered as `" + handle.subscription_key + "`.");
+    finish("Inbox concierge is watching every delivery.");
     </typescript>
+
+A registration's `subscription_key` is a machine identity for later `triggers.*` calls. Never quote it to the user: name a registration by its `name` and what it watches.
 
 Reference only the `inbox.<account>` authorities that actually exist; if the user has not connected an account yet, ask them to add one from the Accounts tab first.
 

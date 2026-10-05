@@ -922,8 +922,6 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         "toolCompleted": tool_completed_event,
         "codeCompleted": code_completed_event,
     });
-    let evidence_scenarios = Box::pin(provider_execution_evidence_scenarios()).await;
-
     let (committed_message, durable_tool_transcript) = durable_browser_projection_fixture().await;
 
     let node = std::env::var_os("LASH_WORKBENCH_TEST_NODE").unwrap_or_else(|| "node".into());
@@ -960,11 +958,6 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
             "LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT",
             serde_json::to_string(&durable_tool_transcript)
                 .expect("serialize Rust-produced durable tool transcript"),
-        )
-        .env(
-            "LASH_WORKBENCH_EXECUTION_EVIDENCE_SCENARIOS",
-            serde_json::to_string(&evidence_scenarios)
-                .expect("serialize provider evidence runtime scenarios"),
         )
         .output()
         .expect("Node.js is required for the agent-workbench browser projection gate");

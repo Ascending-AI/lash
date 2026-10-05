@@ -145,7 +145,6 @@ fn workbench_lists_and_controls_individual_queued_batches() {
                     && batch_ids.as_slice() == std::slice::from_ref(&first.batch_id)
         )));
 
-        assert!(ui::INDEX_HTML.contains("id=\"queuedWorkList\""));
         // The engine executes every pending batch; the page only cancels one.
         assert!(!ui::INDEX_HTML.contains("Run only this queued-work batch now"));
         assert!(ui::INDEX_HTML.contains("Cancel this pending queued-work batch"));

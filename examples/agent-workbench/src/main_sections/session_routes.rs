@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 // The session-management routes: the roster the session sidebar renders, the create
 // flow, and the durable selection a query-less `/api/` call resolves through.
@@ -153,4 +154,49 @@ pub(crate) async fn compact_context(
         }
         Err(error) => Err(state.session_admission_error(&session_id, "api.compact", error)),
     }
+}
+
+/// Delete one chat from the sidebar.
+///
+/// The same durable retirement a reset runs, recorded first as a delete, so
+/// whichever caller settles it removes the row instead of rotating the slot
+/// onto a fresh session. The answer names the chat that takes its place: the
+/// most recent one left, or a fresh one when none is.
+pub(crate) async fn delete_session(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<SessionDeleted>, AppError> {
+    // A path segment is untrusted: a malformed id is a bad request, never a
+    // roster lookup.
+    let session_id =
+        SessionId::parse(session_id).map_err(|err| AppError::bad_request(err.to_string()))?;
+    if state.sessions.entry(&session_id).is_none()
+        && state.active_turns.retirement(&session_id).is_none()
+    {
+        return Err(AppError::not_found(format!(
+            "session `{session_id}` is not on the roster"
+        )));
+    }
+    state.sessions.mark_for_removal(&session_id);
+    let (successor, replaced_current) = match retire_for_reset(&state, &session_id).await {
+        Ok(retired) => retired,
+        Err(error) => {
+            if state.active_turns.retirement(&session_id) != Some(SessionRetirement::Retired) {
+                state.sessions.unmark_for_removal(&session_id);
+            }
+            return Err(error);
+        }
+    };
+    settle_retired_slot(
+        &state,
+        &session_id,
+        &successor,
+        replaced_current,
+        "api.sessions.delete",
+    )
+    .await?;
+    Ok(Json(SessionDeleted {
+        session_id,
+        successor_session_id: successor,
+    }))
 }

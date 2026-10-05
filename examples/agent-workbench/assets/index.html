@@ -36,6 +36,14 @@
       --error-tint:    oklch(0.58 0.180 25 / 0.12);
       --focus-ring:    0 0 0 2px var(--form), 0 0 0 4px var(--sodium);
 
+      /* one type scale for sidebar, timeline and composer */
+      --text-2xs: 0.68rem;
+      --text-xs:  0.75rem;
+      --text-sm:  0.82rem;
+      --text-md:  0.94rem;
+      --text-lg:  1.25rem;
+      --text-xl:  1.5rem;
+
       /* 4pt spacing scale */
       --space-3xs: 0.125rem;
       --space-2xs: 0.25rem;
@@ -786,16 +794,6 @@
     }
     .session-error[hidden] { display: none; }
 
-    .execution-scorecard {
-      margin: 0;
-      padding: 8px 10px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      color: var(--muted);
-      font: 11px/1.45 var(--mono);
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
 
     /* ─── center ─── */
 
@@ -1447,7 +1445,7 @@
       border-left: 1px solid var(--line);
       background: var(--form);
       display: grid;
-      grid-template-rows: auto auto auto auto minmax(0, 1fr);
+      grid-template-rows: auto auto minmax(0, 1fr);
       min-height: 0;
     }
 
@@ -1498,128 +1496,6 @@
     }
 
     .work-filter input { accent-color: var(--sodium); margin: 0; }
-
-    .queued-work-ledger {
-      max-height: 34vh;
-      overflow: auto;
-      padding: var(--space-sm) var(--space-lg);
-      border-bottom: 1px solid var(--line);
-      background: oklch(0.74 0.155 65 / 0.035);
-    }
-
-    .approval-ledger {
-      max-height: 38vh;
-      overflow: auto;
-      padding: var(--space-sm) var(--space-lg);
-      border-bottom: 1px solid var(--line);
-      background: var(--error-tint);
-    }
-
-    .approval-list { display: grid; gap: var(--space-xs); }
-
-    .approval-card {
-      display: grid;
-      gap: var(--space-xs);
-      padding: var(--space-sm);
-      border: 1px solid var(--line-strong);
-      border-radius: 6px;
-      background: var(--form-deep);
-    }
-
-    .approval-tool {
-      font-family: var(--font-mono);
-      font-size: 0.76rem;
-      color: var(--chalk);
-      overflow-wrap: anywhere;
-    }
-
-    .approval-args {
-      margin: 0;
-      font-family: var(--font-mono);
-      font-size: 0.68rem;
-      color: var(--chalk-mid);
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-
-    .approval-meta {
-      display: grid;
-      gap: var(--space-3xs);
-      font-size: 0.7rem;
-      color: var(--ash-text);
-    }
-
-    .approval-key {
-      font-family: var(--font-mono);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .approval-actions { display: flex; justify-content: flex-end; gap: var(--space-xs); }
-
-    .approval-approve,
-    .approval-deny {
-      min-height: 2rem;
-      padding: 0 var(--space-sm);
-      border-radius: 4px;
-      font-family: var(--font-ui);
-      font-size: 0.68rem;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      cursor: pointer;
-    }
-
-    .approval-approve:hover { background: var(--sodium); color: var(--form-deep); }
-    .approval-deny:hover { background: var(--error); color: var(--form-deep); }
-    .approval-approve:active,
-    .approval-deny:active { transform: translateY(1px); }
-    .approval-approve:focus-visible,
-    .approval-deny:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-
-    .approval-approve {
-      border: 1px solid var(--sodium);
-      background: var(--sodium-tint);
-      color: var(--sodium-soft);
-    }
-
-    .approval-deny {
-      border: 1px solid var(--error);
-      background: var(--error-tint);
-      color: var(--error);
-    }
-
-    .approval-approve:disabled,
-    .approval-deny:disabled { opacity: 0.5; cursor: wait; }
-
-    .queued-work-heading {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: var(--space-sm);
-      margin-bottom: var(--space-xs);
-      font-family: var(--font-ui);
-      font-size: 0.72rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--ash-text);
-    }
-
-    .queued-work-list { display: grid; gap: var(--space-xs); }
-
-    .queued-work-batch {
-      display: grid;
-      gap: var(--space-xs);
-      padding: var(--space-sm);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--form-deep);
-    }
-
-    .queued-work-id .value-text { color: var(--chalk); }
-
-    .queued-work-meta { font-family: var(--font-ui); font-size: 0.72rem; color: var(--ash-text); }
-    .queued-work-actions { display: flex; justify-content: flex-end; gap: var(--space-xs); }
 
     .work-list {
       min-width: 0;
@@ -2170,7 +2046,6 @@
 
     /* The rails are narrow; a full-size empty box there reads as a broken
        card rather than as "nothing here yet". */
-    .queued-work-list .empty,
     .work-list .empty {
       margin: 0;
       padding: var(--space-sm);
@@ -2278,6 +2153,199 @@
       border-color: var(--line-strong);
       background: var(--sodium-tint);
     }
+
+    /* ─── sidebar chat rows: delete ─── */
+
+    .chat-item {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      align-items: center;
+    }
+    .chat-item .chat-row { padding-right: 2.2rem; }
+    .chat-item[data-deletion="deleting"] { opacity: 0.45; pointer-events: none; }
+    .chat-item[data-deletion="confirm"] .chat-row { padding-right: 9.5rem; }
+    .chat-item[data-deletion="confirm"] .chat-meta { visibility: hidden; }
+
+    .chat-delete {
+      position: absolute;
+      right: var(--space-2xs);
+      top: 50%;
+      transform: translateY(-50%);
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--ash-text);
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 100ms ease-out, color 100ms ease-out, background 100ms ease-out;
+    }
+    .chat-delete svg { width: 15px; height: 15px; }
+    .chat-item:hover .chat-delete,
+    .chat-item:focus-within .chat-delete { opacity: 1; }
+    .chat-item:hover .chat-meta,
+    .chat-item:focus-within .chat-meta { visibility: hidden; }
+    .chat-delete:hover { color: var(--error); background: var(--error-tint); }
+    @media (hover: none) {
+      .chat-delete { opacity: 1; }
+      .chat-item .chat-meta { display: none; }
+    }
+
+    .chat-confirm {
+      position: absolute;
+      right: var(--space-2xs);
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      align-items: center;
+      gap: var(--space-2xs);
+      font-family: var(--font-ui);
+      font-size: var(--text-xs);
+      color: var(--chalk-dim);
+    }
+    .chat-confirm button {
+      min-height: 24px;
+      padding: 0 var(--space-xs);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--form-deep);
+      color: var(--chalk-dim);
+      font: inherit;
+      cursor: pointer;
+    }
+    .chat-confirm button:hover { border-color: var(--line-strong); color: var(--chalk); }
+    .chat-confirm .chat-confirm-yes { border-color: var(--line-danger); color: var(--error); }
+    .chat-confirm .chat-confirm-yes:hover { background: var(--error-tint); color: var(--error); }
+
+    .chat-flag {
+      flex: none;
+      padding: 0 0.4rem;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      font-family: var(--font-ui);
+      font-size: var(--text-2xs);
+      line-height: 1.5;
+      color: var(--sodium-soft);
+    }
+    .chat-row { display: flex; align-items: baseline; }
+    .chat-row .chat-title { flex: 1 1 auto; }
+
+    .inline-action {
+      min-height: 24px;
+      padding: 0 var(--space-xs);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: transparent;
+      color: var(--ash-text);
+      font-family: var(--font-ui);
+      font-size: var(--text-2xs);
+      letter-spacing: 0.04em;
+      cursor: pointer;
+    }
+    .inline-action:hover { color: var(--chalk); border-color: var(--line-strong); }
+
+    /* ─── compact timeline rows: occurrences, queued batches, approvals ─── */
+
+    .message.event.occurrence,
+    .message.event.queued-batch {
+      padding: var(--space-2xs) var(--space-sm);
+    }
+    .occurrence .event-head,
+    .queued-batch .event-head { align-items: center; }
+    .occurrence-dot {
+      flex: none;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--sodium);
+    }
+    .occurrence-dot[data-tone="red"] { background: var(--error); }
+    .occurrence-dot[data-tone="blue"] { background: var(--info); }
+    .occurrence-outcome { color: var(--ash-text); }
+    .occurrence[data-turn-started="true"] .occurrence-outcome { color: var(--lichen); }
+    .occurrence .event-head { flex-wrap: wrap; row-gap: 0; }
+    .occurrence .msg-time { margin-left: auto; }
+    .occurrence-detail { display: contents; }
+    .occurrence-detail > summary {
+      order: 9;
+      flex: none;
+      color: var(--ash-text);
+      cursor: pointer;
+      list-style: none;
+      font-size: var(--text-2xs);
+      letter-spacing: 0.04em;
+    }
+    .occurrence-detail > summary::-webkit-details-marker { display: none; }
+    .occurrence-detail > summary::before { content: "▸ "; color: var(--sodium); }
+    .occurrence-detail[open] > summary::before { content: "▾ "; }
+    .occurrence-detail > summary:hover { color: var(--chalk); }
+    .occurrence-detail > pre {
+      order: 10;
+      flex: 1 1 100%;
+      margin: var(--space-2xs) 0 0;
+      padding: var(--space-xs) var(--space-sm);
+      border-top: 1px solid var(--line);
+      color: var(--chalk-mid);
+      font-size: var(--text-2xs);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      -webkit-user-select: all;
+      user-select: all;
+    }
+    .queued-batch .inline-action { margin-left: auto; }
+
+    .approval-card {
+      margin: var(--space-sm) 0;
+      padding: var(--space-xs) var(--space-sm);
+      border: 1px solid var(--line-strong);
+      border-left: 2px solid var(--sodium);
+      border-radius: 4px;
+      background: var(--sodium-tint);
+      font-family: var(--font-ui);
+      font-size: var(--text-xs);
+    }
+    .approval-card[data-decided] {
+      padding: var(--space-2xs) var(--space-sm);
+      border-color: var(--line);
+      border-left-color: var(--ash-mid);
+      background: var(--form);
+      color: var(--ash-text);
+    }
+    .approval-card[data-decided="approved"] { border-left-color: var(--lichen); }
+    .approval-card[data-decided="denied"] { border-left-color: var(--error); }
+    .approval-head { display: flex; align-items: center; gap: var(--space-xs); flex-wrap: wrap; }
+    .approval-label {
+      color: var(--sodium-soft);
+      font-size: var(--text-2xs);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .approval-tool { color: var(--chalk); font-weight: 500; overflow-wrap: anywhere; }
+    .approval-age { color: var(--ash-text); }
+    .approval-approve { margin-left: auto; }
+    .approval-approve,
+    .approval-deny {
+      min-height: 26px;
+      padding: 0 var(--space-sm);
+      border-radius: 5px;
+      font-family: var(--font-ui);
+      font-size: var(--text-2xs);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .approval-approve { border: 1px solid var(--sodium); background: var(--sodium); color: var(--form-deep); }
+    .approval-approve:hover { background: var(--sodium-soft); }
+    .approval-deny { border: 1px solid var(--line-danger); background: transparent; color: var(--error); }
+    .approval-deny:hover { background: var(--error-tint); }
+    .approval-approve:disabled,
+    .approval-deny:disabled { opacity: 0.5; cursor: wait; }
+    .approval-card .payload { margin-top: var(--space-xs); }
 
     /* ─── shared: nothing is truncated without recourse ───
        Every abbreviated identity in the console (BLAKE3 ids, trigger keys,
@@ -2400,7 +2468,6 @@
     .work-list,
     .left,
     .accounts-grid,
-    .queued-work-ledger,
     .node-inspector,
     .execution-lineage,
     .payload pre,
@@ -2602,8 +2669,6 @@
                 title="Copy the full session id">copy</button></div>
         <div class="status-row"><span>usage</span><span id="usageTotal">0 total</span></div>
         <div class="status-row"><span>tokens</span><span id="usageBreakdown">0 in · 0 out</span></div>
-        <div class="status-row"><span>execution evidence</span></div>
-        <pre id="executionScorecard" class="execution-scorecard" aria-live="polite">no model attempts yet</pre>
       </div>
     </aside>
 
@@ -2721,20 +2786,6 @@
           <input type="checkbox" id="filterForeground" /> foreground
         </label>
       </div>
-      <section class="approval-ledger" aria-label="Pending approvals">
-        <div class="queued-work-heading">
-          <span>approvals</span>
-          <span id="approvalCount">0 pending</span>
-        </div>
-        <div id="approvalList" class="approval-list"></div>
-      </section>
-      <section class="queued-work-ledger" aria-label="Pending queued work">
-        <div class="queued-work-heading">
-          <span>queued batches</span>
-          <span id="queuedWorkCount">0 pending</span>
-        </div>
-        <div id="queuedWorkList" class="queued-work-list"></div>
-      </section>
       <div id="workList" class="work-list"></div>
     </aside>
 
@@ -2816,10 +2867,6 @@
     const timelineEmpty = document.getElementById("timelineEmpty");
     const workList = document.getElementById("workList");
     const workCount = document.getElementById("workCount");
-    const queuedWorkList = document.getElementById("queuedWorkList");
-    const queuedWorkCount = document.getElementById("queuedWorkCount");
-    const approvalList = document.getElementById("approvalList");
-    const approvalCount = document.getElementById("approvalCount");
     const workFilterProcess = document.getElementById("filterProcess");
     const workFilterForeground = document.getElementById("filterForeground");
     // Processes are the durable, interesting work; foreground Lashlang is every
@@ -2885,7 +2932,6 @@
     const sessionCopy = document.getElementById("sessionCopy");
     const usageTotal = document.getElementById("usageTotal");
     const usageBreakdown = document.getElementById("usageBreakdown");
-    const executionScorecard = document.getElementById("executionScorecard");
     const triggerRegistrations = document.getElementById("triggerRegistrations");
     const triggerCount = document.getElementById("triggerCount");
     const chats = document.getElementById("chats");
@@ -2949,6 +2995,9 @@
 
     let lastSessionListing = null;
     let switchingSessionId = null;
+    /* Per-row delete state the 5s roster poll must not erase: "confirm" while
+       the inline question is open, "deleting" while the delete settles. */
+    const chatDeletions = new Map();
     let revealCurrentChat = true;
 
     /* The session this tab shows: its pinned id, else the workbench's current. */
@@ -2972,7 +3021,9 @@
       chatList.replaceChildren();
       for (const row of rows) {
         const item = document.createElement("li");
-        if (row.current) item.className = "current";
+        item.className = "chat-item" + (row.current ? " current" : "");
+        const deletion = chatDeletions.get(row.id);
+        if (deletion) item.dataset.deletion = deletion;
         const link = document.createElement("a");
         link.className = "chat-row";
         if (row.id === switchingSessionId) link.classList.add("switching");
@@ -2985,9 +3036,47 @@
         title.textContent = row.title.text;
         const meta = document.createElement("span");
         meta.className = "chat-meta";
-        meta.textContent = row.id === switchingSessionId ? "opening…" : sessionAge(row.activeMs, nowMs);
-        link.append(title, meta);
+        meta.textContent = row.id === switchingSessionId
+          ? "opening…"
+          : deletion === "deleting" ? "deleting…" : sessionAge(row.activeMs, nowMs);
+        if (approvalSessions.has(row.id)) {
+          const flag = document.createElement("span");
+          flag.className = "chat-flag";
+          flag.textContent = "approval";
+          flag.title = "A tool call in this chat is waiting for your approval";
+          link.append(title, flag, meta);
+        } else {
+          link.append(title, meta);
+        }
         item.appendChild(link);
+        if (deletion === "confirm") {
+          const confirm = document.createElement("span");
+          confirm.className = "chat-confirm";
+          confirm.setAttribute("role", "group");
+          confirm.setAttribute("aria-label", "Delete " + row.title.text + "?");
+          const ask = document.createElement("span");
+          ask.textContent = "delete?";
+          const yes = document.createElement("button");
+          yes.type = "button";
+          yes.className = "chat-confirm-yes";
+          yes.textContent = "yes";
+          yes.dataset.deleteConfirm = row.id;
+          const no = document.createElement("button");
+          no.type = "button";
+          no.textContent = "no";
+          no.dataset.deleteCancel = row.id;
+          confirm.append(ask, yes, no);
+          item.appendChild(confirm);
+        } else if (deletion !== "deleting") {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "chat-delete";
+          remove.dataset.deleteSession = row.id;
+          remove.title = "Delete this chat";
+          remove.setAttribute("aria-label", "Delete chat " + row.title.text);
+          remove.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+          item.appendChild(remove);
+        }
         chatList.appendChild(item);
         if (row.id === focusedId) link.focus();
       }
@@ -3110,7 +3199,50 @@
       promptInput.focus();
     }
 
+    // BEGIN WORKBENCH_CHAT_DELETE
+    async function deleteChat(sessionId) {
+      chatDeletions.set(sessionId, "deleting");
+      showSessionError("");
+      if (lastSessionListing) renderSessions(lastSessionListing);
+      try {
+        const response = await nativeFetch("/api/sessions/" + encodeURIComponent(sessionId), { method: "DELETE" });
+        const body = await response.json().catch(() => null);
+        if (!response.ok || typeof body?.successor_session_id !== "string") {
+          throw new Error(typeof body?.error === "string" ? body.error : "the chat could not be deleted");
+        }
+        chatDeletions.delete(sessionId);
+        if (lastSessionListing) {
+          lastSessionListing = {
+            ...lastSessionListing,
+            sessions: (lastSessionListing.sessions || []).filter(session => session.session_id !== sessionId)
+          };
+        }
+        if (sessionId === shownSessionId()) await switchToSession(body.successor_session_id);
+        else await loadSessions();
+      } catch (error) {
+        chatDeletions.delete(sessionId);
+        showSessionError(error?.message || "the chat could not be deleted");
+        if (lastSessionListing) renderSessions(lastSessionListing);
+      }
+    }
+    // END WORKBENCH_CHAT_DELETE
+
     chatList.addEventListener("click", event => {
+      const askDelete = event.target.closest("[data-delete-session]");
+      const confirmDelete = event.target.closest("[data-delete-confirm]");
+      const cancelDelete = event.target.closest("[data-delete-cancel]");
+      if (askDelete || cancelDelete) {
+        const id = (askDelete || cancelDelete).dataset.deleteSession || cancelDelete.dataset.deleteCancel;
+        if (askDelete) chatDeletions.set(id, "confirm");
+        else chatDeletions.delete(id);
+        renderSessions(lastSessionListing);
+        chatList.querySelector(askDelete ? "[data-delete-confirm]" : `a[data-session-id="${CSS.escape(id)}"]`)?.focus();
+        return;
+      }
+      if (confirmDelete) {
+        deleteChat(confirmDelete.dataset.deleteConfirm);
+        return;
+      }
       const link = event.target.closest("a.chat-row");
       if (!link) return;
       /* a modified click keeps the link's own meaning: the session in a new tab */
@@ -3262,85 +3394,6 @@
     }
     // END WORKBENCH_PROJECTION_STATE
 
-    // BEGIN WORKBENCH_EXECUTION_SCORECARD
-    function createExecutionScorecardState() {
-      return new Map();
-    }
-
-    function applyExecutionScorecardRecord(state, record) {
-      if (!record?.call_id) return;
-      state.set(record.call_id, record);
-    }
-
-    function executionScorecardText(state) {
-      const lines = [];
-      const startedAt = record => Math.min(
-        ...(record.attempts || []).map(attempt => Number(attempt.started_at_ms)),
-        Number.MAX_SAFE_INTEGER
-      );
-      const records = [...state.values()].sort((left, right) => {
-        const byStart = startedAt(left) - startedAt(right);
-        if (byStart) return byStart;
-        return left.call_id < right.call_id ? -1 : left.call_id > right.call_id ? 1 : 0;
-      });
-      for (const record of records) {
-        for (const attempt of record.attempts || []) {
-          const evidence = attempt.evidence || {};
-          const error = attempt.error || {};
-          const retry = attempt.retry_decision;
-          const policy = retry?.outcome === "scheduled" ? retry.class : retry;
-          const usage = attempt.usage;
-          const generation = attempt.generation_disposition;
-          const facts = [
-            attempt.protocol_position && `position ${attempt.protocol_position}`,
-            error.class && `error ${error.class}`,
-            error.code && `code ${error.code}`,
-            error.http_status !== undefined && `http ${error.http_status}`,
-            error.provider_request_id && `request ${error.provider_request_id}`,
-            error.retry_after_ms !== undefined && `retry-after ${error.retry_after_ms}ms`,
-            retry && `retry ${retry.outcome}`,
-            retry?.delay_ms !== undefined && `delay ${retry.delay_ms}ms`,
-            retry?.wait && `retry wait ${retry.wait}`,
-            retry?.class && `retry class ${retry.class.class}`,
-            retry?.cause && `retry cause ${retry.cause}`,
-            retry?.reason && `policy ${retry.reason}`,
-            policy?.tokens_at_stake !== undefined && `tokens at stake ${policy.tokens_at_stake}`,
-            policy?.attempt_number !== undefined && `unsafe attempt ${policy.attempt_number}`,
-            attempt.retry_budget_consumed === true && "retry budget consumed",
-            attempt.retry_budget_consumed === false && "retry budget not consumed",
-            usage && `usage input=${usage.input_tokens} cache_read=${usage.cache_read_input_tokens} cache_write=${usage.cache_write_input_tokens} output=${usage.output_tokens}`,
-            generation && `generation output=${generation.output_token_cap}`,
-            evidence.served_model && `model ${evidence.served_model}`,
-            evidence.provider_response_id && `response ${evidence.provider_response_id}`,
-            evidence.provider_finish_reason && `finish ${evidence.provider_finish_reason}`,
-            evidence.reasoning_output_tokens !== undefined
-              && `reasoning ${evidence.reasoning_output_tokens}`,
-            evidence.collection_interruption
-              && `collection interrupted: ${evidence.collection_interruption}`,
-          ].filter(Boolean);
-          const suffix = facts.length ? ` · ${facts.join(" · ")}` : "";
-          lines.push(`${record.call_id} #${attempt.ordinal} ${attempt.outcome}${suffix}`);
-        }
-      }
-      return lines.join("\n") || "no model attempts yet";
-    }
-
-    function renderExecutionScorecard(state, target) {
-      target.textContent = executionScorecardText(state);
-    }
-
-    function rebuildExecutionScorecard(state, events, target) {
-      state.clear();
-      for (const event of events || []) {
-        if (event.type === "model_call_recorded") {
-          applyExecutionScorecardRecord(state, event.record);
-        }
-      }
-      renderExecutionScorecard(state, target);
-    }
-    // END WORKBENCH_EXECUTION_SCORECARD
-
-    const executionScorecardState = createExecutionScorecardState();
 
     // BEGIN WORKBENCH_SHELL_AVAILABILITY
     /* "idle" and "no turns yet" are claims about the session; the shell can only
@@ -3978,6 +4031,7 @@
        Verbatim, that buries a 100-char process id and a JSON payload in prose.
        Parsed, it becomes a labelled header, a copyable id and a collapsed
        payload. */
+    // BEGIN WORKBENCH_PROCESS_WAKE_PARSE
     function parseProcessWake(text) {
       const lines = String(text || "").split("\n");
       if (lines[0]?.trim() !== "Background process wake") return null;
@@ -3993,6 +4047,7 @@
       wake.input = lines.slice(index).join("\n");
       return wake;
     }
+    // END WORKBENCH_PROCESS_WAKE_PARSE
 
     /* The one renderer for the system/process lane: a boxed, left-aligned,
        mono row that can never be mistaken for an agent reply. */
@@ -4154,6 +4209,9 @@
     // BEGIN WORKBENCH_MESSAGE_RENDER
     function renderMessage(message) {
       clearEmpty();
+      if (message.provenance?.kind === "trigger_occurrence" && typeof renderOccurrenceRow === "function") {
+        return renderOccurrenceRow(message);
+      }
       if (message.role === "assistant" && assistantDraft && assistantDraftTurnId && message.provenance?.turn_id === assistantDraftTurnId) {
         const parent = assistantDraft.closest(".message");
         if (parent) parent.remove();
@@ -4180,8 +4238,19 @@
         if (stamp) role.appendChild(stamp);
       }
       node.append(role, body);
-      timeline.appendChild(node);
+      const inputTurnId = message.role === "user" && message.provenance?.kind === "turn_input"
+        ? message.provenance.turn_id
+        : null;
+      if (inputTurnId) node.dataset.turnId = inputTurnId;
+      /* A queued input whose run started was shown as that run's user row
+         before the run committed it; the committed row takes its place. */
+      const promoted = inputTurnId
+        ? timeline.querySelector(`.message.user[data-promoted-input][data-turn-id="${CSS.escape(inputTurnId)}"]`)
+        : null;
+      if (promoted) promoted.replaceWith(node);
+      else timeline.appendChild(node);
       scrollToEnd();
+      return node;
     }
     // END WORKBENCH_MESSAGE_RENDER
 
@@ -4259,6 +4328,50 @@
       node.append(kind, body);
       timeline.appendChild(node);
       scrollToEnd();
+    }
+
+    /* A receipt stands for input that is still waiting for a turn. The
+       pending list also carries input a run has already admitted: a send to
+       an idle session is admitted to the turn it starts at once, and a queued
+       input is admitted to the run that drains it. Either way that input is
+       now its run's user row, never a "queued next" card (FIG-5036). */
+    function reconcilePendingTurnInputs(pendingInputs) {
+      for (const pending of pendingInputs || []) {
+        const admission = pending?.input;
+        if (!admission?.input_id) continue;
+        const textItem = (admission.input?.items || []).find(item => item?.type === "text" && typeof item.text === "string");
+        const text = textItem?.text || "pending input";
+        if (pending.status?.kind === "admitted") {
+          admitIngressReceipt(admission.input_id, pending.status.run, text);
+          continue;
+        }
+        renderIngressReceipt({ input_id: admission.input_id, ingress: admission.ingress, state: admission.state, status: pending.status, text });
+      }
+    }
+
+    function admitIngressReceipt(inputId, runId, text) {
+      renderedIngressInputs.add(inputId);
+      const receipt = timeline.querySelector(`.ingress-receipt[data-input-id="${CSS.escape(inputId)}"]`);
+      if (!runId || timeline.querySelector(`.message.user[data-turn-id="${CSS.escape(runId)}"]`)) {
+        receipt?.remove();
+        return;
+      }
+      const node = document.createElement("div");
+      node.className = "message user";
+      node.dataset.turnId = runId;
+      node.dataset.promotedInput = inputId;
+      const role = document.createElement("div");
+      role.className = "msg-role";
+      role.textContent = roleLabel("user");
+      const body = document.createElement("div");
+      body.className = "msg-body";
+      setMessageBody(body, "user", text);
+      node.append(role, body);
+      if (receipt) receipt.replaceWith(node);
+      else {
+        clearEmpty();
+        timeline.appendChild(node);
+      }
     }
 
     function recordTurnInputApplications(applications) {
@@ -4582,6 +4695,7 @@
       clearEmpty();
       const runningEvent = { ...event, phase: "running" };
       const el = appendCodeBlock(runningEvent);
+      if (turnId) el.dataset.turnId = turnId;
       pendingCodeBlock = { event: runningEvent, el, turnId };
       if (event.graph_key) refreshWork();
     }
@@ -4763,17 +4877,115 @@
     }
     // END WORKBENCH_RETRY_STATUS
 
+    // BEGIN WORKBENCH_OCCURRENCE_ROWS
+    /* One host trigger occurrence (a button press, a mail delivery) is one
+       compact row. The processes it started wake the agent, and that wake and
+       the turn it starts fold into the occurrence's row as "→ turn started",
+       with the raw details in a disclosure, instead of arriving as rows of
+       their own (FIG-5036). The live fold reads the turn's queued-work causes;
+       the settled fold reads the durable wake row's process. */
+    const occurrenceStarts = new Map();
+
+    function occurrenceRowFor(occurrenceId) {
+      if (!occurrenceId) return null;
+      return timeline.querySelector(`.occurrence[data-occurrence-id="${CSS.escape(occurrenceId)}"]`);
+    }
+
+    function occurrenceDetail(node) {
+      const lines = [["occurrence", node.dataset.occurrenceId]];
+      for (const processId of (node.dataset.processIds || "").split(" ").filter(Boolean)) {
+        lines.push(["process", processId]);
+      }
+      if (node.dataset.wakeInput) lines.push(["wake input", node.dataset.wakeInput]);
+      return lines.map(([key, value]) => key + ": " + value).join("\n");
+    }
+
+    function paintOccurrenceRow(node) {
+      const outcome = node.querySelector(".occurrence-outcome");
+      const started = node.dataset.turnStarted === "true";
+      const processes = (node.dataset.processIds || "").split(" ").filter(Boolean);
+      outcome.textContent = started
+        ? "→ turn started"
+        : processes.length ? "" : "· nothing registered";
+      node.querySelector("pre").textContent = occurrenceDetail(node);
+    }
+
+    function markOccurrenceStarted(node, wakeInput) {
+      node.dataset.turnStarted = "true";
+      if (wakeInput) node.dataset.wakeInput = wakeInput;
+      paintOccurrenceRow(node);
+    }
+
+    function renderOccurrenceRow(message) {
+      const provenance = message.provenance || {};
+      const existing = occurrenceRowFor(provenance.occurrence_id);
+      if (existing) return existing;
+      const node = document.createElement("div");
+      node.className = "message event occurrence";
+      node.dataset.occurrenceId = provenance.occurrence_id || message.id;
+      node.dataset.processIds = (provenance.process_ids || []).join(" ");
+      const body = document.createElement("div");
+      body.className = "msg-body occurrence-body";
+      const head = document.createElement("div");
+      head.className = "event-head";
+      const dot = document.createElement("span");
+      dot.className = "occurrence-dot";
+      const tone = /^(red|blue)\b/.exec(message.text || "");
+      if (tone) dot.dataset.tone = tone[1];
+      const title = document.createElement("span");
+      title.className = "event-title";
+      title.textContent = message.text || "trigger occurrence";
+      const outcome = document.createElement("span");
+      outcome.className = "occurrence-outcome";
+      const detail = document.createElement("details");
+      detail.className = "occurrence-detail";
+      const summary = document.createElement("summary");
+      summary.textContent = "details";
+      detail.append(summary, document.createElement("pre"));
+      head.append(dot, title, outcome);
+      const stamp = timeStamp(message.at);
+      if (stamp) head.appendChild(stamp);
+      head.appendChild(detail);
+      body.appendChild(head);
+      node.appendChild(body);
+      clearEmpty();
+      timeline.appendChild(node);
+      const pendingStart = occurrenceStarts.get(node.dataset.occurrenceId);
+      if (pendingStart) {
+        occurrenceStarts.delete(node.dataset.occurrenceId);
+        markOccurrenceStarted(node, pendingStart.wakeInput);
+      } else {
+        paintOccurrenceRow(node);
+      }
+      scrollToEnd();
+      return node;
+    }
+
+    function wakeInputOf(cause) {
+      return parseProcessWake(cause?.text)?.input?.trim() || "";
+    }
+
     function renderQueuedWorkStarted(event) {
       const causes = event.causes || [];
-      const wake = causes.find(cause => cause.event_type === "process.wake");
-      if (wake) {
-        renderEventRow("agent woken", wake.text || "process.wake");
-      } else {
-        const count = (event.batch_ids || []).length;
-        renderEventRow("queued turn started", count ? `${count} batch${count === 1 ? "" : "es"}` : "");
+      let unclaimed = [];
+      for (const cause of causes) {
+        const occurrenceId = cause?.origin?.caused_by?.type === "trigger_occurrence"
+          ? cause.origin.caused_by.occurrence_id
+          : null;
+        if (!occurrenceId) {
+          unclaimed.push(cause);
+          continue;
+        }
+        const row = occurrenceRowFor(occurrenceId);
+        if (row) markOccurrenceStarted(row, wakeInputOf(cause));
+        else occurrenceStarts.set(occurrenceId, { wakeInput: wakeInputOf(cause) });
       }
+      /* A wake no occurrence row owns is still one row: who woke the agent. */
+      const wake = unclaimed.find(cause => cause?.origin?.kind === "process");
+      if (wake) renderEventRow("agent woken", wake.text || wake.event_type || "process wake");
       refreshBusyState();
     }
+    // END WORKBENCH_OCCURRENCE_ROWS
 
     // BEGIN WORKBENCH_TRANSIENT_SETTLEMENT
     function finishTransientRows(turnId) {
@@ -4828,10 +5040,6 @@
       if (event.type === "reasoning_delta") appendReasoning(event.text, event.correlation_id, turnId);
       if (event.type === "model_attempt_reset") resetModelAttempt(event);
       if (event.type === "retry_status") renderRetryStatus(event, turnId);
-      if (event.type === "model_call_recorded") {
-        applyExecutionScorecardRecord(executionScorecardState, event.record);
-        renderExecutionScorecard(executionScorecardState, executionScorecard);
-      }
       if (event.type === "code_block_started") startCodeBlock(event, turnId);
       if (event.type === "code_block_completed") completeCodeBlock(event, turnId);
       if (event.type === "tool_call_started") appendStartedTool(event, turnId);
@@ -5059,10 +5267,6 @@
       );
       if (event.type === "message") renderMessage(event.message);
       if (event.type === "turn_input") renderIngressReceipt(event.receipt);
-      if (event.type === "model_call_recorded") {
-        applyExecutionScorecardRecord(executionScorecardState, event.record);
-        renderExecutionScorecard(executionScorecardState, executionScorecard);
-      }
       if (event.type === "done") {
         finishTransientRows(event.turn_id);
         refreshTerminalState(event.turn_id);
@@ -5218,12 +5422,10 @@
           const escalated = cancellations.find(item => item.cancellation?.outcome === "escalated");
           const unresolved = cancellations.find(item =>
             item.status === "cancellation_recorded_terminal_pending");
-          if (evidence) {
-            const where = evidence.mode === "after_step"
-              ? " after step " + (evidence.honoured_after_step ?? "0")
-              : " (aborted)";
-            renderNote("turn stopped" + where + " · request " + evidence.request_id);
-          } else if (escalated) renderNote("stop escalated to abort · request " + escalated.cancellation.cancellation.request_id);
+          /* A committed stop is reported once, by the event row every viewer
+             of the session receives; a local note here was its duplicate. */
+          if (evidence) return;
+          if (escalated) renderNote("stop escalated to abort · request " + escalated.cancellation.cancellation.request_id);
           else if (unresolved) renderNote(mode === "stop" ? "stop recorded · waiting for the step boundary" : "turn route cleared · terminal outcome unknown");
           else if (!receipt.accepted) renderNote("turn already finished");
         })
@@ -5265,6 +5467,7 @@
       clearRetryStatus();
       timeline.innerHTML = "";
       renderedIngressInputs.clear();
+      occurrenceStarts.clear();
       assistantDraft = null;
       assistantDraftTurnId = null;
       assistantDraftText = "";
@@ -5286,12 +5489,19 @@
     // BEGIN WORKBENCH_SETTLED_TRANSCRIPT
     function renderStateTranscript(state) {
       const ownedInputs = new Map();
+      const occurrenceByProcess = new Map();
       for (const event of state.product_events?.events || []) {
         const message = event.message;
         if (message?.provenance?.kind === "turn_input") {
           ownedInputs.set(message.provenance.turn_id, message);
         }
+        if (message?.provenance?.kind === "trigger_occurrence") {
+          for (const processId of message.provenance.process_ids || []) {
+            occurrenceByProcess.set(processId, message);
+          }
+        }
       }
+      const foldedOccurrences = new Set();
       const coveredInputs = new Set();
       const turnAnchors = new Map();
       for (const row of state.transcript) {
@@ -5307,6 +5517,16 @@
           const tools = content.tools.map(tool => ({ kind: "durable_summary", ...tool }));
           if (content.tools_omitted) tools.push({ kind: "omitted", count: content.tools_omitted });
           appendCodeBlock({ id: row.row_id, ...content }, tools);
+        } else if (
+          row.kind === "event" &&
+          occurrenceByProcess.size &&
+          occurrenceByProcess.has(parseProcessWake(content.text)?.processId)
+        ) {
+          const wake = parseProcessWake(content.text);
+          const occurrence = occurrenceByProcess.get(wake.processId);
+          const node = renderOccurrenceRow(occurrence);
+          foldedOccurrences.add(occurrence.id);
+          markOccurrenceStarted(node, wake.input.trim());
         } else if (["user", "assistant_reply", "event", "tool_call", "attachment"].includes(row.kind)) {
           let message = {
             id: row.row_id,
@@ -5332,18 +5552,16 @@
         if (!coveredInputs.has(turnId)) renderMessage(message);
       }
       for (const event of state.product_events?.events || []) {
-        if (event.message?.role === "event") renderMessage(event.message);
+        if (event.message?.role === "event" && !foldedOccurrences.has(event.message.id)) {
+          renderMessage(event.message);
+        }
       }
       for (const terminal of state.unknown_turn_terminals || []) {
         renderNote(terminal.note);
         const anchor = turnAnchors.get(terminal.turn_id);
         if (anchor) anchor.insertAdjacentElement("afterend", timeline.lastElementChild);
       }
-      for (const pending of state.pending_turn_inputs || []) {
-        const admission = pending.input;
-        const textItem = (admission?.input?.items || []).find(item => item?.type === "text" && typeof item.text === "string");
-        renderIngressReceipt({ input_id: admission?.input_id, ingress: admission?.ingress, state: admission?.state, status: pending.status, text: textItem?.text || "pending input" });
-      }
+      if (state.pending_turn_inputs?.length) reconcilePendingTurnInputs(state.pending_turn_inputs);
     }
     // END WORKBENCH_SETTLED_TRANSCRIPT
 
@@ -6335,14 +6553,13 @@
       knownSessionLabel = state.settings.session_id;
       markShellHydrated(shellAvailability);
       renderShellStatus();
+      if (!preserveTransientTranscript) {
+        renderStateTranscript(state);
+        restoreDecidedApprovals();
+      }
+      lastQueuedWorkSignature = JSON.stringify(state.queued_work || []);
       renderQueuedWork(state.queued_work || []);
       renderApprovals(state.pending_approvals || []);
-      if (!preserveTransientTranscript) renderStateTranscript(state);
-      rebuildExecutionScorecard(
-        executionScorecardState,
-        state.product_events?.events,
-        executionScorecard
-      );
       recordTurnInputApplications(state.turn_input_applications);
       return true;
     }
@@ -6493,6 +6710,7 @@
       try {
         const state = await fetchStateSnapshot();
         if (!applyBusySnapshot(state, snapshotSequence)) return;
+        reconcilePendingTurnInputs(state.pending_turn_inputs);
         markShellChannel(shellAvailability, "state", true);
         renderShellStatus();
       } catch (error) {
@@ -6741,37 +6959,38 @@
       return middleEllipsis(text, 16);
     }
 
+    // BEGIN WORKBENCH_INLINE_QUEUED_WORK
+    /* Pending queued-work batches wait for the session's next turn boundary,
+       so they sit at the foot of the conversation they will join, one compact
+       row each, and leave it when the engine takes them. */
     function renderQueuedWork(batches) {
-      queuedWorkList.innerHTML = "";
-      queuedWorkCount.textContent = batches.length + " pending";
-      if (!batches.length) {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = "no pending queued work";
-        queuedWorkList.appendChild(empty);
-        return;
+      const pending = new Set(batches.map(batch => batch.batch_id));
+      for (const row of timeline.querySelectorAll(".queued-batch")) {
+        if (!pending.has(row.dataset.batchId)) row.remove();
       }
       for (const batch of batches) {
-        const card = document.createElement("article");
-        card.className = "queued-work-batch";
-
-        const id = valueRow("batch", batch.batch_id, { max: 26 });
-        id.className = "value-row queued-work-id";
-
+        if (timeline.querySelector(`.queued-batch[data-batch-id="${CSS.escape(batch.batch_id)}"]`)) continue;
+        const row = document.createElement("div");
+        row.className = "message event queued-batch";
+        row.dataset.batchId = batch.batch_id;
+        const body = document.createElement("div");
+        body.className = "msg-body";
+        const head = document.createElement("div");
+        head.className = "event-head";
+        const kind = document.createElement("span");
+        kind.className = "event-kind";
+        kind.textContent = "queued";
+        const title = document.createElement("span");
+        title.className = "event-title";
         const payloadKind = batch.items?.[0]?.payload?.type || "queued_work";
-        const meta = document.createElement("div");
-        meta.className = "queued-work-meta";
-        meta.textContent = payloadKind.replaceAll("_", " ") + " · sequence " + batch.enqueue_seq;
-
-        const actions = document.createElement("div");
-        actions.className = "queued-work-actions";
+        title.textContent = payloadKind.replaceAll("_", " ") + " · waits for the next turn";
+        title.title = batch.batch_id;
         const cancel = document.createElement("button");
-        cancel.className = "work-cancel";
+        cancel.className = "inline-action";
         cancel.type = "button";
         cancel.textContent = "cancel";
         cancel.title = "Cancel this pending queued-work batch";
         cancel.setAttribute("aria-label", "Cancel queued-work batch " + batch.batch_id);
-
         cancel.addEventListener("click", async () => {
           cancel.disabled = true;
           cancel.textContent = "cancelling";
@@ -6783,14 +7002,16 @@
           } catch (_) {
             cancel.disabled = false;
             cancel.textContent = "retry cancel";
-            queuedWorkCount.textContent = "cancel failed — retry";
           }
         });
-        actions.append(cancel);
-        card.append(id, meta, actions);
-        queuedWorkList.appendChild(card);
+        head.append(kind, title, cancel);
+        body.appendChild(head);
+        row.appendChild(body);
+        clearEmpty();
+        timeline.appendChild(row);
       }
     }
+    // END WORKBENCH_INLINE_QUEUED_WORK
 
     /* The rails poll every 1.4s. Rebuilding their DOM on every tick cancels
        an in-progress text selection and resets a copy control mid-flash, so an
@@ -6805,88 +7026,147 @@
       return Math.floor(minutes / 60) + "h";
     }
 
-    function renderApprovals(approvals) {
-      approvalList.innerHTML = "";
-      approvalCount.textContent = approvals.length + " pending";
-      if (!approvals.length) {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = "no changes awaiting sign-off";
-        approvalList.appendChild(empty);
-        return;
-      }
-      for (const approval of approvals) {
-        const card = document.createElement("article");
-        card.className = "approval-card";
-        card.dataset.approvalKey = approval.key;
+    // BEGIN WORKBENCH_INLINE_APPROVALS
+    /* A pending approval is part of the conversation: it renders where its
+       tool call is waiting, as one compact card, and once decided it collapses
+       to one line. Approvals other chats are waiting on mark those chats in the
+       sidebar instead. */
+    const approvalDecisions = new Map();
+    let approvalSessions = new Set();
 
-        const tool = document.createElement("div");
-        tool.className = "approval-tool";
-        tool.textContent = approval.tool;
+    function approvalAnchor(tool) {
+      const rows = Array.from(timeline.querySelectorAll(".tool"))
+        .filter(row => row.querySelector("strong")?.textContent === tool);
+      const row = rows[rows.length - 1];
+      return row ? (row.closest(".code-block") || row) : null;
+    }
 
-        const args = document.createElement("pre");
-        args.className = "approval-args";
-        args.textContent = JSON.stringify(approval.arguments, null, 2);
+    function placeApprovalRow(node, tool, turnId = null) {
+      clearEmpty();
+      const turnBlocks = turnId
+        ? Array.from(timeline.querySelectorAll(".code-block"))
+          .filter(block => block.dataset.turnId === turnId)
+        : [];
+      const anchor = turnBlocks[turnBlocks.length - 1] || approvalAnchor(tool);
+      if (anchor?.dataset.turnId) node.dataset.turnId = anchor.dataset.turnId;
+      if (anchor) anchor.insertAdjacentElement("afterend", node);
+      else timeline.appendChild(node);
+    }
 
-        const meta = document.createElement("div");
-        meta.className = "approval-meta";
-        const session = document.createElement("span");
-        session.textContent = "session " + approval.requesting_session;
-        const age = document.createElement("span");
-        age.textContent = "waiting " + formatApprovalAge(approval.age_ms);
-        const key = document.createElement("span");
-        key.className = "approval-key";
-        key.textContent = "key " + approval.key;
-        key.title = approval.key;
-        meta.append(session, age, key);
+    function collapseApproval(card, decision, tool) {
+      card.dataset.decided = decision;
+      card.replaceChildren();
+      const line = document.createElement("span");
+      line.className = "approval-line";
+      line.textContent = decision + ": " + tool;
+      card.appendChild(line);
+    }
 
-        const actions = document.createElement("div");
-        actions.className = "approval-actions";
-        const approve = document.createElement("button");
-        approve.className = "approval-approve";
-        approve.type = "button";
-        approve.textContent = "approve";
-        approve.setAttribute("aria-label", "Approve " + approval.tool);
-        const deny = document.createElement("button");
-        deny.className = "approval-deny";
-        deny.type = "button";
-        deny.textContent = "deny";
-        deny.setAttribute("aria-label", "Deny " + approval.tool);
-
-        async function decide(decision, button) {
-          approve.disabled = true;
-          deny.disabled = true;
-          button.textContent = decision === "approve" ? "approving" : "denying";
-          try {
-            const response = await fetch(
-              "/api/approvals/" + encodeURIComponent(approval.key) + "/" + decision,
-              { method: "POST" }
-            );
-            if (!response.ok) throw new Error("approval decision failed");
-            await loadState();
-          } catch (_) {
-            approve.disabled = false;
-            deny.disabled = false;
-            button.textContent = "retry " + decision;
-            approvalCount.textContent = decision + " failed — retry";
-          }
+    function approvalCard(approval) {
+      const card = document.createElement("div");
+      card.className = "approval-card";
+      card.dataset.approvalKey = approval.key;
+      card.dataset.tool = approval.tool;
+      const head = document.createElement("div");
+      head.className = "approval-head";
+      const label = document.createElement("span");
+      label.className = "approval-label";
+      label.textContent = "approval needed";
+      const tool = document.createElement("strong");
+      tool.className = "approval-tool";
+      tool.textContent = approval.tool;
+      const age = document.createElement("span");
+      age.className = "approval-age";
+      age.textContent = "waiting " + formatApprovalAge(approval.age_ms);
+      const approve = document.createElement("button");
+      approve.className = "approval-approve";
+      approve.type = "button";
+      approve.textContent = "approve";
+      approve.setAttribute("aria-label", "Approve " + approval.tool);
+      const deny = document.createElement("button");
+      deny.className = "approval-deny";
+      deny.type = "button";
+      deny.textContent = "deny";
+      deny.setAttribute("aria-label", "Deny " + approval.tool);
+      async function decide(decision, button) {
+        approve.disabled = true;
+        deny.disabled = true;
+        button.textContent = decision === "approve" ? "approving" : "denying";
+        try {
+          const response = await fetch(
+            "/api/approvals/" + encodeURIComponent(approval.key) + "/" + decision,
+            { method: "POST" }
+          );
+          if (!response.ok) throw new Error("approval decision failed");
+          const decided = decision === "approve" ? "approved" : "denied";
+          approvalDecisions.set(approval.key, {
+            decision: decided,
+            tool: approval.tool,
+            sessionId: approval.requesting_session,
+            turnId: card.dataset.turnId || null
+          });
+          collapseApproval(card, decided, approval.tool);
+          refreshApprovals();
+        } catch (_) {
+          approve.disabled = false;
+          deny.disabled = false;
+          button.textContent = "retry " + decision;
         }
-        approve.addEventListener("click", () => decide("approve", approve));
-        deny.addEventListener("click", () => decide("deny", deny));
-        actions.append(approve, deny);
-        card.append(tool, args, meta, actions);
-        approvalList.appendChild(card);
+      }
+      approve.addEventListener("click", () => decide("approve", approve));
+      deny.addEventListener("click", () => decide("deny", deny));
+      head.append(label, tool, age, approve, deny);
+      card.append(head, payloadDisclosure("arguments", JSON.stringify(approval.arguments, null, 2)));
+      return card;
+    }
+
+    function renderApprovals(approvals) {
+      const flagged = new Set(approvals.map(approval => approval.requesting_session));
+      const flagsChanged = flagged.size !== approvalSessions.size ||
+        [...flagged].some(id => !approvalSessions.has(id));
+      approvalSessions = flagged;
+      if (flagsChanged && lastSessionListing) renderSessions(lastSessionListing);
+      const shown = shownSessionId();
+      const pending = approvals.filter(approval => approval.requesting_session === shown);
+      const keys = new Set(pending.map(approval => approval.key));
+      for (const card of timeline.querySelectorAll(".approval-card:not([data-decided])")) {
+        if (keys.has(card.dataset.approvalKey)) continue;
+        const decided = approvalDecisions.get(card.dataset.approvalKey);
+        collapseApproval(card, decided?.decision || "resolved", card.dataset.tool);
+      }
+      for (const approval of pending) {
+        const card = timeline.querySelector(`.approval-card[data-approval-key="${CSS.escape(approval.key)}"]`);
+        if (card) {
+          const age = card.querySelector(".approval-age");
+          if (age) age.textContent = "waiting " + formatApprovalAge(approval.age_ms);
+          continue;
+        }
+        placeApprovalRow(approvalCard(approval), approval.tool);
       }
     }
+
+    /* A transcript re-render rebuilds the timeline; the decisions this tab
+       made stay on it as their one-line record. */
+    function restoreDecidedApprovals() {
+      const shown = shownSessionId();
+      for (const [key, decided] of approvalDecisions) {
+        if (decided.sessionId !== shown) continue;
+        if (timeline.querySelector(`.approval-card[data-approval-key="${CSS.escape(key)}"]`)) continue;
+        const card = document.createElement("div");
+        card.className = "approval-card";
+        card.dataset.approvalKey = key;
+        collapseApproval(card, decided.decision, decided.tool);
+        placeApprovalRow(card, decided.tool, decided.turnId);
+      }
+    }
+    // END WORKBENCH_INLINE_APPROVALS
 
     async function refreshApprovals() {
       try {
         const response = await fetch("/api/approvals");
         if (!response.ok) throw new Error("approval request failed");
         renderApprovals(await response.json());
-      } catch (_) {
-        approvalCount.textContent = "updates paused";
-      }
+      } catch (_) { /* polling retries */ }
     }
 
     async function refreshQueuedWork() {
@@ -6900,7 +7180,6 @@
         renderQueuedWork(batches);
       } catch (_) {
         lastQueuedWorkSignature = "";
-        queuedWorkCount.textContent = "updates paused";
       }
     }
 

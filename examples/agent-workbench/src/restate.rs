@@ -653,11 +653,10 @@ async fn run_button_trigger(
             "deliveries": trigger_delivery_trace(&receipt),
         }),
     );
-    state.push_message_with_id_for_session(
+    state.push_trigger_occurrence_for_session(
         &request.session_id,
-        format!("button-trigger:{}:event", request.operation_id),
-        "event",
-        "button trigger occurrence emitted",
+        format!("{} pressed", request.button.lower()),
+        &receipt,
     );
     // Clear the UI's busy state when this request owns it, but do not clear a foreground
     // turn's busy state during a mid-turn occurrence.
@@ -708,11 +707,13 @@ async fn run_mail_received(
             "deliveries": trigger_delivery_trace(&receipt),
         }),
     );
-    state.push_message_with_id_for_session(
+    state.push_trigger_occurrence_for_session(
         &request.session_id,
-        format!("mail-received:{}:event", request.operation_id),
-        "event",
-        "mail received trigger occurrence queued",
+        format!(
+            "mail to inbox.{}: {}",
+            request.delivery.account, request.delivery.title
+        ),
+        &receipt,
     );
     // Clear the UI's busy state when this request owns it, but do not clear a foreground
     // turn's busy state during a mid-turn occurrence.

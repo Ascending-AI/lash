@@ -513,29 +513,31 @@ async fn the_workbench_typescript_tutorials_run_without_a_dialect_refusal() {
         hits.is_empty(),
         "prompt programs the runtime refuses: {hits:#?}"
     );
+}
 
-    // Non-vacuity, and the regression itself: put the handle back into the
-    // string the way the prompt used to spell it, and the same harness must
-    // show the placeholder it would finish with: a plain object's string is
-    // ECMA's type tag (FIG-3652). A prompt that stopped rendering a handle
-    // field would fail the substitution assertion rather than pass this test
-    // vacuously.
-    let button_watcher = programs
+/// The tutorials are what the model copies, so a registration key a tutorial
+/// prints is a hash the agent then quotes at the user ("registration
+/// derived/v3/83cc…a4a is active", FIG-5036). A tutorial's visible answer names
+/// a registration by what it watches, never by its machine key.
+#[test]
+fn the_workbench_tutorials_never_print_a_registration_key() {
+    let programs = typescript_prompt_programs();
+    let finishes = programs
         .iter()
-        .find(|program| program.contains("button watcher"))
-        .expect("the prompt carries the button-watcher tutorial");
-    assert_eq!(
-        button_watcher.matches("handle.subscription_key").count(),
-        1,
-        "the button-watcher tutorial must render the handle's string-formed field"
-    );
-    let regressed = button_watcher.replace("handle.subscription_key", "handle");
-    let finished = run_tutorial(&regressed)
-        .await
-        .expect("string-concatenating a registration handle runs");
+        .flat_map(|program| program.lines())
+        .filter(|line| line.trim_start().starts_with("finish("))
+        .collect::<Vec<_>>();
     assert!(
-        format!("{finished:?}").contains("[object Object]"),
-        "the placeholder this prompt copy must never teach: {finished:?}"
+        finishes.len() >= 3,
+        "every tutorial ends in a visible answer: {finishes:#?}"
+    );
+    let quoting = finishes
+        .iter()
+        .filter(|line| line.contains("subscription_key") || line.contains("handle"))
+        .collect::<Vec<_>>();
+    assert!(
+        quoting.is_empty(),
+        "tutorial answers that quote a registration identity: {quoting:#?}"
     );
 }
 

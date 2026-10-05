@@ -429,12 +429,9 @@ pub(crate) async fn button_trigger(
             "model": serde_json::to_value(&turn_profile).unwrap_or(Value::Null),
         }),
     );
+    // The press shows as one row, published by the workflow once the
+    // occurrence it records has an identity (FIG-5036).
     let pressed_at = Utc::now().to_rfc3339();
-    state.push_message_for_session(
-        &session_id,
-        "event",
-        format!("{} button trigger occurrence", request.button.lower()),
-    );
     restate::submit_button_trigger(
         &state,
         restate::WorkbenchButtonTriggerWorkflowRequest {
@@ -738,11 +735,8 @@ pub(crate) async fn inject_message(
         "api.accounts.inject",
         json!({ "account": slug, "title": message.title }),
     );
-    state.push_message_for_session(
-        &session_id,
-        "event",
-        format!("message delivered to `inbox.{}`: {}", slug, message.title),
-    );
+    // The delivery shows as one row, published by the workflow with the
+    // occurrence it records (FIG-5036).
     restate::submit_mail_received(
         &state,
         restate::WorkbenchMailReceivedWorkflowRequest {
@@ -774,7 +768,7 @@ pub(crate) async fn inject_message(
 /// every use including a second delete, which is correct for the store and was
 /// a dead end for the operator: the page's only repair was a reset, and reset
 /// was the one thing the fence would not allow.
-async fn retire_for_reset(
+pub(crate) async fn retire_for_reset(
     state: &AppState,
     old_session_id: &SessionId,
 ) -> Result<(SessionId, bool), AppError> {
@@ -832,15 +826,36 @@ pub(crate) async fn reset_chat(
 ) -> Result<Json<StateReadSnapshot>, AppError> {
     let old_session_id = query.resolve(&state)?;
     let (new_session_id, replaced_current) = retire_for_reset(&state, &old_session_id).await?;
+    settle_retired_slot(
+        &state,
+        &old_session_id,
+        &new_session_id,
+        replaced_current,
+        "api.reset",
+    )
+    .await?;
+    Ok(Json(read_state_snapshot(&state, &new_session_id).await?))
+}
+
+/// What a reset and a delete both owe once a session is retired: forget what
+/// only that id had a reader for, and make sure the session that took its
+/// place exists.
+pub(crate) async fn settle_retired_slot(
+    state: &AppState,
+    retired_session_id: &SessionId,
+    successor_session_id: &SessionId,
+    replaced_current: bool,
+    surface: &str,
+) -> Result<(), AppError> {
     // The retired id is never served again, so its unknown-terminal disclosures
     // have no reader left; drop them rather than hold them for the process's life.
-    state.unknown_turn_terminals.remove(&old_session_id);
+    state.unknown_turn_terminals.remove(retired_session_id);
     state.trace_for_session(
-        &old_session_id,
-        "api.reset",
+        retired_session_id,
+        surface,
         json!({
-            "old_session_id": old_session_id,
-            "new_session_id": new_session_id.clone(),
+            "old_session_id": retired_session_id,
+            "new_session_id": successor_session_id,
             "replaced_current": replaced_current,
         }),
     );
@@ -848,13 +863,13 @@ pub(crate) async fn reset_chat(
         state.messages.lock_recover().clear();
         state.lashlang_execution.clear();
         state.mail_world.clear();
-        record_accounts_context(&state).await?;
+        record_accounts_context(state).await?;
     }
     state
-        .create_or_open_session(&new_session_id, "api.reset")
+        .create_or_open_session(successor_session_id, surface)
         .await
         .map_err(AppError::session_open)?;
-    Ok(Json(read_state_snapshot(&state, &new_session_id).await?))
+    Ok(())
 }
 
 /// How long a terminal process stays on the rail after leaving the live set.

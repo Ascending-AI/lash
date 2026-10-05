@@ -190,6 +190,9 @@ pub(crate) use session_open_retry::*;
 #[path = "main_sections/app_state.rs"]
 mod app_state;
 pub(crate) use app_state::*;
+#[path = "main_sections/session_roster.rs"]
+mod session_roster;
+pub(crate) use session_roster::*;
 #[path = "main_sections/session_fence.rs"]
 mod session_fence;
 #[path = "main_sections/tool_loss_notice.rs"]
