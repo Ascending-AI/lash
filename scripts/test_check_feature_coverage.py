@@ -168,7 +168,6 @@ class FeatureCoverageContractTests(unittest.TestCase):
                       - name: Compile every feature lane
                         run: |
                           scripts/hermetic-build.sh build //:feature_lane_compile
-                          scripts/hermetic-build.sh clippy //:feature_lane_clippy
                       - name: Run the executable feature lanes
                         run: scripts/hermetic-build.sh test //:feature_lane_tests
 

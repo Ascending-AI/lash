@@ -645,10 +645,7 @@ jobs:
 
       # Every unit of every declared lane command, checked at that command's
       # own feature resolution: one metadata-only rustc action per unit, as
-      # `cargo check` runs it, with no codegen or link. The following Clippy
-      # invocation runs the generated clippy subtargets over the same units,
-      # so a pull request lints the lane variants the
-      # merge group used to wait for. The step name is
+      # `cargo check` runs it, with no codegen or link. The step name is
       # pinned by scripts/test_check_feature_coverage.py.
       - name: Compile every feature lane
         shell: bash
@@ -658,11 +655,6 @@ jobs:
             --jobs 32 --materializations none \
             --build-report "${RUNNER_TEMP}/feature-build-report.json" \
             --event-log "${RUNNER_TEMP}/feature-events.json-lines"
-          python3 scripts/ci/feature_lane_shards.py "$FEATURE_LANE_SHARD" //:feature_lane_clippy -- \
-            scripts/hermetic-build.sh clippy \
-            --jobs 32 --materializations none \
-            --build-report "${RUNNER_TEMP}/feature-clippy-build-report.json" \
-            --event-log "${RUNNER_TEMP}/feature-clippy-events.json-lines"
 
       # The lane commands that are `cargo test`, not `cargo check`. They are
       # service-free, so the pool executes them under the same feature
@@ -704,7 +696,6 @@ jobs:
         if: always()
         run: |
           python3 scripts/ci/buck2_event_digest.py "$RUNNER_TEMP/feature-events.json-lines" --summary "$GITHUB_STEP_SUMMARY"
-          python3 scripts/ci/buck2_event_digest.py "$RUNNER_TEMP/feature-clippy-events.json-lines" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Upload feature-lane build events
         if: always()
@@ -714,8 +705,6 @@ jobs:
           path: |
             ${{ runner.temp }}/feature-events.json-lines
             ${{ runner.temp }}/feature-build-report.json
-            ${{ runner.temp }}/feature-clippy-events.json-lines
-            ${{ runner.temp }}/feature-clippy-build-report.json
             ${{ runner.temp }}/feature-lanes-test-report.json
           if-no-files-found: ignore
           retention-days: 14
@@ -1264,10 +1253,6 @@ jobs:
       # shape — with the `[workspace.lints]` table, the nearest `clippy.toml`
       # and a trailing `-D warnings`, in the order Cargo emits them. See
       # `tools/buck2/rust_rules.bzl`.
-      #
-      # `//:feature_lane_clippy` lints feature-lane units and rides the `feature-lanes` job's own compile
-      # invocation, which runs on every trusted event whose diff can move a
-      # Rust build, pull requests included.
       - name: Clippy (workspace, all targets, shared cache)
         if: needs.plan.outputs.buck2_trusted == 'true'
         shell: bash

@@ -2,28 +2,21 @@
 
 [advisories]
 version = 2
-# Current main carries h2 0.4.15 and the quick-xml advisories below; all are
-# recorded until their owning upstream dependency permits a patched version.
+# Current main carries h2 0.4.15; the ignore is recorded until its owning
+# upstream dependency permits a patched version.
 ignore = [
     { id = "RUSTSEC-2026-0258", reason = "h2 0.4.15 is selected by the current hyper graph; remove when the locked graph moves to the patched h2 version" },
-    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.39.4 is required by object_store 0.13.2; remove when object_store permits quick-xml 0.41 or newer" },
-    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.39.4 is required by object_store 0.13.2; remove when object_store permits quick-xml 0.41 or newer" },
 ]
 
 [bans]
-# New duplicate versions fail. The three existing, reviewed exceptions below
+# New duplicate versions fail. The existing, reviewed exceptions below
 # remain visible in this file and must be removed when their owners converge.
 multiple-versions = "deny"
 wildcards = "allow"
 
 skip = [
-    # Existing transitive duplicate; revisit when jsonschema's dependency
-    # graph converges on bit-set 0.8.
-    { crate = "bit-set@0.5.3", reason = "jsonschema 0.18.3 retains bit-set 0.5; remove when its upstream graph converges" },
-    { crate = "bit-vec@0.6.3", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on bit-vec 0.8" },
-    { crate = "bitflags@1.3.2", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on bitflags 2" },
+    { crate = "base64@0.22.1", reason = "hyper-util 0.1.20 and jsonwebtoken 10.4.0 still require base64 0.22; remove when upstream dependency graph converges on base64 0.23" },
     { crate = "block-buffer@0.10.4", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on block-buffer 0.12" },
-    { crate = "cfg_aliases@0.1.1", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on cfg_aliases 0.2" },
     { crate = "compact_str@0.7.1", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on compact_str 0.9" },
     { crate = "cpufeatures@0.2.17", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on cpufeatures 0.3" },
     { crate = "crypto-common@0.1.7", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on crypto-common 0.2" },
@@ -37,7 +30,8 @@ skip = [
     { crate = "hashbrown@0.14.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
     { crate = "hashbrown@0.15.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
     { crate = "hashbrown@0.16.1", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
-    { crate = "nix@0.28.0", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on nix 0.31" },
+    { crate = "itertools@0.14.0", reason = "prost-derive 0.14.4 still requires itertools 0.14; remove when upstream dependency graph converges on itertools 0.15" },
+    { crate = "md-5@0.10.6", reason = "sqlx-postgres 0.8.6 still requires md-5 0.10; remove when upstream dependency graph converges on md-5 0.11" },
     { crate = "phf@0.11.3", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on phf 0.12" },
     { crate = "phf_shared@0.11.3", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on phf_shared 0.12" },
     { crate = "r-efi@5.3.0", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on r-efi 6" },
@@ -52,9 +46,8 @@ skip = [
     { crate = "serde_derive_internals@0.29.1", reason = "pre-existing transitive duplicate owned by the workspace schemars 0.8 and rmcp schemars 1.x stacks; remove after major convergence" },
     { crate = "sha2@0.10.9", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on sha2 0.11" },
     { crate = "siphasher@0.3.11", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on siphasher 1" },
-    { crate = "thiserror@1.0.69", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on thiserror 2" },
-    { crate = "thiserror-impl@1.0.69", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on thiserror-impl 2" },
-    { crate = "wasm-streams@0.4.2", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on wasm-streams 0.5" },
+    { crate = "strum@0.27.2", reason = "croner 3.0.1 and restate-sdk-shared-core 7.0.3 still require strum 0.27; remove when upstream dependency graph converges on strum 0.28" },
+    { crate = "strum_macros@0.27.2", reason = "croner 3.0.1 and restate-sdk-shared-core 7.0.3 still require strum 0.27; remove when upstream dependency graph converges on strum 0.28" },
     { crate = "windows-sys@0.48.0", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows-sys 0.61" },
     { crate = "windows-sys@0.52.0", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows-sys 0.61" },
     { crate = "windows-targets@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows-targets 0.52" },
@@ -65,9 +58,6 @@ skip = [
     { crate = "windows_x86_64_gnu@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
     { crate = "windows_x86_64_gnullvm@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
     { crate = "windows_x86_64_msvc@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
-    # reqwest 0.12.28 is owned by object_store 0.13.2. Remove when
-    # object_store supports the workspace reqwest 0.13 line.
-    { crate = "reqwest@0.12.28", reason = "object_store 0.13.2 still requires reqwest 0.12; remove when object_store supports reqwest 0.13" },
     # schemars 0.8.22 is the workspace API. Remove when rmcp supports the
     # workspace schemars major or the workspace can migrate without an API dance.
     { crate = "schemars@0.8.22", reason = "Lash workspace API remains on schemars 0.8 while rmcp 1.8.0 requires 1.2; remove after rmcp/workspace major convergence" },
@@ -94,6 +84,12 @@ allow = [
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
+]
+# MIT No Attribution: borrow-or-share 0.2.4, pulled by fluent-uri through
+# referencing for the jsonschema dev dependency. Scoped to that crate; a new
+# MIT-0 dependent still fails until it is reviewed here.
+exceptions = [
+    { allow = ["MIT-0"], crate = "borrow-or-share" },
 ]
 confidence-threshold = 0.8
 

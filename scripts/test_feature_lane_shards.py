@@ -36,7 +36,6 @@ def synthetic(lanes: dict[str, list[str]], **groups: list[str]) -> dict:
         "packages": [],
         "feature_lanes": lanes,
         "feature_lane_compile_targets": groups.get("compile", members),
-        "feature_lane_clippy_targets": groups.get("clippy", []),
         "feature_lane_test_targets": groups.get("tests", []),
         "feature_lane_test_floors": {},
     }
@@ -164,7 +163,7 @@ class PlacementTests(unittest.TestCase):
         self.assertEqual({"heavy": 1, "light": 2}, shards.placement(inventory, sizes, 2)[1])
 
     def test_a_target_outside_every_lane_is_an_error(self) -> None:
-        inventory = synthetic({"a": ["//a:1"]}, clippy=["//stray:1"])
+        inventory = synthetic({"a": ["//a:1"]}, tests=["//stray:1"])
         with self.assertRaisesRegex(ValueError, "//stray:1"):
             shards.partition(inventory, {})
 
@@ -196,14 +195,15 @@ class CommandTests(unittest.TestCase):
 
     def test_a_shard_that_owns_nothing_of_a_group_skips_the_command(self) -> None:
         inventory, sizes = shards.load()
-        group = "//:feature_lane_clippy"
-        empty = [
-            shard for shard in ALL_SHARDS if not shards.selection(inventory, sizes, group, shard)
-        ]
-        self.assertTrue(empty, "every shard lints; this case needs a synthetic group")
-        result = self.run_script(str(empty[0]), group, "--", "false")
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("owns no //:feature_lane_clippy targets", result.stdout)
+        with mock.patch.object(shards, "load", return_value=(inventory, sizes)), mock.patch.object(
+            shards, "selection", return_value=[]
+        ), mock.patch("builtins.print") as printed:
+            self.assertEqual(
+                0, shards.main(["1", "//:feature_lane_tests", "--", "false"])
+            )
+        printed.assert_called_with(
+            "feature-lane shard 1/4 owns no //:feature_lane_tests targets"
+        )
 
     def test_the_commands_failure_is_the_steps_failure(self) -> None:
         result = self.run_script("1", "//:feature_lane_compile", "--", "false")
@@ -274,11 +274,10 @@ class WorkflowTests(unittest.TestCase):
         compile_run = self.flat(self.steps["Compile every feature lane"]["run"])
         for command in (
             selector + "//:feature_lane_compile -- scripts/hermetic-build.sh check --jobs",
-            selector + "//:feature_lane_clippy -- scripts/hermetic-build.sh clippy --jobs",
         ):
             with self.subTest(command=command):
                 self.assertEqual(1, compile_run.count(command))
-        self.assertEqual(2, compile_run.count("scripts/hermetic-build.sh"))
+        self.assertEqual(1, compile_run.count("scripts/hermetic-build.sh"))
         self.assertEqual(
             selector + "//:feature_lane_tests -- scripts/ci/buck2-test.sh feature-lanes",
             self.flat(self.steps["Run the executable feature lanes"]["run"]),

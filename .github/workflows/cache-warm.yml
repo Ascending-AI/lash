@@ -103,7 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           scripts/hermetic-build.sh clippy --jobs 32 --materializations none \
-            //:workspace_clippy //:feature_lane_clippy
+            //:workspace_clippy
 
       # `kiln check` resolves the metadata-only `[check]` graph, which neither
       # the clippy actions nor the test-binary builds share: `//:workspace_check`

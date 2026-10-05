@@ -73,8 +73,8 @@ exact recipe. See
 
 Cargo remains for tests that invoke nested Cargo, trybuild fixtures, service
 gates without a Buck2 route, nightly fuzzing, publishing, and judged
-or release profiles. Use `kiln build //:feature_lanes`, `kiln test
-//:feature_lane_tests`, and `kiln clippy //:feature_lane_clippy` for feature
+or release profiles. Use `kiln build //:feature_lanes` and `kiln test
+//:feature_lane_tests` for feature
 coverage. Use `kiln clippy` for workspace linting and `kiln fmt -- --check`
 for formatting.
 
@@ -120,8 +120,8 @@ A pull request runs the fast board — lint, the hygiene jobs, and the
 path-gated seal and repository-gate jobs, plus the Buck2 test leg that runs
 only the affected targets the plan selects: the same selection
 `python3 scripts/dev-test.py` computes locally, so the CI run is what your
-dev-test dry-run printed. The feature-lane compile and clippy
-(`//:feature_lanes //:feature_lane_clippy`) join every trusted pull request
+dev-test dry-run printed. The feature-lane compile
+(`//:feature_lanes`) joins every trusted pull request
 whose diff can move a Rust build, because a lane break rides an upstream API
 change rather than the gated files themselves; the lane tests still join only
 for a diff that touches feature-gated code. Merge groups keep the broad

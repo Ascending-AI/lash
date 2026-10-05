@@ -2162,8 +2162,6 @@
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test__fv_50908138[check]",
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test__fv_e24a3cb6[check]"
   ],
-  "feature_lane_clippy_build_targets": [],
-  "feature_lane_clippy_targets": [],
   "feature_lane_compile_targets": [
     "//crates/lash-conformance:lash-conformance__fv_0f5f2ec4",
     "//crates/lash-conformance:lash-conformance__fv_110ca6ce",

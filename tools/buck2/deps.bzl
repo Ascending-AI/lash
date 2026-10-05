@@ -15,7 +15,7 @@ PACKAGE_DEPS = {
             "anyhow": "//third-party/rust:p0011",
             "async_trait": "//third-party/rust:p0015",
             "axum": "//third-party/rust:p0021",
-            "base64": "//third-party/rust:p0023",
+            "base64": "//third-party/rust:p0024",
             "bytes": "//third-party/rust:p0038",
             "chrono": "//third-party/rust:p0047",
             "chrono_tz": "//third-party/rust:p0048",
@@ -384,7 +384,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "async_trait": "//third-party/rust:p0015",
-            "base64": "//third-party/rust:p0023",
+            "base64": "//third-party/rust:p0024",
             "blake3": "//third-party/rust:p0030",
             "fastrand": "//third-party/rust:p0114",
             "futures_util": "//third-party/rust:p0134",
@@ -540,7 +540,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "async_trait": "//third-party/rust:p0015",
-            "base64": "//third-party/rust:p0023",
+            "base64": "//third-party/rust:p0024",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
@@ -556,7 +556,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "async_trait": "//third-party/rust:p0015",
-            "base64": "//third-party/rust:p0023",
+            "base64": "//third-party/rust:p0024",
             "form_urlencoded": "//third-party/rust:p0121",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
@@ -580,7 +580,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "async_trait": "//third-party/rust:p0015",
-            "base64": "//third-party/rust:p0023",
+            "base64": "//third-party/rust:p0024",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_provider_auth": "//crates/lash-provider-auth:lash-provider-auth",
@@ -606,7 +606,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "async_trait": "//third-party/rust:p0015",
-            "base64": "//third-party/rust:p0023",
+            "base64": "//third-party/rust:p0024",
             "bytes": "//third-party/rust:p0038",
             "futures_util": "//third-party/rust:p0134",
             "lash_core": "//crates/lash-core:lash-core",
@@ -629,7 +629,7 @@ PACKAGE_DEPS = {
             "tokio": "//third-party/rust:p0399"
         },
         "normal": {
-            "base64": "//third-party/rust:p0023",
+            "base64": "//third-party/rust:p0024",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
@@ -714,7 +714,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "async_trait": "//third-party/rust:p0015",
-            "base64": "//third-party/rust:p0023",
+            "base64": "//third-party/rust:p0024",
             "bytes": "//third-party/rust:p0038",
             "chrono": "//third-party/rust:p0047",
             "http": "//third-party/rust:p0154",
@@ -944,7 +944,7 @@ PACKAGE_DEPS = {
             "serde_json": "//third-party/rust:p0338"
         },
         "normal": {
-            "base64": "//third-party/rust:p0023",
+            "base64": "//third-party/rust:p0024",
             "blake3": "//third-party/rust:p0030",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "rmp_serde": "//third-party/rust:p0304",
@@ -988,7 +988,7 @@ PACKAGE_DEPS = {
         "normal": {
             "anyhow": "//third-party/rust:p0011",
             "async_trait": "//third-party/rust:p0015",
-            "base64": "//third-party/rust:p0023",
+            "base64": "//third-party/rust:p0024",
             "chrono": "//third-party/rust:p0047",
             "clap": "//third-party/rust:p0052",
             "crc32fast": "//third-party/rust:p0072",

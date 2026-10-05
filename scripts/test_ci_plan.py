@@ -3203,7 +3203,6 @@ class FeatureLanesTests(unittest.TestCase):
         compile_step = steps["Compile every feature lane"]
         self.assertNotIn("if", compile_step)
         self.assertIn("//:feature_lane_compile", compile_step["run"])
-        self.assertIn("//:feature_lane_clippy", compile_step["run"])
 
     def test_the_lane_test_steps_keep_the_pull_request_path_gate(self) -> None:
         steps = {

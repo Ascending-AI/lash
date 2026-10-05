@@ -3651,12 +3651,6 @@ test_suite(
     visibility = ["PUBLIC"],
 )
 
-test_suite(
-    name = "feature_lane_clippy",
-    tests = [],
-    visibility = ["PUBLIC"],
-)
-
 restate_suite_inputs(
     name = "restate_suite_inputs",
     srcs = {p: p for p in glob(["scripts/ci/restate_suite.py", "scripts/restate-suites.toml", "scripts/restate-divergences/*.toml"])},

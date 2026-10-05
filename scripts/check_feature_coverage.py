@@ -1175,11 +1175,10 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
     for aggregate in (
         "//:feature_lane_compile",
         "//:feature_lane_tests",
-        "//:feature_lane_clippy",
     ):
         if aggregate not in feature_job:
             failures.append(f"feature-lanes does not execute {aggregate}")
-    # The lane compile and clippy run on every trusted event whose diff can
+    # The lane compile runs on every trusted event whose diff can
     # move a Rust build; only the lane tests keep a path gate on pull
     # requests. Either way the job needs the pool's credentials.
     if (

@@ -24,7 +24,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "chrono-tz",
@@ -2376,7 +2376,7 @@ name = "lash-internal-plugin-mcp"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "blake3",
  "fastrand",
  "futures-util",
@@ -2517,7 +2517,7 @@ name = "lash-internal-provider-anthropic"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "lash-internal-core",
  "lash-internal-llm-transport",
  "lash-internal-provider-anthropic",
@@ -2532,7 +2532,7 @@ name = "lash-internal-provider-auth"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "form_urlencoded",
  "lash-internal-core",
@@ -2550,7 +2550,7 @@ name = "lash-internal-provider-google"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "lash-internal-core",
  "lash-internal-llm-transport",
  "lash-internal-provider-auth",
@@ -2570,7 +2570,7 @@ name = "lash-internal-provider-openai"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "futures-util",
  "lash-internal-core",
@@ -2594,7 +2594,7 @@ dependencies = [
 name = "lash-internal-remote-protocol"
 version = "0.0.0-dev"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "jsonschema",
  "lash-internal-core",
  "lash-internal-core-execution",
@@ -2668,7 +2668,7 @@ name = "lash-internal-restate-test"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "http",
@@ -2883,7 +2883,7 @@ dependencies = [
 name = "lash-internal-vm-protocol"
 version = "0.0.0-dev"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "blake3",
  "lash-internal-sansio",
  "rmp-serde",
@@ -2923,7 +2923,7 @@ version = "0.0.0-dev"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "clap",
  "crc32fast",

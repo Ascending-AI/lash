@@ -1887,13 +1887,6 @@ FEATURE_VARIANT_TAGS = ("feature-lane", "manual")
 # in the PostgreSQL job of their lane.
 SERVICE_JOB_TAGS = frozenset({"cargo-service-gate", "hermetic-postgres"})
 
-# The Cargo clippy invocations the Lint job ran on a runner because the feature
-# resolution they lint is outside the default workspace graph. Each is matched
-# against a lane command by (package, default features, requested features,
-# target selector); matching variants form the aggregate.
-FEATURE_LANE_CLIPPY_SCOPES = (
-)
-
 # Test-count floors the retired `Runtime feature boundary` matrix carried. The
 # floor is what stops a feature-gated arm from quietly taking the default
 # build's coverage with it: compiling the default-off test binary proves it
@@ -2052,7 +2045,6 @@ class FeatureLaneGraph:
         # command's name filter is part of what it executes, so whatever
         # counts or runs the variant outside `buck2 test` needs it too.
         self.test_args: dict[str, list[str]] = {}
-        self.clippy: set[str] = set()
         self.activations: dict[tuple[str, tuple[str, ...]], set[str]] = {}
         self.normal_activations: dict[tuple[str, tuple[str, ...]], set[str]] = {}
         self.packages_by_id = {package["id"]: package for package in metadata["packages"]}
@@ -2719,18 +2711,6 @@ class FeatureLaneGraph:
                     )
                 roots = self.emit_root_targets(command, resolution, test_labels)
                 compile_labels.extend(roots)
-                scope = (
-                    command.package,
-                    tuple(sorted(set(",".join(command.features).split(",")) - {""})),
-                    command.selector,
-                )
-                if scope in FEATURE_LANE_CLIPPY_SCOPES:
-                    self.clippy.update(roots)
-                    self.clippy.update(
-                        self.library_label(name, resolution)
-                        for name in [command.package]
-                        if self.library_of(name) is not None
-                    )
             self.lanes[lane["name"]] = {
                 "compile": sorted(set(compile_labels)),
                 "test": sorted(set(test_labels)),
@@ -2874,10 +2854,6 @@ def feature_lane_outputs(
     test_targets = sorted({
         label for lane in graph.lanes.values() for label in lane["test"]
     })
-    # The variants of exactly the commands `FEATURE_LANE_CLIPPY_SCOPES` names:
-    # the resolutions Cargo clippy still linted on a runner. Every other variant
-    # is compiled, not linted, because Cargo never linted it either.
-    clippy_targets = sorted(graph.clippy)
     floors = {}
     for unit in graph.units:
         key = (unit["package"], tuple(unit["features"]), unit["kind"])
@@ -2926,7 +2902,6 @@ def feature_lane_outputs(
         GENERATED_HEADER,
         "FEATURE_LANE_COMPILE_TARGETS = " + string_list(compile_targets, indent=4) + "\n\n",
         "FEATURE_LANE_TEST_TARGETS = " + string_list(test_targets, indent=4) + "\n\n",
-        "FEATURE_LANE_CLIPPY_TARGETS = " + string_list(clippy_targets, indent=4) + "\n\n",
         "FEATURE_LANE_TEST_ARGS = "
         + json.dumps(
             {label: args for label, args in graph.test_args.items() if label in test_targets},

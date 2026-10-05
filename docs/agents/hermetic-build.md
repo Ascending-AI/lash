@@ -269,7 +269,7 @@ metadata for the workspace's Cargo resolver 3. `sync.py --verify-resolution` rec
 `scripts/check_feature_coverage.py check` rejects missing lane units.
 
 `//:feature_lanes` provides metadata-only checks matching the lane commands.
-`//:feature_lane_clippy` lints them; `//:feature_lane_tests` links and executes the
+`//:feature_lane_tests` links and executes the
 required test units. Runtime default-off and Restate release-feature witnesses
 remain explicit regressions. Required-feature targets outside the default graph
 remain recorded with a Cargo feature-gate reason in the inventory.
@@ -285,8 +285,7 @@ stronger third-party feature proof.
 Clippy covers the resolved workspace shape, including first-party build-script
 compilation. It selects the nearest declared `clippy.toml`, applies workspace and
 package lints, and appends `-D warnings` last. Unsupported labels, an empty
-selection or missing lint outputs fail. Feature linting retains each lane's
-configuration. Every workspace library keeps `doctest = false`; documentation
+selection or missing lint outputs fail. Every workspace library keeps `doctest = false`; documentation
 examples remain prose and there is no doctest aggregate.
 
 ## Execution and resource accounting

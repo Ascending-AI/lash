@@ -148,7 +148,6 @@ def check_inventory() -> None:
         "workspace_docs",
         "feature_lane_compile",
         "feature_lane_tests",
-        "feature_lane_clippy",
         "host_schema_documents",
         "host_schema_check",
         "schema_checks",
@@ -438,7 +437,7 @@ def check_action_categories() -> None:
         for target in package["targets"]
         if "clippy_label" in target
     ] + [unit["clippy_label"] for unit in inventory["feature_lane_units"]]
-    clippy_labels += inventory["workspace_clippy_build_targets"] + inventory["feature_lane_clippy_build_targets"]
+    clippy_labels += inventory["workspace_clippy_build_targets"]
     assert clippy_labels and all(label.endswith("__clippy[clippy.txt]") for label in clippy_labels)
     # The optimized request is selected on the profile constraints alone, with
     # the dev request as the default branch, and only for a target that has

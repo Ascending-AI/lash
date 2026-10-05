@@ -828,7 +828,6 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
             ),
             "feature_lane_compile_targets": list_value("FEATURE_LANE_COMPILE_TARGETS", feature_bzl),
             "feature_lane_test_targets": list_value("FEATURE_LANE_TEST_TARGETS", feature_bzl),
-            "feature_lane_clippy_targets": list_value("FEATURE_LANE_CLIPPY_TARGETS", feature_bzl),
             "feature_lanes": ast.literal_eval(lanes_match.group(1)),
             "feature_lane_test_args": ast.literal_eval(args_match.group(1)),
             "feature_lane_test_floors": ast.literal_eval(floors_match.group(1)),
@@ -916,9 +915,6 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
     result["workspace_clippy_build_targets"] = [
         clippy_label(label) for label in result["workspace_clippy_targets"]
     ]
-    result["feature_lane_clippy_build_targets"] = [
-        clippy_label(label) for label in result["feature_lane_clippy_targets"]
-    ]
     return result
 
 
@@ -974,7 +970,6 @@ def root_buck(inventory: dict) -> str:
             suite("feature_lanes", inventory["feature_lane_check_targets"]),
             suite("feature_lane_compile", inventory["feature_lane_check_targets"]),
             suite("feature_lane_tests", inventory["feature_lane_test_targets"]),
-            suite("feature_lane_clippy", inventory["feature_lane_clippy_build_targets"]),
         ]
     )
     return aggregates + (

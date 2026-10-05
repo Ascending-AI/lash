@@ -571,7 +571,7 @@ floor:
   npm --prefix examples/workflow-graph-roundtrip/frontend ci
   printf '%s\n' \
     'kiln test //:dev_tests //:feature_lane_tests' \
-    'kiln clippy //:workspace_clippy //:feature_lane_clippy' \
+    'kiln clippy //:workspace_clippy' \
     'kiln build //:schema_checks' \
     'kiln fmt -- --check' \
     'git diff --check' \

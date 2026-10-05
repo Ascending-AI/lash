@@ -339,8 +339,6 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("hermetic-build.sh check", feature)
         self.assertNotIn("hermetic-build.sh build", feature)
         self.assertIn("//:feature_lane_compile", feature)
-        self.assertIn("hermetic-build.sh clippy", feature)
-        self.assertIn("//:feature_lane_clippy", feature)
         lint = step(
             self.ci["jobs"]["lint"],
             "Clippy (workspace, all targets, shared cache)",
@@ -668,7 +666,7 @@ class WorkflowTests(unittest.TestCase):
         source = (ROOT / "justfile").read_text(encoding="utf-8")
         self.assertNotIn("--test_sharding_strategy", source)
         self.assertIn("kiln test //:dev_tests //:feature_lane_tests", source)
-        self.assertIn("kiln clippy //:workspace_clippy //:feature_lane_clippy", source)
+        self.assertIn("kiln clippy //:workspace_clippy", source)
         self.assertIn("kiln build //:schema_checks", source)
 
 

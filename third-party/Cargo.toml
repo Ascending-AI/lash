@@ -156,7 +156,7 @@ features = ["alloc", "default", "std"]
 package = "base64"
 version = "=0.23.1"
 default-features = false
-features = ["alloc", "std"]
+features = ["alloc", "default", "simd-unsafe", "std"]
 
 [dependencies.p0025]
 package = "better_scoped_tls"

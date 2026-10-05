@@ -7,8 +7,11 @@ name: Version bumps
 #
 # Until the lash 1.0 cut ends the version freeze (FIG-3846), shapes change in
 # place and this job reports those changes as failures; that is expected, and
-# is why the workflow is not a required check yet. The cut makes it required
-# and adds it to `publish-crates`' `needs` in release.yml.
+# is why the workflow is not a required check yet and the job below is
+# `continue-on-error`: it still runs and reports, but its red cannot take the
+# board. The cut (FIG-4097/Z07) removes the exemption, makes the check
+# required and adds it to `publish-crates`' `needs` in release.yml — exactly
+# the activation `scripts/check_cut_residual.py` allows in a cut candidate.
 #
 # It runs on every push to main, and on a pull request or merge group whose
 # diff touches a registered versioned surface (`scripts/ci_plan.py
@@ -31,6 +34,10 @@ permissions:
 jobs:
   version-bumps:
     name: Strict version-bump gate
+    # Advisory until the 1.0 cut (FIG-4097/Z07 flips this to required): the
+    # version freeze makes in-place stored-shape changes expected, so the
+    # strict gate reports them and the failure must not redden the board.
+    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

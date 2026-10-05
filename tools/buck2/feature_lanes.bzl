@@ -1142,8 +1142,6 @@ FEATURE_LANE_TEST_TARGETS = [
     "//crates/lashlang:lashlang__unit_test__fv_41763c4b",
 ]
 
-FEATURE_LANE_CLIPPY_TARGETS = []
-
 FEATURE_LANE_TEST_ARGS = {
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_116ee6b1": [
         "conformance"

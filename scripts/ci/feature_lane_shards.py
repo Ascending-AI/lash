@@ -48,7 +48,6 @@ SHARDS = 4
 # that holds its members.
 GROUPS = {
     "//:feature_lane_compile": "feature_lane_compile_targets",
-    "//:feature_lane_clippy": "feature_lane_clippy_targets",
     "//:feature_lane_tests": "feature_lane_test_targets",
 }
 

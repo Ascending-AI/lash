@@ -123,9 +123,10 @@ impl From<base64::DecodeError> for McpDecodeFailure {
         match error {
             base64::DecodeError::InvalidByte(offset, byte) => Self::Byte { offset, byte },
             base64::DecodeError::InvalidLength(length) => Self::Length { length },
-            base64::DecodeError::InvalidLastSymbol(offset, byte) => {
-                Self::LastSymbol { offset, byte }
-            }
+            base64::DecodeError::InvalidLastSymbol { offset, symbol, .. } => Self::LastSymbol {
+                offset,
+                byte: symbol,
+            },
             base64::DecodeError::InvalidPadding => Self::Padding,
         }
     }

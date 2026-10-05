@@ -1575,6 +1575,8 @@ third_party_rust_library(
     },
     features = [
         "alloc",
+        "default",
+        "simd-unsafe",
         "std",
     ],
     platform = {
