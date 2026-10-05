@@ -51,6 +51,9 @@ pub enum BodyResult {
         process_id: lash::ProcessId,
         event_type: String,
     },
+    /// Declared isolated: the call runs as a process and has no ordinary
+    /// body, so a delivery here is the evidence that one ran anyway.
+    Isolated,
 }
 
 /// The file remains owned by the case when a host is killed and reopened.
@@ -106,6 +109,10 @@ impl ToolBodies {
                     BodyResult::Deferred => ToolDeclaration::deferring(),
                     BodyResult::EmitEvent { .. } | BodyResult::EmitToReceiver { .. } => ToolDeclaration::default()
                         .with_intents([lash::tools::ToolIntentKind::EmitProcessEvent]),
+                    BodyResult::Isolated => ToolDeclaration {
+                        isolated: true,
+                        ..ToolDeclaration::default()
+                    },
                 };
                 Ok(definition
                     .with_tool_binding(lash::tools::ToolBinding::new(["tools"], label))
@@ -128,7 +135,8 @@ impl ToolBodies {
             BodyResult::Deferred => Some(call.context.completion_key()?),
             BodyResult::Inline { .. }
             | BodyResult::EmitEvent { .. }
-            | BodyResult::EmitToReceiver { .. } => None,
+            | BodyResult::EmitToReceiver { .. }
+            | BodyResult::Isolated => None,
         };
         let delivery = ToolDelivery {
             label: call.name().to_owned(),
@@ -189,6 +197,9 @@ impl ToolBodies {
                 })?,
                 event_type,
             ),
+            BodyResult::Isolated => {
+                return Err(anyhow!("an isolated tool ran an ordinary body"));
+            }
         })
     }
 }

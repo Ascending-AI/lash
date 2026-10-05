@@ -76,6 +76,9 @@ struct WorkbenchCorePlugins {
     mcp: Arc<dyn PluginFactory>,
     #[cfg(feature = "e2e-tools")]
     operation: Arc<crate::e2e_operation::Controls>,
+    /// The tool fixture's isolated worker engine, when its scenario binds one.
+    #[cfg(feature = "e2e-tools")]
+    worker_engine: Option<Arc<dyn PluginFactory>>,
 }
 
 /// The builder behind every workbench Restate core: the selected protocol factory
@@ -98,6 +101,8 @@ async fn workbench_core_builder(
         mcp,
         #[cfg(feature = "e2e-tools")]
         operation,
+        #[cfg(feature = "e2e-tools")]
+        worker_engine,
     } = plugins;
     let mut builder = match crate::session_protocol::selected()? {
         crate::session_protocol::SessionProtocol::Standard => {
@@ -147,6 +152,10 @@ async fn workbench_core_builder(
             operation,
             operation_namespace,
         )));
+        #[cfg(feature = "e2e-tools")]
+        if let Some(engine) = worker_engine {
+            plugins.push(engine);
+        }
         if let Some(marker) = shutdown_marker {
             plugins.push(marker);
         }
@@ -170,7 +179,9 @@ pub(crate) async fn bound_workbench_engine(
     let tool_provider = failure_provider::DevProviderScenario::from_environment()?
         .and_then(failure_provider::DevProviderScenario::tool_provider);
     #[cfg(feature = "e2e-tools")]
-    let tool_provider = match crate::e2e_tools::Fixture::from_env("AGENT_WORKBENCH_TOOL_FIXTURE")? {
+    let tool_fixture = crate::e2e_tools::Fixture::from_env("AGENT_WORKBENCH_TOOL_FIXTURE")?;
+    #[cfg(feature = "e2e-tools")]
+    let tool_provider = match &tool_fixture {
         Some(fixture) => Some(fixture.tools()?),
         None => tool_provider,
     };
@@ -186,6 +197,10 @@ pub(crate) async fn bound_workbench_engine(
         mcp: Arc::new(lash::mcp::McpPluginFactory::empty()),
         #[cfg(feature = "e2e-tools")]
         operation: Arc::new(crate::e2e_operation::Controls::default()),
+        #[cfg(feature = "e2e-tools")]
+        worker_engine: tool_fixture
+            .as_ref()
+            .and_then(crate::e2e_tools::Fixture::worker_engine),
     };
     let _core = workbench_core_builder(
         host_backend,
@@ -502,6 +517,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         mcp: Arc::clone(&mcp_search) as Arc<dyn PluginFactory>,
         #[cfg(feature = "e2e-tools")]
         operation: operation_controls.clone(),
+        #[cfg(feature = "e2e-tools")]
+        worker_engine: tool_fixture
+            .as_ref()
+            .and_then(crate::e2e_tools::Fixture::worker_engine),
     };
     // Deployment policy example. Choose these limits for the host's workload
     // before build(); session settings instead use recorded config commands.

@@ -554,10 +554,17 @@ impl HostAdapter for WorkbenchHost {
                     bail!("physical handover requires a replacing workbench generation")
                 }
                 HostCommand::Process { action, input } => match action.as_str() {
-                    "kill-host" => {
+                    // `kill-host` kills the workbench's whole process group;
+                    // `kill-host-process` only the workbench, so what it
+                    // spawned outlives it as after a crash of that process.
+                    action @ ("kill-host" | "kill-host-process") => {
                         let process = self.process.as_mut().context("no owned workbench")?;
                         let receipt = process.receipt.clone();
-                        process.kill().await?;
+                        if action == "kill-host" {
+                            process.kill().await?;
+                        } else {
+                            process.kill_process().await?;
+                        }
                         let cleanup = process
                             .stop(Instant::now() + Duration::from_secs(10), None)
                             .await?;

@@ -132,6 +132,20 @@ impl HostProcess {
         Ok(())
     }
 
+    /// SIGKILL the host process alone, as a crash of that one process: the
+    /// children it spawned in its group keep running, and the caller owns
+    /// them.
+    pub async fn kill_process(&mut self) -> Result<()> {
+        self.check_alive()?;
+        let sent = Command::new("kill")
+            .args(["-KILL", &self.receipt.pid.to_string()])
+            .status()
+            .await?;
+        ensure!(sent.success(), "could not kill the owned host process");
+        self.child.wait().await.context("reap killed host")?;
+        Ok(())
+    }
+
     pub async fn stop(
         &mut self,
         deadline: Instant,

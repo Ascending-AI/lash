@@ -701,29 +701,45 @@ fn proposal_matches(value: &serde_json::Value, barrier: &Barrier) -> bool {
     {
         return false;
     }
+    // A barrier without a call names the bound Run's declared start, whose
+    // call id a case cannot know before the Run mints it: its X, its
+    // `declare` record (StartAdmitted) and the V record carrying StartLaunched.
     let call = barrier.work.call.as_deref();
+    let named =
+        |observed: Option<&str>| observed.is_some() && call.is_none_or(|c| observed == Some(c));
     if barrier.kind == BarrierKind::XProposed
-        && value.get("call_id").and_then(serde_json::Value::as_str) == call
-        && call.is_some()
+        && let Some(observed) = value.get("call_id").and_then(serde_json::Value::as_str)
     {
-        return value.get("attempt").and_then(serde_json::Value::as_u64)
-            == barrier.work.ordinal.map(u64::from);
+        return named(Some(observed))
+            && value.get("attempt").and_then(serde_json::Value::as_u64)
+                == barrier.work.ordinal.map(u64::from);
     }
     value
         .pointer("/record/events")
         .and_then(serde_json::Value::as_array)
         .is_some_and(|events| {
-            events.iter().any(|event| {
-                let phase = event.get("event").and_then(serde_json::Value::as_str);
-                event.get("call_id").and_then(serde_json::Value::as_str) == call
-                    && call.is_some()
-                    && matches!(
-                        (&barrier.kind, phase),
-                        (BarrierKind::DProposed, Some("decided"))
-                            | (BarrierKind::VProposed, Some("presented"))
-                            | (BarrierKind::DeclarationIssued, Some("declarations_issued"))
-                    )
-            })
+            let carries = |wanted: &str| {
+                events.iter().any(|event| {
+                    event.get("event").and_then(serde_json::Value::as_str) == Some(wanted)
+                })
+            };
+            let start = match (&barrier.kind, call) {
+                (_, Some(_)) => true,
+                (BarrierKind::DeclarationIssued, None) => carries("start_admitted"),
+                (BarrierKind::VProposed, None) => carries("start_launched"),
+                (_, None) => false,
+            };
+            start
+                && events.iter().any(|event| {
+                    let phase = event.get("event").and_then(serde_json::Value::as_str);
+                    named(event.get("call_id").and_then(serde_json::Value::as_str))
+                        && matches!(
+                            (&barrier.kind, phase),
+                            (BarrierKind::DProposed, Some("decided"))
+                                | (BarrierKind::VProposed, Some("presented"))
+                                | (BarrierKind::DeclarationIssued, Some("declarations_issued"))
+                        )
+                })
         })
 }
 fn retry_matches(value: &serde_json::Value, barrier: &Barrier) -> bool {

@@ -8,6 +8,7 @@ mod operation;
 mod plugin_upgrade;
 mod proposal;
 mod tools;
+mod workbench_isolated;
 use anyhow::{Context, Result, ensure};
 use lash_upgrade_harness::e2e::control::process::{
     ProxyCommand, ProxyConfig, command as proxy_command,
