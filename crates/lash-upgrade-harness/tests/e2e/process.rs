@@ -304,6 +304,90 @@ async fn s21_cancel_reaches_a_suspended_deferred_operation_sqlite_memory() -> Re
     Ok(())
 }
 
+/// S21/L21: a Deferred operation Run that suspended on its source and is
+/// resolved externally replays its recorded journal on every resumption and
+/// answers the first resolution from its one physical journal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s21_resolved_deferred_operation_replays_its_journal_sqlite_memory() -> Result<()> {
+    use lash_core::tool_run::{SealOutcome, SealWriter};
+    use lash_upgrade_harness::node::h3::{SourceFixture, SourceSealReply};
+    let (core, double) =
+        lash_upgrade_harness::node::h3::double_fixture_replay(0x495079, true).await?;
+    let session_id = lash::SessionId::fixture("s21-replayed-deferred");
+    core.session(session_id.clone())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "upgrade-harness-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(8),
+        )))
+        .await?;
+    let session = core.session(session_id.clone()).open().await?;
+    let handle = session
+        .plugin_operations()
+        .start_task_raw(
+            "e2e.h3.deferred",
+            serde_json::json!("s21-replayed-deferred"),
+            "s21-replayed-deferred",
+        )
+        .await?;
+    let run: lash::TurnId = handle.run().clone().into();
+    drop(handle);
+    tokio::time::timeout(std::time::Duration::from_secs(10), double.server().settle()).await?;
+    let invocation =
+        lash_upgrade_harness::node::h3::operation_invocation(&double, &session_id, &run).await?;
+    ensure!(
+        invocation.status == "suspended",
+        "deferred operation is not suspended on its source: {invocation:?}"
+    );
+    let operation = lash_core::tool_run::OperationRun::for_run_id(session_id.clone(), &run)
+        .ok_or_else(|| anyhow::anyhow!("{run} is not an operation Run"))?
+        .operation_id;
+    let fixture = SourceFixture::new(&double, session_id.as_str(), &operation).await?;
+    let capture = lash_core::tool_dispatch::SingletonCapture::Done {
+        output: serde_json::to_string(&serde_json::json!("s21-replayed"))?,
+        commands: Vec::new(),
+        intents: Vec::new(),
+        stream: Default::default(),
+        start: None,
+    };
+    let seal = fixture.retained(&serde_json::to_string(&capture)?).await?;
+    ensure!(
+        fixture.seal(SealWriter::External, seal.clone()).await?
+            == SourceSealReply::Outcome {
+                outcome: SealOutcome::Sealed { seal }
+            },
+        "the pending source did not seal its first completion"
+    );
+    let result = match tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        session.durable().run(run.clone().into()).result(),
+    )
+    .await
+    {
+        Ok(result) => result?,
+        Err(_) => {
+            let invocation =
+                lash_upgrade_harness::node::h3::operation_invocation(&double, &session_id, &run)
+                    .await?;
+            anyhow::bail!("resolved Deferred operation never answered: {invocation:?}");
+        }
+    };
+    ensure!(
+        result.output == serde_json::json!("s21-replayed"),
+        "the Run did not answer its resolution: {result:?}"
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(10), double.server().settle()).await?;
+    let finished =
+        lash_upgrade_harness::node::h3::operation_invocation(&double, &session_id, &run).await?;
+    ensure!(
+        finished.id == invocation.id
+            && finished.status == "completed"
+            && finished.last_failure.is_none(),
+        "resolved Run diverged from, kept or reopened its journal: {finished:?}"
+    );
+    Ok(())
+}
+
 /// S18/L07: cancellation wakes a real suspended application timer without
 /// firing it. Both an active follower and a late follower read the same store
 /// terminal; the exact final wait-routing claim is guarded by FIG-4897.

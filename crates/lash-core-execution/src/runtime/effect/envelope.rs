@@ -483,8 +483,10 @@ pub enum RuntimeEffectCommand {
         follow_on: crate::TurnId,
         attempts: u32,
     },
-    /// Acquire and read a successor's material once, before it can retire its
-    /// holder. Replay serves the canonical payloads from this step's journal.
+    /// Acquire and read retained material once, before its holder can end: a
+    /// successor's transferred material, or a Deferred source's Resolved
+    /// result before Run close releases the source. Replay serves the
+    /// canonical payloads from this step's journal.
     RestoreRunMaterial {
         holder: crate::tool_run::MaterialHolder,
         bundles: Vec<crate::tool_run::RetainedBundle>,
@@ -1284,7 +1286,7 @@ pub enum RuntimeEffectOutcome {
     RecoverFollowOn {
         answer: Box<crate::store::FollowOnRecoveryAnswer>,
     },
-    /// Canonical material read under the successor's lease before execution.
+    /// Canonical material read under the holder's lease before it can end.
     RestoreRunMaterial {
         materials: Vec<crate::tool_run::MaterialEntry>,
     },

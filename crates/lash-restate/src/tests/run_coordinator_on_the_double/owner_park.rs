@@ -84,15 +84,19 @@ impl SessionShifts for OwnerDriver {
 
     async fn execute_run(&self, scoped: ScopedEffectController<'_>, _: Admitted) -> RunEnd {
         RunEnd::owing_nothing(
-            async {
+            Box::pin(async {
                 let operation_scope;
                 let scoped = if let Some(operation) = &self.operation {
-                    operation_scope = ScopedEffectController::borrowed(
-                        scoped.controller(),
-                        AdmittedScope::session_operation(self.session.clone(), operation.as_str()),
-                    )
-                    .unwrap()
-                    .in_drive_of(&scoped);
+                    // As the shift's step controller: the engine's scope-bound
+                    // controller rebuilt for the operation, so the Run's own
+                    // effects journal under the operation's scope.
+                    assert!(scoped.is_scope_bound());
+                    operation_scope = scoped
+                        .rescope(AdmittedScope::session_operation(
+                            self.session.clone(),
+                            operation.as_str(),
+                        ))
+                        .unwrap();
                     &operation_scope
                 } else {
                     &scoped
@@ -160,7 +164,7 @@ impl SessionShifts for OwnerDriver {
                     kind: RunTerminalKind::Answered,
                     work_remaining: false,
                 })
-            }
+            })
             .await,
         )
     }

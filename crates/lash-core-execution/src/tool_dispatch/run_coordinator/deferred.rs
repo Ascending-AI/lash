@@ -331,7 +331,7 @@ impl<'a> RunCoordinator<'a> {
         id: &ToolCallId,
         seal: crate::tool_run::SourceSeal,
     ) -> Result<(), SingletonRunError> {
-        use crate::tool_run::{MaterialHolder, SourceSeal};
+        use crate::tool_run::SourceSeal;
         let waiting = self.waiting.remove(id).ok_or_else(|| boundary(id))?;
         if let Some(start) = &waiting.start {
             let obligation = recorded_obligation(&self.journal, id, start)?;
@@ -398,18 +398,8 @@ impl<'a> RunCoordinator<'a> {
                             reference: result.clone(),
                         })
                     })?;
-                let payload = store
-                    .read_material(
-                        &MaterialHolder::Source {
-                            source: source.source.clone(),
-                        },
-                        &result,
-                        &MaterialOwner::Source {
-                            source: source.source.clone(),
-                        },
-                        &self.journal.materials.available,
-                    )
-                    .await?;
+                let payload =
+                    read_source_result(&self.journal, id, &source.source, &result, store).await?;
                 let source_result = result.clone();
                 let capture: SingletonCapture =
                     serde_json::from_str(&payload.text).map_err(|error| {
@@ -479,8 +469,8 @@ impl<'a> RunCoordinator<'a> {
                     Ok(()) => capture,
                     Err(refusal) => SingletonCapture::Refused { refusal },
                 };
-                // Source bytes stay canonical at the retained source; the
-                // decision carries its reference, never another payload copy.
+                // The decision carries the source's reference, never another
+                // payload copy; only the read step journals the bytes.
                 self.journal
                     .materials
                     .entries
@@ -502,4 +492,76 @@ impl<'a> RunCoordinator<'a> {
         }
         Ok(())
     }
+}
+
+/// Read a Resolved seal's retained result once, in a recorded step. Run
+/// close releases the source's lease while this journal can still replay,
+/// so a replay serves the canonical payload from the step, never the store.
+async fn read_source_result(
+    journal: &RunJournal<'_>,
+    call_id: &ToolCallId,
+    source: &AwaitEventKey,
+    result: &MaterialRef,
+    store: &dyn crate::store::ToolMaterialStore,
+) -> Result<MaterialPayload, SingletonRunError> {
+    use crate::tool_run::{MaterialHolder, RetainedBundle};
+    let MaterialLocation::RetainedArtifact { artifact } = &result.location else {
+        return Err(
+            RuntimeEffectControllerError::from(MaterialRefusal::Missing {
+                reference: Box::new(result.clone()),
+            })
+            .into(),
+        );
+    };
+    let holder = MaterialHolder::Source {
+        source: source.clone(),
+    };
+    let name = format!("run:source-material:{call_id}");
+    let invocation = crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(journal.scoped.execution_scope().clone(), &name)
+            .map_err(RuntimeEffectControllerError::from)?,
+        crate::RuntimeAttribution::default(),
+        &name,
+    );
+    let outcome = journal
+        .scoped
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::RestoreRunMaterial {
+                    holder: holder.clone(),
+                    bundles: vec![RetainedBundle {
+                        holder,
+                        artifact: artifact.clone(),
+                        references: vec![result.clone()],
+                        copy_bytes: 0,
+                    }],
+                    aliases: vec![result.clone()],
+                    available: journal.materials.available.clone(),
+                },
+            ),
+            crate::RuntimeEffectLocalExecutor::restore_run_material(store),
+        )
+        .await?;
+    let crate::RuntimeEffectOutcome::RestoreRunMaterial { materials } = outcome else {
+        return Err(RuntimeEffectControllerError::wrong_outcome(
+            crate::RuntimeEffectKind::RestoreRunMaterial,
+            outcome.kind(),
+        )
+        .into());
+    };
+    materials
+        .into_iter()
+        .find_map(|entry| match entry {
+            MaterialEntry::Available { reference, payload } if reference == *result => {
+                Some(*payload)
+            }
+            _ => None,
+        })
+        .ok_or_else(|| {
+            RuntimeEffectControllerError::from(MaterialRefusal::Missing {
+                reference: Box::new(result.clone()),
+            })
+            .into()
+        })
 }

@@ -209,8 +209,9 @@ impl RuntimeEffectLocalRunner for LiveStepRunner<'_> {
     }
 }
 
-/// Only the first successor execution reads the retained store; the owning
-/// invocation records its payloads before its commit can end the lease.
+/// Only the first execution reads the retained store; the owning invocation
+/// records its payloads before its commit can end the lease, whether the
+/// holder is a successor segment or a Deferred source its Run close retires.
 struct RunMaterialReader<'run>(&'run dyn crate::store::ToolMaterialStore);
 
 #[async_trait::async_trait]

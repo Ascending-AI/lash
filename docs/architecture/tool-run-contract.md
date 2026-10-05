@@ -324,8 +324,10 @@ decision. Every recorded D remains authoritative on replay.
 logical opener before starting a body admitted to defer. Its Deferred X
 retains the matching source key and leaves the call open without D, rank or
 V. `await_deferred` subscribes at the Run, reads a Resolved seal's canonical
-retained result under the source lease, and accepts its decision before
-`drain` presents it. The wait always subscribes; pending sources race the
+retained result under the source lease once, in a recorded
+`RestoreRunMaterial` step, and accepts its decision before `drain` presents
+it. Run close releases the source while the owning journal can still replay,
+so a replay serves that payload from the step and never reads the store. The wait always subscribes; pending sources race the
 recorded cancel gate. Its journaled commands follow that gate's recorded
 outcome. A turn Run's gate is its turn-cancel gate; an operation Run's is
 its plugin task's cancel signal, which a host's cancel resolves (FIG-5006).
