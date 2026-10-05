@@ -88,6 +88,21 @@ example "remind me of the code from your context and count the words in each
 message, one step per message"). Its first request must show the previous
 turn's final context.
 
+## Phase 4: caching (optional, a model with the cache_control dialect)
+
+Launch with `OPENROUTER_MODEL=anthropic/claude-sonnet-5` (any `anthropic/` id on
+OpenRouter; the workbench sends the `cache_control` dialect for every model).
+`extract_live.py` prints and writes `usage.md`: one row per request with its
+breakpoints and the provider's uncached input, cache read and cache write.
+Expected, within the 5-minute cache lifetime:
+
+- step 1 of a session writes the system prompt and harness and reads nothing;
+- after an append, a step reads the system prompt plus the previous context;
+- the first step of a later turn reads the system prompt plus the prior context;
+- the step after a rewrite of entry 0 reads only the system prompt, and the
+  step after it reads the system prompt plus the rewritten context;
+- the system-prompt hash column is the same on every row.
+
 ## Teardown
 
 ```sh

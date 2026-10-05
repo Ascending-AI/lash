@@ -959,7 +959,7 @@ async fn chronological_rlm_bodies_carry_the_system_marker_and_one_message_marker
         assert!(anthropic["system"][0].get("cache_control").is_some());
         assert_eq!(
             marked_message_texts(&anthropic["messages"]),
-            [expected.clone()],
+            std::slice::from_ref(&expected),
             "request {index}"
         );
 
