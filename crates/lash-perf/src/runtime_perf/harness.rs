@@ -656,7 +656,7 @@ fn rlm_trajectory_entries(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
             let SessionHistoryRecord::Protocol(event) = event else {
                 return None;
             };
-            match event.decode::<RlmProtocolEvent>(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID) {
+            match lash_protocol_rlm::decode_rlm_protocol_event(event) {
                 Ok(Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))) => Some(entry),
                 Ok(Some(
                     RlmProtocolEvent::RlmAssistantContent(_)

@@ -50,7 +50,10 @@ pub fn rlm_protocol_event(
     .expect("RLM protocol events serialize")
 }
 
-pub(crate) fn decode_rlm_protocol_event(
+/// Read the RLM event a session-history protocol event carries: `None` for
+/// another plugin's event, typed corruption for an unstamped, foreign-format or
+/// undecodable payload. The inverse of [`rlm_protocol_event`].
+pub fn decode_rlm_protocol_event(
     event: &lash_core::ProtocolEvent,
 ) -> Result<Option<RlmProtocolEvent>, lash_core::StoredDataCorruption> {
     if event.plugin_id != crate::plugin::RLM_PROTOCOL_PLUGIN_ID {

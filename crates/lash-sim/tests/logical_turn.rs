@@ -841,12 +841,8 @@ finish({ baton: baton });
         .filter_map(|node| match &node.payload {
             SessionNodePayload::Event {
                 event: lash_core::SessionHistoryRecord::Protocol(event),
-            } => event
-                .decode::<lash_rlm_types::RlmProtocolEvent>(
-                    lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                )
-                .ok()
-                .flatten(),
+            } => lash_protocol_rlm::decode_rlm_protocol_event(event)
+                .expect("recorded RLM protocol event decodes"),
             _ => None,
         })
         .filter_map(|event| match event {

@@ -698,6 +698,7 @@ pub(super) fn run_rlm_protocol_contract(
         effects = drain_rlm_contract_effects(&mut machine);
         observed.record(&effects);
     }
+    let events = rlm_contract_events(&machine)?;
     Ok(json!({
         "execution_api": "lash_core::sansio::TurnMachine",
         "driver": "lash_protocol_rlm::RlmDriver",
@@ -717,8 +718,8 @@ pub(super) fn run_rlm_protocol_contract(
         "turn_outcomes": observed.turn_outcomes.iter().map(turn_outcome_contract_json).collect::<Vec<_>>(),
         "tool_call_event": observed.tool_call_event,
         "assistant_conversation_progress": observed.assistant_conversation_progress,
-        "llm_extraction_diagnostics": rlm_contract_llm_extraction_diagnostics(&machine),
-        "trajectory": rlm_contract_trajectory(&machine),
+        "llm_extraction_diagnostics": rlm_contract_llm_extraction_diagnostics(&events),
+        "trajectory": rlm_contract_trajectory(&events)?,
         "system_messages": rlm_contract_system_messages(&machine),
     }))
 }
@@ -912,51 +913,51 @@ pub(super) fn checkpoint_kind_name(checkpoint: lash_core::CheckpointKind) -> &'s
     }
 }
 
-fn rlm_contract_llm_extraction_diagnostics(machine: &lash_core::TurnMachine) -> Vec<Value> {
-    machine
-        .events()
+/// The RLM events the machine recorded, read through the protocol's decoder:
+/// an event the protocol cannot read is a failed contract, never an absence.
+fn rlm_contract_events(
+    machine: &lash_core::TurnMachine,
+) -> Result<Vec<RlmProtocolEvent>, FixedScriptRunnerError> {
+    let mut events = Vec::new();
+    for event in machine.events().iter() {
+        let lash_core::SessionHistoryRecord::Protocol(event) = event else {
+            continue;
+        };
+        if let Some(event) =
+            lash_protocol_rlm::decode_rlm_protocol_event(event).map_err(|error| {
+                FixedScriptRunnerError::Assertion(format!(
+                    "recorded RLM protocol event does not decode: {error}"
+                ))
+            })?
+        {
+            events.push(event);
+        }
+    }
+    Ok(events)
+}
+
+fn rlm_contract_llm_extraction_diagnostics(events: &[RlmProtocolEvent]) -> Vec<Value> {
+    events
         .iter()
         .filter_map(|event| match event {
-            lash_core::SessionHistoryRecord::Protocol(event) => {
-                match event
-                    .decode::<lash_rlm_types::RlmProtocolEvent>(
-                        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                    )
-                    .ok()
-                    .flatten()
-                {
-                    Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                        if diagnostic.phase == "llm_extraction" =>
-                    {
-                        Some(diagnostic.payload)
-                    }
-                    _ => None,
-                }
+            RlmProtocolEvent::RlmDiagnostic(diagnostic) if diagnostic.phase == "llm_extraction" => {
+                Some(diagnostic.payload.clone())
             }
             _ => None,
         })
         .collect()
 }
 
-fn rlm_contract_trajectory(machine: &lash_core::TurnMachine) -> Vec<Value> {
-    machine
-        .events()
+fn rlm_contract_trajectory(
+    events: &[RlmProtocolEvent],
+) -> Result<Vec<Value>, FixedScriptRunnerError> {
+    events
         .iter()
         .filter_map(|event| match event {
-            lash_core::SessionHistoryRecord::Protocol(event) => {
-                match event
-                    .decode::<lash_rlm_types::RlmProtocolEvent>(
-                        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                    )
-                    .ok()
-                    .flatten()
-                {
-                    Some(RlmProtocolEvent::RlmTrajectoryEntry(entry)) => {
-                        serde_json::to_value(entry).ok()
-                    }
-                    _ => None,
-                }
-            }
+            RlmProtocolEvent::RlmTrajectoryEntry(entry) => Some(
+                serde_json::to_value(entry)
+                    .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string())),
+            ),
             _ => None,
         })
         .collect()

@@ -24,7 +24,7 @@ pub(crate) use transport::{
 #[cfg(test)]
 pub(crate) use context::prune_reserved_projected_bindings;
 
-pub(crate) use context::decode_rlm_protocol_event;
+pub use context::decode_rlm_protocol_event;
 
 mod diagnostics;
 pub use diagnostics::recorded_extraction_decisions;

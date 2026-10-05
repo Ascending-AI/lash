@@ -61,6 +61,10 @@ pub use projection::{
     rlm_history_projection, rlm_protocol_event, rlm_seed_initial_nodes,
 };
 pub use projection::{RlmProjectedBindings, rlm_session_projection_extension};
+// Harnesses read recorded RLM events through the protocol's own decoder; the
+// `lash::rlm` facade keeps decoding sealed (FIG-1530).
+#[cfg(feature = "testing")]
+pub use projection::decode_rlm_protocol_event;
 #[cfg(feature = "testing")]
 pub use protocol::project_conformance_messages_through_rlm_history;
 pub use protocol::{RlmDriver, RlmPromptFeatures};
