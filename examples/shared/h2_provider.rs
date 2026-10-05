@@ -271,7 +271,7 @@ fn response(
             );
             let code = match config.scenario.as_str() {
                 "S10" => {
-                    "const timer = sleep(0); const a = tools.rank_one({}); const b = tools.rank_two({}); const c = tools.rank_three({}); await timer; print('unrelated-progress'); await Promise.all([a,b,c]); finish('drained');"
+                    "const a = tools.rank_one({}); const b = tools.rank_two({}); const c = tools.rank_three({}); await Promise.all([a,b,c,sleep(10000)]); finish('drained');"
                 }
                 "S11" => {
                     "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); await tools.after({}); finish(value);"

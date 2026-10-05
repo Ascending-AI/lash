@@ -930,9 +930,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Product red on rerun (FIG-4983): after cancel and kill at the intent-to-V cut, cold replay hits RT0016 at the V schedule await before the nested process-emit-event Run; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s09_after_intent"
+          }
         },
         {
           "variant": "before-intent",
@@ -988,7 +991,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending product fix and rerun: FIG-4983 owns cancel::s09_after_intent after FIG-4977 (nested intent replay); this leg follows its live row.",
+          "hold_reason": "Missing replay registration: cancel::s09_after_intent exercises the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1045,7 +1048,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending product fix and rerun: FIG-4983 owns cancel::s09_after_intent after FIG-4977 (nested intent replay); this leg follows its live row.",
+          "hold_reason": "Missing PostgreSQL registration: cancel::s09_after_intent exercises the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1102,7 +1105,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending product fix and rerun: FIG-4983 owns cancel::s09_after_intent after FIG-4977 (nested intent replay); this leg follows its live row.",
+          "hold_reason": "Missing PostgreSQL and replay registration: cancel::s09_after_intent exercises the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -1147,9 +1150,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Red on rerun (FIG-4983): the receiver-append hold and rank2 D seat engage, but the unrelated-progress oracle finds no durable_wait_resolved timer trace; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s10_empty_middle_rank"
+          }
         },
         {
           "variant": "default",
@@ -1174,9 +1180,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: cancel::s10_empty_middle_rank exercises the sqlite_file/live leg only; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s10_empty_middle_rank_replay"
+          }
         },
         {
           "variant": "default",
@@ -1201,9 +1210,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: cancel::s10_empty_middle_rank exercises the sqlite_file/live leg only; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s10_empty_middle_rank_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -1228,9 +1240,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: cancel::s10_empty_middle_rank exercises the sqlite_file/live leg only; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s10_empty_middle_rank_postgresql_replay"
+          }
         }
       ],
       "setup": "Rank1 blocked intent, rank2 intent-free, rank3 intent; unrelated program effect.",

@@ -1254,7 +1254,7 @@ pub async fn run(row: Row, permutation: Permutation) -> Result<()> {
             )
             .await
         }
-        Row::Ranks => super::cancel::empty_middle_rank(&mut scenario, &spec).await,
+        Row::Ranks => super::cancel::empty_middle_rank(&mut scenario, &spec, permutation.leg).await,
         Row::InlineLoser => super::cancel::live_loser(&mut scenario, &spec, false).await,
         Row::DeferredLoser => super::cancel::live_loser(&mut scenario, &spec, true).await,
         Row::RetirePending => super::handover::retire_pending(&mut scenario, &shared, &spec).await,

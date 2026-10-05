@@ -14,6 +14,7 @@ use lash_upgrade_harness::e2e::control::{Barrier, BarrierKind, ToolControl};
 use lash_upgrade_harness::e2e::evidence::Evidence;
 use lash_upgrade_harness::e2e::host::{HostCommand, HostKind};
 use lash_upgrade_harness::e2e::provider::ProviderKind;
+use std::time::{Duration, Instant};
 
 h2_case!(s08_pre_final, PreFinal, SqliteFile, Live);
 h2_case!(s08_pre_final_replay, PreFinal, SqliteFile, Replay);
@@ -35,6 +36,14 @@ h2_case!(
 );
 h2_case!(s09_after_intent, AfterIntent, SqliteFile, Live);
 h2_case!(s10_empty_middle_rank, Ranks, SqliteFile, Live);
+h2_case!(s10_empty_middle_rank_replay, Ranks, SqliteFile, Replay);
+h2_case!(s10_empty_middle_rank_postgresql, Ranks, PostgreSql, Live);
+h2_case!(
+    s10_empty_middle_rank_postgresql_replay,
+    Ranks,
+    PostgreSql,
+    Replay
+);
 h2_case!(s11_inline_loser, InlineLoser, SqliteFile, Live);
 h2_case!(s11_deferred_loser, DeferredLoser, SqliteFile, Live);
 h2_case!(s11_inline_loser_postgresql, InlineLoser, PostgreSql, Live);
@@ -135,6 +144,19 @@ fn phase_position(evidence: &Evidence, call: &ToolCallId, phase: &str) -> Result
         })
         .collect();
     ensure!(positions.len() == 1, "{phase} must occur once for {call}");
+    Ok(positions[0])
+}
+
+/// The one recorded wake of the S10 aggregate's timer leaf.
+fn timer_position(evidence: &Evidence) -> Result<usize> {
+    let positions: Vec<_> = events(evidence)?
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, event)| {
+            matches!(event, RunEvent::TimerElapsed { .. }).then_some(index)
+        })
+        .collect();
+    ensure!(positions.len() == 1, "the aggregate timer must elapse once");
     Ok(positions[0])
 }
 
@@ -266,7 +288,17 @@ pub async fn post_final(
 
 /// S10's rank2 is intentionally intent-free. Its seat cannot open rank3's
 /// declarations while rank1 still owes a mutation; an unrelated VM effect can.
-pub async fn empty_middle_rank(scenario: &mut Scenario<'_>, spec: &CaseSpec) -> Result<Evidence> {
+/// That effect is the aggregate's timer leaf: the program's tool handles are
+/// admitted only at its `Promise.all`, so the timer shares their round.
+///
+/// The replay leg releases rank2 and rank3 once rank1's X is durable. Its
+/// server closes every input stream, and the SDK never suspends while an
+/// awaited Run closure executes, so no D could follow while a body is held.
+pub async fn empty_middle_rank(
+    scenario: &mut Scenario<'_>,
+    spec: &CaseSpec,
+    leg: Leg,
+) -> Result<Evidence> {
     scenario.start(spec).await?;
     scenario
         .host
@@ -293,13 +325,52 @@ pub async fn empty_middle_rank(scenario: &mut Scenario<'_>, spec: &CaseSpec) -> 
     scenario
         .release(scenario.barrier(one, BarrierKind::BodyEntered)?)
         .await?;
+    if leg == Leg::Replay {
+        scenario
+            .wait(scenario.barrier(one, BarrierKind::XDurable)?)
+            .await?;
+        for call in [two, three] {
+            scenario
+                .release(scenario.barrier(call, BarrierKind::BodyEntered)?)
+                .await?;
+        }
+    }
     scenario
         .wait(scenario.barrier(one, BarrierKind::DDurable)?)
         .await?;
     scenario.wait(intent.clone()).await?;
-    scenario
-        .release(scenario.barrier(two, BarrierKind::BodyEntered)?)
-        .await?;
+    // K3: an effect issued before the drain keeps progressing while a
+    // final's declarations are held. The Run records the timer's wake.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let held = loop {
+        let held = scenario.read().await?;
+        if events(&held)?
+            .iter()
+            .any(|event| matches!(event, RunEvent::TimerElapsed { .. }))
+        {
+            break held;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "the aggregate timer did not elapse while rank1's declarations were held"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let elapsed = timer_position(&held)?;
+    ensure!(
+        phase_position(&held, one, "issued")? < elapsed,
+        "the aggregate timer elapsed before rank1's declarations were held"
+    );
+    ensure!(
+        !events(&held)?.iter().any(|event| matches!(event,
+        RunEvent::DeclarationsSettled {call_id} if call_id==one)),
+        "rank1 seated before the aggregate timer elapsed"
+    );
+    if leg == Leg::Live {
+        scenario
+            .release(scenario.barrier(two, BarrierKind::BodyEntered)?)
+            .await?;
+    }
     // K3/L18: an intent-free final seats at its D; its V follows rank order.
     let cut = scenario
         .wait(scenario.barrier(two, BarrierKind::DDurable)?)
@@ -317,18 +388,15 @@ pub async fn empty_middle_rank(scenario: &mut Scenario<'_>, spec: &CaseSpec) -> 
     phase_position(&before, one, "issued")
         .context("rank1's declarations were not durable while its receiver held")?;
     ensure!(
-        before.effects.iter().any(|effect| {
-            effect["kind"] == "h2_trace_record"
-                && effect["record"]["type"] == "durable_wait_resolved"
-                && effect["record"]["wait_kind"] == "timer"
-                && effect["record"]["resolution"] == "resolved"
-        }),
-        "the real VM timer did not progress while protected tool declarations waited"
+        timer_position(&before)? == elapsed,
+        "the aggregate timer's wake moved before the cut"
     );
     scenario.kill_and_reopen(&cut).await?;
-    scenario
-        .release(scenario.barrier(three, BarrierKind::BodyEntered)?)
-        .await?;
+    if leg == Leg::Live {
+        scenario
+            .release(scenario.barrier(three, BarrierKind::BodyEntered)?)
+            .await?;
+    }
     scenario
         .wait(scenario.barrier(three, BarrierKind::DDurable)?)
         .await?;
