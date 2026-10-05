@@ -80,6 +80,10 @@ elif [ "$lane" = "fast" ] && [ "$fast_shard" != "all" ]; then
 else
   out_dir="${out_root}/${lane}"
 fi
+# Stage jobs already supply the complete upload directory, including stage.
+if [ -n "${LASH_CONFIDENCE_STAGE:-}" ]; then
+  out_dir="$out_root"
+fi
 if [ "$area" != "all" ]; then
   out_dir="${out_dir}/areas/${area}"
 fi
@@ -398,6 +402,16 @@ cleanup_mutation_postgres() {
 }
 
 finish_confidence_gate() {
+  local exit_code=$?
+  if [ "$exit_code" -ne 0 ] && [ "$dry_run" -eq 0 ]; then
+    mkdir -p "$out_dir"
+    printf 'selector=%s stage=%s step=%s exit_code=%s\n' \
+      "$requested_selector" "${LASH_CONFIDENCE_STAGE:-}" "$current_step" "$exit_code" \
+      > "${out_dir}/failure.log"
+    if [ -n "${LASH_CONFIDENCE_STAGE:-}" ]; then
+      printf '{"stage":"%s","status":"failed"}\n' "$LASH_CONFIDENCE_STAGE" > "${out_dir}/stage.json"
+    fi
+  fi
   cleanup_mutation_postgres
   finish_current_step
   lash_gate_cleanup
@@ -941,7 +955,7 @@ run_postgres_mutants_recorded() {
   shift 2
   start_mutation_postgres "$artifact"
   LASH_POSTGRES_DATABASE_URL="$mutation_postgres_database_url" \
-    run_mutants_recorded "$name" "$artifact" "$@" --jobs "$mutation_jobs"
+    run_mutants_recorded "$name" "$artifact" "$@"
   cleanup_mutation_postgres
 }
 
@@ -1019,10 +1033,15 @@ EOF
 }
 
 run_cargo_tests() {
+  local command=(cargo test)
   if cargo nextest --version >/dev/null 2>&1; then
-    cargo nextest run "$@"
+    command=(cargo nextest run)
+  fi
+  command+=("$@")
+  if [[ " $* " == *" -p lash-internal-postgres-store "* ]] && [ -z "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
+    bash "$repo/scripts/ci/with-service.sh" pg16 -- "${command[@]}"
   else
-    cargo test "$@"
+    "${command[@]}"
   fi
 }
 
@@ -2311,6 +2330,7 @@ run_mutation_smoke() {
         "${area_mutation_file_args[@]}" \
         --cargo-arg=--locked \
         --test-tool cargo \
+        --jobs "$mutation_jobs" \
         --shard "$shard" \
         --timeout "$timeout" \
         --minimum-test-timeout 30 \
@@ -2350,6 +2370,7 @@ run_area_targeted_mutation_evidence() {
         "${area_mutation_file_args[@]}" \
         --cargo-arg=--locked \
         --test-tool cargo \
+        --jobs "$mutation_jobs" \
         --shard "$shard" \
         --timeout "$timeout" \
         --minimum-test-timeout 30 \
@@ -2470,6 +2491,7 @@ run_mutation_full() {
         "${area_mutation_file_args[@]}" \
         --cargo-arg=--locked \
         --test-tool cargo \
+        --jobs "$mutation_jobs" \
         --timeout "$timeout" \
         --minimum-test-timeout 60 \
         "${shard_args[@]}" \
@@ -3040,6 +3062,14 @@ print_plan() {
 if [ "$dry_run" -eq 1 ]; then
   print_plan
   exit 0
+fi
+
+# Tests and cargo-mutants run from deps/scratch directories, so locating the
+# worker beside the test executable cannot find the producer's workspace bin.
+export LASH_VM_WORKER="${LASH_VM_WORKER:-${repo}/target/debug/lash-vm-worker}"
+if [ "${LASH_CONFIDENCE_STAGE:-}" != build ] && [ ! -x "$LASH_VM_WORKER" ]; then
+  echo "Confidence requires the built VM worker at ${LASH_VM_WORKER}; build the workspace bins or restore the confidence tools artifact" >&2
+  exit 127
 fi
 
 if [ "$lane" = "mutation" ]; then
