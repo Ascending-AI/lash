@@ -21,7 +21,7 @@ use lash::runtime::{
     SingletonToolCall, SingletonToolHandlers,
 };
 use lash::sync::MutexExt as _;
-use lash::tools::{ToolDeclaration, ToolIntentKind};
+use lash::tools::ToolDeclaration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
@@ -269,17 +269,6 @@ impl SingletonToolHandlers for Echo {
     }
     async fn run_cancel_requested(&self) -> Result<bool, String> {
         Ok(self.token.is_cancelled())
-    }
-    async fn realize_declarations(
-        &self,
-        _: &lash::ToolCallId,
-        intents: &[ToolIntentKind],
-    ) -> Result<(), String> {
-        if intents.is_empty() {
-            Ok(())
-        } else {
-            Err("workbench echo admits no declarations".into())
-        }
     }
     async fn present(
         &self,
