@@ -703,7 +703,7 @@ fn proposal_matches(value: &serde_json::Value, barrier: &Barrier) -> bool {
     }
     // A barrier without a call names the bound Run's declared start, whose
     // call id a case cannot know before the Run mints it: its X, its
-    // `declare` record (StartAdmitted) and the V record carrying StartLaunched.
+    // `declare` record (StartAdmitted) and its launch record.
     let call = barrier.work.call.as_deref();
     let named =
         |observed: Option<&str>| observed.is_some() && call.is_none_or(|c| observed == Some(c));
@@ -713,6 +713,20 @@ fn proposal_matches(value: &serde_json::Value, barrier: &Barrier) -> bool {
         return named(Some(observed))
             && value.get("attempt").and_then(serde_json::Value::as_u64)
                 == barrier.work.ordinal.map(u64::from);
+    }
+    // A declared start's launch record is its `start:prepare` result: the
+    // launch and discharge events, outside any Run record, that D folds at
+    // its own ordinal once the result is acknowledged.
+    if barrier.kind == BarrierKind::VProposed && call.is_none() {
+        return value
+            .get("events")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|events| {
+                events.iter().any(|event| {
+                    event.get("event").and_then(serde_json::Value::as_str) == Some("start_launched")
+                        && named(event.get("call_id").and_then(serde_json::Value::as_str))
+                })
+            });
     }
     value
         .pointer("/record/events")
@@ -726,7 +740,6 @@ fn proposal_matches(value: &serde_json::Value, barrier: &Barrier) -> bool {
             let start = match (&barrier.kind, call) {
                 (_, Some(_)) => true,
                 (BarrierKind::DeclarationIssued, None) => carries("start_admitted"),
-                (BarrierKind::VProposed, None) => carries("start_launched"),
                 (_, None) => false,
             };
             start

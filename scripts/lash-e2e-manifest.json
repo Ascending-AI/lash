@@ -2265,9 +2265,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "workbench_isolated::s19_isolated_start_cuts_recover_one_process_on_the_workbench_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -2293,7 +2296,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL and forced-suspension replay oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
+          "hold_reason": "Held on FIG-4998: replay legs wait until a cold-reopened Run follows its recorded selection order. The PostgreSQL/live workbench route is registered (FIG-5048); FIG-5057 adds the workbench forced-suspension replay oracle.",
           "registration": null
         }
       ],
@@ -2425,7 +2428,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
+          "hold_reason": "Product red on both stores: with a cancel requested, the declared start's start:prepare discharge calls processes.cancel (crates/lash-core-execution/src/tool_dispatch/production.rs:1167), which registers a journal command while D's lash:run:schedule owner step awaits the preparation. FIG-5009's guard refuses it (journal_write_during_owner_step), so the invocation retries, diverges and parks. Register workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_postgresql (FIG-5048) once that is fixed.",
           "registration": null
         },
         {
@@ -2452,7 +2455,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL and forced-suspension replay oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
+          "hold_reason": "Held on FIG-4998: replay legs wait until a cold-reopened Run follows its recorded selection order. The PostgreSQL/live workbench route is registered (FIG-5048); FIG-5057 adds the workbench forced-suspension replay oracle.",
           "registration": null
         }
       ],

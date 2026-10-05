@@ -10,6 +10,7 @@
 //! readiness or completion.
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -17,7 +18,7 @@ use lash_core::tool_dispatch::{IsolatedProcessDescriptor, ProcessExecutionBounda
 use lash_core::tool_run::RunEvent;
 use lash_remote_protocol::{RemoteToolCallOutcome, RemoteTurnReport, RemoteTurnStatus};
 use lash_upgrade_harness::e2e::{
-    case::CaseLease,
+    case::{CaseLease, Leg, Permutation, StoreKind},
     cluster::{ClusterControl, LocalCluster},
     control::{
         Barrier, BarrierKind, BarrierProof, CleanupReceipt, Fault, FaultReceipt, FileBarriers,
@@ -35,38 +36,64 @@ const CASE_DEADLINE: Duration = Duration::from_secs(300);
 const POLL: Duration = Duration::from_millis(25);
 const ISOLATED_KEY: &str = "process-start-key:v1:isolated:";
 
+macro_rules! workbench_isolated_case {
+    ($name:ident, $oracle:ident, $slug:literal, $scenario:literal, $store:ident, $leg:ident) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() -> Result<()> {
+            let permutation = Permutation::provisioned(StoreKind::$store, Leg::$leg)?;
+            let mut case = Case::boot($slug, $scenario, permutation).await?;
+            let result = tokio::time::timeout_at(
+                (case.deadline() - Duration::from_secs(60)).into(),
+                $oracle(&mut case),
+            )
+            .await
+            .unwrap_or_else(|_| {
+                Err(anyhow::anyhow!(concat!(
+                    $scenario,
+                    " exceeded its execution deadline"
+                )))
+            });
+            case.finish($scenario, result).await
+        }
+    };
+}
+workbench_isolated_case!(
+    s19_isolated_start_cuts_recover_one_process_on_the_workbench,
+    s19,
+    "s19-workbench-isolated",
+    "S19",
+    SqliteFile,
+    Live
+);
+workbench_isolated_case!(
+    s19_isolated_start_cuts_recover_one_process_on_the_workbench_postgresql,
+    s19,
+    "s19-workbench-isolated",
+    "S19",
+    PostgreSql,
+    Live
+);
+workbench_isolated_case!(
+    s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench,
+    s20,
+    "s20-workbench-isolated",
+    "S20",
+    SqliteFile,
+    Live
+);
+workbench_isolated_case!(
+    s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_postgresql,
+    s20,
+    "s20-workbench-isolated",
+    "S20",
+    PostgreSql,
+    Live
+);
+
 /// L08: an unbound isolated tool refuses typed before any body; host SIGKILL
 /// between durable admission and launch, and between registration and the
 /// send of its launch record, recovers the same StartKey and one admitted
 /// process identity on the product route; no ordinary body ever runs.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s19_isolated_start_cuts_recover_one_process_on_the_workbench() -> Result<()> {
-    let mut case = Case::boot("s19-workbench-isolated", "S19").await?;
-    let result = tokio::time::timeout_at(
-        (case.deadline() - Duration::from_secs(60)).into(),
-        s19(&mut case),
-    )
-    .await
-    .unwrap_or_else(|_| Err(anyhow::anyhow!("S19 exceeded its execution deadline")));
-    case.finish("S19", result).await
-}
-
-/// L08: cancellation before admission forbids the start; cancellation after
-/// admission launches under the admitted key, then terminates and reaps the
-/// worker before the hold is released; a workbench killed after the worker's
-/// death but before the discharge is durable recovers the same receipt.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench() -> Result<()> {
-    let mut case = Case::boot("s20-workbench-isolated", "S20").await?;
-    let result = tokio::time::timeout_at(
-        (case.deadline() - Duration::from_secs(60)).into(),
-        s20(&mut case),
-    )
-    .await
-    .unwrap_or_else(|_| Err(anyhow::anyhow!("S20 exceeded its execution deadline")));
-    case.finish("S20", result).await
-}
-
 async fn s19(case: &mut Case) -> Result<()> {
     let leg = case.submit("unbound", &[]).await?;
     let report = case.settled(&leg).await?;
@@ -137,6 +164,16 @@ async fn s19(case: &mut Case) -> Result<()> {
     let rows = case.rows_for(&leg).await?;
     ensure!(rows.len() == 1, "registration left {} rows", rows.len());
     let process = rows[0].process_id.clone();
+    let prepared = held_preparation(&held)?;
+    ensure!(
+        matches!(
+            prepared.events.as_slice(),
+            [RunEvent::StartLaunched { process_id, .. }, RunEvent::StartDischarged { .. }]
+                if process_id.as_str() == process
+        ),
+        "the held launch record names another registration: {:?}",
+        prepared.events
+    );
     let pid = case.await_spawn(&leg).await?;
     ensure!(alive(pid), "the registered worker is not running");
     ensure!(
@@ -162,6 +199,10 @@ async fn s19(case: &mut Case) -> Result<()> {
         .await
 }
 
+/// L08: cancellation before admission forbids the start; cancellation after
+/// admission launches under the admitted key, then terminates and reaps the
+/// worker before the hold is released; a workbench killed after the worker's
+/// death but before the discharge is durable recovers the same receipt.
 async fn s20(case: &mut Case) -> Result<()> {
     let leg = case
         .submit(
@@ -210,12 +251,24 @@ async fn s20(case: &mut Case) -> Result<()> {
         "the discharge did not cancel and release after termination: {rows:?}"
     );
     let process = rows[0].process_id.clone();
-    let proposed = proposed_discharge(&held)?;
+    let proposed = held_preparation(&held)?;
+    ensure!(
+        matches!(
+            proposed.events.as_slice(),
+            [
+                RunEvent::StartLaunched { process_id, .. },
+                RunEvent::StartDischarged { cancelled: true, .. },
+            ] if process_id.as_str() == process
+        ),
+        "the held preparation is not this start's launch and cancelled discharge: {:?}",
+        proposed.events
+    );
     ensure!(
         proposed.termination.as_ref().is_some_and(|receipt| {
             receipt.process_id.as_str() == process && receipt.worker_pid.get() == pid
         }),
-        "the proposed descriptor names another termination: {proposed:?}"
+        "the held preparation names another termination: {:?}",
+        proposed.termination
     );
     ensure!(
         !case
@@ -228,7 +281,8 @@ async fn s20(case: &mut Case) -> Result<()> {
     case.evidence
         .stores
         .push(json!({"kind":"s20_before_discharge_ack","rows":rows,
-        "worker_pid":pid,"reaped":true,"proposed":proposed}));
+        "worker_pid":pid,"reaped":true,"prepared":{"events":proposed.events,
+            "termination":proposed.termination}}));
     case.kill(held).await?;
     case.release(&leg, BarrierKind::VProposed)?;
     case.restart().await?;
@@ -332,8 +386,9 @@ fn presented_descriptor(report: &RemoteTurnReport) -> Result<IsolatedProcessDesc
         .with_context(|| format!("the isolated call presented no descriptor: {record:?}"))
 }
 
-/// The descriptor a held V proposal carries, decoded from its wire frame.
-fn proposed_discharge(proof: &BarrierProof) -> Result<IsolatedProcessDescriptor> {
+/// The declared start's preparation a held launch-record proposal carries,
+/// decoded from its wire frame: launch, discharge and termination receipt.
+fn held_preparation(proof: &BarrierProof) -> Result<lash_core::tool_dispatch::RunStartPrepared> {
     use lash_restate_test::protocol::generated::{
         ProposeRunCompletionMessage, propose_run_completion_message,
     };
@@ -342,26 +397,9 @@ fn proposed_discharge(proof: &BarrierProof) -> Result<IsolatedProcessDescriptor>
     let payload: Vec<u8> = serde_json::from_value(frame["payload"].clone())?;
     let message = ProposeRunCompletionMessage::decode(payload.as_slice())?;
     let Some(propose_run_completion_message::Result::Value(bytes)) = message.result else {
-        bail!("the held V proposal carries no value");
+        bail!("the held launch record carries no value");
     };
-    let value: Value = serde_json::from_slice(&bytes)?;
-    find_descriptor(&value)
-        .with_context(|| format!("the held V proposal has no descriptor: {value}"))
-}
-
-fn find_descriptor(value: &Value) -> Option<IsolatedProcessDescriptor> {
-    if let Ok(descriptor) = serde_json::from_value::<IsolatedProcessDescriptor>(value.clone()) {
-        return Some(descriptor);
-    }
-    match value {
-        Value::Object(fields) => fields.values().find_map(find_descriptor),
-        Value::Array(values) => values.iter().find_map(find_descriptor),
-        Value::String(text) if text.starts_with('{') => serde_json::from_str::<Value>(text)
-            .ok()
-            .as_ref()
-            .and_then(find_descriptor),
-        _ => None,
-    }
+    serde_json::from_slice(&bytes).context("the held launch record is not a start preparation")
 }
 
 /// One process row as read back from the workbench's registry file.
@@ -373,8 +411,49 @@ struct Row {
     cancel_requested: bool,
 }
 
+/// The consumer hold on a process row. No store port reads a hold back: the
+/// registrar writes it with the row and only the release verbs clear it, so
+/// the case reads that one column from the backend's own table.
+enum Holds {
+    Sqlite(PathBuf),
+    Postgres(sqlx::PgPool),
+}
+
+impl Holds {
+    async fn of(&self, process_id: &str) -> Result<Option<String>> {
+        match self {
+            Self::Sqlite(path) => {
+                let (path, process_id) = (path.clone(), process_id.to_owned());
+                tokio::task::spawn_blocking(move || -> Result<Option<String>> {
+                    use rusqlite::OptionalExtension as _;
+                    let db = rusqlite::Connection::open_with_flags(
+                        path,
+                        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                    )?;
+                    Ok(db
+                        .query_row(
+                            "SELECT consumer_hold_key FROM processes WHERE process_id = ?1",
+                            [process_id],
+                            |row| row.get(0),
+                        )
+                        .optional()?
+                        .flatten())
+                })
+                .await?
+            }
+            Self::Postgres(pool) => Ok(sqlx::query_scalar::<_, Option<String>>(
+                "SELECT consumer_hold_key FROM lash_processes WHERE process_id = $1",
+            )
+            .bind(process_id)
+            .fetch_optional(pool)
+            .await?
+            .flatten()),
+        }
+    }
+}
+
 /// One leg's Run: its session and the admitted work bound to its invocation.
-struct Leg {
+struct Run {
     session: String,
     work: WorkIdentity,
     /// Worker markers written before this leg's Run started.
@@ -392,7 +471,11 @@ struct Case {
     barriers: FileBarriers,
     reader: RestateEvidenceReader,
     view: RestateView,
-    store_root: PathBuf,
+    permutation: Permutation,
+    /// One store set, over the leg's SQLite file or PostgreSQL database,
+    /// answers every store read of this case.
+    stores: Arc<dyn lash::StoreSet>,
+    holds: Holds,
     delivery: PathBuf,
     marker: PathBuf,
     base: u16,
@@ -408,7 +491,11 @@ struct Case {
 }
 
 impl Case {
-    async fn boot(slug: &'static str, scenario: &'static str) -> Result<Self> {
+    async fn boot(
+        slug: &'static str,
+        scenario: &'static str,
+        permutation: Permutation,
+    ) -> Result<Self> {
         let root = PathBuf::from(std::env::var("LASH_E2E_ARTIFACT_DIR")?);
         std::fs::create_dir_all(&root)?;
         let deadline = Instant::now() + CASE_DEADLINE;
@@ -424,7 +511,8 @@ impl Case {
             "agent-workbench",
             std::env::var("LASH_WORKBENCH_E2E_BIN")?.into(),
         )?;
-        let mut cluster = LocalCluster::new(base, deadline);
+        let mut cluster = LocalCluster::new(base, deadline).with_leg(permutation.leg);
+        let postgres_url = permutation.postgres_url(&mut lease).await?;
         let boot = cluster.boot(&server, 1, &mut lease).await?;
         let barrier_dir = lease.directory.join("barriers");
         std::fs::create_dir_all(&barrier_dir)?;
@@ -446,7 +534,7 @@ impl Case {
             "worker_marker":marker});
         let fixture_path = lease.directory.join("tool-fixture.json");
         super::write(&fixture_path, &fixture)?;
-        let environment = std::collections::BTreeMap::from([
+        let mut environment = std::collections::BTreeMap::from([
             (
                 "AGENT_WORKBENCH_TOOL_FIXTURE".to_owned(),
                 fixture_path.display().to_string(),
@@ -458,6 +546,9 @@ impl Case {
                 proxy.endpoint.clone(),
             ),
         ]);
+        if let Some(url) = &postgres_url {
+            environment.insert("AGENT_WORKBENCH_DATABASE_URL".into(), url.clone());
+        }
         let mut host = WorkbenchHost::new(
             boot.nodes[0].ingress_url.clone(),
             boot.nodes[0].admin_url.clone(),
@@ -466,6 +557,27 @@ impl Case {
         )?
         .configure(environment)?;
         let ready = host.boot(&artifact, &mut lease).await?;
+        let store_root = lease.directory.join("workbench-data/lash-sessions");
+        let (stores, holds): (Arc<dyn lash::StoreSet>, Holds) = match &postgres_url {
+            Some(url) => {
+                let storage = lash::postgres::PostgresStorage::connect(url).await?;
+                (
+                    Arc::new(lash::postgres::PostgresStoreSet::new(
+                        &storage,
+                        Arc::new(lash::persistence::FileAttachmentStore::new(
+                            lease.directory.join("workbench-data/attachments"),
+                        )),
+                    )),
+                    Holds::Postgres(sqlx::PgPool::connect(url).await?),
+                )
+            }
+            None => (
+                Arc::new(lash::sqlite::SqliteStoreSet::open(&store_root).await?),
+                Holds::Sqlite(
+                    store_root.join(lash_sqlite_store::SqliteDatabase::ProcessRegistry.file_name()),
+                ),
+            ),
+        };
         let view = RestateView::new(&boot.nodes[0].admin_url, &lease.namespace)?;
         let reader = RestateEvidenceReader::new(
             slug.into(),
@@ -477,10 +589,16 @@ impl Case {
         evidence
             .stores
             .push(json!({"kind":"workbench_incarnation","ready":ready}));
+        evidence.stores.push(
+            json!({"kind":"case_store","store":permutation.store.manifest(),
+            "leg":permutation.leg.manifest()}),
+        );
         Ok(Self {
             slug,
             scenario,
-            store_root: lease.directory.join("workbench-data/lash-sessions"),
+            permutation,
+            stores,
+            holds,
             barriers: FileBarriers::new(barrier_dir, deadline)?,
             lease,
             cluster,
@@ -505,7 +623,7 @@ impl Case {
 
     /// The barrier a leg's cut of `kind` holds. An X cut names the first
     /// attempt; every other cut names the leg's declared start.
-    fn barrier(leg: &Leg, kind: BarrierKind) -> Barrier {
+    fn barrier(leg: &Run, kind: BarrierKind) -> Barrier {
         Barrier {
             work: WorkIdentity {
                 ordinal: matches!(kind, BarrierKind::XProposed).then_some(1),
@@ -517,7 +635,7 @@ impl Case {
 
     /// Start a leg's Run, bind its invocation while its model answer is
     /// held, arm the leg's cuts, then let the answer return.
-    async fn submit(&mut self, leg: &str, cuts: &[BarrierKind]) -> Result<Leg> {
+    async fn submit(&mut self, leg: &str, cuts: &[BarrierKind]) -> Result<Run> {
         let alias = format!("{}-{leg}", self.slug);
         let created = self
             .host
@@ -543,9 +661,8 @@ impl Case {
         self.await_model_request(&input).await?;
         let session_id = lash::SessionId::parse(&session)?;
         let run = lash::TurnId::parse(&submitted.work.run)?;
+        let store = self.stores.session_store_factory();
         let work = loop {
-            let stores = lash::sqlite::SqliteStoreSet::open(&self.store_root).await?;
-            let store = stores.open_store().await?;
             match self
                 .reader
                 .bind_public_run(
@@ -566,7 +683,7 @@ impl Case {
         };
         self.proxy
             .bind_invocation(work.segment.clone(), work.clone())?;
-        let leg = Leg {
+        let leg = Run {
             session,
             work,
             spawned_before,
@@ -618,7 +735,7 @@ impl Case {
         }
     }
 
-    async fn hold(&mut self, leg: &Leg, kind: BarrierKind) -> Result<BarrierProof> {
+    async fn hold(&mut self, leg: &Run, kind: BarrierKind) -> Result<BarrierProof> {
         let barrier = Self::barrier(leg, kind);
         let proof = self.barriers.await_proof(&barrier).await?;
         self.evidence.barriers.push(proof.clone());
@@ -626,20 +743,20 @@ impl Case {
     }
 
     /// Wait for a proposal hold, then let the proposal reach Restate.
-    async fn pass(&mut self, leg: &Leg, kind: BarrierKind) -> Result<()> {
+    async fn pass(&mut self, leg: &Run, kind: BarrierKind) -> Result<()> {
         self.hold(leg, kind.clone()).await?;
         self.release(leg, kind)
     }
 
-    fn release(&self, leg: &Leg, kind: BarrierKind) -> Result<()> {
+    fn release(&self, leg: &Run, kind: BarrierKind) -> Result<()> {
         self.barriers.release(&Self::barrier(leg, kind))
     }
 
-    async fn journal(&self, leg: &Leg) -> Result<Vec<JournalFact>> {
+    async fn journal(&self, leg: &Run) -> Result<Vec<JournalFact>> {
         self.view.journal(&leg.work, &leg.work.segment, 7).await
     }
 
-    async fn events(&self, leg: &Leg) -> Result<Vec<RunEvent>> {
+    async fn events(&self, leg: &Run) -> Result<Vec<RunEvent>> {
         Ok(self
             .journal(leg)
             .await?
@@ -652,7 +769,7 @@ impl Case {
             .collect())
     }
 
-    async fn starts(&mut self, leg: &Leg) -> Result<Vec<RunEvent>> {
+    async fn starts(&mut self, leg: &Run) -> Result<Vec<RunEvent>> {
         let journal = self.journal(leg).await?;
         let starts = journal
             .iter()
@@ -668,7 +785,7 @@ impl Case {
     }
 
     /// Wait for the start event `kind` names in the leg's own journal.
-    async fn await_start(&mut self, leg: &Leg, kind: BarrierKind) -> Result<BarrierProof> {
+    async fn await_start(&mut self, leg: &Run, kind: BarrierKind) -> Result<BarrierProof> {
         loop {
             let facts = self.journal(leg).await?;
             let found = facts.iter().find_map(|fact| {
@@ -711,8 +828,7 @@ impl Case {
 
     /// Ask the workbench to cancel the leg's Run and wait until the request
     /// is durable in its store.
-    async fn cancel(&mut self, leg: &Leg) -> Result<Value> {
-        use lash_core::store::TurnInputStore as _;
+    async fn cancel(&mut self, leg: &Run) -> Result<Value> {
         let requested = self
             .host
             .command(HostCommand::Cancel {
@@ -723,9 +839,8 @@ impl Case {
             lash::SessionId::parse(&leg.session)?,
             lash::TurnId::parse(&leg.work.run)?,
         );
+        let store = self.stores.session_store_factory();
         loop {
-            let stores = lash::sqlite::SqliteStoreSet::open(&self.store_root).await?;
-            let store = stores.open_store().await?;
             if let Some(record) = store.turn_cancel_request(&address).await? {
                 return Ok(json!({"requested":requested.output,"record":record}));
             }
@@ -738,19 +853,12 @@ impl Case {
     }
 
     /// The leg's settled report, once its Run has a store terminal.
-    async fn settled(&mut self, leg: &Leg) -> Result<RemoteTurnReport> {
-        use lash_core::store::RunStore as _;
+    async fn settled(&mut self, leg: &Run) -> Result<RemoteTurnReport> {
         let session = lash::SessionId::parse(&leg.session)?;
         let run = lash::TurnId::parse(&leg.work.run)?;
+        let store = self.stores.session_store_factory();
         loop {
-            let stores = lash::sqlite::SqliteStoreSet::open(&self.store_root).await?;
-            if stores
-                .open_store()
-                .await?
-                .run_terminal(&session, &run)
-                .await?
-                .is_some()
-            {
+            if store.run_terminal(&session, &run).await?.is_some() {
                 break;
             }
             ensure!(
@@ -830,39 +938,39 @@ impl Case {
         Ok(())
     }
 
+    /// Every retained isolated process row, read through the store set's
+    /// process registry.
     async fn rows(&self) -> Result<Vec<Row>> {
-        let path = self
-            .store_root
-            .join(lash_sqlite_store::SqliteDatabase::ProcessRegistry.file_name());
-        tokio::task::spawn_blocking(move || -> Result<Vec<Row>> {
-            if !path.exists() {
-                return Ok(Vec::new());
-            }
-            let db = rusqlite::Connection::open_with_flags(
-                path,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-            )?;
-            let mut statement = db.prepare(
-                "SELECT process_id, start_key, consumer_hold_key, cancel_requested_at_ms
-                 FROM processes WHERE start_key LIKE ?1 ORDER BY process_id",
-            )?;
-            let rows = statement
-                .query_map([format!("{ISOLATED_KEY}%")], |row| {
-                    Ok(Row {
-                        process_id: row.get(0)?,
-                        start_key: row.get(1)?,
-                        hold: row.get(2)?,
-                        cancel_requested: row.get::<_, Option<i64>>(3)?.is_some(),
-                    })
-                })?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            Ok(rows)
-        })
-        .await?
+        let records = self
+            .stores
+            .process_registry()
+            .list_processes(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            })
+            .await?;
+        let mut rows = Vec::new();
+        for record in records {
+            let Some(start_key) = record
+                .start_key
+                .filter(|key| key.as_str().starts_with(ISOLATED_KEY))
+            else {
+                continue;
+            };
+            let process_id = record.id.to_string();
+            rows.push(Row {
+                hold: self.holds.of(&process_id).await?,
+                start_key: start_key.to_string(),
+                cancel_requested: record.cancel_request.is_some(),
+                process_id,
+            });
+        }
+        rows.sort_by(|left, right| left.process_id.cmp(&right.process_id));
+        Ok(rows)
     }
 
     /// The isolated rows no earlier leg owned.
-    async fn rows_for(&self, _leg: &Leg) -> Result<Vec<Row>> {
+    async fn rows_for(&self, _leg: &Run) -> Result<Vec<Row>> {
         Ok(self
             .rows()
             .await?
@@ -894,13 +1002,13 @@ impl Case {
         }
     }
 
-    fn spawned(&self, leg: &Leg) -> Result<Vec<u32>> {
+    fn spawned(&self, leg: &Run) -> Result<Vec<u32>> {
         Ok(self
             .pids()?
             .split_off(leg.spawned_before.min(self.pids()?.len())))
     }
 
-    async fn await_spawn(&self, leg: &Leg) -> Result<u32> {
+    async fn await_spawn(&self, leg: &Run) -> Result<u32> {
         loop {
             if let Some(pid) = self.spawned(leg)?.first() {
                 return Ok(*pid);
@@ -921,7 +1029,7 @@ impl Case {
         }
     }
 
-    async fn assert_never_started(&mut self, leg: &Leg) -> Result<()> {
+    async fn assert_never_started(&mut self, leg: &Run) -> Result<()> {
         ensure!(self.deliveries()? == 0, "an ordinary body ran");
         ensure!(self.spawned(leg)?.is_empty(), "a worker was spawned");
         ensure!(
@@ -935,7 +1043,7 @@ impl Case {
 
     async fn assert_recovered(
         &mut self,
-        leg: &Leg,
+        leg: &Run,
         descriptor: &IsolatedProcessDescriptor,
         before: Option<(&str, u32)>,
     ) -> Result<()> {
@@ -1060,7 +1168,7 @@ impl Case {
         };
         match self.rows().await {
             Ok(rows) => self.evidence.stores.push(
-                json!({"kind":"isolated_final_state","pids":pids.iter().map(|pid| json!({"pid":pid,"alive":alive(*pid)})).collect::<Vec<_>>(),"rows":rows}),
+                json!({"kind":"isolated_final_state","pids":pids.iter().map(|pid| json!({"pid":pid,"alive":alive(*pid)})).collect::<Vec<_>>(),"rows":rows,"store":self.permutation.store.manifest()}),
             ),
             Err(error) => errors.push(format!("final state read: {error:#}")),
         }
