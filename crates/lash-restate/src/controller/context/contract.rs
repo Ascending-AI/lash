@@ -11,12 +11,16 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run;
 
-    /// Register a timer before awaiting any pending attempt on replay.
-    fn start_sleep_send<'run>(&'run self, duration: Duration) -> crate::JournaledFuture<'run, ()>
+    /// Register a timer before awaiting any pending attempt on replay,
+    /// returning the engine notification key that completes it.
+    fn start_sleep_send<'run>(
+        &'run self,
+        duration: Duration,
+    ) -> (Option<u32>, crate::JournaledFuture<'run, ()>)
     where
         'ctx: 'run,
     {
-        self.sleep_send(duration)
+        (None, self.sleep_send(duration))
     }
 
     /// A durable timer, raced against the turn's cancellation gate when
@@ -58,18 +62,33 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// Register X before waiting. The SDK owns a value callback; the pair
     /// splits X's borrowed body from its result. The owner polls the body
     /// half beside its waits and awaits the result half only in a frame.
+    /// The `u32` is the engine notification completing this registration —
+    /// the registration's select key; `None` means the registration trapped
+    /// without a notification.
     fn run_json_eager_or_retry_send<'run, T, Fut>(
         &'run self,
         effect_name: String,
         future: Fut,
     ) -> (
         impl Future<Output = ()> + Send + 'run,
+        Option<u32>,
         impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
     )
     where
         'ctx: 'run,
         T: Serialize + DeserializeOwned + Send + 'static,
         Fut: Future<Output = Result<T, String>> + Send + 'run;
+
+    /// One engine first-completed await over the notification handles `keys`
+    /// name: the index of the first the journal completes. Non-consuming:
+    /// every other source stays awaitable. A context without engine
+    /// notifications refuses.
+    fn select_run_sources<'run>(&'run self, _keys: Vec<u32>) -> crate::JournaledFuture<'run, usize>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async { Err(TerminalError::new("this context selects no Run sources")) })
+    }
 
     /// Borrow D's SDK Run so it can suspend while selecting acknowledged X.
     /// The schedule body starts only after the SDK records its fresh command;

@@ -56,6 +56,9 @@ pub(super) struct RecordingContext {
     /// session's revocation awaits its answer: the read answers `409`.
     pub(super) cancel_revocation_read: AtomicBool,
     pub(super) turn_cancel_gate: TestTurnCancelGate,
+    /// Source select keys this context hands out: a counter stands in for
+    /// the engine's notification handles.
+    pub(super) select_keys: AtomicU64,
 }
 
 #[derive(Default)]
@@ -371,6 +374,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         future: Fut,
     ) -> (
         impl std::future::Future<Output = ()> + Send + 'run,
+        Option<u32>,
         impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
     )
     where
@@ -379,9 +383,11 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         Fut: std::future::Future<Output = Result<T, String>> + Send + 'run,
     {
         let context = Arc::clone(self);
-        (std::future::ready(()), async move {
-            context.run_json_or_retry_send(effect_name, future).await
-        })
+        (
+            std::future::ready(()),
+            Some(self.select_keys.fetch_add(1, Ordering::SeqCst) as u32),
+            async move { context.run_json_or_retry_send(effect_name, future).await },
+        )
     }
 
     fn run_json_schedule_or_retry_send<'run, T, Fut>(
@@ -749,6 +755,9 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) events: Arc<RecordingContext>,
     pub(super) process_worker: Mutex<Option<lash_core_worker::DurableProcessWorker>>,
     pub(super) defer_process_workflows: AtomicBool,
+    /// Source select keys this context hands out: a counter stands in for
+    /// the engine's notification handles.
+    pub(super) select_keys: AtomicU64,
 }
 
 impl ReplayableRecordingContext {
@@ -1190,6 +1199,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         future: Fut,
     ) -> (
         impl std::future::Future<Output = ()> + Send + 'run,
+        Option<u32>,
         impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
     )
     where
@@ -1198,9 +1208,11 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         Fut: std::future::Future<Output = Result<T, String>> + Send + 'run,
     {
         let context = Arc::clone(self);
-        (std::future::ready(()), async move {
-            context.run_json_or_retry_send(effect_name, future).await
-        })
+        (
+            std::future::ready(()),
+            Some(self.select_keys.fetch_add(1, Ordering::SeqCst) as u32),
+            async move { context.run_json_or_retry_send(effect_name, future).await },
+        )
     }
 
     fn run_json_schedule_or_retry_send<'run, T, Fut>(

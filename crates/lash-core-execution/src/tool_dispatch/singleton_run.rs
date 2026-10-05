@@ -645,22 +645,57 @@ pub type RunAttemptStep<'run> = std::pin::Pin<
 pub type RunAttemptBody<'run> =
     std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'run>>;
 
-/// X's durable result; only a coordinator frame awaits it.
-pub type RunAttemptResult<'run> = std::pin::Pin<
+/// The engine notification that completes one selectable source. Opaque to
+/// the coordinator; only the controller that issued it interprets it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SelectKey(u32);
+
+impl SelectKey {
+    /// The key of the engine notification `raw` names.
+    pub fn from_engine(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    /// The engine notification identity this key names.
+    pub fn engine(self) -> u32 {
+        self.0
+    }
+}
+
+/// Resolves to a source's engine notification identity once its registration
+/// is durable.
+pub type RunSelectKey<'run> = std::pin::Pin<
     Box<
-        dyn std::future::Future<
-                Output = Result<crate::tool_run::RunAttemptEntry, RuntimeEffectControllerError>,
-            > + Send
+        dyn std::future::Future<Output = Result<SelectKey, RuntimeEffectControllerError>>
+            + Send
             + 'run,
     >,
 >;
+
+/// A selectable source's value; awaited only once the combinator chose it, or
+/// for a served D's recorded choice.
+pub type RunSelectValue<'run, T> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<T, RuntimeEffectControllerError>> + Send + 'run>,
+>;
+
+/// One VM-notified source a Run schedule can select (an X result, a retry or
+/// aggregate timer, a realization receipt, a start:prepare run).
+pub struct RunSelectable<'run, T> {
+    /// The engine notification identity; a future because a forwarding
+    /// controller (the executor's native Run task) learns it after queueing
+    /// the registration.
+    pub key: RunSelectKey<'run>,
+    /// The source's value: awaited only once the combinator chose it, or for
+    /// a served D's recorded choice; never polled to race other sources.
+    pub value: RunSelectValue<'run, T>,
+}
 
 /// An independently registered X; awaiting it does not register another command.
 pub struct RunAttemptHandle<'run> {
     /// The borrowed body half the owner polls beside its waits.
     pub body: RunAttemptBody<'run>,
-    /// The result half a coordinator frame awaits.
-    pub result: RunAttemptResult<'run>,
+    /// The selectable result half a coordinator frame awaits.
+    pub result: RunSelectable<'run, crate::tool_run::RunAttemptEntry>,
 }
 
 /// The body and durable outcome of one eagerly registered Run step.
@@ -714,9 +749,7 @@ pub struct RunSelectable<'run, T> {
 }
 
 /// A durable backoff registered before its result is awaited.
-pub type RunRetryTimer<'run> = std::pin::Pin<
-    Box<dyn std::future::Future<Output = Result<(), RuntimeEffectControllerError>> + Send + 'run>,
->;
+pub type RunRetryTimer<'run> = RunSelectable<'run, ()>;
 
 impl SingletonRunError {
     pub(crate) fn into_controller_error(self) -> RuntimeEffectControllerError {

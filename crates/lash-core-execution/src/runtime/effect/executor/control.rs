@@ -468,14 +468,23 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         step: crate::tool_dispatch::RunAttemptStep<'run>,
     ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
         drop(step);
+        let key_name = name.clone();
         crate::tool_dispatch::RunAttemptHandle {
             body: Box::pin(std::future::ready(())),
-            result: Box::pin(async move {
-                Err(RuntimeEffectControllerError::new(
-                    RuntimeErrorCode::EngineControlUnsupported,
-                    format!("this controller records no Run attempt: {name}"),
-                ))
-            }),
+            result: crate::tool_dispatch::RunSelectable {
+                key: Box::pin(async move {
+                    Err(RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::EngineControlUnsupported,
+                        format!("this controller records no Run attempt key: {key_name}"),
+                    ))
+                }),
+                value: Box::pin(async move {
+                    Err(RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::EngineControlUnsupported,
+                        format!("this controller records no Run attempt: {name}"),
+                    ))
+                }),
+            },
         }
     }
 
@@ -530,12 +539,33 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// Register a durable retry backoff now, preserving its deadline on replay.
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
         let _ = backoff_ms;
-        Box::pin(async {
-            Err(RuntimeEffectControllerError::new(
-                RuntimeErrorCode::EngineControlUnsupported,
-                "this controller records no Run retry timer",
-            ))
-        })
+        crate::tool_dispatch::RunSelectable {
+            key: Box::pin(async {
+                Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::EngineControlUnsupported,
+                    "this controller records no Run retry timer key",
+                ))
+            }),
+            value: Box::pin(async {
+                Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::EngineControlUnsupported,
+                    "this controller records no Run retry timer",
+                ))
+            }),
+        }
+    }
+
+    /// One engine FirstCompleted await over `keys`: the index of the first the
+    /// journal completes. Non-consuming: every other source stays awaitable.
+    async fn select_run_sources(
+        &self,
+        keys: Vec<crate::tool_dispatch::SelectKey>,
+    ) -> Result<usize, RuntimeEffectControllerError> {
+        let _ = keys;
+        Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineControlUnsupported,
+            "this controller cannot select Run sources",
+        ))
     }
 
     async fn execute_effect(

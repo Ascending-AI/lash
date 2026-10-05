@@ -22,6 +22,7 @@ pub enum EffectControllerTaskRequest {
     StartRunAttempt {
         name: String,
         step: crate::tool_dispatch::RunAttemptStep<'static>,
+        key: oneshot::Sender<Result<crate::tool_dispatch::SelectKey, RuntimeEffectControllerError>>,
         response:
             oneshot::Sender<Result<crate::tool_run::RunAttemptEntry, RuntimeEffectControllerError>>,
     },
@@ -49,7 +50,12 @@ pub enum EffectControllerTaskRequest {
     },
     StartRunRetry {
         backoff_ms: u64,
+        key: oneshot::Sender<Result<crate::tool_dispatch::SelectKey, RuntimeEffectControllerError>>,
         response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
+    },
+    SelectRunSources {
+        keys: Vec<crate::tool_dispatch::SelectKey>,
+        response: oneshot::Sender<Result<usize, RuntimeEffectControllerError>>,
     },
     ArmRunSource {
         descriptor: Box<crate::tool_run::SourceDescriptor>,
@@ -130,15 +136,26 @@ impl EffectControllerTaskRequest {
             Self::StartRunAttempt {
                 name,
                 step,
+                key,
                 response,
             } => {
                 // Register in request order, before polling any response.
                 let crate::tool_dispatch::RunAttemptHandle { body, result } =
                     controller.start_run_attempt(name, step);
+                let crate::tool_dispatch::RunSelectable {
+                    key: key_out,
+                    value,
+                } = result;
                 Box::pin(async move {
-                    futures_util::future::join(body, async move {
-                        let _ = response.send(result.await);
-                    })
+                    futures_util::future::join3(
+                        body,
+                        async move {
+                            let _ = key.send(key_out.await);
+                        },
+                        async move {
+                            let _ = response.send(value.await);
+                        },
+                    )
                     .await;
                 })
             }
@@ -214,13 +231,28 @@ impl EffectControllerTaskRequest {
             }),
             Self::StartRunRetry {
                 backoff_ms,
+                key,
                 response,
             } => {
-                let timer = controller.start_run_retry(backoff_ms);
+                let crate::tool_dispatch::RunSelectable {
+                    key: key_out,
+                    value,
+                } = controller.start_run_retry(backoff_ms);
                 Box::pin(async move {
-                    let _ = response.send(timer.await);
+                    futures_util::future::join(
+                        async move {
+                            let _ = key.send(key_out.await);
+                        },
+                        async move {
+                            let _ = response.send(value.await);
+                        },
+                    )
+                    .await;
                 })
             }
+            Self::SelectRunSources { keys, response } => Box::pin(async move {
+                let _ = response.send(controller.select_run_sources(keys).await);
+            }),
             Self::ArmRunSource {
                 descriptor,
                 response,
@@ -576,6 +608,7 @@ impl RuntimeEffectController for EffectTaskController {
         step: crate::tool_dispatch::RunAttemptStep<'run>,
     ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
         let (remote, execute) = native_run_step();
+        let (key_tx, key_rx) = oneshot::channel();
         let (response_tx, response_rx) = oneshot::channel();
         // Queue now: callers can register all X commands before awaiting one.
         if self
@@ -583,17 +616,25 @@ impl RuntimeEffectController for EffectTaskController {
             .send(EffectControllerTaskRequest::StartRunAttempt {
                 name,
                 step: remote,
+                key: key_tx,
                 response: response_tx,
             })
             .is_err()
         {
             return crate::tool_dispatch::RunAttemptHandle {
                 body: Box::pin(std::future::ready(())),
-                result: Box::pin(async {
-                    Err(native_run_task_closed(
-                        "native Run controller task is no longer running",
-                    ))
-                }),
+                result: crate::tool_dispatch::RunSelectable {
+                    key: Box::pin(async {
+                        Err(native_run_task_closed(
+                            "native Run controller task is no longer running",
+                        ))
+                    }),
+                    value: Box::pin(async {
+                        Err(native_run_task_closed(
+                            "native Run controller task is no longer running",
+                        ))
+                    }),
+                },
             };
         }
         crate::tool_dispatch::RunAttemptHandle {
@@ -604,7 +645,11 @@ impl RuntimeEffectController for EffectTaskController {
                     let _ = reply.send(step.await);
                 }
             }),
-            result: Box::pin(native_run_response(response_rx)),
+            result: crate::tool_dispatch::RunSelectable {
+                // The task sends the inner key once it registered the X.
+                key: Box::pin(native_run_response(key_rx)),
+                value: Box::pin(native_run_response(response_rx)),
+            },
         }
     }
 
@@ -696,22 +741,50 @@ impl RuntimeEffectController for EffectTaskController {
     }
 
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
+        let (key_tx, key_rx) = oneshot::channel();
         let (response_tx, response_rx) = oneshot::channel();
         if self
             .requests
             .send(EffectControllerTaskRequest::StartRunRetry {
                 backoff_ms,
+                key: key_tx,
                 response: response_tx,
             })
             .is_err()
         {
-            return Box::pin(async {
-                Err(native_run_task_closed(
-                    "native Run controller task is no longer running",
-                ))
-            });
+            return crate::tool_dispatch::RunSelectable {
+                key: Box::pin(async {
+                    Err(native_run_task_closed(
+                        "native Run controller task is no longer running",
+                    ))
+                }),
+                value: Box::pin(async {
+                    Err(native_run_task_closed(
+                        "native Run controller task is no longer running",
+                    ))
+                }),
+            };
         }
-        Box::pin(native_run_response(response_rx))
+        crate::tool_dispatch::RunSelectable {
+            key: Box::pin(native_run_response(key_rx)),
+            value: Box::pin(native_run_response(response_rx)),
+        }
+    }
+
+    async fn select_run_sources(
+        &self,
+        keys: Vec<crate::tool_dispatch::SelectKey>,
+    ) -> Result<usize, RuntimeEffectControllerError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::SelectRunSources {
+                keys,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                native_run_task_closed("native Run controller task is no longer running")
+            })?;
+        native_run_response(response_rx).await
     }
 
     async fn arm_run_source(

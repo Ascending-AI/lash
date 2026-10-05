@@ -228,7 +228,7 @@ impl<'a> RunCoordinator<'a> {
                     .controller()
                     .start_run_retry(deadline.saturating_sub(clock.timestamp_ms()));
                 let handle = async move {
-                    timer.await?;
+                    timer.value.await?;
                     Ok(Ready::Timer)
                 }
                 .boxed()
@@ -932,7 +932,7 @@ impl<'a> RunCoordinator<'a> {
             controller.start_run_attempt(name, step);
         self.bodies.issue(body);
         let handle = async move {
-            let entry = result.await?;
+            let entry = result.value.await?;
             Ok(Ready::Attempt(std::sync::Arc::new(entry)))
         }
         .boxed()

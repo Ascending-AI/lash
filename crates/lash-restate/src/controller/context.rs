@@ -97,6 +97,35 @@ impl<F: Future + SealedDurableFuture> GateWaitFuture for F {}
 type GateWait<'run, T> =
     Pin<Box<dyn GateWaitFuture<Output = Result<T, TerminalError>> + Send + 'run>>;
 
+/// The engine's first-completed await over the notification handles `keys`
+/// name: the index of the first the journal completes, non-consuming so every
+/// other source stays awaitable — [`first_completed`] for sources a
+/// coordinator names by key.
+fn select_run_sources<'ctx, 'run, C>(
+    context: &'run C,
+    keys: Vec<u32>,
+) -> crate::JournaledFuture<'run, usize>
+where
+    C: restate_sdk::context::ContextSideEffects<'ctx>,
+    'ctx: 'run,
+{
+    let inner = context.inner_context().clone();
+    Box::pin(async move {
+        let handles = keys
+            .into_iter()
+            .map(|key| Some(key.into()))
+            .collect::<Vec<_>>();
+        let index = inner.select(handles.clone()).await?;
+        if index < handles.len() {
+            Ok(index)
+        } else {
+            Err(TerminalError::new(format!(
+                "a source selection completed out-of-range branch {index}"
+            )))
+        }
+    })
+}
+
 /// A fresh gate awakeable, erased for the race.
 fn gate_awakeable<'run, 'ctx, C>(
     context: &'run C,
@@ -208,10 +237,12 @@ macro_rules! impl_restate_controller_context {
                 fn start_sleep_send<'run>(
                     &'run self,
                     duration: Duration,
-                ) -> crate::JournaledFuture<'run, ()>
+                ) -> (Option<u32>, crate::JournaledFuture<'run, ()>)
                 where 'ctx: 'run,
                 {
-                    Box::pin(restate_sdk::context::ContextTimers::sleep(self, duration))
+                    let timer = restate_sdk::context::ContextTimers::sleep(self, duration);
+                    let key = SealedDurableFuture::handle(&timer).map(u32::from);
+                    (key, Box::pin(timer))
                 }
 
                 fn sleep_or_turn_cancel<'run>(
@@ -310,6 +341,7 @@ macro_rules! impl_restate_controller_context {
                     future: Fut,
                 ) -> (
                     impl Future<Output = ()> + Send + 'run,
+                    Option<u32>,
                     impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
                 )
                 where 'ctx: 'run,
@@ -317,6 +349,15 @@ macro_rules! impl_restate_controller_context {
                       Fut: Future<Output = Result<T, String>> + Send + 'run,
                 {
                     run_bridge::issue(self, effect_name, None, future)
+                }
+
+                fn select_run_sources<'run>(
+                    &'run self,
+                    keys: Vec<u32>,
+                ) -> crate::JournaledFuture<'run, usize>
+                where 'ctx: 'run,
+                {
+                    select_run_sources(self, keys)
                 }
 
                 fn run_json_schedule_or_retry_send<'run, T, Fut>(

@@ -104,6 +104,7 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
                         ctx.scoped_effect_controller
                             .controller()
                             .start_run_retry(1)
+                            .value
                             .await
                             .map_err(|error| error.to_string())?;
                         assert_eq!(

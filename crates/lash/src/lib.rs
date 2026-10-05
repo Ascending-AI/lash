@@ -1379,8 +1379,9 @@ pub mod durability {
         JournalReplay, ProcessDriveStep, RecordedJournal, RecordedKeyRange, RunRecordStep,
     };
     pub use lash_core::tool_dispatch::{
-        RunAttemptBody, RunAttemptHandle, RunAttemptResult, RunAttemptStep, RunRetryTimer,
+        RunAttemptBody, RunAttemptHandle, RunAttemptStep, RunRetryTimer,
         RunStartPrepareStep, RunStartPrepared, RunStepHandle,
+        RunSelectKey, RunSelectValue, RunSelectable, SelectKey,
     };
     pub use lash_core::{
         EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,

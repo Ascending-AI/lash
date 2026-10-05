@@ -328,6 +328,13 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.start_run_retry(backoff_ms)
     }
 
+    async fn select_run_sources(
+        &self,
+        keys: Vec<crate::tool_dispatch::SelectKey>,
+    ) -> Result<usize, RuntimeEffectControllerError> {
+        self.inner.select_run_sources(keys).await
+    }
+
     async fn arm_run_source(
         &self,
         descriptor: crate::tool_run::SourceDescriptor,

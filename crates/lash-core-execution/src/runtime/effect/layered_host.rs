@@ -101,6 +101,15 @@ pub trait EffectLayer: Send + Sync + 'static {
         inner.attach_run_realization(invocation_id).await
     }
 
+    /// Forward the engine first-completed await untouched.
+    async fn select_run_sources(
+        &self,
+        inner: &dyn RuntimeEffectController,
+        keys: Vec<crate::tool_dispatch::SelectKey>,
+    ) -> Result<usize, RuntimeEffectControllerError> {
+        inner.select_run_sources(keys).await
+    }
+
     /// Whether the layered controller owns commit backpressure, as an
     /// engine-backed controller does.
     fn owns_commit_backpressure(&self, inner: &dyn RuntimeEffectController) -> bool {
@@ -753,6 +762,15 @@ impl RuntimeEffectController for LayeredController<'_> {
 
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
         self.inner.as_ref().start_run_retry(backoff_ms)
+    }
+
+    async fn select_run_sources(
+        &self,
+        keys: Vec<crate::tool_dispatch::SelectKey>,
+    ) -> Result<usize, RuntimeEffectControllerError> {
+        self.layer
+            .select_run_sources(self.inner.as_ref(), keys)
+            .await
     }
 
     async fn arm_run_source(

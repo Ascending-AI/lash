@@ -35,7 +35,7 @@ pub use run_coordinator::{
 };
 pub use singleton_run::{
     BeforeCheckReply, IsolatedProcessDescriptor, RecordedIsolatedStart, RunAttemptBody,
-    RunAttemptHandle, RunAttemptResult, RunAttemptStep, RunRetryTimer, RunSelectKey,
+    RunAttemptHandle, RunAttemptStep, RunRetryTimer, RunSelectKey,
     RunSelectValue, RunSelectable, RunStartPrepareStep, RunStartPrepared, RunStepHandle, SelectKey,
     SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
     SingletonPreparedRequest, SingletonPresentationError, SingletonRunError, SingletonStart,

@@ -668,17 +668,43 @@ where
     }
 
     fn start_run_retry(&self, backoff_ms: u64) -> lash_core::tool_dispatch::RunRetryTimer<'_> {
-        let timer = self
+        let (key, timer) = self
             .context
             .start_sleep_send(std::time::Duration::from_millis(backoff_ms));
-        Box::pin(async move {
-            timer.await.map_err(|error| {
+        lash_core::tool_dispatch::RunSelectable {
+            key: Box::pin(async move {
+                key.ok_or_else(|| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::EngineEffectController,
+                        "a Run retry timer registered without its engine key",
+                    )
+                })
+                .map(lash_core::tool_dispatch::SelectKey::from_engine)
+            }),
+            value: Box::pin(async move {
+                timer.await.map_err(|error| {
+                    crate::wire::lash_terminal(
+                        &error,
+                        lash_core::RuntimeErrorCode::EngineEffectController,
+                    )
+                })
+            }),
+        }
+    }
+
+    async fn select_run_sources(
+        &self,
+        keys: Vec<lash_core::tool_dispatch::SelectKey>,
+    ) -> Result<usize, RuntimeEffectControllerError> {
+        self.context
+            .select_run_sources(keys.iter().map(|key| key.engine()).collect())
+            .await
+            .map_err(|error| {
                 crate::wire::lash_terminal(
                     &error,
                     lash_core::RuntimeErrorCode::EngineEffectController,
                 )
             })
-        })
     }
 
     async fn arm_run_source(

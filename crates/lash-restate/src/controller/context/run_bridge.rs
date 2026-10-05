@@ -28,7 +28,7 @@ where
     T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
     F: Future<Output = Result<T, String>> + Send + 'run,
 {
-    let (progress, result) = issue(context, name, retry_policy, body);
+    let (progress, _key, result) = issue(context, name, retry_policy, body);
     drive(progress, result)
 }
 
@@ -42,6 +42,7 @@ pub(super) fn issue<'run, 'ctx, C, T, F>(
     body: F,
 ) -> (
     impl Future<Output = ()> + Send + 'run,
+    Option<u32>,
     impl Future<Output = Result<restate_sdk::serde::Json<T>, restate_sdk::errors::TerminalError>>
     + Send
     + 'run,
@@ -66,11 +67,15 @@ where
         None => run,
     };
     let result = run.start();
+    // The engine notification completing this registration; a trapped
+    // registration carries none.
+    let key = result.handle().map(u32::from);
     let state = result.inner_context();
-    owner.split(
+    let (progress, result) = owner.split(
         body,
         super::wake::guard_restate_run_future(result, relay, state),
-    )
+    );
+    (progress, key, result)
 }
 
 /// D borrows its callback instead of adding it to the SDK's owned progress set:
