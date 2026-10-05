@@ -159,6 +159,8 @@ pub(crate) use harness::{
 #[cfg(feature = "rlm")]
 mod aggregate_oracle;
 mod plugin_reopen;
+#[cfg(feature = "rlm")]
+mod relay;
 mod response_phase_replay;
 mod tool_intent_ingress;
 mod turn_streaming;
