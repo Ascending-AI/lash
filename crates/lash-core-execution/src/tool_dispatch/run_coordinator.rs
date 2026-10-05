@@ -201,6 +201,7 @@ struct RunJournal<'a> {
     materials: Materials,
     records: Vec<RunRecord>,
     entries: Vec<RunJournalEntry>,
+    selection: parallel::Selection<'a>,
 }
 
 impl RunJournal<'_> {
@@ -220,12 +221,7 @@ impl RunJournal<'_> {
         name: String,
         step: crate::RunRecordStep<'_>,
     ) -> Result<(RunRecord, Vec<MaterialRef>), SingletonRunError> {
-        self.scoped.admit_journal_write()?;
-        let record = self
-            .scoped
-            .controller()
-            .record_run_record(name.clone(), step);
-        let entry = self.scoped.await_owner_step(name, record).await?;
+        let entry = self.wait_record(name, step).await?;
         let references = entry
             .materials
             .iter()
@@ -890,6 +886,7 @@ impl<'a> RunCoordinator<'a> {
                 },
                 records: Vec::new(),
                 entries: Vec::new(),
+                selection: parallel::Selection::default(),
             },
             bodies: RunBodies::new(),
             owed: BTreeMap::new(),
@@ -1241,11 +1238,8 @@ impl<'a> RunCoordinator<'a> {
                     || journal.ledger.lifecycle() != crate::tool_run::RunLifecycle::Live,
             },
         ));
-        journal.scoped.admit_journal_write()?;
         let decided_entry = journal
-            .scoped
-            .controller()
-            .record_run_record(record_name(&call.call_id, "decide"), decide)
+            .wait_record(record_name(&call.call_id, "decide"), decide)
             .await?;
         let state = decided_entry.state.clone();
         let decided = journal.accept(decided_entry)?;

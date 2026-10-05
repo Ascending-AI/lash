@@ -78,35 +78,6 @@ where
     (progress, key, result)
 }
 
-/// D borrows its callback instead of adding it to the SDK's owned progress set:
-/// an owned D waiting for X prevents the suspension that acknowledges X, while
-/// the owner's await of its executing borrowed D keeps the invocation live once
-/// no X is outstanding.
-/// Run::poll registers D before invoking this body, preserving selection order.
-pub(super) fn schedule<'run, C, T, F>(
-    context: &'run C,
-    name: String,
-    body: F,
-) -> impl Future<Output = Result<restate_sdk::serde::Json<T>, restate_sdk::errors::TerminalError>>
-+ Send
-+ 'run
-where
-    C: restate_sdk::context::ContextSideEffects<'run>,
-    T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
-    F: Future<Output = Result<T, String>> + Send + 'run,
-{
-    let relay = Arc::new(super::wake::ClosureWakeRelay::default());
-    let closure_relay = relay.clone();
-    let run = restate_sdk::context::ContextSideEffects::run(context, move || async move {
-        super::wake::relay_closure_wakes(body, closure_relay)
-            .await
-            .map(restate_sdk::serde::Json)
-            .map_err(|fault| restate_sdk::errors::HandlerError::from(std::io::Error::other(fault)))
-    });
-    let run = restate_sdk::context::RunFuture::name(run, name);
-    super::wake::guard_restate_run_future(run, relay, context.inner_context().clone())
-}
-
 struct State<T> {
     started: bool,
     owner_alive: bool,
@@ -123,7 +94,6 @@ pub(super) struct Owner<T>(Arc<Mutex<State<T>>>);
 /// progress half when it does.
 struct Acknowledgement<R: Future> {
     result: Pin<Box<R>>,
-    output: Option<R::Output>,
     settled: bool,
     progress: Option<Waker>,
 }
@@ -208,7 +178,6 @@ impl<T> Owner<T> {
         let mut body = Some(Box::pin(body));
         let slot = Arc::new(Mutex::new(Acknowledgement {
             result: Box::pin(result),
-            output: None,
             settled: false,
             progress: None,
         }));
@@ -231,35 +200,20 @@ impl<T> Owner<T> {
             };
             body = None;
             self.complete(value);
-            // Submit the completed body before yielding to another owner.
-            // Otherwise a sibling can register its next command before this
-            // run proposes X, leaving an await of an unrecorded X ahead of
-            // that command on replay. This result poll only follows a started
-            // callback, which the SDK runs only after replay, so it never
-            // awaits an unfinished X during replay.
-            let mut slot = progress_slot.lock_recover();
-            if slot.output.is_none()
-                && !slot.settled
-                && let Poll::Ready(output) = slot.result.as_mut().poll(cx)
-            {
-                slot.output = Some(output);
-            }
+            // The next owner combinator progresses the SDK callback and
+            // submits this value. An individual result poll here would drain
+            // notifications outside the ordered selector.
             Poll::Ready(())
         });
         let result = std::future::poll_fn(move |cx| {
             let (answer, wake) = {
                 let mut slot = slot.lock_recover();
-                if let Some(output) = slot.output.take() {
-                    slot.settled = true;
-                    (Poll::Ready(output), slot.progress.take())
-                } else {
-                    match slot.result.as_mut().poll(cx) {
-                        Poll::Ready(output) => {
-                            slot.settled = true;
-                            (Poll::Ready(output), slot.progress.take())
-                        }
-                        Poll::Pending => (Poll::Pending, None),
+                match slot.result.as_mut().poll(cx) {
+                    Poll::Ready(output) => {
+                        slot.settled = true;
+                        (Poll::Ready(output), slot.progress.take())
                     }
+                    Poll::Pending => (Poll::Pending, None),
                 }
             };
             if let Some(wake) = wake {

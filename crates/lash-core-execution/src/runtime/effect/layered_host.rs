@@ -54,13 +54,13 @@ pub trait EffectLayer: Send + Sync + 'static {
         inner.record_run_record(name, step).await
     }
 
-    async fn record_run_schedule(
-        &self,
-        inner: &dyn RuntimeEffectController,
+    fn start_run_record<'run>(
+        &'run self,
+        inner: &'run dyn RuntimeEffectController,
         name: String,
-        step: crate::RunRecordStep<'_>,
-    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
-        inner.record_run_schedule(name, step).await
+        step: crate::RunRecordStep<'run>,
+    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_run::RunJournalEntry> {
+        inner.start_run_record(name, step)
     }
 
     fn start_run_attempt<'run>(
@@ -710,14 +710,12 @@ impl RuntimeEffectController for LayeredController<'_> {
         self.inner.as_ref().run_record_observer()
     }
 
-    async fn record_run_schedule(
-        &self,
+    fn start_run_record<'run>(
+        &'run self,
         name: String,
-        step: crate::RunRecordStep<'_>,
-    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
-        self.layer
-            .record_run_schedule(self.inner.as_ref(), name, step)
-            .await
+        step: crate::RunRecordStep<'run>,
+    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_run::RunJournalEntry> {
+        self.layer.start_run_record(self.inner.as_ref(), name, step)
     }
 
     fn start_run_attempt<'run>(

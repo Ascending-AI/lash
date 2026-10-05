@@ -690,6 +690,13 @@ pub struct RunSelectable<'run, T> {
     pub value: RunSelectValue<'run, T>,
 }
 
+/// An independently registered record; the body progresses beside owner waits,
+/// and its value is awaited only after the VM selects its notification.
+pub struct RunStepHandle<'run, T> {
+    pub body: RunAttemptBody<'run>,
+    pub result: RunSelectable<'run, T>,
+}
+
 /// An independently registered X; awaiting it does not register another command.
 pub struct RunAttemptHandle<'run> {
     /// The borrowed body half the owner polls beside its waits.

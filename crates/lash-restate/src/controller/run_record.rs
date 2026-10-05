@@ -60,16 +60,17 @@ where
         }
         decode_run_journal_entry(&name, entry)
     }
-    pub(super) async fn journal_run_schedule(
-        &self,
+
+    pub(super) fn start_journal_run_record<'run>(
+        &'run self,
         name: String,
-        step: lash_core::RunRecordStep<'_>,
-    ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
+        step: lash_core::RunRecordStep<'run>,
+    ) -> lash_core::tool_dispatch::RunStepHandle<'run, RunJournalEntry> {
         let build_generation = self.sentinel_stamp();
         let first = build_generation.is_some();
-        let Json(mut entry) = self
+        let (body, key, result) = self
             .context
-            .run_json_schedule_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
+            .run_json_eager_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
                 let record = step.await?;
                 let mut entry =
                     serde_json::to_value(stamped(&record)).map_err(|error| error.to_string())?;
@@ -78,18 +79,36 @@ where
                     object.insert(BUILD_GENERATION_FIELD.to_owned(), generation);
                 }
                 Ok(entry)
-            })
-            .await
-            .map_err(|error| {
-                crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
-            })?;
-        let generation = entry
-            .as_object_mut()
-            .and_then(|object| object.remove(BUILD_GENERATION_FIELD));
-        if first && let Some(sentinel) = &self.folded_sentinel {
-            sentinel.check(generation.as_ref()).await;
+            });
+        let key_name = name.clone();
+        lash_core::tool_dispatch::RunStepHandle {
+            body: Box::pin(body),
+            result: lash_core::tool_dispatch::RunSelectable {
+                key: Box::pin(async move {
+                    key.map(lash_core::tool_dispatch::SelectKey::from_engine)
+                        .ok_or_else(|| {
+                            RuntimeEffectControllerError::new(
+                                RuntimeErrorCode::EngineEffectController,
+                                format!(
+                                    "Run record `{key_name}` registered without its engine key"
+                                ),
+                            )
+                        })
+                }),
+                value: Box::pin(async move {
+                    let Json(mut entry) = result.await.map_err(|error| {
+                        crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
+                    })?;
+                    let generation = entry
+                        .as_object_mut()
+                        .and_then(|object| object.remove(BUILD_GENERATION_FIELD));
+                    if first && let Some(sentinel) = &self.folded_sentinel {
+                        sentinel.check(generation.as_ref()).await;
+                    }
+                    decode_run_journal_entry(&name, entry)
+                }),
+            },
         }
-        decode_run_journal_entry(&name, entry)
     }
 
     pub(super) fn start_journal_run_prepare<'run>(

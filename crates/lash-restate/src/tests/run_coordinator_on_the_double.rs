@@ -129,6 +129,42 @@ fn output_of(call_id: &ToolCallId) -> String {
     format!("fig4880 done {call_id}")
 }
 
+/// A per-call hold a test script opens from outside the handler: closed
+/// until `release`, then open for every delivery.
+#[derive(Default)]
+struct Gate {
+    open: AtomicBool,
+    wake: tokio::sync::Notify,
+}
+
+impl Gate {
+    fn release(&self) {
+        self.open.store(true, Ordering::SeqCst);
+        self.wake.notify_waiters();
+    }
+
+    async fn wait(&self) {
+        loop {
+            let wake = self.wake.notified();
+            tokio::pin!(wake);
+            wake.as_mut().enable();
+            if self.open.load(Ordering::SeqCst) {
+                break;
+            }
+            wake.await;
+        }
+    }
+}
+
+/// A law's out-of-handler driver, spawned beside the backend with the
+/// server and the probe.
+type Script = dyn Fn(
+        lash_restate_test::RestateTestServer,
+        Arc<Probe>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+    + Send
+    + Sync;
+
 /// One entry of the order in which the probe saw protected work happen.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Seen {
@@ -196,6 +232,12 @@ struct Probe {
     presentation_failure: bool,
     declaration_drift_on_replay: bool,
     emitted: Mutex<Vec<(ToolCallId, AttemptStream)>>,
+    /// The backend serves every attempt in always-replay mode.
+    always_replay: bool,
+    /// Per-call body gates: a gated body waits on every delivery.
+    gates: BTreeMap<ToolCallId, Arc<Gate>>,
+    /// A law's out-of-handler driver, spawned beside the backend.
+    script: Option<Arc<Script>>,
 }
 
 #[derive(Clone, Debug)]
@@ -305,9 +347,16 @@ async fn drive(
     program: Arc<Vec<Step>>,
     probe: Arc<Probe>,
 ) -> Driven {
-    let backend = lash_restate_test::backend(seed, ServerConfig::default())
-        .await
-        .unwrap();
+    let backend = lash_restate_test::backend(
+        seed,
+        ServerConfig::default().always_replay(probe.always_replay),
+    )
+    .await
+    .unwrap();
+    let script = probe
+        .script
+        .as_ref()
+        .map(|script| tokio::spawn(script(backend.server().clone(), Arc::clone(&probe))));
     backend.install_tool_realizer(probe.clone());
     for point in crashes {
         backend.server().crash_on(CrashRule::new(point));
@@ -583,6 +632,9 @@ async fn drive(
     .unwrap()
     .unwrap();
     backend.server().settle().await;
+    if let Some(script) = script {
+        script.await.unwrap();
+    }
     if let Some(release) = release_gate {
         release.await.unwrap();
     }
@@ -1489,6 +1541,7 @@ async fn l05_empty_and_cached_rounds_admit_every_operand_before_a_decision() {
 
 mod aggregate;
 mod realization;
+mod cold_selection;
 
 #[tokio::test]
 async fn l12_recorded_admission_ignores_live_isolation_drift() {

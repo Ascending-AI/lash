@@ -1,7 +1,11 @@
 //! Eager X handles and the recorded K9 selection/registration schedule.
 use super::*;
+use crate::tool_dispatch::SelectKey;
 use crate::tool_run::{RecordedRetryPolicy, RunAttemptEntry};
-use futures_util::future::{BoxFuture, FutureExt, Shared, select_all};
+use futures_util::future::{BoxFuture, FutureExt, Shared};
+
+pub(super) type KeyHandle<'a> =
+    Shared<BoxFuture<'a, Result<SelectKey, RuntimeEffectControllerError>>>;
 
 pub(super) type Handle<'a> = Shared<BoxFuture<'a, Result<Ready, RuntimeEffectControllerError>>>;
 
@@ -29,6 +33,7 @@ pub(super) struct AggregateTimer<'a> {
     pub key: String,
     pub leaf: u32,
     pub handle: Handle<'a>,
+    pub select_key: KeyHandle<'a>,
 }
 
 #[derive(Clone)]
@@ -64,6 +69,7 @@ pub(super) struct Pending<'a> {
     ordinal: AttemptOrdinal,
     timer: bool,
     handle: Handle<'a>,
+    select_key: KeyHandle<'a>,
 }
 
 fn captured(
@@ -137,7 +143,7 @@ impl<'a> RunCoordinator<'a> {
         // sibling whose admission already owns an executable attempt.
         for (index, (member, request)) in admitted.iter().enumerate() {
             if member.selection() == BeforeSelection::Execute {
-                let handle = self.issue_attempt(
+                let (select_key, handle) = self.issue_attempt(
                     &calls[index],
                     member,
                     request,
@@ -155,6 +161,7 @@ impl<'a> RunCoordinator<'a> {
                     ordinal: AttemptOrdinal::FIRST,
                     timer: false,
                     handle,
+                    select_key,
                 });
             }
         }
@@ -227,6 +234,8 @@ impl<'a> RunCoordinator<'a> {
                     .scoped
                     .controller()
                     .start_run_retry(deadline.saturating_sub(clock.timestamp_ms()));
+                let select_key = timer.key.shared();
+                self.journal.selection.pending.push(select_key.clone());
                 let handle = async move {
                     timer.value.await?;
                     Ok(Ready::Timer)
@@ -237,6 +246,7 @@ impl<'a> RunCoordinator<'a> {
                     key: plan.key.clone(),
                     leaf: index as u32,
                     handle,
+                    select_key,
                 });
             }
         }
@@ -294,6 +304,7 @@ impl<'a> RunCoordinator<'a> {
                 .iter()
                 .map(|entry| {
                     (
+                        entry.select_key.clone(),
                         entry.handle.clone(),
                         SelectedWork::Call {
                             work: std::sync::Arc::clone(&entry.work),
@@ -310,6 +321,7 @@ impl<'a> RunCoordinator<'a> {
                 .collect();
             choices.extend(self.timers.iter().map(|timer| {
                 (
+                    timer.select_key.clone(),
                     timer.handle.clone(),
                     SelectedWork::AggregateTimer {
                         key: timer.key.clone(),
@@ -363,40 +375,35 @@ impl<'a> RunCoordinator<'a> {
             let owner = self.journal.materials.owner.clone();
             let available = self.journal.materials.available.clone();
 
-            // D registers before any unfinished result is polled. Started
-            // preparation is an acknowledged choice alongside X and timers.
-            // FIG-4998 replaces this borrowed selection with FirstCompleted.
-            let needs_selection = std::sync::Arc::new(tokio::sync::Notify::new());
-            let needed = std::sync::Arc::clone(&needs_selection);
-            let (send_choice, receive_choice) = tokio::sync::oneshot::channel();
-            let selector = async move {
-                needs_selection.notified().await;
-                if !choices.is_empty() {
-                    let (ready, chosen, _) =
-                        select_all(choices.iter().map(|entry| entry.0.clone())).await;
-                    let _ = send_choice.send((ready, choices[chosen].1.clone()));
-                } else {
-                    std::future::pending::<()>().await;
+            // Every recorded choice has a completed VM notification. Replay
+            // can resolve this single combinator before registering D; an
+            // unfinished sibling never gets an individual await.
+            let mut keys = Vec::with_capacity(choices.len());
+            for (key, _, _) in &choices {
+                keys.push(key.clone().await?);
+            }
+            self.journal.selection.retain(&keys);
+            let chosen_key = match self.journal.selection.acknowledged.pop_front() {
+                Some(key) => key,
+                None => {
+                    let chosen = self
+                        .journal
+                        .scoped
+                        .controller()
+                        .select_run_sources(keys.clone())
+                        .await?;
+                    *keys
+                        .get(chosen)
+                        .ok_or_else(|| selection_boundary("selection index exceeds its sources"))?
                 }
             };
+            let chosen = keys
+                .iter()
+                .position(|key| *key == chosen_key)
+                .ok_or_else(|| selection_boundary("queued acknowledgment has no source"))?;
+            let ready = choices[chosen].1.clone().await?;
+            let selected_work = choices[chosen].2.clone();
             let step = Box::pin(async move {
-                needed.notify_one();
-                let acknowledged = async {
-                    receive_choice
-                        .await
-                        .map_err(|_| "the owning selection frame ended".to_owned())
-                };
-                let protected = async move {
-                    match protected {
-                        Some((handle, work)) => Ok::<_, String>((handle.await, work)),
-                        None => std::future::pending().await,
-                    }
-                };
-                let (ready, selected_work) = tokio::select! {
-                    result = acknowledged => result?,
-                    result = protected => result?,
-                };
-                let ready = ready.map_err(|error| error.to_string())?;
                 let (work, ordinal, timer, delay) = match selected_work {
                     SelectedWork::StartPrepared { call_id } => {
                         let Ready::StartPrepared(parts) = ready else {
@@ -554,22 +561,8 @@ impl<'a> RunCoordinator<'a> {
                     }
                 }
             });
-            self.journal.scoped.admit_journal_write()?;
-            let selection = self
-                .journal
-                .scoped
-                .controller()
-                .record_run_schedule(name.clone(), step);
-            tokio::pin!(selection);
-            tokio::pin!(selector);
-            let schedule = async {
-                tokio::select! {
-                    biased;
-                    result = &mut selection => result,
-                    () = &mut selector => selection.await,
-                }
-            };
-            let selected = self.journal.scoped.await_owner_step(name, schedule).await?;
+            self.journal.selection.forget(chosen_key);
+            let selected = self.journal.wait_record(name, step).await?;
             if let Some(pending) = presentation.as_mut()
                 && selected.record.events.iter().any(|event| matches!(event, RunEvent::StartLaunched { call_id, .. } if *call_id == pending.call_id))
             {
@@ -798,6 +791,14 @@ impl<'a> RunCoordinator<'a> {
                     let controller = self.journal.scoped.controller();
                     self.journal.scoped.admit_journal_write()?;
                     let timer = controller.start_run_retry(delay);
+                    let select_key = timer.key.shared();
+                    self.journal.selection.pending.push(select_key.clone());
+                    let timer = crate::tool_dispatch::RunSelectable {
+                        key: Box::pin(select_key.clone()),
+                        value: timer.value,
+                    };
+                    let waiting_handlers = std::sync::Arc::clone(&handlers);
+                    let call_id = call.call_id.clone();
                     let handle = async move {
                         timer.await?;
                         Ok(Ready::Timer)
@@ -810,10 +811,11 @@ impl<'a> RunCoordinator<'a> {
                         ordinal,
                         timer: true,
                         handle,
+                        select_key,
                     });
                 }
                 [RunEvent::RetryScheduled { next, .. }] => {
-                    let handle = self.issue_attempt(
+                    let (select_key, handle) = self.issue_attempt(
                         call,
                         member,
                         request,
@@ -826,6 +828,7 @@ impl<'a> RunCoordinator<'a> {
                         ordinal: *next,
                         timer: false,
                         handle,
+                        select_key,
                     });
                 }
                 events => {
@@ -896,13 +899,13 @@ impl<'a> RunCoordinator<'a> {
     }
 
     fn issue_attempt(
-        &self,
+        &mut self,
         call: &SingletonToolCall,
         member: &AdmittedCall,
         request: &SingletonPreparedRequest,
         handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         ordinal: AttemptOrdinal,
-    ) -> Result<Handle<'a>, SingletonRunError> {
+    ) -> Result<(KeyHandle<'a>, Handle<'a>), SingletonRunError> {
         self.journal.scoped.admit_journal_write()?;
         let owner = self.journal.materials.owner.clone();
         let name = record_name(&call.call_id, &format!("attempt:{ordinal}"));
@@ -931,13 +934,15 @@ impl<'a> RunCoordinator<'a> {
         let crate::tool_dispatch::RunAttemptHandle { body, result } =
             controller.start_run_attempt(name, step);
         self.bodies.issue(body);
+        let select_key = result.key.shared();
+        self.journal.selection.pending.push(select_key.clone());
         let handle = async move {
             let entry = result.value.await?;
             Ok(Ready::Attempt(std::sync::Arc::new(entry)))
         }
         .boxed()
         .shared();
-        Ok(handle)
+        Ok((select_key, handle))
     }
 }
 
@@ -979,4 +984,76 @@ fn backoff(
         )
     })
     .min(*max_delay_ms)
+}
+
+fn selection_boundary(message: &str) -> SingletonRunError {
+    RuntimeEffectControllerError::new(crate::RuntimeErrorCode::EffectReplayDivergence, message)
+        .into()
+}
+
+/// Only the owner pops VM notifications. The queue is rebuilt in the same
+/// order on replay, including pops during non-selection record waits.
+#[derive(Default)]
+pub(super) struct Selection<'a> {
+    pub pending: Vec<KeyHandle<'a>>,
+    acknowledged: std::collections::VecDeque<SelectKey>,
+}
+
+impl Selection<'_> {
+    fn forget(&mut self, key: SelectKey) {
+        self.pending
+            .retain(|source| !matches!(source.peek(), Some(Ok(found)) if *found == key));
+        self.acknowledged.retain(|found| *found != key);
+    }
+
+    fn retain(&mut self, keys: &[SelectKey]) {
+        self.pending
+            .retain(|source| matches!(source.peek(), Some(Ok(key)) if keys.contains(key)));
+        self.acknowledged.retain(|key| keys.contains(key));
+    }
+}
+
+impl RunJournal<'_> {
+    /// Await a short record with every outstanding source in one combinator.
+    /// A source that becomes ready stays queued until a schedule consumes it.
+    pub(super) async fn wait_record(
+        &mut self,
+        name: String,
+        step: crate::RunRecordStep<'_>,
+    ) -> Result<RunJournalEntry, SingletonRunError> {
+        self.scoped.admit_journal_write()?;
+        let crate::tool_dispatch::RunStepHandle { body, result } =
+            self.scoped.controller().start_run_record(name, step);
+        // This body belongs only to this record wait. A served record never
+        // starts it, so returning the value can drop its unstarted body.
+        let bodies = RunBodies::new();
+        bodies.issue(body);
+        bodies
+            .beside(async {
+                let decision_key = result.key.await?;
+                let mut keys = Vec::with_capacity(self.selection.pending.len());
+                for source in &self.selection.pending {
+                    keys.push(source.clone().await?);
+                }
+                loop {
+                    let remaining: Vec<_> = keys
+                        .iter()
+                        .copied()
+                        .filter(|key| !self.selection.acknowledged.contains(key))
+                        .collect();
+                    let mut awaited = vec![decision_key];
+                    awaited.extend(remaining.iter().copied());
+                    let chosen = self.scoped.controller().select_run_sources(awaited).await?;
+                    if chosen == 0 {
+                        break;
+                    }
+                    let key = remaining
+                        .get(chosen - 1)
+                        .ok_or_else(|| selection_boundary("record wait selected no source"))?;
+                    self.selection.acknowledged.push_back(*key);
+                }
+                Ok(result.value.await?)
+            })
+            .await
+    }
 }

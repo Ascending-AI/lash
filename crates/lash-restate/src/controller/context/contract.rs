@@ -90,19 +90,6 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         Box::pin(async { Err(TerminalError::new("this context selects no Run sources")) })
     }
 
-    /// Borrow D's SDK Run so it can suspend while selecting acknowledged X.
-    /// The schedule body starts only after the SDK records its fresh command;
-    /// its result, including the selected X, is accepted only through D.
-    fn run_json_schedule_or_retry_send<'run, T, Fut>(
-        &'run self,
-        effect_name: String,
-        future: Fut,
-    ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
-    where
-        'ctx: 'run,
-        T: Serialize + DeserializeOwned + Send + 'static,
-        Fut: Future<Output = Result<T, String>> + Send + 'run;
-
     fn run_json_or_retry_send<'run, T, Fut>(
         &'run self,
         effect_name: String,

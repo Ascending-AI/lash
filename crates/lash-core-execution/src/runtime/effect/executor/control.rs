@@ -395,17 +395,31 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         ))
     }
 
-    /// Record a parallel Run's selection and decision with an owned SDK closure.
-    async fn record_run_schedule(
-        &self,
+    /// Register a short record now, exposing its VM notification to the owner.
+    fn start_run_record<'run>(
+        &'run self,
         name: String,
-        step: RunRecordStep<'_>,
-    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        step: RunRecordStep<'run>,
+    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_run::RunJournalEntry> {
         drop(step);
-        Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::EngineControlUnsupported,
-            format!("this controller records no owned Run schedule: {name}"),
-        ))
+        let key_name = name.clone();
+        crate::tool_dispatch::RunStepHandle {
+            body: Box::pin(std::future::ready(())),
+            result: crate::tool_dispatch::RunSelectable {
+                key: Box::pin(async move {
+                    Err(RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::EngineControlUnsupported,
+                        format!("this controller records no Run record key: {key_name}"),
+                    ))
+                }),
+                value: Box::pin(async move {
+                    Err(RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::EngineControlUnsupported,
+                        format!("this controller records no Run record: {name}"),
+                    ))
+                }),
+            },
+        }
     }
 
     /// Arm a call's source before its attempt receives the completion key.

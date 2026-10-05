@@ -89,16 +89,28 @@ impl EffectLayer for NativeCapture {
         self.retain(name, DecodedRecord::Run(entry.clone()))?;
         Ok(entry)
     }
-    async fn record_run_schedule(
-        &self,
-        inner: &dyn RuntimeEffectController,
+
+    fn start_run_record<'run>(
+        &'run self,
+        inner: &'run dyn RuntimeEffectController,
         name: String,
-        step: lash_core::RunRecordStep<'_>,
-    ) -> Result<lash_core::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
-        let entry = inner.record_run_schedule(name.clone(), step).await?;
-        self.retain(name, DecodedRecord::Run(entry.clone()))?;
-        Ok(entry)
+        step: lash_core::RunRecordStep<'run>,
+    ) -> lash_core::tool_dispatch::RunStepHandle<'run, lash_core::tool_run::RunJournalEntry> {
+        let lash_core::tool_dispatch::RunStepHandle { body, result } =
+            inner.start_run_record(name.clone(), step);
+        lash_core::tool_dispatch::RunStepHandle {
+            body,
+            result: lash_core::tool_dispatch::RunSelectable {
+                key: result.key,
+                value: Box::pin(async move {
+                    let entry = result.value.await?;
+                    self.retain(name, DecodedRecord::Run(entry.clone()))?;
+                    Ok(entry)
+                }),
+            },
+        }
     }
+
     fn start_run_attempt<'run>(
         &'run self,
         inner: &'run dyn RuntimeEffectController,

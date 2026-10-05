@@ -619,14 +619,12 @@ where
         recorded.map_err(RuntimeEffectControllerError::from)
     }
 
-    /// One `ctx.run` step named `name` holding a Run record and the material
-    /// it owns (FIG-4877): journaled once, served on every replay.
-    async fn record_run_schedule(
-        &self,
+    fn start_run_record<'run>(
+        &'run self,
         name: String,
-        step: lash_core::RunRecordStep<'_>,
-    ) -> Result<lash_core::tool_run::RunJournalEntry, lash_core::RuntimeEffectControllerError> {
-        self.journal_run_schedule(name, step).await
+        step: lash_core::RunRecordStep<'run>,
+    ) -> lash_core::tool_dispatch::RunStepHandle<'run, lash_core::tool_run::RunJournalEntry> {
+        self.start_journal_run_record(name, step)
     }
 
     fn start_run_attempt<'run>(

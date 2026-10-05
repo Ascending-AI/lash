@@ -15,9 +15,16 @@ pub enum EffectControllerTaskRequest {
     RecordRun {
         name: String,
         step: RunRecordStep<'static>,
-        schedule: bool,
         response:
             oneshot::Sender<Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError>>,
+    },
+    StartRunRecord {
+        name: String,
+        step: RunRecordStep<'static>,
+        key: oneshot::Sender<Result<crate::tool_dispatch::SelectKey, RuntimeEffectControllerError>>,
+        response:
+            oneshot::Sender<Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError>>,
+        demand: oneshot::Receiver<()>,
     },
     StartRunAttempt {
         name: String,
@@ -25,6 +32,7 @@ pub enum EffectControllerTaskRequest {
         key: oneshot::Sender<Result<crate::tool_dispatch::SelectKey, RuntimeEffectControllerError>>,
         response:
             oneshot::Sender<Result<crate::tool_run::RunAttemptEntry, RuntimeEffectControllerError>>,
+        demand: oneshot::Receiver<()>,
     },
     StartRunPrepare {
         name: String,
@@ -52,6 +60,7 @@ pub enum EffectControllerTaskRequest {
         backoff_ms: u64,
         key: oneshot::Sender<Result<crate::tool_dispatch::SelectKey, RuntimeEffectControllerError>>,
         response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
+        demand: oneshot::Receiver<()>,
     },
     SelectRunSources {
         keys: Vec<crate::tool_dispatch::SelectKey>,
@@ -123,21 +132,46 @@ impl EffectControllerTaskRequest {
             Self::RecordRun {
                 name,
                 step,
-                schedule,
                 response,
             } => Box::pin(async move {
-                let result = if schedule {
-                    controller.record_run_schedule(name, step).await
-                } else {
-                    controller.record_run_record(name, step).await
-                };
+                let result = controller.record_run_record(name, step).await;
                 let _ = response.send(result);
             }),
+            Self::StartRunRecord {
+                name,
+                step,
+                key,
+                response,
+                demand,
+            } => {
+                // Register in request order, before polling any response.
+                let crate::tool_dispatch::RunStepHandle { body, result } =
+                    controller.start_run_record(name, step);
+                let crate::tool_dispatch::RunSelectable {
+                    key: key_out,
+                    value,
+                } = result;
+                Box::pin(async move {
+                    futures_util::future::join3(
+                        body,
+                        async move {
+                            let _ = key.send(key_out.await);
+                        },
+                        async move {
+                            if demand.await.is_ok() {
+                                let _ = response.send(value.await);
+                            }
+                        },
+                    )
+                    .await;
+                })
+            }
             Self::StartRunAttempt {
                 name,
                 step,
                 key,
                 response,
+                demand,
             } => {
                 // Register in request order, before polling any response.
                 let crate::tool_dispatch::RunAttemptHandle { body, result } =
@@ -153,7 +187,9 @@ impl EffectControllerTaskRequest {
                             let _ = key.send(key_out.await);
                         },
                         async move {
-                            let _ = response.send(value.await);
+                            if demand.await.is_ok() {
+                                let _ = response.send(value.await);
+                            }
                         },
                     )
                     .await;
@@ -233,6 +269,7 @@ impl EffectControllerTaskRequest {
                 backoff_ms,
                 key,
                 response,
+                demand,
             } => {
                 let crate::tool_dispatch::RunSelectable {
                     key: key_out,
@@ -244,7 +281,9 @@ impl EffectControllerTaskRequest {
                             let _ = key.send(key_out.await);
                         },
                         async move {
-                            let _ = response.send(value.await);
+                            if demand.await.is_ok() {
+                                let _ = response.send(value.await);
+                            }
                         },
                     )
                     .await;
@@ -428,7 +467,6 @@ impl EffectTaskController {
         &self,
         name: String,
         step: RunRecordStep<'_>,
-        schedule: bool,
     ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
         let (remote, execute) = native_run_step();
         let (response_tx, response_rx) = oneshot::channel();
@@ -436,7 +474,6 @@ impl EffectTaskController {
             .send(EffectControllerTaskRequest::RecordRun {
                 name,
                 step: remote,
-                schedule,
                 response: response_tx,
             })
             .map_err(|_| {
@@ -591,15 +628,63 @@ impl RuntimeEffectController for EffectTaskController {
         name: String,
         step: RunRecordStep<'_>,
     ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
-        self.record_native_run(name, step, false).await
+        self.record_native_run(name, step).await
     }
 
-    async fn record_run_schedule(
-        &self,
+    fn start_run_record<'run>(
+        &'run self,
         name: String,
-        step: RunRecordStep<'_>,
-    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
-        self.record_native_run(name, step, true).await
+        step: RunRecordStep<'run>,
+    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_run::RunJournalEntry> {
+        let (remote, execute) = native_run_step();
+        let (key_tx, key_rx) = oneshot::channel();
+        let (response_tx, response_rx) = oneshot::channel();
+        let (demand_tx, demand_rx) = oneshot::channel();
+        // Queue now: callers can register all X commands before awaiting one.
+        if self
+            .requests
+            .send(EffectControllerTaskRequest::StartRunRecord {
+                name,
+                step: remote,
+                key: key_tx,
+                response: response_tx,
+                demand: demand_rx,
+            })
+            .is_err()
+        {
+            return crate::tool_dispatch::RunStepHandle {
+                body: Box::pin(std::future::ready(())),
+                result: crate::tool_dispatch::RunSelectable {
+                    key: Box::pin(async {
+                        Err(native_run_task_closed(
+                            "native Run controller task is no longer running",
+                        ))
+                    }),
+                    value: Box::pin(async {
+                        Err(native_run_task_closed(
+                            "native Run controller task is no longer running",
+                        ))
+                    }),
+                },
+            };
+        }
+        crate::tool_dispatch::RunStepHandle {
+            // A replay drops the remote step without asking, closing
+            // `execute`, so the body ends; a served record never runs it.
+            body: Box::pin(async move {
+                if let Ok(reply) = execute.await {
+                    let _ = reply.send(step.await);
+                }
+            }),
+            result: crate::tool_dispatch::RunSelectable {
+                // The task sends the inner key once it registered the X.
+                key: Box::pin(native_run_response(key_rx)),
+                value: Box::pin(async move {
+                    let _ = demand_tx.send(());
+                    native_run_response(response_rx).await
+                }),
+            },
+        }
     }
 
     fn start_run_attempt<'run>(
@@ -610,6 +695,7 @@ impl RuntimeEffectController for EffectTaskController {
         let (remote, execute) = native_run_step();
         let (key_tx, key_rx) = oneshot::channel();
         let (response_tx, response_rx) = oneshot::channel();
+        let (demand_tx, demand_rx) = oneshot::channel();
         // Queue now: callers can register all X commands before awaiting one.
         if self
             .requests
@@ -618,6 +704,7 @@ impl RuntimeEffectController for EffectTaskController {
                 step: remote,
                 key: key_tx,
                 response: response_tx,
+                demand: demand_rx,
             })
             .is_err()
         {
@@ -648,7 +735,10 @@ impl RuntimeEffectController for EffectTaskController {
             result: crate::tool_dispatch::RunSelectable {
                 // The task sends the inner key once it registered the X.
                 key: Box::pin(native_run_response(key_rx)),
-                value: Box::pin(native_run_response(response_rx)),
+                value: Box::pin(async move {
+                    let _ = demand_tx.send(());
+                    native_run_response(response_rx).await
+                }),
             },
         }
     }
@@ -743,12 +833,14 @@ impl RuntimeEffectController for EffectTaskController {
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
         let (key_tx, key_rx) = oneshot::channel();
         let (response_tx, response_rx) = oneshot::channel();
+        let (demand_tx, demand_rx) = oneshot::channel();
         if self
             .requests
             .send(EffectControllerTaskRequest::StartRunRetry {
                 backoff_ms,
                 key: key_tx,
                 response: response_tx,
+                demand: demand_rx,
             })
             .is_err()
         {
@@ -767,7 +859,10 @@ impl RuntimeEffectController for EffectTaskController {
         }
         crate::tool_dispatch::RunSelectable {
             key: Box::pin(native_run_response(key_rx)),
-            value: Box::pin(native_run_response(response_rx)),
+            value: Box::pin(async move {
+                let _ = demand_tx.send(());
+                native_run_response(response_rx).await
+            }),
         }
     }
 

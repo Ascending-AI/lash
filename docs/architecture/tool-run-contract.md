@@ -280,7 +280,12 @@ then also settles the declarations. A replay whose call drifts from its
 recorded admission (tool name, arguments, owner, or a recorded plugin revision
 this build no longer executes) refuses typed before any body; the recorded
 declaration governs, never the live catalog. Every member of a round has its own independent X record.
-Reported retries follow the recorded dynamic schedule (K9).
+Reported retries follow the recorded dynamic schedule (K9). Selection awaits
+one VM first-completed combinator over every selectable source, then records
+the chosen value in a short decision step. Issue no await on replay that the
+journal cannot resolve. Remaining acknowledgements are queued in pop order
+beside every record wait; a cold owner rebuilds that same order. Source value
+futures are awaited only after selection, never raced individually.
 While the owner awaits a Run step, scoped-controller clones share an in-flight
 token. A concurrent registration refuses at its live site with
 `JournalWriteDuringOwnerStep`. Started concurrent runs are selected outside

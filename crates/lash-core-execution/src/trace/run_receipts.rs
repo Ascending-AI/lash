@@ -58,18 +58,39 @@ impl RunRecordObserver {
         Ok(entry)
     }
 
-    pub async fn record_schedule(
-        &self,
-        engine: &dyn RuntimeEffectController,
+    pub fn start_record<'run>(
+        &'run self,
+        engine: &'run dyn RuntimeEffectController,
         name: String,
-        step: RunRecordStep<'_>,
-    ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
-        let (body, observations) = self.recording_step(engine, step)?;
-        let entry = engine.record_run_schedule(name, body).await?;
-        if let Some(observations) = observations {
-            observations.observe(&entry.record).await?;
+        step: RunRecordStep<'run>,
+    ) -> crate::tool_dispatch::RunStepHandle<'run, RunJournalEntry> {
+        let (body, observations) = match self.recording_step(engine, step) {
+            Ok(parts) => parts,
+            Err(error) => {
+                return crate::tool_dispatch::RunStepHandle {
+                    body: Box::pin(std::future::ready(())),
+                    result: crate::tool_dispatch::RunSelectable {
+                        key: Box::pin(std::future::ready(Err(error.clone()))),
+                        value: Box::pin(std::future::ready(Err(error))),
+                    },
+                };
+            }
+        };
+        let crate::tool_dispatch::RunStepHandle { body, result } =
+            engine.start_run_record(name, body);
+        crate::tool_dispatch::RunStepHandle {
+            body,
+            result: crate::tool_dispatch::RunSelectable {
+                key: result.key,
+                value: Box::pin(async move {
+                    let entry = result.value.await?;
+                    if let Some(observations) = observations {
+                        observations.observe(&entry.record).await?;
+                    }
+                    Ok(entry)
+                }),
+            },
         }
-        Ok(entry)
     }
 
     fn recording_step<'run>(
