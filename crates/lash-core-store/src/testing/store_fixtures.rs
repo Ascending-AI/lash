@@ -75,7 +75,9 @@ pub fn append_conformance_event_node(
     let node = crate::SessionNodeRecord {
         node_id: crate::NodeId::fixture(id),
         parent_node_id,
-        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        timestamp: "2026-07-27T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: crate::SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(
                 crate::ProtocolEvent::typed(

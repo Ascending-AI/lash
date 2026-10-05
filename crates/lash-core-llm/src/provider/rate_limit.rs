@@ -293,7 +293,7 @@ mod admission_tests {
         fn now(&self) -> std::time::Instant {
             self.epoch + Duration::from_millis(self.elapsed_ms())
         }
-        // `timestamp_ms`/`timestamp_rfc3339` derive through `ClockWallTime`
+        // `timestamp_ms`/`node_timestamp` derive through `ClockWallTime`
         // from this single wall-clock instant, so the derived faces advance in
         // lockstep with the test's elapsed counter.
         fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {

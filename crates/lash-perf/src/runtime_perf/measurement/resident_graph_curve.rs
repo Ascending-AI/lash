@@ -55,7 +55,7 @@ fn seed_resident_graph(resident_nodes: usize) -> anyhow::Result<ResidentGraphFix
                     format!("Resident graph fixture message {index} at size {resident_nodes}."),
                 )
             }),
-            "2026-09-12T00:00:00Z".to_string(),
+            "2026-09-12T00:00:00.000000000Z".parse()?,
         );
         graph
             .apply_append(&GraphAppend::Extend { nodes })
@@ -154,7 +154,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
                                         "Measured one-node append at resident size {resident_nodes}."
                                     ),
                                 )],
-                                "2026-09-12T00:00:00Z".to_string(),
+                                "2026-09-12T00:00:00.000000000Z".parse()?,
                             ))
                         },
                     )?;
@@ -210,7 +210,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
                         || {
                             adopted.apply_realized_node_timestamps(&[RealizedNodeTimestamp {
                                 node_id: derived_node_id,
-                                timestamp: "2026-09-12T00:00:01Z".to_string(),
+                                timestamp: "2026-09-12T00:00:01.000000000Z".parse()?,
                             }]);
                             Ok(())
                         },
@@ -391,7 +391,7 @@ mod commit_scaling_tests {
         let mut graph = state.session_graph.clone();
         let nodes = graph
             .append_builder_in_namespace(format!("turn-{turn}"))
-            .append_messages_at([message], "2026-09-30T00:00:00Z".into());
+            .append_messages_at([message], "2026-09-30T00:00:00.000000000Z".parse()?);
         let draft = nodes[0].node_id.clone();
         graph.apply_append(&GraphAppend::Extend { nodes })?;
         graph.remap_node_ids(
@@ -403,7 +403,7 @@ mod commit_scaling_tests {
         );
         graph.apply_realized_node_timestamps(&[RealizedNodeTimestamp {
             node_id: lash_core::NodeId::fixture(format!("committed-{turn}")),
-            timestamp: "2026-09-30T00:00:01Z".into(),
+            timestamp: "2026-09-30T00:00:01.000000000Z".parse()?,
         }]);
         let mut snapshot = state.to_snapshot();
         snapshot.session_graph = graph;

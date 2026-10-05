@@ -188,9 +188,11 @@ PACKAGE_DEPS = {
             "chrono": "//third-party/rust:p0047",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_trace": "//crates/lash-trace:lash-trace",
+            "schemars": "//third-party/rust:p0322",
             "serde": "//third-party/rust:p0331",
             "serde_json": "//third-party/rust:p0338",
             "sha2": "//third-party/rust:p0345",
+            "thiserror": "//third-party/rust:p0392",
             "tokio": "//third-party/rust:p0399",
             "tracing": "//third-party/rust:p0414",
             "tracing_subscriber": "//third-party/rust:p0418"

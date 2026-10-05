@@ -162,7 +162,7 @@ impl RuntimeCommitPlanner {
             .appended_nodes()
             .map(|node| crate::session_graph::RealizedNodeTimestamp {
                 node_id: node.node_id.clone(),
-                timestamp: node.timestamp.clone(),
+                timestamp: node.timestamp,
             })
             .collect();
         let turn_input_applications = commit.turn_input_applications();

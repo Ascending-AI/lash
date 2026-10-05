@@ -709,7 +709,9 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     state.ensure_agent_frame_initialized();
     let graph_data = state.session_graph.data_mut();
     std::sync::Arc::make_mut(&mut graph_data.nodes.make_mut()[0]).timestamp =
-        "2026-07-26T10:00:00Z".to_string();
+        "2026-07-26T10:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp");
     state.set_execution_state_snapshot(Some(vec![7; 1_024].into()));
     let operation = crate::OperationId::turn("root", "provider-turn", "final");
     let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state)
@@ -727,7 +729,9 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     let mut replay_state = state.clone();
     let replay_graph_data = replay_state.session_graph.data_mut();
     std::sync::Arc::make_mut(&mut replay_graph_data.nodes.make_mut()[0]).timestamp =
-        "2026-07-26T10:00:09Z".to_string();
+        "2026-07-26T10:00:09.000000000Z"
+            .parse()
+            .expect("canonical node timestamp");
     let (replay_commit, _) = RuntimeCommit::persisted_state_for_test(&replay_state)
         .with_operation(operation.clone())
         .expect("derive and stamp replay");
@@ -814,7 +818,9 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
         nodes: vec![crate::SessionNodeRecord {
             node_id: lash_core::NodeId::fixture(node_id.to_string()),
             parent_node_id: None,
-            timestamp: "2026-07-26T10:00:00Z".to_string(),
+            timestamp: "2026-07-26T10:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: crate::SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: AgentFrameReason::initial(),
@@ -894,7 +900,9 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeSt
         nodes: vec![crate::SessionNodeRecord {
             node_id: "rogue-node-id".into(),
             parent_node_id: None,
-            timestamp: "2026-07-26T10:00:00Z".to_string(),
+            timestamp: "2026-07-26T10:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: crate::SessionNodePayload::Plugin {
                 plugin_type: "guard".to_string(),
                 body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"ok": true})),
@@ -942,7 +950,9 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
     let original = crate::SessionNodeRecord {
         node_id: lash_core::NodeId::fixture(colliding_id.to_string()),
         parent_node_id: None,
-        timestamp: "2026-07-26T10:00:00Z".to_string(),
+        timestamp: "2026-07-26T10:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: crate::SessionNodePayload::FrameOpen {
             frame_key: frame_key.clone(),
             reason: AgentFrameReason::new("original"),

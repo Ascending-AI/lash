@@ -151,7 +151,9 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
                 nodes: vec![lash_core_execution::SessionNodeRecord {
                     node_id: lash_core::NodeId::from("orphan-fork-child-node"),
                     parent_node_id,
-                    timestamp: "2026-08-17T00:00:00Z".to_string(),
+                    timestamp: "2026-08-17T00:00:00.000000000Z"
+                        .parse()
+                        .expect("canonical node timestamp"),
                     payload: lash_core_execution::SessionNodePayload::Event {
                         event: lash_core_execution::SessionHistoryRecord::Protocol(
                             lash_core_execution::ProtocolEvent::typed(

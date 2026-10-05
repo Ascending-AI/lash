@@ -117,7 +117,7 @@ fn open_next_frame(
         key,
         lash_core::AgentFrameReason::compaction(),
         lash_core::AgentFrameAssignment::unconfigured(state.policy.clone()),
-        chrono::Utc::now().to_rfc3339(),
+        lash_core::ClockWallTime::node_timestamp(&lash_core::facade_support::SystemClock),
     );
     if !opened {
         anyhow::bail!("frame residency key was reused");

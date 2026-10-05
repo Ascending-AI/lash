@@ -557,7 +557,8 @@ pub mod persistence {
     pub use lash_core_store::compat::{CompatRefusal, CompatStamp};
     pub use lash_core_store::runtime_error::ExecutableGenerationRefusal;
     pub use lash_core_store::session_graph::{
-        SessionGraphAppendBuilder, SessionGraphData, SessionNodeDraft, SessionReadModel,
+        NodeTimestamp, NodeTimestampError, SessionGraphAppendBuilder, SessionGraphData,
+        SessionNodeDraft, SessionReadModel,
     };
     pub use lash_core_store::session_identity::{
         SessionLineage, SessionObservedProcessOutcome, SessionObservedProcessReceipt,

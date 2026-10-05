@@ -39,49 +39,6 @@ impl QueuedDrainPolicy for OracleDrainPolicy {
     }
 }
 
-#[derive(Debug)]
-struct AdvancingDifferentialClock(std::sync::atomic::AtomicU64);
-
-impl AdvancingDifferentialClock {
-    fn new(timestamp_ms: u64) -> Self {
-        Self(std::sync::atomic::AtomicU64::new(timestamp_ms))
-    }
-}
-
-#[async_trait::async_trait]
-impl Clock for AdvancingDifferentialClock {
-    fn now(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        let timestamp_ms = self.0.load(std::sync::atomic::Ordering::SeqCst);
-        chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
-        )
-    }
-
-    async fn sleep(&self, duration: Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
-    async fn sleep_until(&self, deadline: std::time::Instant) {
-        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
-    }
-}
-
-#[test]
-fn advancing_differential_clock_wall_clock_faces_agree() {
-    let clock = AdvancingDifferentialClock::new(1_700_000_000_123);
-    let clock: &dyn lash_core::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
-}
-
 /// A literal-oracle row as a durable process wake from its own process, so
 /// every row has a distinct `(process, sequence)` source. The row id rides in
 /// the wake input, where [`oracle_row_id`] reads it back.

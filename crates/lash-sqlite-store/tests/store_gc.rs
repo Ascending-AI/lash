@@ -348,7 +348,9 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         let node = lash_core_execution::SessionNodeRecord {
             node_id: lash_core_execution::NodeId::fixture(frame_node_id.to_string()),
             parent_node_id: None,
-            timestamp: "2026-07-26T00:00:00Z".to_string(),
+            timestamp: "2026-07-26T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: lash_core_execution::SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: lash_core_execution::AgentFrameReason::initial(),
@@ -440,7 +442,9 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let node = lash_core_execution::SessionNodeRecord {
         node_id: lash_core_execution::NodeId::fixture(frame_node_id.to_string()),
         parent_node_id: None,
-        timestamp: "2026-07-26T00:00:00Z".to_string(),
+        timestamp: "2026-07-26T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: lash_core_execution::SessionNodePayload::FrameOpen {
             frame_key,
             reason: lash_core_execution::AgentFrameReason::initial(),
@@ -711,7 +715,9 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
                 nodes: vec![lash_core_execution::SessionNodeRecord {
                     node_id: lash_core_execution::NodeId::from("orphan-fork-child-node"),
                     parent_node_id,
-                    timestamp: "2026-08-17T00:00:00Z".to_string(),
+                    timestamp: "2026-08-17T00:00:00.000000000Z"
+                        .parse()
+                        .expect("canonical node timestamp"),
                     payload: lash_core_execution::SessionNodePayload::Event {
                         event: lash_core_execution::SessionHistoryRecord::Protocol(
                             lash_core_execution::ProtocolEvent::typed(

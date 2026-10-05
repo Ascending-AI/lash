@@ -78,7 +78,9 @@ fn open_frame(state: &mut RuntimeSessionState, name: &str) -> FrameNodeId {
         key,
         AgentFrameReason::new("history-conformance"),
         AgentFrameAssignment::unconfigured(state.policy.clone()),
-        "2026-09-29T00:00:00Z".to_string(),
+        "2026-09-29T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
     );
     assert!(opened, "fixture frame must have a fresh identity");
     state.current_frame_node_id = Some(frame.clone());

@@ -1628,7 +1628,9 @@ fn malformed_graph_append(
             node_id: crate::store::derive_history_node_id(&state.session_id, operation, ordinal)
                 .expect("property operation id is valid"),
             parent_node_id,
-            timestamp: "1970-01-01T00:00:00Z".to_string(),
+            timestamp: "1970-01-01T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: crate::SessionNodePayload::Plugin {
                 plugin_type: "session-graph-malformed".to_string(),
                 body: crate::session_graph::SharedJsonValue::new(
@@ -1647,7 +1649,9 @@ fn malformed_graph_append(
             let frame = |parent_node_id: Option<lash_core::NodeId>| crate::SessionNodeRecord {
                 node_id: lash_core::NodeId::fixture(node_id.clone()),
                 parent_node_id,
-                timestamp: "1970-01-01T00:00:00Z".to_string(),
+                timestamp: "1970-01-01T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
                 payload: crate::SessionNodePayload::FrameOpen {
                     frame_key: frame_key.clone(),
                     reason: crate::AgentFrameReason::initial(),
@@ -1683,7 +1687,9 @@ fn malformed_graph_append(
                 nodes: vec![crate::SessionNodeRecord {
                     node_id: lash_core::NodeId::fixture(node_id.clone()),
                     parent_node_id: old_leaf.clone(),
-                    timestamp: "1970-01-01T00:00:00Z".to_string(),
+                    timestamp: "1970-01-01T00:00:00.000000000Z"
+                        .parse()
+                        .expect("canonical node timestamp"),
                     payload: crate::SessionNodePayload::FrameOpen {
                         frame_key: resident_frame_key,
                         reason: crate::AgentFrameReason::initial(),
@@ -1703,7 +1709,9 @@ fn malformed_graph_append(
                 nodes: vec![crate::SessionNodeRecord {
                     node_id: lash_core::NodeId::fixture(node_id.clone()),
                     parent_node_id: Some(lash_core::NodeId::fixture(node_id.clone())),
-                    timestamp: "1970-01-01T00:00:00Z".to_string(),
+                    timestamp: "1970-01-01T00:00:00.000000000Z"
+                        .parse()
+                        .expect("canonical node timestamp"),
                     payload: crate::SessionNodePayload::FrameOpen {
                         frame_key,
                         reason: crate::AgentFrameReason::initial(),
@@ -1745,7 +1753,9 @@ fn malformed_resident_graph(shape: u8) -> crate::SessionGraph {
     let node = |id: &str, parent: Option<&str>| crate::SessionNodeRecord {
         node_id: lash_core::NodeId::fixture(id.to_string()),
         parent_node_id: parent.map(lash_core::NodeId::fixture),
-        timestamp: "1970-01-01T00:00:00Z".to_string(),
+        timestamp: "1970-01-01T00:00:00.000000000Z"
+            .parse()
+            .unwrap_or_else(|error| panic!("invalid fixture timestamp: {error}")),
         payload: crate::SessionNodePayload::Plugin {
             plugin_type: "session-graph-bounded".to_string(),
             body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"id": id})),

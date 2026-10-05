@@ -861,7 +861,7 @@ impl RuntimeSessionState {
     ) {
         self.ensure_agent_frame_initialized_with_clock(clock);
         self.session_graph
-            .append_active_conversation_messages_at(messages, clock.timestamp_rfc3339());
+            .append_active_conversation_messages_at(messages, clock.node_timestamp());
         self.refresh_current_frame_projection();
     }
 
@@ -952,7 +952,7 @@ impl RuntimeSessionState {
     /// so the open has no seed to carry artifacts from, no execution state to
     /// reset and no live interpreter to restart (FIG-4134).
     pub fn ensure_agent_frame_initialized_with_clock(&mut self, clock: &dyn crate::Clock) {
-        self.ensure_agent_frame_initialized_with_timestamp(|| clock.timestamp_rfc3339());
+        self.ensure_agent_frame_initialized_with_timestamp(|| clock.node_timestamp());
     }
 
     #[expect(
@@ -961,7 +961,7 @@ impl RuntimeSessionState {
     )]
     pub(crate) fn ensure_agent_frame_initialized_with_timestamp(
         &mut self,
-        timestamp: impl FnOnce() -> String,
+        timestamp: impl FnOnce() -> crate::session_graph::NodeTimestamp,
     ) {
         if let Some(frame_node_id) = self
             .session_graph
@@ -1070,7 +1070,7 @@ impl RuntimeSessionState {
             frame_key,
             crate::AgentFrameReason::initial(),
             assignment,
-            clock.timestamp_rfc3339(),
+            clock.node_timestamp(),
         );
         self.current_frame_node_id = Some(frame_node_id);
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
@@ -1344,7 +1344,7 @@ pub fn append_session_nodes_to_state_with_clock(
     state.ensure_agent_frame_initialized_with_clock(clock);
     state
         .session_graph
-        .append_node_drafts_at(draft_namespace, drafts, clock.timestamp_rfc3339())
+        .append_node_drafts_at(draft_namespace, drafts, clock.node_timestamp())
 }
 
 /// Names a boundary; a stable name alone does not make a rebuilt request replay-safe.
@@ -1458,7 +1458,7 @@ pub fn open_agent_frame_in_state_with_clock(
         request.frame_key.clone(),
         request.reason,
         assignment,
-        clock.timestamp_rfc3339(),
+        clock.node_timestamp(),
     );
     if !opened {
         if state.current_frame_node_id.as_deref() == Some(frame_node_id.as_str()) {

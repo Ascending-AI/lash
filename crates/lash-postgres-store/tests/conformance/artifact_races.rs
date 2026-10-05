@@ -39,13 +39,17 @@ fn append_successor_frame(
         lash_core_execution::FrameKey::from_caller_material("successor-frame").expect("frame key");
     let successor =
         lash_core_execution::session_graph::frame_node_id(&state.session_id, key.as_str());
-    assert!(state.session_graph.append_frame_open_with_id_at(
-        successor.clone(),
-        key,
-        lash_core_execution::AgentFrameReason::initial(),
-        lash_core_execution::AgentFrameAssignment::unconfigured(state.policy.clone()),
-        "2026-09-29T00:00:00Z".into(),
-    ));
+    assert!(
+        state.session_graph.append_frame_open_with_id_at(
+            successor.clone(),
+            key,
+            lash_core_execution::AgentFrameReason::initial(),
+            lash_core_execution::AgentFrameAssignment::unconfigured(state.policy.clone()),
+            "2026-09-29T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+        )
+    );
     state.current_frame_node_id = Some(successor.clone());
     successor
 }

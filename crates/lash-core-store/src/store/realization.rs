@@ -138,7 +138,7 @@ mod tests {
                 .appended_nodes()
                 .map(|node| RealizedNodeTimestamp {
                     node_id: node.node_id.clone(),
-                    timestamp: node.timestamp.clone(),
+                    timestamp: node.timestamp,
                 })
                 .collect();
             let manifest = commit
@@ -431,7 +431,9 @@ mod tests {
         let node = crate::SessionNodeRecord {
             node_id: "node".into(),
             parent_node_id: None,
-            timestamp: "2026-07-27T00:00:00Z".to_string(),
+            timestamp: "2026-07-27T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Protocol(
                     crate::ProtocolEvent::typed("budget", serde_json::Value::Null)

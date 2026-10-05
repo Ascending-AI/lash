@@ -50303,9 +50303,11 @@
         "chrono",
         "lash-internal-sansio",
         "lash-internal-trace",
+        "schemars",
         "serde",
         "serde_json",
         "sha2",
+        "thiserror",
         "tokio",
         "tracing",
         "tracing-subscriber"

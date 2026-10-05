@@ -98,7 +98,7 @@ impl TurnGraphEditor {
         }
         let nodes = self
             .append_builder
-            .append_events_at(events, self.clock.timestamp_rfc3339());
+            .append_events_at(events, self.clock.node_timestamp());
         self.active_events.extend_adopting(
             nodes.iter().filter_map(|node| node.event().cloned()),
             same_history_record,
@@ -171,7 +171,7 @@ impl TurnGraphEditor {
 
         let nodes = self
             .append_builder
-            .append_messages_at(appendable_messages.clone(), self.clock.timestamp_rfc3339());
+            .append_messages_at(appendable_messages.clone(), self.clock.node_timestamp());
         self.active_events.extend_adopting(
             nodes.iter().filter_map(|node| node.event().cloned()),
             same_history_record,
@@ -191,7 +191,7 @@ impl TurnGraphEditor {
     ) -> Vec<NodeId> {
         let mut builder = self.base_graph.append_builder_in_namespace(draft_namespace);
         builder.set_leaf_node_id(self.leaf_node_id());
-        let nodes = builder.append_drafts_at(drafts, self.clock.timestamp_rfc3339());
+        let nodes = builder.append_drafts_at(drafts, self.clock.node_timestamp());
         self.append_builder
             .set_leaf_node_id(builder.leaf_node_id().cloned());
         self.active_events.extend_adopting(
@@ -581,7 +581,9 @@ mod tests {
         let plugin_node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
             node_id: crate::NodeId::fixture(node_id),
             parent_node_id: Some(crate::NodeId::fixture(parent_node_id)),
-            timestamp: "2026-07-31T00:00:00Z".to_string(),
+            timestamp: "2026-07-31T00:00:00.000000000Z"
+                .parse()
+                .unwrap_or_else(|error| panic!("invalid fixture timestamp: {error}")),
             payload: crate::SessionNodePayload::Plugin {
                 plugin_type: "turn-graph-cycle-test".to_string(),
                 body: crate::session_graph::SharedJsonValue::new(serde_json::json!({

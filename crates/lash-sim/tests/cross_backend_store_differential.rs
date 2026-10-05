@@ -407,7 +407,9 @@ impl NodeSpec {
             parent_node_id: self
                 .parent_node_id
                 .map(|node_id| lash_core::NodeId::fixture(scoped_node_id(session_id, node_id))),
-            timestamp: "2026-07-26T00:00:00Z".to_string(),
+            timestamp: "2026-07-26T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: if is_frame_alias(self.node_id) {
                 SessionNodePayload::FrameOpen {
                     frame_key,
@@ -2036,18 +2038,6 @@ impl Clock for DifferentialClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
-}
-
-#[test]
-fn differential_clock_wall_clock_faces_agree() {
-    let clock = DifferentialClock;
-    let clock: &dyn lash_core::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 /// The lifecycle backend's session work: an engine that holds the core's

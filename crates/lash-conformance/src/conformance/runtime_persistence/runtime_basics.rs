@@ -29,13 +29,17 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
         crate::FrameKey::from_caller_material("frame-2").expect("non-empty frame material");
     let second_frame_node_id =
         crate::session_graph::frame_node_id(&state.session_id, second_frame_key.as_str());
-    assert!(state.session_graph.append_frame_open_with_id_at(
-        second_frame_node_id.clone(),
-        second_frame_key,
-        custom_reason.clone(),
-        assignment,
-        "2026-07-27T00:00:00Z".to_string(),
-    ));
+    assert!(
+        state.session_graph.append_frame_open_with_id_at(
+            second_frame_node_id.clone(),
+            second_frame_key,
+            custom_reason.clone(),
+            assignment,
+            "2026-07-27T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+        )
+    );
     state.current_frame_node_id = Some(second_frame_node_id.clone());
     state.agent_frames = state
         .session_graph

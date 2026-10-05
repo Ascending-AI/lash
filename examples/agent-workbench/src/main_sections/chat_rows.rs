@@ -55,7 +55,7 @@ pub(crate) fn chat_message_from_row(
         id: serde_json::from_value(serde_json::to_value(&row.row_id)?)?,
         role: role.into(),
         text: row.content.text.clone(),
-        at: row.timestamp.clone(),
+        at: row.timestamp.to_string(),
         attachments: row
             .content
             .attachments

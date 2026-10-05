@@ -12,7 +12,9 @@ fn first_commit_may_end_its_own_appended_frame_open() {
         nodes: vec![lash_core_execution::SessionNodeRecord {
             node_id: lash_core::NodeId::fixture(first.as_str().to_owned()),
             parent_node_id: None,
-            timestamp: "2026-09-29T00:00:00Z".into(),
+            timestamp: "2026-09-29T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: lash_core_execution::SessionNodePayload::FrameOpen {
                 frame_key: lash_core_execution::FrameKey::from_caller_material("first-frame")
                     .expect("frame key"),

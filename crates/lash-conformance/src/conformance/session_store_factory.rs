@@ -1280,7 +1280,9 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     let child = crate::SessionNodeRecord {
         node_id: "cross-session-child".into(),
         parent_node_id: Some(crate::NodeId::fixture(foreign_parent.to_string())),
-        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        timestamp: "2026-07-27T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: crate::SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(
                 crate::ProtocolEvent::typed("cross-session", serde_json::Value::Null)
@@ -1681,7 +1683,9 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     let child_node = |node_id: &str| crate::SessionNodeRecord {
         node_id: crate::NodeId::fixture(node_id.to_string()),
         parent_node_id: Some(frame_node_id.clone()),
-        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        timestamp: "2026-07-27T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: crate::SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(
                 crate::ProtocolEvent::typed(node_id, serde_json::Value::Null)

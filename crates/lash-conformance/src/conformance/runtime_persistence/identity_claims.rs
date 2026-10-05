@@ -18,26 +18,30 @@ pub async fn receipt_replay_rehydrates_recorded_node_clocks_and_ids(store: Arc<d
         append_request_commit(&mut state, "recorded-clock-operation", &nodes, None);
     if let crate::GraphAppend::Extend { nodes } = &mut commit.graph {
         for node in nodes {
-            node.timestamp = "2026-09-01T00:00:00Z".into();
+            node.timestamp = "2026-09-01T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp");
         }
     }
     let first = commit_runtime_state_for_test(&store, commit.clone(), "recorded-clock-first")
         .await
         .expect("commit recorded clock");
     assert!(!first.realized_node_timestamps.is_empty());
-    assert!(
-        first
-            .realized_node_timestamps
-            .iter()
-            .all(|node| node.timestamp == "2026-09-01T00:00:00Z")
-    );
+    assert!(first.realized_node_timestamps.iter().all(|node| {
+        node.timestamp
+            == "2026-09-01T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp")
+    }));
     let head = store
         .load_session_head_meta(&SessionId::from("root"))
         .await
         .expect("head before replay");
     if let crate::GraphAppend::Extend { nodes } = &mut commit.graph {
         for node in nodes {
-            node.timestamp = "2026-09-30T23:59:59Z".into();
+            node.timestamp = "2026-09-30T23:59:59.000000000Z"
+                .parse()
+                .expect("canonical node timestamp");
         }
     }
     let replay = store
@@ -71,7 +75,9 @@ pub async fn receipt_replay_rehydrates_recorded_node_clocks_and_ids(store: Arc<d
         .iter()
         .map(|node| {
             let mut observed = node.clone();
-            observed.timestamp = "2026-09-30T23:59:59Z".into();
+            observed.timestamp = "2026-09-30T23:59:59.000000000Z"
+                .parse()
+                .expect("canonical node timestamp");
             observed
         })
         .collect::<Vec<_>>();
@@ -84,7 +90,10 @@ pub async fn receipt_replay_rehydrates_recorded_node_clocks_and_ids(store: Arc<d
             .nodes
             .iter()
             .filter(|node| observed.iter().any(|clock| clock.node_id == node.node_id))
-            .all(|node| node.timestamp == "2026-09-30T23:59:59Z")
+            .all(|node| node.timestamp
+                == "2026-09-30T23:59:59.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"))
     );
     state.apply_persisted_commit_result(replay);
     for realized in &first.realized_node_timestamps {

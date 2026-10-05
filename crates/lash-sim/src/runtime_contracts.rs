@@ -743,7 +743,7 @@ mod tests {
             {
                 "node_id": "child",
                 "parent_node_id": "missing",
-                "timestamp": "2026-01-01T00:00:00Z",
+                "timestamp": "2026-01-01T00:00:00.000000000Z",
                 "kind": "plugin",
                 "plugin_type": "sim",
                 "body": {}
@@ -762,7 +762,7 @@ mod tests {
             {
                 "node_id": "a",
                 "parent_node_id": "b",
-                "timestamp": "2026-01-01T00:00:00Z",
+                "timestamp": "2026-01-01T00:00:00.000000000Z",
                 "kind": "plugin",
                 "plugin_type": "sim",
                 "body": {}
@@ -770,7 +770,7 @@ mod tests {
             {
                 "node_id": "b",
                 "parent_node_id": "a",
-                "timestamp": "2026-01-01T00:00:01Z",
+                "timestamp": "2026-01-01T00:00:01.000000000Z",
                 "kind": "plugin",
                 "plugin_type": "sim",
                 "body": {}

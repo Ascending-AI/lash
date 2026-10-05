@@ -16,6 +16,8 @@ const FRAME_NODE_PREFIX_VERSION: &str = "frame-node/v3/";
 /// version_guard(items(LASH_FRAME_NODE_DOMAIN_VERSION, frame_node_id))
 const LASH_FRAME_NODE_DOMAIN_VERSION: &str = "lash-frame-node/v3";
 
+pub use lash_core_ids::clock::{NodeTimestamp, NodeTimestampError};
+
 use crate::{NodeId, SessionId};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
@@ -36,7 +38,7 @@ use lash_sansio::core_support::MessageCoreSupport;
 )]
 pub struct RealizedNodeTimestamp {
     pub node_id: NodeId,
-    pub timestamp: String,
+    pub timestamp: NodeTimestamp,
 }
 
 pub mod facade_ops {
@@ -239,7 +241,7 @@ pub struct SessionNodeRecord {
     pub node_id: NodeId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_node_id: Option<NodeId>,
-    pub timestamp: String,
+    pub timestamp: NodeTimestamp,
     #[serde(flatten)]
     pub payload: SessionNodePayload,
 }
@@ -384,7 +386,7 @@ pub(crate) fn upcast_synthetic_node_body(
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredSessionNodeBody {
     schema_version: u32,
-    timestamp: String,
+    timestamp: NodeTimestamp,
     #[serde(flatten)]
     payload: SessionNodePayload,
 }
@@ -724,7 +726,7 @@ impl SessionGraphAppendBuilder {
     pub fn append_messages_at<I>(
         &mut self,
         messages: I,
-        timestamp: String,
+        timestamp: NodeTimestamp,
     ) -> Vec<SessionNodeRecord>
     where
         I: IntoIterator<Item = Message>,
@@ -735,14 +737,22 @@ impl SessionGraphAppendBuilder {
         )
     }
 
-    pub fn append_events_at<I>(&mut self, events: I, timestamp: String) -> Vec<SessionNodeRecord>
+    pub fn append_events_at<I>(
+        &mut self,
+        events: I,
+        timestamp: NodeTimestamp,
+    ) -> Vec<SessionNodeRecord>
     where
         I: IntoIterator<Item = SessionHistoryRecord>,
     {
         self.append_drafts_at(events.into_iter().map(SessionNodeDraft::event), timestamp)
     }
 
-    pub fn append_drafts_at<I>(&mut self, drafts: I, timestamp: String) -> Vec<SessionNodeRecord>
+    pub fn append_drafts_at<I>(
+        &mut self,
+        drafts: I,
+        timestamp: NodeTimestamp,
+    ) -> Vec<SessionNodeRecord>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
@@ -786,7 +796,7 @@ impl SessionGraphAppendBuilder {
             nodes.push(SessionNodeRecord {
                 node_id,
                 parent_node_id,
-                timestamp: timestamp.clone(),
+                timestamp,
                 payload,
             });
         }
@@ -834,7 +844,7 @@ impl SessionNodeRecord {
         serde_json::to_string(&StoredSessionNodeBody {
             schema_version: fleet_format
                 .writer_version(crate::surface_format!(SESSION_NODE_BODY_SCHEMA_VERSION)),
-            timestamp: self.timestamp.clone(),
+            timestamp: self.timestamp,
             payload: self.payload.clone(),
         })
     }
@@ -968,7 +978,7 @@ impl SessionGraph {
     pub(crate) fn append_active_conversation_messages_at(
         &mut self,
         messages: &[Message],
-        timestamp: String,
+        timestamp: NodeTimestamp,
     ) {
         let appendable_messages = messages
             .iter()
@@ -1143,10 +1153,10 @@ impl SessionGraph {
     }
 
     fn append_message_batch(&mut self, messages: Vec<Message>) {
-        self.append_message_batch_at(messages, crate::SystemClock.timestamp_rfc3339());
+        self.append_message_batch_at(messages, crate::SystemClock.node_timestamp());
     }
 
-    fn append_message_batch_at(&mut self, messages: Vec<Message>, timestamp: String) {
+    fn append_message_batch_at(&mut self, messages: Vec<Message>, timestamp: NodeTimestamp) {
         if messages.is_empty() {
             return;
         }
@@ -1245,7 +1255,7 @@ impl SessionGraph {
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
-        self.append_node_drafts_at_inner(None, drafts, crate::SystemClock.timestamp_rfc3339())
+        self.append_node_drafts_at_inner(None, drafts, crate::SystemClock.node_timestamp())
     }
 
     pub fn append_frame_open_with_id_at(
@@ -1254,7 +1264,7 @@ impl SessionGraph {
         frame_key: crate::FrameKey,
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
-        timestamp: String,
+        timestamp: NodeTimestamp,
     ) -> bool {
         if self.find_node(frame_node_id.as_str()).is_some() {
             return false;
@@ -1293,7 +1303,7 @@ impl SessionGraph {
                 previous_frame_node_id.clone(),
                 reason.clone(),
                 assignment.clone(),
-                node.timestamp.clone(),
+                node.timestamp.to_string(),
             ));
             previous_frame_node_id = Some(frame_node_id);
         }
@@ -1304,7 +1314,7 @@ impl SessionGraph {
         &mut self,
         draft_namespace: &str,
         drafts: I,
-        timestamp: String,
+        timestamp: NodeTimestamp,
     ) -> Vec<NodeId>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
@@ -1316,7 +1326,7 @@ impl SessionGraph {
         &mut self,
         draft_namespace: Option<&str>,
         drafts: I,
-        timestamp: String,
+        timestamp: NodeTimestamp,
     ) -> Vec<NodeId>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
@@ -1474,7 +1484,7 @@ pub fn build_active_read_replacement<'a>(
     current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
     mut append_builder: SessionGraphAppendBuilder,
     messages: &[Message],
-    timestamp: String,
+    timestamp: NodeTimestamp,
 ) -> ActiveReadReplacement {
     let target = messages
         .iter()

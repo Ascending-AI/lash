@@ -32,7 +32,7 @@ fn text(bytes: &[u8]) -> &str {
 fn node() -> SessionNodeRecord {
     let body = serde_json::json!({
         "schema_version": SESSION_NODE_BODY_SCHEMA_VERSION,
-        "timestamp": "2026-09-30T00:00:00Z",
+        "timestamp": "2026-09-30T00:00:00.000000000Z",
         "kind": "plugin",
         "plugin_type": "guarded-surface-law",
         "body": {"value": 7},

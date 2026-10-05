@@ -313,10 +313,12 @@ impl RuntimeCommit {
             ))
         };
         crate::session_state::adopt_session_config(&mut state, &config);
-        // This frame is only a sizing probe. Wall time's fractional precision
-        // varies, so reserve all nine digits without reading the clock.
+        // Every node timestamp occupies exactly 30 bytes; use a deterministic
+        // instant for this sizing probe without reading the clock.
         state.ensure_agent_frame_initialized_with_timestamp(|| {
-            "1970-01-01T00:00:00.000000001+00:00".to_string()
+            "1970-01-01T00:00:00.000000001Z"
+                .parse()
+                .expect("canonical sizing timestamp")
         });
         // A session command's settlement commits under its batch's queue
         // drain; every batch id has the derived id's length.
@@ -432,26 +434,25 @@ mod tests {
         let nodes = probe.graph.nodes();
         assert_eq!(nodes.len(), 1, "the probe includes the initial frame");
         assert_eq!(
-            nodes[0].timestamp, "1970-01-01T00:00:00.000000001+00:00",
-            "a sizing probe must never sample wall time or omit fractional digits"
+            nodes[0].timestamp.to_string().len(),
+            crate::session_graph::NodeTimestamp::WIDTH
+        );
+        assert_eq!(
+            nodes[0].timestamp.to_string(),
+            "1970-01-01T00:00:00.000000001Z"
         );
         let reserved = probe.measure_budget().expect("measure the sizing probe");
-        for timestamp in [
-            "2026-10-02T00:00:00+00:00",
-            "2026-10-02T00:00:00.123+00:00",
-            "2026-10-02T00:00:00.123456+00:00",
-            "2026-10-02T00:00:00.123456789+00:00",
-        ] {
-            let mut realized = probe.clone();
-            realized.graph.nodes_mut()[0].timestamp = timestamp.to_string();
-            let actual = realized
-                .measure_budget()
-                .expect("measure the realized frame");
-            assert!(
-                actual.total_bytes <= reserved.total_bytes,
-                "the sizing probe covers every fractional precision: {timestamp}"
-            );
-        }
+        let mut realized = probe.clone();
+        realized.graph.nodes_mut()[0].timestamp = "2026-10-02T00:00:00.123456789Z"
+            .parse()
+            .expect("canonical realized timestamp");
+        let actual = realized
+            .measure_budget()
+            .expect("measure the realized frame");
+        assert_eq!(
+            actual.total_bytes, reserved.total_bytes,
+            "timestamp width is invariant"
+        );
     }
 
     #[test]
@@ -499,7 +500,9 @@ mod tests {
         let node = crate::SessionNodeRecord {
             node_id: "budget-node".into(),
             parent_node_id: None,
-            timestamp: "2026-07-26T00:00:00Z".to_string(),
+            timestamp: "2026-07-26T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Protocol(
                     crate::ProtocolEvent::typed("budget", serde_json::Value::Null)

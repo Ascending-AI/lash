@@ -99,7 +99,7 @@ pub struct TranscriptRowRecord {
     pub kind: TranscriptRowKind,
     pub provenance: RowProvenance,
     pub content: RowContent,
-    pub timestamp: String,
+    pub timestamp: crate::session_graph::NodeTimestamp,
     pub suppressed: Option<SuppressionReason>,
 }
 
@@ -270,7 +270,7 @@ impl TranscriptProjection {
                         kind,
                         content,
                         provenance,
-                        timestamp: node.timestamp.clone(),
+                        timestamp: node.timestamp,
                         suppressed,
                     },
                 })

@@ -10,7 +10,7 @@ fn open_frame(graph: &mut SessionGraph, assignment: AgentFrameAssignment) {
         FrameKey::from_caller_material("caller-provided-frame-key").unwrap(),
         AgentFrameReason::initial(),
         assignment,
-        String::new(),
+        "2026-10-02T00:00:00.000000000Z".parse().unwrap(),
     );
 }
 

@@ -84,7 +84,9 @@ fn intent_fixture() -> RuntimeCommit {
     state.ensure_agent_frame_initialized();
     let graph_data = state.session_graph.data_mut();
     std::sync::Arc::make_mut(&mut graph_data.nodes.make_mut()[0]).timestamp =
-        "2026-07-26T10:00:00Z".to_string();
+        "2026-07-26T10:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp");
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     let node_id =
         derive_history_node_id(&state.session_id, &operation, 0).expect("derive golden node");
@@ -103,7 +105,9 @@ fn intent_fixture() -> RuntimeCommit {
         nodes: vec![crate::SessionNodeRecord {
             node_id: node_id.clone(),
             parent_node_id: None,
-            timestamp: "2026-07-26T10:00:01Z".to_string(),
+            timestamp: "2026-07-26T10:00:01.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Conversation(
                     crate::ConversationRecord::from_message(message),
@@ -539,7 +543,9 @@ fn intent_projection_keeps_payload_timestamp_but_excludes_node_timestamp() {
     let first = intent_fixture();
     let mut observed_later = first.clone();
     let nodes = observed_later.graph.nodes_mut();
-    nodes[0].timestamp = "2027-01-01T00:00:00Z".to_string();
+    nodes[0].timestamp = "2027-01-01T00:00:00.000000000Z"
+        .parse()
+        .expect("canonical node timestamp");
     assert_eq!(
         first.turn_commit_hash().expect("first hash"),
         observed_later.turn_commit_hash().expect("later hash")
@@ -648,7 +654,9 @@ fn node_derivation_remaps_in_batch_parent_edges() {
             crate::SessionNodeRecord {
                 node_id: "draft-a".into(),
                 parent_node_id: None,
-                timestamp: "2026-07-26T10:00:00Z".to_string(),
+                timestamp: "2026-07-26T10:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
                 payload: crate::SessionNodePayload::Plugin {
                     plugin_type: "first".to_string(),
                     body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
@@ -657,7 +665,9 @@ fn node_derivation_remaps_in_batch_parent_edges() {
             crate::SessionNodeRecord {
                 node_id: "draft-b".into(),
                 parent_node_id: Some("draft-a".into()),
-                timestamp: "2026-07-26T10:00:00Z".to_string(),
+                timestamp: "2026-07-26T10:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
                 payload: crate::SessionNodePayload::Plugin {
                     plugin_type: "second".to_string(),
                     body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
@@ -681,7 +691,9 @@ fn append_chain_rejects_self_parent_cycles() {
         nodes: vec![crate::SessionNodeRecord {
             node_id: "cycle".into(),
             parent_node_id: Some("cycle".into()),
-            timestamp: "2026-07-26T10:00:00Z".to_string(),
+            timestamp: "2026-07-26T10:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: crate::SessionNodePayload::Plugin {
                 plugin_type: "cycle".to_string(),
                 body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),

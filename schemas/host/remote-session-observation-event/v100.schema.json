@@ -3933,6 +3933,13 @@
       ],
       "type": "object"
     },
+    "NodeTimestamp": {
+      "format": "date-time",
+      "maxLength": 30,
+      "minLength": 30,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{9}Z$",
+      "type": "string"
+    },
     "OpaqueStateRefusal": {
       "description": "Why opaque state failed a structural check.",
       "oneOf": [
@@ -15744,7 +15751,7 @@
           ]
         },
         "timestamp": {
-          "type": "string"
+          "$ref": "#/$defs/NodeTimestamp"
         }
       },
       "required": [

@@ -332,7 +332,9 @@ pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn Runt
     let node = SessionNodeRecord {
         node_id: "unframed-root".into(),
         parent_node_id: None,
-        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        timestamp: "2026-07-27T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(
                 ProtocolEvent::typed("unframed", serde_json::Value::Null).expect("protocol event"),
@@ -1427,7 +1429,9 @@ pub(super) fn sample_session_node(
     SessionNodeRecord {
         node_id: lash_core::NodeId::fixture(node_id),
         parent_node_id: parent.map(lash_core::NodeId::fixture),
-        timestamp: "1970-01-01T00:00:00Z".to_string(),
+        timestamp: "1970-01-01T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: if parent.is_none() {
             SessionNodePayload::FrameOpen {
                 frame_key,

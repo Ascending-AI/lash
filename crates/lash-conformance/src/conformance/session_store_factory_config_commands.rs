@@ -541,18 +541,6 @@ impl crate::Clock for ConfigSettlementClock {
     }
 }
 
-#[test]
-fn config_settlement_clock_wall_clock_faces_agree() {
-    let clock = ConfigSettlementClock::new(1_700_000_000_123);
-    let clock: &dyn crate::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
-}
-
 /// The law's store: a fresh backend, and `request`'s store from its
 /// factory. The backend is returned so the runtime takes its ports from it.
 ///

@@ -799,7 +799,7 @@ mod tests {
             frame_key,
             crate::AgentFrameReason::new("observation-test"),
             crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
-            <crate::SystemClock as crate::ClockWallTime>::timestamp_rfc3339(&crate::SystemClock,),
+            <crate::SystemClock as crate::ClockWallTime>::node_timestamp(&crate::SystemClock,),
         ));
         state.refresh_current_frame_projection();
     }

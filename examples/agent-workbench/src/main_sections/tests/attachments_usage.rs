@@ -252,8 +252,7 @@ async fn run_attachment_usage_gate(
         .leaf_node_id
         .as_deref()
         .and_then(|node_id| graph.find_node(node_id))
-        .and_then(|node| chrono::DateTime::parse_from_rfc3339(&node.timestamp).ok())
-        .map(|timestamp| timestamp.timestamp_millis() as u64)
+        .map(|node| node.timestamp.timestamp_millis() as u64)
         .expect("runtime-stamped graph node timestamp");
     assert!(
         (runtime_window_start_ms..=runtime_window_end_ms).contains(&latest_node_ms),

@@ -212,7 +212,7 @@ impl PluginDispatchContext<'_> {
                         plugin_type,
                         body,
                     )],
-                    clock.timestamp_rfc3339(),
+                    clock.node_timestamp(),
                 );
                 next_plugin_ordinal += 1;
             }

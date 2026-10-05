@@ -26,7 +26,9 @@ fn construction_enforces_structural_graph_integrity() {
     let node = |id: &str, parent: Option<&str>| SessionNodeRecord {
         node_id: NodeId::fixture(id.to_string()),
         parent_node_id: parent.map(crate::NodeId::fixture),
-        timestamp: "2026-08-08T00:00:00Z".to_string(),
+        timestamp: "2026-08-08T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: SessionNodePayload::Plugin {
             plugin_type: "construction-integrity-test".to_string(),
             body: SharedJsonValue::new(serde_json::json!({"id": id})),
@@ -108,7 +110,9 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
     let node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
         node_id: NodeId::fixture(node_id.to_string()),
         parent_node_id: Some(NodeId::fixture(parent_node_id.to_string())),
-        timestamp: "2026-09-12T00:00:00Z".to_string(),
+        timestamp: "2026-09-12T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: SessionNodePayload::Plugin {
             plugin_type: "atomic-append-test".to_string(),
             body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
@@ -186,7 +190,9 @@ fn cache_build_rejects_parent_cycles_scenario() {
             SessionNodeRecord {
                 node_id: "cycle-a".into(),
                 parent_node_id: Some("cycle-b".into()),
-                timestamp: "2026-07-31T00:00:00Z".to_string(),
+                timestamp: "2026-07-31T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
                 payload: SessionNodePayload::Plugin {
                     plugin_type: "cycle-test".to_string(),
                     body: SharedJsonValue::new(serde_json::json!({"node": "a"})),
@@ -195,7 +201,9 @@ fn cache_build_rejects_parent_cycles_scenario() {
             SessionNodeRecord {
                 node_id: "cycle-b".into(),
                 parent_node_id: Some("cycle-a".into()),
-                timestamp: "2026-07-31T00:00:00Z".to_string(),
+                timestamp: "2026-07-31T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
                 payload: SessionNodePayload::Plugin {
                     plugin_type: "cycle-test".to_string(),
                     body: SharedJsonValue::new(serde_json::json!({"node": "b"})),
@@ -221,7 +229,9 @@ fn cache_build_rejects_cycles_in_inactive_components() {
     let plugin_node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
         node_id: NodeId::fixture(node_id.to_string()),
         parent_node_id: parent_node_id.map(crate::NodeId::fixture),
-        timestamp: "2026-07-31T00:00:00Z".to_string(),
+        timestamp: "2026-07-31T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: SessionNodePayload::Plugin {
             plugin_type: "inactive-cycle-test".to_string(),
             body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
@@ -268,7 +278,9 @@ fn nearest_ancestor_walk_is_bounded_scenario() {
             SessionNodeRecord {
                 node_id: "nearest-a".into(),
                 parent_node_id: Some("nearest-b".into()),
-                timestamp: "2026-07-31T00:00:00Z".to_string(),
+                timestamp: "2026-07-31T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
                 payload: SessionNodePayload::Plugin {
                     plugin_type: "nearest-test".to_string(),
                     body: SharedJsonValue::new(serde_json::json!({"node": "a"})),
@@ -277,7 +289,9 @@ fn nearest_ancestor_walk_is_bounded_scenario() {
             SessionNodeRecord {
                 node_id: "nearest-b".into(),
                 parent_node_id: Some("nearest-a".into()),
-                timestamp: "2026-07-31T00:00:00Z".to_string(),
+                timestamp: "2026-07-31T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
                 payload: SessionNodePayload::Plugin {
                     plugin_type: "nearest-test".to_string(),
                     body: SharedJsonValue::new(serde_json::json!({"node": "b"})),
@@ -308,14 +322,16 @@ fn protocol_event() -> ProtocolEvent {
 fn draft_node_ids_are_stable_per_boundary_and_distinct_across_boundaries() {
     let graph = SessionGraph::default();
     let message = text_message("same-message", MessageRole::User, "hello");
-    let timestamp = "2026-07-26T10:00:00Z".to_string();
+    let timestamp = "2026-07-26T10:00:00.000000000Z"
+        .parse()
+        .expect("canonical node timestamp");
 
     let mut first = graph.append_builder_in_namespace("turn:one");
-    let first_id = first.append_messages_at([message.clone()], timestamp.clone())[0]
+    let first_id = first.append_messages_at([message.clone()], timestamp)[0]
         .node_id
         .clone();
     let mut replay = graph.append_builder_in_namespace("turn:one");
-    let replay_id = replay.append_messages_at([message.clone()], timestamp.clone())[0]
+    let replay_id = replay.append_messages_at([message.clone()], timestamp)[0]
         .node_id
         .clone();
     let mut next_turn = graph.append_builder_in_namespace("turn:two");
@@ -347,7 +363,9 @@ fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
     let node = SessionNodeRecord {
         node_id: "node-2".into(),
         parent_node_id: Some("node-1".into()),
-        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        timestamp: "2026-07-27T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: SessionNodePayload::Event {
             event: SessionHistoryRecord::Protocol(protocol_event()),
         },
@@ -374,7 +392,7 @@ fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
 #[test]
 fn unstamped_stored_bodies_are_refused() {
     // Byte-for-byte a body written before the generation stamp existed.
-    let legacy = r#"{"timestamp":"2026-07-27T00:00:00Z","kind":"plugin","plugin_type":"legacy","body":{"value":7}}"#;
+    let legacy = r#"{"timestamp":"2026-07-27T00:00:00.000000000Z","kind":"plugin","plugin_type":"legacy","body":{"value":7}}"#;
 
     let error = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, legacy)
         .expect_err("pre-stamp durable bodies are pre-cutover data and must be refused");
@@ -399,7 +417,9 @@ fn stored_bodies_below_the_supported_generation_are_refused() {
     let node = SessionNodeRecord {
         node_id: "node-1".into(),
         parent_node_id: None,
-        timestamp: "2026-08-18T00:00:00Z".to_string(),
+        timestamp: "2026-08-18T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: SessionNodePayload::Event {
             event: SessionHistoryRecord::Protocol(protocol_event()),
         },
@@ -431,7 +451,7 @@ fn stored_bodies_below_the_supported_generation_are_refused() {
 #[cfg(feature = "synthetic-next")]
 #[test]
 fn supported_older_stored_bodies_remain_readable_after_finalize() {
-    let older = r#"{"schema_version":22,"timestamp":"2026-08-18T00:00:00Z","kind":"plugin","plugin_type":"older-history","body":{"value":7}}"#;
+    let older = r#"{"schema_version":22,"timestamp":"2026-08-18T00:00:00.000000000Z","kind":"plugin","plugin_type":"older-history","body":{"value":7}}"#;
 
     for epoch in [1, 2] {
         let fleet = crate::store::FleetFormat::from_version(epoch);
@@ -452,7 +472,10 @@ fn supported_older_stored_bodies_remain_readable_after_finalize() {
             decoded.parent_node_id,
             Some(crate::NodeId::from("parent-1"))
         );
-        assert_eq!(decoded.timestamp, "2026-08-18T00:00:00Z");
+        assert_eq!(
+            decoded.timestamp.to_string(),
+            "2026-08-18T00:00:00.000000000Z"
+        );
         let SessionNodePayload::Plugin { plugin_type, body } = decoded.payload else {
             panic!("the older plugin payload must be preserved");
         };
@@ -465,7 +488,7 @@ fn supported_older_stored_bodies_remain_readable_after_finalize() {
 fn stored_bodies_from_a_newer_generation_are_refused() {
     let newer = serde_json::json!({
         "schema_version": SESSION_NODE_BODY_SCHEMA_VERSION + 1,
-        "timestamp": "2026-08-18T00:00:00Z",
+        "timestamp": "2026-08-18T00:00:00.000000000Z",
         "kind": "plugin",
         "plugin_type": "from-the-future",
         "body": {},
@@ -497,7 +520,9 @@ fn stored_frame_open_rejects_a_raw_frame_key() {
             frame_node_id(&SessionId::from("session"), frame_key.as_str()).into_inner(),
         ),
         parent_node_id: None,
-        timestamp: "2026-09-01T00:00:00Z".to_string(),
+        timestamp: "2026-09-01T00:00:00.000000000Z"
+            .parse()
+            .expect("canonical node timestamp"),
         payload: SessionNodePayload::FrameOpen {
             frame_key,
             reason: crate::AgentFrameReason::initial(),
@@ -540,24 +565,32 @@ fn nearest_frame_is_derived_from_ancestry() {
     let first_key =
         crate::FrameKey::from_caller_material("first-frame").expect("non-empty frame material");
     let first = frame_node_id(&SessionId::from("session"), first_key.as_str());
-    assert!(graph.append_frame_open_with_id_at(
-        first.clone(),
-        first_key,
-        crate::AgentFrameReason::initial(),
-        assignment.clone(),
-        "2026-07-27T00:00:00Z".to_string(),
-    ));
+    assert!(
+        graph.append_frame_open_with_id_at(
+            first.clone(),
+            first_key,
+            crate::AgentFrameReason::initial(),
+            assignment.clone(),
+            "2026-07-27T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+        )
+    );
     let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
     let second_key =
         crate::FrameKey::from_caller_material("second-frame").expect("non-empty frame material");
     let second = frame_node_id(&SessionId::from("session"), second_key.as_str());
-    assert!(graph.append_frame_open_with_id_at(
-        second.clone(),
-        second_key,
-        crate::AgentFrameReason::continue_as(),
-        assignment,
-        "2026-07-27T00:00:01Z".to_string(),
-    ));
+    assert!(
+        graph.append_frame_open_with_id_at(
+            second.clone(),
+            second_key,
+            crate::AgentFrameReason::continue_as(),
+            assignment,
+            "2026-07-27T00:00:01.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+        )
+    );
     let second_message = graph.append_message(text_message("m2", MessageRole::User, "second"));
 
     assert_eq!(
@@ -593,7 +626,9 @@ fn active_read_rewrite_preserves_draft_node_id_sequence() {
         std::sync::Arc::new(SessionNodeRecord {
             node_id: draft_node_id(&draft_namespace, ordinal),
             parent_node_id: Some(leaf_node_id.clone()),
-            timestamp: "2026-08-20T00:00:00Z".to_string(),
+            timestamp: "2026-08-20T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: SessionNodePayload::Plugin {
                 plugin_type: "pre-existing-draft".to_string(),
                 body: SharedJsonValue::new(serde_json::json!({"ordinal": ordinal})),
@@ -678,7 +713,9 @@ fn projection_and_replacement_retain_the_same_prefix() {
             graph.nodes.iter().map(std::sync::Arc::as_ref),
             graph.append_builder_in_namespace("active-read-prefix-differential-test"),
             &messages,
-            "2026-08-20T00:00:00Z".to_string(),
+            "2026-08-20T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
         );
         let projection =
             build_active_read_projection(graph.nodes.iter().map(std::sync::Arc::as_ref), &messages);
@@ -794,13 +831,17 @@ fn open_test_frame(
     ));
     let frame_key = crate::FrameKey::from_caller_material(key).expect("non-empty material");
     let frame = frame_node_id(session, frame_key.as_str());
-    assert!(graph.append_frame_open_with_id_at(
-        frame.clone(),
-        frame_key,
-        reason,
-        assignment,
-        "2026-09-29T00:00:00Z".to_string(),
-    ));
+    assert!(
+        graph.append_frame_open_with_id_at(
+            frame.clone(),
+            frame_key,
+            reason,
+            assignment,
+            "2026-09-29T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+        )
+    );
     frame
 }
 
@@ -903,7 +944,9 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
         let record = |id: &str, parent: Option<&str>| SessionNodeRecord {
             node_id: NodeId::fixture(id.to_string()),
             parent_node_id: parent.map(crate::NodeId::fixture),
-            timestamp: "2026-08-08T00:00:00Z".to_string(),
+            timestamp: "2026-08-08T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: SessionNodePayload::Plugin {
                 plugin_type: "remap-child-before-parent".to_string(),
                 body: SharedJsonValue::new(serde_json::json!({"id": id})),
@@ -984,7 +1027,9 @@ mod window_anchor {
                 frame_node_id(&SessionId::from("window"), frame_key.as_str()).into_inner(),
             ),
             parent_node_id: parent.map(crate::NodeId::fixture),
-            timestamp: "2026-09-29T00:00:00Z".to_string(),
+            timestamp: "2026-09-29T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: crate::AgentFrameReason::initial(),
@@ -1000,7 +1045,9 @@ mod window_anchor {
         SessionNodeRecord {
             node_id: id.parse().unwrap(),
             parent_node_id: Some(parent.parse().unwrap()),
-            timestamp: "2026-09-29T00:00:00Z".to_string(),
+            timestamp: "2026-09-29T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
             payload: SessionNodePayload::Plugin {
                 plugin_type: "window-anchor-test".to_string(),
                 body: SharedJsonValue::new(serde_json::json!({"id": id})),
@@ -1183,7 +1230,9 @@ fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
         graph.remap_node_ids(&session, &[(draft, derived.clone())]);
         graph.apply_realized_node_timestamps(&[RealizedNodeTimestamp {
             node_id: derived.clone(),
-            timestamp: format!("2026-09-29T00:00:{:02}Z", turn % 60),
+            timestamp: format!("2026-09-29T00:00:{:02}.000000000Z", turn % 60)
+                .parse()
+                .expect("canonical node timestamp"),
         }]);
         let read = graph.read_model();
         assert!(
@@ -1207,8 +1256,8 @@ fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
         assert_eq!(leaf.as_str(), format!("derived-{turn}"));
         let leaf_node = snapshot.find_node(leaf.as_str()).expect("leaf node");
         assert_eq!(
-            leaf_node.timestamp,
-            format!("2026-09-29T00:00:{:02}Z", turn % 60)
+            leaf_node.timestamp.to_string(),
+            format!("2026-09-29T00:00:{:02}.000000000Z", turn % 60)
         );
     }
     let message_buffers = held
@@ -1296,5 +1345,69 @@ fn an_extended_render_cache_equals_a_fresh_render_of_the_frame() {
         buffers.len() <= 8,
         "{} render buffers for {TURNS} turns: each render extends the last",
         buffers.len()
+    );
+}
+
+/// FIG-5052: durable node time admits only the fixed-width nanosecond UTC spelling.
+#[test]
+fn stored_node_timestamp_refuses_noncanonical_text() {
+    for timestamp in [
+        "yesterday",
+        "",
+        "2026-10-02T00:00:00.123456789+00:00",
+        "2026-10-02T00:00:00Z",
+        "2026-10-02T00:00:00.123Z",
+        "2026-10-02t00:00:00.123456789z",
+        "2026-02-30T00:00:00.123456789Z",
+    ] {
+        let body = serde_json::json!({
+            "schema_version": SESSION_NODE_BODY_SCHEMA_VERSION,
+            "timestamp": timestamp,
+            "kind": "plugin",
+            "plugin_type": "timestamp-law",
+            "body": {}
+        });
+        assert!(
+            SessionNodeRecord::decode_storage_body("timestamp-law".into(), None, &body.to_string())
+                .is_err(),
+            "noncanonical node timestamp was accepted: {timestamp}"
+        );
+    }
+}
+
+/// FIG-5052: every admitted node instant has a 30-byte wire spelling, including
+/// zero fractions and sub-millisecond precision, without losing its instant.
+#[test]
+fn node_timestamp_round_trips_fixed_width_utc_instants() {
+    for text in [
+        "0000-01-01T00:00:00.000000000Z",
+        "1970-01-01T00:00:00.000000001Z",
+        "2026-10-02T00:00:00.123456789Z",
+        "9999-12-31T23:59:59.999999999Z",
+    ] {
+        let timestamp: NodeTimestamp = text.parse().expect("canonical node time");
+        assert_eq!(timestamp.to_string().len(), NodeTimestamp::WIDTH);
+        assert_eq!(
+            serde_json::to_value(timestamp).expect("serialize time"),
+            text
+        );
+        let decoded: NodeTimestamp =
+            serde_json::from_value(serde_json::json!(text)).expect("decode time");
+        assert_eq!(decoded, timestamp);
+    }
+    assert_eq!(
+        "yesterday".parse::<NodeTimestamp>(),
+        Err(NodeTimestampError::Noncanonical)
+    );
+    let expanded_year = crate::testing::TestClock::new(253_402_300_800_000);
+    assert_eq!(
+        NodeTimestamp::new(crate::Clock::timestamp_datetime(&expanded_year)),
+        Err(NodeTimestampError::YearOutOfRange)
+    );
+    let clock = crate::testing::TestClock::new(1_700_000_000_123);
+    assert_eq!(clock.node_timestamp().timestamp_millis(), 1_700_000_000_123);
+    assert_eq!(
+        clock.node_timestamp().to_string(),
+        "2023-11-14T22:13:20.123000000Z"
     );
 }

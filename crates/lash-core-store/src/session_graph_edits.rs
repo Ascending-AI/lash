@@ -109,7 +109,7 @@ impl SessionGraph {
             edits
                 .entry(index)
                 .or_insert_with(|| self.nodes[index].as_ref().clone())
-                .timestamp = realized.timestamp.clone();
+                .timestamp = realized.timestamp;
         }
         replace_node_records(&mut Arc::make_mut(&mut self.inner).nodes, edits);
     }
@@ -169,7 +169,7 @@ impl SessionGraph {
                 self.leaf_node_id.as_deref().unwrap_or("root")
             )),
             messages,
-            crate::SystemClock.timestamp_rfc3339(),
+            crate::SystemClock.node_timestamp(),
         );
         let data = self.data_mut();
         data.leaf_node_id = replacement.leaf_node_id;

@@ -144,7 +144,9 @@ fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
     nodes.push(std::sync::Arc::new(lash_core::SessionNodeRecord {
         node_id: lash_core::NodeId::fixture(frame_node_id.to_string()),
         parent_node_id: state.session_graph.leaf_node_id.clone(),
-        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        timestamp: "2026-07-27T00:00:00.000000000Z"
+            .parse()
+            .unwrap_or_else(|error| panic!("invalid fixture timestamp: {error}")),
         payload: lash_core::SessionNodePayload::FrameOpen {
             frame_key,
             reason: lash_core::AgentFrameReason::continue_as(),
