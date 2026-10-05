@@ -2426,40 +2426,64 @@ run_lash_sim_runtime_completion_mutation_evidence() {
   step "Lash-sim scheduler/runtime completion mutation evidence (${mutation_jobs} concurrent jobs)"
   require_tool cargo-mutants cargo-mutants 27.1.0
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
-  run_mutants_recorded "lash-sim scheduler runtime completion queue" "${out_dir}/mutants-lash-sim-scheduler-runtime-completion-targeted" \
-    cargo mutants \
-    -p lash-sim \
-    --file crates/lash-sim/src/scheduler.rs \
-    --re 'RuntimeCompletionQueue::register|RuntimeCompletionQueue::take_ready|RuntimeCompletionQueue::mark_completed|RuntimeCompletionQueue::registered_len' \
-    --baseline skip \
-    --jobs "$mutation_jobs" \
-    --timeout "$timeout" \
-    --minimum-test-timeout 30 \
-    --output "${out_dir}/mutants-lash-sim-scheduler-runtime-completion-targeted" \
-    -- --locked
-  run_mutants_recorded "lash-sim scheduler-owned and mini-oracles" "${out_dir}/mutants-lash-sim-oracles-runtime-completion-targeted" \
-    cargo mutants \
-    -p lash-sim \
-    --file crates/lash-sim/src/oracles/recovery_and_scheduling.rs \
-    --file crates/lash-sim/src/oracles/mini_scenarios.rs \
-    --re 'scheduler_owned_runtime_completions|mini_rlm_lashlang_cell_exec_continues|mini_agent_parallel_spawn_join|mini_agent_durable_input_resolution|mini_standard_provider_error_without_checkpoint' \
-    --baseline skip \
-    --jobs "$mutation_jobs" \
-    --timeout "$timeout" \
-    --minimum-test-timeout 30 \
-    --output "${out_dir}/mutants-lash-sim-oracles-runtime-completion-targeted" \
-    -- --locked
-  run_mutants_recorded "lash-sim runtime completion readiness" "${out_dir}/mutants-lash-sim-runner-runtime-completion-targeted" \
-    cargo mutants \
-    -p lash-sim \
-    --file crates/lash-sim/src/runner/runtime_completion.rs \
-    --re 'runtime_completion_ready|register_ready_runtime_completions|RuntimeCompletionState::next_provider_turn_ready|RuntimeCompletionState::provider_completed' \
-    --baseline skip \
-    --jobs "$mutation_jobs" \
-    --timeout "$timeout" \
-    --minimum-test-timeout 30 \
-    --output "${out_dir}/mutants-lash-sim-runner-runtime-completion-targeted" \
-    -- --locked
+  # Run 37304222736 spent 168 minutes judging a red/hanging baseline 86
+  # times. A baseline refusal is a verdict; no mutant from that tree is valid.
+  local failures_before=$mutation_failures
+  local group="${LASH_MUTATION_SIM_GROUP:-all}"
+  local shard="${LASH_MUTATION_SIM_SHARD:-0/1}"
+  case "$group" in all|scheduler|oracles|readiness) ;; *) echo 'Unknown mutation-sim group' >&2; exit 2 ;; esac
+  if ! [[ "$shard" =~ ^([0-9]+)/([1-9][0-9]*)$ ]] || ((10#${BASH_REMATCH[1]} >= 10#${BASH_REMATCH[2]})); then
+    echo 'LASH_MUTATION_SIM_SHARD must be a zero-based index/count' >&2
+    exit 2
+  fi
+  if [ "$group" = all ] || [ "$group" = scheduler ]; then
+    run_mutants_recorded "lash-sim scheduler runtime completion queue" "${out_dir}/mutants-lash-sim-scheduler-runtime-completion-targeted" \
+      cargo mutants \
+      -p lash-sim \
+      --file crates/lash-sim/src/scheduler.rs \
+      --re 'RuntimeCompletionQueue::register|RuntimeCompletionQueue::take_ready|RuntimeCompletionQueue::mark_completed|RuntimeCompletionQueue::registered_len' \
+      --baseline run \
+      --build-timeout 900 \
+      --shard "$shard" \
+      --jobs "$mutation_jobs" \
+      --timeout "$timeout" \
+      --minimum-test-timeout 30 \
+      --output "${out_dir}/mutants-lash-sim-scheduler-runtime-completion-targeted" \
+      -- --locked
+  fi
+  [ "$mutation_failures" -eq "$failures_before" ] || return 0
+  if [ "$group" = all ] || [ "$group" = oracles ]; then
+    run_mutants_recorded "lash-sim scheduler-owned and mini-oracles" "${out_dir}/mutants-lash-sim-oracles-runtime-completion-targeted" \
+      cargo mutants \
+      -p lash-sim \
+      --file crates/lash-sim/src/oracles/recovery_and_scheduling.rs \
+      --file crates/lash-sim/src/oracles/mini_scenarios.rs \
+      --re 'scheduler_owned_runtime_completions|mini_rlm_lashlang_cell_exec_continues|mini_agent_parallel_spawn_join|mini_agent_durable_input_resolution|mini_standard_provider_error_without_checkpoint' \
+      --baseline run \
+      --build-timeout 900 \
+      --shard "$shard" \
+      --jobs "$mutation_jobs" \
+      --timeout "$timeout" \
+      --minimum-test-timeout 30 \
+      --output "${out_dir}/mutants-lash-sim-oracles-runtime-completion-targeted" \
+      -- --locked
+  fi
+  [ "$mutation_failures" -eq "$failures_before" ] || return 0
+  if [ "$group" = all ] || [ "$group" = readiness ]; then
+    run_mutants_recorded "lash-sim runtime completion readiness" "${out_dir}/mutants-lash-sim-runner-runtime-completion-targeted" \
+      cargo mutants \
+      -p lash-sim \
+      --file crates/lash-sim/src/runner/runtime_completion.rs \
+      --re 'runtime_completion_ready|register_ready_runtime_completions|RuntimeCompletionState::next_provider_turn_ready|RuntimeCompletionState::provider_completed' \
+      --baseline run \
+      --build-timeout 900 \
+      --shard "$shard" \
+      --jobs "$mutation_jobs" \
+      --timeout "$timeout" \
+      --minimum-test-timeout 30 \
+      --output "${out_dir}/mutants-lash-sim-runner-runtime-completion-targeted" \
+      -- --locked
+  fi
 }
 
 run_mutation_full() {

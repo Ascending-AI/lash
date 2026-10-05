@@ -32,11 +32,14 @@ env:
   # reproducible without introducing entropy inside the deterministic world.
   LASH_SIM_RUN_SALT: github-${{ github.run_id }}-attempt-${{ github.run_attempt }}
 
+# Job caps include setup/upload and measurement margin (FIG-5042). GitHub
+# has no workflow timeout; the longest full dependency path is bounded by
+# build (70) + a stage (100) + conclusion (5) = 175 execution minutes.
 jobs:
   confidence:
     name: Confidence ${{ github.event_name == 'workflow_dispatch' && inputs.lane || 'full' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 120
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.lane != 'full' }}
 
     steps:
@@ -99,7 +102,7 @@ jobs:
     # This independent interpreter job does not consume the stable build.
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 55
     steps:
       - *checkout
 
@@ -110,7 +113,7 @@ jobs:
     name: Build full confidence once
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 70
     steps:
       - *checkout
 
@@ -172,7 +175,7 @@ jobs:
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 100
+    timeout-minutes: 45
     steps:
       - *checkout
 
@@ -222,7 +225,7 @@ jobs:
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 100
+    timeout-minutes: 65
     strategy:
       fail-fast: false
       matrix:
@@ -277,7 +280,7 @@ jobs:
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 100
+    timeout-minutes: 70
     steps:
       - *checkout
 
@@ -327,7 +330,7 @@ jobs:
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 100
+    timeout-minutes: 45
     steps:
       - *checkout
 
@@ -377,7 +380,7 @@ jobs:
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 100
+    timeout-minutes: 45
     steps:
       - *checkout
 
@@ -419,7 +422,7 @@ jobs:
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 100
+    timeout-minutes: 40
     steps:
       - *checkout
 
@@ -457,18 +460,30 @@ jobs:
           if-no-files-found: error
 
   confidence-mutation-sim:
-    name: Confidence mutation-sim
+    name: Confidence mutation-sim-${{ matrix.group }}-${{ matrix.shard }}
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    # 86 mutants (7 scheduler + 51 oracle + 28 runtime-completion, counted by
-    # `cargo mutants --list`). Run 35091816279 recorded 38 mutants in the 77
-    # minutes this job had after the 23 minutes it spends downloading and
-    # restoring the shared build: 2.03 min/mutant, so the full set needs 175
-    # min of work. Five mutants hit the 180 s per-test cap, and a mutant set
-    # that shifts toward timeouts costs more, so 30% margin on the work:
-    # 175 * 1.3 + 23 = 250 min.
-    timeout-minutes: 250
+    # Run 37304222736: 7 + 51 + 28 mutants; cold builds took up to
+    # 12.2 min and warm build+test timeouts about 2.03 min/mutant at jobs=2.
+    # At most 9 mutants per leg: 15 min bounded cold build + 3 min baseline
+    # + 9 * 2.03 * 1.3 + 5 min setup/upload = 47 min, rounded to 50.
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {group: scheduler, shard: "0/1", artifact: scheduler-0}
+          - {group: oracles, shard: "0/6", artifact: oracles-0}
+          - {group: oracles, shard: "1/6", artifact: oracles-1}
+          - {group: oracles, shard: "2/6", artifact: oracles-2}
+          - {group: oracles, shard: "3/6", artifact: oracles-3}
+          - {group: oracles, shard: "4/6", artifact: oracles-4}
+          - {group: oracles, shard: "5/6", artifact: oracles-5}
+          - {group: readiness, shard: "0/4", artifact: readiness-0}
+          - {group: readiness, shard: "1/4", artifact: readiness-1}
+          - {group: readiness, shard: "2/4", artifact: readiness-2}
+          - {group: readiness, shard: "3/4", artifact: readiness-3}
     steps:
       - *checkout
 
@@ -494,15 +509,17 @@ jobs:
       - name: Run mutation-sim
         env:
           LASH_CONFIDENCE_STAGE: mutation-sim
-          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/mutation-sim
+          LASH_MUTATION_SIM_GROUP: ${{ matrix.group }}
+          LASH_MUTATION_SIM_SHARD: ${{ matrix.shard }}
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/mutation-sim-${{ matrix.artifact }}
         run: bash scripts/confidence-gate.sh full
 
       - name: Upload mutation-sim evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: confidence-mutation-sim-attempt-${{ github.run_attempt }}
-          path: target/confidence/stages/mutation-sim/**
+          name: confidence-mutation-sim-${{ matrix.artifact }}-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/mutation-sim-${{ matrix.artifact }}/**
           if-no-files-found: error
 
   confidence-mutation-packages-rotating:

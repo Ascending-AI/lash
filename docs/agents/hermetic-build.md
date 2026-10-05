@@ -732,6 +732,28 @@ owning definition closure.
 
 ## Service and Cargo-owned gates
 
+Cargo build parity has a named landing gate:
+
+```sh
+kiln gate lash <fork> -- bash scripts/ci/cargo-parity.sh
+```
+
+It runs real Cargo through the admission shim, with Buck routing disabled,
+using `check --workspace --all-targets --locked --offline` and the isolated
+development graphs of lashlang and integrator-contract. Cargo manifests remain the single
+source for the generated Buck graph. Resolver 2 isolates development features
+by package; the generated workspace feature union can hide an undeclared
+feature on a development dependency, so workspace compilation alone is not a
+parity proof. The gate keeps reusable artifacts under `.kiln/cargo-parity`;
+`LASH_CARGO_PARITY_OUT_DIR` selects another directory. It honors Confidence's
+`LASH_CI_FEATURES` (currently empty) and prints the package count and wall time.
+
+Confidence mutation-sim requires a passing unmutated baseline, bounds each
+compile at 900 seconds and each test run at 180 seconds, and partitions its
+three source groups into disjoint legs. Each leg uploads its own evidence and
+has a 50-minute job cap; a baseline refusal is a failure, never mutation signal.
+
+
 Registered Restate suites without a `ci_driver` run as cacheable remote
 actions. The registry in `scripts/restate-suites.toml` generates a target
 named `restate_<suite>_<leg>` beside its Rust test binary, with hyphens in the

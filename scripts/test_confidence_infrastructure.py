@@ -25,7 +25,7 @@ def definition(name):
 
 class ConfidenceInfrastructureTests(unittest.TestCase):
     def setUp(self):
-        scratch = ROOT / '.kiln/confidence-infrastructure'
+        scratch = Path(os.environ.get('LASH_CONFIDENCE_TEST_TMP_DIR', ROOT / '.kiln/confidence-infrastructure'))
         scratch.mkdir(parents=True, exist_ok=True)
         self.directory = tempfile.TemporaryDirectory(dir=scratch)
         self.addCleanup(self.directory.cleanup)
@@ -34,6 +34,83 @@ class ConfidenceInfrastructureTests(unittest.TestCase):
     def shell(self, body, **environment):
         return subprocess.run(['bash', '-euc', body], cwd=ROOT,
                               env=os.environ | environment, text=True, capture_output=True)
+
+    def test_mutation_sim_refuses_a_red_baseline_before_judging_mutants(self):
+        # Model cargo-mutants' baseline contract at the real invocation seam.
+        # Skipping it launches the entire sweep even when the unmutated suite
+        # hangs, as in run 37304222736.
+        body = definition('run_lash_sim_runtime_completion_mutation_evidence')
+        body += """step() { :; }
+require_tool() { :; }
+mutation_jobs=2
+mutation_failures=0
+out_dir=fixture
+run_mutants_recorded() {
+    shift 2
+    local baseline=skip bounded=0 arg
+    while (($#)); do
+        arg=$1; shift
+        case "$arg" in
+          --baseline) baseline=$1; shift ;;
+          --build-timeout) bounded=$1; shift ;;
+        esac
+    done
+    [ "$baseline" = run ] || { echo 'mutants launched on a red baseline' >&2; exit 91; }
+    [ "$bounded" -gt 0 ] || { echo 'unbounded mutant compile' >&2; exit 92; }
+    mutation_failures=$((mutation_failures + 1))
+    echo baseline-refused
+}
+run_lash_sim_runtime_completion_mutation_evidence
+"""
+        result = self.shell(body)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(['baseline-refused'], result.stdout.splitlines())
+
+    def test_mutation_sim_shards_judge_the_complete_disjoint_space(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/confidence.yml').read_text())
+        job = workflow['jobs']['confidence-mutation-sim']
+        covered = set()
+        counts = {'scheduler': 7, 'oracles': 51, 'readiness': 28}
+        for row in job['strategy']['matrix']['include']:
+            body = definition('run_lash_sim_runtime_completion_mutation_evidence')
+            body += """step() { :; }
+require_tool() { :; }
+mutation_jobs=2
+mutation_failures=0
+out_dir=fixture
+run_mutants_recorded() {
+    local name=$1; shift 2
+    local shard arg
+    while (($#)); do
+        arg=$1; shift
+        if [ "$arg" = --shard ]; then shard=$1; shift; fi
+    done
+    printf '%s|%s\\n' "$name" "$shard"
+}
+run_lash_sim_runtime_completion_mutation_evidence
+"""
+            result = self.shell(body, LASH_MUTATION_SIM_GROUP=row['group'],
+                                LASH_MUTATION_SIM_SHARD=row['shard'])
+            self.assertEqual(0, result.returncode, result.stderr)
+            calls = result.stdout.splitlines()
+            self.assertEqual(1, len(calls))
+            expected_names = {
+                'scheduler': 'lash-sim scheduler runtime completion queue',
+                'oracles': 'lash-sim scheduler-owned and mini-oracles',
+                'readiness': 'lash-sim runtime completion readiness',
+            }
+            name, shard = calls[0].split('|')
+            self.assertEqual(expected_names[row['group']], name)
+            self.assertEqual(row['shard'], shard)
+            index, total = map(int, shard.split('/'))
+            selected = {(row['group'], i) for i in range(counts[row['group']]) if i % total == index}
+            self.assertFalse(covered & selected, 'mutant judged twice')
+            covered |= selected
+            # Preserve the full space while bounding the slowest leg from
+            # measured warm cost + compile/baseline caps + setup and margin.
+            self.assertLessEqual(15 + 3 + len(selected) * 2.03 * 1.3 + 5,
+                                 job['timeout-minutes'])
+        self.assertEqual({(group, i) for group, count in counts.items() for i in range(count)}, covered)
 
     def test_postgres_mutation_jobs_belong_to_mutants_not_libtest(self):
         body = '''mutation_jobs=2

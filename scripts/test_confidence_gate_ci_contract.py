@@ -1034,7 +1034,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         expected_consumed_paths.update(
             f"target/confidence/stages/{stage}/**"
             for stage in ("harnesses", "generated-${{ matrix.shard }}", "minimizer", "backends",
-                           "coverage", "mutation-core", "mutation-sim",
+                           "coverage", "mutation-core", "mutation-sim-${{ matrix.artifact }}",
                            "mutation-packages-rotating-${{ matrix.package }}-${{ matrix.shard }}")
         )
         self.assertCountEqual(consumed_paths, expected_consumed_paths)
@@ -1741,12 +1741,11 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertNotIn("LASH_SIM_SHARD", workflow)
         self.assertNotIn("LASH_SIM_FULL_SEEDS", workflow)
 
-    def test_sim_search_and_mutation_sim_fit_their_job_caps(self) -> None:
-        """Both lanes were cancelled at 100 minutes in run 35091816279.
+    def test_sim_search_fits_its_job_cap(self) -> None:
+        """Sim-search was cancelled at 100 minutes in run 35091816279.
 
-        A job cancelled at its cap produces no evidence at all, so the seed
-        budget and the mutant budget each have to be stated against the cap
-        with the shared-build download counted as the fixed cost it is.
+        The seed budget must fit the cap with the shared-build download
+        counted as the fixed cost it is.
         """
         gate = GATE.read_text(encoding="utf-8")
         confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
@@ -1806,20 +1805,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn('"search_seconds": int(search_seconds),', gate)
         self.assertIn('artifact["corpus_seconds"] = int(corpus_seconds)', gate)
         self.assertIn('artifact["shard_seconds"]', gate)
-
-        # mutation-sim is a mutant count, not a seed budget: 86 mutants
-        # (`cargo mutants --list` over its three sweeps: 7 scheduler, 51 oracle,
-        # 28 runtime-completion) at the 2.03 min/mutant the cancelled run
-        # measured, plus the same 23 minutes of fixed cost, with margin for the
-        # 180 s per-test cap.
-        mutation_sim_cap = int(
-            re.search(
-                r"^    timeout-minutes: (\d+)$",
-                workflow_job_block(confidence_workflow, "confidence-mutation-sim"),
-                re.MULTILINE,
-            ).group(1)
-        )
-        self.assertGreaterEqual(mutation_sim_cap, 23 + 86 * 2.03 * 1.3)
 
     def test_mutation_packages_legs_fit_their_job_cap(self) -> None:
         """Run 35117123483 cancelled three package legs at the 100-minute cap.
