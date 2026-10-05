@@ -77,7 +77,8 @@ def test_counts(report: Path, label: str, name: str) -> dict:
 
 def run(label: str, name: str, artifacts: Path) -> int:
     gate = os.environ["KILN_GATE_ID"]
-    # S28 owns a second cluster in this block; serve owns offsets 40–42.
+    # S28 owns a second cluster in this block and fleet PostgreSQL owns
+    # offset 40; serve owns offsets 45–47.
     base = 61000 + (int(hashlib.sha256(gate.encode()).hexdigest()[:8], 16) % 89) * 50
     reservations = []
     try:
@@ -183,7 +184,7 @@ def run(label: str, name: str, artifacts: Path) -> int:
     code = subprocess.call([
         "python3", str(RESTATE), "serve", "--name", f"e2e-{gate}",
         "--server-env", "RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true",
-        "--port-base", str(base + 40), "--keep-log", str(artifacts / "restate.log"),
+        "--port-base", str(base + 45), "--keep-log", str(artifacts / "restate.log"),
         "--", *command,
     ], cwd=ROOT, env=env)
     counts = test_counts(report, label, name)

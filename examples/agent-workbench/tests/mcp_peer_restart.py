@@ -110,6 +110,10 @@ class Journey:
         return {table: self.sql(self.session_db, f"SELECT * FROM {table} WHERE session_id = ?", (self.session,))
                 for table in ("graph_nodes", "runtime_turn_commits", "pending_turn_inputs")}
 
+    @staticmethod
+    def final_commits(store):
+        return [row for row in store["runtime_turn_commits"] if json.loads(row["turn_id"])["key"] == "final"]
+
     def attributed_pair(self, turn):
         messages = [message for message in self.state()["messages"]
                     if message.get("provenance", {}).get("turn_id") == turn]
@@ -235,7 +239,7 @@ class Journey:
                     and self.dom(self.pages[0]) == self.dom(self.pages[1]))
                 store = self.store()
                 self.gate("depth", "api/store", "one accepted input and one attributed answer persist",
-                    len(self.state()["messages"]) == 2 and len(store["runtime_turn_commits"]) == 1
+                    len(self.state()["messages"]) == 2 and len(self.final_commits(store)) == 1
                     and len(store["pending_turn_inputs"]) == 1 and depth["turn_id"] in json.dumps(store)
                     and self.attributed_pair(depth["turn_id"]))
                 # Presentation material is committed under its canonical Run owner;
@@ -297,7 +301,7 @@ class Journey:
                     all(len(self.dom(p)) == before + 4 and "workspace badge came back" in json.dumps(self.dom(p)) for p in self.pages))
                 store = self.store()
                 self.gate("attach", "api/store", "both requests and attributed answers persist once",
-                    len(self.state()["messages"]) == before + 4 and len(store["runtime_turn_commits"]) == 4
+                    len(self.state()["messages"]) == before + 4 and len(self.final_commits(store)) == 4
                     and len(store["pending_turn_inputs"]) == 4
                     and all(self.attributed_pair(turn["turn_id"]) for turn in (badge, detached_turn)))
                 refs = [v["source"] for r in results for v in r["output"].get("view", {}).get("blocks", [])
