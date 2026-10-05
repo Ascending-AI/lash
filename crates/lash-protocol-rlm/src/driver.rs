@@ -184,7 +184,7 @@ impl RlmContextProjector {
             ctx.events,
             ctx.messages,
         );
-        let view = crate::relay::RelayView::read(&projection, &ctx.config.turn_id.to_string())?;
+        let view = crate::relay::RelayView::read(&projection, ctx.config.turn_id.as_ref())?;
         let messages = crate::relay::build_relay_messages(crate::relay::RelayHarnessInput {
             view: &view,
             settings: relay,

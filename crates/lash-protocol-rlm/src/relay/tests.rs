@@ -119,7 +119,7 @@ fn the_turns_input_survives_its_own_steps_in_the_view() {
     let projection =
         lash_core::facade_support::ChronologicalProjection::from_turn_view(&events, &messages);
 
-    let view = RelayView::read(&projection, &turn.to_string()).expect("a readable view");
+    let view = RelayView::read(&projection, turn.as_ref()).expect("a readable view");
 
     let input = view
         .turn_input
