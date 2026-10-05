@@ -976,14 +976,15 @@ async fn a_cancel_after_the_hand_over_reaches_the_continuation(storage: Storage)
 }
 
 /// The double over `storage` with one build, whose run invocations end
-/// after `budget` effects.
-pub(super) async fn budget_world(storage: Storage, budget: u64) -> World {
+/// after `budget` effects; with `always_replay`, every attempt's input
+/// closes after its replayed journal (`INACTIVITY_TIMEOUT=0s`).
+pub(super) async fn budget_world(storage: Storage, budget: u64, always_replay: bool) -> World {
     let (opening, keep) = prepare(storage).await;
     let lever = DrainLever::default();
     let opened = lever.clone();
     let double = lash_restate_test::backend_with_store_set_and_segment_budget(
         SEED,
-        lash_restate_test::ServerConfig::default(),
+        lash_restate_test::ServerConfig::default().always_replay(always_replay),
         Some(budget),
         lash_restate_test::DeploymentHooks::default(),
         |clock| async move {
@@ -997,7 +998,7 @@ pub(super) async fn budget_world(storage: Storage, budget: u64) -> World {
     World {
         engine: Engine::Double(double),
         lever,
-        always_replay: false,
+        always_replay,
         _keep: keep,
     }
 }
@@ -1009,9 +1010,12 @@ struct RunRunRow {
     target_service_key: Option<String>,
 }
 
-async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(storage: Storage) -> Result<()> {
+async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(
+    storage: Storage,
+    always_replay: bool,
+) -> Result<()> {
     const TOOL_ROUNDS: usize = 3;
-    let World { engine, _keep, .. } = budget_world(storage, 1).await;
+    let World { engine, _keep, .. } = budget_world(storage, 1, always_replay).await;
     let model = Arc::new(RunModel {
         tool_rounds: TOOL_ROUNDS,
         held: &[],
@@ -1031,7 +1035,8 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(storage: Stor
             .output(),
     )
     .await
-    .expect("the run ends")?;
+    .expect("the run ends");
+    let output = output?;
     assert_eq!(
         output.result.outcome,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage {
@@ -1114,7 +1119,7 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(storage: Stor
 /// run bounded to two model calls stops for its budget after two, however
 /// many invocations ran them.
 async fn a_runs_turn_budget_counts_across_its_boundaries(storage: Storage) -> Result<()> {
-    let World { engine, _keep, .. } = budget_world(storage, 1).await;
+    let World { engine, _keep, .. } = budget_world(storage, 1, false).await;
     let model = Arc::new(RunModel {
         tool_rounds: 3,
         held: &[],
@@ -1172,8 +1177,8 @@ async fn turn_budget(storage: Storage, (): ()) -> Result<()> {
     a_runs_turn_budget_counts_across_its_boundaries(storage).await
 }
 
-async fn journal_budget(storage: Storage, (): ()) -> Result<()> {
-    a_run_past_its_journal_budget_goes_on_in_a_new_invocation(storage).await
+async fn journal_budget(storage: Storage, always_replay: bool) -> Result<()> {
+    a_run_past_its_journal_budget_goes_on_in_a_new_invocation(storage, always_replay).await
 }
 
 async fn counts(storage: Storage, (): ()) -> Result<()> {
@@ -1244,10 +1249,11 @@ drain_hand_over_laws! {
     run_cancel_after_sqlite_file: cancel_after, Storage::SqliteFile, ();
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     run_cancel_after_postgres: cancel_after, Storage::Postgres, ();
-    run_journal_budget_sqlite_memory: journal_budget, Storage::SqliteMemory, ();
-    run_journal_budget_sqlite_file: journal_budget, Storage::SqliteFile, ();
+    run_journal_budget_sqlite_memory: journal_budget, Storage::SqliteMemory, false;
+    run_journal_budget_sqlite_file: journal_budget, Storage::SqliteFile, false;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    run_journal_budget_postgres: journal_budget, Storage::Postgres, ();
+    run_journal_budget_postgres: journal_budget, Storage::Postgres, false;
+    replay_run_journal_budget_sqlite_memory: journal_budget, Storage::SqliteMemory, true;
     run_turn_budget_sqlite_memory: turn_budget, Storage::SqliteMemory, ();
     run_turn_budget_sqlite_file: turn_budget, Storage::SqliteFile, ();
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
