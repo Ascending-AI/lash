@@ -1,8 +1,10 @@
 name: Release journal replay
 
 on:
-  push:
-    branches: [main]
+  # Full suites run on main on a schedule, not once per merge.
+  schedule:
+    - cron: "53 * * * *"
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -19,7 +21,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       release_journal_replay: ${{ steps.classify.outputs.release_journal_replay }}
-      trusted: ${{ github.event_name == 'push' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
+      trusted: ${{ github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -30,7 +32,7 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+          if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
             python3 scripts/ci_plan.py fail-open --reason "main replays release journals" >> "$GITHUB_OUTPUT"
           elif git diff --no-renames --name-status -z "$PR_BASE_SHA" HEAD > "$RUNNER_TEMP/replay-paths"; then
             python3 scripts/ci_plan.py classify --event pull_request --paths-file "$RUNNER_TEMP/replay-paths" >> "$GITHUB_OUTPUT"

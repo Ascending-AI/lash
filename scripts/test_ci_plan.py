@@ -2052,7 +2052,9 @@ class ReleaseJournalReplaySelectionTests(unittest.TestCase):
     def test_replay_job_runs_on_main_and_stays_non_required_until_the_cut(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/release-journal-replay.yml").read_text())
         triggers = workflow.get("on", workflow.get(True))
-        self.assertEqual(["main"], triggers["push"]["branches"])
+        self.assertNotIn("push", triggers)
+        self.assertEqual([{"cron": "53 * * * *"}], triggers["schedule"])
+        self.assertIn("workflow_dispatch", triggers)
         self.assertIn("pull_request", triggers)
         job = workflow["jobs"]["release-journal-replay"]
         self.assertIn("release_journal_replay", job["if"])
