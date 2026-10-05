@@ -1395,8 +1395,18 @@ function shellRender(model) {
     shellStatus: element({ hidden: true }),
     shellStatusText: element(),
     shellStatusDetail: element({ hidden: true }),
-    timelineEmpty: element({ className: "empty pending" }),
+    timelineEmpty: {
+      ...element({ className: "empty pending" }),
+      children: [],
+      replaceChildren(...nodes) {
+        this.children = nodes;
+        this.textContent = nodes
+          .map(node => (typeof node === "string" ? node : node.textContent))
+          .join("");
+      },
+    },
   };
+  const views = [];
   // The context deliberately withholds every handle to transcript content —
   // `timeline`, `clearTranscript`, `renderError`, `renderNote`. A renderer that
   // reached for one to express a degraded state would throw a ReferenceError
@@ -1404,9 +1414,26 @@ function shellRender(model) {
   // tested property rather than an intention.
   const renderContext = {
     ...elements,
+    setView(view) {
+      views.push(view);
+    },
     document: {
       getElementById(id) {
         return id === "timelineEmpty" ? elements.timelineEmpty : null;
+      },
+      createElement() {
+        const listeners = {};
+        return {
+          type: "",
+          className: "",
+          textContent: "",
+          addEventListener(type, listener) {
+            listeners[type] = listener;
+          },
+          click() {
+            if (listeners.click) listeners.click();
+          },
+        };
       },
     },
   };
@@ -1425,6 +1452,9 @@ function shellRender(model) {
     bannerDetail: elements.shellStatusDetail.textContent,
     placeholder: elements.timelineEmpty.textContent,
     placeholderClass: elements.timelineEmpty.className,
+    placeholderLink:
+      elements.timelineEmpty.children.find(node => typeof node !== "string") || null,
+    views,
   };
 }
 
@@ -1930,6 +1960,12 @@ test("a successful response is what promotes the shell to session claims", () =>
   assert.equal(render.bannerHidden, true);
   assert.equal(render.placeholderClass, "empty");
   assert.equal(render.placeholder, shell.timelinePlaceholder("live"));
+
+  // The hint ends in a working link to the view that fires a trigger: the same
+  // setView("triggers") the sidebar entry calls.
+  assert.equal(render.placeholderLink.textContent, "triggers page");
+  render.placeholderLink.click();
+  assert.deepEqual(render.views, ["triggers"]);
 
   // Only "live" may say it.
   for (const phase of ["connecting", "unavailable", "reconnecting"]) {

@@ -1869,6 +1869,19 @@
     .empty.pending { color: var(--chalk-dim); }
     .empty.degraded { color: var(--error); }
 
+    /* A hint that ends in an action links the view that performs it. Views are
+       shell state, not URLs, so the link is a button dressed as one — the same
+       move the sidebar's view entries make. */
+    .empty-link {
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--sodium-soft);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    .empty-link:hover { color: var(--sodium); }
+
     .node-inspector {
       min-width: 0;
       min-height: 0;
@@ -3590,7 +3603,7 @@
 
     function timelinePlaceholder(phase) {
       if (phase === "live") {
-        return "no turns yet. ask the agent something below, or click red or blue to fire a trigger occurrence.";
+        return "no turns yet. ask the agent something below, or fire a trigger from the triggers page.";
       }
       if (phase === "connecting") return "connecting to the workbench…";
       if (phase === "reconnecting") {
@@ -3633,6 +3646,7 @@
         session: phase === "connecting" ? "connecting…" : "unknown",
         placeholder: timelinePlaceholder(phase),
         placeholderTone: phase === "live" ? "" : (phase === "connecting" ? "pending" : "degraded"),
+        placeholderLink: phase === "live" ? { text: "triggers page", view: "triggers" } : null,
         banner: { hidden: true, text: "", detail: shellReason(availability) }
       };
       if (phase === "replacing") {
@@ -3833,8 +3847,19 @@
       shellStatusDetail.hidden = !model.banner.detail;
       const placeholder = document.getElementById("timelineEmpty");
       if (placeholder) {
-        placeholder.textContent = model.placeholder;
         placeholder.className = "empty" + (model.placeholderTone ? " " + model.placeholderTone : "");
+        const linkSpec = model.placeholderLink;
+        if (linkSpec) {
+          const [before, after] = model.placeholder.split(linkSpec.text);
+          const link = document.createElement("button");
+          link.type = "button";
+          link.className = "empty-link";
+          link.textContent = linkSpec.text;
+          link.addEventListener("click", () => setView(linkSpec.view));
+          placeholder.replaceChildren(before, link, after);
+        } else {
+          placeholder.textContent = model.placeholder;
+        }
       }
     }
     // END WORKBENCH_SHELL_STATUS_RENDER
