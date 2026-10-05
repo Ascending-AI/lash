@@ -2188,5 +2188,5 @@ mod observation_config_tests;
 #[path = "tests/reset_chat.rs"]
 mod reset_chat_tests;
 
-#[path = "tests/operator_routes.rs"]
-mod operator_routes_tests;
+#[path = "tests/compact.rs"]
+mod compact_tests;

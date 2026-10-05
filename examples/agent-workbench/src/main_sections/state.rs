@@ -134,7 +134,9 @@ pub(crate) enum WorkbenchAuthorizationAction {
     /// Deployment-wide operator policy. Approval decisions are deliberately
     /// separate from chat/session participation.
     ManageApprovals,
-    OperateDeployment,
+    CompactContext {
+        session_id: SessionId,
+    },
     /// Destructive, deployment-wide store-growth maintenance: trigger
     /// occurrence reclamation, explicit tombstone forget, session-store vacuum,
     /// and attachment reclamation. It is deliberately not session-scoped: no
@@ -176,11 +178,11 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
             | WorkbenchAuthorizationAction::EnqueueTurn { session_id }
             | WorkbenchAuthorizationAction::EnqueueTurnInput { session_id }
             | WorkbenchAuthorizationAction::CancelTurn { session_id }
-            | WorkbenchAuthorizationAction::ManageQueuedWork { session_id } => {
+            | WorkbenchAuthorizationAction::ManageQueuedWork { session_id }
+            | WorkbenchAuthorizationAction::CompactContext { session_id } => {
                 let _ = session_id;
             }
             WorkbenchAuthorizationAction::ManageApprovals => {}
-            WorkbenchAuthorizationAction::OperateDeployment => {}
             WorkbenchAuthorizationAction::RunStoreMaintenance => {}
         }
         Ok(())

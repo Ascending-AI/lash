@@ -762,7 +762,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         )
         .route("/api/triggers/{subscription_key}", delete(delete_trigger))
         .merge(trigger_occurrence_admin_routes())
-        .merge(operator_routes())
+        .route("/api/compact", post(compact_context))
         // Deliberately absent from the UI, and deliberately unscheduled: see
         // the handler's contract.
         .route("/api/admin/store-maintenance", post(run_store_maintenance))

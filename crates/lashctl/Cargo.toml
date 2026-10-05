@@ -23,7 +23,7 @@ synthetic-next = [
 ]
 
 [dependencies]
-lash = { workspace = true, features = ["rlm", "restate"] }
+lash = { workspace = true, features = ["rlm", "restate", "sqlite", "postgres"] }
 lash-core-execution = { workspace = true }
 lash-core-store = { workspace = true }
 lash-postgres-store = { workspace = true }

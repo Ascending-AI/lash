@@ -793,54 +793,40 @@ leaves the authoritative message absent, disconnect-as-cancel prevents the turn
 from completing, lag without resync loses ordered product events, and raw
 failure text fails the safe-copy assertion.
 
-## Operator controls
+## Recovery and context compaction
 
-The **operator** button opens deployment controls separately from the chat.
-Every route checks `WorkbenchAuthorizationAction::OperateDeployment`; replace
-`allow_all()` with the host's operator policy when exposing this example.
+Use `lashctl` for deployment operations. Set `LASH_SQLITE_DIR` to the
+workbench's `<data-dir>/lash-sessions`, or `LASH_POSTGRES_DATABASE_URL` for a
+PostgreSQL store. Use the workbench's `RESTATE_AUTHORITY_ID`,
+`RESTATE_INGRESS_URL` and `RESTATE_ADMIN_URL`. Set lashctl’s `RESTATE_NAMESPACE`
+to the workbench’s `AGENT_WORKBENCH_RESTATE_NAMESPACE` so control
+intents reach the engine that owns the work.
 
-Parked work is paged through `GET /api/admin/parks`. Each row keeps its typed
-reason and `park_id`. Redrive, cancel and fork submit that exact token to
-`POST /api/admin/parks/{verb}`. Process parks support redrive; cancel and fork
-apply to turn parks. `GET /api/admin/parks/events` retains both feeds' cursor.
-If an event cursor has been compacted, relist and start the event feed again.
+- `lashctl --json park list [--after '<cursor JSON>'] [--limit 50]` lists parks.
+- `lashctl --json park events [--after '<cursor JSON>']` reads transitions.
+- `lashctl --json park redrive|cancel|fork --target '<target JSON>' --park-id <id>`
+  submits the exact `target` and `park_id` returned by the list. Process parks
+  support redrive; cancel and fork apply to turn parks. After a compacted event
+  cursor refusal, relist and restart the event feed.
+- `lashctl --json stalled list <kind> [--after <id>] [--limit 50]` pages stalled
+  deliveries, including their last typed error. `stalled rearm <kind> <id>`
+  resets that delivery in its owning ledger.
+- `lashctl --json deployment-status --accepting-new-work false` reports live
+  and parked work. The flag describes host admission policy; it changes no routing.
+- `drain <generation>`, `drain-status <generation> --restate-admin-url <url>`
+  and `end-drain <generation>` remain the PostgreSQL generation drain verbs.
 
-`GET /api/admin/drain?accepting_new_work=true` reports deployment status. The
-admission flag describes the host's routing policy; the route does not close
-admission. `GET`, `POST` and `DELETE /api/admin/generations/{generation}/drain`
-read, start and end a generation drain. Drain an old generation from its
-replacement deployment. `GET /api/admin/obligations/{kind}` lists stalled
-rows, including the last typed error. `POST /api/admin/obligations/rearm` takes
-`{"kind":"ingress","id":"..."}` and reports whether that row was rearmed.
-These controls complement the bootstrap's stalled-obligation logger.
+Recovery commands also accept `--sqlite-dir <path>` instead of `LASH_SQLITE_DIR`.
+Page limits are nonzero and at most 200; retain `next` to read the next page.
+The standard lashctl JSON envelope and exit codes apply to every verb.
 
-Session controls use `/api/admin/sessions/{session_id}`:
+Type `/compact` in the chat composer to compact the current session's context.
+One inline note reports whether context was compacted, was empty, or is queued
+for a turn boundary. This is the only slash command. Recorded settings and
+session command submission, settlement and withdrawal are embedder APIs on
+`session.admin()`; the workbench has no deployment operator dialog.
+Usage is provider result data, metered at the host's provider seam (ADR 0127).
 
-- `GET /usage/facts` and `GET /usage/meters` export ledger pages. The panel
-  follows `next` to download all pages as JSON. Reuse each opaque cursor with
-  the same owner. `POST /usage/reconcile` asks the provider to recover
-  unreported amounts and returns both recovered and unresolved attempts.
-- `GET /config` returns registered command schemas and their revision, plus
-  values from the committed `DurableSession` view. `POST /config` takes a
-  stable `id`, `expected_revision` and an ordered list of typed commands,
-  each shaped as `{"kind":"set_autonomy","args":{"autonomous":true}}`.
-  All core commands and both protocols' prompt, context and render commands
-  have typed request variants. This RLM host admits RLM protocol commands;
-  standard protocol commands require a standard session. An absent owner
-  returns `unknown_owner` without enqueuing anything.
-- `POST /config/settle` accepts a retained receipt and returns applied, stale,
-  refused, pending or cancelled evidence. A stale edit publishes nothing.
-  Read the new revision before submitting the intended edit under a new id.
-- `POST /commands` takes `id` and a typed `SessionCommand`. Config
-  transactions use `/config` so callers cannot mint recorded resolutions.
-  `/commands/settle` and `/commands/withdraw` accept the returned receipt;
-  withdrawal answers `withdrawn` or `already_admitted`. Receipt/session
-  mismatches are refused before any command operation.
-- `POST /compact` takes optional `instructions`. The engine applies the
-  compaction command at a run boundary and reports whether it opened a
-  frame. Pending errors retain their receipt for later settlement.
-
-Page reads default to 50 records and accept a nonzero `limit` up to 200.
 The commented builder block in `src/main_sections/bootstrap.rs` demonstrates
 output retention, attachment limits and expiry, recovery lease and pass
 budgets, termination, abort drain grace, trigger route restoration, process

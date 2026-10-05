@@ -21,6 +21,8 @@ use lash_postgres_store::{
     PostgresConnectionBudget, PostgresConnectionBudgetReport, PostgresStorage, PostgresStoreConfig,
     PostgresStorePreflight,
 };
+mod recovery;
+
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -47,7 +49,7 @@ const OPERATOR_POOL_MAX: u32 = 2;
 /// The most stalled obligations `drain-status` lists per kind, first by id;
 /// `stalled_obligations` still counts every one.
 const STALLED_LISTED_PER_KIND: std::num::NonZeroUsize = std::num::NonZeroUsize::new(100).unwrap();
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> --restate-admin-url <url> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] [--plugin-registrations <json-file>] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> --restate-admin-url <url> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] [--plugin-registrations <json-file>] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | park list|events [--after <json>] [--limit <n>] | park redrive|cancel|fork --target <json> --park-id <n> | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery commands accept --sqlite-dir <path>) | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -166,6 +168,7 @@ fn parse_plugin_registrations(bytes: &[u8]) -> Result<Vec<PluginWriterRegistrati
 }
 
 enum Command {
+    Recovery(recovery::Invocation),
     Migrate {
         phase: MigrationPhase,
         dry_run: bool,
@@ -218,6 +221,7 @@ enum HoldAction {
 impl Command {
     fn name(&self) -> &'static str {
         match self {
+            Self::Recovery(invocation) => invocation.command.name(),
             Self::Migrate { .. } => "migrate",
             Self::Drain { .. } => "drain",
             Self::DrainStatus { .. } => "drain-status",
@@ -256,6 +260,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
     };
     let rest = &words[1..];
     let command = match verb {
+        "park" | "stalled" | "deployment-status" => Command::Recovery(recovery::parse(verb, rest)?),
         "migrate" => {
             let mut phase = MigrationPhase::Expand;
             let mut dry_run = false;
@@ -709,6 +714,7 @@ fn database_url() -> Result<String, CliError> {
 
 async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
     let outcome = match command {
+        Command::Recovery(invocation) => (invocation.run().await?, Exit::Done),
         Command::ObjectsPreflight { restate } => {
             let preflight = lash_restate::preflight_objects(&restate.target())
                 .await
@@ -1038,6 +1044,66 @@ async fn main() -> std::process::ExitCode {
 mod tests {
     use super::*;
     use lash_core_store::compat::CompatRefusal;
+
+    /// FIG-5037: recovery commands require an exact park token; paging cursors
+    /// and delivery kinds are validated before opening any operator backend.
+    #[test]
+    fn recovery_verbs_validate_tokens_cursors_and_delivery_kinds() {
+        let process = json!({"kind":"process", "process_id":lash::ProcessId::fixture("recovery")})
+            .to_string();
+        let valid = [
+            vec!["park", "list", "--limit", "1"],
+            vec!["park", "events", "--after", r#"{"turn":0,"process":0}"#],
+            vec![
+                "park",
+                "redrive",
+                "--target",
+                process.as_str(),
+                "--park-id",
+                "1",
+            ],
+            vec![
+                "park",
+                "cancel",
+                "--target",
+                r#"{"kind":"turn","session_id":"s","turn_id":"t"}"#,
+                "--park-id",
+                "1",
+            ],
+            vec![
+                "park",
+                "fork",
+                "--target",
+                r#"{"kind":"turn","session_id":"s","turn_id":"t"}"#,
+                "--park-id",
+                "1",
+            ],
+            vec![
+                "stalled", "list", "ingress", "--after", "delivery", "--limit", "1",
+            ],
+            vec!["stalled", "rearm", "ingress", "delivery"],
+            vec!["deployment-status", "--accepting-new-work", "false"],
+        ];
+        for words in valid {
+            assert!(
+                parse(words.iter().map(|word| (*word).to_owned())).is_ok(),
+                "{words:?}"
+            );
+        }
+        for words in [
+            vec!["park", "redrive", "--target", process.as_str()],
+            vec!["park", "list", "--limit", "0"],
+            vec!["park", "list", "--after", "broken"],
+            vec!["stalled", "list", "unknown"],
+            vec!["stalled", "rearm", "ingress"],
+            vec!["deployment-status"],
+        ] {
+            let error = parse(words.iter().map(|word| (*word).to_owned()))
+                .err()
+                .expect("invalid recovery arguments");
+            assert_eq!(error.exit as u8, Exit::Usage as u8, "{words:?}");
+        }
+    }
 
     #[test]
     fn release_inventory_build_probe() {

@@ -525,3 +525,225 @@ fn rolling_preflight_refuses_an_oversubscribed_budget() {
         "oversubscribed preflight refused; bounded roll accepted against live server capacity"
     );
 }
+
+/// FIG-5037: the operator CLI addresses the selected SQLite store, preserves
+/// resumable feed cursors, and returns typed park refusals in its JSON envelope.
+#[test]
+fn recovery_json_uses_sqlite_and_keeps_typed_refusals() {
+    let path = std::env::temp_dir().join(format!("lashctl-recovery-{}", uuid::Uuid::new_v4()));
+    let invoke = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lashctl"))
+            .args(args)
+            .arg("--json")
+            .arg("--sqlite-dir")
+            .arg(&path)
+            .env_remove("LASH_POSTGRES_DATABASE_URL")
+            .env_remove("LASH_SQLITE_DIR")
+            .env("RESTATE_AUTHORITY_ID", "lashctl-recovery-test")
+            .env("RESTATE_NAMESPACE", "lashctl-recovery-test")
+            .env("RESTATE_INGRESS_URL", "http://127.0.0.1:1")
+            .env("RESTATE_ADMIN_URL", "http://127.0.0.1:1")
+            .output()
+            .expect("run recovery CLI");
+        let body: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "recovery JSON: {error}; stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
+        (output.status.code().expect("normal exit"), body)
+    };
+    let (code, parks) = invoke(&["park", "list", "--limit", "1"]);
+    assert_eq!(code, 0, "{parks}");
+    assert_envelope(&parks, "park-list", true, false);
+    assert_eq!(parks["result"], json!({"records":[], "next":null}));
+    let (code, events) = invoke(&["park", "events"]);
+    assert_eq!(code, 0, "{events}");
+    let cursor = events["result"]["next"].to_string();
+    let (code, resumed) = invoke(&["park", "events", "--after", &cursor]);
+    assert_eq!(code, 0, "{resumed}");
+    assert_eq!(resumed["result"], events["result"]);
+    for kind in lash_core_store::store::ObligationKind::ALL {
+        let (code, page) = invoke(&["stalled", "list", kind.label(), "--limit", "1"]);
+        assert_eq!(code, 0, "{page}");
+        assert_envelope(&page, "stalled-list", true, false);
+        assert_eq!(page["result"], json!({"records":[], "next":null}));
+        let (code, rearm) = invoke(&["stalled", "rearm", kind.label(), "absent"]);
+        assert_eq!(code, 0, "{rearm}");
+        assert_eq!(rearm["result"]["rearmed"], false);
+    }
+    for admission in ["true", "false"] {
+        let (code, status) = invoke(&["deployment-status", "--accepting-new-work", admission]);
+        assert_eq!(code, 0, "{status}");
+        assert_eq!(status["result"]["accepting_new_work"], admission == "true");
+        assert_eq!(status["result"]["drained"], admission == "false");
+    }
+    let target =
+        json!({"kind":"process", "process_id":lash::ProcessId::fixture("absent")}).to_string();
+    let (code, refused) = invoke(&["park", "fork", "--target", &target, "--park-id", "1"]);
+    assert_eq!(code, 3, "{refused}");
+    assert_envelope(&refused, "park-fork", false, true);
+    assert_eq!(
+        refused["error"]["refusal"],
+        json!({"kind":"fork_requires_turn"})
+    );
+    let (code, refused) = invoke(&["park", "redrive", "--target", &target, "--park-id", "1"]);
+    assert_eq!(code, 3, "{refused}");
+    assert_envelope(&refused, "park-redrive", false, true);
+    assert_eq!(refused["error"]["refusal"]["kind"], "engine_refused");
+    assert_eq!(refused["error"]["refusal"]["code"], "process_not_visible");
+    // The wire pages must resume after the last returned row, including when
+    // there is another row behind a one-record page. Seed through store APIs.
+    let runtime = tokio::runtime::Runtime::new().expect("recovery store setup runtime");
+    let ids = runtime.block_on(async {
+        use lash::StoreSet;
+        use lash::process::{
+            ProcessExecutionEnvRef, ProcessExecutionWriteAuthority, ProcessInput, ProcessLifecycle,
+            ProcessProvenance, ProcessRegistrar, ProcessRegistration,
+        };
+        use lash_core_store::store::{
+            ClaimToken, DeliveryError, ObligationKey, ObligationKind, ObligationSettlement,
+            ParkReason, StallReason,
+        };
+        let stores = lash::sqlite::SqliteStoreSet::open(&path)
+            .await
+            .expect("seed selected store");
+        let registry = stores.process_registry();
+        let ledger = stores.obligation_ledger(ObligationKind::ProcessStart);
+        let mut stalled = Vec::new();
+        for index in 0..2 {
+            let process = registry
+                .register_process(
+                    ProcessRegistration::new(
+                        ProcessInput::Engine {
+                            kind: "recovery-wire-test".into(),
+                            payload: Value::Null,
+                        },
+                        ProcessProvenance::host(),
+                        lash::process::Lifetime::Detached,
+                    )
+                    .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(
+                        "process-env:recovery-wire-test",
+                    ))),
+                )
+                .await
+                .expect("register process")
+                .id;
+            let id = ObligationKey::ProcessStart {
+                process_id: process.clone(),
+            }
+            .id();
+            let token = ClaimToken::new(format!("recovery-wire-{index}"));
+            ledger
+                .claim(&id, &token, 1, 1000)
+                .await
+                .expect("claim start")
+                .expect("start owed");
+            ledger
+                .settle(
+                    &id,
+                    &token,
+                    ObligationSettlement::Stall {
+                        reason: StallReason::Refused,
+                        error: DeliveryError::new(
+                            lash_core_execution::RuntimeErrorCode::StoreRefused,
+                            "operator repair needed",
+                        ),
+                    },
+                    2,
+                )
+                .await
+                .expect("stall start");
+            stalled.push(id.to_string());
+            let process = registry
+                .register_process(
+                    ProcessRegistration::new(
+                        ProcessInput::Engine {
+                            kind: "recovery-wire-test".into(),
+                            payload: Value::Null,
+                        },
+                        ProcessProvenance::host(),
+                        lash::process::Lifetime::Detached,
+                    )
+                    .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(
+                        "process-env:recovery-wire-test",
+                    ))),
+                )
+                .await
+                .expect("register park owner")
+                .id;
+            let authority = ProcessExecutionWriteAuthority::invocation(
+                process.clone(),
+                format!("recovery-wire-{index}"),
+            )
+            .bind_attempt(1);
+            registry
+                .record_first_started_with_authority(
+                    &process,
+                    authority.invocation_started().expect("bound authority"),
+                    &authority,
+                )
+                .await
+                .expect("record started process");
+            registry
+                .park_process_with_authority(
+                    &process,
+                    ParkReason::engine_retry_exhausted(1, None, "engine retry stopped".into())
+                        .into(),
+                    &authority,
+                )
+                .await
+                .expect("park process");
+        }
+        stalled.sort();
+        stalled
+    });
+    let (code, first) = invoke(&["park", "list", "--limit", "1"]);
+    assert_eq!(code, 0, "{first}");
+    assert_eq!(
+        first["result"]["records"]
+            .as_array()
+            .expect("records")
+            .len(),
+        1
+    );
+    let cursor = first["result"]["next"].to_string();
+    assert_ne!(cursor, "null");
+    let (code, second) = invoke(&["park", "list", "--limit", "1", "--after", &cursor]);
+    assert_eq!(code, 0, "{second}");
+    assert_ne!(
+        first["result"]["records"][0]["target"],
+        second["result"]["records"][0]["target"]
+    );
+    assert_eq!(second["result"]["next"], Value::Null);
+    let (code, first) = invoke(&["stalled", "list", "process_start", "--limit", "1"]);
+    assert_eq!(code, 0, "{first}");
+    assert_eq!(first["result"]["records"][0]["obligation_id"], ids[0]);
+    assert_eq!(first["result"]["next"], ids[0]);
+    let (code, second) = invoke(&[
+        "stalled",
+        "list",
+        "process_start",
+        "--limit",
+        "1",
+        "--after",
+        &ids[0],
+    ]);
+    assert_eq!(code, 0, "{second}");
+    assert_eq!(second["result"]["records"][0]["obligation_id"], ids[1]);
+    assert_eq!(second["result"]["next"], Value::Null);
+    let (code, rearmed) = invoke(&["stalled", "rearm", "process_start", &ids[0]]);
+    assert_eq!(code, 0, "{rearmed}");
+    assert_eq!(rearmed["result"]["rearmed"], true);
+    let (code, remaining) = invoke(&["stalled", "list", "process_start"]);
+    assert_eq!(code, 0, "{remaining}");
+    assert_eq!(
+        remaining["result"]["records"]
+            .as_array()
+            .expect("records")
+            .len(),
+        1
+    );
+    assert_eq!(remaining["result"]["records"][0]["obligation_id"], ids[1]);
+    std::fs::remove_dir_all(path).expect("remove recovery store");
+}

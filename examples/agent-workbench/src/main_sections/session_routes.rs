@@ -129,3 +129,28 @@ pub(crate) async fn select_session(
         last_active_ms: entry.last_active_ms,
     }))
 }
+
+/// The composer's sole slash command submits the core's durable compaction
+/// command. Restate applies it at a boundary; the host never drives a turn.
+pub(crate) async fn compact_context(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> Result<Json<Value>, AppError> {
+    let session_id = state.admit_session(&query, "api.compact").await?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::CompactContext {
+            session_id: session_id.clone(),
+        })?;
+    let session = state
+        .open_session(&session_id, "api.compact")
+        .await
+        .map_err(|error| state.session_admission_error(&session_id, "api.compact", error))?;
+    match session.admin().state().compact_context(None).await {
+        Ok(opened) => Ok(Json(json!({"opened": opened}))),
+        Err(lash::EmbedError::Session(lash::SessionError::SessionCommandPending(receipt))) => {
+            Ok(Json(json!({"pending": receipt})))
+        }
+        Err(error) => Err(state.session_admission_error(&session_id, "api.compact", error)),
+    }
+}

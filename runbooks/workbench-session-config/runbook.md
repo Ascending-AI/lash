@@ -1,4 +1,4 @@
-# Operator runbook: Recorded Workbench session config
+# Embedder runbook: Recorded Workbench session config
 
 > Read [../RULES.md](../RULES.md) first. This deterministic operator rehearsal
 > combines Workbench observations with named companion laws. It is inventoried
@@ -57,19 +57,24 @@ let spec = lash::SessionSpec::new(
 );
 ```
 
-Save the initial committed config via
-`GET /api/admin/sessions/<S>/config`. Its `catalog.revision` is the write
-revision; `recorded.policy` and `recorded.plugins` are the committed values.
-The operator must have this deployment's config permission. Use the existing
-operator panel or its HTTP routes, never SQL writes.
+The workbench is a chat product. Deployment recovery lives in `lashctl`:
+see [recovery commands](../../examples/agent-workbench/README.md#recovery-and-context-compaction).
+Recorded settings and session commands are product APIs for embedders; they
+have no workbench operator dialog or admin HTTP routes. Run config operations
+below in the host integration that owns `core` and `session`, or use the named
+facade companion laws for their typed evidence.
 
-For each transaction, save its exact request and receipt. POST the request to
-`/api/admin/sessions/<S>/config`; a `kind: "pending"` response is acceptance,
-not application. POST its receipt unchanged to the `/config/settle` sibling
-until `kind: "settled"`. Gate the typed `outcome.kind` and its fields. A
-cancelled command or expired wait is not an applied transaction. Equal-content
-retries reuse the same id; a new edit uses a new id. The route implementation is
-[`operator_config.rs`](../../examples/agent-workbench/src/main_sections/operator_config.rs).
+Read the catalog and its write revision with
+`session.admin().config().commands().await?`. Read committed policy and plugin
+values with `core.session(session_id).durable().await?.read().await?`.
+For each transaction retain its `ConfigWrite` id, expected revision, typed
+`ConfigTransaction` and receipt. Submit through `session.admin().config().submit(...)`.
+`ConfigSettlement::Pending` is acceptance; pass the unchanged receipt to
+`session.admin().config().settle(receipt).await?` to observe application.
+Gate the typed outcome and its fields. A cancelled command or expired wait is
+not an applied transaction. Equal-content retries reuse the same id; a new
+edit uses a new id. The implementation is
+[`config_transactions.rs`](../../crates/lash/src/admin/config_transactions.rs).
 
 Retain `/api/state`, config reads, screenshot checkpoints, and the matching
 `llm_call_started` and `turn_completed` trace records. Correlate requests by
@@ -97,23 +102,12 @@ Type `dev/replay-route-b` into `#profileInput` and choose `low` in
 `#variantSelect`. The selector is pending until send. Send
 `FIG4690-after-<row-id>` through the composer and await its finished run.
 [`start_user_turn`](../../examples/agent-workbench/src/restate/turn_follow.rs)
-applies the selection transaction before `send()`. Reattach to that exact
-write through the operator route to retain its typed settlement. Use the
-host's existing id, replacing `<R>` with the revision read before send:
-
-```json
-{
-  "id": "model-selection:dev/replay-route-b:low:<R>",
-  "expected_revision": 0,
-  "commands": [
-    {"kind": "set_llm_profile", "args": {"model": "dev/replay-route-b"}},
-    {"kind": "set_reasoning", "args": {"reasoning": {"effort": "low"}}}
-  ]
-}
-```
-
-Replace `expected_revision: 0` with the actual `R`. Equal-id, equal-content
-submission reads the original command; it must not publish a second change.
+applies the selection transaction before `send()`. Retain that exact write's typed settlement through the host's
+`session.admin().config()` API. Use the stable id
+`model-selection:dev/replay-route-b:low:<R>` with the revision `R` read before
+send and the same `SetLlmProfile` and `SetReasoning` commands. Equal-id,
+equal-content submission reads the original command and publishes no second
+change.
 This is the typed operation `apply_llm_profile_selection_to_session` uses in
 [`app_state.rs`](../../examples/agent-workbench/src/main_sections/app_state.rs):
 
@@ -166,16 +160,16 @@ This composer send records its own fresh selection command and advances the
 revision once. Save that new revision for Phase 3; do not attribute its write
 to the stale transaction.
 
-Companion, **one executed test**, through the actual operator routes:
+Companion, **one executed test**, through the typed embedder config API:
 
 ```sh
-kiln test --test_output=all --no-test-cache //examples/agent-workbench:agent-workbench__unit_test \
+kiln test --test_output=all --no-test-cache //crates/lash:lash__unit_test \
   --test_arg=--exact \
-  --test_arg=tests::operator_routes_tests::recorded_core_and_rlm_config_commands_settle_and_stale_edits_publish_nothing
+  --test_arg=tests::core_session_builder::recorded_plugin_config::a_stale_transaction_publishes_nothing
 ```
 
 Save `02-stale-write.json`, `02-stale-settlement.json`, `02-config.json`,
-`02-provider-request.json`, and the panel's typed result as `02-stale.png`.
+`02-provider-request.json`, and a chat screenshot as `02-stale.png`; retain the typed settlement separately.
 
 ## Phase 3: Restart and redrive read the record despite catalog drift
 
@@ -239,8 +233,8 @@ authority and the `api.accounts.add` record. The host calls
 [`plugins.rs`](../../examples/agent-workbench/src/main_sections/plugins.rs),
 which applies `ConfigTransaction::of(lash::rlm::SetRlmPromptContext { context })`.
 Read the newly recorded context array and config revision. Re-submit that
-exact array under a fresh id and the current revision using the operator
-`set_rlm_prompt_context` command, so this phase retains an explicit typed
+exact array under a fresh id and the current revision using the typed
+`lash::rlm::SetRlmPromptContext` command through `session.admin().config()`, so this phase retains an explicit typed
 `Applied` outcome as well as the host-data change.
 
 Send `FIG4690-context-<row-id>` and require a finished run. In its first
@@ -363,7 +357,7 @@ process and managed Restate container are gone. Preserve all evidence.
 | Phase | Typed outcome | Provider-request fact | Verdict and evidence |
 | --- | --- | --- | --- |
 | 1 | `Applied`, one revision step; unsupported effort is owner-refused | A/high before, B/low after; earlier evidence stays A | `01-*`, two model laws |
-| 2 | `Stale`, exact expected/actual; config unchanged | no command call; following request remains B/low | `02-*`, operator law |
+| 2 | `Stale`, exact expected/actual; config unchanged | no command call; following request remains B/low | `02-*`, embedder config law |
 | 3 | `Applied` rebind; finished reopen and engine redrive | old metadata on old runs; new binding only after resolution | `03-*`, restart/redrive law |
 | 4 | `Applied`; forbidden run options yield typed `RunShapeRefused` | new complete context once; refused run makes zero requests | `04-*`, two RLM prompt laws |
 | 5 | typed cell-limit failure; `Applied`/`Stale`; missing limit refused | fifth call's refusal in feedback; same session answers after reopen | `05-*`, three RLM and three control laws |
