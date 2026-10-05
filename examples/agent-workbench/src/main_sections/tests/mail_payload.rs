@@ -131,7 +131,9 @@ async fn inject_message_scopes_emission_to_requested_session() {
         .expect("execute other session's register command")
         .expect("register other session's mail trigger");
     let other_subscription_id = match other_outcome {
-        lash::triggers::TriggerCommandOutcome::Mutation { receipt } => receipt.subscription_id,
+        lash::triggers::TriggerCommandOutcome::Mutation { receipt } => {
+            receipt.record.subscription_id
+        }
         _ => panic!("expected mutation outcome"),
     };
     let outcome = lash::triggers::TriggerStore::execute_command(
@@ -149,7 +151,9 @@ async fn inject_message_scopes_emission_to_requested_session() {
     .expect("execute command reaches store")
     .expect("register mail trigger succeeds");
     let subscription_id = match outcome {
-        lash::triggers::TriggerCommandOutcome::Mutation { receipt } => receipt.subscription_id,
+        lash::triggers::TriggerCommandOutcome::Mutation { receipt } => {
+            receipt.record.subscription_id
+        }
         _ => panic!("expected mutation outcome"),
     };
 

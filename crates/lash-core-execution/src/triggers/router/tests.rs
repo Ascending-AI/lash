@@ -354,7 +354,7 @@ fn trigger_operation_identity_golden_corpus() {
         assert!(
             key.starts_with(&format!(
                 "trigger-command:v{}:blake3:",
-                super::super::TRIGGER_COMMAND_FAMILY_VERSION,
+                super::super::command::TRIGGER_COMMAND_FAMILY_VERSION,
             )),
             "retired command family: {key}"
         );
@@ -363,7 +363,7 @@ fn trigger_operation_identity_golden_corpus() {
         .iter()
         .map(|command| {
             (
-                hex(&super::super::trigger_command_preimage(command)),
+                hex(&super::super::command::trigger_command_preimage(command)),
                 super::super::trigger_command_fingerprint(command),
             )
         })
@@ -427,7 +427,7 @@ fn trigger_operation_identity_golden_corpus() {
     );
     assert_eq!(
         (
-            hex(&super::super::trigger_operation_receipt_preimage(
+            hex(&super::super::command::trigger_operation_receipt_preimage(
                 &TriggerOwnerScope::Platform,
                 "op:0",
             )),

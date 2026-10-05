@@ -127,11 +127,10 @@ pub fn stored_trigger_receipt(
 /// result.
 pub fn trigger_mutation_records(result: &TriggerEffectResult) -> Vec<&TriggerSubscriptionRecord> {
     match result {
-        Ok(TriggerCommandOutcome::Mutation { receipt }) => vec![&receipt.record_snapshot],
-        Ok(TriggerCommandOutcome::Prune { receipts }) => receipts
-            .iter()
-            .map(|receipt| &receipt.record_snapshot)
-            .collect(),
+        Ok(TriggerCommandOutcome::Mutation { receipt }) => vec![&receipt.record],
+        Ok(TriggerCommandOutcome::Prune { receipts }) => {
+            receipts.iter().map(|receipt| &receipt.record).collect()
+        }
         Ok(TriggerCommandOutcome::List { .. }) | Err(_) => Vec::new(),
     }
 }
@@ -225,7 +224,7 @@ mod tests {
             .expect("register evaluates")
             .expect("register commits")
         {
-            TriggerCommandOutcome::Mutation { receipt } => receipt.record_snapshot,
+            TriggerCommandOutcome::Mutation { receipt } => receipt.record,
             other => panic!("expected one mutation receipt, got {other:?}"),
         }
     }

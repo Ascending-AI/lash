@@ -274,10 +274,15 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     let deleted = mutate(
         &store,
         "dead-owner-retention-delete",
-        revision_command(&SessionId::from(SESSION), KEY, created.revision, "delete"),
+        revision_command(
+            &SessionId::from(SESSION),
+            KEY,
+            created.record.revision,
+            "delete",
+        ),
     )
     .await;
-    assert!(deleted.record_snapshot.is_tombstoned());
+    assert!(deleted.record.is_tombstoned());
 
     let blocked = store
         .reconcile_trigger_retention(&[], &[SessionId::fixture(SESSION.to_string())])
@@ -370,7 +375,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     )
     .await;
     assert_eq!(
-        recreated.revision, 1,
+        recreated.record.revision, 1,
         "a new operation re-evaluates against the reclaimed subscription"
     );
 }
@@ -407,7 +412,7 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
             owner_scope: owner_scope.clone(),
             actor: actor.clone(),
             subscription_key: draft.subscription_key.clone(),
-            expected_revision: created.revision,
+            expected_revision: created.record.revision,
         },
     )
     .await;
@@ -434,11 +439,11 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
             actor,
             subscription_key: draft.subscription_key.clone(),
             draft,
-            expected_revision: deleted.revision,
+            expected_revision: deleted.record.revision,
         },
     )
     .await;
-    assert_eq!(revived.revision, 3);
+    assert_eq!(revived.record.revision, 3);
 }
 
 #[expect(
@@ -724,10 +729,10 @@ async fn same_owner_key_definition_is_idempotent(store: Arc<dyn crate::TriggerSt
         register_command(&SessionId::from("session-a"), draft),
     )
     .await;
-    assert_eq!(first.subscription_id, second.subscription_id);
-    assert_eq!(first.incarnation, second.incarnation);
-    assert_eq!(first.revision, 1);
-    assert_eq!(second.revision, 1);
+    assert_eq!(first.record.subscription_id, second.record.subscription_id);
+    assert_eq!(first.record.incarnation, second.record.incarnation);
+    assert_eq!(first.record.revision, 1);
+    assert_eq!(second.record.revision, 1);
     assert_eq!(second.disposition, crate::TriggerMutationOutcome::Unchanged);
     let rows = store
         .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
@@ -767,7 +772,7 @@ async fn changed_register_conflicts_and_update_is_cas(store: Arc<dyn crate::Trig
             assert_eq!(existing_revision, Some(1));
             assert_eq!(
                 existing_definition_fingerprint,
-                Some(created.definition_fingerprint)
+                Some(created.record.definition_fingerprint)
             );
             assert!(requested_definition_fingerprint.is_some());
         }
@@ -813,7 +818,7 @@ async fn committed_mutation_receipt_survives_later_revision(store: Arc<dyn crate
         1,
     );
     let committed = mutate(&store, "receipt-update", update.clone()).await;
-    assert_eq!(committed.revision, 2);
+    assert_eq!(committed.record.revision, 2);
     mutate(
         &store,
         "receipt-disable",
@@ -994,7 +999,7 @@ async fn explicit_prune_is_journaled_and_owner_scoped(store: Arc<dyn crate::Trig
     };
     assert_eq!(receipts.len(), 1);
     assert_eq!(
-        receipts[0].owner_scope,
+        receipts[0].record.owner_scope,
         owner(&SessionId::from("prune-owner"))
     );
     assert_eq!(
@@ -1115,7 +1120,7 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
         revision_command(&SessionId::from("session-a"), key, 1, "disable"),
     )
     .await;
-    assert_eq!(disabled.revision, 2);
+    assert_eq!(disabled.record.revision, 2);
     assert_eq!(
         store
             .list_deliveries_by_occurrence_id(&reserved.occurrence.occurrence_id)
@@ -1138,8 +1143,8 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
         register_command(&SessionId::from("session-a"), draft),
     )
     .await;
-    assert!(!repeated.enabled);
-    assert_eq!(repeated.revision, 2);
+    assert!(!repeated.enabled());
+    assert_eq!(repeated.record.revision, 2);
     mutate(
         &store,
         "disable-enable",
@@ -1182,8 +1187,8 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
         ),
     )
     .await;
-    assert_eq!(registered.revision, 1);
-    assert!(registered.enabled);
+    assert_eq!(registered.record.revision, 1);
+    assert!(registered.enabled());
 
     let disabled = mutate(
         &store,
@@ -1191,7 +1196,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
         revision_command(&SessionId::from("session-a"), key, 1, "disable"),
     )
     .await;
-    assert_eq!(disabled.revision, 2);
+    assert_eq!(disabled.record.revision, 2);
     assert_eq!(
         disabled.disposition,
         crate::TriggerMutationOutcome::Disabled
@@ -1260,17 +1265,20 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
         reenabled.disposition,
         crate::TriggerMutationOutcome::Enabled
     );
-    assert_eq!(reenabled.revision, 3);
-    assert!(reenabled.enabled);
+    assert_eq!(reenabled.record.revision, 3);
+    assert!(reenabled.enabled());
     assert_eq!(
-        reenabled.record_snapshot.lifecycle,
+        reenabled.record.lifecycle,
         crate::TriggerSubscriptionLifecycle::Enabled
     );
-    assert_eq!(reenabled.subscription_id, registered.subscription_id);
-    assert_eq!(reenabled.incarnation, registered.incarnation);
     assert_eq!(
-        reenabled.definition_fingerprint,
-        registered.definition_fingerprint
+        reenabled.record.subscription_id,
+        registered.record.subscription_id
+    );
+    assert_eq!(reenabled.record.incarnation, registered.record.incarnation);
+    assert_eq!(
+        reenabled.record.definition_fingerprint,
+        registered.record.definition_fingerprint
     );
 
     let live = store
@@ -1347,7 +1355,7 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
         revision_command(&SessionId::from("session-a"), key, 1, "delete"),
     )
     .await;
-    assert!(deleted.record_snapshot.is_tombstoned());
+    assert!(deleted.record.is_tombstoned());
     assert!(
         store
             .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
@@ -1362,7 +1370,7 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
             .unwrap()[0]
             .subscription
             .incarnation,
-        created.incarnation
+        created.record.incarnation
     );
     assert!(
         execute(
@@ -1381,13 +1389,16 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
             actor: actor(&SessionId::from("session-a")),
             subscription_key: key.to_string(),
             draft,
-            expected_revision: deleted.revision,
+            expected_revision: deleted.record.revision,
         },
     )
     .await;
-    assert_eq!(revived.subscription_id, created.subscription_id);
-    assert_ne!(revived.incarnation, created.incarnation);
-    assert_eq!(revived.revision, 3);
+    assert_eq!(
+        revived.record.subscription_id,
+        created.record.subscription_id
+    );
+    assert_ne!(revived.record.incarnation, created.record.incarnation);
+    assert_eq!(revived.record.revision, 3);
 }
 
 /// A `Register` or `Revive` commits the incarnation `trigger_incarnation`
@@ -1409,15 +1420,14 @@ async fn register_and_revive_commit_their_operation_incarnation(
     )
     .await;
     assert_eq!(
-        created.incarnation,
+        created.record.incarnation,
         crate::trigger_incarnation(&owner(&session_id), "incarnation-register"),
         "a Register commits the incarnation of its own operation id"
     );
-    assert_eq!(created.record_snapshot.incarnation, created.incarnation);
     let deleted = mutate(
         &store,
         "incarnation-delete",
-        revision_command(&session_id, key, created.revision, "delete"),
+        revision_command(&session_id, key, created.record.revision, "delete"),
     )
     .await;
     let revived = mutate(
@@ -1428,16 +1438,15 @@ async fn register_and_revive_commit_their_operation_incarnation(
             actor: actor(&session_id),
             subscription_key: key.to_string(),
             draft,
-            expected_revision: deleted.revision,
+            expected_revision: deleted.record.revision,
         },
     )
     .await;
     assert_eq!(
-        revived.incarnation,
+        revived.record.incarnation,
         crate::trigger_incarnation(&owner(&session_id), "incarnation-revive"),
         "a Revive commits the incarnation of its own operation id"
     );
-    assert_eq!(revived.record_snapshot.incarnation, revived.incarnation);
 }
 
 #[expect(
@@ -1478,7 +1487,7 @@ async fn owner_namespaces_are_exact_and_session_cleanup_is_scoped(
     )
     .await;
     assert_ne!(
-        host.subscription_id,
+        host.record.subscription_id,
         crate::deterministic_subscription_id(&owner(&SessionId::from("root")), "shared-key")
     );
     let visible_to_session = execute(
@@ -2212,8 +2221,11 @@ async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTrigg
         register_command(&SessionId::from("session-a"), draft),
     )
     .await;
-    assert_eq!(repeated.subscription_id, first.subscription_id);
-    assert_eq!(repeated.revision, 1);
+    assert_eq!(
+        repeated.record.subscription_id,
+        first.record.subscription_id
+    );
+    assert_eq!(repeated.record.revision, 1);
     let restored = factory
         .reopen
         .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
@@ -2395,7 +2407,7 @@ where
             panic!("list command must return rows");
         };
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].subscription_id, receipt.subscription_id);
+        assert_eq!(rows[0].subscription_id, receipt.record.subscription_id);
         if index != 0 {
             continue;
         }
@@ -2406,7 +2418,7 @@ where
                 owner_scope: owner.clone(),
                 actor: crate::ProcessOriginator::host_scoped("binding"),
                 subscription_key: "shared".into(),
-                expected_revision: receipt.revision,
+                expected_revision: receipt.record.revision,
             },
         )
         .await;
@@ -2424,7 +2436,7 @@ where
                 owner_scope: owner.clone(),
                 actor: crate::ProcessOriginator::host_scoped("binding"),
                 subscription_key: "shared".into(),
-                expected_revision: disabled.revision,
+                expected_revision: disabled.record.revision,
             },
         )
         .await;
@@ -2437,8 +2449,8 @@ where
             .await
             .expect("foreign rows untouched");
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].subscription_id, receipt.subscription_id);
-        assert_eq!(rows[0].revision, receipt.revision);
+        assert_eq!(rows[0].subscription_id, receipt.record.subscription_id);
+        assert_eq!(rows[0].revision, receipt.record.revision);
         assert!(rows[0].lifecycle.enabled());
     }
 }

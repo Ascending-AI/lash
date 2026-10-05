@@ -268,6 +268,9 @@ fn trigger_registration_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+            "type": { "type": "string", "enum": ["trigger_handle"] },
+            "id": { "type": "string" },
+            "disposition": { "oneOf": [{ "type": "string", "enum": ["created", "unchanged", "updated", "enabled", "disabled", "deleted", "revived"] }, { "type": "null" }] },
             "subscription_key": { "type": "string" },
             "incarnation": { "type": "string" },
             "revision": { "type": "integer" },
@@ -280,6 +283,7 @@ fn trigger_registration_schema() -> Value {
             "enabled": { "type": "boolean" }
         },
         "required": [
+            "type", "id", "disposition",
             "subscription_key",
             "incarnation",
             "revision",

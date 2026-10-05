@@ -143,7 +143,7 @@ async fn exhausted_trigger_revision(handles: FenceIntegrityHandles) {
         panic!("trigger registration must return a mutation receipt")
     };
     let target = FenceIntegrityTarget::TriggerRevision {
-        subscription_id: receipt.record_snapshot.subscription_id,
+        subscription_id: receipt.record.subscription_id,
     };
     handles.injector.inject_raw_value(&target, i64::MAX).await;
     let before = handles.injector.observe_raw_value(&target).await;

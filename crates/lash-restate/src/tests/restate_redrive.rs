@@ -1379,7 +1379,7 @@ pub(super) async fn register_fig811_subscription(
     let lash_core::TriggerCommandOutcome::Mutation { receipt } = outcome else {
         panic!("register must return a mutation receipt");
     };
-    receipt.subscription_id
+    receipt.record.subscription_id
 }
 
 #[tokio::test]

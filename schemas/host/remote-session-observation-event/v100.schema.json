@@ -9420,46 +9420,16 @@
       "additionalProperties": false,
       "description": "The admitted trigger registration result, including its recorded subscription.",
       "properties": {
-        "definition_fingerprint": {
-          "type": "string"
-        },
         "disposition": {
           "$ref": "#/$defs/TriggerMutationOutcome"
         },
-        "enabled": {
-          "type": "boolean"
-        },
-        "incarnation": {
-          "type": "string"
-        },
-        "owner_scope": {
-          "$ref": "#/$defs/RemoteTriggerOwnerScope"
-        },
-        "record_snapshot": {
+        "record": {
           "$ref": "#/$defs/RemoteTriggerSubscriptionRecord"
-        },
-        "revision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "subscription_id": {
-          "type": "string"
-        },
-        "subscription_key": {
-          "type": "string"
         }
       },
       "required": [
-        "owner_scope",
-        "subscription_key",
-        "subscription_id",
-        "incarnation",
-        "revision",
-        "definition_fingerprint",
-        "enabled",
         "disposition",
-        "record_snapshot"
+        "record"
       ],
       "type": "object"
     },

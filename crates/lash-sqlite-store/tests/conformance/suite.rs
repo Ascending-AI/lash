@@ -1109,7 +1109,7 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     let conn = backend.raw(SqliteDatabase::Triggers);
     conn.execute(
         "UPDATE trigger_subscriptions SET record_json = ?2 WHERE subscription_id = ?1",
-        rusqlite::params![malformed.subscription_id.as_str(), "{not valid json"],
+        rusqlite::params![malformed.subscription_id(), "{not valid json"],
     )
     .expect("poison trigger row");
     drop(conn);
@@ -1127,7 +1127,7 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     assert_eq!(ingress.reservations.len(), 1);
     assert_eq!(
         ingress.reservations[0].subscription.subscription_id,
-        current.subscription_id
+        current.record.subscription_id
     );
 }
 

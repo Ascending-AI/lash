@@ -227,13 +227,13 @@ impl RevisionReferrerTriggerStore {
                     | TriggerMutationOutcome::Disabled
                     | TriggerMutationOutcome::Deleted
             );
-            if !moved || receipt.revision <= 1 {
+            if !moved || receipt.revision() <= 1 {
                 continue;
             }
             match SubscriptionRevisionId::new(
-                receipt.subscription_id.clone(),
-                receipt.incarnation.clone(),
-                receipt.revision - 1,
+                receipt.subscription_id().to_owned(),
+                receipt.incarnation().to_owned(),
+                receipt.revision() - 1,
             ) {
                 Ok(superseded) => {
                     ports

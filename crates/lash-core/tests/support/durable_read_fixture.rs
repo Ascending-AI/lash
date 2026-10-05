@@ -1155,7 +1155,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     )
     .await;
     assert_eq!(
-        replayed_receipt.subscription_id,
+        replayed_receipt.record.subscription_id,
         subscriptions[0].subscription_id
     );
     let unchanged = trigger_receipt(

@@ -833,3 +833,49 @@ fn remote_process_event_type() -> RemoteProcessEventType {
         },
     }
 }
+
+/// S10 F2: the wire and journal carry the same sole subscription record.
+#[test]
+fn trigger_mutation_receipt_round_trip_has_one_record() {
+    let session_id = lash_core::SessionId::from("receipt-session");
+    let draft = lash_core::TriggerSubscriptionDraft::for_process(
+        "receipt-key",
+        lash_core::ProcessExecutionEnvRef::new(canonical_env_ref()),
+        "timer.tick",
+        "timer-key",
+        lash_core::ProcessInput::Engine {
+            kind: "fixture".into(),
+            payload: serde_json::json!({}),
+        },
+        lash_core::ProcessIdentity::new("fixture"),
+    );
+    let outcome = lash_core::facade_support::evaluate_trigger_mutation(
+        None,
+        lash_core::TriggerCommand::Register {
+            owner_scope: lash_core::TriggerOwnerScope::session(&session_id),
+            actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(&session_id)),
+            draft,
+        },
+        "receipt-register",
+        1,
+    )
+    .expect("registration")
+    .expect("mutation");
+    let lash_core::TriggerCommandOutcome::Mutation { receipt } = outcome else {
+        panic!("mutation")
+    };
+    let remote = RemoteTriggerMutationReceipt::try_from(*receipt.clone()).expect("wire conversion");
+    let json = serde_json::to_value(&remote).expect("wire receipt");
+    assert_eq!(json.as_object().expect("receipt record").len(), 2);
+    assert_eq!(
+        json["record"]["incarnation"],
+        serde_json::json!(receipt.incarnation())
+    );
+    let decoded: RemoteTriggerMutationReceipt =
+        serde_json::from_value(json.clone()).expect("wire decode");
+    let restored = lash_core::TriggerMutationReceipt::try_from(decoded).expect("core conversion");
+    assert_eq!(restored, *receipt);
+    let mut contradictory = json;
+    contradictory["incarnation"] = serde_json::json!("different-incarnation");
+    assert!(serde_json::from_value::<RemoteTriggerMutationReceipt>(contradictory).is_err());
+}

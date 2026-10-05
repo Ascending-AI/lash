@@ -64,8 +64,8 @@ async fn trigger_revision_columns_carry_the_record_revision() {
             .expect("execute registration")
             .expect("register row"),
     );
-    let subscription_id = registered.record_snapshot.subscription_id.clone();
-    let registered_revision = registered.record_snapshot.revision;
+    let subscription_id = registered.record.subscription_id.clone();
+    let registered_revision = registered.record.revision;
 
     // A fresh subscription has a real, positive revision, and the column
     // holds exactly it -- not a sentinel and not a constant.
@@ -131,7 +131,7 @@ async fn trigger_revision_columns_carry_the_record_revision() {
             .expect("execute disable")
             .expect("disable row"),
     );
-    let disabled_revision = disabled.record_snapshot.revision;
+    let disabled_revision = disabled.record.revision;
     assert_eq!(
         disabled_revision,
         registered_revision + 1,
@@ -195,7 +195,7 @@ async fn subscription_changes_are_durable_on_sqlite_memory() {
     assert_eq!(
         changes,
         vec![lash_core_execution::TriggerSubscriptionChange::from(
-            &registered.record_snapshot
+            &registered.record
         )]
     );
     assert!(cursor.store_sequence() > 0);

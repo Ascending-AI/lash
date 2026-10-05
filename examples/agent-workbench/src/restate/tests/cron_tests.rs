@@ -67,7 +67,7 @@ async fn register_test_subscription_record(
     let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = outcome else {
         panic!("register must return a mutation receipt");
     };
-    receipt.record_snapshot
+    receipt.record
 }
 
 async fn disable_cron_test_subscription(
@@ -250,7 +250,7 @@ async fn register_fig1067_cron_subscription(
     let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = outcome else {
         panic!("register must return a mutation receipt");
     };
-    receipt.record_snapshot
+    receipt.record
 }
 
 fn fig1067_cron_registration(
@@ -334,7 +334,7 @@ async fn register_fig1067_button_subscription(
     let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = outcome else {
         panic!("register must return a mutation receipt");
     };
-    receipt.record_snapshot
+    receipt.record
 }
 
 fn assert_fig1067_cron_sync_trace(
@@ -765,13 +765,13 @@ async fn a_redundant_disable_reconciles_a_stale_armed_cron() {
     let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = disabled else {
         panic!("disable must return a mutation receipt");
     };
-    let job_key = crate::restate::cron_job_key(&session_id, &receipt.record_snapshot.source_key);
+    let job_key = crate::restate::cron_job_key(&session_id, &receipt.record.source_key);
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&job_key);
     state.restate_ingress_url = spawn_scripted_cron_object_surface(surface.clone()).await;
 
     let axum::Json(response) = Box::pin(crate::set_trigger_enabled(
-        axum::extract::Path(receipt.record_snapshot.subscription_key),
+        axum::extract::Path(receipt.record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
             session_id: Some(session_id),

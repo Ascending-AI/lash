@@ -148,6 +148,7 @@ use lash::tracing::TraceTurnFailureReason as _;
 use lash::tracing::TraceTurnOutcome as _;
 use lash::triggers::JsonSchema as _;
 use lash::triggers::TriggerDeliveryReservation as _;
+use lash::triggers::TriggerHandle as _;
 use lash::triggers::TriggerInputBinding as _;
 use lash::triggers::TriggerOccurrenceFilter as _;
 use lash::triggers::TriggerOccurrenceRecord as _;
@@ -156,6 +157,7 @@ use lash::triggers::TriggerRegistration as _;
 use lash::triggers::TriggerSubscriptionDraft as _;
 use lash::triggers::TriggerSubscriptionFilter as _;
 use lash::triggers::TriggerSubscriptionRecord as _;
+use lash::triggers::trigger_handle as _;
 
 /// `lash_sansio::schema_contract`, the one sans-io module the host names.
 use lash::schema::{SchemaContract as _, SchemaProjectionPolicy as _};

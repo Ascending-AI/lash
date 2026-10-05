@@ -207,7 +207,7 @@ async fn register_ingress_trigger_subscription(
     let lash_core::TriggerCommandOutcome::Mutation { receipt } = outcome else {
         panic!("registration must return a mutation receipt")
     };
-    Ok(receipt.record_snapshot)
+    Ok(receipt.record)
 }
 
 async fn ingress_core_with_trigger_store(

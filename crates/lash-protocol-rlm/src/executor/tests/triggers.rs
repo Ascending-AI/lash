@@ -673,7 +673,8 @@ pub(super) fn trigger_registry_operations_execute_foreground_code() {
                 });
                 const registrations = await triggers.list({ target: { definition: remember } });
 
-                finish({ answer: "foreground ran", handle: handle, registrations: registrations });
+                const pruned = await triggers.prune({ subscription_keys: [handle.subscription_key] });
+                finish({ answer: "foreground ran", handle: handle, registrations: registrations, pruned: pruned });
                 "#,
         )
         .await;
@@ -706,6 +707,42 @@ pub(super) fn trigger_registry_operations_execute_foreground_code() {
             finish["registrations"][0]["incarnation"],
             finish["handle"]["incarnation"]
         );
+        let handle = finish["handle"].as_object().expect("register handle");
+        let listed = finish["registrations"][0].as_object().expect("list handle");
+        let pruned = finish["pruned"][0].as_object().expect("prune handle");
+        let expected_fields = [
+            "type",
+            "id",
+            "subscription_key",
+            "incarnation",
+            "revision",
+            "enabled",
+            "disposition",
+            "name",
+            "source_type",
+            "source_key",
+            "source",
+            "registrant",
+            "target",
+        ]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        for view in [handle, listed, pruned] {
+            assert_eq!(
+                view.keys()
+                    .map(String::as_str)
+                    .collect::<std::collections::BTreeSet<_>>(),
+                expected_fields
+            );
+            assert_eq!(view["type"], serde_json::json!("trigger_handle"));
+            assert_eq!(view["id"], handle["subscription_key"]);
+            assert_eq!(view["incarnation"], handle["incarnation"]);
+        }
+        assert_eq!(handle["disposition"], serde_json::json!("created"));
+        assert_eq!(listed["disposition"], serde_json::Value::Null);
+        assert_eq!(pruned["disposition"], serde_json::json!("deleted"));
+        assert_eq!(pruned["revision"], serde_json::json!(2));
+        assert_eq!(pruned["enabled"], serde_json::json!(false));
         assert_eq!(
             response
                 .calls
@@ -715,6 +752,7 @@ pub(super) fn trigger_registry_operations_execute_foreground_code() {
             vec![
                 ("triggers.register", lash_core::ExecutedCallOutcome::Ok),
                 ("triggers.list", lash_core::ExecutedCallOutcome::Ok),
+                ("triggers.prune", lash_core::ExecutedCallOutcome::Ok),
             ],
             "trigger effects must appear in the executed-call ledger"
         );

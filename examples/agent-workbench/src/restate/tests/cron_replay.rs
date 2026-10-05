@@ -716,7 +716,7 @@ async fn register_then_disable(
     let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = outcome else {
         panic!("register must return a mutation receipt");
     };
-    let record = receipt.record_snapshot;
+    let record = receipt.record;
     lash::triggers::TriggerStore::execute_command(
         trigger_store,
         &format!("disable:fig1071-handler:{source_key}"),

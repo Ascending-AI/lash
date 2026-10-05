@@ -576,7 +576,7 @@ pub use tool_result::{
 pub use tool_result::{DeclaredStart, DeclaredStartRefused};
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryAdmission, TriggerDeliveryReservation,
-    TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerEventCatalog,
+    TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerEventCatalog, TriggerHandle,
     TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
     TriggerOccurrenceFilter, TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
     TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
@@ -584,8 +584,8 @@ pub use triggers::{
     TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestore,
     TriggerRouteRestorer, TriggerSourceCapture, TriggerStore, TriggerSubscriptionChange,
     TriggerSubscriptionChangeCursor, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
-    TriggerSubscriptionRecord, admit_trigger_registration_target, trigger_handle_outcome_value,
-    trigger_incarnation,
+    TriggerSubscriptionRecord, admit_trigger_registration_target, trigger_handle,
+    trigger_handle_outcome_value, trigger_incarnation,
 };
 
 pub(crate) mod facade_ops {}

@@ -69,7 +69,7 @@ mod tests {
         let TriggerCommandOutcome::Mutation { receipt } = outcome else {
             panic!("expected mutation receipt")
         };
-        receipt.record_snapshot
+        receipt.record
     }
 
     async fn register_for_session(
@@ -93,7 +93,7 @@ mod tests {
         let TriggerCommandOutcome::Mutation { receipt } = outcome else {
             panic!("expected mutation receipt")
         };
-        receipt.record_snapshot
+        receipt.record
     }
 
     fn button_occurrence(
@@ -213,9 +213,9 @@ mod tests {
         let TriggerCommandOutcome::Mutation { receipt: updated } = updated else {
             panic!("expected mutation receipt")
         };
-        assert_eq!(updated.record_snapshot.source_capture, rerouted);
+        assert_eq!(updated.record.source_capture, rerouted);
         assert_ne!(
-            updated.record_snapshot.definition_fingerprint, registered.definition_fingerprint,
+            updated.record.definition_fingerprint, registered.definition_fingerprint,
             "a rerouted source is a different definition"
         );
 

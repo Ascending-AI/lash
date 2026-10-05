@@ -394,8 +394,8 @@ pub mod triggers {
     pub use lash_core::facade_support::deterministic_subscription_id;
     pub use lash_core::{
         JsonSchema, TriggerCommandOutcome, TriggerDeliveryReservation,
-        TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerIngressReceipt,
-        TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
+        TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerHandle,
+        TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
         TriggerOccurrenceFilter, TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
         TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
         TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
@@ -411,7 +411,7 @@ pub mod triggers {
     /// The fenced, receipted verb vocabulary for subscription mutation,
     /// including [`TriggerCommand::Enable`] for re-enable, executed by
     /// [`TriggerStore::execute_command`] on the host's trigger store.
-    pub use lash_core::{TriggerCommand, TriggerStore};
+    pub use lash_core::{TriggerCommand, TriggerStore, trigger_handle};
 }
 
 /// Tool definitions, providers, and execution types.

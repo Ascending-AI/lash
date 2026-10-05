@@ -535,7 +535,7 @@ pub(crate) async fn set_trigger_enabled(
             "changed": changed,
         }),
     );
-    let registration = lash::triggers::TriggerRegistration::from(&receipt.record_snapshot);
+    let registration = lash::triggers::TriggerRegistration::from(&receipt.record);
     // Do not gate this sync on `changed`: redundant mutations reconcile stale Restate state.
     // A sync failure leaves the mutation durable and Restate stale; the next sync reconciles.
     Box::pin(restate::sync_cron_jobs_after_trigger_mutation(
@@ -546,7 +546,7 @@ pub(crate) async fn set_trigger_enabled(
         } else {
             "trigger_disabled"
         },
-        &receipt.record_snapshot,
+        &receipt.record,
     ))
     .await?;
     Ok(Json(TriggerMutationResponse {

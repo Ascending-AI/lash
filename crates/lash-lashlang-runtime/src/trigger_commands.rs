@@ -474,53 +474,30 @@ async fn execute_trigger_command(
         ),
     });
     let outcome = outcome.map_err(|err| ExecutionHostError::new(err.to_string()))?;
+    trigger_command_value(outcome)
+}
+
+fn trigger_command_value(
+    outcome: lash_core::TriggerCommandOutcome,
+) -> Result<lashlang::Value, ExecutionHostError> {
     let value = match outcome {
         lash_core::TriggerCommandOutcome::Mutation { receipt } => {
-            let mut value = serde_json::to_value(&receipt).map_err(|err| {
-                ExecutionHostError::new(format!("failed to encode trigger receipt: {err}"))
-            })?;
-            let object = value.as_object_mut().ok_or_else(|| {
-                ExecutionHostError::new("trigger mutation receipt must encode as a record")
-            })?;
-            object.insert("type".to_string(), serde_json::json!("trigger_handle"));
-            object.insert(
-                "id".to_string(),
-                serde_json::json!(receipt.subscription_key),
-            );
-            value
+            serde_json::to_value(lash_core::trigger_handle(&receipt))
         }
         lash_core::TriggerCommandOutcome::List { records } => serde_json::to_value(
             records
                 .iter()
-                .map(lash_core::facade_support::TriggerRegistration::from)
+                .map(lash_core::TriggerHandle::from)
                 .collect::<Vec<_>>(),
-        )
-        .map_err(|err| {
-            ExecutionHostError::new(format!("failed to encode trigger records: {err}"))
-        })?,
-        lash_core::TriggerCommandOutcome::Prune { receipts } => {
-            let values = receipts
+        ),
+        lash_core::TriggerCommandOutcome::Prune { receipts } => serde_json::to_value(
+            receipts
                 .iter()
-                .map(|receipt| {
-                    let mut value = serde_json::to_value(receipt).map_err(|err| {
-                        ExecutionHostError::new(format!(
-                            "failed to encode trigger prune receipt: {err}"
-                        ))
-                    })?;
-                    let object = value.as_object_mut().ok_or_else(|| {
-                        ExecutionHostError::new("trigger prune receipt must encode as a record")
-                    })?;
-                    object.insert("type".to_string(), serde_json::json!("trigger_handle"));
-                    object.insert(
-                        "id".to_string(),
-                        serde_json::json!(receipt.subscription_key),
-                    );
-                    Ok(value)
-                })
-                .collect::<Result<Vec<_>, ExecutionHostError>>()?;
-            Value::Array(values)
-        }
-    };
+                .map(lash_core::trigger_handle)
+                .collect::<Vec<_>>(),
+        ),
+    }
+    .map_err(|err| ExecutionHostError::new(format!("failed to encode trigger handles: {err}")))?;
     Ok(lashlang::from_json(value))
 }
 
@@ -582,7 +559,7 @@ fn core_trigger_input_template(
 
 #[cfg(test)]
 mod tests {
-    use super::materialized_trigger_subscription_key;
+    use super::{materialized_trigger_subscription_key, trigger_command_value};
 
     #[test]
     fn trigger_registration_materializes_a_derived_subscription_key() {
@@ -590,5 +567,103 @@ mod tests {
             materialized_trigger_subscription_key(None, "scan", "timer.Schedule", "source-key")
                 .expect("a registration without a key derives one at the boundary");
         assert!(key.starts_with("derived/"), "{key}");
+    }
+
+    /// S10 F2: register, list and prune expose one public trigger view.
+    #[test]
+    fn register_prune_and_list_share_one_public_trigger_handle() {
+        let owner = lash_core::TriggerOwnerScope::session("projection-session");
+        let actor = lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+            "projection-session",
+        ));
+        let mut draft = lash_core::TriggerSubscriptionDraft::for_process(
+            "projection-key",
+            lash_core::ProcessExecutionEnvRef::new("env"),
+            "timer.tick",
+            "source-key",
+            lash_core::ProcessInput::Engine {
+                kind: "fixture".into(),
+                payload: serde_json::json!({}),
+            },
+            lash_core::ProcessIdentity::new("fixture"),
+        );
+        draft.name = Some("projection".into());
+        let outcome = lash_core::facade_support::evaluate_trigger_mutation(
+            None,
+            lash_core::TriggerCommand::Register {
+                owner_scope: owner.clone(),
+                actor: actor.clone(),
+                draft,
+            },
+            "register",
+            1,
+        )
+        .expect("registration")
+        .expect("mutation");
+        let lash_core::TriggerCommandOutcome::Mutation { receipt } = outcome else {
+            panic!("mutation")
+        };
+        let record = receipt.record.clone();
+        let registered = lash_core::ToolIntentRealized::RegisterTrigger(receipt.clone())
+            .model_value()
+            .expect("register handle");
+        let mutation = serde_json::to_value(
+            trigger_command_value(lash_core::TriggerCommandOutcome::Mutation { receipt })
+                .expect("mutation view"),
+        )
+        .expect("mutation JSON");
+        assert_eq!(registered, mutation);
+        let listed = serde_json::to_value(
+            trigger_command_value(lash_core::TriggerCommandOutcome::List {
+                records: vec![record.clone()],
+            })
+            .expect("list view"),
+        )
+        .expect("list JSON");
+        let prune = lash_core::facade_support::evaluate_trigger_prune(
+            vec![record],
+            owner,
+            actor,
+            vec!["projection-key".into()],
+            2,
+        )
+        .expect("prune");
+        let pruned = serde_json::to_value(trigger_command_value(prune).expect("prune view"))
+            .expect("prune JSON");
+        let fields = [
+            "type",
+            "id",
+            "subscription_key",
+            "incarnation",
+            "revision",
+            "enabled",
+            "disposition",
+            "name",
+            "source_type",
+            "source_key",
+            "source",
+            "registrant",
+            "target",
+        ]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        for view in [&registered, &listed[0], &pruned[0]] {
+            let object = view.as_object().expect("trigger handle");
+            assert_eq!(
+                object
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<std::collections::BTreeSet<_>>(),
+                fields
+            );
+            assert_eq!(view["type"], serde_json::json!("trigger_handle"));
+            assert_eq!(view["id"], registered["subscription_key"]);
+            assert_eq!(view["incarnation"], registered["incarnation"]);
+        }
+        assert_eq!(registered["disposition"], serde_json::json!("created"));
+        assert!(listed[0]["disposition"].is_null());
+        assert_eq!(pruned[0]["disposition"], serde_json::json!("deleted"));
+        assert_eq!(pruned[0]["revision"], serde_json::json!(2));
+        assert_eq!(pruned[0]["enabled"], serde_json::json!(false));
     }
 }

@@ -857,13 +857,6 @@ lash_sansio::tool_intent_variants!(define_remote_realized);
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteTriggerMutationReceipt {
-    pub owner_scope: crate::RemoteTriggerOwnerScope,
-    pub subscription_key: String,
-    pub subscription_id: String,
-    pub incarnation: String,
-    pub revision: u64,
-    pub definition_fingerprint: String,
-    pub enabled: bool,
     pub disposition: lash_core_execution::TriggerMutationOutcome,
-    pub record_snapshot: crate::RemoteTriggerSubscriptionRecord,
+    pub record: crate::RemoteTriggerSubscriptionRecord,
 }

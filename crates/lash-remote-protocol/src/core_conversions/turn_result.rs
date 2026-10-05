@@ -540,27 +540,19 @@ lash_sansio::tool_intent_variants!(define_realized_conversion);
 impl TryFrom<lash_core::TriggerMutationReceipt> for crate::RemoteTriggerMutationReceipt {
     type Error = crate::RemoteProtocolError;
     fn try_from(value: lash_core::TriggerMutationReceipt) -> Result<Self, Self::Error> {
-        let lash_core::TriggerMutationReceipt {
-            owner_scope,
-            subscription_key,
-            subscription_id,
-            incarnation,
-            revision,
-            definition_fingerprint,
-            enabled,
-            disposition,
-            record_snapshot,
-        } = value;
         Ok(Self {
-            owner_scope: owner_scope.into(),
-            subscription_key,
-            subscription_id,
-            incarnation,
-            revision,
-            definition_fingerprint,
-            enabled,
-            disposition,
-            record_snapshot: record_snapshot.try_into()?,
+            disposition: value.disposition,
+            record: value.record.try_into()?,
+        })
+    }
+}
+
+impl TryFrom<crate::RemoteTriggerMutationReceipt> for lash_core::TriggerMutationReceipt {
+    type Error = crate::RemoteProtocolError;
+    fn try_from(value: crate::RemoteTriggerMutationReceipt) -> Result<Self, Self::Error> {
+        Ok(Self {
+            disposition: value.disposition,
+            record: value.record.try_into()?,
         })
     }
 }

@@ -885,7 +885,7 @@ async fn register_trigger_intent_subscription_with_schema(
     let crate::TriggerCommandOutcome::Mutation { receipt } = outcome else {
         panic!("registration must return a mutation receipt")
     };
-    receipt.record_snapshot
+    receipt.record
 }
 
 #[tokio::test]

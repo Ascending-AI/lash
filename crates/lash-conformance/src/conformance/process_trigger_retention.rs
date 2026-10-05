@@ -303,7 +303,7 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
                 owner_scope: owner(&SessionId::from(SESSION)),
                 actor: actor(&SessionId::from(SESSION)),
                 subscription_key: KEY.to_string(),
-                expected_revision: created.revision,
+                expected_revision: created.record.revision,
             },
         )
         .await
@@ -445,7 +445,7 @@ async fn mutation_receipts_follow_the_host_retention_bound(
     let TriggerCommandOutcome::Mutation { receipt: created } = created else {
         panic!("register must return a mutation receipt")
     };
-    let written_at_ms = created.record_snapshot.created_at_ms;
+    let written_at_ms = created.record.created_at_ms;
 
     let live_command = TriggerCommand::Register {
         owner_scope: owner(&SessionId::from(LIVE_SESSION)),

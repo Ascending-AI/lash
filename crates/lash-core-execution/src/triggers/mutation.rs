@@ -67,10 +67,8 @@ fn apply_trigger_command_with_incarnation(
                 evaluate_trigger_prune(records, owner_scope, actor, subscription_keys, now)?;
             if let TriggerCommandOutcome::Prune { receipts } = &result {
                 for receipt in receipts {
-                    subscriptions.insert(
-                        receipt.subscription_id.clone(),
-                        receipt.record_snapshot.clone(),
-                    );
+                    subscriptions
+                        .insert(receipt.subscription_id().to_owned(), receipt.record.clone());
                 }
             }
             Ok(result)

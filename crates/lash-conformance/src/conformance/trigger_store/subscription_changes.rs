@@ -34,9 +34,7 @@ where
         .expect("first page");
     assert_eq!(
         changes,
-        vec![crate::TriggerSubscriptionChange::from(
-            &first.record_snapshot
-        )]
+        vec![crate::TriggerSubscriptionChange::from(&first.record)]
     );
     assert!(first_cursor.store_sequence() > 0);
     assert_eq!(
@@ -60,7 +58,7 @@ where
     let updated = mutate(
         store,
         "feed-update",
-        update_command(&session, "first", draft.clone(), first.revision),
+        update_command(&session, "first", draft.clone(), first.record.revision),
     )
     .await;
     let (updated_changes, updated_cursor) = store
@@ -69,14 +67,12 @@ where
         .expect("updated page");
     assert_eq!(
         updated_changes.last(),
-        Some(&crate::TriggerSubscriptionChange::from(
-            &updated.record_snapshot
-        ))
+        Some(&crate::TriggerSubscriptionChange::from(&updated.record))
     );
     let disabled = mutate(
         store,
         "feed-disable",
-        revision_command(&session, "first", updated.revision, "disable"),
+        revision_command(&session, "first", updated.record.revision, "disable"),
     )
     .await;
     let (disabled_changes, disabled_cursor) = store
@@ -85,27 +81,23 @@ where
         .expect("disabled page");
     assert_eq!(
         disabled_changes,
-        vec![crate::TriggerSubscriptionChange::from(
-            &disabled.record_snapshot
-        )]
+        vec![crate::TriggerSubscriptionChange::from(&disabled.record)]
     );
     assert!(!disabled_changes[0].lifecycle.enabled());
     let enabled = mutate(
         store,
         "feed-enable",
-        revision_command(&session, "first", disabled.revision, "enable"),
+        revision_command(&session, "first", disabled.record.revision, "enable"),
     )
     .await;
-    assert!(enabled.enabled);
+    assert!(enabled.enabled());
     assert_eq!(
         store
             .subscriptions_changed_since(disabled_cursor, 20)
             .await
             .expect("enabled page")
             .0,
-        vec![crate::TriggerSubscriptionChange::from(
-            &enabled.record_snapshot
-        )]
+        vec![crate::TriggerSubscriptionChange::from(&enabled.record)]
     );
     let (changes, enabled_cursor) = store
         .subscriptions_changed_since(first_cursor, 20)
@@ -114,8 +106,8 @@ where
     assert_eq!(
         changes,
         vec![
-            crate::TriggerSubscriptionChange::from(&second.record_snapshot),
-            crate::TriggerSubscriptionChange::from(&enabled.record_snapshot)
+            crate::TriggerSubscriptionChange::from(&second.record),
+            crate::TriggerSubscriptionChange::from(&enabled.record)
         ]
     );
     assert_eq!(changes[1].source, draft.source);
@@ -140,9 +132,7 @@ where
         .expect("bounded page");
     assert_eq!(
         one,
-        vec![crate::TriggerSubscriptionChange::from(
-            &second.record_snapshot
-        )]
+        vec![crate::TriggerSubscriptionChange::from(&second.record)]
     );
     assert_eq!(
         store
@@ -150,25 +140,23 @@ where
             .await
             .expect("next bounded page")
             .0,
-        vec![crate::TriggerSubscriptionChange::from(
-            &enabled.record_snapshot
-        )]
+        vec![crate::TriggerSubscriptionChange::from(&enabled.record)]
     );
 
     // Replays, identical definitions and losing revisions publish no change.
     let _ = mutate(
         store,
         "feed-enable",
-        revision_command(&session, "first", disabled.revision, "enable"),
+        revision_command(&session, "first", disabled.record.revision, "enable"),
     )
     .await;
     let unchanged = mutate(store, "feed-identical", register_command(&session, draft)).await;
-    assert_eq!(unchanged.revision, enabled.revision);
+    assert_eq!(unchanged.record.revision, enabled.record.revision);
     assert!(
         execute(
             store,
             "feed-stale",
-            revision_command(&session, "first", first.revision, "disable")
+            revision_command(&session, "first", first.record.revision, "disable")
         )
         .await
         .is_err()
@@ -184,7 +172,7 @@ where
     let deleted = mutate(
         store,
         "feed-delete",
-        revision_command(&session, "second", second.revision, "delete"),
+        revision_command(&session, "second", second.record.revision, "delete"),
     )
     .await;
     assert_eq!(
@@ -201,10 +189,10 @@ where
     assert_eq!(changes.len(), 2);
     assert_eq!(
         changes[0],
-        crate::TriggerSubscriptionChange::from(&deleted.record_snapshot)
+        crate::TriggerSubscriptionChange::from(&deleted.record)
     );
-    assert_eq!(changes[1].subscription_id, first.subscription_id);
-    assert_eq!(changes[1].revision, enabled.revision + 1);
+    assert_eq!(changes[1].subscription_id, first.record.subscription_id);
+    assert_eq!(changes[1].revision, enabled.record.revision + 1);
     assert!(
         changes
             .iter()
@@ -271,10 +259,10 @@ where
         .await
         .expect("prune and retention page");
     assert_eq!(changes.len(), 2);
-    assert_eq!(changes[0].subscription_id, pruned.subscription_id);
-    assert_eq!(changes[0].revision, pruned.revision + 1);
-    assert_eq!(changes[1].subscription_id, retained.subscription_id);
-    assert_eq!(changes[1].revision, retained.revision + 1);
+    assert_eq!(changes[0].subscription_id, pruned.record.subscription_id);
+    assert_eq!(changes[0].revision, pruned.record.revision + 1);
+    assert_eq!(changes[1].subscription_id, retained.record.subscription_id);
+    assert_eq!(changes[1].revision, retained.record.revision + 1);
     assert!(
         changes
             .iter()
@@ -335,7 +323,7 @@ where
         .list_subscriptions_with_cursor()
         .await
         .expect("resync snapshot");
-    assert_eq!(snapshot, vec![survivor.record_snapshot.clone()]);
+    assert_eq!(snapshot, vec![survivor.record.clone()]);
     assert!(resume.store_sequence() > compact_cursor.store_sequence());
     assert_eq!(
         store
@@ -347,7 +335,12 @@ where
     let disabled = mutate(
         store,
         "feed-survivor-disable",
-        revision_command(&survivor_owner, "survivor", survivor.revision, "disable"),
+        revision_command(
+            &survivor_owner,
+            "survivor",
+            survivor.record.revision,
+            "disable",
+        ),
     )
     .await;
     assert_eq!(
@@ -356,9 +349,7 @@ where
             .await
             .expect("changes after resync")
             .0,
-        vec![crate::TriggerSubscriptionChange::from(
-            &disabled.record_snapshot
-        )]
+        vec![crate::TriggerSubscriptionChange::from(&disabled.record)]
     );
 
     let replacement = mutate(
@@ -367,7 +358,7 @@ where
         register_command(&session, sample_draft(&session, "first", "source", "first")),
     )
     .await;
-    assert_ne!(replacement.incarnation, first.incarnation);
+    assert_ne!(replacement.record.incarnation, first.record.incarnation);
     let replacement_change = store
         .subscriptions_changed_since(resume, 20)
         .await
@@ -375,8 +366,6 @@ where
         .0;
     assert_eq!(
         replacement_change.last(),
-        Some(&crate::TriggerSubscriptionChange::from(
-            &replacement.record_snapshot
-        ))
+        Some(&crate::TriggerSubscriptionChange::from(&replacement.record))
     );
 }

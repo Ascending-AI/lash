@@ -86,3 +86,47 @@ fn incarnation_fixture_draft() -> TriggerSubscriptionDraft {
         crate::ProcessIdentity::new("kind"),
     )
 }
+
+/// S10 F2: a stored mutation has one incarnation, owned by its record.
+#[test]
+fn mutation_receipt_refuses_a_second_incarnation() {
+    let outcome = evaluate_trigger_mutation_with_incarnation(
+        None,
+        TriggerCommand::Register {
+            owner_scope: TriggerOwnerScope::Session {
+                session_id: SessionId::from("session"),
+            },
+            actor: crate::ProcessOriginator::Session {
+                session_id: SessionId::from("session"),
+                agent_frame_id: None,
+            },
+            draft: incarnation_fixture_draft(),
+        },
+        1,
+        "incarnation-a".to_string(),
+    )
+    .expect("valid registration")
+    .expect("mutation");
+    let TriggerCommandOutcome::Mutation { receipt } = outcome else {
+        panic!("mutation")
+    };
+    let mut stored = serde_json::to_value(&receipt).expect("stored receipt");
+    assert_eq!(stored.as_object().expect("receipt record").len(), 2);
+    assert_eq!(
+        stored["record"]["incarnation"],
+        serde_json::json!(receipt.incarnation())
+    );
+    let restored: TriggerMutationReceipt =
+        serde_json::from_value(stored.clone()).expect("canonical receipt");
+    assert_eq!(restored, *receipt);
+    let projected = trigger_handle_outcome_value(&restored).expect("public handle");
+    assert_eq!(projected["incarnation"], stored["record"]["incarnation"]);
+    assert!(projected.get("record").is_none());
+    assert!(projected.get("env_ref").is_none());
+    assert!(projected.get("source_capture").is_none());
+    stored["incarnation"] = serde_json::json!("incarnation-b");
+    assert!(
+        serde_json::from_value::<TriggerMutationReceipt>(stored).is_err(),
+        "a stored receipt must refuse a contradictory top-level incarnation"
+    );
+}

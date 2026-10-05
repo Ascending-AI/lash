@@ -28,7 +28,7 @@ use super::events::ProcessEventAppendRequest;
 ///         path = "crates/lash-core-execution/src/runtime/process/validation.rs",
 ///         validate_generic_process_event_append,
 ///     ),
-///     items(path = "crates/lash-core-execution/src/triggers.rs", failure_code),
+///     items(path = "crates/lash-core-execution/src/triggers/command.rs", failure_code),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
