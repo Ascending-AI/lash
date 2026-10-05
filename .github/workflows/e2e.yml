@@ -113,6 +113,17 @@ jobs:
       - name: Run the E2E tier
         run: python3 scripts/lash-e2e.py run --tier "$TIER" --ready --sha "$GITHUB_SHA" --artifacts target/e2e/"$TIER"
 
+      # Every receipt the run produced must satisfy the counted-receipt schema
+      # before it is uploaded as evidence.
+      - name: Validate E2E receipts
+        if: always()
+        run: |
+          set -euo pipefail
+          shopt -s failglob
+          uvx --from check-jsonschema==0.38.1 check-jsonschema \
+            --schemafile scripts/lash-e2e-receipt.schema.json \
+            target/e2e/*/receipt.json
+
       - name: Upload E2E receipts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -121,7 +132,6 @@ jobs:
           path: |
             target/e2e/
             !target/e2e/**/binaries/**
-            !target/e2e/**/tmp/**
 
       - name: Remove client credentials
         if: always()

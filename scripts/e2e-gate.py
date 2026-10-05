@@ -188,6 +188,17 @@ def certify_case(artifacts: Path, junit: Path, outputs: dict[str, Path], source:
     return provenance
 
 
+def scratch_dir(artifacts: Path) -> Path:
+    """The run's TMPDIR: fixed-width for every test name and artifacts path.
+
+    test_runner.py binds its executor sockets under <TMPDIR>/lash-tests-*/,
+    and an AF_UNIX path dies past sun_path (107 bytes). The artifacts path
+    alone already exceeds that under the default layout, so TMPDIR can never
+    be derived from it by concatenation: hash it instead.
+    """
+    return Path("/tmp") / f"lash-e2e-{hashlib.sha256(str(artifacts).encode()).hexdigest()[:8]}"
+
+
 def run(label: str, name: str, artifacts: Path, case: str | None) -> int:
     gate = os.environ["KILN_GATE_ID"]
     # S28 owns a second cluster in this block and fleet PostgreSQL owns
@@ -207,120 +218,127 @@ def run(label: str, name: str, artifacts: Path, case: str | None) -> int:
             reservation.close()
 
     env = dict(os.environ)
-    scratch = artifacts / "tmp"
-    scratch.mkdir()
+    # TMPDIR reaches the executor as a resolved --test_env value each run, so
+    # a daemon that inherited an older artifacts path cannot pin a stale long
+    # path for its sockets.
+    scratch = scratch_dir(artifacts)
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir(parents=True)
     env.update({
         "TMPDIR": str(scratch),
         "UV_CACHE_DIR": str(ROOT / "target/e2e-gate/uv-cache"),
         "UV_PYTHON_DOWNLOADS": "never",
         "PLAYWRIGHT_BROWSERS_PATH": str(Path.home() / ".cache/ms-playwright"),
     })
-    units = json.loads(INVENTORY.read_text())["feature_lane_units"]
-    workbench_e2e = feature_variant(units, "agent-workbench", WORKBENCH, ["e2e-tools"])
-    node_next = feature_variant(units, "lash-upgrade-harness", NODE, ["synthetic-next"])
-    build = artifacts / "build.json"
-    subprocess.run([
-        "kiln", "build", WORKBENCH, workbench_e2e, WORKER, SERVER, NODE, node_next,
-        CONSUMER, label, "--materializations", "final",
-        "--target-platforms", "prelude//platforms:default",
-        "--build-report", str(build),
-    ], cwd=ROOT, env=env, check=True)
-    outputs = {
-        "workbench": Path(output(build, WORKBENCH)),
-        "workbench_e2e": Path(output(build, workbench_e2e)),
-        "node": Path(output(build, NODE)),
-        "node_next": Path(output(build, node_next)),
-        "consumer": Path(output(build, CONSUMER)),
-        "vm_worker": Path(output(build, WORKER)),
-        "server": Path(output(build, SERVER)),
-    }
-    workbench = str(outputs["workbench"])
-    worker = str(outputs["vm_worker"])
-    python = ROOT / "target/e2e-gate/python/bin/python"
-    if not python.exists():
+    try:
+        units = json.loads(INVENTORY.read_text())["feature_lane_units"]
+        workbench_e2e = feature_variant(units, "agent-workbench", WORKBENCH, ["e2e-tools"])
+        node_next = feature_variant(units, "lash-upgrade-harness", NODE, ["synthetic-next"])
+        build = artifacts / "build.json"
         subprocess.run([
-            "uv", "venv", "--python", sys.executable, str(python.parent.parent),
+            "kiln", "build", WORKBENCH, workbench_e2e, WORKER, SERVER, NODE, node_next,
+            CONSUMER, label, "--materializations", "final",
+            "--target-platforms", "prelude//platforms:default",
+            "--build-report", str(build),
         ], cwd=ROOT, env=env, check=True)
-    subprocess.run([
-        "uv", "pip", "install", "--python", str(python), "playwright==1.62.0",
-    ], cwd=ROOT, env=env, check=True)
-    subprocess.run([
-        str(python), "-c",
-        "from importlib.metadata import version; from pathlib import Path; "
-        "from playwright.sync_api import sync_playwright\n"
-        "assert version('playwright') == '1.62.0'\n"
-        "with sync_playwright() as p:\n"
-        "    assert Path(p.chromium.executable_path).is_file(), 'Chromium missing from ~/.cache/ms-playwright'\n"
-        "    browser = p.chromium.launch(headless=True)\n"
-        "    browser.close()\n",
-    ], cwd=ROOT, env=env, check=True)
-    # Read the frozen current epoch rather than inventing a runner generation.
-    epochs = (ROOT / "crates/lash-restate/src/process/admission.rs").read_text()
-    generation = re.search(r"pub const JOURNAL_LOGIC_EPOCH: u32 = (\d+);", epochs).group(1)
-    source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    env.update({
-        "LASH_E2E_HOST_ARTIFACTS": str(artifacts / "case"),
-        "LASH_E2E_ARTIFACT_DIR": str(artifacts / "case"),
-        "LASH_PHASE_A_ARTIFACT_DIR": str(artifacts / "case"),
-        "LASH_E2E_PORT_BASE": str(base),
-        "LASH_E2E_HOST_PORT": str(base + 20),
-        "LASH_E2E_CANDIDATE_SHA": source,
-        "LASH_E2E_HOST_GENERATION": generation,
-        "LASH_E2E_REPO": str(ROOT),
-        "LASH_E2E_PYTHON": str(python),
-        "LASH_E2E_WORKBENCH_BIN": workbench,
-        "LASH_E2E_WORKBENCH_SHA256": hashlib.sha256(Path(workbench).read_bytes()).hexdigest(),
-        "LASH_WORKBENCH_E2E_BIN": str(outputs["workbench_e2e"]),
-        "LASH_UPGRADE_NODE_N": str(outputs["node"]),
-        "LASH_UPGRADE_NODE_NEXT": str(outputs["node_next"]),
-        "LASH_E2E_CONSUMER_BIN": str(outputs["consumer"]),
-        "LASH_E2E_CONSUMER_SHA256": hashlib.sha256(outputs["consumer"].read_bytes()).hexdigest(),
-        "LASH_E2E_CONSUMER_GENERATION": generation,
-        "LASH_RESTATE_SERVER_BIN": str(outputs["server"]),
-        "LASH_VM_WORKER": worker,
-    })
-    (artifacts / "case").mkdir()
-    report = artifacts / "test-report.json"
-    command = [
-        "kiln", "test", label, "--local-test-execution", "--no-test-cache",
-        "--test_arg=--exact", f"--test_arg={name}", "--test_arg=--include-ignored",
-        "--test_arg=--nocapture", "--test-report", str(report),
-        "--test-output-dir", str(artifacts / "test-results"),
-    ]
-    # Kiln actions receive only explicitly forwarded runtime variables. serve
-    # fills the endpoint URLs before Kiln resolves these two --test_env keys.
-    keys = [key for key in env if key.startswith("LASH_E2E_")]
-    keys += ["KILN_GATE_ID", "LASH_RESTATE_SERVER_BIN", "LASH_VM_WORKER",
-             "LASH_WORKBENCH_E2E_BIN", "LASH_UPGRADE_NODE_N", "LASH_UPGRADE_NODE_NEXT",
-             "LASH_PHASE_A_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH", "TMPDIR",
-             "RESTATE_INGRESS_URL", "RESTATE_ADMIN_URL"]
-    command.extend(f"--test_env={key}" for key in sorted(keys))
-    code = subprocess.call([
-        "python3", str(RESTATE), "serve", "--name", f"e2e-{gate}",
-        "--server-env", "RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true",
-        "--port-base", str(base + 45), "--keep-log", str(artifacts / "restate.log"),
-        "--", *command,
-    ], cwd=ROOT, env=env)
-    counts = test_counts(report, label, name)
-    junit = Path(counts.pop("junit_xml"))
-    # serve's port roles are ingress/admin/node, so the runner-served admin URL
-    # the journal facts record is base + 46.
-    provenance = certify_case(artifacts, junit, outputs, source, case,
-                              f"http://127.0.0.1:{base + 46}", {
-                                  "scenario": name, "label": label, "source_sha": source,
-                                  "gate": gate, "port_base": base, "generation": generation,
-                                  "playwright": "1.62.0",
-                                  "workbench": {"path": workbench,
-                                                "sha256": env["LASH_E2E_WORKBENCH_SHA256"]},
-                              })
-    write(artifacts / "execution.json", {
-        "scenario": name, "label": label, "source_sha": source, "counts": counts,
-        "exit_code": code, "evidence_error": provenance["evidence_error"],
-        "artifacts": str(artifacts),
-    })
-    print(f"{name}: executed={counts['executed']} passed={counts['passed']} "
-          f"failed={counts['failed']} artifacts={artifacts}", flush=True)
-    return code if code else int(counts["failed"] != 0 or provenance["evidence_error"] is not None)
+        outputs = {
+            "workbench": Path(output(build, WORKBENCH)),
+            "workbench_e2e": Path(output(build, workbench_e2e)),
+            "node": Path(output(build, NODE)),
+            "node_next": Path(output(build, node_next)),
+            "consumer": Path(output(build, CONSUMER)),
+            "vm_worker": Path(output(build, WORKER)),
+            "server": Path(output(build, SERVER)),
+        }
+        workbench = str(outputs["workbench"])
+        worker = str(outputs["vm_worker"])
+        python = ROOT / "target/e2e-gate/python/bin/python"
+        if not python.exists():
+            subprocess.run([
+                "uv", "venv", "--python", sys.executable, str(python.parent.parent),
+            ], cwd=ROOT, env=env, check=True)
+        subprocess.run([
+            "uv", "pip", "install", "--python", str(python), "playwright==1.62.0",
+        ], cwd=ROOT, env=env, check=True)
+        subprocess.run([
+            str(python), "-c",
+            "from importlib.metadata import version; from pathlib import Path; "
+            "from playwright.sync_api import sync_playwright\n"
+            "assert version('playwright') == '1.62.0'\n"
+            "with sync_playwright() as p:\n"
+            "    assert Path(p.chromium.executable_path).is_file(), 'Chromium missing from ~/.cache/ms-playwright'\n"
+            "    browser = p.chromium.launch(headless=True)\n"
+            "    browser.close()\n",
+        ], cwd=ROOT, env=env, check=True)
+        # Read the frozen current epoch rather than inventing a runner generation.
+        epochs = (ROOT / "crates/lash-restate/src/process/admission.rs").read_text()
+        generation = re.search(r"pub const JOURNAL_LOGIC_EPOCH: u32 = (\d+);", epochs).group(1)
+        source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        env.update({
+            "LASH_E2E_HOST_ARTIFACTS": str(artifacts / "case"),
+            "LASH_E2E_ARTIFACT_DIR": str(artifacts / "case"),
+            "LASH_PHASE_A_ARTIFACT_DIR": str(artifacts / "case"),
+            "LASH_E2E_PORT_BASE": str(base),
+            "LASH_E2E_HOST_PORT": str(base + 20),
+            "LASH_E2E_CANDIDATE_SHA": source,
+            "LASH_E2E_HOST_GENERATION": generation,
+            "LASH_E2E_REPO": str(ROOT),
+            "LASH_E2E_PYTHON": str(python),
+            "LASH_E2E_WORKBENCH_BIN": workbench,
+            "LASH_E2E_WORKBENCH_SHA256": hashlib.sha256(Path(workbench).read_bytes()).hexdigest(),
+            "LASH_WORKBENCH_E2E_BIN": str(outputs["workbench_e2e"]),
+            "LASH_UPGRADE_NODE_N": str(outputs["node"]),
+            "LASH_UPGRADE_NODE_NEXT": str(outputs["node_next"]),
+            "LASH_E2E_CONSUMER_BIN": str(outputs["consumer"]),
+            "LASH_E2E_CONSUMER_SHA256": hashlib.sha256(outputs["consumer"].read_bytes()).hexdigest(),
+            "LASH_E2E_CONSUMER_GENERATION": generation,
+            "LASH_RESTATE_SERVER_BIN": str(outputs["server"]),
+            "LASH_VM_WORKER": worker,
+        })
+        (artifacts / "case").mkdir()
+        report = artifacts / "test-report.json"
+        command = [
+            "kiln", "test", label, "--local-test-execution", "--no-test-cache",
+            "--test_arg=--exact", f"--test_arg={name}", "--test_arg=--include-ignored",
+            "--test_arg=--nocapture", "--test-report", str(report),
+            "--test-output-dir", str(artifacts / "test-results"),
+        ]
+        # Kiln actions receive only explicitly forwarded runtime variables. serve
+        # fills the endpoint URLs before Kiln resolves these two --test_env keys.
+        keys = [key for key in env if key.startswith("LASH_E2E_")]
+        keys += ["KILN_GATE_ID", "LASH_RESTATE_SERVER_BIN", "LASH_VM_WORKER",
+                 "LASH_WORKBENCH_E2E_BIN", "LASH_UPGRADE_NODE_N", "LASH_UPGRADE_NODE_NEXT",
+                 "LASH_PHASE_A_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH", "TMPDIR",
+                 "RESTATE_INGRESS_URL", "RESTATE_ADMIN_URL"]
+        command.extend(f"--test_env={key}" for key in sorted(keys))
+        code = subprocess.call([
+            "python3", str(RESTATE), "serve", "--name", f"e2e-{gate}",
+            "--server-env", "RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true",
+            "--port-base", str(base + 45), "--keep-log", str(artifacts / "restate.log"),
+            "--", *command,
+        ], cwd=ROOT, env=env)
+        counts = test_counts(report, label, name)
+        junit = Path(counts.pop("junit_xml"))
+        # serve's port roles are ingress/admin/node, so the runner-served admin URL
+        # the journal facts record is base + 46.
+        provenance = certify_case(artifacts, junit, outputs, source, case,
+                                  f"http://127.0.0.1:{base + 46}", {
+                                      "scenario": name, "label": label, "source_sha": source,
+                                      "gate": gate, "port_base": base, "generation": generation,
+                                      "playwright": "1.62.0",
+                                      "workbench": {"path": workbench,
+                                                    "sha256": env["LASH_E2E_WORKBENCH_SHA256"]},
+                                  })
+        write(artifacts / "execution.json", {
+            "scenario": name, "label": label, "source_sha": source, "counts": counts,
+            "exit_code": code, "evidence_error": provenance["evidence_error"],
+            "artifacts": str(artifacts),
+        })
+        print(f"{name}: executed={counts['executed']} passed={counts['passed']} "
+              f"failed={counts['failed']} artifacts={artifacts}", flush=True)
+        return code if code else int(counts["failed"] != 0 or provenance["evidence_error"] is not None)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def main() -> int:

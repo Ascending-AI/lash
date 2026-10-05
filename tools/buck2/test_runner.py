@@ -425,7 +425,9 @@ def main():
         supplied = json.loads(options.test_env_file.read_text())
         runtime_env.update(parse_env([key + '=' + val for key, val in supplied.items()]))
     reports = Reports(options.test_report, transport.buck_trace_id)
-    with tempfile.TemporaryDirectory(prefix='lash-tests-') as work:
+    # The sockets below bind under this directory; a forwarded TMPDIR scopes
+    # them per invocation instead of whatever this daemon-inherited process got.
+    with tempfile.TemporaryDirectory(prefix='lash-tests-', dir=runtime_env.get('TMPDIR')) as work:
         executor_path, orchestrator_path = Path(work) / 'executor', Path(work) / 'orchestrator'
         executor = Executor()
         server = grpc.server(ThreadPoolExecutor(max_workers=2), options=[('grpc.max_receive_message_length', 64 * 1024 * 1024)])

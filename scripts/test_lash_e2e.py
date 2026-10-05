@@ -376,5 +376,27 @@ class ReceiptLaws(unittest.TestCase):
         self.assertTrue((self.root / "receipt.json").exists())
 
 
+class RunnerLaws(unittest.TestCase):
+    """The executor's Unix socket must fit sun_path for every registration."""
+
+    def test_socket_path_stays_under_107_for_the_longest_registration(self):
+        registrations = [
+            row["registration"]
+            for scenario in e2e.load_manifest()["scenarios"]
+            for row in scenario["cases"]
+            if row["registration"] is not None
+        ]
+        label, test = max(
+            ((row["label"], row["test"]) for row in registrations),
+            key=lambda row: len(row[1]),
+        )
+        artifacts = (e2e.ROOT / "target/e2e-gate" / label.rsplit(":", 1)[-1]
+                     / test / "0").resolve()
+        # test_runner.py binds executor/orchestrator sockets under
+        # <TMPDIR>/lash-tests-XXXXXXXX/.
+        socket_path = Path(e2e.GATE.scratch_dir(artifacts)) / "lash-tests-xxxxxxxx" / "executor"
+        self.assertLess(len(str(socket_path)), 107)
+
+
 if __name__ == "__main__":
     unittest.main()
