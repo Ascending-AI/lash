@@ -627,6 +627,30 @@ impl NodeBinary {
         report(&self.path, "h3", output)
     }
 
+    /// [`h3`](Self::h3) in the background, so two controls can race.
+    pub fn spawn_h3(
+        &self,
+        case: &Case,
+        session: &str,
+        command: &crate::node::h3::H3Command,
+    ) -> Result<PendingControl> {
+        let child = Command::new(&self.path)
+            .arg("h3")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .args(["--session", session])
+            .arg("--command")
+            .arg(serde_json::to_string(command)?)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("spawn {} h3", self.label()))?;
+        Ok(PendingControl {
+            path: self.path.clone(),
+            child,
+        })
+    }
+
     /// Signal `process` through this build's deployment.
     pub fn signal_process(
         &self,
@@ -785,6 +809,23 @@ impl PendingSignal {
             .wait_with_output()
             .context("wait for the signal")?;
         report(&self.path, "process-signal", output)
+    }
+}
+
+/// An `h3` control running in the background.
+pub struct PendingControl {
+    path: PathBuf,
+    child: Child,
+}
+
+impl PendingControl {
+    /// Wait for the control's report.
+    pub fn wait(self) -> Result<serde_json::Value> {
+        let output = self
+            .child
+            .wait_with_output()
+            .context("wait for the h3 control")?;
+        report(&self.path, "h3", output)
     }
 }
 

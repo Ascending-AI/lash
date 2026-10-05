@@ -32,8 +32,9 @@ fn core(backend: lash::Backend, code: &str) -> Result<lash::LashCore> {
         backend.effect_host(),
         None,
     );
+    let materials = backend.tool_material_store();
     Ok(lash::LashCore::rlm_builder(backend, factory)
-        .plugin(super::plugin("", isolated))
+        .plugin(super::plugin("", isolated, materials))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .llm_profiles(Arc::new(models))

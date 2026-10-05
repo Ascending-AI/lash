@@ -23,6 +23,7 @@ use super::{RestateArgs, StoreArgs};
 const PLUGIN: &str = "e2e-h3";
 const TASK: &str = "e2e.h3.operation";
 
+pub mod live;
 pub mod retirement;
 pub mod rlm;
 mod tasks;
@@ -75,11 +76,38 @@ pub enum H3Command {
     Snapshot {
         run: lash_core::TurnId,
     },
+    /// The real durable-wait registry of `operation`'s completion source.
+    Source {
+        operation: String,
+        op: live::SourceOp,
+    },
+    /// Drain, retirement and finalize reads of the operator floor.
+    Drain {
+        generation: lash_core::engine::BuildGeneration,
+        op: live::DrainOp,
+        /// Read the deployment registry through this unreachable admin URL.
+        #[serde(default)]
+        severed_admin_url: Option<String>,
+    },
+    /// The session's live turn park and its Run's store terminal.
+    Parks,
+    Redrive {
+        run: lash_core::TurnId,
+        park: lash_core::store::ParkId,
+    },
+    CancelPark {
+        run: lash_core::TurnId,
+        park: lash_core::store::ParkId,
+    },
 }
 
 /// Register the fixture on both the submitter and the serving node. Its
 /// revision is identical across the candidate/synthetic successor pair.
-pub(super) fn plugin(namespace: &str, isolated: IsolatedHost) -> Arc<StaticPluginFactory> {
+pub(super) fn plugin(
+    namespace: &str,
+    isolated: IsolatedHost,
+    materials: Arc<dyn lash_core::store::ToolMaterialStore>,
+) -> Arc<StaticPluginFactory> {
     let namespace = namespace.to_owned();
     let spec = lash_core::facade_support::PluginSpec::new()
         .with_plugin_task_typed::<Operation, _, _>(move |ctx, output| {
@@ -156,7 +184,7 @@ pub(super) fn plugin(namespace: &str, isolated: IsolatedHost) -> Arc<StaticPlugi
                 Ok(lash_core::plugin::PluginOperationOutcome::new(output))
             }
         });
-    let spec = tasks::isolated::register(tasks::register(spec), isolated);
+    let spec = tasks::isolated::register(tasks::register(spec, materials), isolated);
     Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial(PLUGIN),
         spec,
@@ -261,8 +289,17 @@ impl SingletonToolHandlers for Echo {
 
 pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
     let command: H3Command = serde_json::from_str(&args.command)?;
+    if let H3Command::Drain {
+        generation,
+        op,
+        severed_admin_url,
+    } = command
+    {
+        return live::drain(&args, &generation, op, severed_admin_url).await;
+    }
     let stores = super::open_stores(&args.store).await?;
     let snapshots = stores.session_store_factory();
+    let materials = stores.tool_material_store();
     let engine = super::engine(stores, &args.restate)?;
     let core = super::core(
         lash::Backend::new(engine.clone()),
@@ -308,19 +345,30 @@ pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
         }
         H3Command::Resolve { source, value } => {
             use lash_core::AwaitEventResolver as _;
-            let outcome = engine
+            match engine
                 .restate_effect_host()
                 .resolve_await_event(&source, lash_core::Resolution::Ok(value))
-                .await?;
-            Ok(serde_json::to_value(outcome)?)
+                .await
+            {
+                Ok(outcome) => Ok(serde_json::to_value(outcome)?),
+                // A typed refusal is an answer: a retired scope refuses a late completion.
+                Err(error) => Ok(serde_json::json!({
+                    "refused": error.code.as_str(),
+                    "message": error.to_string(),
+                })),
+            }
         }
         H3Command::Follow { run } => {
             let result = session.run(run.clone()).result().await?;
             Ok(serde_json::json!({"run": run, "output": result.output}))
         }
         H3Command::Cancel { run } => {
-            session.run(run.clone()).cancel().await?;
-            Ok(serde_json::json!({"run": run, "cancel_requested": true}))
+            let receipt = session.run(run.clone()).cancel().await?;
+            Ok(serde_json::json!({
+                "run": run,
+                "cancel_requested": true,
+                "receipt": format!("{receipt:?}"),
+            }))
         }
         H3Command::Snapshot { run } => {
             let unfinished = session.durable().unfinished_run().await?;
@@ -338,8 +386,43 @@ pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
                 "terminal": snapshots.run_terminal(&session_id, &run).await?,
                 "continuation": snapshots.load_pending_follow_on(&session_id).await?,
                 "park": snapshots.load_turn_park(&session_id).await?,
+                "invocation_key": lash_restate::recorded_turn_invocation_key(
+                    snapshots.as_ref(),
+                    &session_id,
+                    &run,
+                )
+                .await?,
             }))
         }
+        H3Command::Source { operation, op } => {
+            let fixture = SourceFixture::from_parts(
+                &engine.restate_effect_host(),
+                lash_restate::RestateIngressClient::new(lash_restate::RestateConnection::new(
+                    args.restate.ingress_url.clone(),
+                )),
+                engine.namespace().service_name("LashDurableWaitIndex"),
+                materials,
+                &args.session,
+                &operation,
+            )
+            .await?;
+            live::source(&fixture, op).await
+        }
+        H3Command::Parks => {
+            let park = snapshots.load_turn_park(&session_id).await?;
+            let terminal = match &park {
+                Some(park) => snapshots.run_terminal(&session_id, &park.turn_id).await?,
+                None => None,
+            };
+            Ok(serde_json::json!({"session": session_id, "park": park, "terminal": terminal}))
+        }
+        H3Command::Redrive { run, park } => {
+            live::park_verb(&core, session_id, run, park, true).await
+        }
+        H3Command::CancelPark { run, park } => {
+            live::park_verb(&core, session_id, run, park, false).await
+        }
+        H3Command::Drain { .. } => unreachable!("drain is answered before the core opens"),
     }
 }
 
@@ -439,15 +522,33 @@ impl SourceFixture {
         session: &str,
         operation: &str,
     ) -> Result<Self> {
+        Self::from_parts(
+            &double.restate().restate_effect_host(),
+            double.ingress(),
+            double.service_name("LashDurableWaitIndex"),
+            double.stores().tool_material_store(),
+            session,
+            operation,
+        )
+        .await
+    }
+
+    /// The same registry boundary served by a live deployment.
+    pub async fn from_parts(
+        host: &lash_restate::RestateEffectHost,
+        client: lash_restate::RestateIngressClient,
+        service: String,
+        materials: Arc<dyn lash_core::store::ToolMaterialStore>,
+        session: &str,
+        operation: &str,
+    ) -> Result<Self> {
         use lash_core::AwaitEventResolver as _;
         let call_id = lash_core::ToolCallId::derive(
             "",
             lash_core::ToolCallRoot::host_submission(operation)?,
             &[],
         );
-        let source = double
-            .restate()
-            .restate_effect_host()
+        let source = host
             .await_event_key(
                 &lash_core::ExecutionScope::SessionOperation {
                     session_id: lash_core::SessionId::fixture(session.to_owned()),
@@ -469,10 +570,10 @@ impl SourceFixture {
                 authority: lash_core::tool_run::SourceAuthority::ExternalCompletion,
                 cancel: ExternalCancelPolicy::CancelExternalWork,
             },
-            client: double.ingress(),
-            service: double.service_name("LashDurableWaitIndex"),
+            client,
+            service,
             index,
-            materials: double.stores().tool_material_store(),
+            materials,
         })
     }
 
@@ -566,7 +667,7 @@ impl SourceFixture {
 
 /// Typed replies decoded from the real registry wire boundary. These fixture
 /// DTOs are needed because the handler reply types are internal to the adapter.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SourceArmReply {
     Armed {
@@ -576,7 +677,7 @@ pub enum SourceArmReply {
         refusal: lash_core::tool_run::SourceRefusal,
     },
 }
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SourceSealReply {
     Outcome {
@@ -586,7 +687,7 @@ pub enum SourceSealReply {
         refusal: lash_core::tool_run::SourceRefusal,
     },
 }
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SourceSubscribeReply {
     Subscribed,

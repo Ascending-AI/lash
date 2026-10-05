@@ -15,13 +15,14 @@ pub fn specs(store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Vec<CaseSpec
         rules: vec!["L11".into(), "L21".into()],
         host: HostKind::UpgradeNode,
         store,
-        channel: Channel::Rlm,
+        channel: Channel::Standard,
         provider: ProviderKind::Scripted,
         restate_nodes: 1,
         artifacts,
         cuts: Vec::new(),
         expected_terminal: "settled".into(),
-        requires: vec!["FIG-4900".into()],
+        // FIG-4900's landing commit is the manifest's S13 arc guard.
+        requires: Vec::new(),
     }]
 }
 
@@ -155,4 +156,177 @@ async fn s13_unreadable_registry_fails_closed_sqlite_memory() -> Result<()> {
         "failed query removed a deployment"
     );
     Ok(())
+}
+
+/// S13/L11/L21 on real hosts: genuine work pinned to N keeps N's deployment
+/// while N+1 serves beside it. Retirement and finalize refuse typed, a
+/// severed registry read refuses rather than reading drained, and once the
+/// original Run finishes on N the drained deployment is removed.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries and private live Restate"]
+fn s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes() -> Result<()> {
+    use crate::h3_live::{Live, command};
+    use lash_upgrade_harness::harness::block_on;
+    use lash_upgrade_harness::node::h3::H3Command;
+    use serde_json::json;
+    const SEVERED: &str = "http://127.0.0.1:1";
+    let mut live = Live::setup("s13", |artifacts| {
+        specs(StoreKind::SqliteFile, artifacts)
+            .into_iter()
+            .find(|spec| spec.id == "S13")
+            .expect("S13 is catalogued")
+    })?;
+    let (n, next) = (live.builds.n.clone(), live.builds.next.clone());
+    let session = live.case.session_id("s13");
+    let view = live.case.view()?;
+    let n_host = live.serve(&n, "candidate")?;
+    let g_n = n_host.generation()?.to_owned();
+    let n_deployment = block_on(view.deployment_at(n_host.uri()?))?.id;
+    let admitted = live.h3(
+        &n,
+        &session,
+        &H3Command::Deferred {
+            key: "s13-pinned".into(),
+        },
+    )?;
+    let run: lash_core::TurnId = serde_json::from_value(admitted["run"].clone())?;
+    let (key, pinned) = live.await_suspended(&n, &session, &run)?;
+    ensure!(
+        pinned.pinned_deployment_id.as_deref() == Some(n_deployment.as_str()),
+        "genuine work is not pinned to N's deployment: {pinned:?}"
+    );
+    let next_host = live.serve(&next, "successor")?;
+    let g_next = next_host.generation()?.to_owned();
+    let next_deployment = block_on(view.deployment_at(next_host.uri()?))?.id;
+    ensure!(g_next != g_n, "N+1 serves N's generation");
+    let present = |view: &lash_upgrade_harness::restate_view::RestateView| -> Result<Vec<String>> {
+        Ok(block_on(view.deployments())?
+            .into_iter()
+            .map(|deployment| deployment.id)
+            .collect())
+    };
+    ensure!(
+        present(&view)?.contains(&n_deployment) && present(&view)?.contains(&next_deployment),
+        "N and N+1 do not coexist"
+    );
+    let drain = |op: serde_json::Value, severed: Option<&str>| {
+        command(
+            json!({"action": "drain", "generation": g_n, "op": op, "severed_admin_url": severed}),
+        )
+    };
+
+    live.h3(&n, &session, &drain(json!({"drain": "mark"}), None)?)?;
+    let refused = live.h3(
+        &n,
+        &session,
+        &drain(json!({"drain": "retire", "deployment": n_deployment}), None)?,
+    )?;
+    ensure!(
+        refused["refused"] == "owned_work"
+            && refused["status"]["drained"] == false
+            && refused["status"]["unfinished_invocations"]
+                .as_u64()
+                .is_some_and(|count| count > 0),
+        "operator retired genuine pinned work: {refused}"
+    );
+    let finalize = live.h3(&n, &session, &drain(json!({"drain": "finalize"}), None)?)?;
+    ensure!(
+        finalize["refused"].is_string() && finalize.get("finalized").is_none(),
+        "finalize retired a generation with pinned work: {finalize}"
+    );
+    ensure!(
+        present(&view)?.contains(&n_deployment),
+        "refused retirement removed the deployment"
+    );
+
+    // The query fault: an unreadable registry is a typed native storage
+    // failure and never proves drain, so nothing is removed.
+    let read = live.h3(
+        &n,
+        &session,
+        &drain(json!({"drain": "status"}), Some(SEVERED))?,
+    )?;
+    ensure!(
+        read["error"]["kind"] == "storage_failure"
+            && read["error"]["backend"] == "engine deployment registry"
+            && read.get("status").is_none(),
+        "unreadable registry did not keep its typed refusal: {read}"
+    );
+    let severed = live.h3(
+        &n,
+        &session,
+        &drain(
+            json!({"drain": "retire", "deployment": n_deployment}),
+            Some(SEVERED),
+        )?,
+    )?;
+    ensure!(
+        severed["refused"] == "drain_read_failed"
+            && severed["cause"]["kind"] == "storage_failure"
+            && severed["cause"]["backend"] == "engine deployment registry",
+        "a failed drain read did not refuse retirement typed: {severed}"
+    );
+    ensure!(
+        present(&view)?.contains(&n_deployment),
+        "failed query removed a deployment"
+    );
+
+    // Abort this drain while the application finishes naturally, then ask
+    // for retirement again. Completion is the source's resolution.
+    live.h3(&n, &session, &drain(json!({"drain": "clear"}), None)?)?;
+    let operation = lash_core::tool_run::OperationRun::for_run_id(
+        lash::SessionId::fixture(session.clone()),
+        &run,
+    )
+    .ok_or_else(|| anyhow::anyhow!("{run} is not an operation Run"))?
+    .operation_id;
+    live.complete_first(&n, &session, &operation, "s13-drained")?;
+    let followed = live.h3(&n, &session, &H3Command::Follow { run: run.clone() })?;
+    ensure!(
+        followed["output"] == json!("s13-drained"),
+        "pinned application did not finish its original Run: {followed}"
+    );
+    let snapshot = live.h3(&n, &session, &H3Command::Snapshot { run: run.clone() })?;
+    let terminal: lash_core::store::RunTerminal =
+        serde_json::from_value(snapshot["terminal"].clone())?;
+    ensure!(
+        terminal.run == run
+            && terminal.kind() == lash_core::store::RunTerminalKind::Answered
+            && snapshot["unfinished"] == false,
+        "original Run did not settle Answered: {snapshot}"
+    );
+    live.quiesce()?;
+    let finished = live.run_invocations(&key)?;
+    ensure!(
+        finished.len() == 1
+            && finished[0].id == pinned.id
+            && finished[0].status == "completed"
+            && finished[0].pinned_deployment_id.as_deref() == Some(n_deployment.as_str()),
+        "the original journal did not finish on N: {finished:?}"
+    );
+    live.journal(&pinned.id)?;
+
+    live.h3(&n, &session, &drain(json!({"drain": "mark"}), None)?)?;
+    let retired = live.h3(
+        &n,
+        &session,
+        &drain(json!({"drain": "retire", "deployment": n_deployment}), None)?,
+    )?;
+    ensure!(
+        retired["retired"]["drained"] == true && retired["retired"]["unfinished_invocations"] == 0,
+        "retirement has no complete drain receipt: {retired}"
+    );
+    let remaining = present(&view)?;
+    ensure!(
+        !remaining.contains(&n_deployment) && remaining.contains(&next_deployment),
+        "drained N was not removed or N+1 was: {remaining:?}"
+    );
+    let finalized = live.h3(&n, &session, &drain(json!({"drain": "finalize"}), None)?)?;
+    ensure!(
+        finalized.get("finalized").is_some(),
+        "drained generation did not finalize: {finalized}"
+    );
+    live.stop(next_host, "successor")?;
+    live.stop(n_host, "candidate")?;
+    live.finish()
 }

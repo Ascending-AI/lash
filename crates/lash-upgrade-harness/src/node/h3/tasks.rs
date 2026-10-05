@@ -10,53 +10,63 @@ use std::sync::Arc;
 
 pub(super) const DEFERRED: &str = "e2e.h3.deferred";
 
-pub(super) fn register(spec: PluginSpec) -> PluginSpec {
-    spec.with_plugin_task_typed::<Deferred, _, _>(|ctx, label| async move {
-        let call = call(&ctx, &label, ToolDeclaration::deferring())?;
-        let token = ctx.cancellation_token.clone();
-        let handlers = Pending(Echo {
-            output: label,
-            cancelled: Arc::new(move || token.is_cancelled()),
-        });
-        let mut run = RunCoordinator::open(
-            &ctx.scoped_effect_controller,
-            call.owner.clone(),
-            call.segment,
-            call.available.clone(),
-        );
-        let decided = run
-            .start_round(
-                std::slice::from_ref(&call),
-                lash_core::tool_run::CapacityScope::Held,
-                Arc::new(handlers),
-                Default::default(),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-        if decided.is_empty() {
-            while run
-                .progress()
+pub(super) fn register(
+    spec: PluginSpec,
+    materials: Arc<dyn lash_core::store::ToolMaterialStore>,
+) -> PluginSpec {
+    spec.with_plugin_task_typed::<Deferred, _, _>(move |ctx, label| {
+        let materials = materials.clone();
+        async move {
+            let call = call(&ctx, &label, ToolDeclaration::deferring())?;
+            let token = ctx.cancellation_token.clone();
+            let handlers = Pending(
+                Echo {
+                    output: label,
+                    cancelled: Arc::new(move || token.is_cancelled()),
+                },
+                materials,
+            );
+            let mut run = RunCoordinator::open(
+                &ctx.scoped_effect_controller,
+                call.owner.clone(),
+                call.segment,
+                call.available.clone(),
+            );
+            let decided = run
+                .start_round(
+                    std::slice::from_ref(&call),
+                    lash_core::tool_run::CapacityScope::Held,
+                    Arc::new(handlers),
+                    Default::default(),
+                )
                 .await
-                .map_err(|error| error.to_string())?
-                .is_none()
-            {}
+                .map_err(|error| error.to_string())?;
+            if decided.is_empty() {
+                while run
+                    .progress()
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .is_none()
+                {}
+            }
+            run.await_deferred()
+                .await
+                .map_err(|error| error.to_string())?;
+            let terminals = run.drain().await.map_err(|error| error.to_string())?;
+            run.close().await.map_err(|error| error.to_string())?;
+            let output = terminals
+                .into_iter()
+                .find_map(|(_, terminal)| match terminal {
+                    lash_core::tool_dispatch::SingletonTerminal::Final { capture, .. } => {
+                        capture.output().map(str::to_owned)
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| "H3 Deferred completed without its retained result".to_owned())?;
+            let output: String =
+                serde_json::from_str(&output).map_err(|error| error.to_string())?;
+            Ok(PluginOperationOutcome::new(output))
         }
-        run.await_deferred()
-            .await
-            .map_err(|error| error.to_string())?;
-        let terminals = run.drain().await.map_err(|error| error.to_string())?;
-        run.close().await.map_err(|error| error.to_string())?;
-        let output = terminals
-            .into_iter()
-            .find_map(|(_, terminal)| match terminal {
-                lash_core::tool_dispatch::SingletonTerminal::Final { capture, .. } => {
-                    capture.output().map(str::to_owned)
-                }
-                _ => None,
-            })
-            .ok_or_else(|| "H3 Deferred completed without its retained result".to_owned())?;
-        let output: String = serde_json::from_str(&output).map_err(|error| error.to_string())?;
-        Ok(PluginOperationOutcome::new(output))
     })
 }
 
@@ -124,9 +134,13 @@ macro_rules! task {
 }
 task!(Deferred, DEFERRED, String);
 
-struct Pending(Echo);
+/// The source's retained result is read from the serving store set.
+struct Pending(Echo, Arc<dyn lash_core::store::ToolMaterialStore>);
 #[lash_core::async_trait]
 impl SingletonToolHandlers for Pending {
+    fn tool_material_store(&self) -> Option<&dyn lash_core::store::ToolMaterialStore> {
+        Some(self.1.as_ref())
+    }
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
         self.0.prepare(call).await
     }

@@ -319,3 +319,405 @@ async fn s18_cancel_suspended_application_timer_sqlite_memory() -> Result<()> {
     );
     Ok(())
 }
+
+/// S21's catalogue entry for its live upgrade-node case.
+pub fn s21_spec(
+    store: lash_upgrade_harness::e2e::case::StoreKind,
+    artifacts: Vec<lash_upgrade_harness::e2e::case::ArtifactIdentity>,
+) -> lash_upgrade_harness::e2e::case::CaseSpec {
+    lash_upgrade_harness::e2e::case::CaseSpec {
+        id: "S21".into(),
+        rules: vec!["L07".into(), "L12".into()],
+        host: lash_upgrade_harness::e2e::host::HostKind::UpgradeNode,
+        store,
+        channel: lash_upgrade_harness::e2e::case::Channel::Standard,
+        provider: lash_upgrade_harness::e2e::provider::ProviderKind::Scripted,
+        restate_nodes: 1,
+        artifacts,
+        cuts: Vec::new(),
+        expected_terminal: "settled".into(),
+        requires: Vec::new(),
+    }
+}
+
+/// One source-registry control against the live deployment.
+fn source(
+    live: &mut crate::h3_live::Live,
+    session: &str,
+    operation: &str,
+    op: lash_upgrade_harness::node::h3::live::SourceOp,
+) -> Result<serde_json::Value> {
+    let node = live.builds.n.clone();
+    live.h3(
+        &node,
+        session,
+        &lash_upgrade_harness::node::h3::H3Command::Source {
+            operation: operation.into(),
+            op,
+        },
+    )
+}
+
+fn reply<T: serde::de::DeserializeOwned>(answer: serde_json::Value) -> Result<T> {
+    Ok(serde_json::from_value(answer["reply"].clone())?)
+}
+
+/// S21/L07/L12 on a real host: the live registry keeps the first seal
+/// against duplicate, wrong-authority and owner-cancel writes; a real
+/// Deferred Run drains its resolved final exactly once; a cancelled Run's
+/// late completion neither publishes nor revives it.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries and private live Restate"]
+fn s21_source_seal_stays_immutable_on_the_upgrade_node() -> Result<()> {
+    use lash_core::tool_run::{
+        SealOutcome, SealRefusal, SealWriter, SegmentOrdinal, SourceRefusal, SourceSeal,
+    };
+    use lash_upgrade_harness::harness::{block_on, wait_for};
+    use lash_upgrade_harness::node::h3::live::SourceOp;
+    use lash_upgrade_harness::node::h3::{
+        H3Command, SourceArmReply, SourceSealReply, SourceSubscribeReply,
+    };
+    use serde_json::json;
+    let mut live = crate::h3_live::Live::setup("s21", |artifacts| {
+        s21_spec(
+            lash_upgrade_harness::e2e::case::StoreKind::SqliteFile,
+            artifacts,
+        )
+    })?;
+    let n = live.builds.n.clone();
+    let n_host = live.serve(&n, "candidate")?;
+    let opener = |session: &str, operation: &str| {
+        lash_core::EffectOpener::session_operation(
+            lash_core::SessionId::fixture(session.to_owned()),
+            operation,
+        )
+    };
+    let retained =
+        |live: &mut crate::h3_live::Live, session: &str, value: &str| -> Result<SourceSeal> {
+            let answer = source(
+                live,
+                session,
+                "s21-owner",
+                SourceOp::Retain {
+                    value: value.into(),
+                },
+            )?;
+            Ok(serde_json::from_value(answer["seal"].clone())?)
+        };
+    let seal = |live: &mut crate::h3_live::Live,
+                session: &str,
+                operation: &str,
+                writer: SealWriter,
+                seal: SourceSeal|
+     -> Result<SourceSealReply> {
+        reply(source(
+            live,
+            session,
+            operation,
+            SourceOp::Seal { writer, seal },
+        )?)
+    };
+    let subscribe = |live: &mut crate::h3_live::Live,
+                     session: &str,
+                     operation: &str,
+                     owner: lash_core::EffectOpener,
+                     segment: u32|
+     -> Result<SourceSubscribeReply> {
+        reply(source(
+            live,
+            session,
+            operation,
+            SourceOp::Subscribe {
+                owner,
+                segment: SegmentOrdinal(segment),
+            },
+        )?)
+    };
+    let arm = |live: &mut crate::h3_live::Live, session: &str| -> Result<SourceArmReply> {
+        reply(source(live, session, "s21-owner", SourceOp::Arm)?)
+    };
+
+    // Resolve before subscribe, against the live registry object.
+    let resolved = live.case.session_id("s21-resolved");
+    let owner = opener(&resolved, "s21-owner");
+    let wrong = opener(&resolved, "wrong-owner");
+    ensure!(arm(&mut live, &resolved)? == SourceArmReply::Armed { seal: None });
+    let first = retained(&mut live, &resolved, "s21-original-result")?;
+    let second = retained(&mut live, &resolved, "s21-late-result")?;
+    ensure!(
+        seal(
+            &mut live,
+            &resolved,
+            "s21-owner",
+            SealWriter::External,
+            first.clone()
+        )? == SourceSealReply::Outcome {
+            outcome: SealOutcome::Sealed {
+                seal: first.clone()
+            }
+        }
+    );
+    ensure!(
+        seal(
+            &mut live,
+            &resolved,
+            "s21-owner",
+            SealWriter::Owner {
+                opener: wrong.clone()
+            },
+            SourceSeal::Cancelled
+        )? == SourceSealReply::Refused {
+            refusal: SourceRefusal::Seal {
+                seal: SealRefusal::WrongAuthority
+            }
+        }
+    );
+    ensure!(
+        seal(
+            &mut live,
+            &resolved,
+            "s21-owner",
+            SealWriter::External,
+            second
+        )? == SourceSealReply::Outcome {
+            outcome: SealOutcome::AlreadySealed {
+                seal: first.clone()
+            }
+        }
+    );
+    ensure!(
+        seal(
+            &mut live,
+            &resolved,
+            "s21-owner",
+            SealWriter::Owner {
+                opener: owner.clone()
+            },
+            SourceSeal::Cancelled
+        )? == SourceSealReply::Outcome {
+            outcome: SealOutcome::AlreadySealed {
+                seal: first.clone()
+            }
+        }
+    );
+    ensure!(
+        subscribe(&mut live, &resolved, "s21-owner", wrong, 1)?
+            == SourceSubscribeReply::Refused {
+                refusal: SourceRefusal::WrongOwner
+            }
+    );
+    ensure!(
+        subscribe(&mut live, &resolved, "s21-owner", owner.clone(), 1)?
+            == SourceSubscribeReply::Sealed {
+                seal: first.clone()
+            }
+    );
+    ensure!(arm(&mut live, &resolved)? == SourceArmReply::Armed { seal: Some(first) });
+
+    // An owner cancellation seals first; a late authorized completion
+    // cannot change the next segment's observation.
+    let cancelled = live.case.session_id("s21-cancelled");
+    let owner = opener(&cancelled, "s21-owner");
+    ensure!(arm(&mut live, &cancelled)? == SourceArmReply::Armed { seal: None });
+    ensure!(
+        seal(
+            &mut live,
+            &cancelled,
+            "s21-owner",
+            SealWriter::Owner {
+                opener: owner.clone()
+            },
+            SourceSeal::Cancelled
+        )? == SourceSealReply::Outcome {
+            outcome: SealOutcome::Sealed {
+                seal: SourceSeal::Cancelled
+            }
+        }
+    );
+    let late = retained(&mut live, &cancelled, "s21-too-late")?;
+    ensure!(
+        seal(
+            &mut live,
+            &cancelled,
+            "s21-owner",
+            SealWriter::External,
+            late
+        )? == SourceSealReply::Outcome {
+            outcome: SealOutcome::AlreadySealed {
+                seal: SourceSeal::Cancelled
+            }
+        }
+    );
+    ensure!(
+        subscribe(&mut live, &cancelled, "s21-owner", owner, 2)?
+            == SourceSubscribeReply::Sealed {
+                seal: SourceSeal::Cancelled
+            }
+    );
+
+    // A real Deferred Run: its first resolution is the protected final it
+    // drains; a duplicate and a wrong-owner cancel change nothing.
+    let session = live.case.session_id("s21-run");
+    let admitted = live.h3(
+        &n,
+        &session,
+        &H3Command::Deferred {
+            key: "s21-resolved-run".into(),
+        },
+    )?;
+    let run: lash_core::TurnId = serde_json::from_value(admitted["run"].clone())?;
+    let (key, suspended) = live.await_suspended(&n, &session, &run)?;
+    let operation = lash_core::tool_run::OperationRun::for_run_id(
+        lash::SessionId::fixture(session.clone()),
+        &run,
+    )
+    .ok_or_else(|| anyhow::anyhow!("{run} is not an operation Run"))?
+    .operation_id;
+    let described = source(&mut live, &session, &operation, SourceOp::Describe)?;
+    let descriptor: lash_core::tool_run::SourceDescriptor =
+        serde_json::from_value(described["descriptor"].clone())?;
+    ensure!(
+        seal(
+            &mut live,
+            &session,
+            &operation,
+            SealWriter::Owner {
+                opener: opener(&session, "wrong-owner")
+            },
+            SourceSeal::Cancelled
+        )? == SourceSealReply::Refused {
+            refusal: SourceRefusal::Seal {
+                seal: SealRefusal::WrongAuthority
+            }
+        },
+        "a wrong owner's cancel was not refused typed"
+    );
+    let first = live.complete_first(&n, &session, &operation, "s21-first")?;
+    let duplicate = live.complete(&n, &session, &operation, "s21-second")?;
+    ensure!(
+        crate::h3_live::kept(&duplicate, &first),
+        "a duplicate completion displaced the first seal: {duplicate:?}"
+    );
+    let followed = live.h3(&n, &session, &H3Command::Follow { run: run.clone() })?;
+    ensure!(
+        followed["output"] == json!("s21-first"),
+        "the Run did not drain its first resolution: {followed}"
+    );
+    let snapshot = live.h3(&n, &session, &H3Command::Snapshot { run: run.clone() })?;
+    let terminal: lash_core::store::RunTerminal =
+        serde_json::from_value(snapshot["terminal"].clone())?;
+    ensure!(
+        terminal.run == run
+            && terminal.kind() == lash_core::store::RunTerminalKind::Answered
+            && snapshot["unfinished"] == false,
+        "resolved Run has no single Answered terminal: {snapshot}"
+    );
+    // Once the Run settles its scope may already be retired: a typed
+    // refusal is allowed, a different seal or a fresh subscription is not.
+    let sealed = subscribe(&mut live, &session, &operation, descriptor.owner.clone(), 1)?;
+    ensure!(
+        match &sealed {
+            SourceSubscribeReply::Sealed { seal } => *seal == first,
+            SourceSubscribeReply::Refused { .. } => true,
+            SourceSubscribeReply::Subscribed => false,
+        },
+        "the settled Run's source shows another seal: {sealed:?}"
+    );
+    live.journal(&suspended.id)?;
+    let invocations = live.run_invocations(&key)?;
+    ensure!(
+        invocations.len() == 1 && invocations[0].status == "completed",
+        "resolved Run kept or opened another journal: {invocations:?}"
+    );
+
+    // A cancelled Run: the late completion neither publishes nor revives it.
+    let session = live.case.session_id("s21-cancel-run");
+    let admitted = live.h3(
+        &n,
+        &session,
+        &H3Command::Deferred {
+            key: "s21-cancelled-run".into(),
+        },
+    )?;
+    let run: lash_core::TurnId = serde_json::from_value(admitted["run"].clone())?;
+    let (key, suspended) = live.await_suspended(&n, &session, &run)?;
+    let operation = lash_core::tool_run::OperationRun::for_run_id(
+        lash::SessionId::fixture(session.clone()),
+        &run,
+    )
+    .ok_or_else(|| anyhow::anyhow!("{run} is not an operation Run"))?
+    .operation_id;
+    let described = source(&mut live, &session, &operation, SourceOp::Describe)?;
+    let descriptor: lash_core::tool_run::SourceDescriptor =
+        serde_json::from_value(described["descriptor"].clone())?;
+    let receipt = live.h3(&n, &session, &H3Command::Cancel { run: run.clone() })?;
+    ensure!(
+        receipt["receipt"]
+            .as_str()
+            .is_some_and(|receipt| receipt.starts_with("OperationRequested")),
+        "public cancellation did not address the admitted operation: {receipt}"
+    );
+    let probe = H3Command::Snapshot { run: run.clone() };
+    let snapshot = wait_for("the cancelled Run's store terminal", || {
+        let snapshot = n.h3(&live.case, &session, &probe)?;
+        Ok((!snapshot["terminal"].is_null()).then_some(snapshot))
+    })
+    .map_err(|error| {
+        let open = live.run_invocations(&key);
+        let snapshot = n.h3(&live.case, &session, &probe);
+        anyhow::anyhow!("{error}; journals {open:?}; store {snapshot:?}")
+    })?;
+    let terminal: lash_core::store::RunTerminal =
+        serde_json::from_value(snapshot["terminal"].clone())?;
+    ensure!(
+        terminal.run == run && terminal.kind() == lash_core::store::RunTerminalKind::Cancelled,
+        "cancel did not settle its own Run: {snapshot}"
+    );
+    live.quiesce()?;
+    let before = live.run_invocations(&key)?;
+    let late = live.complete(&n, &session, &operation, "s21-too-late")?;
+    ensure!(
+        crate::h3_live::kept(&late, &SourceSeal::Cancelled),
+        "a completion after cancellation displaced the Cancelled seal: {late:?}"
+    );
+    let observed = subscribe(&mut live, &session, &operation, descriptor.owner.clone(), 2)?;
+    ensure!(
+        matches!(
+            &observed,
+            SourceSubscribeReply::Sealed {
+                seal: SourceSeal::Cancelled
+            } | SourceSubscribeReply::Refused { .. }
+        ),
+        "a late completion resealed the cancelled source: {observed:?}"
+    );
+    ensure!(
+        subscribe(&mut live, &session, &operation, descriptor.owner.clone(), 2)? == observed,
+        "the cancelled source's observation changed"
+    );
+    live.quiesce()?;
+    let after = live.h3(&n, &session, &probe)?;
+    ensure!(
+        after["terminal"] == snapshot["terminal"] && after["unfinished"] == false,
+        "a late completion changed the cancelled Run: {after}; late answer {late:?}"
+    );
+    let revived = live.run_invocations(&key)?;
+    ensure!(
+        revived == before
+            && revived
+                .iter()
+                .all(|invocation| invocation.status == "completed"),
+        "a late completion revived the cancelled Run: {revived:?}"
+    );
+    live.journal(&suspended.id)?;
+    let view = live.case.view()?;
+    let waits: Vec<serde_json::Value> = block_on(view.query(&format!(
+        "SELECT id, status FROM sys_invocation WHERE target_service_name = '{}' AND status <> 'completed'",
+        view.service_name("LashDurableWaitIndex")
+    )))?;
+    ensure!(
+        waits.is_empty(),
+        "sources retained waiting registry invocations: {waits:?}"
+    );
+    live.stop(n_host, "candidate")?;
+    live.finish()
+}

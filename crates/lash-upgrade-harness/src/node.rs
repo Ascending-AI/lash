@@ -579,6 +579,7 @@ fn core_builder(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash:
             backend.effect_host(),
             observed.gate_dir.clone(),
         ),
+        backend.tool_material_store(),
     );
     let build = BuildLabel::current();
     // The generation exists once this core is built: it folds in the core's

@@ -1408,9 +1408,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Not implemented on a real host: e2e_h3 transfer::s13_owned_work_refuses_operator_retirement_sqlite_memory and transfer::s13_unreadable_registry_fails_closed_sqlite_memory are SQLite-memory/double component witnesses without N/N+1 coexistence; FIG-4934 deferred it; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
+            "test": "transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes"
+          }
         },
         {
           "variant": "default",
@@ -1436,7 +1439,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented on a real host: e2e_h3 transfer::s13_owned_work_refuses_operator_retirement_sqlite_memory and transfer::s13_unreadable_registry_fails_closed_sqlite_memory are SQLite-memory/double component witnesses without N/N+1 coexistence; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the upgrade-node case transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes proves the sqlite_file/live leg and FIG-4994 threads the permutation into it.",
           "registration": null
         },
         {
@@ -1463,7 +1466,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented on a real host: e2e_h3 transfer::s13_owned_work_refuses_operator_retirement_sqlite_memory and transfer::s13_unreadable_registry_fails_closed_sqlite_memory are SQLite-memory/double component witnesses without N/N+1 coexistence; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the upgrade-node case transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes proves the sqlite_file/live leg and FIG-4994 threads the permutation into it.",
           "registration": null
         },
         {
@@ -1490,7 +1493,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented on a real host: e2e_h3 transfer::s13_owned_work_refuses_operator_retirement_sqlite_memory and transfer::s13_unreadable_registry_fails_closed_sqlite_memory are SQLite-memory/double component witnesses without N/N+1 coexistence; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the upgrade-node case transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes proves the sqlite_file/live leg and FIG-4994 threads the permutation into it.",
           "registration": null
         }
       ],
@@ -2278,9 +2281,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Not implemented on a real host: e2e_h3 process::s21_resolved_before_subscription_sqlite_memory and process::s21_cancelled_source_refuses_revival_sqlite_memory are double component witnesses without transfer/protected drain; FIG-4934 deferred it; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
+            "test": "process::s21_source_seal_stays_immutable_on_the_upgrade_node"
+          }
         },
         {
           "variant": "default",
@@ -2306,7 +2312,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented on a real host: e2e_h3 process::s21_resolved_before_subscription_sqlite_memory and process::s21_cancelled_source_refuses_revival_sqlite_memory are double component witnesses without transfer/protected drain; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the upgrade-node case process::s21_source_seal_stays_immutable_on_the_upgrade_node proves the sqlite_file/live leg and FIG-4994 threads the permutation into it.",
           "registration": null
         },
         {
@@ -2333,7 +2339,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented on a real host: e2e_h3 process::s21_resolved_before_subscription_sqlite_memory and process::s21_cancelled_source_refuses_revival_sqlite_memory are double component witnesses without transfer/protected drain; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the upgrade-node case process::s21_source_seal_stays_immutable_on_the_upgrade_node proves the sqlite_file/live leg and FIG-4994 threads the permutation into it.",
           "registration": null
         },
         {
@@ -2360,7 +2366,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented on a real host: e2e_h3 process::s21_resolved_before_subscription_sqlite_memory and process::s21_cancelled_source_refuses_revival_sqlite_memory are double component witnesses without transfer/protected drain; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the upgrade-node case process::s21_source_seal_stays_immutable_on_the_upgrade_node proves the sqlite_file/live leg and FIG-4994 threads the permutation into it.",
           "registration": null
         }
       ],
@@ -2405,9 +2411,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/park.rs is a catalogue-only spec; FIG-4934 deferred it; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
+            "test": "park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes"
+          }
         },
         {
           "variant": "default",
@@ -2433,7 +2442,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/park.rs is a catalogue-only spec; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the upgrade-node case park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes proves the sqlite_file/live leg and FIG-4994 threads the permutation into it.",
           "registration": null
         },
         {
@@ -2460,7 +2469,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/park.rs is a catalogue-only spec; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the upgrade-node case park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes proves the sqlite_file/live leg and FIG-4994 threads the permutation into it.",
           "registration": null
         },
         {
@@ -2487,7 +2496,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/park.rs is a catalogue-only spec; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the upgrade-node case park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes proves the sqlite_file/live leg and FIG-4994 threads the permutation into it.",
           "registration": null
         }
       ],
