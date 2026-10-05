@@ -140,6 +140,9 @@ impl PluginOperation for WorkbenchOperation {
     type Output = String;
     type Error = String;
     const ERROR_TYPE: &'static str = "e2e.workbench.operation";
+    /// The fixture operation returns a Serde string as its typed error.
+    /// version_surface = "coexist"
+    /// version_guard(items(Error))
     const ERROR_VERSION: FormatVersion = FormatVersion::ONE;
     fn error_class(_: &String) -> PluginFailureClass {
         PluginFailureClass::Terminal

@@ -158,8 +158,13 @@ enum RetiredSourceTerminal {
     Cancelled,
 }
 
+/// The retained source identity and terminal's index key.
+/// version_surface = "coexist"
+/// version_guard(items(retired_source_key, RetiredSource, RetiredSourceTerminal))
+const RETIRED_SOURCE_PREFIX: &str = "wait-index/v2/source-retired/";
+
 fn retired_source_key(address: &RestateDurableWaitAddress) -> String {
-    format!("wait-index/v2/source-retired/{}", address.workflow_key)
+    format!("{RETIRED_SOURCE_PREFIX}{}", address.workflow_key)
 }
 
 async fn source_is_retired(

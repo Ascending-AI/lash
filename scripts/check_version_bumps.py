@@ -3001,7 +3001,7 @@ def version_at(view: TreeView, surface: Surface) -> int:
 
     The value is an integer literal, another constant of the same file that
     resolves to one, or a string whose trailing digits are the version
-    (`"lashlang-vm-abi-v14"`).
+    (`"lashlang-vm-abi-v14"`), or a typed plugin `FormatVersion`.
     """
     content = view.content(surface.constant_path)
     where = f"{view.label}: {surface.constant_path}"
@@ -3012,6 +3012,15 @@ def version_at(view: TreeView, surface: Surface) -> int:
         value = _default_build_value(content, name, where)
         if re.fullmatch(r"[0-9][0-9_]*", value):
             return int(value.replace("_", ""))
+        typed = re.fullmatch(
+            r"(?:[A-Za-z_][A-Za-z0-9_]*::)*FormatVersion::"
+            r"(?:ONE|new\(([0-9][0-9_]*)\)\.unwrap\(\))",
+            strip_rust_trivia(value),
+        )
+        if typed is not None:
+            version = 1 if typed[1] is None else int(typed[1].replace("_", ""))
+            if 0 < version <= 0xFFFF_FFFF:
+                return version
         tagged = re.fullmatch(r'"[^"\\]*?v([0-9]+)(?:[/:-][^"\\]*)?"', value)
         if tagged is not None:
             return int(tagged.group(1))

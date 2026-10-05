@@ -1,6 +1,11 @@
 use super::RuntimeExecutionContext;
 use lash_sansio::sync::MutexExt;
 
+/// The retained unadmitted request's identity preimage.
+/// version_surface = "coexist"
+/// version_guard(items(retain_unadmitted_tool_request))
+const UNADMITTED_TOOL_REQUEST_FAMILY_VERSION: u8 = 1;
+
 impl RuntimeExecutionContext<'_> {
     pub(in crate::session) async fn retain_unadmitted_tool_request(
         &self,
@@ -33,7 +38,7 @@ impl RuntimeExecutionContext<'_> {
             });
             let digest = crate::stable_identity::rendered_hash(
                 "unadmitted-tool-request",
-                1,
+                UNADMITTED_TOOL_REQUEST_FAMILY_VERSION,
                 &crate::identity_json::payload_leaf(&payload),
             );
             let offered_digest = digest.clone();

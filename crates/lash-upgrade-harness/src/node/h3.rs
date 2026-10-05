@@ -201,6 +201,9 @@ impl lash_core::facade_support::PluginOperation for Operation {
     type Output = String;
     type Error = String;
     const ERROR_TYPE: &'static str = TASK;
+    /// The fixture operation returns a Serde string as its typed error.
+    /// version_surface = "coexist"
+    /// version_guard(items(Error))
     const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
     fn error_class(_: &String) -> lash_core::plugin::PluginFailureClass {
         lash_core::plugin::PluginFailureClass::Terminal

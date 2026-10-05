@@ -943,6 +943,31 @@ class Reachable(Fixture):
 
 
 class RegistryMoves(Fixture):
+    def test_typed_plugin_error_versions_preserve_the_strict_shape_guard(self) -> None:
+        source = "crates/demo/src/operation.rs"
+        operation = (
+            '/// version_surface = "coexist"\n'
+            '/// version_guard(items(ErrorPayload))\n'
+            'const ERROR_VERSION: crate::FormatVersion = crate::FormatVersion::ONE;\n'
+            'pub struct ErrorPayload { pub message: String }\n'
+        )
+        self.write(source, operation)
+        base = self.commit("declare a typed plugin error version")
+        code, output = self.verdict(base, base)
+        self.assertEqual(0, code, output)
+        self.write(source, operation.replace("message: String", "message: u64"))
+        code, output = self.verdict(self.commit("change the error payload"), base)
+        self.assertEqual(1, code, output)
+        self.assertIn("ERROR_VERSION is 1 on both sides", output)
+        self.write(source, operation.replace("message: String", "message: u64")
+                   .replace("FormatVersion::ONE", "FormatVersion::new(2).unwrap()"))
+        code, output = self.verdict(self.commit("advance the typed error version"), base)
+        self.assertEqual(0, code, output)
+        self.write(source, operation.replace("FormatVersion::ONE", "FormatVersion::new(0).unwrap()"))
+        code, output = self.verdict(self.commit("refuse an invalid zero version"), base)
+        self.assertEqual(2, code, output)
+        self.assertIn("does not resolve to an integer version", output)
+
     def test_base_revisions_cannot_use_a_second_surface_declaration_path(self) -> None:
         historical = (
             '[[surface]]\nconstant = "WIRE_VERSION"\n'
