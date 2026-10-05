@@ -125,6 +125,43 @@ A SQL store is not a second execution engine. Tests exercise the contract
 through the in-process Restate server double and live Restate; simulation
 uses Lash-sim's in-process effect host.
 
+### 8. A physical worker retains one ownership record
+
+`WorkerProcessEngine` receives a durable ownership directory from its host.
+Replacement deployments retain that directory on the same Linux kernel and
+PID namespace. The StartKey recovers one minted ProcessId (ADR 0107); the
+engine's record binds that id, key and payload to one worker PID, kernel boot
+id, PID namespace and kernel start time. An OS file lock serializes launch
+and terminal writes across engine instances. Data replacement and the owning
+directory are synced before the new state is acknowledged.
+
+A prelaunch shell waits for an authorization line on stdin and then execs
+in place. The parent records the PID durably before sending that line and
+the JSON payload. If the host dies before the write, EOF closes the gate:
+none of the configured work ran. If it dies after the write, redelivery
+reads that launch, never starts a replacement, and adopts its live worker.
+A pidfd is opened before checking boot, namespace and start time, so a
+reused numeric PID cannot receive a signal intended for the recorded worker.
+
+Adoption retains the live worker instead of setting a parent-death signal.
+Cancellation signals that pidfd, observes death and waits for the original
+parent or kernel init to reap it. Termination and natural-exit output are
+written durably before the supervisor publishes them, and a retained terminal
+is immutable. Cold cancellation reads that record even when the process
+workflow already finished. When a host lost the worker's output before
+recording it, recovery refuses resume with typed `SubstrateLost`; it does
+not execute the program again to reconstruct that result. The directory
+must survive host replacement and remain retained alongside its process
+identities. A live worker record from another kernel or PID namespace refuses ownership
+observation: that worker is inaccessible, not proven dead. No fresh termination
+receipt or replacement launch is allowed there. Retained terminals remain
+readable without another physical observation.
+
+Evidence: `crates/lash-core-execution/src/runtime/process/worker_engine.rs`,
+`crates/lash-core-execution/src/runtime/process/worker_ownership.rs`, and the
+L08 cold-process-redelivery laws in
+`crates/lash/src/tests/isolated_tool_route.rs` (FIG-5011).
+
 ## Consequences
 
 A registry row cannot authorize re-execution from scratch. Losing an engine

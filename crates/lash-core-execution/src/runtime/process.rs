@@ -32,6 +32,7 @@ mod tests;
 mod validation;
 mod wake;
 mod worker_engine;
+mod worker_ownership;
 
 pub use awaiter::{
     ProcessChangeHub, ProcessChangeSubscription, ProcessEventSink, ProcessEventSinkRegistration,

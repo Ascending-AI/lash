@@ -1236,7 +1236,7 @@ features = ["bundled", "bundled_bindings", "cc", "default", "min_sqlite_version_
 package = "linux-raw-sys"
 version = "=0.12.1"
 default-features = false
-features = ["auxvec", "elf", "errno", "general", "ioctl", "no_std"]
+features = ["auxvec", "elf", "errno", "general", "ioctl", "no_std", "prctl"]
 
 [dependencies.p0205]
 package = "litemap"
@@ -1864,7 +1864,7 @@ features = []
 package = "rustix"
 version = "=1.1.4"
 default-features = false
-features = ["alloc", "default", "fs", "std"]
+features = ["alloc", "default", "event", "fs", "process", "std"]
 
 [dependencies.p0309]
 package = "rustls"

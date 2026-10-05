@@ -2181,6 +2181,7 @@ dependencies = [
  "lash-internal-trace",
  "proptest",
  "rmp-serde",
+ "rustix",
  "schemars 1.2.2",
  "serde",
  "serde_json",

@@ -119,7 +119,7 @@ struct Isolated {
     core: LashCore,
     tools: Arc<IsolatedTools>,
     engine: Arc<lash_core::WorkerProcessEngine>,
-    marker: tempfile::TempDir,
+    marker: Arc<tempfile::TempDir>,
 }
 
 impl Isolated {
@@ -128,19 +128,30 @@ impl Isolated {
             lash_restate_test::backend(0x4997_0001, lash_restate_test::ServerConfig::default())
                 .await
                 .expect("build the Restate double");
-        let marker = tempfile::tempdir().unwrap();
-        let engine = Arc::new(lash_core::WorkerProcessEngine::new(
-            KIND,
-            lash_core::WorkerCommand {
-                program: "/bin/sh".into(),
-                args: vec![
-                    "-c".into(),
-                    "echo $$ >> \"$1\"; exec sleep 600".into(),
-                    "sh".into(),
-                    marker.path().join("pids").into_os_string(),
-                ],
-            },
-        ));
+        Self::over(double, Arc::new(tempfile::tempdir().unwrap()), bound).await
+    }
+
+    async fn over(
+        double: lash_restate_test::RestateTestBackend,
+        marker: Arc<tempfile::TempDir>,
+        bound: bool,
+    ) -> Self {
+        let engine = Arc::new(
+            lash_core::WorkerProcessEngine::new(
+                KIND,
+                lash_core::WorkerCommand {
+                    program: "/bin/sh".into(),
+                    args: vec![
+                        "-c".into(),
+                        "echo $$ >> \"$1\"; exec sleep 600".into(),
+                        "sh".into(),
+                        marker.path().join("pids").into_os_string(),
+                    ],
+                },
+                marker.path().join("ownership"),
+            )
+            .with_spawn_wait(std::time::Duration::from_secs(2)),
+        );
         let tools = Arc::new(IsolatedTools {
             bound,
             executions: AtomicUsize::new(0),
@@ -204,6 +215,25 @@ impl Isolated {
         })
         .await
         .expect("the worker writes its PID")
+    }
+
+    /// Wait until a redelivered process workflow has committed its terminal.
+    async fn settled(&self, process_id: &lash_core::ProcessId) {
+        tokio::time::timeout(WEDGE, async {
+            loop {
+                if self
+                    .processes()
+                    .await
+                    .iter()
+                    .any(|record| record.id == *process_id && record.outcome().is_some())
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the recovered process settles without spawning");
     }
 
     /// The engine processes the registry holds for the law's engine.
@@ -446,4 +476,114 @@ async fn l08_isolated_cancellation_forbids_launch_before_admission_or_reaps_the_
         assert!(!alive(pids[0]), "{suffix}: no orphan worker");
         assert_eq!(world.tools.executions.load(Ordering::SeqCst), 0, "{suffix}");
     }
+}
+
+/// L08/K5 (FIG-5011/S19): a cold deployment redelivers the process workflow
+/// under the same StartKey, adopting its live worker rather than duplicating it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn l08_cold_process_redelivery_adopts_the_live_worker_without_a_second_launch() -> Result<()>
+{
+    let world = Isolated::new(true).await;
+    let session = world
+        .core
+        .session("isolated-orphan")
+        .created()
+        .await
+        .open()
+        .await?;
+    let output = session
+        .send(TurnInput::text("start"))
+        .id("orphan-run")
+        .await?
+        .output()
+        .await?;
+    let descriptor = descriptor(&output.result);
+    let original = world.spawned(1).await[0];
+    // Retain the OS supervisor, as SIGKILL leaves its worker alive, but lose
+    // every engine slot reachable by the restarted process workflow.
+    let old_engine = world.engine;
+    let old_core = world.core;
+    let fresh = Isolated::over(world.double.restart().await.unwrap(), world.marker, true).await;
+    let receipt = fresh
+        .engine
+        .terminate_worker(&descriptor.process_id)
+        .await?;
+    assert_eq!(
+        receipt.worker_pid.get(),
+        original,
+        "recovery must terminate the original worker"
+    );
+    fresh.settled(&descriptor.process_id).await;
+    assert_eq!(
+        fresh.pids(),
+        vec![original],
+        "recovery launches no replacement"
+    );
+    assert!(!alive(original), "the adopted worker is reaped");
+    drop((old_core, old_engine));
+    Ok(())
+}
+
+/// L08/K5 (FIG-5011/S20): losing host-local slots after the physical reap
+/// preserves its receipt and never gives that StartKey a replacement worker.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn l08_cold_process_redelivery_keeps_the_reaped_worker_and_its_receipt() -> Result<()> {
+    let world = Isolated::new(true).await;
+    let session = world
+        .core
+        .session("isolated-reaped")
+        .created()
+        .await
+        .open()
+        .await?;
+    let output = session
+        .send(TurnInput::text("start"))
+        .id("reaped-run")
+        .await?
+        .output()
+        .await?;
+    let descriptor = descriptor(&output.result);
+    let original = world.spawned(1).await[0];
+    let mut crashes = CrashCount::new();
+    assert!(world.double.server().on_crash(crashes.listener()));
+    world.double.server().crash_on(
+        lash_restate_test::CrashRule::new(CrashPoint::BeforeRun {
+            name: "lash.process.complete".to_owned(),
+        })
+        .service("LashProcessWorkflow")
+        .handler("run")
+        .times(u32::MAX),
+    );
+    let receipt = world
+        .engine
+        .terminate_worker(&descriptor.process_id)
+        .await?;
+    assert_eq!(receipt.worker_pid.get(), original);
+    tokio::time::timeout(WEDGE, crashes.wait_until(1))
+        .await
+        .unwrap()
+        .unwrap();
+    let old_core = world.core;
+    let old_engine = world.engine;
+    let fresh = Isolated::over(world.double.restart().await.unwrap(), world.marker, true).await;
+    fresh.double.server().clear_crashes();
+    let recovered = fresh
+        .engine
+        .terminate_worker(&descriptor.process_id)
+        .await?;
+    // Waiting for redelivery prevents the marker assertion from missing
+    // a replacement launched after cold cancellation recovered the receipt.
+    fresh.settled(&descriptor.process_id).await;
+    assert_eq!(
+        recovered, receipt,
+        "cold recovery retains the physical receipt"
+    );
+    assert_eq!(
+        fresh.pids(),
+        vec![original],
+        "a reaped worker is never respawned"
+    );
+    assert!(!alive(original));
+    drop((old_core, old_engine));
+    Ok(())
 }

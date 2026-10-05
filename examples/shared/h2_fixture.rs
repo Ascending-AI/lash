@@ -42,8 +42,8 @@ fn event_type() -> String {
 pub(crate) struct Fixture {
     config: FixtureConfig,
     receiver: Arc<OnceLock<lash::ProcessId>>,
-    /// The one worker engine every contribution returns: the engine that
-    /// ran a worker is the one that can terminate it.
+    /// One engine per deployment; its marker's durable ownership directory
+    /// lets a cold replacement adopt the same worker or termination receipt.
     worker: Option<Arc<dyn lash::plugins::ProcessEngine>>,
 }
 
@@ -86,6 +86,7 @@ impl Fixture {
                             marker.clone().into_os_string(),
                         ],
                     },
+                    marker.with_extension("ownership"),
                 )))
             }
             ("S19" | "S20", None) => {

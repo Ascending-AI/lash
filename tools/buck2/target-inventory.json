@@ -50161,6 +50161,7 @@
         "lash-internal-trace",
         "proptest",
         "rmp-serde",
+        "rustix",
         "schemars",
         "serde",
         "serde_json",

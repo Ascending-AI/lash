@@ -11798,6 +11798,7 @@ third_party_rust_library(
         "general",
         "ioctl",
         "no_std",
+        "prctl",
     ],
     platform = {
         "linux-x86_64": dict(),
@@ -18234,7 +18235,9 @@ third_party_rust_library(
     features = [
         "alloc",
         "default",
+        "event",
         "fs",
+        "process",
         "std",
     ],
     platform = {
@@ -18274,7 +18277,9 @@ third_party_rust_binary(
     features = [
         "alloc",
         "default",
+        "event",
         "fs",
+        "process",
         "std",
     ],
     platform = {
@@ -18302,7 +18307,9 @@ third_party_buildscript_run(
     features = [
         "alloc",
         "default",
+        "event",
         "fs",
+        "process",
         "std",
     ],
     platform = {
