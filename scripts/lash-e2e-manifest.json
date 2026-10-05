@@ -3504,9 +3504,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer proves the sqlite_file/live leg only; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer_replay"
+          }
         },
         {
           "variant": "partial-stream-reset",
@@ -3561,9 +3564,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: s26_workbench_partial_stream_disconnect_refuses_unsafe_regeneration proves the sqlite_file/live leg only; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s26_workbench_partial_stream_disconnect_refuses_unsafe_regeneration_replay"
+          }
         },
         {
           "variant": "observer-reconnect",
@@ -3618,9 +3624,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer proves the sqlite_file/live leg only; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer_replay"
+          }
         }
       ],
       "setup": "Workbench production provider HTTP client; recorded SSE frames + usage.",
@@ -3693,9 +3702,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: s27_workbench_authentication_failure_permits_the_next_run proves the sqlite_file/live leg only; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s27_workbench_authentication_failure_permits_the_next_run_replay"
+          }
         }
       ],
       "setup": "Same production HTTP provider fixture.",

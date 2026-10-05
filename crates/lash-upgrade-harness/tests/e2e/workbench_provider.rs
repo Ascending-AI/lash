@@ -18,7 +18,7 @@ use lash::provider::ProviderFailureKind;
 use lash_core::RuntimeEffectOutcome;
 use lash_remote_protocol::RemoteSessionObservationEvent;
 use lash_restate::EFFECT_JOURNAL_VERSION;
-use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease};
+use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease, Leg, Permutation, StoreKind};
 use lash_upgrade_harness::e2e::control::ProcessReceipt;
 use lash_upgrade_harness::e2e::evidence::Evidence;
 use lash_upgrade_harness::e2e::host::{HostAdapter as _, HostCommand};
@@ -586,7 +586,8 @@ async fn journal_oracle(scenario: &Scenario, view: &RestateView) -> Result<Vec<V
     Ok(facts)
 }
 
-pub async fn run(scenario: &'static Scenario) -> Result<()> {
+pub async fn run(scenario: &'static Scenario, leg: Leg) -> Result<()> {
+    Permutation::provisioned(StoreKind::SqliteFile, leg)?;
     let root = PathBuf::from(required("LASH_E2E_HOST_ARTIFACTS")?);
     let directory = root.join(scenario.id);
     std::fs::create_dir_all(&directory)?;
@@ -663,6 +664,14 @@ pub async fn run(scenario: &'static Scenario) -> Result<()> {
             .args(["--scenario", scenario.id])
             .args(["--directory", &directory.to_string_lossy()])
             .args(["--base-url", &boot.endpoint])
+            .args([
+                "--remaining-case-seconds",
+                &lease
+                    .deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_secs_f64()
+                    .to_string(),
+            ])
             .env("PYTHONDONTWRITEBYTECODE", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -815,6 +824,17 @@ pub async fn run(scenario: &'static Scenario) -> Result<()> {
     if let Err(error) = &outcome {
         errors.push(error.clone());
     }
+    let base: u16 = required("LASH_E2E_PORT_BASE")?.parse()?;
+    let leg_observation = lash_upgrade_harness::e2e::cluster::observe_leg(
+        leg,
+        &[format!("http://127.0.0.1:{}/metrics", base + 47)],
+        &directory,
+    )
+    .await;
+    match &leg_observation {
+        Ok(receipt) => evidence.stores.push(receipt.clone()),
+        Err(error) => errors.push(format!("leg observation: {error:#}")),
+    }
     match host.transcript() {
         Ok(observations) => evidence.outputs = observations,
         Err(error) => errors.push(format!("transcript: {error:#}")),
@@ -846,6 +866,7 @@ pub async fn run(scenario: &'static Scenario) -> Result<()> {
     evidence.cleanup.extend(lease.cleanup.iter().cloned());
     write_case_receipt(&directory, evidence, errors, &[("host", &host_cleanup)])?;
     outcome.map_err(|error| anyhow!("{error}"))?;
+    leg_observation?;
     fixture_receipt.verify()?;
     ensure!(
         host_cleanup?.iter().all(|receipt| receipt.closed),

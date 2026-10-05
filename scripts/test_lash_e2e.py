@@ -6,6 +6,7 @@ These are selector/receipt laws with synthetic artifacts, not host scenarios.
 
 import copy
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -88,14 +89,23 @@ class ReceiptLaws(unittest.TestCase):
             final = e2e.plan(self.manifest, "b" * 64, "full", ["S22"], SOURCE)
         self.assertEqual(final["guarded"], [])
         self.assertEqual({g["ticket"] for r in final["cases"] for g in r["arc_guards"]}, {f"FIG-{i}" for i in range(4896, 4901)})
-        held = e2e.plan(self.manifest, "b" * 64, "full", ["S26"], SOURCE)
+        # Held-row refusal is a receipt rule independent of which scenarios
+        # currently have replay oracles registered.
+        manifest = copy.deepcopy(self.manifest)
+        for scenario in manifest["scenarios"]:
+            if scenario["id"] == "S26":
+                for row in scenario["cases"]:
+                    if row["leg"] == "replay":
+                        row.update(state="held", hold_reason="synthetic missing replay oracle",
+                                   registration=None)
+        held = e2e.plan(manifest, "b" * 64, "full", ["S26"], SOURCE)
         self.assertEqual(held["held"], [
             "S26/observer-reconnect/sqlite_file/replay/standard",
             "S26/partial-stream-reset/sqlite_file/replay/standard",
             "S26/recorded-429-retry/sqlite_file/replay/standard",
         ])
         with self.assertRaisesRegex(ValueError, "held cases"):
-            e2e.reconcile(held, {}, self.root, self.manifest)
+            e2e.reconcile(held, {}, self.root, manifest)
         manifest, expected, receipt = self.fixture()
         expected["guarded"] = [e2e.case_key(expected["cases"][0])]
         with self.assertRaisesRegex(ValueError, "arc guards"):
@@ -424,6 +434,38 @@ class RunnerLaws(unittest.TestCase):
         # <TMPDIR>/lash-tests-XXXXXXXX/.
         socket_path = Path(e2e.GATE.scratch_dir(artifacts)) / "lash-tests-xxxxxxxx" / "executor"
         self.assertLess(len(str(socket_path)), 107)
+
+
+class WorkbenchReadinessLaws(unittest.TestCase):
+    def test_initial_state_waits_for_health_within_the_case_deadline(self):
+        spec = importlib.util.spec_from_file_location(
+            "workbench_provider", Path(__file__).with_name("e2e-workbench-provider.py"))
+        provider = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provider)
+        now = 10.0
+        requests = []
+        snapshot = {"settings": {"session_id": "ready-session"}, "active_turns": []}
+
+        # A ready host's first session read can take longer than five seconds.
+        # Virtual transport latency reproduces the captured socket timeout
+        # without a wall-clock sleep or a live workbench.
+        def delayed_response(url, *, timeout):
+            nonlocal now
+            requests.append((url, timeout))
+            latency = 2.0 if url.endswith("/healthz") else 6.0
+            if timeout < latency:
+                raise TimeoutError("timed out")
+            now += latency
+            value = ({"service": "agent-workbench", "status": "ok"}
+                     if url.endswith("/healthz") else snapshot)
+            return io.StringIO(json.dumps(value))
+
+        with patch.object(provider.time, "monotonic", side_effect=lambda: now), \
+                patch.object(provider.urllib.request, "urlopen", side_effect=delayed_response):
+            actual = provider.initial_state("http://workbench", deadline=30.0)
+        self.assertEqual(actual, snapshot)
+        self.assertEqual(requests, [("http://workbench/healthz", 20.0),
+                                    ("http://workbench/api/state", 18.0)])
 
 
 if __name__ == "__main__":

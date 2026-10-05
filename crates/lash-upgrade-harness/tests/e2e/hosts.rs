@@ -390,7 +390,23 @@ fn s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer() -> Result
         .enable_all()
         .thread_stack_size(8 * 1024 * 1024)
         .build()?
-        .block_on(workbench_provider::run(&workbench_provider::S26_RATE_LIMIT))
+        .block_on(workbench_provider::run(
+            &workbench_provider::S26_RATE_LIMIT,
+            lash_upgrade_harness::e2e::case::Leg::Live,
+        ))
+}
+
+#[test]
+#[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
+fn s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer_replay() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(workbench_provider::run(
+            &workbench_provider::S26_RATE_LIMIT,
+            lash_upgrade_harness::e2e::case::Leg::Replay,
+        ))
 }
 
 #[test]
@@ -402,6 +418,20 @@ fn s26_workbench_partial_stream_disconnect_refuses_unsafe_regeneration() -> Resu
         .build()?
         .block_on(workbench_provider::run(
             &workbench_provider::S26_PARTIAL_DISCONNECT,
+            lash_upgrade_harness::e2e::case::Leg::Live,
+        ))
+}
+
+#[test]
+#[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
+fn s26_workbench_partial_stream_disconnect_refuses_unsafe_regeneration_replay() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(workbench_provider::run(
+            &workbench_provider::S26_PARTIAL_DISCONNECT,
+            lash_upgrade_harness::e2e::case::Leg::Replay,
         ))
 }
 
@@ -414,6 +444,20 @@ fn s27_workbench_authentication_failure_permits_the_next_run() -> Result<()> {
         .build()?
         .block_on(workbench_provider::run(
             &workbench_provider::S27_AUTH_NEXT_RUN,
+            lash_upgrade_harness::e2e::case::Leg::Live,
+        ))
+}
+
+#[test]
+#[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
+fn s27_workbench_authentication_failure_permits_the_next_run_replay() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(workbench_provider::run(
+            &workbench_provider::S27_AUTH_NEXT_RUN,
+            lash_upgrade_harness::e2e::case::Leg::Replay,
         ))
 }
 
@@ -426,6 +470,7 @@ fn s18_workbench_cancel_suspended_application_timer() -> Result<()> {
         .build()?
         .block_on(workbench_provider::run(
             &workbench_provider::S18_APPLICATION_TIMER,
+            lash_upgrade_harness::e2e::case::Leg::Live,
         ))
 }
 

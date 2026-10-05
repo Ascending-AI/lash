@@ -15,6 +15,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -66,6 +67,30 @@ COUNTER = r"""(() => {
 
 def write(path, value):
     path.write_text(json.dumps(value, indent=2) + "\n")
+
+
+def initial_state(base_url, deadline):
+    """Bootstrap only after product health, within the enclosing case budget.
+
+    The first state read can initialize the selected session. It shares the
+    case deadline rather than the five-second budget of later settled reads.
+    """
+    def remaining():
+        seconds = deadline - time.monotonic()
+        assert seconds > 0, "watchdog: workbench startup missed the case deadline"
+        return seconds
+
+    while True:
+        try:
+            with urllib.request.urlopen(base_url + "/healthz", timeout=remaining()) as response:
+                health = json.load(response)
+            if health.get("service") == "agent-workbench" and health.get("status") == "ok":
+                break
+        except (urllib.error.URLError, TimeoutError):
+            pass
+        time.sleep(min(0.05, remaining()))
+    with urllib.request.urlopen(base_url + "/api/state", timeout=remaining()) as response:
+        return json.load(response)
 
 
 def browser(args):
@@ -180,7 +205,7 @@ def browser(args):
         return [row for row in snapshot["transcript"]
                 if row["kind"] == "user" and not row["suppressed"]]
 
-    initial = state()
+    initial = initial_state(args.base_url, time.monotonic() + args.remaining_case_seconds)
     session = initial["settings"]["session_id"]
     cursor = initial["observation"]["cursor"]
     assert not initial["active_turns"] and not initial["messages"], "session must be fresh"
@@ -430,6 +455,7 @@ def main():
         "s18-application-timer"))
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--base-url", required=True)
+    parser.add_argument("--remaining-case-seconds", type=float, required=True)
     args = parser.parse_args()
     args.directory.mkdir(parents=True, exist_ok=True)
     browser(args)
