@@ -101,3 +101,8 @@ impl AwaitEventKey {
         format!("lash-await-event:{}", self.key_id)
     }
 }
+
+impl crate::store::DurableRecord for AwaitEventKey {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::artifact_referrer::ARTIFACT_REFERRER_KINDS_VERSION);
+}

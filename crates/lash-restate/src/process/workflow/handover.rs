@@ -59,57 +59,54 @@ impl<R: RestateProcessRunner> LashProcessWorkflowImpl<R> {
         let written_generation = self.build_generation.clone();
         let reference_id = format!("{route}/{successor_key}");
         let Json(handed_over) = context
-            .run_json_or_retry_send::<Result<(), String>, _>(
-                HANDOVER_STEP.to_string(),
-                async move {
-                    if let Err(error) = registry
-                        .set_external_ref(
-                            pid,
-                            lash_core::ProcessExternalRef {
-                                backend: "restate".to_string(),
-                                id: reference_id,
-                                metadata: None,
-                                segment_ordinal: Some(next_segment_ordinal),
-                            },
-                        )
-                        .await
-                    {
-                        return step_fault(error);
-                    }
-                    match continuations
-                        .put_segment_handover(
-                            pid,
-                            lash_core::PersistedSegmentHandover {
-                                writer,
-                                segment_ordinal: next_segment_ordinal,
-                                written_generation,
-                                route,
-                                handover,
-                            },
-                        )
-                        .await
-                    {
-                        Ok(receipt) => {
-                            if let (Some(tracing), Some(scope)) = (
-                                self.tracing.clone().or_else(|| self.runner.tracing()),
-                                receipt.record.scope.as_ref(),
-                            ) {
-                                completion::emit_segment_completion(
-                                    &tracing,
-                                    scope,
-                                    started.segment_ordinal(),
-                                    started.started_at_ms(),
-                                    receipt.record.committed_at_ms,
-                                    lash_trace::TraceDomainStatus::Yielded,
-                                    receipt.permit().as_ref(),
-                                );
-                            }
-                            Ok(Ok(()))
+            .run_json_or_retry_send(PublishHandoverStep, async move {
+                if let Err(error) = registry
+                    .set_external_ref(
+                        pid,
+                        lash_core::ProcessExternalRef {
+                            backend: "restate".to_string(),
+                            id: reference_id,
+                            metadata: None,
+                            segment_ordinal: Some(next_segment_ordinal),
+                        },
+                    )
+                    .await
+                {
+                    return step_fault(error);
+                }
+                match continuations
+                    .put_segment_handover(
+                        pid,
+                        lash_core::PersistedSegmentHandover {
+                            writer,
+                            segment_ordinal: next_segment_ordinal,
+                            written_generation,
+                            route,
+                            handover,
+                        },
+                    )
+                    .await
+                {
+                    Ok(receipt) => {
+                        if let (Some(tracing), Some(scope)) = (
+                            self.tracing.clone().or_else(|| self.runner.tracing()),
+                            receipt.record.scope.as_ref(),
+                        ) {
+                            completion::emit_segment_completion(
+                                &tracing,
+                                scope,
+                                started.segment_ordinal(),
+                                started.started_at_ms(),
+                                receipt.record.committed_at_ms,
+                                lash_trace::TraceDomainStatus::Yielded,
+                                receipt.permit().as_ref(),
+                            );
                         }
-                        Err(error) => step_fault(error),
+                        Ok(Ok(()))
                     }
-                },
-            )
+                    Err(error) => step_fault(error),
+                }
+            })
             .await
             .map_err(HandlerError::from)?;
         if let Err(error) = handed_over {
@@ -156,23 +153,20 @@ impl<R: RestateProcessRunner> LashProcessWorkflowImpl<R> {
         let registry = &self.registry;
         let pid = &process_id;
         let Json(forward) = context
-            .run_json_or_retry_send::<Result<Option<RestateProcessCancelRequest>, String>, _>(
-                CANCEL_FORWARD_STEP.to_string(),
-                async move {
-                    let record = match registry.get_process(pid).await {
-                        Ok(Some(record)) => record,
-                        // No process is left to cancel.
-                        Ok(None) => return Ok(Ok(None)),
-                        Err(error) => return step_fault(error),
-                    };
-                    if record.cancel_request.is_none() {
-                        return Ok(Ok(None));
-                    }
-                    Ok(RestateProcessCancelRequest::from_record(&record)
-                        .map(Some)
-                        .map_err(|error| error.to_string()))
-                },
-            )
+            .run_json_or_retry_send(ForwardCancelStep, async move {
+                let record = match registry.get_process(pid).await {
+                    Ok(Some(record)) => record,
+                    // No process is left to cancel.
+                    Ok(None) => return Ok(Ok(None)),
+                    Err(error) => return step_fault(error),
+                };
+                if record.cancel_request.is_none() {
+                    return Ok(Ok(None));
+                }
+                Ok(RestateProcessCancelRequest::from_record(&record)
+                    .map(Some)
+                    .map_err(|error| error.to_string()))
+            })
             .await
             .map_err(HandlerError::from)?;
         // The successor carries the process from the send on, so a failure
@@ -198,18 +192,15 @@ impl<R: RestateProcessRunner> LashProcessWorkflowImpl<R> {
             let pid = &process_id;
             let segment_ordinal = input.segment_ordinal;
             let Json(retired) = context
-                .run_json_or_retry_send::<Result<(), String>, _>(
-                    RETIRE_STEP.to_string(),
-                    async move {
-                        match continuations
-                            .retire_segment_handovers_through(pid, segment_ordinal)
-                            .await
-                        {
-                            Ok(()) => Ok(Ok(())),
-                            Err(error) => step_fault(error),
-                        }
-                    },
-                )
+                .run_json_or_retry_send(RetireSegmentStep, async move {
+                    match continuations
+                        .retire_segment_handovers_through(pid, segment_ordinal)
+                        .await
+                    {
+                        Ok(()) => Ok(Ok(())),
+                        Err(error) => step_fault(error),
+                    }
+                })
                 .await
                 .map_err(HandlerError::from)?;
             if let Err(error) = retired {
@@ -227,5 +218,38 @@ impl<R: RestateProcessRunner> LashProcessWorkflowImpl<R> {
         Ok(RestateProcessWorkflowOutput::SegmentChained {
             next_segment_ordinal,
         })
+    }
+}
+
+struct PublishHandoverStep;
+impl crate::JournalStep for PublishHandoverStep {
+    type Output = Result<(), String>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "lash.segment.handover";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct ForwardCancelStep;
+impl crate::JournalStep for ForwardCancelStep {
+    type Output = Result<Option<RestateProcessCancelRequest>, String>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "lash.segment.cancel-forward";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct RetireSegmentStep;
+impl crate::JournalStep for RetireSegmentStep {
+    type Output = Result<(), String>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "lash.segment.retire";
+    fn instance(&self) -> String {
+        String::new()
     }
 }

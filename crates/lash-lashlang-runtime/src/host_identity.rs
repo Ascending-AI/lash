@@ -87,6 +87,11 @@ impl LashlangHostIdentities {
     }
 }
 
+impl lash_core::store::DurableRecord for LashlangHostIdentities {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::replay_run::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

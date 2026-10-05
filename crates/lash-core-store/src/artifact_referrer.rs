@@ -34,11 +34,6 @@ use crate::{ProcessId, SessionId};
 ///         ArtifactReferrerKind, ArtifactReferrer, StoredReferrer, FrameEnvironmentId,
 ///         SubscriptionRevisionId, HostArtifactPin, UploadReferrerId, AttachmentUploadId,
 ///     ),
-///     roots(path = "crates/lash-core-store/src/process_identity.rs", StartKey),
-///     roots(path = "crates/lash-core-store/src/session_identity.rs", FrameNodeId),
-///     roots(path = "crates/lash-core-store/src/effect_opener.rs", EffectOpener),
-///     roots(path = "crates/lash-core-store/src/await_event_identity.rs", AwaitEventKey),
-///     roots(path = "crates/lash-core-store/src/tool_run/run_event.rs", SegmentOrdinal),
 ///     roots(path = "crates/lash-sansio/src/effect_identity.rs", EffectJournalIdentity),
 ///     items(
 ///         ALL, as_str, parse, canonical_id, decode, HOST_PIN_PREFIX, HOST_PIN_HEX_LEN,
@@ -1207,6 +1202,16 @@ impl schemars::JsonSchema for ArtifactReferrer {
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         StoredReferrer::json_schema(generator)
     }
+}
+
+impl crate::store::DurableRecord for ArtifactReferrerKind {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::obligation::OBLIGATION_LEDGER_VOCABULARY_VERSION);
+}
+
+impl crate::store::DurableRecord for ArtifactReferrer {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::obligation::OBLIGATION_LEDGER_VOCABULARY_VERSION);
 }
 
 #[cfg(test)]

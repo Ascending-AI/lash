@@ -63,20 +63,20 @@ impl AttemptEnd {
 /// attempt before anything is journaled, and an `Ok` value is journaled
 /// through the context's `run_json_send` as `{"Ok": value}`, the record
 /// encoding the committed replay corpus pins for these contexts.
-pub(crate) fn run_json_or_end_attempt<'ctx, 'run, C, T, Fut>(
+pub(crate) fn run_json_or_end_attempt<'ctx, 'run, C, S, Fut>(
     context: &'run C,
     attempt: &'run AttemptEnd,
-    effect_name: String,
+    step: S,
     future: Fut,
-) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+) -> impl Future<Output = Result<Json<S::Output>, TerminalError>> + Send + 'run
 where
     'ctx: 'run,
     C: RestateControllerContext<'ctx>,
-    T: Serialize + DeserializeOwned + Send + 'static,
-    Fut: Future<Output = Result<T, String>> + Send + 'run,
+    S: crate::JournalStep,
+    Fut: Future<Output = Result<S::Output, String>> + Send + 'run,
 {
-    let effect = effect_name.clone();
-    let run = context.run_json_send::<Result<T, String>, _>(effect_name, None, async move {
+    let effect = crate::journal_step_name(&step);
+    let run = context.run_json_send(CommittedStep(step), None, async move {
         match future.await {
             Ok(value) => Ok(value),
             Err(failure) => match attempt.end(effect, failure).await {},
@@ -93,17 +93,27 @@ where
 /// A recording context's `run_json_or_retry_send`, over its `attempt` field.
 macro_rules! run_json_or_retry_send_ends_the_attempt {
     () => {
-        fn run_json_or_retry_send<'run, T, Fut>(
+        fn run_json_or_retry_send<'run, S, Fut>(
             &'run self,
-            effect_name: String,
+            step: S,
             future: Fut,
-        ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+        ) -> impl Future<Output = Result<Json<S::Output>, TerminalError>> + Send + 'run
         where
             'ctx: 'run,
-            T: Serialize + DeserializeOwned + Send + 'static,
-            Fut: Future<Output = Result<T, String>> + Send + 'run,
+            S: crate::JournalStep,
+            Fut: Future<Output = Result<S::Output, String>> + Send + 'run,
         {
-            run_json_or_end_attempt(self, &self.attempt, effect_name, future)
+            run_json_or_end_attempt(self, &self.attempt, step, future)
         }
     };
+}
+
+struct CommittedStep<S>(S);
+impl<S: crate::JournalStep> crate::JournalStep for CommittedStep<S> {
+    type Output = Result<S::Output, String>;
+    const SURFACE: lash_core::store::SurfaceFormat = S::SURFACE;
+    const KIND: &'static str = S::KIND;
+    fn instance(&self) -> String {
+        self.0.instance()
+    }
 }

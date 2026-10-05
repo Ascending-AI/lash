@@ -25,9 +25,6 @@ mod arc_serde_bytes {
 /// checked `TokenUsage` shape; v3 roots carrying the retired `PromptUsage`
 /// snapshot fields are refused rather than remapped.
 ///
-/// version_guard(
-///     roots(SessionCheckpoint),
-/// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionCheckpointManifest"
@@ -42,9 +39,6 @@ pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 5;
 
 /// Encoding implemented for checkpoint-component logical bytes in this build.
 ///
-/// version_guard(
-///     roots(HydratedCheckpointComponent),
-/// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "CheckpointComponentEncoding"
@@ -591,6 +585,16 @@ pub fn ensure_checkpoint_component_hash_agreement(
             ),
         })
     }
+}
+
+impl crate::store::DurableRecord for SessionCheckpoint {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::checkpoint::SESSION_CHECKPOINT_SCHEMA_VERSION);
+}
+
+impl crate::store::DurableRecord for HydratedCheckpointComponent {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::checkpoint::CHECKPOINT_COMPONENT_ENCODING_VERSION);
 }
 
 #[cfg(test)]

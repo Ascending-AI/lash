@@ -548,7 +548,6 @@ pub mod direct {
 pub mod persistence {
     // The vocabulary this module's signatures name (the facade-completeness rule).
 
-    pub use lash_core_store::PersistedNodeIds;
     pub use lash_core_store::artifact_referrer::{
         ArtifactCarry, ArtifactCleanup, ArtifactReferrerError, ArtifactReferrerKind,
         ArtifactStoreId, AttachmentUploadId, ReferrerGuard, ReferrerStore, SubscriptionRevisionId,
@@ -571,11 +570,12 @@ pub mod persistence {
     pub use lash_core_store::store::ToolMaterialStore;
     pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
     pub use lash_core_store::store::{
-        EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow, StoreFault, StoreRefusal,
-        StoredRunTerminal, SurfaceFormat, WriterPin,
+        DurableRecord, EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow,
+        StoreFault, StoreRefusal, StoredRunTerminal, SurfaceFormat, WriterPin,
     };
     /// The segment of a logical Run a `RunSegment` referrer names.
     pub use lash_core_store::tool_run::SegmentOrdinal;
+    pub use lash_core_store::{PersistedNodeIds, surface_format};
     /// The protocol-generic form [`SessionHistoryRecord`] specializes.
     pub use lash_sansio::SessionHistoryRecord as GenericSessionHistoryRecord;
     pub use lash_sansio::{AppendVec, BaseRenderCache, ConversationRecord};

@@ -179,22 +179,26 @@ fn registered_scenario_names() -> Vec<String> {
     names
 }
 
-/// The registered name of every `#[restate_sdk::object]` and
-/// `#[restate_sdk::workflow]` the crate declares outside its tests: the
+/// The registered name of every Restate service, object and workflow
+/// the crate declares outside its tests: the
 /// trait's `#[name]`, or the trait's own name.
 fn restate_services_declared_in_the_source() -> BTreeSet<String> {
-    fn visit(directory: &Path, tests: &Path, services: &mut BTreeSet<String>) {
+    fn visit(directory: &Path, services: &mut BTreeSet<String>) {
         let mut entries = std::fs::read_dir(directory)
             .expect("read a source directory")
             .map(|entry| entry.expect("read a source entry").path())
             .collect::<Vec<_>>();
         entries.sort();
         for path in entries {
-            if path == tests || path == tests.with_extension("rs") {
+            if path.file_name().is_some_and(|name| {
+                name == "tests"
+                    || name == "tests.rs"
+                    || name.to_string_lossy().ends_with("_tests.rs")
+            }) {
                 continue;
             }
             if path.is_dir() {
-                visit(&path, tests, services);
+                visit(&path, services);
                 continue;
             }
             if path.extension().is_none_or(|extension| extension != "rs") {
@@ -205,6 +209,7 @@ fn restate_services_declared_in_the_source() -> BTreeSet<String> {
             while let Some(line) = lines.next() {
                 if !line.starts_with("#[restate_sdk::object")
                     && !line.starts_with("#[restate_sdk::workflow")
+                    && !line.starts_with("#[restate_sdk::service")
                 {
                     continue;
                 }
@@ -230,12 +235,12 @@ fn restate_services_declared_in_the_source() -> BTreeSet<String> {
     }
     let source = crate_dir().join("src");
     let mut services = BTreeSet::new();
-    visit(&source, &source.join("tests"), &mut services);
+    visit(&source, &mut services);
     services
 }
 
 /// The corpus's service list is derived, never hand-kept (FIG-4805): every
-/// `#[restate_sdk::object|workflow]` the crate declares is a lash service,
+/// `#[restate_sdk::service|object|workflow]` the crate declares is a lash service,
 /// and every lash service has a recorded scenario.
 #[test]
 fn every_restate_service_in_the_source_has_a_recorded_scenario() {
@@ -804,7 +809,6 @@ async fn drive_scalar_lashlang_tool_attempt(
             max_attempts: 1,
         },
     );
-    let effect_name = restate_effect_name(&envelope.invocation);
     let local_runs = Arc::new(AtomicUsize::new(0));
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let outcome = controller
@@ -840,7 +844,6 @@ async fn drive_scalar_lashlang_tool_attempt(
         usize::from(!replaying),
         "replay must return the journaled scalar ToolAttempt without re-executing it"
     );
-    assert_eq!(context.runs(), vec![effect_name]);
     Ok(())
 }
 

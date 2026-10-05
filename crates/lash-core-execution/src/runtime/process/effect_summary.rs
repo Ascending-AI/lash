@@ -23,7 +23,6 @@ use super::events::ProcessEventAppendRequest;
 ///             "fn effect_omissions_payload_schema",
 ///         ),
 ///     ),
-///     roots(path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessEventKind),
 ///     items(path = "crates/lash-core-execution/src/runtime/process/events.rs", from_event_type),
 ///     items(
 ///         path = "crates/lash-core-execution/src/runtime/process/validation.rs",
@@ -491,6 +490,12 @@ pub(super) fn effect_omissions_payload_schema() -> crate::JsonSchema {
         }
     }))
     .expect("valid declared payload schema")
+}
+
+impl lash_core_store::store::DurableRecord for super::events::ProcessEventKind {
+    const SURFACE: lash_core_store::store::SurfaceFormat = lash_core_store::surface_format!(
+        crate::runtime::process::effect_summary::PROCESS_EVENT_VOCABULARY_VERSION
+    );
 }
 
 #[cfg(test)]

@@ -16,6 +16,7 @@ use lash_core_execution::store::fleet_finalize::{FinalizeError, FinalizeRefusal,
 use lash_core_execution::store::generation_drain::GenerationDrainStatus;
 use lash_core_execution::store::plugin_writers::PluginWriterRegistration;
 use lash_core_execution::{FleetFormat, StoreError};
+use lash_core_store::store::DurableRecord;
 use serde::{Deserialize, Serialize};
 
 use crate::compat::{AdvanceStep, advance_set_observed};
@@ -28,7 +29,6 @@ const STAGING: &str = "lash-finalize.json.staging";
 /// version_surface = "migrate"
 /// version_unguarded = "backend-private recovery file decoded before the store catalog can admit its FleetFormat; exact bootstrap reader until the release cut"
 /// format_outside_manifest = "backend-private recovery intent read before the store set opens"
-/// version_guard(roots(AuthorizedFinalize))
 pub const SQLITE_FINALIZE_INTENT_VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize)]
@@ -215,7 +215,7 @@ fn read(location: &SqliteLocation) -> rusqlite::Result<Option<AuthorizedFinalize
             }
             let stamp: Stamp =
                 serde_json::from_slice(&bytes).map_err(|error| invalid(error.to_string()))?;
-            if stamp.format != SQLITE_FINALIZE_INTENT_VERSION {
+            if stamp.format != AuthorizedFinalize::SURFACE.build_newest() {
                 return Err(crate::sqlite_conversion_error(StoreError::Incompatible {
                     refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary {
                         surface: "SQLite finalize intent format".into(),
@@ -402,9 +402,7 @@ fn advance(
                 if lowest != target {
                     let intent = AuthorizedFinalize {
                         format: lash_core_store::store::FleetFormat::from_version(lowest)
-                            .writer_version(lash_core_store::surface_format!(
-                                SQLITE_FINALIZE_INTENT_VERSION
-                            )),
+                            .writer_version(AuthorizedFinalize::SURFACE),
                         store: location.identity(),
                         retired: DrainedGeneration::from_status(
                             retired
@@ -436,6 +434,11 @@ fn advance(
             to: target,
         }
     })
+}
+
+impl DurableRecord for AuthorizedFinalize {
+    const SURFACE: lash_core_store::store::SurfaceFormat =
+        lash_core_store::surface_format!(crate::finalize::SQLITE_FINALIZE_INTENT_VERSION);
 }
 
 #[cfg(test)]

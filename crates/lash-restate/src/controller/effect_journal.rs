@@ -110,7 +110,6 @@ use serde::{Deserialize, Serialize};
 /// version_guard(
 ///     shapes(path = "crates/lash-restate/src/controller/journal_payload.rs", cover(PayloadEntry, PayloadReference)),
 ///     shapes(cover(RecordedRuntimeEffect, GaveUpEntry, Stamped, FrontierMark)),
-///     roots(JournaledEffectRecord),
 ///     roots(path = "crates/lash-core-store/src/tool_run/run_event.rs", RunJournalEntry),
 ///     items(EFFECT_JOURNAL_VERSION_FIELD, stamped),
 ///     shapes(
@@ -426,6 +425,11 @@ pub(super) fn recorded_frontier_mark(
             ),
         )),
     }
+}
+
+impl lash_core::store::DurableRecord for JournaledEffectRecord {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::controller::effect_journal::EFFECT_JOURNAL_VERSION);
 }
 
 #[cfg(test)]

@@ -128,7 +128,6 @@ const START_KEY_PREFIX: &str = "process-start-key";
 /// burned.
 ///
 /// version_guard(
-///     roots(StartKeyNamespace),
 ///     items(
 ///         START_KEY_DOMAIN, START_KEY_PREFIX, derive, for_tool_intent, for_trigger_delivery,
 ///         for_host, for_keyless_host, for_isolated_call, write_scope,
@@ -776,9 +775,6 @@ impl WakeDeliveryState {
 /// in the invocation delivered with a process wake. Version 4 drops the
 /// process incarnation: a minted process id names one process (ADR 0107).
 ///
-/// version_guard(
-///     roots(ProcessWakeDelivery),
-/// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "ProcessWakeDelivery"
@@ -1039,6 +1035,21 @@ lifecycle_vocabulary!(WakeDeliveryState, as_str, by_value {
     Enqueued => "enqueued",
     Discarded => "discarded",
 });
+
+impl crate::store::DurableRecord for StartKey {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::artifact_referrer::ARTIFACT_REFERRER_KINDS_VERSION);
+}
+
+impl crate::store::DurableRecord for StartKeyNamespace {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::process_identity::START_KEY_FAMILY_VERSION);
+}
+
+impl crate::store::DurableRecord for ProcessWakeDelivery {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::process_identity::PROCESS_WAKE_DELIVERY_FORMAT_VERSION);
+}
 
 #[cfg(test)]
 #[path = "process_identity_tests.rs"]

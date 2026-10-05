@@ -558,12 +558,6 @@ pub struct RuntimeCommitReceipt {
 /// receipt is refused, not converted.
 ///
 /// version_guard(
-///     roots(RuntimeCommitReceipt),
-///     roots(
-///         path = "crates/lash-core-store/src/store/runtime_commit_plan.rs",
-///         RuntimeCommitReceiptRecord,
-///     ),
-///     roots(path = "crates/lash-core-store/src/queued_work_vocabulary.rs", QueuedWorkBatch),
 ///     items(decode_runtime_commit_receipt, ensure_supported_receipt_version),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
@@ -1061,6 +1055,11 @@ impl TurnChange {
             kind,
         })
     }
+}
+
+impl crate::store::DurableRecord for RuntimeCommitReceipt {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::runtime_commit::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION);
 }
 
 #[cfg(test)]

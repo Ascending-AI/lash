@@ -1410,59 +1410,6 @@ async fn a_profile_bind_fault_is_never_journaled_and_its_retry_runs_the_step_aga
     );
 }
 
-/// FIG-4631: a recording context ends an attempt the way the engine does.
-/// A step whose fault is retried journals nothing, nothing after it runs,
-/// and its text is all that is kept; a value is journaled.
-#[tokio::test]
-async fn a_recording_context_ends_the_attempt_at_a_retried_fault_and_journals_nothing() {
-    let fault = lash_core::RuntimeEffectControllerError::llm_profile_unavailable(
-        &lash_core::LlmProfileKey::new(FAST),
-        "the recorded model cannot be bound on this worker",
-    )
-    .attempt_failure_text();
-    let context = Arc::new(ReplayableRecordingContext::default());
-    let ran_past_the_fault = AtomicBool::new(false);
-    let ended = context
-        .attempt
-        .run(async {
-            let Json(value) = context
-                .run_json_or_retry_send("settled".to_string(), async { Ok::<u32, String>(7) })
-                .await
-                .expect("a value is journaled");
-            assert_eq!(value, 7);
-            let _ = context
-                .run_json_or_retry_send("faulted".to_string(), {
-                    let fault = fault.clone();
-                    async move { Err::<u32, String>(fault) }
-                })
-                .await;
-            ran_past_the_fault.store(true, Ordering::SeqCst);
-        })
-        .await
-        .expect_err("the fault ends the attempt");
-    assert_eq!(
-        ended,
-        AttemptFailure {
-            effect: "faulted".to_string(),
-            failure: fault,
-        }
-    );
-    assert!(
-        !ran_past_the_fault.load(Ordering::SeqCst),
-        "nothing runs after the step that ended the attempt"
-    );
-    let records = context.records.lock_recover();
-    assert_eq!(
-        records.get("settled").map(Vec::as_slice),
-        Some(br#"{"Ok":7}"#.as_slice()),
-        "a settled step journals its value"
-    );
-    assert!(
-        !records.contains_key("faulted"),
-        "the faulted step journaled nothing"
-    );
-}
-
 #[tokio::test]
 async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     let registry = process_registry();

@@ -618,7 +618,6 @@ impl PendingTurnInputBatch {
 /// identical retry as a conflict.
 ///
 /// version_guard(
-///     roots(TurnInput),
 ///     items(turn_input_submission_preimage),
 /// )
 /// version_surface = "coexist"
@@ -1354,6 +1353,11 @@ impl TurnInput {
             turn_context: crate::TurnContext::default(),
         }
     }
+}
+
+impl crate::store::DurableRecord for TurnInput {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::turn_input_vocabulary::TURN_INPUT_SUBMISSION_FAMILY_VERSION);
 }
 
 #[cfg(test)]

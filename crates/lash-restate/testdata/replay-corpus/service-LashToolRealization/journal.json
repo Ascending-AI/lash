@@ -1,0 +1,20 @@
+{
+  "scenario": "service-LashToolRealization",
+  "service": "LashToolRealization",
+  "generation": "d91236f337b3",
+  "handlers": {
+    "realize": [
+      [
+        "InputCommand",
+        "RunCommand lash.build.generation",
+        "RunCommand lash.effect.frontier:lash:tool:tc_#:attempt:1:process:start:process-start-key:v1:intent:blake3:#:frontier",
+        "RunCommand process-start-register:lash:tool:tc_#:attempt:1:process:start:process-start-key:v1:intent:blake3:#.process-start-register",
+        "RunCommand process-start-claim:lash:tool:tc_#:attempt:1:process:start:process-start-key:v1:intent:blake3:#.process-start-claim",
+        "OneWayCallCommand LashProcessWorkflow/run",
+        "RunCommand process-start-external-ref:lash:tool:tc_#:attempt:1:process:start:process-start-key:v1:intent:blake3:#.process-start-external-ref",
+        "RunCommand process-start-settle:lash:tool:tc_#:attempt:1:process:start:process-start-key:v1:intent:blake3:#.process-start-settle",
+        "OutputCommand"
+      ]
+    ]
+  }
+}

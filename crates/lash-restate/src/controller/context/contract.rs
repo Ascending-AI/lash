@@ -38,16 +38,16 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run;
 
-    fn run_json_send<'run, T, Fut>(
+    fn run_json_send<'run, S, Fut>(
         &'run self,
-        effect_name: String,
+        step: S,
         retry_policy: Option<RunRetryPolicy>,
         future: Fut,
-    ) -> crate::JournaledFuture<'run, Json<T>>
+    ) -> crate::JournaledFuture<'run, Json<S::Output>>
     where
         'ctx: 'run,
-        T: Serialize + DeserializeOwned + Send + 'static,
-        Fut: Future<Output = T> + Send + 'run;
+        S: crate::JournalStep,
+        Fut: Future<Output = S::Output> + Send + 'run;
 
     /// Runs one journaled `ctx.run` step whose fault is never recorded
     /// (ADR 0105 §1: an engine fault is not a domain outcome).
@@ -65,19 +65,19 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// The `u32` is the engine notification completing this registration —
     /// the registration's select key; `None` means the registration trapped
     /// without a notification.
-    fn run_json_eager_or_retry_send<'run, T, Fut>(
+    fn run_json_eager_or_retry_send<'run, S, Fut>(
         &'run self,
-        effect_name: String,
+        step: S,
         future: Fut,
     ) -> (
         impl Future<Output = ()> + Send + 'run,
         Option<u32>,
-        impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
+        impl Future<Output = Result<Json<S::Output>, TerminalError>> + Send + 'run,
     )
     where
         'ctx: 'run,
-        T: Serialize + DeserializeOwned + Send + 'static,
-        Fut: Future<Output = Result<T, String>> + Send + 'run;
+        S: crate::JournalStep,
+        Fut: Future<Output = Result<S::Output, String>> + Send + 'run;
 
     /// One engine first-completed await over the notification handles `keys`
     /// name: the index of the first the journal completes. Non-consuming:
@@ -90,15 +90,15 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         Box::pin(async { Err(TerminalError::new("this context selects no Run sources")) })
     }
 
-    fn run_json_or_retry_send<'run, T, Fut>(
+    fn run_json_or_retry_send<'run, S, Fut>(
         &'run self,
-        effect_name: String,
+        step: S,
         future: Fut,
-    ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+    ) -> impl Future<Output = Result<Json<S::Output>, TerminalError>> + Send + 'run
     where
         'ctx: 'run,
-        T: Serialize + DeserializeOwned + Send + 'static,
-        Fut: Future<Output = Result<T, String>> + Send + 'run;
+        S: crate::JournalStep,
+        Fut: Future<Output = Result<S::Output, String>> + Send + 'run;
 
     /// A captured turn sleep raced against cancellation and generation drain.
     fn sleep_or_turn_end<'run>(

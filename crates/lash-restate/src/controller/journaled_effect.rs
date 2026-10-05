@@ -108,7 +108,7 @@ where
         let Json(journaled) = self
             .context
             .run_json_send(
-                verdict_name.clone(),
+                BudgetVerdictStep(effect_name.to_owned()),
                 run_retry_policy,
                 Box::pin(async move { verdict }),
             )
@@ -281,7 +281,7 @@ where
         let first = build_generation.is_some();
         let Json(entry) = self
             .context
-            .run_json_or_retry_send(effect_name.clone(), async move {
+            .run_json_or_retry_send(RecordEffectStep(effect_name.clone()), async move {
                 let record = match (gave_up, &live) {
                     (Some(_), Some(live)) => live.reached().await,
                     (Some(budget), None) => gave_up_over_budget_entry(budget),
@@ -365,7 +365,7 @@ where
         let Json(entry) = self
             .context
             .run_json_send(
-                effect_name.clone(),
+                RecordEffectStep(effect_name.clone()),
                 run_retry_policy,
                 Box::pin(async move {
                     self.payloads.encode(JournaledEntry {
@@ -443,5 +443,27 @@ where
         };
         recorded_effect_from_journal(envelope, effect_name, entry.record)
             .map_err(RestateEffectError::Refused)
+    }
+}
+
+struct RecordEffectStep(String);
+impl crate::JournalStep for RecordEffectStep {
+    type Output = super::journal_payload::PayloadEntry;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(super::effect_journal::EFFECT_JOURNAL_VERSION);
+    const KIND: &'static str = "lash.effect.record";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct BudgetVerdictStep(String);
+impl crate::JournalStep for BudgetVerdictStep {
+    type Output = JournaledBudgetVerdict;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(super::effect_journal::EFFECT_JOURNAL_VERSION);
+    const KIND: &'static str = "lash.effect.budget";
+    fn instance(&self) -> String {
+        self.0.clone()
     }
 }

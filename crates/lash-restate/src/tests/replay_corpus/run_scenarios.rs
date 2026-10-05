@@ -155,11 +155,18 @@ async fn run_partial_result() -> BTreeMap<String, HandlerJournals> {
     until(
         &server,
         "a's attempt record never became durable",
-        |_views| run_step_completed(&server, &format!("lash:run:{a_call}:attempt:1")),
+        |_views| {
+            run_step_completed(
+                &server,
+                &crate::controller::attempt_journal_name(format!("lash:run:{a_call}:attempt:1")),
+            )
+        },
     )
     .await;
     server.crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
-        name: Some(format!("lash:run:{b_call}:attempt:1")),
+        name: Some(crate::controller::attempt_journal_name(format!(
+            "lash:run:{b_call}:attempt:1"
+        ))),
     }));
     tools.open_pair_gate();
 

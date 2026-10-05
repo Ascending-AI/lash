@@ -32,6 +32,18 @@
           "OutputCommand"
         ]
       ],
+      "register_process_journal": [
+        [
+          "InputCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateKeysCommand",
+          "SetStateCommand _compat",
+          "GetLazyStateCommand",
+          "SetStateCommand wait-index/v2/metadata",
+          "SetStateCommand wait-index/v2/process-journal/inv_#",
+          "OutputCommand"
+        ]
+      ],
       "reinstate": [
         [
           "InputCommand",
@@ -40,6 +52,14 @@
           "SetStateCommand _compat",
           "GetLazyStateCommand",
           "SetStateCommand wait-index/v2/metadata",
+          "OutputCommand"
+        ]
+      ],
+      "release_process_journal": [
+        [
+          "InputCommand",
+          "GetLazyStateCommand",
+          "ClearStateCommand wait-index/v2/process-journal/inv_#",
           "OutputCommand"
         ]
       ],
@@ -126,6 +146,34 @@
         ]
       ]
     },
+    "LashProcessWorkflow": {
+      "await_cancel": [
+        [
+          "InputCommand",
+          "GetPromiseCommand",
+          "OutputCommand"
+        ]
+      ],
+      "run": [
+        [
+          "InputCommand",
+          "RunCommand lash.build.generation",
+          "RunCommand lash.segment.admit",
+          "RunCommand lash.segment.start",
+          "CallCommand LashDurableWaitIndex/register_process_journal",
+          "RunCommand lash.effect.record:lash:plugin-transition",
+          "RunCommand lash.process.complete",
+          "RunCommand lash.process.parent-end",
+          "CallCommand LashDurableWaitIndex/release_process_journal",
+          "CompletePromiseCommand",
+          "CompletePromiseCommand",
+          "PeekPromiseCommand",
+          "CallCommand LashDurableWaitIndex/resolve",
+          "RunCommand lash.process.terminal.published",
+          "OutputCommand"
+        ]
+      ]
+    },
     "LashSession": {
       "shift": [
         [
@@ -140,32 +188,47 @@
         ]
       ]
     },
+    "LashToolRealization": {
+      "realize": [
+        [
+          "InputCommand",
+          "RunCommand lash.build.generation",
+          "RunCommand lash.effect.frontier:lash:tool:tc_#:attempt:1:process:start:process-start-key:v1:intent:blake3:#:frontier",
+          "RunCommand process-start-register:lash:tool:tc_#:attempt:1:process:start:process-start-key:v1:intent:blake3:#.process-start-register",
+          "RunCommand process-start-claim:lash:tool:tc_#:attempt:1:process:start:process-start-key:v1:intent:blake3:#.process-start-claim",
+          "OneWayCallCommand LashProcessWorkflow/run",
+          "RunCommand process-start-external-ref:lash:tool:tc_#:attempt:1:process:start:process-start-key:v1:intent:blake3:#.process-start-external-ref",
+          "RunCommand process-start-settle:lash:tool:tc_#:attempt:1:process:start:process-start-key:v1:intent:blake3:#.process-start-settle",
+          "OutputCommand"
+        ]
+      ]
+    },
     "LashTurn": {
       "close": [
         [
           "InputCommand",
-          "RunCommand lash:shift-close:run-handover",
+          "RunCommand lash.effect.record:lash:shift-close:run-handover",
           "OutputCommand"
         ]
       ],
       "run": [
         [
           "InputCommand",
-          "RunCommand lash:shift-run-start:ingress:ti:#:1#0",
-          "RunCommand lash:shift-admission:ingress:ti:#:1#0",
-          "SetStateCommand admission",
-          "RunCommand lash:plugin-transition:run-handover",
-          "RunCommand lash:turn-config:run-handover",
-          "RunCommand lash:trace:turn:run-handover:started",
+          "RunCommand lash.effect.record:lash:shift-run-start:ingress:ti:#:1#0",
+          "RunCommand lash.effect.record:lash:shift-admission:ingress:ti:#:1#0",
+          "SetStateCommand outcome",
+          "RunCommand lash.effect.record:lash:plugin-transition:run-handover",
+          "RunCommand lash.effect.record:lash:turn-config:run-handover",
+          "RunCommand lash.effect.record:lash:trace:turn:run-handover:started",
           "CallCommand LashDurableWaitIndex/peek_turn_gate",
-          "RunCommand lash:replay-corpus-run-handover:run-handover:1:0:sync_execution_environment:1",
-          "RunCommand lash:replay-corpus-run-handover:run-handover:1:0:before_llm_call:2",
-          "RunCommand lash:replay-corpus-run-handover:run-handover:1:0:llm_call:2",
+          "RunCommand lash.effect.record:lash:replay-corpus-run-handover:run-handover:1:0:sync_execution_environment:1",
+          "RunCommand lash.effect.record:lash:replay-corpus-run-handover:run-handover:1:0:before_llm_call:2",
+          "RunCommand lash.effect.record:lash:replay-corpus-run-handover:run-handover:1:0:llm_call:2",
           "CallCommand LashDurableWaitIndex/peek_turn_gate",
-          "RunCommand lash:run:aggregate:run-handover:group:replay-corpus-run-handover:run-handover:1:0:tool_batch:3:admit [admitted, aggregate_admitted]",
-          "RunCommand lash:run:tc_#:attempt:1 [x:done]",
-          "RunCommand lash:run:schedule:2 [attempt_recorded, decided]",
-          "RunCommand lash:run:cut:retain:0:4 [cut_retained]",
+          "RunCommand lash.run.record:lash:run:aggregate:run-handover:group:replay-corpus-run-handover:run-handover:1:0:tool_batch:3:admit [admitted, aggregate_admitted]",
+          "RunCommand lash.run.attempt:lash:run:tc_#:attempt:1 [x:done]",
+          "RunCommand lash.run.record:lash:run:schedule:2 [attempt_recorded, decided]",
+          "RunCommand lash.run.record:lash:run:cut:retain:0:4 [cut_retained]",
           "CallCommand LashDurableWaitIndex/resolve",
           "CallCommand LashDurableWaitIndex/resolve",
           "OneWayCallCommand LashDurableWaitIndex/resolve",
@@ -174,21 +237,27 @@
         ],
         [
           "InputCommand",
-          "RunCommand lash:shift-run-start:ingress:ti:#:1#1",
-          "RunCommand lash:shift-admission:ingress:ti:#:1#1",
-          "SetStateCommand admission",
-          "RunCommand lash:shift-follow-on:follow-on:run-handover:agent-frame:1#0",
-          "RunCommand lash:plugin-transition:follow-on:run-handover:agent-frame:1#0",
-          "RunCommand lash:turn-config:run-handover:agent-frame:1",
-          "RunCommand lash:trace:turn:run-handover:agent-frame:1:started",
+          "RunCommand lash.effect.record:lash:shift-run-start:ingress:ti:#:1#1",
+          "RunCommand lash.effect.record:lash:shift-admission:ingress:ti:#:1#1",
+          "SetStateCommand outcome",
+          "RunCommand lash.effect.record:lash:shift-follow-on:follow-on:run-handover:agent-frame:1#0",
+          "RunCommand lash.effect.record:lash:plugin-transition:follow-on:run-handover:agent-frame:1#0",
+          "RunCommand lash.effect.record:lash:turn-config:run-handover:agent-frame:1",
+          "RunCommand lash.effect.record:lash:trace:turn:run-handover:agent-frame:1:started",
           "CallCommand LashDurableWaitIndex/peek_turn_gate",
-          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:1:2:0:sync_execution_environment:1",
-          "RunCommand lash:run:schedule:5 [presented, incorporated]",
-          "RunCommand lash:run:aggregate:run-handover:group:replay-corpus-run-handover:run-handover:1:0:tool_batch:3:consume:7 [consumed]",
-          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:1:2:1:checkpoint:3",
+          "RunCommand lash.effect.record:lash:run:restore-material:1",
+          "RunCommand lash.effect.record:lash:replay-corpus-run-handover:run-handover:agent-frame:1:2:0:sync_execution_environment:1",
+          "RunCommand lash.run.record:lash:run:tc_#:declare [declarations_issued, realization_admitted]",
+          "OneWayCallCommand LashToolRealization/realize",
+          "AttachInvocationCommand",
+          "RunCommand lash.run.record:lash:run:tc_#:realization:issued [realization_issued]",
+          "RunCommand lash.run.record:lash:run:schedule:8 [realized]",
+          "RunCommand lash.run.record:lash:run:tc_#:present [declarations_settled, presented, incorporated]",
+          "RunCommand lash.run.record:lash:run:aggregate:run-handover:group:replay-corpus-run-handover:run-handover:1:0:tool_batch:3:consume:12 [consumed]",
+          "RunCommand lash.effect.record:lash:replay-corpus-run-handover:run-handover:agent-frame:1:2:1:checkpoint:3",
           "CallCommand LashDurableWaitIndex/peek_turn_gate",
-          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:1:2:1:sync_execution_environment:4",
-          "RunCommand lash:run:cut:retain:1:8 [cut_retained]",
+          "RunCommand lash.effect.record:lash:replay-corpus-run-handover:run-handover:agent-frame:1:2:1:sync_execution_environment:4",
+          "RunCommand lash.run.record:lash:run:cut:retain:1:13 [cut_retained]",
           "CallCommand LashDurableWaitIndex/resolve",
           "CallCommand LashDurableWaitIndex/resolve",
           "OneWayCallCommand LashDurableWaitIndex/resolve",
@@ -197,21 +266,22 @@
         ],
         [
           "InputCommand",
-          "RunCommand lash:shift-run-start:ingress:ti:#:1#2",
-          "RunCommand lash:shift-admission:ingress:ti:#:1#2",
-          "SetStateCommand admission",
-          "RunCommand lash:shift-follow-on:follow-on:run-handover:agent-frame:2#0",
-          "RunCommand lash:plugin-transition:follow-on:run-handover:agent-frame:2#0",
-          "RunCommand lash:turn-config:run-handover:agent-frame:2",
-          "RunCommand lash:trace:turn:run-handover:agent-frame:2:started",
+          "RunCommand lash.effect.record:lash:shift-run-start:ingress:ti:#:1#2",
+          "RunCommand lash.effect.record:lash:shift-admission:ingress:ti:#:1#2",
+          "SetStateCommand outcome",
+          "RunCommand lash.effect.record:lash:shift-follow-on:follow-on:run-handover:agent-frame:2#0",
+          "RunCommand lash.effect.record:lash:plugin-transition:follow-on:run-handover:agent-frame:2#0",
+          "RunCommand lash.effect.record:lash:turn-config:run-handover:agent-frame:2",
+          "RunCommand lash.effect.record:lash:trace:turn:run-handover:agent-frame:2:started",
           "CallCommand LashDurableWaitIndex/peek_turn_gate",
-          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:sync_execution_environment:1",
-          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:before_llm_call:2",
-          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:llm_call:2",
+          "RunCommand lash.effect.record:lash:run:restore-material:2",
+          "RunCommand lash.effect.record:lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:sync_execution_environment:1",
+          "RunCommand lash.effect.record:lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:before_llm_call:2",
+          "RunCommand lash.effect.record:lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:llm_call:2",
           "CallCommand LashDurableWaitIndex/peek_turn_gate",
-          "RunCommand lash:run:lifecycle:Closing [lifecycle]",
-          "RunCommand lash:run:lifecycle:Settled [lifecycle]",
-          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:checkpoint:3",
+          "RunCommand lash.run.record:lash:run:lifecycle:Closing [lifecycle]",
+          "RunCommand lash.run.record:lash:run:lifecycle:Settled [lifecycle]",
+          "RunCommand lash.effect.record:lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:checkpoint:3",
           "CallCommand LashDurableWaitIndex/resolve",
           "CallCommand LashDurableWaitIndex/resolve",
           "OneWayCallCommand LashDurableWaitIndex/resolve",

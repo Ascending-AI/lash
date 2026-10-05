@@ -290,6 +290,16 @@ impl<T> PayloadMetadata for Reply<T> {
     }
 }
 
+impl lash_core::store::DurableRecord for RestateCompatError {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}
+
+impl lash_core::store::DurableRecord for CallDecodeError {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}
+
 /// A scripted ingress answer: `body` inside the Reply envelope a lash
 /// handler answers on this build's wire.
 #[cfg(test)]

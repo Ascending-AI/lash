@@ -34,9 +34,9 @@ surface, and the crate it names as owner runs the three guarded-surface laws
 under ``const OWNER`` set to its own name, so a row cannot be added without
 its decoders being driven through its supported range.
 
-Every surface's constant declares the shapes it guards with a
-``/// version_guard(..)`` marker in its doc comment, or states why it has
-none
+DurableRecord and JournalStep implementations declare guarded roots in code.
+A surface may retain ``/// version_guard(..)`` markers for DDL, encoders and
+shared closures, or state why it has no shape
 (``scripts/check_version_bumps.py`` describes the marker). A surface without
 one, or with a guard the tree cannot evaluate, fails here, so the strict bump
 gate's inventory cannot go incomplete silently.
@@ -409,7 +409,9 @@ def guard_marker_problems(repo: Path, registry: Registry) -> list[str]:
         ]
     except check_version_bumps.CheckError as error:
         raise RegistryError(str(error)) from error
-    return check_version_bumps.worktree_problems(repo, surfaces)
+    from durable_surfaces import problems
+    return (problems(check_version_bumps.WorktreeView(repo), {s.constant for s in surfaces})
+            + check_version_bumps.worktree_problems(repo, surfaces))
 
 
 def row_label(row: str) -> str:

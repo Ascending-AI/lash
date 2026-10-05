@@ -158,16 +158,7 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// `lash_core::store::RECORD_UPCASTERS`.
 ///
 /// version_guard(
-///     roots(RestateDurableWaitIndexMetadata, IndexedWait),
-///     roots(path = "crates/lash-restate/src/durable_wait/messages.rs", RestateDurableWaitAwaitRequest),
 ///     roots(path = "crates/lash-core-store/src/tool_run/source_seal.rs", SourceSeal),
-///     roots(
-///         path = "crates/lash-restate/src/durable_wait/source_seal.rs",
-///         IndexedSource, RestateSourceArmRequest, RestateSourceArmReply,
-///         RestateSourceSubscribeRequest, RestateSourceSubscribeReply,
-///         RestateSourceSealRequest, RestateSourceSealReply, RestateSourceSealWrite,
-///     ),
-///     roots(path = "crates/lash-restate/src/ingress.rs", RestateInvocationId),
 ///     items(
 ///         DURABLE_WAIT_REGISTRY_FORMATS, DURABLE_WAIT_INDEX_METADATA_KEY,
 ///         DURABLE_WAIT_INDEX_WAIT_PREFIX, DURABLE_WAIT_INDEX_EFFECT_PREFIX,
@@ -228,6 +219,16 @@ const DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX: &str = "wait-index/v2/process-j
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX, durable_wait_index_closure_participant_key), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", revoke_index))
 const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v2/closure-participant/";
+
+impl lash_core::store::DurableRecord for RestateDurableWaitIndexMetadata {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
+impl lash_core::store::DurableRecord for IndexedWait {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
 
 #[cfg(test)]
 mod wait_registration_witness;

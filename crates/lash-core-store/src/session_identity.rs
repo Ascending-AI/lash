@@ -790,3 +790,18 @@ pub enum SessionObservedProcessOutcome {
         message: String,
     },
 }
+
+impl crate::store::DurableRecord for FrameNodeId {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::artifact_referrer::ARTIFACT_REFERRER_KINDS_VERSION);
+}
+
+impl crate::store::DurableRecord for SessionResidentToolAccess {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::SESSION_HEAD_META_SCHEMA_VERSION);
+}
+
+impl crate::store::DurableRecord for SessionToolAccessWire {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::SESSION_HEAD_META_SCHEMA_VERSION);
+}

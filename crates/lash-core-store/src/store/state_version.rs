@@ -18,9 +18,6 @@ pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 3;
 /// model, tool or provider effect; the refusal names the found generation so
 /// a later migration or drain can identify them.
 ///
-/// version_guard(
-///     roots(path = "crates/lash-core-store/src/plugin_state.rs", PluginState),
-/// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionStateGeneration"

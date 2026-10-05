@@ -1280,6 +1280,11 @@ impl EffectErrorJournalPolicy {
     }
 }
 
+impl crate::store::DurableRecord for RuntimeErrorCode {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::compat::SQLITE_CORE_SCHEMA_VERSION);
+}
+
 #[cfg(test)]
 mod declaration_tests {
     use super::RuntimeErrorClass;

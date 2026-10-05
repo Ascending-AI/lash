@@ -19,7 +19,6 @@ use serde::{Deserialize, Serialize};
 /// declaration replay key.
 /// **Integrator class 3: protocol and process-engine implementors.**
 /// version_surface = "coexist"
-/// version_guard(roots(ToolIntents, ToolIntentSubmissionRecord))
 pub const TOOL_INTENT_PROTOCOL_V3: u16 = 3;
 pub const TOOL_INTENT_MAX_COUNT: usize = 32;
 /// Maximum canonical JSON bytes one recorded intent batch may declare.
@@ -736,6 +735,16 @@ impl From<crate::ToolOutcome> for ToolAttemptOutcome {
             crate::ToolOutcome::Pending(pending) => Self::Pending(*pending),
         }
     }
+}
+
+impl lash_core_store::store::DurableRecord for ToolIntents {
+    const SURFACE: lash_core_store::store::SurfaceFormat =
+        lash_core_store::surface_format!(crate::tool_intent::TOOL_INTENT_PROTOCOL_V3);
+}
+
+impl lash_core_store::store::DurableRecord for ToolIntentSubmissionRecord {
+    const SURFACE: lash_core_store::store::SurfaceFormat =
+        lash_core_store::surface_format!(crate::tool_intent::TOOL_INTENT_PROTOCOL_V3);
 }
 
 #[cfg(test)]

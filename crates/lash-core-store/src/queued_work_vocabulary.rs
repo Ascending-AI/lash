@@ -862,3 +862,8 @@ pub fn process_wake_batch_draft_with_delivery_policy(
     .with_merge_key(PROCESS_WAKE_MERGE_KEY)
     .with_trace_cause(trace_cause)
 }
+
+impl crate::store::DurableRecord for QueuedWorkBatch {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::runtime_commit::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION);
+}

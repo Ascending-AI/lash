@@ -1204,7 +1204,6 @@
     "tests::process_session_turn_cancel::a_session_turn_cancel_is_its_recorded_peek_not_its_lent_stop": 2903,
     "tests::process_session_turn_laws::a_partially_created_child_completes_from_its_recorded_creation_config_on_sqlite": 1513,
     "tests::process_session_turn_laws::a_profile_bind_fault_is_never_journaled_and_its_retry_runs_the_step_again": 821,
-    "tests::process_session_turn_laws::a_recording_context_ends_the_attempt_at_a_retried_fault_and_journals_nothing": 1,
     "tests::process_session_turn_laws::a_session_turn_key_this_worker_does_not_serve_retries_typed": 672,
     "tests::process_session_turn_laws::a_start_in_a_process_owned_session_records_its_owner_above_the_session": 542,
     "tests::process_session_turn_laws::cancelled_mid_turn_subagent_retains_durable_rows": 273,

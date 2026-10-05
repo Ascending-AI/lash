@@ -586,6 +586,11 @@ pub fn decode_pending_follow_on(
     .transpose()
 }
 
+impl crate::store::DurableRecord for PendingFollowOn {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::compat::SQLITE_CORE_SCHEMA_VERSION);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

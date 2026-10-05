@@ -79,7 +79,6 @@ pub(super) fn continuation_refused(
 /// wiring a store.
 ///
 /// version_guard(
-///     roots(LashlangSegmentState),
 ///     items(path = "crates/lashlang/src/workflow_graph.rs", workflow_node_id),
 ///     items(
 ///         path = "crates/lashlang/src/workflow_graph/execution_sites.rs",
@@ -289,4 +288,9 @@ pub(super) fn capture_segment(
         program_hash: program_hash.to_owned(),
         engine_state,
     })
+}
+
+impl lash_core::store::DurableRecord for LashlangSegmentState {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::process::segment_state::LASHLANG_SEGMENT_STATE_VERSION);
 }

@@ -164,6 +164,79 @@ class FormatRegistryTests(unittest.TestCase):
         self.write("scripts/versioned-surfaces.toml", self.registry_text)
         return gate.check(self.repo, gate.load_registry(config), self.manifest)
 
+    def test_durable_declarations_require_a_registered_surface(self) -> None:
+        self.write("crates/demo/src/orphan.rs", """
+            struct Orphan;
+            impl DurableRecord for Orphan {
+                const SURFACE: SurfaceFormat = surface_format!(ABSENT_VERSION);
+            }
+            struct GenericStep<T>(T);
+            impl<T> JournalStep for GenericStep<T> {
+                type Output = T;
+                const SURFACE: SurfaceFormat = surface_format!(WIRE_VERSION);
+                const KIND: &str = "generic";
+                fn instance(&self) -> String { String::new() }
+            }
+            struct UnboundStep;
+            impl JournalStep for UnboundStep {
+                type Output = Orphan;
+                const KIND: &str = "orphan";
+                fn instance(&self) -> String { String::new() }
+            }
+        """)
+        problems = self.problems()
+        self.assertTrue(any("Orphan" in p and "surface" in p for p in problems), problems)
+        self.assertTrue(any("UnboundStep" in p and "SURFACE" in p for p in problems), problems)
+        self.assertTrue(any("GenericStep" in p and "concrete Output" in p for p in problems), problems)
+
+    def test_durable_roots_follow_use_imports(self) -> None:
+        self.write("runbooks/demo/Cargo.toml", '[package]\nname = "demo"\nversion = "0.1.0"\n')
+        self.write("runbooks/demo/src/lib.rs", SOURCE.replace(
+            "/// version_guard(items(WireRecord))\n", "",
+        ) + """
+            mod payload;
+            use crate::payload::Stored as Durable;
+            impl DurableRecord for Durable {
+                const SURFACE: SurfaceFormat = surface_format!(WIRE_VERSION);
+            }
+        """)
+        self.write("runbooks/demo/src/payload.rs", """
+            #[derive(Serialize, Deserialize)]
+            pub struct Stored { pub nested: Nested }
+            #[derive(Serialize, Deserialize)]
+            pub struct Nested { pub id: String }
+        """)
+        self.assertEqual(self.problems(), [])
+        view = gate.check_version_bumps.WorktreeView(self.repo)
+        surface = gate.check_version_bumps.Surface("WIRE_VERSION", "runbooks/demo/src/lib.rs", "migrate", True)
+        declaration = gate.check_version_bumps._declaration(view, surface)
+        closure, missing = gate.check_version_bumps.closure_of(view, declaration.guards[0])
+        self.assertEqual(missing, [])
+        self.assertIn("Stored", {shape.name for shape, _ in closure.depths})
+        self.assertIn("Nested", {shape.name for shape, _ in closure.depths})
+        before = gate.check_version_bumps.guard_signature(view, declaration.guards[0], enforce_presence=True)
+        self.write("runbooks/demo/src/payload.rs", """
+            #[derive(Serialize, Deserialize)]
+            pub struct Stored { pub nested: Nested }
+            #[derive(Serialize, Deserialize)]
+            pub struct Nested { pub id: u64 }
+        """)
+        changed = gate.check_version_bumps.WorktreeView(self.repo)
+        after = gate.check_version_bumps.guard_signature(changed, declaration.guards[0], enforce_presence=True)
+        self.assertNotEqual(gate.check_version_bumps.comparable(before), gate.check_version_bumps.comparable(after))
+
+
+    def test_journal_tripwire_tracks_control_flow_instead_of_payload_shapes(self) -> None:
+        projection = gate.check_version_bumps.journal_logic_source
+        body = "async fn drive() { ctx.run_json_send(step, None, body).await; if done { return; } }"
+        self.assertEqual(projection(body + "struct Payload { value: u32 }"),
+                         projection(body + "struct Payload { value: String }"))
+        self.assertNotEqual(projection(body), projection(body.replace("if done", "if cancelled")))
+        self.assertNotEqual(projection(body), projection(body.replace("run_json_send", "sleep")))
+        outside = "async fn drive() { if ready { ctx.run(body).await; } ctx.sleep(delay).await; }"
+        inside = "async fn drive() { if ready { ctx.run(body).await; ctx.sleep(delay).await; } }"
+        self.assertNotEqual(projection(outside), projection(inside))
+
     def test_source_markers_are_the_only_surface_declaration_path(self) -> None:
         self.assertNotIn("[[surface]]", self.registry_text)
         self.assertEqual(self.problems(), [])

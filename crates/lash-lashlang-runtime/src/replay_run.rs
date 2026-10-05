@@ -57,8 +57,6 @@ use lash_sansio::sync::MutexExt;
 /// marker, the ordinal width, a sub-key, the seal — is a grammar change.
 ///
 /// version_guard(
-///     roots(LashlangReplayNamespace, CommandShape, DispatchedOrdinalsDigest),
-///     roots(path = "crates/lash-lashlang-runtime/src/host_identity.rs", LashlangHostIdentities),
 ///     roots(path = "crates/lash-core-execution/src/runtime/causal.rs", CommandReplayKey),
 /// )
 /// version_surface = "drain"
@@ -798,6 +796,21 @@ pub struct RunSeal {
     pub key: String,
     pub issued_count: u64,
     pub dispatched_ordinals_digest: DispatchedOrdinalsDigest,
+}
+
+impl lash_core::store::DurableRecord for LashlangReplayNamespace {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::replay_run::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION);
+}
+
+impl lash_core::store::DurableRecord for CommandShape {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::replay_run::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION);
+}
+
+impl lash_core::store::DurableRecord for DispatchedOrdinalsDigest {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::replay_run::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION);
 }
 
 #[cfg(test)]

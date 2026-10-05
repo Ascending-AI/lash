@@ -187,3 +187,8 @@ pub(super) async fn decode_run_intent(
     serde_json::from_value(raw)
         .map_err(|error| super::misaddressed(format!("invalid turn intent: {error}")))
 }
+
+impl lash_core::store::DurableRecord for LashTurnState {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::session_shifts::LASH_TURN_OUTCOME_FORMAT_VERSION);
+}

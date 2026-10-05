@@ -770,10 +770,12 @@ impl Fig1464RunGuardRepro for Fig1464RunGuardReproImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig1464RunGuardReproInput>,
     ) -> HandlerResult<Json<()>> {
-        let mut run =
-            RestateControllerContext::run_json_send(&ctx, input.effect_name, None, async {
-                Fig1464UnjournalableEffectResult
-            });
+        let mut run = RestateControllerContext::run_json_send(
+            &ctx,
+            UnjournalableFixtureStep(input.effect_name),
+            None,
+            async { Fig1464UnjournalableEffectResult },
+        );
         std::future::poll_fn(|cx| {
             assert!(
                 matches!(run.as_mut().poll(cx), Poll::Pending),
@@ -797,10 +799,12 @@ impl Fig1464RunGuardRepro for Fig1464RunGuardReproImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig1464RunGuardReproInput>,
     ) -> HandlerResult<Json<()>> {
-        let mut run =
-            RestateControllerContext::run_json_send(&ctx, input.effect_name, None, async {
-                Fig1464UnreadableJournaledResult
-            });
+        let mut run = RestateControllerContext::run_json_send(
+            &ctx,
+            UnreadableFixtureStep(input.effect_name),
+            None,
+            async { Fig1464UnreadableJournaledResult },
+        );
         std::future::poll_fn(|cx| {
             assert!(
                 matches!(run.as_mut().poll(cx), Poll::Pending),
@@ -820,11 +824,13 @@ impl Fig1464RunGuardRepro for Fig1464RunGuardReproImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig1464RunGuardReproInput>,
     ) -> HandlerResult<Json<u32>> {
-        let Json(value) =
-            RestateControllerContext::run_json_send(&ctx, input.effect_name, None, async {
-                41_u32
-            })
-            .await?;
+        let Json(value) = RestateControllerContext::run_json_send(
+            &ctx,
+            ScalarFixtureStep(input.effect_name),
+            None,
+            async { 41_u32 },
+        )
+        .await?;
         Ok(Json(value + 1))
     }
 
@@ -838,12 +844,16 @@ impl Fig1464RunGuardRepro for Fig1464RunGuardReproImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig1464RunGuardReproInput>,
     ) -> HandlerResult<Json<u32>> {
-        let Json(value) =
-            RestateControllerContext::run_json_send(&ctx, input.effect_name, None, async {
+        let Json(value) = RestateControllerContext::run_json_send(
+            &ctx,
+            ScalarFixtureStep(input.effect_name),
+            None,
+            async {
                 tokio::task::yield_now().await;
                 41_u32
-            })
-            .await?;
+            },
+        )
+        .await?;
         Ok(Json(value + 1))
     }
 }
@@ -1629,5 +1639,38 @@ impl lash_core::tool_dispatch::ToolRealizer for NoIntentsRealizer {
             lash_core::RuntimeErrorCode::RuntimeToolRunShape,
             "fixture admits no intent realization",
         ))
+    }
+}
+
+struct UnjournalableFixtureStep(String);
+impl crate::JournalStep for UnjournalableFixtureStep {
+    type Output = Fig1464UnjournalableEffectResult;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "fixture.UnjournalableFixtureStep";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct UnreadableFixtureStep(String);
+impl crate::JournalStep for UnreadableFixtureStep {
+    type Output = Fig1464UnreadableJournaledResult;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "fixture.UnreadableFixtureStep";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct ScalarFixtureStep(String);
+impl crate::JournalStep for ScalarFixtureStep {
+    type Output = u32;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "fixture.ScalarFixtureStep";
+    fn instance(&self) -> String {
+        self.0.clone()
     }
 }

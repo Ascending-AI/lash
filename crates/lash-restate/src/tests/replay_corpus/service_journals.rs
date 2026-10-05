@@ -56,7 +56,10 @@ fn tool_definition(awaited_child: bool) -> lash_core::ToolDefinition {
     if awaited_child {
         definition.with_declaration(lash_core::ToolDeclaration::deferring())
     } else {
-        definition
+        definition.with_declaration(
+            lash_core::ToolDeclaration::default()
+                .with_intents([lash_core::ToolIntentKind::StartProcess]),
+        )
     }
 }
 
@@ -79,33 +82,36 @@ impl lash_core::ToolProvider for CountingTool {
             .await
             .expect("the workload keeps the tool's gate open")
             .forget();
+        let declaration = lash_core::ProcessStartDeclaration::new(
+            lash_core::ProcessInput::Engine {
+                kind: ENGINE_KIND.into(),
+                payload: json!({}),
+            },
+            lash_core::ProcessOriginator::host(),
+            lash_core::Lifetime::Detached,
+        )
+        .with_env_ref(
+            call.context
+                .process_execution_env_ref()
+                .expect("the admitted tool carries its execution environment"),
+        );
+        let intent = lash_core::StartProcessIntent {
+            owner: call.context.owner().runtime_owner(),
+            declaration,
+        };
         if self.awaited_child {
-            let declaration = lash_core::ProcessStartDeclaration::new(
-                lash_core::ProcessInput::Engine {
-                    kind: ENGINE_KIND.into(),
-                    payload: json!({}),
-                },
-                lash_core::ProcessOriginator::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_env_ref(
-                call.context
-                    .process_execution_env_ref()
-                    .expect("the admitted tool carries its execution environment"),
-            );
-            let start = lash_core::DeclaredStart::new(
-                call.context,
-                lash_core::StartProcessIntent {
-                    owner: call.context.owner().runtime_owner(),
-                    declaration,
-                },
-            )
-            .expect("the tool may await its declared child");
+            let start = lash_core::DeclaredStart::new(call.context, intent)
+                .expect("the tool may await its declared child");
             return lash_core::ToolAttemptOutcome::pending(
                 lash_core::PendingCompletion::new().resolved_by_declared_start(start),
             );
         }
-        lash_core::ToolOutcome::ok(json!({"result": "counted"})).into()
+        // A recorded final with a real intent exercises LashToolRealization's
+        // independent journal as part of the existing service workload.
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(json!({"result": "counted"})),
+            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(intent))]),
+        )
     }
 }
 
@@ -658,7 +664,10 @@ pub(super) fn turn_run_settled(server: &RestateTestServer, turn_id: &str) -> boo
                 .is_some_and(|name| name.contains(turn_id))
         }) && entries.iter().any(|entry| {
             entry.ty == MessageType::RunCommand
-                && entry.name.as_deref() == Some("lash:run:lifecycle:Settled")
+                && entry
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| name.ends_with("lash:run:lifecycle:Settled"))
         })
     })
 }

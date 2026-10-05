@@ -640,3 +640,8 @@ pub(crate) fn ingress_stored_format_refusal(
         .to_owned();
     stored_format_error_in(&message)
 }
+
+impl lash_core::store::DurableRecord for ObjectUpgradeResponse {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}

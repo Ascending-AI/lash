@@ -77,7 +77,6 @@ use std::sync::Arc;
 /// of recording every effect's begin and end at the scope index.
 ///
 /// version_guard(
-///     roots(AdmissionVerdict, StartOutcome),
 ///     roots(
 ///         path = "crates/lash-restate/src/process/mod.rs", RestateProcessWorkflowInput,
 ///         RestateProcessWorkflowPayload, RestateProcessCancelRequest,
@@ -85,7 +84,6 @@ use std::sync::Arc;
 ///     ),
 ///     items(ADMIT_STEP, START_STEP, stamped_journal_version, decode_stamped_request),
 ///     items(path = "crates/lash-restate/src/controller/scope_recording.rs", execute_effect),
-///     roots(path = "crates/lash-restate/src/durable_wait/messages.rs", RestateDurableWaitProcessJournalRequest),
 ///     items(path = "crates/lash-restate/src/process/workflow.rs", run),
 ///     items(path = "crates/lash-restate/src/process/workflow/scope_journal.rs", register, release),
 ///     items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", register_process_journal, release_process_journal),
@@ -169,15 +167,6 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// Epoch 33 (FIG-4946) closes a Run after a completed cell response handoff
 /// abort when the turn has already recorded cancellation.
 ///
-/// version_guard(
-///     roots(AdmissionVerdict, StartOutcome),
-///     items(ADMIT_STEP, START_STEP),
-///     items(
-///         path = "crates/lash-restate/src/process/workflow.rs", COMPLETE_STEP, BOUNDARY_STEP,
-///         HANDOVER_STEP, CANCEL_FORWARD_STEP, CANCEL_RECORD_STEP, CANCEL_ROUTE_STEP,
-///         CANCEL_CHILD_TURN_STEP, RETIRE_STEP,
-///     ),
-/// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
@@ -912,4 +901,14 @@ async fn start_later_segment(
     } else {
         StartOutcome::SubstrateLost { lost: root }
     })
+}
+
+impl lash_core::store::DurableRecord for AdmissionVerdict {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::process::admission::RESTATE_PROCESS_JOURNAL_VERSION);
+}
+
+impl lash_core::store::DurableRecord for StartOutcome {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::process::admission::RESTATE_PROCESS_JOURNAL_VERSION);
 }

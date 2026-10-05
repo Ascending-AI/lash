@@ -44,7 +44,9 @@ fn run_completion_landed(server: &RestateTestServer, run_name: &str) -> bool {
         return false;
     };
     let Some(command) = journal.iter().find(|entry| {
-        entry.ty == MessageType::RunCommand && entry.name.as_deref() == Some(run_name)
+        entry.ty == MessageType::RunCommand
+            && entry.name.as_deref()
+                == Some(crate::controller::attempt_journal_name(run_name.to_owned()).as_str())
     }) else {
         return false;
     };

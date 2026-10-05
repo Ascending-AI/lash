@@ -49,6 +49,8 @@ use crate::ingress::RestateIngressClient;
 use crate::process_stop::ProcessStopDelivery;
 use crate::services::{Lane, LashService, ServiceRoute, routed_workflow};
 
+mod journal;
+use journal::*;
 mod completion;
 mod handover;
 mod lanes;
@@ -56,34 +58,6 @@ mod park;
 mod scope_journal;
 pub(crate) use completion::complete_process_outcome;
 
-/// The journal name of the terminal completion step.
-const COMPLETE_STEP: &str = "lash.process.complete";
-/// The journal name of the step that decides whether a boundary is declined.
-const BOUNDARY_STEP: &str = "lash.segment.boundary";
-/// The journal name of the step that publishes a successor's handover.
-const HANDOVER_STEP: &str = "lash.segment.handover";
-/// The journal name of the step that reads a cancel to forward to a successor.
-const CANCEL_FORWARD_STEP: &str = "lash.segment.cancel-forward";
-/// The journal name of the step that records a cancel request.
-const CANCEL_RECORD_STEP: &str = "lash.process.cancel.record";
-/// The journal name of the step that finds the segment a cancel is routed to.
-const CANCEL_ROUTE_STEP: &str = "lash.process.cancel.route";
-/// The journal name of the step that asks a `SessionTurn` child turn to stop.
-const CANCEL_CHILD_TURN_STEP: &str = "lash.process.cancel.child-turn";
-/// The journal name of the step that retires the handovers a segment no
-/// longer needs.
-const RETIRE_STEP: &str = "lash.segment.retire";
-/// The journal name of the step that applies an ended process's parent-end
-/// plan: the step right after its terminal completion (FIG-3822).
-const PARENT_END_STEP: &str = "lash.process.parent-end";
-/// The journal name of the step that settles the process's terminal
-/// publication once this execution published the terminal itself (ADR 0109
-/// §3, `ProcessTerminal`).
-const PUBLISHED_STEP: &str = "lash.process.terminal.published";
-/// The handover a later segment resumes from, read once and journaled, so a
-/// redrive replays the runner from the recorded handover even after the
-/// segment retired it (FIG-3809).
-const RESUME_STEP: &str = "lash.segment.resume";
 /// The live segment a process-level cancel is forwarded to: its ordinal and
 /// the route its handover recorded it was sent under.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -525,15 +499,12 @@ where
         }
         let registry = &self.registry;
         let Json(settled) = context
-            .run_json_or_retry_send::<Result<bool, String>, _>(
-                PUBLISHED_STEP.to_string(),
-                async move {
-                    match registry.settle_terminal_publication(process_id).await {
-                        Ok(settled) => Ok(Ok(settled)),
-                        Err(error) => step_fault(error),
-                    }
-                },
-            )
+            .run_json_or_retry_send(PublishTerminalStep, async move {
+                match registry.settle_terminal_publication(process_id).await {
+                    Ok(settled) => Ok(Ok(settled)),
+                    Err(error) => step_fault(error),
+                }
+            })
             .await
             .map_err(HandlerError::from)?;
         if let Err(refusal) = settled {
@@ -604,40 +575,37 @@ where
     ) -> Result<SubstrateLostRecovery, HandlerError> {
         let registry = &self.registry;
         let Json(recovered) = journal
-            .run_json_or_retry_send::<Result<SubstrateLostRecovery, String>, _>(
-                COMPLETE_STEP.to_string(),
-                async move {
-                    let proposed = ProcessAwaitOutput::Abandoned {
-                        evidence: Box::new(AbandonEvidence {
-                            writer: AbandonWriter::ResumeRefused {
-                                reason: lash_core::ProcessResumeRefusal::SubstrateLost,
-                            },
-                            owner: Some(owner),
-                            epoch_ms: restate_now_ms(),
-                        }),
-                        control: None,
-                    };
-                    let authority = lash_core::ProcessCompletionAuthority::WorkflowKeyRecovery {
-                        workflow_key: process_id.to_string(),
-                        segment_ordinal,
-                    };
-                    match registry
-                        .complete_process(process_id, proposed, authority)
-                        .await
-                    {
-                        Ok(completion) => match completion.stored().outcome() {
-                            Some(stored) => Ok(Ok(SubstrateLostRecovery::Ended(Box::new(stored)))),
-                            None => Ok(Err(format!(
-                                "process `{process_id}` completion returned a non-terminal record"
-                            ))),
+            .run_json_or_retry_send(RecoverLostStep, async move {
+                let proposed = ProcessAwaitOutput::Abandoned {
+                    evidence: Box::new(AbandonEvidence {
+                        writer: AbandonWriter::ResumeRefused {
+                            reason: lash_core::ProcessResumeRefusal::SubstrateLost,
                         },
-                        Err(PluginError::ProcessHandedOver {
-                            segment_ordinal, ..
-                        }) => Ok(Ok(SubstrateLostRecovery::HandedOver { segment_ordinal })),
-                        Err(error) => step_fault(error),
-                    }
-                },
-            )
+                        owner: Some(owner),
+                        epoch_ms: restate_now_ms(),
+                    }),
+                    control: None,
+                };
+                let authority = lash_core::ProcessCompletionAuthority::WorkflowKeyRecovery {
+                    workflow_key: process_id.to_string(),
+                    segment_ordinal,
+                };
+                match registry
+                    .complete_process(process_id, proposed, authority)
+                    .await
+                {
+                    Ok(completion) => match completion.stored().outcome() {
+                        Some(stored) => Ok(Ok(SubstrateLostRecovery::Ended(Box::new(stored)))),
+                        None => Ok(Err(format!(
+                            "process `{process_id}` completion returned a non-terminal record"
+                        ))),
+                    },
+                    Err(PluginError::ProcessHandedOver {
+                        segment_ordinal, ..
+                    }) => Ok(Ok(SubstrateLostRecovery::HandedOver { segment_ordinal })),
+                    Err(error) => step_fault(error),
+                }
+            })
             .await
             .map_err(HandlerError::from)?;
         recovered.map_err(|refusal| TerminalError::new(refusal).into())
@@ -658,29 +626,26 @@ where
         let registry = &self.registry;
         let attachments = self.attachments.as_ref();
         let Json(stored) = journal
-            .run_json_or_retry_send::<Result<ProcessAwaitOutput, String>, _>(
-                COMPLETE_STEP.to_string(),
-                async move {
-                    let TerminalProposal::Output { output, prelude } = proposal;
-                    match complete_process_outcome(
-                        registry,
-                        attachments,
-                        process_id,
-                        *output,
-                        prelude,
-                        self.tracing
-                            .clone()
-                            .or_else(|| self.runner.tracing())
-                            .as_ref(),
-                        segment,
-                    )
-                    .await
-                    {
-                        Ok(stored) => Ok(Ok(stored)),
-                        Err(error) => step_fault(error),
-                    }
-                },
-            )
+            .run_json_or_retry_send(CompleteProcessStep, async move {
+                let TerminalProposal::Output { output, prelude } = proposal;
+                match complete_process_outcome(
+                    registry,
+                    attachments,
+                    process_id,
+                    *output,
+                    prelude,
+                    self.tracing
+                        .clone()
+                        .or_else(|| self.runner.tracing())
+                        .as_ref(),
+                    segment,
+                )
+                .await
+                {
+                    Ok(stored) => Ok(Ok(stored)),
+                    Err(error) => step_fault(error),
+                }
+            })
             .await
             .map_err(HandlerError::from)?;
         let stored = stored.map_err(|refusal| HandlerError::from(TerminalError::new(refusal)))?;
@@ -704,22 +669,19 @@ where
         let delivery = &self.parent_end_delivery;
         let parent = lash_core::ScopeId::process(process_id.clone());
         let Json(applied) = journal
-            .run_json_or_retry_send::<Result<u32, String>, _>(
-                PARENT_END_STEP.to_string(),
-                async move {
-                    match lash_core::apply_parent_end_plan(
-                        registry.as_ref(),
-                        delivery.as_ref(),
-                        &parent,
-                        restate_now_ms(),
-                    )
-                    .await
-                    {
-                        Ok(application) => Ok(Ok(application.delivered)),
-                        Err(error) => step_fault(error),
-                    }
-                },
-            )
+            .run_json_or_retry_send(ParentEndStep, async move {
+                match lash_core::apply_parent_end_plan(
+                    registry.as_ref(),
+                    delivery.as_ref(),
+                    &parent,
+                    restate_now_ms(),
+                )
+                .await
+                {
+                    Ok(application) => Ok(Ok(application.delivered)),
+                    Err(error) => step_fault(error),
+                }
+            })
             .await
             .map_err(HandlerError::from)?;
         if let Err(refusal) = applied {
@@ -979,15 +941,12 @@ async fn record_cancel_step(
     request: &RestateProcessCancelRequest,
 ) -> Result<(), HandlerError> {
     let Json(recorded) = journal
-        .run_json_or_retry_send::<Result<(), String>, _>(
-            CANCEL_RECORD_STEP.to_string(),
-            async move {
-                match record_cancel_requested(registry, request).await {
-                    Ok(()) => Ok(Ok(())),
-                    Err(error) => step_fault(error),
-                }
-            },
-        )
+        .run_json_or_retry_send(RecordCancelStep, async move {
+            match record_cancel_requested(registry, request).await {
+                Ok(()) => Ok(Ok(())),
+                Err(error) => step_fault(error),
+            }
+        })
         .await
         .map_err(HandlerError::from)?;
     recorded.map_err(|refusal| TerminalError::new(refusal).into())
@@ -1174,41 +1133,36 @@ where
                 let pid = &process_id;
                 let segment_ordinal = input.segment_ordinal;
                 let Json(resumed) = ctx
-                    .run_json_or_retry_send::<Result<lash_core::SegmentHandover, SegmentFailure>, _>(
-                        RESUME_STEP.to_string(),
-                        async move {
-                            let persisted = match super::journal_or_retry(
-                                continuations
-                                    .get_segment_handover(pid, segment_ordinal)
-                                    .await,
-                            )? {
-                                Ok(persisted) => persisted,
-                                Err(error) => {
-                                    return Ok(Err(SegmentFailure::HandoverMissing(
-                                        error.to_string(),
-                                    )));
-                                }
-                            };
-                            let Some(persisted) = persisted else {
-                                return Ok(Err(SegmentFailure::HandoverMissing(format!(
-                                    "missing persisted handover for process `{pid}` segment \
+                    .run_json_or_retry_send(ResumeSegmentStep, async move {
+                        let persisted = match super::journal_or_retry(
+                            continuations
+                                .get_segment_handover(pid, segment_ordinal)
+                                .await,
+                        )? {
+                            Ok(persisted) => persisted,
+                            Err(error) => {
+                                return Ok(Err(SegmentFailure::HandoverMissing(error.to_string())));
+                            }
+                        };
+                        let Some(persisted) = persisted else {
+                            return Ok(Err(SegmentFailure::HandoverMissing(format!(
+                                "missing persisted handover for process `{pid}` segment \
                                      {segment_ordinal}: its admission recorded one that is no \
                                      longer retained"
-                                ))));
-                            };
-                            Ok(match handover_digest(&persisted.handover) {
-                                Ok(digest) if digest == recorded => Ok(persisted.handover),
-                                Ok(_) => Err(SegmentFailure::HandoverMismatch(format!(
-                                    "process `{pid}` segment {segment_ordinal} handover differs \
+                            ))));
+                        };
+                        Ok(match handover_digest(&persisted.handover) {
+                            Ok(digest) if digest == recorded => Ok(persisted.handover),
+                            Ok(_) => Err(SegmentFailure::HandoverMismatch(format!(
+                                "process `{pid}` segment {segment_ordinal} handover differs \
                                      from the one its admission recorded"
-                                ))),
-                                Err(error) => Err(SegmentFailure::HandoverMismatch(format!(
-                                    "process `{pid}` segment {segment_ordinal} handover digest: \
+                            ))),
+                            Err(error) => Err(SegmentFailure::HandoverMismatch(format!(
+                                "process `{pid}` segment {segment_ordinal} handover digest: \
                                      {error:?}"
-                                ))),
-                            })
-                        },
-                    )
+                            ))),
+                        })
+                    })
                     .await
                     .map_err(HandlerError::from)?;
                 match resumed {
@@ -1284,17 +1238,14 @@ where
                 let reason = boundary.reason;
                 let Json(declined) = controller
                     .context()
-                    .run_json_or_retry_send::<Result<bool, String>, _>(
-                        BOUNDARY_STEP.to_string(),
-                        async move {
-                            match registry.get_process(pid).await {
-                                Ok(record) => {
-                                    Ok(Ok(boundary_must_be_declined(reason, record.as_ref())))
-                                }
-                                Err(error) => step_fault(error),
+                    .run_json_or_retry_send(BoundaryStep, async move {
+                        match registry.get_process(pid).await {
+                            Ok(record) => {
+                                Ok(Ok(boundary_must_be_declined(reason, record.as_ref())))
                             }
-                        },
-                    )
+                            Err(error) => step_fault(error),
+                        }
+                    })
                     .await
                     .map_err(HandlerError::from)?;
                 match declined {
@@ -1391,20 +1342,17 @@ where
         let runner = &self.runner;
         let cancel = &request;
         let Json(child_turn) = ctx
-            .run_json_or_retry_send::<Result<(), String>, _>(
-                CANCEL_CHILD_TURN_STEP.to_string(),
-                async move {
-                    let record = match registry.get_process(&cancel.process_id).await {
-                        Ok(Some(record)) => record,
-                        Ok(None) => return Ok(Ok(())),
-                        Err(error) => return step_fault(error),
-                    };
-                    match runner.stop_child_turn(&record, &cancel.request).await {
-                        Ok(()) => Ok(Ok(())),
-                        Err(error) => step_fault(error),
-                    }
-                },
-            )
+            .run_json_or_retry_send(CancelChildTurnStep, async move {
+                let record = match registry.get_process(&cancel.process_id).await {
+                    Ok(Some(record)) => record,
+                    Ok(None) => return Ok(Ok(())),
+                    Err(error) => return step_fault(error),
+                };
+                match runner.stop_child_turn(&record, &cancel.request).await {
+                    Ok(()) => Ok(Ok(())),
+                    Err(error) => step_fault(error),
+                }
+            })
             .await
             .map_err(HandlerError::from)?;
         child_turn.map_err(TerminalError::new)?;
@@ -1416,20 +1364,17 @@ where
         let continuations = &self.continuations;
         let process_id = &request.process_id;
         let Json(target) = ctx
-            .run_json_or_retry_send::<Result<Option<CancelTarget>, String>, _>(
-                CANCEL_ROUTE_STEP.to_string(),
-                async move {
-                    match continuations.latest_segment_handover(process_id).await {
-                        Ok(handover) => Ok(Ok(handover
-                            .filter(|handover| handover.segment_ordinal > 0)
-                            .map(|handover| CancelTarget {
-                                segment_ordinal: handover.segment_ordinal,
-                                route: handover.route,
-                            }))),
-                        Err(error) => step_fault(error),
-                    }
-                },
-            )
+            .run_json_or_retry_send(CancelRouteStep, async move {
+                match continuations.latest_segment_handover(process_id).await {
+                    Ok(handover) => Ok(Ok(handover
+                        .filter(|handover| handover.segment_ordinal > 0)
+                        .map(|handover| CancelTarget {
+                            segment_ordinal: handover.segment_ordinal,
+                            route: handover.route,
+                        }))),
+                    Err(error) => step_fault(error),
+                }
+            })
             .await
             .map_err(HandlerError::from)?;
         if let Some(target) = target.map_err(TerminalError::new)? {

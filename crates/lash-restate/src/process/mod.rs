@@ -34,6 +34,46 @@ use serde::Serialize;
 use crate::durable_wait::restate_await_event_key_for_authority;
 use crate::ingress::{RestateConnection, RestateIngressClient};
 
+impl lash_core::store::DurableRecord for RestateProcessWorkflowInput {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateProcessWorkflowPayload {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateProcessWorkflowOutput {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateProcessCancelRequest {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateProcessCompleteRequest {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateProcessAwaitRequest {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateProcessHandOverRequest {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateProcessCancelSignal {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::compat::RESTATE_WIRE_VERSION);
+}
+
 #[cfg(test)]
 pub(crate) use workflow::complete_process_outcome;
 pub(crate) use workflow::{LashProcessWorkflow, LashProcessWorkflowImpl};

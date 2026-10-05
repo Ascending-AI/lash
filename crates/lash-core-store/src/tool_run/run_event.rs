@@ -1373,3 +1373,8 @@ fn decision_follows(
         CallDecision::Cancelled => after.is_none(),
     }
 }
+
+impl crate::store::DurableRecord for SegmentOrdinal {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::artifact_referrer::ARTIFACT_REFERRER_KINDS_VERSION);
+}

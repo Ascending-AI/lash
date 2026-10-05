@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 /// Retained at version 6 under the pre-1.0 stored-format freeze.
 ///
 /// version_guard(
-///     roots(ToolAttemptCapture),
 ///     roots(path = "crates/lash-sansio/src/llm/types.rs", LlmCallId),
 ///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
 ///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TokenUsage),
@@ -82,4 +81,10 @@ impl ToolAttemptCapture {
         }
         Ok(())
     }
+}
+
+impl lash_core_store::store::DurableRecord for ToolAttemptCapture {
+    const SURFACE: lash_core_store::store::SurfaceFormat = lash_core_store::surface_format!(
+        crate::runtime::effect::tool_attempt_capture::TOOL_ATTEMPT_CAPTURE_VERSION
+    );
 }

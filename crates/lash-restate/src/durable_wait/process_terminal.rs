@@ -304,18 +304,15 @@ pub(super) async fn deliver(
         .map_err(|_| refusal(SourceRefusal::WrongOwner))?;
     let output = delivery.output.clone();
     let Json(acquisition) = ctx
-        .run_json_or_retry_send::<DeliveryAcquisition, _>(
-            "process-terminal-acquire".into(),
-            async move {
-                acquire_under(
-                    attachments.as_ref(),
-                    &claim,
-                    &delivered_attachment_ids(&output),
-                )
-                .await
-                .map_err(|error| error.to_string())
-            },
-        )
+        .run_json_or_retry_send(AcquireTerminalStep, async move {
+            acquire_under(
+                attachments.as_ref(),
+                &claim,
+                &delivered_attachment_ids(&output),
+            )
+            .await
+            .map_err(|error| error.to_string())
+        })
         .await?;
     let mut resolution = match acquisition {
         DeliveryAcquisition::Held => Resolution::Ok(
@@ -365,13 +362,16 @@ pub(super) async fn deliver(
         source: subscription.receiver.clone(),
     };
     let store = Arc::clone(&materials);
-    let Json(retained) = ctx.run_json_or_retry_send::<Result<RetainedBundle, lash_core::RuntimeEffectControllerError>, _>(
-        "process-terminal-retain".into(), async move {
+    let Json(retained) = ctx
+        .run_json_or_retry_send(RetainTerminalStep, async move {
             match store.retain_material(&holder, &bundle).await {
-                Err(lash_core::tool_run::MaterialRetentionError::Store(error)) => Err(error.to_string()),
+                Err(lash_core::tool_run::MaterialRetentionError::Store(error)) => {
+                    Err(error.to_string())
+                }
                 result => Ok(result.map_err(material_error)),
             }
-        }).await?;
+        })
+        .await?;
     let retained = retained.map_err(|error| TerminalError::new(error.to_record()))?;
     let result = retained
         .references
@@ -488,6 +488,28 @@ pub(super) async fn publish(
         .process_receivers
         .retain(|entry| &entry.terminal != key);
     Ok(())
+}
+
+struct AcquireTerminalStep;
+impl crate::JournalStep for AcquireTerminalStep {
+    type Output = DeliveryAcquisition;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "process-terminal-acquire";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct RetainTerminalStep;
+impl crate::JournalStep for RetainTerminalStep {
+    type Output = Result<RetainedBundle, lash_core::RuntimeEffectControllerError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "process-terminal-retain";
+    fn instance(&self) -> String {
+        String::new()
+    }
 }
 
 #[cfg(test)]

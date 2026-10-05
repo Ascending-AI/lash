@@ -561,6 +561,11 @@ fn validate_head_revision(expected: u64, actual: u64) -> Result<(), StoreError> 
     Ok(())
 }
 
+impl crate::store::DurableRecord for RuntimeCommitReceiptRecord {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::runtime_commit::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

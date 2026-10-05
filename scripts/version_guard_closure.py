@@ -40,7 +40,7 @@ def surface_report(view: gate.TreeView, surface: gate.Surface) -> dict:
     cycles: set[tuple[str, ...]] = set()
     opaque: set[tuple[str, str]] = set()
     for guard in declaration.guards:
-        if guard.kind not in {"roots", "shapes"}:
+        if guard.kind not in {"roots", "shapes", "records"}:
             continue
         closure, missing = gate.closure_of(view, guard)
         report["missing_roots"].extend(missing)

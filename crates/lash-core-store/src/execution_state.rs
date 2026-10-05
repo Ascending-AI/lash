@@ -397,3 +397,8 @@ impl PluginOptions {
             .transpose()
     }
 }
+
+impl crate::store::DurableRecord for PluginOptions {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::session_graph::SESSION_NODE_BODY_SCHEMA_VERSION);
+}

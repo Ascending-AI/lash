@@ -30,14 +30,15 @@ fn frame(session: &lash::LashSession) -> String {
         .unwrap_or_default()
 }
 
-async fn journal_read<T, F>(controller: &Controller<'_>, name: &str, future: F) -> HandlerResult<T>
+async fn journal_read<S, T, F>(controller: &Controller<'_>, step: S, future: F) -> HandlerResult<T>
 where
+    S: lash::restate::JournalStep<Output = Result<T, String>>,
     T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
     F: std::future::Future<Output = lash::Result<T>> + Send,
 {
     let Json(result) = controller
         .context()
-        .run_json_or_retry_send(name.into(), async move {
+        .run_json_or_retry_send(step, async move {
             match future.await {
                 Ok(value) => Ok(Ok(value)),
                 Err(error) if error.is_retryable() => Err(error.to_string()),
@@ -75,7 +76,7 @@ pub(super) async fn external_event(
         .await
         .map_err(turn_handler_error)?;
     let ids = receipt.started_process_ids();
-    let outputs = journal_read(controller, "load.external-outputs", async {
+    let outputs = journal_read(controller, ExternalOutputsStep, async {
         let mut outputs = Vec::new();
         for id in &ids {
             let output = core.processes().await_output(id).await?.into_tool_output();
@@ -110,7 +111,7 @@ pub(super) async fn promotion_evidence(
         .first()
         .ok_or_else(|| terminal("external occurrence started no process"))?
         .clone();
-    journal_read(controller, "load.promotion", async move {
+    journal_read(controller, PromotionStep, async move {
         let id = match process_id.parse::<lash::ProcessId>() {
             Ok(id) => id,
             Err(error) => return Ok(Err(error.to_string())),
@@ -155,7 +156,7 @@ pub(super) async fn listed_trigger_revision(
     core: &lash::LashCore,
     session_id: &str,
 ) -> HandlerResult<u64> {
-    journal_read(controller, "load.trigger-revision", async {
+    journal_read(controller, TriggerRevisionStep, async {
         let listed = core
             .session(lash::SessionId::parse(session_id)?)
             .open()
@@ -212,7 +213,7 @@ impl LoadWorker {
         let session =
             journaled_session(controller.context(), &self.core, session_id.clone()).await?;
         let expected = behavior::prefill(&self.load, run).map_err(terminal_chain)?;
-        let prefill = journal_read(controller, "load.prefill", async {
+        let prefill = journal_read(controller, PrefillStep, async {
             // The live session is opened only inside journaled steps: a
             // replay reads their answers back and opens nothing.
             let session = self.core.session(session_id.clone()).open().await?;
@@ -242,7 +243,7 @@ impl LoadWorker {
         .await?;
         self.behavior_turn(controller, &session, run, "seed")
             .await?;
-        let admin = journal_read(controller, "load.admin-compaction", async {
+        let admin = journal_read(controller, AdminCompactionStep, async {
             let session = self.core.session(session_id.clone()).open().await?;
             let before = frame(&session);
             let applied = session
@@ -263,14 +264,14 @@ impl LoadWorker {
         // next admitted turn's pressure hook must open its own summary frame.
         self.behavior_turn(controller, &session, run, "pressure_usage")
             .await?;
-        let before = journal_read(controller, "load.before-pressure", async {
+        let before = journal_read(controller, BeforePressureStep, async {
             Ok(frame(&self.core.session(session_id.clone()).open().await?))
         })
         .await?;
         let outcome = self
             .behavior_turn(controller, &session, run, "pressure")
             .await?;
-        let pressure = journal_read(controller, "load.pressure-frame", async {
+        let pressure = journal_read(controller, PressureFrameStep, async {
             let reopened = self.core.session(session_id.clone()).open().await?;
             Ok(FrameEvidence {
                 before,
@@ -325,3 +326,80 @@ impl LoadWorker {
 #[cfg(test)]
 #[path = "behaviors_replay_tests.rs"]
 mod replay_tests;
+
+struct ExternalOutputsStep;
+impl lash::restate::JournalStep for ExternalOutputsStep {
+    type Output = Result<Result<Vec<Value>, String>, String>;
+    const SURFACE: lash::persistence::SurfaceFormat =
+        lash::persistence::surface_format!(lash::restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "load.external-outputs";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct PromotionStep;
+impl lash::restate::JournalStep for PromotionStep {
+    type Output = Result<Result<PromotionEvidence, String>, String>;
+    const SURFACE: lash::persistence::SurfaceFormat =
+        lash::persistence::surface_format!(lash::restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "load.promotion";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct TriggerRevisionStep;
+impl lash::restate::JournalStep for TriggerRevisionStep {
+    type Output = Result<u64, String>;
+    const SURFACE: lash::persistence::SurfaceFormat =
+        lash::persistence::surface_format!(lash::restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "load.trigger-revision";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct PrefillStep;
+impl lash::restate::JournalStep for PrefillStep {
+    type Output = Result<HistoryEvidence, String>;
+    const SURFACE: lash::persistence::SurfaceFormat =
+        lash::persistence::surface_format!(lash::restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "load.prefill";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct AdminCompactionStep;
+impl lash::restate::JournalStep for AdminCompactionStep {
+    type Output = Result<FrameEvidence, String>;
+    const SURFACE: lash::persistence::SurfaceFormat =
+        lash::persistence::surface_format!(lash::restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "load.admin-compaction";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct BeforePressureStep;
+impl lash::restate::JournalStep for BeforePressureStep {
+    type Output = Result<String, String>;
+    const SURFACE: lash::persistence::SurfaceFormat =
+        lash::persistence::surface_format!(lash::restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "load.before-pressure";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct PressureFrameStep;
+impl lash::restate::JournalStep for PressureFrameStep {
+    type Output = Result<FrameEvidence, String>;
+    const SURFACE: lash::persistence::SurfaceFormat =
+        lash::persistence::surface_format!(lash::restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "load.pressure-frame";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}

@@ -26,8 +26,6 @@ use restate_sdk::serde::Json;
 
 pub use super::process_scheduling::ProcessWorkflowStartFailure;
 
-use serde::{Serialize, de::DeserializeOwned};
-
 use crate::durable_wait::process_terminal::RestateProcessTerminalRequest;
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitEffectRequest,
@@ -321,33 +319,35 @@ macro_rules! impl_restate_controller_context {
                     })
                 }
 
-                fn run_json_send<'run, T, Fut>(
+                fn run_json_send<'run, S, Fut>(
                     &'run self,
-                    effect_name: String,
+                    step: S,
                     retry_policy: Option<RunRetryPolicy>,
                     future: Fut,
-                ) -> crate::JournaledFuture<'run, Json<T>>
+                ) -> crate::JournaledFuture<'run, Json<S::Output>>
                 where
                     'ctx: 'run,
-                    T: Serialize + DeserializeOwned + Send + 'static,
-                    Fut: Future<Output = T> + Send + 'run,
+                    S: crate::JournalStep,
+                    Fut: Future<Output = S::Output> + Send + 'run,
                 {
+                    let effect_name = crate::journal_step_name(&step);
                     Box::pin(run_bridge::register(self, effect_name, retry_policy, async move { Ok(future.await) }))
                 }
 
-                fn run_json_eager_or_retry_send<'run, T, Fut>(
+                fn run_json_eager_or_retry_send<'run, S, Fut>(
                     &'run self,
-                    effect_name: String,
+                    step: S,
                     future: Fut,
                 ) -> (
                     impl Future<Output = ()> + Send + 'run,
                     Option<u32>,
-                    impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
+                    impl Future<Output = Result<Json<S::Output>, TerminalError>> + Send + 'run,
                 )
                 where 'ctx: 'run,
-                      T: Serialize + DeserializeOwned + Send + 'static,
-                      Fut: Future<Output = Result<T, String>> + Send + 'run,
+                      S: crate::JournalStep,
+                      Fut: Future<Output = Result<S::Output, String>> + Send + 'run,
                 {
+                    let effect_name = crate::journal_step_name(&step);
                     run_bridge::issue(self, effect_name, None, future)
                 }
 
@@ -362,16 +362,17 @@ macro_rules! impl_restate_controller_context {
 
 
 
-                fn run_json_or_retry_send<'run, T, Fut>(
+                fn run_json_or_retry_send<'run, S, Fut>(
                     &'run self,
-                    effect_name: String,
+                    step: S,
                     future: Fut,
-                ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+                ) -> impl Future<Output = Result<Json<S::Output>, TerminalError>> + Send + 'run
                 where
                     'ctx: 'run,
-                    T: Serialize + DeserializeOwned + Send + 'static,
-                    Fut: Future<Output = Result<T, String>> + Send + 'run,
+                    S: crate::JournalStep,
+                    Fut: Future<Output = Result<S::Output, String>> + Send + 'run,
                 {
+                    let effect_name = crate::journal_step_name(&step);
                     run_bridge::register(self, effect_name, None, future)
                 }
 

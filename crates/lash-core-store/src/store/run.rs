@@ -1222,6 +1222,11 @@ pub async fn admit_run_with_trace(
     result
 }
 
+impl crate::store::DurableRecord for RunAdmission {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::compat::SQLITE_CORE_SCHEMA_VERSION);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

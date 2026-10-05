@@ -482,9 +482,6 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 ///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope,
 ///         BlobArtifactDescriptor, BlobStorageHint, BlobCompression,
 ///     ),
-///     roots(path = "crates/lash-core-store/src/store/run.rs", RunAdmission),
-///     roots(path = "crates/lash-core-store/src/store/pending_follow_on.rs", PendingFollowOn),
-///     roots(path = "crates/lash-core-store/src/runtime_error.rs", RuntimeErrorCode),
 ///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
 ///     items(
 ///         path = "crates/lash-sqlite-store/src/schema.rs", SCHEMA,

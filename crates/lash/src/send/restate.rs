@@ -130,16 +130,17 @@ impl<'a> RestateWait<'a> {
 
 /// One step, journaled on the host's handler: a retryable error ends the
 /// attempt unjournaled, any other is journaled and ends the handler.
-fn journal_host<'ctx: 'a, 'a, C, T>(
+fn journal_host<'ctx: 'a, 'a, C, T, S>(
     ctx: &'a C,
-    name: &str,
+    operation: S,
     future: BoxFuture<'a, crate::Result<T>>,
 ) -> BoxFuture<'a, HandlerResult<T>>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
+    S: lash_restate::JournalStep<Output = Result<T, String>>,
     T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
 {
-    let step = ctx.run_json_or_retry_send(name.to_owned(), async move {
+    let step = ctx.run_json_or_retry_send(operation, async move {
         match future.await {
             Ok(value) => Ok(Ok(value)),
             Err(error) if error.is_retryable() => Err(error.to_string()),
@@ -187,7 +188,7 @@ impl SessionBuilder {
         Box::pin(async move {
             journal_host(
                 ctx,
-                "lash.host.session",
+                CreateHostSessionStep,
                 Box::pin(async move {
                     match self.create(creation).await {
                         Ok(_) | Err(EmbedError::SessionAlreadyExists { .. }) => Ok(()),
@@ -228,7 +229,7 @@ impl SendBuilder {
         Box::pin(async move {
             let requested = self.id.take().or_else(|| self.input.trace_turn_id.take());
             let Json(id) = ctx
-                .run_json_send("lash.host.input-id".to_owned(), None, async move {
+                .run_json_send(HostInputIdStep, None, async move {
                     requested.unwrap_or_else(crate::turn::fresh_turn_id)
                 })
                 .await?;
@@ -236,7 +237,7 @@ impl SendBuilder {
             let target = durable_target(&self.target);
             let (receipt, cursor) = journal_host(
                 ctx,
-                "lash.host.accept",
+                AcceptHostInputStep,
                 Box::pin(async move {
                     let handle = self.await?;
                     Ok::<(TurnInputAcceptanceReceipt, SessionCursor), _>((
@@ -337,7 +338,7 @@ where
             let from = position;
             let probe = journal_host(
                 ctx,
-                "lash.host.outcome",
+                HostOutcomeStep,
                 Box::pin(async move {
                     let context = target.context().await?;
                     let mut tap = match sink {
@@ -377,4 +378,48 @@ where
             }
         }
     })
+}
+
+struct CreateHostSessionStep;
+impl lash_restate::JournalStep for CreateHostSessionStep {
+    type Output = Result<(), String>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(lash_restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "lash.host.session";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct AcceptHostInputStep;
+impl lash_restate::JournalStep for AcceptHostInputStep {
+    type Output = Result<(TurnInputAcceptanceReceipt, SessionCursor), String>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(lash_restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "lash.host.accept";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct HostOutcomeStep;
+impl lash_restate::JournalStep for HostOutcomeStep {
+    type Output = Result<Probe, String>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(lash_restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "lash.host.outcome";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct HostInputIdStep;
+impl lash_restate::JournalStep for HostInputIdStep {
+    type Output = lash_core::TurnId;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(lash_restate::RESTATE_WIRE_VERSION);
+    const KIND: &'static str = "lash.host.input-id";
+    fn instance(&self) -> String {
+        String::new()
+    }
 }

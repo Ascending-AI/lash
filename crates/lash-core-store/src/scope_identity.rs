@@ -29,9 +29,6 @@ pub enum ScopeId {
 /// pre-1.0 version freeze (FIG-3846); such a payload's scope is not a
 /// [`ScopeId`], so it is refused as malformed.
 ///
-/// version_guard(
-///     roots(ScopeStoragePayload),
-/// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "ScopeStoragePayload"
@@ -242,4 +239,9 @@ impl std::fmt::Display for ScopeId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.render())
     }
+}
+
+impl crate::store::DurableRecord for ScopeStoragePayload {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::scope_identity::SCOPE_STORAGE_PAYLOAD_VERSION);
 }

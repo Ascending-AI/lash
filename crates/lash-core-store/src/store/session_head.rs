@@ -245,3 +245,8 @@ impl Default for SessionHeadPayload {
         }
     }
 }
+
+impl crate::store::DurableRecord for SessionHeadPayload {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::SESSION_HEAD_META_SCHEMA_VERSION);
+}

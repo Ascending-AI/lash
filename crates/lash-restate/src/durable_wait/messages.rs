@@ -14,6 +14,21 @@ pub struct RestateDurableWaitAwaitRequest {
     pub key: AwaitEventKey,
 }
 
+impl lash_core::store::DurableRecord for RestateDurableWaitAwaitRequest {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateDurableWaitProcessJournalRequest {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::process::RESTATE_PROCESS_JOURNAL_VERSION);
+}
+
+impl lash_core::store::DurableRecord for crate::ingress::RestateInvocationId {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
 #[cfg(test)]
 impl RestateDurableWaitAwaitRequest {
     pub(crate) fn address(&self) -> RestateDurableWaitAddress {

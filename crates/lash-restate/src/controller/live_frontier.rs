@@ -148,14 +148,14 @@ where
     let entry = frontier_entry(&mark)?;
     let live = served_only.cloned().map(LiveFrontier::new);
     let closure_live = live.clone();
-    let run = context.run_json_send::<serde_json::Value, _>(name.clone(), None, async move {
+    let run = context.run_json_send(FrontierStep(name.clone()), None, async move {
         if let Some(live) = &closure_live {
             return live.reached().await;
         }
         if let Some(recorded) = recorded {
             recorded();
         }
-        entry
+        super::run_record::RunJournalWire::new(entry)
     });
     let journaled = match live {
         None => run.await,
@@ -170,7 +170,7 @@ where
         });
         failure(terminal, fault)
     })?;
-    recorded_frontier_mark(&name, recorded, &mark)
+    recorded_frontier_mark(&name, recorded.value, &mark)
 }
 
 /// The signal a served-only run's closure raises when Restate runs it live,
@@ -236,5 +236,16 @@ impl LiveFrontier {
         }
         state.1 = Some(cx.waker().clone());
         Poll::Pending
+    }
+}
+
+struct FrontierStep(String);
+impl crate::JournalStep for FrontierStep {
+    type Output = super::run_record::RunJournalWire<FrontierMark>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(super::effect_journal::EFFECT_JOURNAL_VERSION);
+    const KIND: &'static str = "lash.effect.frontier";
+    fn instance(&self) -> String {
+        self.0.clone()
     }
 }

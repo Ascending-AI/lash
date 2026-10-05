@@ -24,7 +24,7 @@
         "RunCommand lash.segment.admit",
         "RunCommand lash.segment.start",
         "CallCommand LashDurableWaitIndex/register_process_journal",
-        "RunCommand lash:plugin-transition",
+        "RunCommand lash.effect.record:lash:plugin-transition",
         "RunCommand lash.process.complete",
         "RunCommand lash.process.parent-end",
         "CallCommand LashDurableWaitIndex/release_process_journal",

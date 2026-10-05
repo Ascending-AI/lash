@@ -28,9 +28,6 @@ use crate::compat::{CompatRefusal, VersionRange};
 /// upgrade introduces `min_F`/`max_F` and widens the range; until then a store
 /// recording any other value is refused at open.
 ///
-/// version_guard(
-///     roots(FleetFormat, FleetFormatState),
-/// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_outside_manifest = "store-resident stamp: recorded in the fleet-format row and read from the deployment through StorePreflight::schema_status, not reported from the build"
@@ -583,6 +580,13 @@ pub struct SurfaceFormat {
     build_newest: u32,
 }
 
+/// A durable record declares the format whose decoder owns its serialized shape.
+/// The format gate derives its roots from these implementations.
+pub trait DurableRecord {
+    /// The registered format governing this record.
+    const SURFACE: SurfaceFormat;
+}
+
 impl SurfaceFormat {
     /// The registered surface `constant` — the name keys the fleet's
     /// per-format pins, and `build_newest` is the constant's own value.
@@ -872,6 +876,16 @@ where
     }
     upcast_json_record(record_kind, surface, actual, window.newest(), &mut value)?;
     serde_json::from_value(value).map_err(|err| undecodable(record_kind, err))
+}
+
+impl crate::store::DurableRecord for FleetFormat {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::fleet_format::FLEET_FORMAT_VERSION);
+}
+
+impl crate::store::DurableRecord for FleetFormatState {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::fleet_format::FLEET_FORMAT_VERSION);
 }
 
 #[cfg(test)]

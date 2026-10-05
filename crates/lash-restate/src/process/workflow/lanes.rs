@@ -19,10 +19,6 @@ use super::{LashProcessWorkflowImpl, step_fault};
 use crate::controller::RestateControllerContext as _;
 use crate::services::{Lane, LashService, ServiceRoute};
 
-/// The journal name of the step that decides whether this build takes a
-/// segment another build sent to the stable lane (FIG-3795 S6).
-const SUCCESSOR_WINDOW_STEP: &str = "lash.segment.successor-window";
-
 /// What the successor window decided for a segment another build sent to the
 /// stable lane, journaled so a redrive takes the same branch.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -221,61 +217,55 @@ where
         let own = &self.build_generation;
         let route = self.route.name();
         let Json(window) = ctx
-            .run_json_or_retry_send::<Result<SuccessorWindow, String>, _>(
-                SUCCESSOR_WINDOW_STEP.to_string(),
-                async move {
-                    let record = match registry.get_process(process_id).await {
-                        Ok(Some(record)) => record,
-                        // No process, or a terminal one: admission decides.
-                        Ok(None) => return Ok(Ok(SuccessorWindow::Admitted)),
-                        Err(error) => return step_fault(error),
-                    };
-                    if record.is_terminal() {
-                        return Ok(Ok(SuccessorWindow::Admitted));
-                    }
-                    let reason = match current {
-                        Some(current) => {
-                            let recorded = record
-                                .first_started
-                                .as_deref()
-                                .and_then(|started| started.generation.as_ref());
-                            match lash_core::ExecutableGenerationRefusal::check(recorded, current) {
-                                Ok(()) => return Ok(Ok(SuccessorWindow::Admitted)),
-                                Err(refusal) => {
-                                    lash_core::store::ParkReason::retired_process_generation(
-                                        refusal,
-                                    )
-                                }
+            .run_json_or_retry_send(SuccessorWindowStep, async move {
+                let record = match registry.get_process(process_id).await {
+                    Ok(Some(record)) => record,
+                    // No process, or a terminal one: admission decides.
+                    Ok(None) => return Ok(Ok(SuccessorWindow::Admitted)),
+                    Err(error) => return step_fault(error),
+                };
+                if record.is_terminal() {
+                    return Ok(Ok(SuccessorWindow::Admitted));
+                }
+                let reason = match current {
+                    Some(current) => {
+                        let recorded = record
+                            .first_started
+                            .as_deref()
+                            .and_then(|started| started.generation.as_ref());
+                        match lash_core::ExecutableGenerationRefusal::check(recorded, current) {
+                            Ok(()) => return Ok(Ok(SuccessorWindow::Admitted)),
+                            Err(refusal) => {
+                                lash_core::store::ParkReason::retired_process_generation(refusal)
                             }
                         }
-                        None => lash_core::store::ParkReason::RetiredGeneration {
-                            generation: None,
-                            message: format!(
-                                "process `{process_id}` segment {segment_ordinal} was sent by \
+                    }
+                    None => lash_core::store::ParkReason::RetiredGeneration {
+                        generation: None,
+                        message: format!(
+                            "process `{process_id}` segment {segment_ordinal} was sent by \
                                  generation `{sender}` with an input this build (generation \
                                  `{own}`, {route}) does not decode: {decode_error}; its redrive \
                                  was refused before any effect; drain it to generation `{sender}`"
-                            ),
-                        },
-                    };
-                    let message = match &reason {
-                        lash_core::store::ParkReason::RetiredGeneration { message, .. } => {
-                            message.clone()
-                        }
-                        other => format!("{other:?}"),
-                    };
-                    let write = lash_core::store::ProcessParkWrite {
-                        reason,
-                        engine: None,
-                        build_generation: Some(sender.clone()),
-                    };
-                    match park_for_generation(registry, process_id, write, tracing.metrics()).await
-                    {
-                        Ok(()) => Ok(Ok(SuccessorWindow::Refused { message })),
-                        Err(error) => step_fault(error),
+                        ),
+                    },
+                };
+                let message = match &reason {
+                    lash_core::store::ParkReason::RetiredGeneration { message, .. } => {
+                        message.clone()
                     }
-                },
-            )
+                    other => format!("{other:?}"),
+                };
+                let write = lash_core::store::ProcessParkWrite {
+                    reason,
+                    engine: None,
+                    build_generation: Some(sender.clone()),
+                };
+                match park_for_generation(registry, process_id, write, tracing.metrics()).await {
+                    Ok(()) => Ok(Ok(SuccessorWindow::Refused { message })),
+                    Err(error) => step_fault(error),
+                }
+            })
             .await
             .map_err(HandlerError::from)?;
         let window = window.map_err(TerminalError::new)?;
@@ -394,4 +384,15 @@ pub(super) fn observe_refusal_park(
         park_id = park.map_or(0, |park| park.park_id.feed_sequence()),
         "process parked on a replay divergence"
     );
+}
+
+struct SuccessorWindowStep;
+impl crate::JournalStep for SuccessorWindowStep {
+    type Output = Result<SuccessorWindow, String>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "lash.segment.successor-window";
+    fn instance(&self) -> String {
+        String::new()
+    }
 }

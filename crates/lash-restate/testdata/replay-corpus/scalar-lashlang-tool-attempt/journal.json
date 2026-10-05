@@ -3,7 +3,7 @@
   "generation": "d91236f337b3",
   "journal": [
     {
-      "name": "lash:session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt",
+      "name": "lash.effect.record:lash:session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt",
       "body": {
         "effect": {
           "Ok": {

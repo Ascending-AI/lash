@@ -119,6 +119,11 @@ impl CellSegmentState {
     }
 }
 
+impl lash_core::store::DurableRecord for CellSegmentState {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::executor::RLM_SNAPSHOT_VERSION);
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

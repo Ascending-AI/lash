@@ -215,7 +215,6 @@ const TURN_OUTCOME_STATE: &str = "outcome";
 /// command changes move the journal logic epoch and retain the old drain lane.
 ///
 /// version_guard(
-///     roots(path = "crates/lash-restate/src/session_shifts/intent.rs", LashTurnState),
 ///     roots(path = "crates/lash-core-execution/src/engine/admission.rs", SealVerdict),
 ///     roots(path = "crates/lash-core-store/src/store/shift_fence.rs", AdmissionId, ShiftFence),
 ///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", ErrorEnvelope),

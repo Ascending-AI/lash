@@ -132,3 +132,8 @@ impl From<FormatRefusal> for crate::runtime_error::RuntimeError {
         crate::runtime_error::RuntimeEffectControllerError::from(refusal).into_runtime_error()
     }
 }
+
+impl crate::store::DurableRecord for PluginState {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::CURRENT_SESSION_STATE_VERSION);
+}

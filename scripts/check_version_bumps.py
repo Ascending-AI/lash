@@ -1562,7 +1562,7 @@ RUST_PRELUDE_TYPES = frozenset(
 RUST_STANDARD_CRATES = frozenset({"std", "core", "alloc"})
 RUST_TYPE_KEYWORDS = frozenset({"mut", "const", "unsafe", "extern", "fn", "for", "Self", "as"})
 RUST_SOURCE_PATTERNS = ("crates/*.rs", "examples/*.rs")
-CARGO_MANIFEST_PATTERNS = ("Cargo.toml", "crates/*Cargo.toml", "examples/*Cargo.toml")
+CARGO_MANIFEST_PATTERNS = ("Cargo.toml", "crates/*Cargo.toml", "examples/*Cargo.toml", "runbooks/*Cargo.toml")
 MAX_REPORTED_PROBLEMS = 12
 
 Token = tuple[str, str]
@@ -2156,7 +2156,7 @@ class Reachability:
             external.update(workspace_external)
         self._crate_roots = tuple(sorted(roots, key=len, reverse=True))
         sources: dict[str, list[str]] = {}
-        for path in self.view.matching_paths(RUST_SOURCE_PATTERNS):
+        for path in self.view.matching_paths((*RUST_SOURCE_PATTERNS, "runbooks/*.rs")):
             sources.setdefault(self.crate_of(path), []).append(path)
         self._sources = sources
 
@@ -2860,6 +2860,9 @@ def reachability(view: TreeView) -> Reachability:
 def roots_closure(view: TreeView, guard: Guard) -> tuple[Closure, list[str]]:
     """The closure of a `roots(..)` guard's roots, or of every shape a
     `shapes(..)` guard sweeps, and the roots the tree does not have."""
+    if guard.kind == "records":
+        from durable_surfaces import closure
+        return closure(view, guard)
     reach = reachability(view)
     shapes: list[Shape] = []
     found: set[str] = set()
@@ -2882,7 +2885,10 @@ def guard_signature(
     enforce_presence: bool,
     base_signature: tuple[Entry, ...] | None = None,
 ) -> tuple[Entry, ...]:
-    if guard.kind == "roots":
+    if guard.kind == "step":
+        from durable_surfaces import step_signature
+        return step_signature(view, guard)
+    if guard.kind in {"roots", "records"}:
         return roots_signature(view, guard, enforce_presence=enforce_presence)
     paths = view.matching_paths(guard.paths)
     elide_fn = ELISIONS.get(guard.elide) if guard.elide else None
@@ -3216,7 +3222,13 @@ def _declaration(view: TreeView, surface: Surface) -> Declaration | None:
         raise CheckError(
             f"{view.label}: cannot read {surface.constant_path} for {surface.constant}"
         )
-    return declaration_in(content, surface)
+    from durable_surfaces import guards
+    declared = declaration_in(content, surface)
+    owned = guards(view, surface.constant)
+    if not owned:
+        return declared
+    return Declaration((declared.guards if declared else ()) + owned,
+                       None, declared.catalogs if declared else ())
 
 
 def _compare(
@@ -3542,7 +3554,7 @@ def guarded_path_patterns(repo: Path) -> frozenset[str]:
         if declaration is not None:
             for guard in declaration.guards:
                 patterns.update(guard.paths)
-                if guard.kind in {"roots", "shapes"}:
+                if guard.kind in {"roots", "shapes", "records"}:
                     patterns.update(closure_of(view, guard)[0].paths)
             patterns.update(catalog.path for catalog in declaration.catalogs)
     return frozenset(patterns)
@@ -3574,22 +3586,96 @@ JOURNAL_LOGIC_PATHS = (
 
 
 def journal_logic_source(text: str) -> str:
-    """Compare executable tokens, excluding file-local test modules."""
-    ranges = []
-    for start, end in rust_outer_attribute_ranges(text):
-        if strip_rust_trivia(text[start:end]) == "#[cfg(test)]" and (
-                not ranges or start >= ranges[-1][1]):
-            ranges.append((start, rust_item_end(text, end)))
+    """The ordering of suspension commands and their control-flow decisions.
+
+    Shapes, constants, signatures, and work inside synchronous codecs belong
+    to surface guards. This tripwire records async function boundaries,
+    awaited callees, journal commands, and branch/loop decisions only.
+    """
+    ranges = test_only_module_ranges(text, rust_outer_attribute_ranges(text))
     for start, end in reversed(ranges):
         text = text[:start] + text[end:]
-    return strip_rust_trivia(text)
+    projection = []
+    commands = {"run", "run_json_send", "run_json_or_retry_send",
+                "run_json_eager_or_retry_send", "run_json_schedule_or_retry_send",
+                "call", "send", "sleep", "select", "join", "try_join"}
+    functions = []
+    for match in re.finditer(r"\bfn\s+(\w+)\s*(?:<[^{};]*>)?\s*\(", text):
+        try:
+            end = rust_item_end(text, match.start())
+        except CheckError:
+            continue
+        item = text[match.end():end]
+        body = item[item.find("{"):]
+        if ".await" in body or any(re.search(r"\.\s*" + command + r"\b", body) for command in commands):
+            functions.append((match[1], body))
+    for name, body in functions:
+        projection.append(("function", name))
+        tokens = rust_tokens(body)
+        projection.extend(_journal_control_tokens(tokens, commands))
+    return repr(projection)
+
+
+def _journal_control_tokens(tokens, commands):
+    projection = []
+    stack = []
+    closes = {}
+    for index, (_, token) in enumerate(tokens):
+        if token == "{":
+            stack.append(index)
+        elif token == "}" and stack:
+            closes[stack.pop()] = index
+    boundaries = {}
+    for index, (_, token) in enumerate(tokens):
+        if token in {"if", "match", "while", "for", "else", "loop"}:
+            start = index + 1
+            while start < len(tokens) and tokens[start][1] != "{":
+                start += 1
+            if start in closes:
+                boundaries.setdefault(closes[start], []).append(token)
+    for index, (_, token) in enumerate(tokens):
+        projection.extend(("end", branch) for branch in boundaries.get(index, ()))
+        if token in commands and index and tokens[index - 1][1] in {".", "::"}:
+            projection.append(("command", token))
+        elif token == "await":
+            cursor = index - 2  # skip the dot
+            if cursor >= 0 and tokens[cursor][1] == ")":
+                depth = 1
+                cursor -= 1
+                while cursor >= 0 and depth:
+                    if tokens[cursor][1] == ")": depth += 1
+                    if tokens[cursor][1] == "(": depth -= 1
+                    cursor -= 1
+            projection.append(("await", tokens[cursor][1] if cursor >= 0 else ""))
+        elif token in {"if", "match", "while", "for"}:
+            end = index + 1
+            while end < len(tokens) and tokens[end][1] != "{":
+                end += 1
+            projection.append((token, tuple(value for _, value in tokens[index + 1:end])))
+        elif token == "=>":
+            cursor = index - 1
+            depth = 0
+            while cursor >= 0:
+                value = tokens[cursor][1]
+                if value in {")", "}", "]"}: depth += 1
+                elif value in {"(", "{", "["}:
+                    if depth == 0: break
+                    depth -= 1
+                elif value == "," and depth == 0: break
+                cursor -= 1
+            projection.append(("arm", tuple(value for _, value in tokens[cursor + 1:index])))
+        elif token == "?":
+            projection.append(("flow", "try"))
+        elif token in {"else", "loop", "break", "continue", "return", "select"}:
+            projection.append(("flow", token))
+    return projection
 
 
 def journal_lane_refusal(base: TreeView, head: TreeView) -> str | None:
     """Handler logic needs both generation lanes, even during format freeze.
 
-    This is conservative over the journal owners: executable edits to their
-    command construction or its execution helpers require a new epoch. Source
+    This compares command ordering and branch/loop decisions in the journal
+    owners; serialized shapes and step kinds have their own surface guards. Source
     text is not a substitute for replay proof of the resulting generation.
     """
     old = base.content(JOURNAL_LOGIC_SOURCE)

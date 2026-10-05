@@ -16,6 +16,8 @@ mod journaled_effect;
 use journaled_effect::EngineFaults;
 mod live_frontier;
 mod run_record;
+#[cfg(test)]
+pub(crate) use run_record::{attempt_journal_name, record_journal_name};
 mod scope_recording;
 mod scoped;
 mod turn_cancel_request;
@@ -609,7 +611,7 @@ where
     ) -> Result<(), RuntimeEffectControllerError> {
         let Json(recorded) = self
             .context
-            .run_json_or_retry_send::<Result<(), PluginError>, _>(name, async move {
+            .run_json_or_retry_send(DriveProcessStep(name), async move {
                 crate::process::journal_or_retry(step.await)
             })
             .await
@@ -1310,5 +1312,16 @@ where
                 .await
                 .map(|outcome| outcome.map(|()| context::TurnSleepOutcome::Resolved)),
         }
+    }
+}
+
+struct DriveProcessStep(String);
+impl crate::JournalStep for DriveProcessStep {
+    type Output = Result<(), PluginError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "lash.process.drive";
+    fn instance(&self) -> String {
+        self.0.clone()
     }
 }

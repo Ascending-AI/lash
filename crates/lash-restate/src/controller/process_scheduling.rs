@@ -101,8 +101,16 @@ where
         Some(starts) => {
             let Json(claim) = run_past_engine_cancel(
                 context,
-                invocation,
-                ["process-start-claim", "process-start-claim-after-cancel"],
+                [
+                    ClaimStartStep(process_command_journal_name(
+                        invocation,
+                        "process-start-claim",
+                    )),
+                    ClaimStartStep(process_command_journal_name(
+                        invocation,
+                        "process-start-claim-after-cancel",
+                    )),
+                ],
                 || {
                     let starts = Arc::clone(starts);
                     let claimed_id = process_id.clone();
@@ -196,8 +204,7 @@ where
             let compensation_record = record.clone();
             let compensation_error = submit_error.to_string();
             let Json(compensation) = context
-                .run_json_or_retry_send(
-                    process_command_journal_name(invocation, "process-start-compensate"),
+                .run_json_or_retry_send(CompensateStartStep(process_command_journal_name(invocation, "process-start-compensate")),
                     async move {
                         // The compensation write failing leaves the row
                         // exactly the shape the `ProcessStart` obligation's
@@ -285,10 +292,15 @@ where
     let settle_id = process_id.clone();
     let Json(record) = run_past_engine_cancel(
         context,
-        invocation,
         [
-            "process-start-external-ref",
-            "process-start-external-ref-after-cancel",
+            StoreExternalRefStep(process_command_journal_name(
+                invocation,
+                "process-start-external-ref",
+            )),
+            StoreExternalRefStep(process_command_journal_name(
+                invocation,
+                "process-start-external-ref-after-cancel",
+            )),
         ],
         || {
             let registry = Arc::clone(&registry);
@@ -364,8 +376,16 @@ where
     // A settle that already applied answers `ClaimLost` when it runs again.
     let Json(settled) = run_past_engine_cancel(
         context,
-        invocation,
-        ["process-start-settle", "process-start-settle-after-cancel"],
+        [
+            SettleStartStep(process_command_journal_name(
+                invocation,
+                "process-start-settle",
+            )),
+            SettleStartStep(process_command_journal_name(
+                invocation,
+                "process-start-settle-after-cancel",
+            )),
+        ],
         || {
             let starts = Arc::clone(starts);
             let process_id = process_id.clone();
@@ -402,28 +422,19 @@ where
 /// runs again under its second journal name, which every step here answers
 /// correctly after a first run whose answer was lost. A replay meets the
 /// cancellation at the same await and takes the same path.
-async fn run_past_engine_cancel<'ctx, C, T, Fut>(
+async fn run_past_engine_cancel<'ctx, C, S, Fut>(
     context: &C,
-    invocation: &RuntimeEffectInvocation,
-    [operation, after_cancel]: [&str; 2],
+    [operation, after_cancel]: [S; 2],
     step: impl Fn() -> Fut,
-) -> Result<Json<T>, TerminalError>
+) -> Result<Json<S::Output>, TerminalError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
-    T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
-    Fut: std::future::Future<Output = Result<T, String>> + Send + 'static,
+    S: crate::JournalStep,
+    Fut: std::future::Future<Output = Result<S::Output, String>> + Send + 'static,
 {
-    match context
-        .run_json_or_retry_send(process_command_journal_name(invocation, operation), step())
-        .await
-    {
+    match context.run_json_or_retry_send(operation, step()).await {
         Err(error) if context::is_engine_cancellation(&error) => {
-            context
-                .run_json_or_retry_send(
-                    process_command_journal_name(invocation, after_cancel),
-                    step(),
-                )
-                .await
+            context.run_json_or_retry_send(after_cancel, step()).await
         }
         journaled => journaled,
     }
@@ -451,4 +462,48 @@ async fn compensate_failed_process_submission(
                 "Restate process workflow submission failed"
             );
         })
+}
+
+struct CompensateStartStep(String);
+impl crate::JournalStep for CompensateStartStep {
+    type Output = Option<ProcessRecord>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(super::PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-start-compensate";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct ClaimStartStep(String);
+impl crate::JournalStep for ClaimStartStep {
+    type Output = Result<Option<String>, RuntimeEffectControllerError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(super::PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-start-claim";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct StoreExternalRefStep(String);
+impl crate::JournalStep for StoreExternalRefStep {
+    type Output = Result<ProcessRecord, RuntimeEffectControllerError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(super::PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-start-external-ref";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct SettleStartStep(String);
+impl crate::JournalStep for SettleStartStep {
+    type Output = Result<(), RuntimeEffectControllerError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(super::PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-start-settle";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
 }

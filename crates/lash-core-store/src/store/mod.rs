@@ -137,12 +137,12 @@ pub use fencing::{
     wake_delivery_claim_verdict,
 };
 pub use fleet_format::{
-    FLEET_FORMAT_VERSION, FLEET_WRITABLE_RANGE, FleetFormat, FleetFormatState, GUARDED_SURFACES,
-    GuardedSurface, Lift, RECORD_UPCASTERS, ReadWindow, RecordUpcaster, SurfaceFormat,
-    SurfaceReads, WriterPin, decode_versioned_json_record, decode_versioned_json_record_for_fleet,
-    decode_versioned_msgpack_record_for_fleet, ensure_supported_record_schema_version_for_fleet,
-    ensure_supported_schema_version_for_fleet, guarded_surface, upcast_chain_covers,
-    upcast_json_record, upcaster,
+    DurableRecord, FLEET_FORMAT_VERSION, FLEET_WRITABLE_RANGE, FleetFormat, FleetFormatState,
+    GUARDED_SURFACES, GuardedSurface, Lift, RECORD_UPCASTERS, ReadWindow, RecordUpcaster,
+    SurfaceFormat, SurfaceReads, WriterPin, decode_versioned_json_record,
+    decode_versioned_json_record_for_fleet, decode_versioned_msgpack_record_for_fleet,
+    ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
+    guarded_surface, upcast_chain_covers, upcast_json_record, upcaster,
 };
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use head_ownership::{
@@ -252,13 +252,6 @@ fn default_root_session_id() -> SessionId {
 /// `contract` fields (FIG-1210); a version 10 head carrying the flattened
 /// encoding is refused rather than reinterpreted field-by-field.
 ///
-/// version_guard(
-///     roots(path = "crates/lash-core-store/src/store/session_head.rs", SessionHeadPayload),
-///     roots(
-///         path = "crates/lash-core-store/src/session_identity.rs", SessionResidentToolAccess,
-///         SessionToolAccessWire,
-///     ),
-/// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionHeadMeta"

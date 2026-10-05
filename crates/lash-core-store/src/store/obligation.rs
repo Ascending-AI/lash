@@ -18,12 +18,6 @@ use super::control_intent::ControlIntentId;
 /// The obligation state, kind, key, and stall labels written at the 1.0 cut.
 ///
 /// version_guard(
-///     roots(ObligationKind, KeyColumnType, ObligationKey, ObligationState, StallReason),
-///     roots(path = "crates/lash-core-store/src/store/control_intent.rs", ControlIntentId),
-///     roots(
-///         path = "crates/lash-core-store/src/artifact_referrer.rs", ArtifactReferrerKind,
-///         ArtifactReferrer,
-///     ),
 ///     items(ALL, from_label, label, key_column_types, decode_label, columns, decode, as_str),
 ///     items(
 ///         path = "crates/lash-core-store/src/artifact_referrer.rs", canonical_id, decode, as_str,
@@ -777,6 +771,31 @@ pub trait ObligationLedger: Send + Sync {
     async fn state(&self, id: &ObligationId) -> Result<Option<ObligationState>, StoreError> {
         Ok(self.standing(id).await?.map(|standing| standing.state))
     }
+}
+
+impl crate::store::DurableRecord for ObligationKind {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::obligation::OBLIGATION_LEDGER_VOCABULARY_VERSION);
+}
+
+impl crate::store::DurableRecord for KeyColumnType {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::obligation::OBLIGATION_LEDGER_VOCABULARY_VERSION);
+}
+
+impl crate::store::DurableRecord for ObligationKey {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::obligation::OBLIGATION_LEDGER_VOCABULARY_VERSION);
+}
+
+impl crate::store::DurableRecord for ObligationState {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::obligation::OBLIGATION_LEDGER_VOCABULARY_VERSION);
+}
+
+impl crate::store::DurableRecord for StallReason {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::obligation::OBLIGATION_LEDGER_VOCABULARY_VERSION);
 }
 
 #[cfg(test)]

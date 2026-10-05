@@ -84,7 +84,6 @@ pub(crate) async fn record_tool_presentation_plan(
 /// holding the complete text.
 ///
 /// version_guard(
-///     roots(ToolPresentation),
 ///     roots(path = "crates/lash-sansio/src/plugin.rs", PluginMessage),
 ///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
 ///     file(
@@ -265,4 +264,10 @@ pub async fn retain_oversized_return(
     }
     model_return.parts = parts;
     Ok(())
+}
+
+impl lash_core_store::store::DurableRecord for ToolPresentation {
+    const SURFACE: lash_core_store::store::SurfaceFormat = lash_core_store::surface_format!(
+        crate::runtime::effect::tool_presentation::TOOL_PRESENTATION_VERSION
+    );
 }

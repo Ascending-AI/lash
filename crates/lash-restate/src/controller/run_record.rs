@@ -36,9 +36,9 @@ where
     {
         let build_generation = self.sentinel_stamp();
         let first = build_generation.is_some();
-        let Json(mut entry) = self
+        let Json(entry) = self
             .context
-            .run_json_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
+            .run_json_or_retry_send(RecordRunStep(name.clone()), async move {
                 let record = step.await?;
                 let mut entry =
                     serde_json::to_value(stamped(&record)).map_err(|error| error.to_string())?;
@@ -46,12 +46,13 @@ where
                 {
                     object.insert(BUILD_GENERATION_FIELD.to_owned(), generation);
                 }
-                Ok(entry)
+                Ok(RunJournalWire::new(entry))
             })
             .await
             .map_err(|error| {
                 crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
             })?;
+        let mut entry = entry.value;
         let generation = entry
             .as_object_mut()
             .and_then(|object| object.remove(BUILD_GENERATION_FIELD));
@@ -68,18 +69,19 @@ where
     ) -> lash_core::tool_dispatch::RunStepHandle<'run, RunJournalEntry> {
         let build_generation = self.sentinel_stamp();
         let first = build_generation.is_some();
-        let (body, key, result) = self
-            .context
-            .run_json_eager_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
-                let record = step.await?;
-                let mut entry =
-                    serde_json::to_value(stamped(&record)).map_err(|error| error.to_string())?;
-                if let (Some(generation), Some(object)) = (build_generation, entry.as_object_mut())
-                {
-                    object.insert(BUILD_GENERATION_FIELD.to_owned(), generation);
-                }
-                Ok(entry)
-            });
+        let (body, key, result) =
+            self.context
+                .run_json_eager_or_retry_send(RecordRunStep(name.clone()), async move {
+                    let record = step.await?;
+                    let mut entry = serde_json::to_value(stamped(&record))
+                        .map_err(|error| error.to_string())?;
+                    if let (Some(generation), Some(object)) =
+                        (build_generation, entry.as_object_mut())
+                    {
+                        object.insert(BUILD_GENERATION_FIELD.to_owned(), generation);
+                    }
+                    Ok(RunJournalWire::new(entry))
+                });
         let key_name = name.clone();
         lash_core::tool_dispatch::RunStepHandle {
             body: Box::pin(body),
@@ -96,9 +98,10 @@ where
                         })
                 }),
                 value: Box::pin(async move {
-                    let Json(mut entry) = result.await.map_err(|error| {
+                    let Json(entry) = result.await.map_err(|error| {
                         crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
                     })?;
+                    let mut entry = entry.value;
                     let generation = entry
                         .as_object_mut()
                         .and_then(|object| object.remove(BUILD_GENERATION_FIELD));
@@ -117,11 +120,13 @@ where
         step: lash_core::tool_dispatch::RunStartPrepareStep<'run>,
     ) -> lash_core::tool_dispatch::RunStepHandle<'run, lash_core::tool_dispatch::RunStartPrepared>
     {
-        let (body, key, result) = self
-            .context
-            .run_json_eager_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
-                serde_json::to_value(stamped(&step.await?)).map_err(|error| error.to_string())
-            });
+        let (body, key, result) =
+            self.context
+                .run_json_eager_or_retry_send(PrepareRunStep(name.clone()), async move {
+                    serde_json::to_value(stamped(&step.await?))
+                        .map(RunJournalWire::new)
+                        .map_err(|error| error.to_string())
+                });
         let key_name = name.clone();
         lash_core::tool_dispatch::RunStepHandle {
             body: Box::pin(body),
@@ -141,7 +146,7 @@ where
                     let Json(entry) = result.await.map_err(|error| {
                         crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
                     })?;
-                    decode_entry(&name, entry)
+                    decode_entry(&name, entry.value)
                 }),
             },
         }
@@ -152,12 +157,14 @@ where
         name: String,
         step: lash_core::tool_dispatch::RunAttemptStep<'run>,
     ) -> lash_core::tool_dispatch::RunAttemptHandle<'run> {
-        let (body, key, result) = self
-            .context
-            .run_json_eager_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
-                let entry = step.await?;
-                serde_json::to_value(stamped(&entry)).map_err(|error| error.to_string())
-            });
+        let (body, key, result) =
+            self.context
+                .run_json_eager_or_retry_send(AttemptRunStep(name.clone()), async move {
+                    let entry = step.await?;
+                    serde_json::to_value(stamped(&entry))
+                        .map(RunJournalWire::new)
+                        .map_err(|error| error.to_string())
+                });
         let key_name = name.clone();
         lash_core::tool_dispatch::RunAttemptHandle {
             body: Box::pin(body),
@@ -175,7 +182,7 @@ where
                     let Json(entry) = result.await.map_err(|error| {
                         crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
                     })?;
-                    decode_entry(&name, entry)
+                    decode_entry(&name, entry.value)
                 }),
             },
         }
@@ -216,6 +223,65 @@ fn decode_entry<T: serde::de::DeserializeOwned>(
             format!("journaled Run record `{name}` does not decode: {error}"),
         )
     })
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(transparent, bound = "")]
+pub(super) struct RunJournalWire<T> {
+    pub(super) value: serde_json::Value,
+    #[serde(skip)]
+    record: std::marker::PhantomData<T>,
+}
+impl<T> RunJournalWire<T> {
+    pub(super) fn new(value: serde_json::Value) -> Self {
+        Self {
+            value,
+            record: std::marker::PhantomData,
+        }
+    }
+}
+
+struct RecordRunStep(String);
+impl crate::JournalStep for RecordRunStep {
+    type Output = RunJournalWire<RunJournalEntry>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(super::effect_journal::EFFECT_JOURNAL_VERSION);
+    const KIND: &'static str = "lash.run.record";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct PrepareRunStep(String);
+impl crate::JournalStep for PrepareRunStep {
+    type Output = RunJournalWire<lash_core::tool_dispatch::RunStartPrepared>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(super::effect_journal::EFFECT_JOURNAL_VERSION);
+    const KIND: &'static str = "lash.run.prepare";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct AttemptRunStep(String);
+impl crate::JournalStep for AttemptRunStep {
+    type Output = RunJournalWire<lash_core::tool_run::RunAttemptEntry>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(super::effect_journal::EFFECT_JOURNAL_VERSION);
+    const KIND: &'static str = "lash.run.attempt";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn record_journal_name(instance: String) -> String {
+    crate::journal_step_name(&RecordRunStep(instance))
+}
+
+#[cfg(test)]
+pub(crate) fn attempt_journal_name(instance: String) -> String {
+    crate::journal_step_name(&AttemptRunStep(instance))
 }
 
 #[cfg(test)]

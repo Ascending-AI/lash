@@ -25,18 +25,10 @@ pub use lash_sansio::VersionRange;
 ///
 /// version_guard(
 ///     shapes(cover(Call, Reply, ObjectCompat)),
-///     roots(path = "crates/lash-restate/src/wire.rs", RestateCompatError, CallDecodeError),
-///     roots(
-///         path = "crates/lash-restate/src/process/mod.rs", RestateProcessWorkflowInput,
-///         RestateProcessWorkflowPayload, RestateProcessWorkflowOutput,
-///         RestateProcessCancelRequest, RestateProcessCompleteRequest, RestateProcessAwaitRequest,
-///         RestateProcessHandOverRequest, RestateProcessCancelSignal,
-///     ),
 ///     roots(
 ///         path = "crates/lash-restate/src/session_shifts/intent.rs", RestateSessionShiftRequest,
 ///         RestateRunRequest, RestateRunCloseRequest,
 ///     ),
-///     roots(path = "crates/lash-restate/src/object_state.rs", ObjectUpgradeResponse),
 ///     roots(path = "crates/lash-core-execution/src/tool_dispatch/realization.rs", RealizationRequest, RealizationReceipt),
 ///     items(COMPAT_KEY),
 ///     items(

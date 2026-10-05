@@ -230,3 +230,25 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/response_body_budget.rs"]
 mod response_body_budget_tests;
+
+/// One named journal operation, with exactly one serialized output type.
+/// Instances distinguish repeated operations without changing their kind.
+pub trait JournalStep: Send + 'static {
+    /// The serialized result this operation records.
+    type Output: serde::Serialize + serde::de::DeserializeOwned + Send + 'static;
+    /// The registered surface governing the result.
+    const SURFACE: lash_core::store::SurfaceFormat;
+    /// The stable operation kind; never includes a format version.
+    const KIND: &'static str;
+    /// The identity of this occurrence within its invocation.
+    fn instance(&self) -> String;
+}
+
+fn journal_step_name<S: JournalStep>(step: &S) -> String {
+    let instance = step.instance();
+    if instance.is_empty() {
+        S::KIND.to_owned()
+    } else {
+        format!("{}:{instance}", S::KIND)
+    }
+}

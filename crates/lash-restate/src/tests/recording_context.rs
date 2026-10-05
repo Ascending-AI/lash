@@ -339,17 +339,18 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         test_sleep_or_turn_cancel(self, &self.turn_cancel_gate, duration, turn_cancel, None)
     }
 
-    fn run_json_send<'run, T, Fut>(
+    fn run_json_send<'run, S, Fut>(
         &'run self,
-        effect_name: String,
+        step: S,
         _retry_policy: Option<RunRetryPolicy>,
         future: Fut,
-    ) -> Pin<Box<dyn Future<Output = Result<Json<T>, TerminalError>> + Send + 'run>>
+    ) -> Pin<Box<dyn Future<Output = Result<Json<S::Output>, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
-        T: Serialize + DeserializeOwned + Send + 'static,
-        Fut: Future<Output = T> + Send + 'run,
+        S: crate::JournalStep,
+        Fut: Future<Output = S::Output> + Send + 'run,
     {
+        let effect_name = crate::journal_step_name(&step);
         let cancelled = {
             let mut pending = self.cancel_after_runs.lock_recover();
             pending
@@ -368,25 +369,25 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         })
     }
 
-    fn run_json_eager_or_retry_send<'run, T, Fut>(
+    fn run_json_eager_or_retry_send<'run, S, Fut>(
         &'run self,
-        effect_name: String,
+        step: S,
         future: Fut,
     ) -> (
         impl std::future::Future<Output = ()> + Send + 'run,
         Option<u32>,
-        impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
+        impl std::future::Future<Output = Result<Json<S::Output>, TerminalError>> + Send + 'run,
     )
     where
         'ctx: 'run,
-        T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
-        Fut: std::future::Future<Output = Result<T, String>> + Send + 'run,
+        S: crate::JournalStep,
+        Fut: std::future::Future<Output = Result<S::Output, String>> + Send + 'run,
     {
         let context = Arc::clone(self);
         (
             std::future::ready(()),
             Some(self.select_keys.fetch_add(1, Ordering::SeqCst) as u32),
-            async move { context.run_json_or_retry_send(effect_name, future).await },
+            async move { context.run_json_or_retry_send(step, future).await },
         )
     }
 
@@ -1132,17 +1133,18 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         })
     }
 
-    fn run_json_send<'run, T, Fut>(
+    fn run_json_send<'run, S, Fut>(
         &'run self,
-        effect_name: String,
+        step: S,
         _retry_policy: Option<RunRetryPolicy>,
         future: Fut,
-    ) -> Pin<Box<dyn Future<Output = Result<Json<T>, TerminalError>> + Send + 'run>>
+    ) -> Pin<Box<dyn Future<Output = Result<Json<S::Output>, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
-        T: Serialize + DeserializeOwned + Send + 'static,
-        Fut: Future<Output = T> + Send + 'run,
+        S: crate::JournalStep,
+        Fut: Future<Output = S::Output> + Send + 'run,
     {
+        let effect_name = crate::journal_step_name(&step);
         self.runs.lock_recover().push(effect_name.clone());
         self.journal_commands
             .lock_recover()
@@ -1179,25 +1181,25 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         })
     }
 
-    fn run_json_eager_or_retry_send<'run, T, Fut>(
+    fn run_json_eager_or_retry_send<'run, S, Fut>(
         &'run self,
-        effect_name: String,
+        step: S,
         future: Fut,
     ) -> (
         impl std::future::Future<Output = ()> + Send + 'run,
         Option<u32>,
-        impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
+        impl std::future::Future<Output = Result<Json<S::Output>, TerminalError>> + Send + 'run,
     )
     where
         'ctx: 'run,
-        T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
-        Fut: std::future::Future<Output = Result<T, String>> + Send + 'run,
+        S: crate::JournalStep,
+        Fut: std::future::Future<Output = Result<S::Output, String>> + Send + 'run,
     {
         let context = Arc::clone(self);
         (
             std::future::ready(()),
             Some(self.select_keys.fetch_add(1, Ordering::SeqCst) as u32),
-            async move { context.run_json_or_retry_send(effect_name, future).await },
+            async move { context.run_json_or_retry_send(step, future).await },
         )
     }
 

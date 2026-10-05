@@ -22,7 +22,7 @@ use crate::{SessionId, TurnId};
 
 /// The registered durable format of a [`ControlIntent`] record.
 /// version_surface = "coexist"
-/// version_guard(roots(ControlIntent), items(from_stored))
+/// version_guard( items(from_stored))
 pub const CONTROL_INTENT_FORMAT: u32 = 1;
 
 /// A control intent's id: the store's intent clock sequence.
@@ -648,6 +648,16 @@ pub trait ControlIntentStore: Send + Sync {
         }
         .into())
     }
+}
+
+impl crate::store::DurableRecord for ControlIntent {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::control_intent::CONTROL_INTENT_FORMAT);
+}
+
+impl crate::store::DurableRecord for ControlIntentId {
+    const SURFACE: crate::store::SurfaceFormat =
+        crate::surface_format!(crate::store::obligation::OBLIGATION_LEDGER_VOCABULARY_VERSION);
 }
 
 #[cfg(test)]

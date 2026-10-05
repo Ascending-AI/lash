@@ -399,7 +399,7 @@ async fn drive(
                         let held = probe.gate.as_ref().unwrap().0.clone();
                         let issued = entries.iter().find(|entry|
                             entry.ty == MessageType::RunCommand
-                                && entry.name.as_deref() == Some(name(&held, "attempt:1").as_str()))
+                                && entry.name.as_deref() == Some(crate::controller::attempt_journal_name(name(&held, "attempt:1")).as_str()))
                             .expect("A1 was issued before the cut");
                         let held_key = issued.completion_id().unwrap();
                         assert!(!entries.iter().any(|entry| entry.completion_id() == Some(held_key)
@@ -412,7 +412,7 @@ async fn drive(
                             matches!(event, RunEvent::Decided { call_id, decision: CallDecision::Final { .. }, .. }
                                 if *call_id == release))).expect("B's Final is durable at the cut");
                         assert!(entries.iter().filter_map(|entry|
-                            entry.name.as_deref()?.strip_prefix("lash:run:schedule:")?.parse::<u64>().ok())
+                            entry.name.as_deref()?.strip_prefix(crate::controller::record_journal_name("lash:run:schedule:".to_owned()).as_str())?.parse::<u64>().ok())
                             .all(|ordinal| ordinal <= final_record.first.0), "no later D at the cut");
                     }
                     if probe.cancel_at_gate {
@@ -1485,7 +1485,7 @@ async fn l19_only_the_durable_selected_final_publishes_body_commands_on_cold_rep
             // The old BeforeRun(D3) existed while A1 was held. Short D3
             // follows A1, so crash after B-final D1 while A1 is unfinished.
             let cut = crash.then(|| CrashPoint::AfterRunResult {
-                name: "lash:run:schedule:1".to_owned(),
+                name: crate::controller::record_journal_name(schedule(1)),
             });
             let driven = drive(
                 487919,

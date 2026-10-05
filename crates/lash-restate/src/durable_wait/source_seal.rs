@@ -314,12 +314,16 @@ pub(super) async fn resolve_completion(
             .ok_or_else(|| TerminalError::new("completion bundle is empty"))?;
         let store = materials.clone();
         let retained_holder = holder.clone();
-        let Json(retained) = ctx.run_json_or_retry_send::<Result<lash_core::tool_run::RetainedBundle, lash_core::RuntimeEffectControllerError>, _>("source:completion:retain".into(), async move {
-            match store.retain_material(&retained_holder, &bundle).await {
-                Err(lash_core::tool_run::MaterialRetentionError::Store(error)) => Err(error.to_string()),
-                outcome => Ok(outcome.map_err(super::process_terminal::material_error)),
-            }
-        }).await?;
+        let Json(retained) = ctx
+            .run_json_or_retry_send(RetainSourceStep, async move {
+                match store.retain_material(&retained_holder, &bundle).await {
+                    Err(lash_core::tool_run::MaterialRetentionError::Store(error)) => {
+                        Err(error.to_string())
+                    }
+                    outcome => Ok(outcome.map_err(super::process_terminal::material_error)),
+                }
+            })
+            .await?;
         let retained = retained.map_err(|error| TerminalError::new(error.to_record()))?;
         let result = retained
             .references
@@ -670,22 +674,19 @@ pub(super) async fn retire_sources(
         };
         let materials = registry.materials.clone();
         let attachments = registry.attachments.clone();
-        ctx.run_json_or_retry_send::<(), _>(
-            format!("source-retire:{}", address.workflow_key),
-            async move {
-                if let Some(materials) = materials {
-                    materials
-                        .release_material(&holder)
-                        .await
-                        .map_err(|error| error.to_string())?;
-                }
-                attachments
-                    .end_attachment_referrer(&holder.referrer())
+        ctx.run_json_or_retry_send(RetireSourceStep(address.workflow_key.clone()), async move {
+            if let Some(materials) = materials {
+                materials
+                    .release_material(&holder)
                     .await
                     .map_err(|error| error.to_string())?;
-                Ok(())
-            },
-        )
+            }
+            attachments
+                .end_attachment_referrer(&holder.referrer())
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        })
         .await?;
         object_state::set_stamped(ctx, &retired_source_key(&address), writer, fence);
     }
@@ -707,4 +708,67 @@ pub(super) async fn hold_seal(
     let payload = serde_json::to_string(&request.seal).map_err(TerminalError::from_error)?;
     ctx.resolve_promise(SOURCE_SEAL_PROMISE_KEY, payload);
     Ok(Reply::at(wire, SealOutcome::Sealed { seal: request.seal }))
+}
+
+impl lash_core::store::DurableRecord for IndexedSource {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateSourceArmRequest {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateSourceArmReply {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateSourceSubscribeRequest {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateSourceSubscribeReply {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateSourceSealRequest {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateSourceSealReply {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
+impl lash_core::store::DurableRecord for RestateSourceSealWrite {
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION);
+}
+
+struct RetainSourceStep;
+impl crate::JournalStep for RetainSourceStep {
+    type Output =
+        Result<lash_core::tool_run::RetainedBundle, lash_core::RuntimeEffectControllerError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "source.completion.retain";
+    fn instance(&self) -> String {
+        String::new()
+    }
+}
+
+struct RetireSourceStep(String);
+impl crate::JournalStep for RetireSourceStep {
+    type Output = ();
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(crate::JOURNAL_LOGIC_EPOCH);
+    const KIND: &'static str = "source-retire";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
 }

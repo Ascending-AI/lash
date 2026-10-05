@@ -6,7 +6,6 @@ use restate_sdk::serde::Json;
 /// a replay refuses any other version.
 ///
 /// version_guard(
-///     roots(JournaledCancelAdmission),
 ///     roots(
 ///         path = "crates/lash-core-execution/src/runtime/process/start_staging.rs",
 ///         RegisteredProcessStart,
@@ -97,20 +96,21 @@ struct JournaledSignalAppend {
 /// the store gave, so a replay answers the recorded result even after the
 /// store moved on; a retryable store fault ends the attempt unrecorded and the
 /// step runs again.
-async fn recorded_process_step<'ctx, C, T, Fut>(
+async fn recorded_process_step<'ctx, C, T, S, Fut>(
     context: &C,
-    invocation: &RuntimeEffectInvocation,
-    operation: &'static str,
+    step: S,
     work: Fut,
 ) -> Result<T, RuntimeEffectControllerError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
+    S: crate::JournalStep<Output = Result<T, PluginError>>,
     T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
     Fut: std::future::Future<Output = Result<T, PluginError>> + Send,
 {
+    let operation = S::KIND;
     let Json(recorded) = context
-        .run_json_or_retry_send::<Result<T, PluginError>, _>(
-            process_command_journal_name(invocation, operation),
+        .run_json_or_retry_send(
+            step,
             async move { crate::process::journal_or_retry(work.await) },
         )
         .await
@@ -122,7 +122,7 @@ pub(super) fn process_command_journal_name(
     invocation: &RuntimeEffectInvocation,
     operation: &str,
 ) -> String {
-    format!("{}.{operation}:v1", restate_effect_name(invocation))
+    format!("{}.{operation}", restate_effect_name(invocation))
 }
 
 pub(super) fn process_command_journal_error(
@@ -214,8 +214,11 @@ where
     let observed_id = process_id.clone();
     let receiver = invocation.execution_scope().clone();
     let Json(observed) = context
-        .run_json_or_retry_send::<Result<JournaledProcessAwait, PluginError>, _>(
-            process_command_journal_name(invocation, "process-await-observation"),
+        .run_json_or_retry_send(
+            ObserveProcessStep(process_command_journal_name(
+                invocation,
+                "process-await-observation",
+            )),
             async move {
                 let record = match crate::process::journal_or_retry(
                     observation_registry.get_process(&observed_id).await,
@@ -364,16 +367,20 @@ where
         command @ (ProcessCommand::PublishDefinition { .. }
         | ProcessCommand::GetDefinition { .. }) => {
             let execution = local_executor.into_definition_execution()?;
-            return recorded_process_step(context, invocation, "process-definition", async move {
-                let outcome = execution.execute(command).await?;
-                if let Some(observer) = outcome_observer {
-                    observer(&outcome, lash_core::StoreRealization::Realized);
-                }
-                Ok(JournaledProcessOutcome {
-                    outcome,
-                    realization: lash_core::StoreRealization::Realized,
-                })
-            })
+            return recorded_process_step(
+                context,
+                DefinitionStep(restate_effect_name(invocation)),
+                async move {
+                    let outcome = execution.execute(command).await?;
+                    if let Some(observer) = outcome_observer {
+                        observer(&outcome, lash_core::StoreRealization::Realized);
+                    }
+                    Ok(JournaledProcessOutcome {
+                        outcome,
+                        realization: lash_core::StoreRealization::Realized,
+                    })
+                },
+            )
             .await
             .map(|recorded| recorded.outcome);
         }
@@ -438,33 +445,41 @@ where
         } => {
             let registry = local_executor.into_process()?.registry;
             let step_registry = Arc::clone(&registry);
-            recorded_process_step(context, invocation, "process-transfer", async move {
-                step_registry
-                    .transfer_observers(
-                        &from_scope.session_id,
-                        &to_scope.session_id,
-                        &process_ids,
-                        lash_core::ProcessObserverBy::host("restate-transfer"),
-                    )
-                    .await?;
-                Ok(JournaledProcessOutcome::realized(
-                    ProcessEffectOutcome::Transfer,
-                ))
-            })
+            recorded_process_step(
+                context,
+                TransferStep(restate_effect_name(invocation)),
+                async move {
+                    step_registry
+                        .transfer_observers(
+                            &from_scope.session_id,
+                            &to_scope.session_id,
+                            &process_ids,
+                            lash_core::ProcessObserverBy::host("restate-transfer"),
+                        )
+                        .await?;
+                    Ok(JournaledProcessOutcome::realized(
+                        ProcessEffectOutcome::Transfer,
+                    ))
+                },
+            )
             .await
             .map(|recorded| (recorded.outcome, recorded.realization))
         }
         ProcessCommand::DeleteSession { session_id } => {
             let registry = local_executor.into_process()?.registry;
             let step_registry = Arc::clone(&registry);
-            recorded_process_step(context, invocation, "process-delete-session", async move {
-                let report = step_registry
-                    .delete_session_process_state(&session_id)
-                    .await?;
-                Ok(JournaledProcessOutcome::realized(
-                    ProcessEffectOutcome::DeleteSession { report },
-                ))
-            })
+            recorded_process_step(
+                context,
+                DeleteProcessSessionStep(restate_effect_name(invocation)),
+                async move {
+                    let report = step_registry
+                        .delete_session_process_state(&session_id)
+                        .await?;
+                    Ok(JournaledProcessOutcome::realized(
+                        ProcessEffectOutcome::DeleteSession { report },
+                    ))
+                },
+            )
             .await
             .map(|recorded| (recorded.outcome, recorded.realization))
         }
@@ -543,7 +558,7 @@ where
             let admission_attribution = command_identity.attribution.clone();
             let Json(admission_value) = context
                 .run_json_send(
-                    process_command_journal_name(invocation, "process-cancel-admission"),
+                    CancelAdmissionStep(restate_effect_name(invocation)),
                     None,
                     async move {
                         let admitted = admission_registry
@@ -568,13 +583,14 @@ where
                                 realization,
                             },
                         )
+                        .map(super::run_record::RunJournalWire::new)
                     },
                 )
                 .await
                 .map_err(|error| process_command_journal_error("cancel admission", error))?;
             let admission_value = admission_value?;
             let admission: JournaledCancelAdmission =
-                decode_process_command_journal_payload("cancel admission", admission_value)?;
+                decode_process_command_journal_payload("cancel admission", admission_value.value)?;
             validate_process_command_journal_payload_version(
                 "cancel admission",
                 admission.version,
@@ -622,16 +638,20 @@ where
                 signal: recorded_signal,
                 event,
                 realization,
-            } = recorded_process_step(context, invocation, "process-signal-append", async move {
-                let appended = step_registry
-                    .append_event(admitted.identity.process_id(), admitted.append_request())
-                    .await?;
-                Ok(JournaledSignalAppend {
-                    signal: admitted,
-                    event: Box::new(appended.event),
-                    realization: appended.realization,
-                })
-            })
+            } = recorded_process_step(
+                context,
+                SignalAppendStep(restate_effect_name(invocation)),
+                async move {
+                    let appended = step_registry
+                        .append_event(admitted.identity.process_id(), admitted.append_request())
+                        .await?;
+                    Ok(JournaledSignalAppend {
+                        signal: admitted,
+                        event: Box::new(appended.event),
+                        realization: appended.realization,
+                    })
+                },
+            )
             .await?;
             if !recorded_signal.same_signal(&signal) {
                 return Err(RuntimeEffectControllerError::new(
@@ -686,16 +706,20 @@ where
             // The append records its receipt (FIG-3827), so a replay answers
             // the recorded event and wake delivery.
             let step_registry = Arc::clone(&registry);
-            recorded_process_step(context, invocation, "process-emit-event", async move {
-                let appended = step_registry.append_event(&process_id, request).await?;
-                Ok(JournaledProcessOutcome {
-                    outcome: ProcessEffectOutcome::EmitEvent {
-                        event: Box::new(appended.event),
-                        wake_delivery: appended.wake_delivery.map(Box::new),
-                    },
-                    realization: appended.realization,
-                })
-            })
+            recorded_process_step(
+                context,
+                EmitProcessEventStep(restate_effect_name(invocation)),
+                async move {
+                    let appended = step_registry.append_event(&process_id, request).await?;
+                    Ok(JournaledProcessOutcome {
+                        outcome: ProcessEffectOutcome::EmitEvent {
+                            event: Box::new(appended.event),
+                            wake_delivery: appended.wake_delivery.map(Box::new),
+                        },
+                        realization: appended.realization,
+                    })
+                },
+            )
             .await
             .map(|recorded| (recorded.outcome, recorded.realization))
         }
@@ -717,24 +741,30 @@ where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
     let receiver = &invocation.address().execution_scope;
-    let recorded = recorded_process_step(context, invocation, operation, async move {
-        let outcome = Box::pin(execution.execute(receiver, command))
-            .await
-            .map_err(PluginError::from)?;
-        let realization = match &outcome {
-            ProcessEffectOutcome::CompleteExternal { completion } => match completion.as_ref() {
-                lash_core::ProcessCompletionOutcome::Committed(_) => {
-                    lash_core::StoreRealization::Realized
+    let recorded = recorded_process_step(
+        context,
+        LocalProcessStep(format!("{}:{operation}", restate_effect_name(invocation))),
+        async move {
+            let outcome = Box::pin(execution.execute(receiver, command))
+                .await
+                .map_err(PluginError::from)?;
+            let realization = match &outcome {
+                ProcessEffectOutcome::CompleteExternal { completion } => {
+                    match completion.as_ref() {
+                        lash_core::ProcessCompletionOutcome::Committed(_) => {
+                            lash_core::StoreRealization::Realized
+                        }
+                        _ => lash_core::StoreRealization::Coalesced,
+                    }
                 }
-                _ => lash_core::StoreRealization::Coalesced,
-            },
-            _ => lash_core::StoreRealization::Realized,
-        };
-        Ok(JournaledProcessOutcome {
-            outcome,
-            realization,
-        })
-    })
+                _ => lash_core::StoreRealization::Realized,
+            };
+            Ok(JournaledProcessOutcome {
+                outcome,
+                realization,
+            })
+        },
+    )
     .await?;
     Ok((recorded.outcome, recorded.realization))
 }
@@ -805,7 +835,10 @@ where
     let closure_live = live.clone();
     let stored_registration = registration.clone();
     let run = context.run_json_or_retry_send(
-        process_command_journal_name(invocation, "process-start-register"),
+        RegisterProcessStep(process_command_journal_name(
+            invocation,
+            "process-start-register",
+        )),
         async {
             if let Some(live) = &closure_live {
                 // FIG-3779 option 3: the step runs live, so its result
@@ -871,7 +904,10 @@ where
             let start_key = start_key.clone();
             let Json(retained) = context
                 .run_json_or_retry_send(
-                    process_command_journal_name(invocation, "process-start-register-after-cancel"),
+                    RetainedProcessStep(process_command_journal_name(
+                        invocation,
+                        "process-start-register-after-cancel",
+                    )),
                     async move {
                         registry
                             .get_process_by_start_key(&start_key)
@@ -1103,10 +1139,10 @@ where
                     let admission_process_id = process_id.clone();
                     let Json(cancel_request) = context
                         .run_json_or_retry_send(
-                            process_command_journal_name(
+                            CancelAwaitStep(process_command_journal_name(
                                 invocation,
                                 "process-await-turn-cancel-admission",
-                            ),
+                            )),
                             async move {
                                 turn_stop_process_cancel_admission(
                                     admission_registry.as_ref(),
@@ -1250,5 +1286,132 @@ fn process_await_output_from_resolution(
             RuntimeErrorCode::EngineProcessAwait,
             "a process-await wait ended without the terminal it waits on",
         )),
+    }
+}
+
+impl lash_core::store::DurableRecord for JournaledCancelAdmission {
+    const SURFACE: lash_core::store::SurfaceFormat = lash_core::surface_format!(
+        crate::controller::process_command::PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION
+    );
+}
+
+struct ObserveProcessStep(String);
+impl crate::JournalStep for ObserveProcessStep {
+    type Output = Result<JournaledProcessAwait, PluginError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-await-observation";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct RegisterProcessStep(String);
+impl crate::JournalStep for RegisterProcessStep {
+    type Output = Result<lash_core::runtime::RegisteredProcessStart, RuntimeEffectControllerError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-start-register";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct RetainedProcessStep(String);
+impl crate::JournalStep for RetainedProcessStep {
+    type Output = Option<ProcessRecord>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-start-register-after-cancel";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct CancelAwaitStep(String);
+impl crate::JournalStep for CancelAwaitStep {
+    type Output = Option<RestateProcessCancelRequest>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-await-turn-cancel-admission";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct DefinitionStep(String);
+impl crate::JournalStep for DefinitionStep {
+    type Output = Result<JournaledProcessOutcome, PluginError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-definition";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct TransferStep(String);
+impl crate::JournalStep for TransferStep {
+    type Output = Result<JournaledProcessOutcome, PluginError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-transfer";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct DeleteProcessSessionStep(String);
+impl crate::JournalStep for DeleteProcessSessionStep {
+    type Output = Result<JournaledProcessOutcome, PluginError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-delete-session";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct SignalAppendStep(String);
+impl crate::JournalStep for SignalAppendStep {
+    type Output = Result<JournaledSignalAppend, PluginError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-signal-append";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct EmitProcessEventStep(String);
+impl crate::JournalStep for EmitProcessEventStep {
+    type Output = Result<JournaledProcessOutcome, PluginError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-emit-event";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct LocalProcessStep(String);
+impl crate::JournalStep for LocalProcessStep {
+    type Output = Result<JournaledProcessOutcome, PluginError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-local";
+    fn instance(&self) -> String {
+        self.0.clone()
+    }
+}
+
+struct CancelAdmissionStep(String);
+impl crate::JournalStep for CancelAdmissionStep {
+    type Output = Result<super::run_record::RunJournalWire<JournaledCancelAdmission>, PluginError>;
+    const SURFACE: lash_core::store::SurfaceFormat =
+        lash_core::surface_format!(PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION);
+    const KIND: &'static str = "process-cancel-admission";
+    fn instance(&self) -> String {
+        self.0.clone()
     }
 }

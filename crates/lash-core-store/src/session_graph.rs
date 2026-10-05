@@ -326,7 +326,6 @@ pub struct SessionNodeRecord {
 ///         path = "crates/lash-sansio/src/session_model/message.rs", Message, FlatPart,
 ///         FlatPartRef,
 ///     ),
-///     roots(path = "crates/lash-core-store/src/execution_state.rs", PluginOptions),
 ///     file(
 ///         path = "crates/lash-core-store/src/session_policy_serde.rs",
 ///         cover(
