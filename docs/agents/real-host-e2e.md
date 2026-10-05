@@ -62,7 +62,12 @@ case creates a fresh database and applies the committed schema itself. For
 `--leg replay` the runner serves the always-suspending Restate
 (`RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s`), and the scenario's leg
 oracle must observe at least one suspended invocation task in the server's
-Prometheus metrics; a live leg only retains the same scrape.
+Prometheus metrics; a live leg only retains the same scrape. The H2 runner's
+replay leg also reads the V7 frames its proxies retained: one of the case's
+journaled Run invocations must end an attempt in a Suspension and resume on a
+replayed command, and every resumed attempt's replayed entries must match that
+invocation's `sys_journal` entry for entry (`h2_replay_wire` in the store
+evidence).
 
 The producer writes `receipt.json` using
 `scripts/lash-e2e-receipt.schema.json`. It carries the source SHA, manifest

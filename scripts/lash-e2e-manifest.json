@@ -1312,7 +1312,7 @@
           }
         },
         {
-          "variant": "default",
+          "variant": "inline",
           "store": "sqlite_file",
           "leg": "replay",
           "channel": "rlm",
@@ -1335,7 +1335,34 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: cancel::s11_inline_loser and cancel::s11_deferred_loser exercise the sqlite_file/live leg only; no owner ticket filed.",
+          "hold_reason": "REVISIT #53: cancel::live_loser releases the winner while the loser body is held executing inline. On the always-suspending replay leg the winner's proposed completion waits for its ACK, the executing loser prevents Suspension, and the Run never reaches `after` (sqlite_file replay receipts .kiln/FIG-5055/dev-s11-inline-replay and dev-s11-deferred-replay, FIG-5055: last attempt proposes with requested ACK, sends no Suspension, receives no ACK).",
+          "registration": null
+        },
+        {
+          "variant": "deferred",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "REVISIT #53: cancel::live_loser releases the winner while the loser body is held executing inline. On the always-suspending replay leg the winner's proposed completion waits for its ACK, the executing loser prevents Suspension, and the Run never reaches `after` (sqlite_file replay receipts .kiln/FIG-5055/dev-s11-inline-replay and dev-s11-deferred-replay, FIG-5055: last attempt proposes with requested ACK, sends no Suspension, receives no ACK).",
           "registration": null
         },
         {
@@ -1393,7 +1420,7 @@
           "registration": null
         },
         {
-          "variant": "default",
+          "variant": "inline",
           "store": "postgresql",
           "leg": "replay",
           "channel": "rlm",
@@ -1416,7 +1443,34 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: cancel::s11_inline_loser and cancel::s11_deferred_loser exercise the sqlite_file/live leg only; no owner ticket filed.",
+          "hold_reason": "REVISIT #53: cancel::live_loser releases the winner while the loser body is held executing inline. On the always-suspending replay leg the winner's proposed completion waits for its ACK, the executing loser prevents Suspension, and the Run never reaches `after` (sqlite_file replay receipts .kiln/FIG-5055/dev-s11-inline-replay and dev-s11-deferred-replay, FIG-5055: last attempt proposes with requested ACK, sends no Suspension, receives no ACK).",
+          "registration": null
+        },
+        {
+          "variant": "deferred",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "REVISIT #53: cancel::live_loser releases the winner while the loser body is held executing inline. On the always-suspending replay leg the winner's proposed completion waits for its ACK, the executing loser prevents Suspension, and the Run never reaches `after` (sqlite_file replay receipts .kiln/FIG-5055/dev-s11-inline-replay and dev-s11-deferred-replay, FIG-5055: last attempt proposes with requested ACK, sends no Suspension, receives no ACK).",
           "registration": null
         }
       ],
@@ -1494,7 +1548,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: handover::s12_deferred_survives_removal_of_n proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Product red (FIG-5055 replay run): handover::s12_deferred_survives_removal_of_n_replay executes, but after the generation drain the Run parked on its Deferred source wait ends stopped=runtime_error without publishing its continuation (the sqlite_file live run of FIG-5055 shows the wake as lash:turn_wait_handed_over); the harness fails at the ContinuationPublished wait (crates/lash-upgrade-harness/tests/e2e/h2.rs, Controller::await_barrier: \"the Run ended without publishing its continuation\"). No owner ticket filed.",
           "registration": null
         },
         {
@@ -1548,7 +1602,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: handover::s12_deferred_survives_removal_of_n proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Product red (FIG-5055 replay run): handover::s12_deferred_survives_removal_of_n_postgresql_replay executes, but after the generation drain the Run parked on its Deferred source wait ends stopped=runtime_error without publishing its continuation (the sqlite_file live run of FIG-5055 shows the wake as lash:turn_wait_handed_over); the harness fails at the ContinuationPublished wait (crates/lash-upgrade-harness/tests/e2e/h2.rs, Controller::await_barrier: \"the Run ended without publishing its continuation\"). No owner ticket filed.",
           "registration": null
         }
       ],
@@ -2878,7 +2932,7 @@
           }
         },
         {
-          "variant": "default",
+          "variant": "capture-adoption",
           "store": "sqlite_file",
           "leg": "replay",
           "channel": "rlm",
@@ -2901,7 +2955,34 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: handover::s23_cancel_between_capture_and_adoption and handover::s23_cancel_after_adoption prove the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Product red (FIG-5055 replay run): handover::s23_cancel_between_capture_and_adoption_replay executes, but cancelling the transferred Run at the capture-to-adoption cut answers status completion_won_race from TurnControl::request_cancel (crates/lash-core-execution/src/runtime/turn_control.rs) instead of recording the cancel; the harness refuses at crates/lash-upgrade-harness/tests/e2e/tools.rs (\"cancel was not recorded\"). No owner ticket filed.",
+          "registration": null
+        },
+        {
+          "variant": "post-adoption",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Product red (FIG-5055 replay run): handover::s23_cancel_after_adoption_replay executes, but cancelling the transferred Run at the post-adoption cut answers status completion_won_race from TurnControl::request_cancel (crates/lash-core-execution/src/runtime/turn_control.rs) instead of recording the cancel; the harness refuses at crates/lash-upgrade-harness/tests/e2e/tools.rs (\"cancel was not recorded\"). No owner ticket filed.",
           "registration": null
         },
         {
@@ -2959,7 +3040,7 @@
           "registration": null
         },
         {
-          "variant": "default",
+          "variant": "capture-adoption",
           "store": "postgresql",
           "leg": "replay",
           "channel": "rlm",
@@ -2982,7 +3063,34 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: handover::s23_cancel_between_capture_and_adoption and handover::s23_cancel_after_adoption prove the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Product red (FIG-5055 replay run): handover::s23_cancel_between_capture_and_adoption_postgresql_replay executes, but cancelling the transferred Run at the capture-to-adoption cut answers status completion_won_race from TurnControl::request_cancel (crates/lash-core-execution/src/runtime/turn_control.rs) instead of recording the cancel; the harness refuses at crates/lash-upgrade-harness/tests/e2e/tools.rs (\"cancel was not recorded\"). No owner ticket filed.",
+          "registration": null
+        },
+        {
+          "variant": "post-adoption",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Product red (FIG-5055 replay run): handover::s23_cancel_after_adoption_postgresql_replay executes, but cancelling the transferred Run at the post-adoption cut answers status completion_won_race from TurnControl::request_cancel (crates/lash-core-execution/src/runtime/turn_control.rs) instead of recording the cancel; the harness refuses at crates/lash-upgrade-harness/tests/e2e/tools.rs (\"cancel was not recorded\"). No owner ticket filed.",
           "registration": null
         }
       ],
@@ -4203,9 +4311,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: handover::s31_publication_crash_hands_over_once proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "handover::s31_publication_crash_hands_over_once_replay"
+          }
         },
         {
           "variant": "default",
@@ -4257,9 +4368,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: handover::s31_publication_crash_hands_over_once proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "handover::s31_publication_crash_hands_over_once_postgresql_replay"
+          }
         }
       ],
       "setup": "RLM process with pending source, held loser, state, retained material and declared start.",
@@ -4335,9 +4449,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: handover::s32_missing_retained_material_refuses_without_body_replay proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "handover::s32_missing_retained_material_refuses_without_body_replay_replay"
+          }
         },
         {
           "variant": "default",
@@ -4389,9 +4506,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: handover::s32_missing_retained_material_refuses_without_body_replay proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "handover::s32_missing_retained_material_refuses_without_body_replay_postgresql_replay"
+          }
         }
       ],
       "setup": "Transfer real retained result to successor; ensure owner-qualified reference published.",

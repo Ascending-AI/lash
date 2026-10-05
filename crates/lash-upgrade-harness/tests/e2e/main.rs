@@ -22,6 +22,7 @@ mod handover;
 mod operation;
 mod plugin_upgrade;
 mod proposal;
+mod replay;
 mod tools;
 mod workbench_isolated;
 use anyhow::{Context, Result, ensure};

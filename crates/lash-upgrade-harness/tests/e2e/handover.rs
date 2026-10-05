@@ -82,6 +82,66 @@ h2_case!(
     PostgreSql,
     Live
 );
+h2_case!(
+    s12_deferred_survives_removal_of_n_replay,
+    RetirePending,
+    SqliteFile,
+    Replay
+);
+h2_case!(
+    s23_cancel_between_capture_and_adoption_replay,
+    CancelAtCapture,
+    SqliteFile,
+    Replay
+);
+h2_case!(
+    s23_cancel_after_adoption_replay,
+    CancelAfterAdoption,
+    SqliteFile,
+    Replay
+);
+h2_case!(
+    s31_publication_crash_hands_over_once_replay,
+    PublicationCrash,
+    SqliteFile,
+    Replay
+);
+h2_case!(
+    s32_missing_retained_material_refuses_without_body_replay_replay,
+    RetainedRemoval,
+    SqliteFile,
+    Replay
+);
+h2_case!(
+    s12_deferred_survives_removal_of_n_postgresql_replay,
+    RetirePending,
+    PostgreSql,
+    Replay
+);
+h2_case!(
+    s23_cancel_between_capture_and_adoption_postgresql_replay,
+    CancelAtCapture,
+    PostgreSql,
+    Replay
+);
+h2_case!(
+    s23_cancel_after_adoption_postgresql_replay,
+    CancelAfterAdoption,
+    PostgreSql,
+    Replay
+);
+h2_case!(
+    s31_publication_crash_hands_over_once_postgresql_replay,
+    PublicationCrash,
+    PostgreSql,
+    Replay
+);
+h2_case!(
+    s32_missing_retained_material_refuses_without_body_replay_postgresql_replay,
+    RetainedRemoval,
+    PostgreSql,
+    Replay
+);
 
 pub fn spec(id: &str, store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Result<CaseSpec> {
     let rules = match id {

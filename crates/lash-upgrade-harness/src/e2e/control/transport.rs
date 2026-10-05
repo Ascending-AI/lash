@@ -17,6 +17,7 @@ use lash_restate_test::protocol::{
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -27,6 +28,10 @@ use tokio::task::{JoinHandle, JoinSet};
 mod forward;
 
 use forward::{Forwarder, Hold};
+
+/// Connections across every proxy in the process: proxies sharing one
+/// artifact directory never overwrite each other's retained wire frames.
+static CONNECTIONS: AtomicU64 = AtomicU64::new(0);
 
 pub struct V7Proxy {
     pub endpoint: String,
@@ -120,7 +125,6 @@ impl V7Proxy {
         let stream_disconnect = disconnect.clone();
         let task = tokio::spawn(async move {
             let mut children = JoinSet::new();
-            let mut connection = 0;
             loop {
                 tokio::select! {
                     _ = stopped.changed() => break,
@@ -135,7 +139,7 @@ impl V7Proxy {
                             Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => continue,
                             Err(error) => return Err(error.into()),
                         };
-                        connection += 1;
+                        let connection = CONNECTIONS.fetch_add(1, Ordering::Relaxed) + 1;
                         let directory = directory.clone();
                         let cuts = cuts.clone();
                         let mut stopped = stopped.clone();

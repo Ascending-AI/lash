@@ -77,7 +77,7 @@ fn setup(permutation: Permutation) -> Result<(Case, CaseLease, CaseSpec)> {
 }
 
 /// One captured HTTP/2 DATA frame's decoded service-protocol message.
-fn wire_frame(path: &std::path::Path) -> Result<Frame> {
+pub(super) fn wire_frame(path: &std::path::Path) -> Result<Frame> {
     let artifact: Value = serde_json::from_slice(&std::fs::read(path)?)?;
     let payload: Vec<u8> = serde_json::from_value(artifact["payload"].clone())?;
     Ok(Frame {

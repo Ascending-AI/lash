@@ -1301,6 +1301,14 @@ pub async fn run(row: Row, permutation: Permutation) -> Result<()> {
         }
     };
     evidence.artifacts = shared.artifacts.clone();
+    if permutation.leg == Leg::Replay && errors.is_empty() {
+        // A passing scenario on the replay leg must also show its own Run
+        // invocations suspended and resumed on their recorded journal.
+        match super::replay::assert_replayed(&shared.directory, &shared.view, &evidence).await {
+            Ok(receipt) => evidence.stores.push(receipt),
+            Err(error) => errors.push(format!("replay evidence: {error:#}")),
+        }
+    }
     let host_cleanup = host.stop().await;
     let callback_cleanup = shared.callbacks.lock().await.finish().await;
     let proxy_cleanup = shared.proxy.lock().await.finish().await;
