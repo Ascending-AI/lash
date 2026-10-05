@@ -282,6 +282,7 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         name: String,
         step: crate::RunRecordStep<'run>,
     ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_run::RunJournalEntry> {
+        self.ledger.record(format!("run_record:{name}"));
         self.inner.start_run_record(name, step)
     }
 

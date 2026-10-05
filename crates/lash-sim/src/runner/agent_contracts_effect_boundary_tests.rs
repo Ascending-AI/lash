@@ -91,15 +91,20 @@ impl lash_core::testing::EffectLayer for ToolAttemptRecordingLayer {
         name: String,
         step: lash_core::tool_dispatch::RunAttemptStep<'run>,
     ) -> lash_core::tool_dispatch::RunAttemptHandle<'run> {
-        let handle = inner.start_run_attempt(name, step);
+        let lash_core::tool_dispatch::RunAttemptHandle { body, result } =
+            inner.start_run_attempt(name, step);
+        let lash_core::tool_dispatch::RunSelectable { key, value } = result;
         lash_core::tool_dispatch::RunAttemptHandle {
-            body: handle.body,
-            result: Box::pin(async move {
-                let entry = handle.result.await?;
-                self.recorder
-                    .record_tool_attempt(entry.call_id.clone(), entry.attempt.get());
-                Ok(entry)
-            }),
+            body,
+            result: lash_core::tool_dispatch::RunSelectable {
+                key,
+                value: Box::pin(async move {
+                    let entry = value.await?;
+                    self.recorder
+                        .record_tool_attempt(entry.call_id.clone(), entry.attempt.get());
+                    Ok(entry)
+                }),
+            },
         }
     }
 }

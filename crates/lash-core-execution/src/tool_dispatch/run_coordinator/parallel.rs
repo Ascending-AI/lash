@@ -1107,38 +1107,37 @@ impl RunJournal<'_> {
         let bodies = RunBodies::new();
         bodies.issue(body);
         let scoped = self.scoped;
-        Ok(scoped
-            .await_owner_step(
-                name,
-                bodies.beside(async {
-                    let decision_key = result.key.await?;
-                    let mut keys = Vec::with_capacity(self.selection.pending.len());
-                    for source in &self.selection.pending {
-                        keys.push(source.clone().await?);
+        Ok(Box::pin(scoped.await_owner_step(
+            name,
+            bodies.beside(async {
+                let decision_key = result.key.await?;
+                let mut keys = Vec::with_capacity(self.selection.pending.len());
+                for source in &self.selection.pending {
+                    keys.push(source.clone().await?);
+                }
+                loop {
+                    let remaining: Vec<_> = keys
+                        .iter()
+                        .copied()
+                        .filter(|key| !self.selection.acknowledged.contains(key))
+                        .collect();
+                    let mut awaited = vec![decision_key];
+                    awaited.extend(remaining.iter().copied());
+                    let chosen = self.scoped.controller().select_run_sources(awaited).await?;
+                    if chosen == 0 {
+                        break;
                     }
-                    loop {
-                        let remaining: Vec<_> = keys
-                            .iter()
-                            .copied()
-                            .filter(|key| !self.selection.acknowledged.contains(key))
-                            .collect();
-                        let mut awaited = vec![decision_key];
-                        awaited.extend(remaining.iter().copied());
-                        let chosen = self.scoped.controller().select_run_sources(awaited).await?;
-                        if chosen == 0 {
-                            break;
-                        }
-                        let key = remaining.get(chosen - 1).ok_or_else(|| {
-                            RuntimeEffectControllerError::new(
-                                crate::RuntimeErrorCode::EffectReplayDivergence,
-                                "record wait selected no source",
-                            )
-                        })?;
-                        self.selection.acknowledged.push_back(*key);
-                    }
-                    result.value.await
-                }),
-            )
-            .await?)
+                    let key = remaining.get(chosen - 1).ok_or_else(|| {
+                        RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::EffectReplayDivergence,
+                            "record wait selected no source",
+                        )
+                    })?;
+                    self.selection.acknowledged.push_back(*key);
+                }
+                result.value.await
+            }),
+        ))
+        .await?)
     }
 }
