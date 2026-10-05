@@ -137,12 +137,16 @@ impl RemoteSessionObservationEvent {
                     activity: Box::new(RemoteTurnActivity::from_core(sequence, activity.clone())?),
                 }
             }
-            lash_core::SessionObservationEventPayload::Committed { rows, .. } => {
-                RemoteSessionObservationEventPayload::Committed { rows: rows.clone() }
-            }
-            // Resident replacements are also signal-only; the authoritative
-            // read view remains a local handle and must be refetched by the peer.
-            lash_core::SessionObservationEventPayload::ResidentChanged { read_view: _ } => {
+            lash_core::SessionObservationEventPayload::Committed {
+                base_revision,
+                rows,
+            } => RemoteSessionObservationEventPayload::Committed {
+                base_revision: base_revision.as_u64(),
+                rows: rows.clone(),
+            },
+            // A resident change is a reference: the peer reads the resident
+            // view again.
+            lash_core::SessionObservationEventPayload::ResidentChanged => {
                 RemoteSessionObservationEventPayload::ResidentChanged
             }
             lash_core::SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {

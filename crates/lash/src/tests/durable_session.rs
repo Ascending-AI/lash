@@ -1837,6 +1837,7 @@ async fn committed_row_deltas_transport_each_new_node_once() -> Result<()> {
             )?;
             let crate::remote::observations::RemoteSessionObservationEventPayload::Committed {
                 rows: transported,
+                ..
             } = remote.event
             else {
                 panic!("commit lost its typed rows");

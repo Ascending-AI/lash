@@ -156,9 +156,7 @@ async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_re
     )
     .await
     .expect("terminal replacement timeout");
-    let lash::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
-        snapshot, event, ..
-    } = terminal
+    let lash::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { event, .. } = terminal
     else {
         unreachable!("loop returns only terminal replacements")
     };
@@ -166,7 +164,6 @@ async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_re
         event.turn_id.as_deref(),
         Some("remote-recovery-facade-turn")
     );
-    assert_eq!(snapshot.cursor, event.cursor);
     drop(direct);
     drop(recovering);
     drop(observable);

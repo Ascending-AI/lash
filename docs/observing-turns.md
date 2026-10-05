@@ -23,10 +23,13 @@ activity, it is absent from durable history.
 
 ## Placing committed rows
 
-A live activity is provisional. `Committed { rows, .. }` supplies the new
-canonical records for that commit, including named suppressions; it never
-repeats the earlier transcript. The remote event transports the same `rows`
-and omits the local read view. Replace the preview for each record's typed
+A live activity is provisional. `Committed { base_revision, rows }` supplies
+the new canonical records for that commit, including named suppressions; it
+never repeats the earlier transcript and never carries the session's read
+view. `rows` extend the session at `base_revision`: the recoverable-chat feed
+delivers a commit only to a consumer holding that revision, and answers any
+other with a replay gap and the durable head. The remote event transports the
+same `base_revision` and `rows`. Replace the preview for each record's typed
 turn provenance, then style its neutral content. Read `durable.transcript()`
 for a complete retained transcript after reconnecting across a replay gap.
 

@@ -9,6 +9,11 @@
 //! it, and every gap's replacement snapshot is the durable head, never a
 //! resident projection that may trail a commit another process made.
 //!
+//! A `Committed` event carries the commit's rows delta, not the session's
+//! read view: the feed delivers it only to a consumer that holds the
+//! revision the delta extends, and rebuilds from the durable head when the
+//! consumer holds any other.
+//!
 //! Which commits reach the tail is the live replay store's property. The
 //! in-memory default holds this process's publications; a host whose
 //! sessions run on several processes configures one shared store, and every
@@ -204,6 +209,16 @@ impl Stream for SessionObservationStream {
     }
 }
 
+/// What the feed does with one live event.
+enum Delivery {
+    Item(SessionObservationStreamItem),
+    /// A commit the consumer already holds.
+    Skipped,
+    /// A commit whose rows extend a revision the consumer does not hold:
+    /// the consumer rebuilds from the durable head.
+    Diverged,
+}
+
 struct FeedState {
     source: FeedSource,
     /// Where the feed stands: the last delivered or skipped event's live
@@ -251,11 +266,13 @@ impl FeedState {
             let item = live.next().await;
             match item {
                 None => return None,
-                Some(Ok(event)) => {
-                    if let Some(item) = self.deliver(event) {
-                        return Some(Ok(item));
+                Some(Ok(event)) => match self.deliver(event) {
+                    Delivery::Item(item) => return Some(Ok(item)),
+                    Delivery::Skipped => {}
+                    Delivery::Diverged => {
+                        return Some(self.rebuild(LiveReplayGapReason::Unavailable).await);
                     }
-                }
+                },
                 Some(Err(
                     LiveReplayStoreError::SubscriberLagged(_) | LiveReplayStoreError::Closed,
                 )) => self.set_live(None),
@@ -301,26 +318,26 @@ impl FeedState {
         }
     }
 
-    fn deliver(
-        &mut self,
-        event: Arc<SessionObservationEvent>,
-    ) -> Option<SessionObservationStreamItem> {
+    /// Deliver one live event. A `Committed` at or below the revision the
+    /// consumer holds is a redelivery; one whose delta extends a revision
+    /// the consumer does not hold diverged from it.
+    fn deliver(&mut self, event: Arc<SessionObservationEvent>) -> Delivery {
         let delivered = self.delivered.unwrap_or(SessionRevision::new(0));
-        if matches!(
-            event.payload,
-            SessionObservationEventPayload::Committed { .. }
-        ) {
+        if let SessionObservationEventPayload::Committed { base_revision, .. } = &event.payload {
             let revision = event.revision();
             if revision <= delivered {
                 self.advance_past(&event, delivered);
-                return None;
+                return Delivery::Skipped;
+            }
+            if *base_revision != delivered {
+                return Delivery::Diverged;
             }
             self.delivered = Some(revision);
             self.cursor = event.cursor.clone();
-            return Some(SessionObservationStreamItem::Event(event));
+            return Delivery::Item(SessionObservationStreamItem::Event(event));
         }
         self.advance_past(&event, delivered);
-        Some(SessionObservationStreamItem::Event(event))
+        Delivery::Item(SessionObservationStreamItem::Event(event))
     }
 
     /// Move the feed's cursor to a delivered or skipped event's position,

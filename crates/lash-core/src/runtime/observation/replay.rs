@@ -302,13 +302,18 @@ pub enum SessionQueueEventKind {
 #[allow(clippy::large_enum_variant)]
 pub enum SessionObservationEventPayload {
     TurnActivity(crate::TurnActivity),
+    /// A durable commit, by reference: the event's cursor names the
+    /// committed revision, and `rows` are the transcript rows the commit
+    /// added to the session at `base_revision`. A consumer holding
+    /// `base_revision` advances by applying `rows`; any other consumer
+    /// loads the durable head. The full read view never rides the feed.
     Committed {
-        read_view: crate::SessionReadView,
+        base_revision: SessionRevision,
         rows: Vec<crate::transcript::TranscriptRowRecord>,
     },
-    ResidentChanged {
-        read_view: crate::SessionReadView,
-    },
+    /// A revision-stable change to resident authority, by reference: a
+    /// consumer that needs the resident view reads it again.
+    ResidentChanged,
     AgentFrameSwitched {
         frame_id: String,
     },

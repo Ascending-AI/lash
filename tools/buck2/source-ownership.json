@@ -74,7 +74,6 @@
         "tests/runtime/tests/child_sessions.rs",
         "tests/runtime/tests/persistence.rs",
         "tests/runtime/tests/plugin_lifecycle.rs",
-        "tests/runtime/tests/replay_retention.rs",
         "tests/runtime/tests/tool_restore_report.rs",
         "tests/runtime/tests/tool_surface_lifecycle.rs"
       ],

@@ -1407,7 +1407,7 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
     resident.await.expect("join resident publication");
     assert!(matches!(
         resident_event.payload,
-        lash_core::SessionObservationEventPayload::ResidentChanged { .. }
+        lash_core::SessionObservationEventPayload::ResidentChanged
     ));
     assert_eq!(
         session
@@ -1458,11 +1458,23 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
         })
         .expect("durable transition emitted Committed");
     assert_eq!(committed.revision(), lash_core::SessionRevision::new(1));
-    let lash_core::SessionObservationEventPayload::Committed { read_view, .. } = &committed.payload
+    let lash_core::SessionObservationEventPayload::Committed {
+        base_revision,
+        rows,
+    } = &committed.payload
     else {
         unreachable!()
     };
-    assert_eq!(read_view.turn_index(), 1);
+    assert_eq!(
+        *base_revision,
+        initial
+            .cursor
+            .parse_for_session(&session.session_id())
+            .expect("the snapshot's cursor names its session")
+            .revision,
+        "the commit's rows extend the revision the snapshot held"
+    );
+    assert!(!rows.is_empty(), "the commit carries the rows it added");
 
     let committed_cursor = committed.cursor.clone();
     let probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe> = Arc::new(NoopTurnPhaseProbe);
@@ -1478,7 +1490,7 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
             if event.revision() == lash_core::SessionRevision::new(1)
                 && matches!(
                     event.payload,
-                    lash_core::SessionObservationEventPayload::ResidentChanged { .. }
+                    lash_core::SessionObservationEventPayload::ResidentChanged
                 )
     ));
 
@@ -1530,7 +1542,7 @@ impl PausedCommitReplayStore {
             matches!(
                 &event.payload,
                 lash_core::SessionObservationEventPayload::Committed { .. }
-                    | lash_core::SessionObservationEventPayload::ResidentChanged { .. }
+                    | lash_core::SessionObservationEventPayload::ResidentChanged
             )
         })
     }
@@ -1598,7 +1610,7 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
             matches!(
                 &event.payload,
                 lash_core::SessionObservationEventPayload::Committed { .. }
-                    | lash_core::SessionObservationEventPayload::ResidentChanged { .. }
+                    | lash_core::SessionObservationEventPayload::ResidentChanged
             )
         });
         if authoritative && self.boundary == PublicationBoundary::BeforeReservation {
@@ -1901,30 +1913,41 @@ pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() ->
         .send(TurnInput::text("live after gap"))
         .output()
         .await?;
-    let read_view = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    let continued = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
             match stream.next().await.expect("post-gap live update")? {
-                crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, .. }
-                | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
-                    snapshot,
-                    ..
+                crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, .. } => {
+                    break Ok::<_, crate::EmbedError>(
+                        snapshot
+                            .read_view
+                            .messages()
+                            .iter()
+                            .map(crate::message_text)
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    );
                 }
-                | crate::recoverable_chat::RecoverableChatUpdate::ResidentReplacement {
-                    snapshot,
+                crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
+                    event,
                     ..
-                } => break Ok::<_, crate::EmbedError>(snapshot.read_view),
-                crate::recoverable_chat::RecoverableChatUpdate::Event { .. } => {}
+                } => {
+                    let lash_core::SessionObservationEventPayload::Committed { rows, .. } =
+                        &event.payload
+                    else {
+                        panic!("a terminal replacement carries a commit");
+                    };
+                    break Ok(format!("{rows:?}"));
+                }
+                crate::recoverable_chat::RecoverableChatUpdate::ResidentReplacement { .. }
+                | crate::recoverable_chat::RecoverableChatUpdate::Event { .. } => {}
             }
         }
     })
     .await
     .expect("post-gap continuation timeout")?;
     assert!(
-        read_view
-            .messages()
-            .iter()
-            .any(|message| crate::message_text(message).contains("live after gap")),
-        "continued recovery must replace from a snapshot containing the next turn"
+        continued.contains("live after gap"),
+        "continued recovery must carry the next turn"
     );
     Ok(())
 }

@@ -458,7 +458,7 @@ impl RuntimeHandle {
             previous.cursor.clone(),
             Some(previous.as_ref()),
             revision,
-            read_view.clone(),
+            read_view,
             authority_fingerprint,
         );
         let payload = if previous.revision < revision {
@@ -470,7 +470,8 @@ impl RuntimeHandle {
                 .into_iter()
                 .map(|row| row.row_id)
                 .collect::<std::collections::HashSet<_>>();
-            let rows = read_view
+            let rows = next
+                .read_view
                 .transcript()
                 .expect("resident history is valid")
                 .into_records()
@@ -478,13 +479,11 @@ impl RuntimeHandle {
                 .filter(|row| !previous_rows.contains(&row.row_id))
                 .collect();
             Some(SessionObservationEventPayload::Committed {
-                read_view: read_view.clone(),
+                base_revision: previous.revision,
                 rows,
             })
         } else if force_resident || previous.authority_fingerprint != next.authority_fingerprint {
-            Some(SessionObservationEventPayload::ResidentChanged {
-                read_view: read_view.clone(),
-            })
+            Some(SessionObservationEventPayload::ResidentChanged)
         } else {
             None
         };
@@ -1134,7 +1133,7 @@ mod tests {
         assert_eq!(events[0].turn_id, None);
         assert!(matches!(
             events[1].payload,
-            SessionObservationEventPayload::ResidentChanged { .. }
+            SessionObservationEventPayload::ResidentChanged
         ));
         assert_eq!(events[1].turn_id, None);
     }

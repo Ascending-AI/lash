@@ -16123,7 +16123,13 @@
       "type": "object"
     },
     {
+      "description": "A durable commit by reference: `rows` are the transcript rows the\ncommit added to the session at `base_revision`, and the event's\n`revision` is the one it committed. A consumer holding\n`base_revision` applies `rows`; any other reads the session again.",
       "properties": {
+        "base_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "rows": {
           "items": {
             "$ref": "#/$defs/TranscriptRowRecord"
@@ -16137,11 +16143,13 @@
       },
       "required": [
         "type",
+        "base_revision",
         "rows"
       ],
       "type": "object"
     },
     {
+      "description": "Resident authority changed without a commit: read it again.",
       "properties": {
         "type": {
           "const": "resident_changed",

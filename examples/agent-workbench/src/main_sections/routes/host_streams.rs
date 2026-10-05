@@ -268,9 +268,8 @@ async fn forward_session_observations_until_shutdown(
                     break;
                 }
             }
-            Ok(RecoverableChatUpdate::TerminalReplacement {
-                event, snapshot, ..
-            }) => {
+            Ok(RecoverableChatUpdate::TerminalReplacement { event, .. }) => {
+                let cursor = event.cursor.to_string();
                 let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
                     Ok(event) => event,
                     Err(err) => {
@@ -282,7 +281,7 @@ async fn forward_session_observations_until_shutdown(
                 if !send_until_shutdown(
                     &tx,
                     ObservationStreamItem::TerminalReplacement {
-                        cursor: snapshot.cursor.to_string(),
+                        cursor,
                         event: Box::new(Envelope::at(&negotiated, event)),
                     },
                     &mut shutdown,
@@ -292,9 +291,8 @@ async fn forward_session_observations_until_shutdown(
                     break;
                 }
             }
-            Ok(RecoverableChatUpdate::ResidentReplacement {
-                event, snapshot, ..
-            }) => {
+            Ok(RecoverableChatUpdate::ResidentReplacement { event, .. }) => {
+                let cursor = event.cursor.to_string();
                 let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
                     Ok(event) => event,
                     Err(err) => {
@@ -306,7 +304,7 @@ async fn forward_session_observations_until_shutdown(
                 if !send_until_shutdown(
                     &tx,
                     ObservationStreamItem::ResidentReplacement {
-                        cursor: snapshot.cursor.to_string(),
+                        cursor,
                         event: Box::new(Envelope::at(&negotiated, event)),
                     },
                     &mut shutdown,

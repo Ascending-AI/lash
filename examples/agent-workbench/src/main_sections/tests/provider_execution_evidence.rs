@@ -75,9 +75,9 @@ pub(crate) async fn next_terminal_replacement(
             {
                 lash::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
                     event,
-                    snapshot,
                     ..
                 } => {
+                    let cursor = event.cursor.to_string();
                     let remote =
                         lash::remote::observations::RemoteSessionObservationEvent::from_core(
                             sequence,
@@ -87,7 +87,7 @@ pub(crate) async fn next_terminal_replacement(
                     return serde_json::json!({
                         "type": "terminal_replacement",
                         "event": remote,
-                        "cursor": snapshot.cursor.to_string(),
+                        "cursor": cursor,
                     });
                 }
                 lash::recoverable_chat::RecoverableChatUpdate::Event { .. } => {}

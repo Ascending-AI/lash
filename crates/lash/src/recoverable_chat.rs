@@ -9,6 +9,12 @@
 //! snapshot, and a replay gap rebuilds from the durable head. Any process
 //! that shares the session's store therefore serves a consistent feed; this
 //! process's live replay adds only the provisional events published here.
+//!
+//! A commit arrives by reference (FIG-5100): its revision and the transcript
+//! rows it added, never the session's read view. The host advances its
+//! projection by applying those rows. A commit whose rows extend a revision
+//! the host does not hold arrives as a [`RecoverableChatUpdate::ReplayGap`]
+//! with the durable head instead.
 
 use lash_sansio::SessionId;
 use std::collections::{BTreeSet, VecDeque};
@@ -115,29 +121,28 @@ pub enum RecoverableChatUpdate {
         /// Replay gap that required snapshot replacement.
         gap: LiveReplayGap,
     },
-    /// A terminal commit replaces provisional state with this authoritative
-    /// snapshot. The committed event is retained for remote encoding and
-    /// tracing, but the snapshot is the transcript authority. A commit the
-    /// feed read from the store, rather than from this process's live
-    /// replay, names no turn, and commits the store showed together arrive
-    /// as one replacement at the newest revision.
+    /// A terminal commit settles provisional state. `event`'s payload is
+    /// [`SessionObservationEventPayload::Committed`]: its `rows` are the
+    /// transcript rows the commit added to the revision the host holds, so
+    /// the host advances its projection by applying them, and persists
+    /// `event.cursor`. The subscription delivers a commit only to a host
+    /// holding the revision it extends; otherwise it yields a
+    /// [`Self::ReplayGap`] with the durable head.
     TerminalReplacement {
         /// Stable replay identity for this observation event.
         id: RecoverableChatEventId,
-        /// Observation event delivered by this update.
+        /// The commit, carrying its revision and rows delta.
         event: std::sync::Arc<SessionObservationEvent>,
-        /// Authoritative session snapshot for recovering the read model.
-        snapshot: RecoverableChatSnapshot,
     },
-    /// A revision-stable authoritative replacement. Refresh the resident
-    /// projection without settling provisional transcript rows.
+    /// Resident authority changed without a commit. The event is a
+    /// reference: a host that projects resident state reads it again
+    /// ([`ObservableSession::recoverable_chat_snapshot`]); provisional
+    /// transcript rows stay unsettled.
     ResidentReplacement {
         /// Stable replay identity for this observation event.
         id: RecoverableChatEventId,
         /// Observation event delivered by this update.
         event: std::sync::Arc<SessionObservationEvent>,
-        /// Authoritative session snapshot for recovering the read model.
-        snapshot: RecoverableChatSnapshot,
     },
 }
 
@@ -209,33 +214,18 @@ impl Stream for RecoverableChatSubscription {
                     if !self.applied.insert(id.clone()) {
                         continue;
                     }
-                    if let SessionObservationEventPayload::Committed { read_view, .. } =
-                        &event.payload
-                    {
-                        self.applied.clear();
-                        self.applied.insert(id.clone());
-                        return Poll::Ready(Some(Ok(RecoverableChatUpdate::TerminalReplacement {
-                            id,
-                            snapshot: RecoverableChatSnapshot {
-                                read_view: read_view.clone(),
-                                cursor: event.cursor.clone(),
-                            },
-                            event,
-                        })));
-                    }
-                    if let SessionObservationEventPayload::ResidentChanged { read_view } =
-                        &event.payload
-                    {
-                        return Poll::Ready(Some(Ok(RecoverableChatUpdate::ResidentReplacement {
-                            id,
-                            snapshot: RecoverableChatSnapshot {
-                                read_view: read_view.clone(),
-                                cursor: event.cursor.clone(),
-                            },
-                            event,
-                        })));
-                    }
-                    return Poll::Ready(Some(Ok(RecoverableChatUpdate::Event { id, event })));
+                    let update = match &event.payload {
+                        SessionObservationEventPayload::Committed { .. } => {
+                            self.applied.clear();
+                            self.applied.insert(id.clone());
+                            RecoverableChatUpdate::TerminalReplacement { id, event }
+                        }
+                        SessionObservationEventPayload::ResidentChanged => {
+                            RecoverableChatUpdate::ResidentReplacement { id, event }
+                        }
+                        _ => RecoverableChatUpdate::Event { id, event },
+                    };
+                    return Poll::Ready(Some(Ok(update)));
                 }
             }
         }
@@ -256,8 +246,10 @@ impl ObservableSession {
 
     /// Resume a recoverable chat observation from an authoritative snapshot's
     /// cursor. Every durable commit past the cursor's revision arrives once,
-    /// in order, as a [`RecoverableChatUpdate::TerminalReplacement`],
-    /// whichever process made it.
+    /// in order, as a [`RecoverableChatUpdate::TerminalReplacement`]
+    /// carrying its rows delta, whichever process made it, or, when its
+    /// rows extend a revision the host does not hold, as a
+    /// [`RecoverableChatUpdate::ReplayGap`] with the durable head.
     pub fn subscribe_recoverable_chat(&self, cursor: SessionCursor) -> RecoverableChatSubscription {
         RecoverableChatSubscription::new(self.subscribe_and_recover(cursor))
     }

@@ -378,9 +378,10 @@ inputs collapse by design; user chat rows persist across the switch.
 Provisional prose and reasoning are keyed by Lash correlation id. A
 `model_attempt_reset` retracts only the superseded chunks. Provisional rows
 also retain their producing turn id; a `done` event retracts only rows from its
-own turn, so late settlement cannot erase a newer turn's output. A replay gap,
-product lag, cancellation settlement, or terminal replacement rebuilds state
-from `/api/state`. Recovery fetches are generation-fenced: an out-of-order
+own turn, so late settlement cannot erase a newer turn's output. A terminal
+replacement carries its commit's rows, not the session (FIG-5100), and the
+timeline upserts them in place. A replay gap, product lag, or cancellation
+settlement rebuilds state from `/api/state`. Recovery fetches are generation-fenced: an out-of-order
 response or a response overtaken by a newer product event is discarded.
 Authoritative replacement rebuilds both dedup sets and assigns, rather than
 monotonically preserves, the snapshot cursor. Cursor and dedup state are scoped

@@ -247,7 +247,7 @@ impl ReferenceTransport {
     }
 
     fn fold_event(&mut self, event: &RemoteSessionObservationEvent) {
-        if let RemoteSessionObservationEventPayload::Committed { rows } = &event.event {
+        if let RemoteSessionObservationEventPayload::Committed { rows, .. } = &event.event {
             for record in rows
                 .iter()
                 .filter(|record| record.suppressed.is_none() && record.provenance.is_turn_reply)

@@ -132,9 +132,15 @@ pub enum RemoteSessionObservationEventPayload {
     TurnActivity {
         activity: Box<RemoteTurnActivity>,
     },
+    /// A durable commit by reference: `rows` are the transcript rows the
+    /// commit added to the session at `base_revision`, and the event's
+    /// `revision` is the one it committed. A consumer holding
+    /// `base_revision` applies `rows`; any other reads the session again.
     Committed {
+        base_revision: u64,
         rows: Vec<lash_core_store::transcript::TranscriptRowRecord>,
     },
+    /// Resident authority changed without a commit: read it again.
     ResidentChanged,
     AgentFrameSwitched {
         frame_id: String,

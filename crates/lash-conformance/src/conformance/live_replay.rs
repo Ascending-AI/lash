@@ -968,7 +968,7 @@ fn live_replay_event_label(event: &SessionObservationEvent) -> String {
             other => format!("turn:{other:?}"),
         },
         SessionObservationEventPayload::Committed { .. } => "committed".to_string(),
-        SessionObservationEventPayload::ResidentChanged { .. } => "resident_changed".to_string(),
+        SessionObservationEventPayload::ResidentChanged => "resident_changed".to_string(),
         SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
             format!("frame:{frame_id}")
         }

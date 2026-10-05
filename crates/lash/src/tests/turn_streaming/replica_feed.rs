@@ -49,36 +49,37 @@ fn row_ids(view: &SessionReadView) -> Vec<lash_core::transcript::RowId> {
 }
 
 fn says(view: &SessionReadView, text: &str) -> bool {
-    let rows = view
-        .transcript()
-        .expect("committed transcript")
-        .into_records();
+    rows_say(
+        &view
+            .transcript()
+            .expect("committed transcript")
+            .into_records(),
+        text,
+    )
+}
+
+fn rows_say(rows: &[lash_core::transcript::TranscriptRowRecord], text: &str) -> bool {
     format!("{rows:?}").contains(text)
 }
 
-/// The next terminal replacement on `feed`, past provisional events: its
-/// snapshot and the rows its commit added.
+/// The next terminal replacement on `feed`, past provisional events: the
+/// rows its commit added.
 async fn next_commit(
     feed: &mut crate::recoverable_chat::RecoverableChatSubscription,
-) -> Result<(
-    SessionReadView,
-    Vec<lash_core::transcript::TranscriptRowRecord>,
-)> {
+) -> Result<Vec<lash_core::transcript::TranscriptRowRecord>> {
     loop {
         let update = tokio::time::timeout(FEED_DEADLINE, feed.next())
             .await
             .expect("the feed delivers the commit")
             .expect("the feed stays open")?;
         match update {
-            RecoverableChatUpdate::TerminalReplacement {
-                event, snapshot, ..
-            } => {
+            RecoverableChatUpdate::TerminalReplacement { event, .. } => {
                 let lash_core::SessionObservationEventPayload::Committed { rows, .. } =
                     &event.payload
                 else {
                     panic!("a terminal replacement carries a commit");
                 };
-                return Ok((snapshot.read_view, rows.clone()));
+                return Ok(rows.clone());
             }
             RecoverableChatUpdate::ReplayGap { gap, .. } => {
                 panic!("a cursor this feed minted gapped: {gap:?}")
@@ -186,9 +187,9 @@ async fn a_commit_reaches_another_replicas_feed_through_a_shared_store(
         .output()
         .await?;
 
-    let (committed, _) = next_commit(&mut feed).await?;
+    let committed = next_commit(&mut feed).await?;
     assert!(
-        says(&committed, "echo: made on the publisher"),
+        rows_say(&committed, "echo: made on the publisher"),
         "the observer's feed delivers the publisher's commit"
     );
     Ok(())
@@ -232,7 +233,7 @@ async fn a_feed_snapshot_and_its_tail_hold_every_committed_row_once(
 
     for (mut seen, mut feed) in feeds {
         while seen.len() < head_rows.len() {
-            let (_, rows) = next_commit(&mut feed).await?;
+            let rows = next_commit(&mut feed).await?;
             seen.extend(rows.into_iter().map(|row| row.row_id));
         }
         assert_eq!(
@@ -280,9 +281,9 @@ async fn an_observer_that_lags_across_a_commit_continues_without_a_gap(
         .send(TurnInput::text("committed after the reconnect"))
         .output()
         .await?;
-    let (committed, _) = next_commit(&mut reconnected).await?;
+    let committed = next_commit(&mut reconnected).await?;
     assert!(
-        says(&committed, "echo: committed after the reconnect"),
+        rows_say(&committed, "echo: committed after the reconnect"),
         "the reconnected feed continues with the next commit"
     );
     Ok(())
@@ -291,4 +292,100 @@ async fn an_observer_that_lags_across_a_commit_continues_without_a_gap(
 #[tokio::test]
 async fn an_observer_that_lags_across_a_commit_continues_without_a_gap_in_memory() -> Result<()> {
     an_observer_that_lags_across_a_commit_continues_without_a_gap(in_memory()).await
+}
+
+/// A commit carries its rows delta, not the session's read view (FIG-5100):
+/// a feed whose consumer holds a revision the delta does not extend
+/// rebuilds from the durable head instead of delivering rows that would
+/// leave out the commit the consumer never received.
+///
+/// The observer's store receives the publisher's second commit but never
+/// its first, as a shared store does when one replica's publication fails.
+async fn a_commit_that_extends_a_revision_the_consumer_lacks_resyncs_from_the_head(
+    publisher_replay: Arc<dyn LiveReplayStore>,
+    observer_replay: Arc<dyn LiveReplayStore>,
+) -> Result<()> {
+    let (publisher, observer) =
+        replicas(Arc::clone(&publisher_replay), Arc::clone(&observer_replay)).await?;
+    let session_id = SessionId::from("replica-feed-diverged");
+    let published = publisher
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let observed = observer.session(session_id.clone()).open().await?;
+    let published_at = snapshot(&published).await?.cursor;
+    let held = snapshot(&observed).await?;
+    let mut feed = observed.observe().subscribe_recoverable_chat(held.cursor);
+
+    for text in ["first", "second"] {
+        published.send(TurnInput::text(text)).output().await?;
+    }
+    let lash_core::LiveReplayOutcome::Replayed(events) = publisher_replay
+        .replay_after_cursor(&published_at)
+        .map_err(crate::observation_feed::live_replay_error)?
+    else {
+        panic!("the publisher's replay holds both commits");
+    };
+    let second = events
+        .iter()
+        .rev()
+        .find(|event| {
+            matches!(
+                event.payload,
+                lash_core::SessionObservationEventPayload::Committed { .. }
+            )
+        })
+        .expect("the second commit was published");
+    let lash_core::SessionObservationEventPayload::Committed { base_revision, .. } =
+        &second.payload
+    else {
+        unreachable!("the search found a commit");
+    };
+    assert_ne!(
+        *base_revision,
+        lash_core::SessionRevision::new(0),
+        "the second commit extends the first, which the consumer lacks"
+    );
+    let prepared = observer_replay
+        .prepare_publication(
+            &session_id,
+            second.revision(),
+            vec![lash_core::LiveReplayEventDraft::new(
+                second.turn_id.clone(),
+                second.payload.clone(),
+            )],
+        )
+        .map_err(crate::observation_feed::live_replay_error)?;
+    observer_replay
+        .publish_prepared(prepared)
+        .map_err(crate::observation_feed::live_replay_error)?;
+
+    let update = tokio::time::timeout(FEED_DEADLINE, feed.next())
+        .await
+        .expect("the feed answers the diverged commit")
+        .expect("the feed stays open")?;
+    let RecoverableChatUpdate::ReplayGap { snapshot, gap } = update else {
+        panic!("a commit extending a revision the consumer lacks resyncs, got {update:?}");
+    };
+    assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Unavailable);
+    assert_eq!(gap.latest_revision, second.revision());
+    assert!(
+        says(&snapshot.read_view, "echo: first") && says(&snapshot.read_view, "echo: second"),
+        "the resync is the durable head, holding the commit the delta left out"
+    );
+    let head = published.durable().read().await?.expect("durable head");
+    assert_eq!(row_ids(&snapshot.read_view), row_ids(&head));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_commit_that_extends_a_revision_the_consumer_lacks_resyncs_from_the_head_in_memory()
+-> Result<()> {
+    a_commit_that_extends_a_revision_the_consumer_lacks_resyncs_from_the_head(
+        in_memory(),
+        in_memory(),
+    )
+    .await
 }
