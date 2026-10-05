@@ -3972,9 +3972,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Product red on the always-suspending replay leg: explicit operation attach never answers after its body is released; the request exceeds the 60 s client bound. FIG-5002 owns the fix; the replay selector exists.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s30_external_consumer_accept_follow_cancel_replay"
+          }
         }
       ],
       "setup": "Small consumer with only public `lash`; real host transport, one task/tool.",
@@ -4455,9 +4458,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Product red on the always-suspending replay leg: next segment never starts after the first agent-frame completes with effect budget 1; the request exceeds the 60 s client bound. FIG-5002 owns the fix; the replay selector exists.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_telemetry__test",
+            "test": "s34_otlp_retry_transfer_and_shutdown_replay"
+          }
         }
       ],
       "setup": "Real host installs adapter and OTLP exporter; local receiver plus JSONL trace.",

@@ -1080,6 +1080,8 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(
         })
         .cloned()
         .collect();
+    // Each round adds a durable restored-material read on its successor.
+    // With the unchanged one-effect budget, those reads each add a boundary.
     assert_eq!(
         runs.len(),
         2 * TOOL_ROUNDS + 1,
