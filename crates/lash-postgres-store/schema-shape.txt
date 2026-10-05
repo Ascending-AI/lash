@@ -185,7 +185,6 @@ table lash_parent_end_plans
   column parent_id text not-null
   column parent_kind text not-null
   column parent_payload text not-null
-  column settled_at_ms bigint nullable
   unique (obligation_id)
   primary-key (parent_kind, parent_id)
 table lash_pending_turn_inputs
@@ -253,12 +252,13 @@ table lash_process_park_clock
   primary-key (singleton)
 table lash_process_park_events
   column at_ms bigint not-null
-  column cause text nullable
+  column cause_json text nullable
   column kind text not-null
   column park_build_generation text nullable
   column park_id bigint not-null
   column process_id text not-null
   column reason_json text nullable
+  column redrive_intent bigint nullable
   column seq bigint not-null
   primary-key (seq)
 table lash_process_segment_handovers
@@ -540,7 +540,6 @@ table lash_tool_intent_submissions
   column admitted_at_ms bigint not-null
   column execution_scope_id text not-null
   column intent_index bigint not-null
-  column kind text not-null
   column owner text not-null
   column payload_hash text not-null
   column replay_key text not-null
@@ -557,7 +556,7 @@ table lash_trigger_deliveries
   column obligation_last_error_code text nullable
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
-  column obligation_state text nullable
+  column obligation_state text not-null
   column occurrence_id text not-null
   column occurrence_outcome_kind text not-null default
   column process_id text nullable
@@ -667,11 +666,12 @@ table lash_turn_park_clock
   primary-key (singleton)
 table lash_turn_park_events
   column at_ms bigint not-null
-  column cause text nullable
+  column cause_json text nullable
   column kind text not-null
   column park_build_generation text nullable
   column park_id bigint not-null
   column reason_json text nullable
+  column redrive_intent bigint nullable
   column seq bigint not-null
   column session_id text not-null
   column turn_id text not-null
