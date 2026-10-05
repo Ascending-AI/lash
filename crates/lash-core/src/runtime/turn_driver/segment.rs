@@ -123,7 +123,7 @@ impl RuntimeTurnDriver<'_> {
             cell: None,
             opener: self
                 .opener_state
-                .boundary_snapshot(reason)
+                .boundary_snapshot()
                 .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?,
             tools: None,
         }));
@@ -176,13 +176,10 @@ impl RuntimeTurnDriver<'_> {
                 .await
                 .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
         }
-        let mut opener = self
+        let opener = self
             .opener_state
-            .boundary_snapshot(crate::BoundaryReason::HandOver)
+            .boundary_snapshot()
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
-        if let Some(run) = &mut opener.run {
-            run.vm_continuation = true;
-        }
         self.segment.taken = Some(Box::new(BoundaryTaken {
             iterations: self
                 .segment
@@ -264,7 +261,7 @@ impl RuntimeTurnDriver<'_> {
             tools: Some(tools),
             opener: self
                 .opener_state
-                .boundary_snapshot(reason)
+                .boundary_snapshot()
                 .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?,
         }));
         machine.finish_with_outcome(TurnOutcome::SegmentBoundary { reason });

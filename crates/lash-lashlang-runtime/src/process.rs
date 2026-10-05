@@ -238,9 +238,7 @@ async fn run_lashlang_process_scoped(
             Ok(state) => {
                 if let Some(run) = &state.tool_run {
                     let refused = (|| {
-                        run.check_capture(
-                            &lash_core::tool_run::Cut::request(run.reason).observe(0),
-                        )?;
+                        run.check_capture(lash_core::tool_run::CutPhase::Capturable)?;
                         let successor = segment.ok_or(
                             lash_core::tool_run::ContinuationRefusal::MissingSegmentAuthority,
                         )?;

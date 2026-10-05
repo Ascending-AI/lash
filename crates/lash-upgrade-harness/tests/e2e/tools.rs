@@ -152,7 +152,7 @@ impl Scenario<'_> {
                     DecodedRecord::Attempt(entry) => ensure!(
                         serde_json::from_value::<lash_core::tool_run::RunAttemptEntry>(
                             record_payload(fact)?
-                        )? == *entry,
+                        )? == **entry,
                         "decoded independent X differs from retrieved journal bytes"
                     ),
                     DecodedRecord::Run(entry) => ensure!(
@@ -423,7 +423,7 @@ pub fn attempts(evidence: &Evidence) -> Vec<&lash_core::tool_run::RunAttemptEntr
         .journals
         .iter()
         .filter_map(|fact| match &fact.decoded {
-            Some(DecodedRecord::Attempt(entry)) => Some(entry),
+            Some(DecodedRecord::Attempt(entry)) => Some(entry.as_ref()),
             _ => None,
         })
         .collect()

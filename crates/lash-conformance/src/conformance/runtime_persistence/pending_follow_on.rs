@@ -56,10 +56,11 @@ fn recovering_generation() -> crate::engine::BuildGeneration {
 
 fn follow_on(frame_id: crate::FrameNodeId) -> crate::store::PendingFollowOn {
     crate::store::PendingFollowOn {
-        continuation: None,
         follow_on_turn_id: TurnId::from(FOLLOW_ON_TURN),
         frame_id,
-        task: "run in the switched frame".to_string(),
+        owes: crate::store::FollowOnWork::FrameTask {
+            task: "run in the switched frame".to_string(),
+        },
         resolved_run: crate::conformance::helpers::default_resolved_run(),
         chain_depth: 1,
         attempts: 0,

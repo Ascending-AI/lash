@@ -64,9 +64,8 @@ impl RestateProcessRunner for Runner {
             run.retain_cut(&mut transfer, material.as_ref())
                 .await
                 .unwrap();
-            assert_eq!(transfer.owed_starts, vec![start_key("process-transfer")]);
             assert_eq!(transfer.environment, call.environment);
-            assert_eq!(transfer.held_calls, 1);
+            assert_eq!(transfer.ledger().unwrap().held_calls(), 1);
             assert_eq!(
                 self.starter.launches().len(),
                 usize::from(self.launched_before_cut)
@@ -86,7 +85,10 @@ impl RestateProcessRunner for Runner {
             segment,
         };
         for bundle in &transfer.material {
-            material.acquire_material(&successor, bundle).await.unwrap();
+            material
+                .acquire_material(&successor, &bundle.held_by(transfer.holder()))
+                .await
+                .unwrap();
         }
         material.release_material(&transfer.holder()).await.unwrap();
         // The final was protected before cancellation. Its launch, original

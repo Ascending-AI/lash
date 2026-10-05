@@ -37,16 +37,8 @@ pub struct PendingFollowOn {
     pub follow_on_turn_id: TurnId,
     /// The frame the follow-on runs in. Every head write keeps it current.
     pub frame_id: FrameNodeId,
-    /// The task the switching turn handed to the frame; the follow-on's
-    /// input. Empty for a [`continuation`](Self::continuation), which has no
-    /// input of its own.
-    pub task: String,
-    /// Set when the follow-on continues a run that crossed a segment
-    /// boundary (FIG-4739) rather than running a switched frame's task: the
-    /// owing turn ended at a quiet point of the run, and the follow-on goes
-    /// on from the history that turn committed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub continuation: Option<RunContinuation>,
+    /// The one kind of work this follow-on owes.
+    pub owes: FollowOnWork,
     /// The shape the logical run's run resolved under, recorded at the
     /// switch so a recovered follow-on runs under it — its protocol turn
     /// options included — rather than resolving the session's current
@@ -59,6 +51,36 @@ pub struct PendingFollowOn {
     pub chain_depth: u32,
     /// Recoveries so far. Raised once per recovering shift, never reset.
     pub attempts: u32,
+}
+
+/// A frame switch owes input; a segment boundary owes execution state.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "owes", rename_all = "snake_case", deny_unknown_fields)]
+pub enum FollowOnWork {
+    FrameTask { task: String },
+    Continuation(RunContinuation),
+}
+
+impl FollowOnWork {
+    /// The input owed by a frame switch.
+    #[must_use]
+    pub fn task(&self) -> Option<&str> {
+        match self {
+            Self::FrameTask { task } => Some(task),
+            Self::Continuation(_) => None,
+        }
+    }
+
+    /// The execution state owed by a segment boundary.
+    #[must_use]
+    pub fn continuation(&self) -> Option<&RunContinuation> {
+        match self {
+            Self::FrameTask { .. } => None,
+            Self::Continuation(continuation) => Some(continuation),
+        }
+    }
 }
 
 /// The continuation a segment boundary owes its run (FIG-4739).
@@ -111,7 +133,7 @@ pub fn run_material_cleanups(
     operation: &super::OperationId,
 ) -> Result<Vec<crate::artifact_referrer::ResolvedArtifactCleanup>, StoreError> {
     use crate::artifact_referrer::{ArtifactCarry, ResolvedArtifactCleanup};
-    use crate::tool_run::{Cut, MaterialHolder, SegmentOrdinal};
+    use crate::tool_run::{CutPhase, MaterialHolder, SegmentOrdinal};
 
     let terminal_turn = (operation.key == TURN_TERMINAL_OPERATION_KEY)
         .then(|| operation.turn_id())
@@ -121,8 +143,8 @@ pub fn run_material_cleanups(
     }
     fn run_of(pending: &PendingFollowOn) -> Option<&crate::tool_run::RunTransfer> {
         pending
-            .continuation
-            .as_ref()
+            .owes
+            .continuation()
             .and_then(|continuation| continuation.opener.run.as_deref())
     }
     let mut cleanups = Vec::new();
@@ -139,24 +161,18 @@ pub fn run_material_cleanups(
                 record_kind: "Run continuation",
                 message: "the successor segment ordinal overflows".into(),
             })?;
-        if u64::from(successor) != pending.physical_index()
-            || run.owner != owner
-            || run.reason
-                != pending
-                    .continuation
-                    .as_ref()
-                    .map_or(run.reason, |continuation| continuation.reason)
-        {
+        if u64::from(successor) != pending.physical_index() || run.owner != owner {
             return Err(StoreError::StoredDataCorrupt {
                 record_kind: "Run continuation",
                 message: "the tool Run does not belong to the published continuation".into(),
             });
         }
-        run.check_capture(&Cut::request(run.reason).observe(0))
-            .map_err(|refusal| StoreError::StoredDataCorrupt {
+        run.check_capture(CutPhase::Capturable).map_err(|refusal| {
+            StoreError::StoredDataCorrupt {
                 record_kind: "Run continuation",
                 message: refusal.to_string(),
-            })?;
+            }
+        })?;
         let to = MaterialHolder::Segment {
             opener: run.owner.clone(),
             segment: SegmentOrdinal(successor),
@@ -258,8 +274,7 @@ impl PendingFollowOn {
         Ok(Self {
             follow_on_turn_id: PhysicalTurn::derive_turn_id(run, next),
             frame_id,
-            task: String::new(),
-            continuation: Some(continuation),
+            owes: FollowOnWork::Continuation(continuation),
             resolved_run: Box::new(resolved),
             chain_depth,
             attempts: 0,
@@ -284,8 +299,7 @@ impl PendingFollowOn {
         Ok(Self {
             follow_on_turn_id: PhysicalTurn::derive_turn_id(run, next),
             frame_id,
-            task: task.into(),
-            continuation: None,
+            owes: FollowOnWork::FrameTask { task: task.into() },
             resolved_run: Box::new(resolved),
             chain_depth,
             attempts: 0,
@@ -590,14 +604,41 @@ mod tests {
 
     fn fact(turn: &str, frame: &str) -> PendingFollowOn {
         PendingFollowOn {
-            continuation: None,
             follow_on_turn_id: TurnId::fixture(turn),
             frame_id: FrameNodeId::new(frame).expect("frame"),
-            task: "task".into(),
+            owes: FollowOnWork::FrameTask {
+                task: "task".into(),
+            },
             resolved_run: Box::new(resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES)),
             chain_depth: 1,
             attempts: 0,
         }
+    }
+
+    /// S08 F2: a continuation has no separate input that recovery can silently discard.
+    #[test]
+    fn s08_continuation_cannot_also_owe_a_frame_task() {
+        let pending = PendingFollowOn::after_boundary(
+            &TurnId::fixture("run"),
+            0,
+            FrameNodeId::new("f").expect("frame"),
+            RunContinuation {
+                reason: lash_sansio::BoundaryReason::HandOver,
+                protocol_iterations: 0,
+                cell: None,
+                tools: None,
+                opener: RunOpenerState::default(),
+            },
+            0,
+            resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES),
+        )
+        .expect("boundary");
+        let mut value = serde_json::to_value(pending).expect("fact");
+        value["task"] = serde_json::json!("must not be silently discarded");
+        assert!(matches!(
+            decode_pending_follow_on(&crate::SessionId::from("s"), Some(&value.to_string())),
+            Err(StoreError::StoredDataCorrupt { .. })
+        ));
     }
 
     #[test]

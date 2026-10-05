@@ -111,7 +111,7 @@ impl EffectLayer for NativeCapture {
             body,
             result: Box::pin(async move {
                 let entry = result.await?;
-                self.retain(name, DecodedRecord::Attempt(entry.clone()))?;
+                self.retain(name, DecodedRecord::Attempt(Box::new(entry.clone())))?;
                 Ok(entry)
             }),
         }

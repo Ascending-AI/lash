@@ -696,7 +696,7 @@ pub mod persistence {
         refresh_session_window,
     };
     pub use lash_core::store::{
-        AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
+        AppendRequestIdentity, CheckpointComponentDescriptor, FollowOnWork, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, InterruptedTurnClosure,
         OperationId, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
         ParkId, ParkReason, ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, ProcessPark,
@@ -1405,9 +1405,9 @@ pub mod runtime {
         SingletonTerminal, SingletonToolCall, SingletonToolHandlers, ToolRealizer,
     };
     pub use lash_core::tool_run::{
-        AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AggregateConsumer, AggregateLeaf,
-        AggregatePlan, AttributedVerdict, CapacityScope, Cut, CutPhase, RecordedRetryPolicy,
-        RunLifecycle, RunTransfer, SegmentOrdinal,
+        AdmissionRefusal, AdmittedBinding, AdoptedRun, AfterCheckVerdict, AggregateConsumer,
+        AggregateLeaf, AggregatePlan, AttributedVerdict, CapacityScope, Cut, CutPhase,
+        RecordedRetryPolicy, RunLifecycle, RunTransfer, SegmentOrdinal, TransferBundle,
     };
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::engine::{

@@ -3,13 +3,12 @@
 
 use super::*;
 use crate::tool_dispatch::{RunCoordinator, SingletonRunError, SingletonToolHandlers};
-use crate::tool_run::{ContinuationRefusal, Cut, SegmentOrdinal};
+use crate::tool_run::{ContinuationRefusal, CutPhase, SegmentOrdinal};
 
 impl OpenerState {
     /// A physical boundary may publish only a completed, retained K6 capture.
     pub fn boundary_snapshot(
         &self,
-        reason: crate::BoundaryReason,
     ) -> Result<crate::store::RunOpenerState, RuntimeEffectControllerError> {
         let registry = self.run_state.lock_recover();
         if registry.active_run {
@@ -17,7 +16,7 @@ impl OpenerState {
         }
         if let Some(transfer) = &registry.run {
             transfer
-                .check_capture(&Cut::request(reason).observe(0))
+                .check_capture(CutPhase::Capturable)
                 .map_err(RuntimeEffectControllerError::from)?;
         }
         Ok(self.snapshot_with_registry(&registry))

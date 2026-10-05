@@ -204,13 +204,12 @@ pub(super) fn follow_on_after_turn(
         .pending_follow_on
         .as_ref()
         .filter(|owed| owed.is_turn(turn_id));
-    let (frame_id, task, continuation, chain_depth) = match outcome {
+    let (frame_id, work, chain_depth) = match outcome {
         TurnOutcome::AgentFrameSwitch {
             frame_key, task, ..
         } => (
             crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str()),
-            task.clone(),
-            None,
+            crate::store::FollowOnWork::FrameTask { task: task.clone() },
             owed.map_or(0, |owed| owed.chain_depth).saturating_add(1),
         ),
         TurnOutcome::SegmentBoundary { reason } => {
@@ -228,8 +227,7 @@ pub(super) fn follow_on_after_turn(
             })?;
             (
                 frame_id,
-                String::new(),
-                Some(crate::store::RunContinuation {
+                crate::store::FollowOnWork::Continuation(crate::store::RunContinuation {
                     reason: *reason,
                     protocol_iterations: captured.iterations,
                     cell: captured.cell.clone(),
@@ -254,23 +252,27 @@ pub(super) fn follow_on_after_turn(
                 format!("physical turn `{turn_id}` does not belong to run `{run}`"),
             )
         })?;
-    match continuation {
-        Some(continuation) => crate::store::PendingFollowOn::after_boundary(
-            run,
-            physical_ordinal,
-            frame_id,
-            continuation,
-            chain_depth,
-            resolved.run.clone(),
-        ),
-        None => crate::store::PendingFollowOn::after_switch(
-            run,
-            physical_ordinal,
-            frame_id,
-            task,
-            chain_depth,
-            resolved.run.clone(),
-        ),
+    match work {
+        crate::store::FollowOnWork::Continuation(continuation) => {
+            crate::store::PendingFollowOn::after_boundary(
+                run,
+                physical_ordinal,
+                frame_id,
+                continuation,
+                chain_depth,
+                resolved.run.clone(),
+            )
+        }
+        crate::store::FollowOnWork::FrameTask { task } => {
+            crate::store::PendingFollowOn::after_switch(
+                run,
+                physical_ordinal,
+                frame_id,
+                task,
+                chain_depth,
+                resolved.run.clone(),
+            )
+        }
     }
     .map(Some)
     .map_err(super::runtime_error_from_store_commit)
@@ -635,7 +637,7 @@ impl LashRuntime {
                          commits failed instead of running",
                         owed.follow_on_turn_id, owed.attempts
                     ),
-                    owed.continuation.is_none().then(|| owed.task.clone()),
+                    owed.owes.task().map(str::to_owned),
                 )),
                 _ => self
                     .state
@@ -651,7 +653,7 @@ impl LashRuntime {
                             format!(
                                 "logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"
                             ),
-                            owed.continuation.is_none().then(|| owed.task.clone()),
+                            owed.owes.task().map(str::to_owned),
                         )
                     }),
             };
@@ -801,7 +803,7 @@ impl LashRuntime {
                 // (FIG-4739): the continuation it owes stays on the head for
                 // the next shift to admit, in an invocation of its own. A
                 // turn that takes a boundary carries no withheld work.
-                if owed.continuation.is_some() {
+                if matches!(owed.owes, crate::store::FollowOnWork::Continuation(_)) {
                     return Ok(AgentFrameRun {
                         turns,
                         acceptance: None,
@@ -896,9 +898,9 @@ pub(super) fn follow_on_input(
     owed: &crate::store::PendingFollowOn,
     turn_context: crate::TurnContext,
 ) -> TurnInput {
-    let mut input = match owed.continuation {
-        Some(_) => TurnInput::items(Vec::new()),
-        None => TurnInput::text(owed.task.clone()),
+    let mut input = match &owed.owes {
+        crate::store::FollowOnWork::Continuation(_) => TurnInput::items(Vec::new()),
+        crate::store::FollowOnWork::FrameTask { task } => TurnInput::text(task.clone()),
     };
     input.turn_context = turn_context;
     input.trace_turn_id = Some(owed.follow_on_turn_id.clone());

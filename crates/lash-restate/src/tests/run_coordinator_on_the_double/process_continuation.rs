@@ -188,7 +188,7 @@ impl RestateProcessRunner for Runner {
             if !self.held {
                 // K1: the race holds its whole round while its Deferred loser
                 // is unpresented, and the current round holds its two calls.
-                assert_eq!(transfer.held_calls, 4);
+                assert_eq!(transfer.ledger().unwrap().held_calls(), 4);
                 assert_eq!(transfer.subscriptions.len(), 2);
                 assert_eq!(
                     self.probe.presentations.lock().unwrap().as_slice(),
@@ -215,7 +215,10 @@ impl RestateProcessRunner for Runner {
         // Publication already committed. Move leases and fence the predecessor
         // before adoption; no read may require its now-ended lease.
         for bundle in &transfer.material {
-            store.acquire_material(&successor, bundle).await.unwrap();
+            store
+                .acquire_material(&successor, &bundle.held_by(transfer.holder()))
+                .await
+                .unwrap();
         }
         store.release_material(&transfer.holder()).await.unwrap();
         let old_ref = &transfer.material[0].references[0];
@@ -246,7 +249,8 @@ impl RestateProcessRunner for Runner {
         );
         if !self.held {
             // K6 carries the very count the successor's admission enforces.
-            let limit = lash_core::MaxToolCalls::new(transfer.held_calls as usize);
+            let limit =
+                lash_core::MaxToolCalls::new(transfer.ledger().unwrap().held_calls() as usize);
             let held = lash_core::tool_run::CapacityScope::Held;
             assert_eq!(run.admit_capacity(&held, 0, limit), Ok(()));
             assert_eq!(

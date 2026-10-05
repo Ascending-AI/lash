@@ -8,7 +8,6 @@ fn l09_run_continuation_refusals_keep_typed_causes_and_live_quiescence() {
     for refusal in [
         ContinuationRefusal::NotQuiescent,
         ContinuationRefusal::ForeignOwner,
-        ContinuationRefusal::UnleasedMaterial,
         ContinuationRefusal::NotSuccessor { from: 0, found: 2 },
     ] {
         let terminal = refusal != ContinuationRefusal::NotQuiescent;

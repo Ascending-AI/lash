@@ -1342,12 +1342,13 @@ impl BackendRunner {
                     ));
                 commit.pending_follow_on =
                     owed_turn_id.map(|owed_turn_id| lash_core::store::PendingFollowOn {
-                        continuation: None,
                         follow_on_turn_id: lash_core::TurnId::from(owed_turn_id),
                         frame_id: frame
                             .clone()
                             .expect("a pending follow-on owes the head's current frame"),
-                        task: "fig-2841 follow-on task".to_string(),
+                        owes: lash_core::store::FollowOnWork::FrameTask {
+                            task: "fig-2841 follow-on task".to_string(),
+                        },
                         resolved_run: Box::new(lash_core::ResolvedRun::snapshot(
                             commit.config.clone(),
                             lash_core::runtime::TerminationPolicy::default(),

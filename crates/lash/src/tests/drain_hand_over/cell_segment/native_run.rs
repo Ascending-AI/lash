@@ -248,7 +248,7 @@ impl CellRun {
             .load_pending_follow_on()
             .await?
             .expect("the immutable successor intent");
-        assert!(owed.continuation.as_ref().unwrap().cell.is_some());
+        assert!(owed.owes.continuation().unwrap().cell.is_some());
         if matches!(cut, Cut::SuccessorParked) {
             assert!(double.server().crash(&successor.id));
             parked(double.server(), &self.session).await;
@@ -1006,8 +1006,8 @@ async fn native_cut_without_wait(
                 })
                 .collect::<Vec<_>>();
             let store = lash_core::runtime::live_session_view(&core.store_factory, &session).await.unwrap().unwrap();
-            let pending = store.load_pending_follow_on().await.unwrap().and_then(|pending| pending.continuation)
-                .map(|continuation| (continuation.reason, continuation.cell.is_some(), continuation.opener.run.map(|run| run.vm_continuation)));
+            let pending = store.load_pending_follow_on().await.unwrap().and_then(|pending| match pending.owes { lash_core::store::FollowOnWork::Continuation(c) => Some(c), _ => None })
+                .map(|continuation| (continuation.reason, continuation.cell.is_some(), continuation.opener.run.is_some()));
             panic!(
                 "native cut did not resume: process={process}, last_only={last_only}, crash_after_cut_ack={crash_after_cut_ack:?}; pending={pending:?}; model_calls={}; {journals:#?}", requests.lock_recover().len()
             )
@@ -1053,12 +1053,19 @@ async fn native_cut_without_wait(
 // Process VM state is opaque bytes inside its journaled handover. Decode that
 // envelope before checking the same typed K6 transfer a foreground cell owns.
 fn retained_native_cut(value: &serde_json::Value) -> bool {
-    if value.get("vm_continuation").is_some() {
+    let transfer = if value.get("vm").is_some_and(|vm| !vm.is_null()) {
+        value.get("tool_run")
+    } else if value.get("owes").and_then(serde_json::Value::as_str) == Some("continuation")
+        && value.get("cell").is_some_and(|cell| !cell.is_null())
+    {
+        value.pointer("/opener/run")
+    } else {
+        None
+    };
+    if let Some(transfer) = transfer.filter(|transfer| !transfer.is_null()) {
         let transfer: lash_core::tool_run::RunTransfer =
-            serde_json::from_value(value.clone()).unwrap();
-        return transfer.vm_continuation
-            && transfer.reason == lash_core::BoundaryReason::HandOver
-            && transfer.ledger().is_ok()
+            serde_json::from_value(transfer.clone()).unwrap();
+        return transfer.ledger().is_ok()
             && transfer
                 .entries
                 .iter()

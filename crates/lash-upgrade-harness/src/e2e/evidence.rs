@@ -7,7 +7,7 @@ use super::{
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum DecodedRecord {
-    Attempt(lash_core_store::tool_run::RunAttemptEntry),
+    Attempt(Box<lash_core_store::tool_run::RunAttemptEntry>),
     Run(lash_core_store::tool_run::RunJournalEntry),
     Transfer(lash_core_store::tool_run::RunTransfer),
 }
@@ -172,8 +172,8 @@ impl Evidence {
             "retained transfer lacks an independently read store artifact"
         );
         let transfer = follow_on
-            .continuation
-            .as_ref()
+            .owes
+            .continuation()
             .and_then(|continuation| continuation.opener.run.as_deref())
             .ok_or_else(|| anyhow::anyhow!("fenced follow-on has no canonical Run transfer"))?;
         self.transfers.push(RetainedTransferFact {

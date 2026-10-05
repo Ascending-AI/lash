@@ -23,22 +23,6 @@ impl RunCoordinator<'_> {
         Ok(())
     }
 
-    fn owed_starts(&self) -> Vec<crate::StartKey> {
-        let mut keys: std::collections::BTreeSet<_> =
-            self.journal.ledger.owed_starts().into_iter().collect();
-        for (waiting, _) in self.pending_starts.values() {
-            if let Some(start) = &waiting.start {
-                keys.insert(start.start_key.clone());
-            }
-        }
-        for owed in self.owed.values() {
-            if let Some(start) = owed.capture.as_ref().and_then(SingletonCapture::start) {
-                keys.insert(start.start_key.clone());
-            }
-        }
-        keys.into_iter().collect()
-    }
-
     /// Freeze admission at this boundary, retaining the first requested reason.
     /// Requesting a physical cut never closes or cancels the logical Run.
     pub fn request_cut(&mut self, reason: crate::BoundaryReason) -> crate::tool_run::Cut {
@@ -98,8 +82,6 @@ impl RunCoordinator<'_> {
         Ok(crate::tool_run::RunTransfer {
             owner: self.journal.owner.clone(),
             from: self.journal.segment,
-            reason: cut.reason,
-            events: self.journal.ledger.next_ordinal(),
             entries: self.journal.entries.clone(),
             attempts: self.attempts.clone(),
             material_aliases: self
@@ -114,33 +96,8 @@ impl RunCoordinator<'_> {
             subscriptions: self
                 .waiting
                 .keys()
-                .map(|id| crate::tool_run::SourceSubscription {
-                    source: self.sources[id].source.clone(),
-                    owner: self.journal.owner.clone(),
-                    segment: self.journal.segment,
-                })
+                .map(|id| self.sources[id].source.clone())
                 .collect(),
-            owed_starts: self.owed_starts(),
-            owed_cancels: self.journal.ledger.owed_cancels(),
-            state: crate::tool_run::StateFrontier {
-                owner_segment: self.journal.segment,
-                applied: self
-                    .journal
-                    .entries
-                    .iter()
-                    .flat_map(|entry| &entry.state)
-                    .map(|state| state.ordinal)
-                    .max(),
-                receipts: self
-                    .journal
-                    .entries
-                    .iter()
-                    .flat_map(|entry| &entry.state)
-                    .map(|state| (state.ordinal, state.receipt()))
-                    .collect(),
-            },
-            held_calls: self.journal.ledger.held_calls(),
-            vm_continuation: false,
             environment: self.environment.clone(),
             plugin_state: self
                 .handlers
@@ -179,7 +136,7 @@ impl<'a> RunCoordinator<'a> {
                 RunEvent::CutRetained { material } => Some(material.clone()),
                 _ => None,
             });
-        transfer.material = match retained {
+        let material = match retained {
             Some(material) => material,
             None => {
                 let payloads: Vec<_> = self
@@ -230,7 +187,7 @@ impl<'a> RunCoordinator<'a> {
                 }
             }
         };
-        transfer.events = self.journal.ledger.next_ordinal();
+        transfer.material = material.into_iter().map(Into::into).collect();
         transfer.entries.clone_from(&self.journal.entries);
         for entry in &mut transfer.entries {
             entry
@@ -240,7 +197,7 @@ impl<'a> RunCoordinator<'a> {
         for entry in &mut transfer.attempts {
             entry.materials.clear();
         }
-        transfer.check_capture(&crate::tool_run::Cut::request(transfer.reason).observe(0))?;
+        transfer.check_capture(crate::tool_run::CutPhase::Capturable)?;
         Ok(())
     }
 
@@ -259,10 +216,12 @@ impl<'a> RunCoordinator<'a> {
         handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         clock: &dyn crate::Clock,
     ) -> Result<Self, SingletonRunError> {
-        use crate::tool_run::{Cut, MaterialHolder, RunLifecycle};
-        transfer.check_capture(&Cut::request(transfer.reason).observe(0))?;
+        use crate::tool_run::{CutPhase, MaterialHolder, RunLifecycle};
+        transfer.check_capture(CutPhase::Capturable)?;
         let ledger = transfer.ledger()?;
-        let transfer = transfer.adopt(&owner, ledger.lifecycle(), successor)?;
+        let adopted = transfer.adopt(&owner, ledger.lifecycle(), successor)?;
+        let ledger = adopted.ledger()?;
+        let transfer = adopted.transfer;
         let mut run = Self::open(scoped, owner, successor, available);
         run.environment.clone_from(&transfer.environment);
         if !transfer.material.is_empty() {
@@ -286,7 +245,11 @@ impl<'a> RunCoordinator<'a> {
                         invocation,
                         crate::RuntimeEffectCommand::RestoreRunMaterial {
                             holder,
-                            bundles: transfer.material.clone(),
+                            bundles: transfer
+                                .material
+                                .iter()
+                                .map(|bundle| bundle.held_by(transfer.holder()))
+                                .collect(),
                             aliases: transfer.material_aliases.clone(),
                             available: run.journal.materials.available.clone(),
                         },
@@ -304,14 +267,11 @@ impl<'a> RunCoordinator<'a> {
             run.journal.materials.admit(materials)?;
         }
         for entry in &transfer.entries {
-            run.journal
-                .ledger
-                .append(entry.record.segment, &entry.record)?;
             run.journal.materials.admit(entry.materials.clone())?;
             run.journal.records.push(entry.record.clone());
             run.journal.entries.push(entry.clone());
         }
-        run.journal.ledger.admit_successor(successor);
+        run.journal.ledger = ledger;
         run.attempts.clone_from(&transfer.attempts);
         run.sources = transfer
             .sources

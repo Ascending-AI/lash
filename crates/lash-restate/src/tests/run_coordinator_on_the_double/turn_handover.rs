@@ -131,7 +131,11 @@ async fn turn_receipts(side: CrashSide) {
                         // already ended the predecessor's material holder.
                         run.request_cut(reason);
                         run.quiesce().await.unwrap();
-                        owed.continuation.unwrap().opener
+                        match owed.owes {
+                            lash_core::store::FollowOnWork::Continuation(c) => c,
+                            _ => panic!("continuation"),
+                        }
+                        .opener
                     } else {
                         let capturing = later_cell.capture_run(&mut run, reason, store.as_ref());
                         tokio::pin!(capturing);
@@ -144,7 +148,7 @@ async fn turn_receipts(side: CrashSide) {
                                 Poll::Ready(())
                             })
                             .await;
-                            let refused = opener.boundary_snapshot(reason).unwrap_err();
+                            let refused = opener.boundary_snapshot().unwrap_err();
                             assert!(refused.turn_failure_cause().aborts_invocation());
                             assert!(
                                 matches!(refused.cause, Some(lash_core::RuntimeErrorCause::RunContinuationRefused { refusal }) if *refusal == lash_core::tool_run::ContinuationRefusal::NotQuiescent)
@@ -154,7 +158,7 @@ async fn turn_receipts(side: CrashSide) {
                             probe.gate_wake.notify_waiters();
                         }
                         capturing.await.unwrap();
-                        opener.boundary_snapshot(reason).unwrap()
+                        opener.boundary_snapshot().unwrap()
                     };
                     let transfer = snapshot.run.as_ref().unwrap();
                     assert_eq!(transfer.attempts.len(), 3);
@@ -235,10 +239,7 @@ async fn turn_receipts(side: CrashSide) {
                                     .unwrap()
                                     .and_then(|head| head.pending_follow_on)
                                 {
-                                    assert_eq!(
-                                        owed.continuation.as_ref().unwrap().opener,
-                                        snapshot
-                                    );
+                                    assert_eq!(owed.owes.continuation().unwrap().opener, snapshot);
                                     *publishing.lock().unwrap() = Some(owed);
                                     return Ok(RunJournalEntry {
                                         record: RunRecord {
@@ -347,7 +348,7 @@ async fn turn_receipts(side: CrashSide) {
             .unwrap();
         let owed = head.pending_follow_on.unwrap();
         assert_eq!(Some(owed.clone()), *published.lock().unwrap());
-        let bytes = serde_json::to_vec(&owed.continuation.as_ref().unwrap().opener).unwrap();
+        let bytes = serde_json::to_vec(&owed.owes.continuation().unwrap().opener).unwrap();
         if matches!(side, CrashSide::SuccessorAdopted) {
             backend
                 .server()
@@ -520,11 +521,7 @@ async fn cancellation_closes_captured_and_adopted_losers() {
                         .unwrap();
                     assert_eq!(run.lifecycle(), RunLifecycle::Live);
                     assert!(probe.cancelled_calls.lock().unwrap().is_empty());
-                    *captured.lock().unwrap() = Some(
-                        opener
-                            .boundary_snapshot(lash_core::BoundaryReason::HandOver)
-                            .unwrap(),
-                    );
+                    *captured.lock().unwrap() = Some(opener.boundary_snapshot().unwrap());
                     if !adopt {
                         run.close().await.unwrap();
                         assert_eq!(run.lifecycle(), RunLifecycle::Settled);
@@ -747,7 +744,10 @@ async fn l13_k6_old_cut_replays_after_successor_material_retirement() {
                     // The successor alone owns the transferred material before
                     // its retirement, exactly as the publication commit orders it.
                     for bundle in &transfer.material {
-                        store.acquire_material(&successor, bundle).await.unwrap();
+                        store
+                            .acquire_material(&successor, &bundle.held_by(transfer.holder()))
+                            .await
+                            .unwrap();
                     }
                     store.release_material(&transfer.holder()).await.unwrap();
                     store.release_material(&successor).await.unwrap();
@@ -761,7 +761,12 @@ async fn l13_k6_old_cut_replays_after_successor_material_retirement() {
                             .is_err()
                     );
                     assert!(matches!(
-                        store.acquire_material(&holder, &transfer.material[0]).await,
+                        store
+                            .acquire_material(
+                                &holder,
+                                &transfer.material[0].held_by(transfer.holder())
+                            )
+                            .await,
                         Err(MaterialRetentionError::HolderEnded { .. })
                     ));
                 }

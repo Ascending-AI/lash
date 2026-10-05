@@ -153,13 +153,14 @@ impl AdmittedRun {
         };
         state.ensure_agent_frame_initialized();
         let owed = crate::store::PendingFollowOn {
-            continuation: None,
             follow_on_turn_id: lash_core::store::PhysicalTurn::derive_turn_id(&self.run, 1),
             frame_id: state
                 .current_frame_node_id
                 .clone()
                 .expect("the initial frame is current"),
-            task: "run the rest of the run".to_owned(),
+            owes: crate::store::FollowOnWork::FrameTask {
+                task: "run the rest of the run".to_owned(),
+            },
             resolved_run: crate::conformance::helpers::default_resolved_run(),
             chain_depth: 1,
             attempts: 0,

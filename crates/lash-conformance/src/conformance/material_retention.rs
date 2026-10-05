@@ -354,7 +354,7 @@ pub async fn run_handover_commits_material_ownership_with_the_head(
     use lash_core::store::{PendingFollowOn, RunContinuation, RunOpenerState};
     use lash_core::tool_run::{
         MaterialBundle, MaterialHolder, MaterialOwner, MaterialPayload, MaterialRetentionError,
-        MaterialRole, RunEventOrdinal, RunTransfer, SegmentOrdinal, StateFrontier,
+        MaterialRole, RunTransfer, SegmentOrdinal,
     };
     use lash_core::{
         BoundaryReason, EffectOpener, OperationId, PersistedSessionConfig, ResolvedRun, TurnId,
@@ -386,7 +386,6 @@ pub async fn run_handover_commits_material_ownership_with_the_head(
         .unwrap();
     let transfer = RunTransfer {
         owner,
-        reason: BoundaryReason::HandOver,
         from: SegmentOrdinal(0),
         entries: Vec::new(),
         attempts: Vec::new(),
@@ -394,14 +393,8 @@ pub async fn run_handover_commits_material_ownership_with_the_head(
         sources: Vec::new(),
         environment: None,
         plugin_state: None,
-        events: RunEventOrdinal(0),
-        material: vec![retained.clone()],
+        material: vec![retained.clone().into()],
         subscriptions: Vec::new(),
-        owed_starts: Vec::new(),
-        owed_cancels: Vec::new(),
-        state: StateFrontier::default(),
-        held_calls: 0,
-        vm_continuation: false,
     };
     let mut state = RuntimeSessionState {
         session_id: session.clone(),

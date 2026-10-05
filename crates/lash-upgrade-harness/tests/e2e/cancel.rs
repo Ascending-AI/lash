@@ -485,14 +485,7 @@ pub async fn live_loser(
         "handover must publish exactly one physical successor"
     );
     let transfer = transfers[0];
-    transfer.check_capture(&lash_core::tool_run::Cut {
-        reason: transfer.reason,
-        phase: lash_core::tool_run::CutPhase::Capturable,
-    })?;
-    ensure!(
-        transfer.vm_continuation,
-        "physical successor lost the VM continuation"
-    );
+    transfer.check_capture(lash_core::tool_run::CutPhase::Capturable)?;
     ensure!(
         transfer
             .attempts
@@ -512,7 +505,7 @@ pub async fn live_loser(
             transfer
                 .subscriptions
                 .iter()
-                .any(|subscription| subscription.source == descriptor),
+                .any(|subscription| subscription == &descriptor),
             "transfer lost pending Deferred subscription"
         );
         scenario.wait(starting.clone()).await?;

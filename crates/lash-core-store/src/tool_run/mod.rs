@@ -45,7 +45,9 @@ pub use admission::{
     RecordedRetryPolicy, RoundAdmission, RuntimeCallPolicy, ToolDeclaration,
 };
 pub use aggregate::{AggregateConsumer, AggregateLeaf, AggregatePlan};
-pub use continuation::{ContinuationRefusal, Cut, CutPhase, RunTransfer};
+pub use continuation::{
+    AdoptedRun, ContinuationRefusal, Cut, CutPhase, RunTransfer, TransferBundle,
+};
 pub use material::{
     InvalidMaterialDigest, MaterialDigest, MaterialEntry, MaterialLocation, MaterialOwner,
     MaterialPayload, MaterialRef, MaterialRefusal, MaterialRole,

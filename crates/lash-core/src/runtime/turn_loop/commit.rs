@@ -382,7 +382,7 @@ impl LashRuntime {
             .pending_follow_on
             .as_deref()
             .filter(|owed| owed.is_turn(turn))
-            .and_then(|owed| owed.continuation.as_ref())
+            .and_then(|owed| owed.owes.continuation())
         else {
             return Ok(None);
         };

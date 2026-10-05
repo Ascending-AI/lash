@@ -411,7 +411,8 @@ async fn admitted_switch_is_seeded_atomic_ordered_and_exactly_once() {
             .as_str(),
     );
     let follow_on_owed = owed_at_commit.is_some_and(|owed| {
-        owed.frame_id.as_str() == expected_frame_id.as_str() && owed.task == "run seeded follow-on"
+        owed.frame_id.as_str() == expected_frame_id.as_str()
+            && owed.owes.task() == Some("run seeded follow-on")
     });
     assert!(
         second_still_pending,

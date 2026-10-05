@@ -2061,44 +2061,6 @@
           "additionalProperties": false,
           "properties": {
             "refusal": {
-              "const": "event_frontier",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "expected": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "found": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "refusal": {
-              "const": "capacity_frontier",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal",
-            "expected",
-            "found"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
               "const": "segment_frontier",
               "type": "string"
             }
@@ -2178,32 +2140,6 @@
           "properties": {
             "refusal": {
               "const": "unretained_material",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "unleased_material",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "foreign_subscription",
               "type": "string"
             }
           },

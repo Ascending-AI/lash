@@ -76,10 +76,14 @@ Stored format versions remain frozen.
 Process admission binds a `SegmentOrdinal` onto execution authority without
 changing its process-attempt fence. The native segment envelope carries the
 same `RunTransfer` beside the opaque VM continuation. Capture checks local ACK,
-retained material, event and capacity frontiers. Restore checks the process,
+retained material, source ownership and segment bounds. Event and capacity
+frontiers are derived from the acknowledged journal. The boundary container
+owns its reason and VM continuation; the capture stores source keys and
+bundles whose holder is implied by its owner and predecessor segment. Restore checks the process,
 admitted successor and inherited environment before loading definitions.
 Publication stores the original predecessor-stamped transfer unchanged.
-Coordinator adoption rebinds subscriptions and reads material only through
+Adoption returns an in-memory successor beside the unchanged capture. The
+coordinator rebuilds subscriptions and reads material only through
 successor-held references, including after the predecessor lease is fenced.
 The process registry still owns lifecycle transactions and child holds.
 

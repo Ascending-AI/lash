@@ -320,7 +320,6 @@ async fn commit_switch_owing(
     };
     state.ensure_agent_frame_initialized();
     let owed = crate::store::PendingFollowOn {
-        continuation: None,
         follow_on_turn_id: crate::store::PhysicalTurn::derive_turn_id(
             &TurnId::fixture(switching_turn),
             1,
@@ -329,7 +328,9 @@ async fn commit_switch_owing(
             .current_frame_node_id
             .clone()
             .expect("the initial frame is current"),
-        task: "run in the switched frame".to_string(),
+        owes: crate::store::FollowOnWork::FrameTask {
+            task: "run in the switched frame".to_string(),
+        },
         resolved_run: Box::new(resolved_run),
         chain_depth: 1,
         attempts: 0,

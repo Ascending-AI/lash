@@ -1405,94 +1405,102 @@ fn transfer() -> RunTransfer {
     }];
     RunTransfer {
         owner: opener(),
-        reason: lash_sansio::BoundaryReason::HandOver,
         from: SegmentOrdinal(0),
-        events: RunEventOrdinal(2),
         entries,
         attempts: Vec::new(),
         material_aliases: Vec::new(),
         sources: Vec::new(),
         environment: None,
         plugin_state: None,
-        material: vec![leased_bundle(segment_holder(0))],
-        subscriptions: vec![SourceSubscription {
-            source: source_key(&call_id),
-            owner: opener(),
-            segment: SegmentOrdinal(0),
-        }],
-        owed_starts: Vec::new(),
-        owed_cancels: Vec::new(),
-        state: StateFrontier::default(),
-        held_calls: 1,
-        vm_continuation: true,
+        material: vec![leased_bundle(segment_holder(0)).into()],
+        subscriptions: vec![source_key(&call_id)],
     }
 }
 
+/// S01 F1 / S08 F1: a transfer cannot decode a second truth for a journal
+/// frontier or its container's boundary reason.
 #[test]
-fn a_cut_captures_only_after_local_quiescence() {
-    let cut = Cut::request(lash_sansio::BoundaryReason::JournalBudget);
-    assert!(!cut.admits_new_work());
-    assert_eq!(
-        transfer().check_capture(&cut),
-        Err(ContinuationRefusal::NotQuiescent)
-    );
-    let quiescing = cut.observe(1);
-    assert_eq!(quiescing.phase, CutPhase::Quiescing);
-    assert_eq!(
-        transfer().check_capture(&quiescing),
-        Err(ContinuationRefusal::NotQuiescent)
-    );
-    let capturable = quiescing.observe(0);
-    assert_eq!(transfer().check_capture(&capturable), Ok(()));
-    let mut local = transfer();
-    local.material[0].references = vec![run_material(MaterialRole::AttemptOutput)];
-    assert_eq!(
-        local.check_capture(&capturable),
-        Err(ContinuationRefusal::UnretainedMaterial)
-    );
-    let mut foreign = transfer();
-    foreign.subscriptions[0].segment = SegmentOrdinal(4);
-    assert_eq!(
-        foreign.check_capture(&capturable),
-        Err(ContinuationRefusal::ForeignSubscription)
-    );
-}
-
-/// FIG-4889: a reference relocated to an artifact is not retained until the
-/// transferring segment holds its dependency lease. Without the lease the
-/// bytes can be reclaimed between publication and the successor's acquire.
-#[test]
-fn a_transfer_refuses_retained_material_without_the_predecessor_lease() {
-    let capturable = Cut::request(lash_sansio::BoundaryReason::HandOver).observe(0);
-    let elsewhere = ArtifactName {
-        store: ArtifactStoreId::Engine("restate".into()),
-        artifact_ref: "bundle-1".into(),
-    };
-    let mut relocated = transfer();
-    relocated.material[0].artifact = elsewhere.clone();
-    for reference in &mut relocated.material[0].references {
-        *reference = reference.retained(elsewhere.clone());
-    }
-    assert_eq!(
-        relocated.check_capture(&capturable),
-        Err(ContinuationRefusal::UnretainedMaterial),
-        "a reference moved to some artifact has no lease behind it"
-    );
-    for holder in [
-        segment_holder(1),
-        MaterialHolder::Segment {
-            opener: EffectOpener::turn("session-1", "turn-2"),
-            segment: SegmentOrdinal(0),
-        },
+fn s01_transfer_refuses_conflicting_copies_of_derived_facts() {
+    for (field, conflicting) in [
+        ("events", json!(999)),
+        ("held_calls", json!(999)),
+        ("reason", json!("journal_budget")),
+        ("vm_continuation", json!(false)),
+        ("owed_starts", json!([])),
+        ("owed_cancels", json!([])),
+        (
+            "state",
+            serde_json::to_value(StateFrontier::default()).unwrap(),
+        ),
     ] {
-        let mut unleased = transfer();
-        unleased.material = vec![leased_bundle(holder)];
-        assert_eq!(
-            unleased.check_capture(&capturable),
-            Err(ContinuationRefusal::UnleasedMaterial)
+        let mut encoded = serde_json::to_value(transfer()).unwrap();
+        encoded[field] = conflicting;
+        assert!(
+            serde_json::from_value::<RunTransfer>(encoded).is_err(),
+            "{field}"
         );
     }
-    assert_eq!(transfer().check_capture(&capturable), Ok(()));
+    let mut encoded = serde_json::to_value(transfer()).unwrap();
+    encoded["material"][0]["holder"] = serde_json::to_value(segment_holder(4)).unwrap();
+    assert!(serde_json::from_value::<RunTransfer>(encoded).is_err());
+    let mut encoded = serde_json::to_value(transfer()).unwrap();
+    encoded["subscriptions"][0] = serde_json::to_value(SourceSubscription {
+        source: source_key(&ToolCallId::fixture("deferred")),
+        owner: opener(),
+        segment: SegmentOrdinal(4),
+    })
+    .unwrap();
+    assert!(serde_json::from_value::<RunTransfer>(encoded).is_err());
+}
+
+/// L10: ownership and terminal refusal apply before adoption; L09: the
+/// in-memory successor fences the predecessor while the capture stays valid.
+#[test]
+fn l10_adoption_binds_a_live_owner_and_l09_fences_its_predecessor() {
+    let capture = transfer();
+    assert_eq!(
+        capture.clone().adopt(
+            &EffectOpener::turn("session-1", "fresh"),
+            RunLifecycle::Live,
+            SegmentOrdinal(1)
+        ),
+        Err(ContinuationRefusal::ForeignOwner)
+    );
+    assert_eq!(
+        capture
+            .clone()
+            .adopt(&opener(), RunLifecycle::Settled, SegmentOrdinal(1)),
+        Err(ContinuationRefusal::OwnerTerminal)
+    );
+    assert_eq!(
+        capture
+            .clone()
+            .adopt(&opener(), RunLifecycle::Live, SegmentOrdinal(2)),
+        Err(ContinuationRefusal::NotSuccessor { from: 0, found: 2 })
+    );
+    let adopted = capture
+        .adopt(&opener(), RunLifecycle::Live, SegmentOrdinal(1))
+        .unwrap();
+    adopted
+        .transfer
+        .check_capture(CutPhase::Capturable)
+        .unwrap();
+    let mut ledger = adopted.ledger().unwrap();
+    let record = RunRecord {
+        trace: None,
+        segment: SegmentOrdinal(0),
+        first: ledger.next_ordinal(),
+        events: vec![RunEvent::Lifecycle {
+            state: RunLifecycle::Closing,
+        }],
+    };
+    assert_eq!(
+        ledger.append(SegmentOrdinal(0), &record),
+        Err(RunEventRefusal::StaleSegment {
+            latest: 1,
+            found: 0
+        })
+    );
 }
 
 /// FIG-4889: material that stays in its opener journal needs no artifact
@@ -1532,35 +1540,6 @@ fn bundles_retain_only_crossing_material_and_refuse_corrupt_bytes() {
             if matches!(**refusal, MaterialRefusal::Corrupt { .. })
     ));
     assert!(error.journaled, "a refused read never grants a fresh body");
-}
-
-/// L10's protocol witness: a cancelled Run's continuation cannot infect a
-/// fresh Run, and only the owner's next segment adopts it.
-#[test]
-fn a_continuation_is_adopted_only_by_its_own_live_run() {
-    let fresh = EffectOpener::turn("session-1", "turn-2");
-    assert_eq!(
-        transfer().adopt(&fresh, RunLifecycle::Live, SegmentOrdinal(1)),
-        Err(ContinuationRefusal::ForeignOwner)
-    );
-    assert_eq!(
-        transfer().adopt(&opener(), RunLifecycle::Settled, SegmentOrdinal(1)),
-        Err(ContinuationRefusal::OwnerTerminal)
-    );
-    assert_eq!(
-        transfer().adopt(&opener(), RunLifecycle::Live, SegmentOrdinal(2)),
-        Err(ContinuationRefusal::NotSuccessor { from: 0, found: 2 })
-    );
-    let adopted = transfer()
-        .adopt(&opener(), RunLifecycle::Closing, SegmentOrdinal(1))
-        .unwrap();
-    assert_eq!(adopted.subscriptions[0].segment, SegmentOrdinal(1));
-    assert_eq!(adopted.state.owner_segment, SegmentOrdinal(1));
-    let encoded = serde_json::to_value(&adopted).unwrap();
-    assert_eq!(
-        serde_json::from_value::<RunTransfer>(encoded).unwrap(),
-        adopted
-    );
 }
 
 #[test]
@@ -1866,201 +1845,6 @@ fn presentation_plans_record_explicit_empty_and_decision_only_callbacks() {
             Err(StateCommandRefusal::DecisionOnly)
         );
     }
-}
-
-/// L09: successor admission fences the predecessor before its first append.
-#[test]
-fn l09_adoption_fences_predecessor_before_the_first_successor_record() {
-    let adopted = transfer()
-        .adopt(&opener(), RunLifecycle::Live, SegmentOrdinal(1))
-        .unwrap();
-    let mut ledger = adopted.ledger().unwrap();
-    let record = RunRecord {
-        trace: None,
-        segment: SegmentOrdinal(0),
-        first: ledger.next_ordinal(),
-        events: vec![RunEvent::Lifecycle {
-            state: RunLifecycle::Closing,
-        }],
-    };
-    assert_eq!(
-        ledger.append(SegmentOrdinal(0), &record),
-        Err(RunEventRefusal::StaleSegment {
-            latest: 1,
-            found: 0
-        })
-    );
-}
-
-/// L09: the codec retains prior consumption, a protected final and an
-/// unranked source, with their receipts, capacity and admitted authority.
-#[test]
-fn l09_capture_rebuilds_the_complete_acknowledged_run() {
-    let prior = call("prior-cell");
-    let committed = call("current-cell-final");
-    let mut pending = call("unranked-source");
-    pending.declaration = ToolDeclaration::deferring();
-    let source = SourceDescriptor {
-        source: source_key(&pending.call_id),
-        call_id: pending.call_id.clone(),
-        owner: opener(),
-        resolver: revision("tools"),
-        authority: SourceAuthority::ExternalCompletion,
-        cancel: ExternalCancelPolicy::CancelExternalWork,
-    };
-    let events = vec![
-        RunEvent::Admitted {
-            round: round(vec![prior.clone(), committed.clone(), pending.clone()]),
-        },
-        done(&prior.call_id, 1),
-        decided(&prior.call_id, 1, final_of(1, false)),
-        RunEvent::Presented {
-            call_id: prior.call_id.clone(),
-            presentation: None,
-            failure: None,
-        },
-        RunEvent::Consumed {
-            call_id: prior.call_id.clone(),
-        },
-        RunEvent::Incorporated {
-            call_id: prior.call_id.clone(),
-        },
-        done(&committed.call_id, 1),
-        decided(&committed.call_id, 2, final_of(1, true)),
-        RunEvent::AttemptRecorded {
-            call_id: pending.call_id.clone(),
-            attempt: attempt(1),
-            result: AttemptResult::Deferred {
-                source: source.source.clone(),
-            },
-        },
-    ];
-    let mut capture = transfer();
-    capture.entries = vec![RunJournalEntry {
-        record: RunRecord {
-            trace: None,
-            segment: SegmentOrdinal(0),
-            first: RunEventOrdinal(0),
-            events,
-        },
-        materials: Vec::new(),
-        state: Vec::new(),
-    }];
-    capture.events = RunEventOrdinal(capture.entries[0].record.events.len() as u64);
-    capture.attempts = vec![RunAttemptEntry {
-        call_id: pending.call_id.clone(),
-        attempt: attempt(1),
-        result: AttemptResult::Deferred {
-            source: source.source.clone(),
-        },
-        materials: Vec::new(),
-    }];
-    capture.material_aliases = vec![
-        run_material(MaterialRole::PreparedRequest),
-        run_material(MaterialRole::AttemptOutput),
-    ];
-    let artifact = capture.material[0].artifact.clone();
-    capture.material[0]
-        .references
-        .push(capture.material_aliases[0].retained(artifact));
-    capture.sources = vec![source.clone()];
-    capture.environment = Some(crate::process_identity::ProcessExecutionEnvRef::new(
-        "admitted-process-environment",
-    ));
-    // The round of three is held whole: two members are unpresented.
-    capture.held_calls = 3;
-    capture.subscriptions = vec![SourceSubscription {
-        source: source.source.clone(),
-        owner: opener(),
-        segment: SegmentOrdinal(0),
-    }];
-    let publication = StateResolution {
-        publisher: crate::EffectAddress::new(
-            ExecutionScope::turn("session-1", "turn-1"),
-            "decision:current-cell-final",
-        )
-        .unwrap(),
-        plugin: revision("state"),
-        origin: StateCommandOrigin::ToolAttempt {
-            call_id: committed.call_id.clone(),
-            attempt: attempt(1),
-        },
-        segment: SegmentOrdinal(0),
-        ordinal: PublicationOrdinal(1),
-        predecessor: None,
-        outcome: StateResolutionOutcome::Applied {
-            changes: vec![ResolvedStateChange::Put {
-                key: "count".into(),
-                value: json!(1),
-            }],
-        },
-    };
-    capture.entries[0].state.push(publication.clone());
-    capture.state.record(&publication);
-    capture
-        .check_capture(&Cut::request(capture.reason).observe(0))
-        .unwrap();
-    let encoded = serde_json::to_vec(&capture).unwrap();
-    let decoded: RunTransfer = serde_json::from_slice(&encoded).unwrap();
-    assert_eq!(decoded, capture);
-    let adopted = decoded
-        .adopt(&opener(), RunLifecycle::Live, SegmentOrdinal(1))
-        .unwrap();
-    let ledger = adopted.ledger().unwrap();
-    assert_eq!(ledger.next_ordinal(), capture.events);
-    assert!(ledger.consumed(&prior.call_id));
-    assert!(!ledger.consumed(&committed.call_id));
-    assert!(!ledger.drain_frontier_open(3));
-    assert_eq!(ledger.held_calls(), 3);
-    assert_eq!(ledger.unacknowledged_local(), 0);
-    assert_eq!(adopted.sources, vec![source]);
-    assert_eq!(adopted.environment, capture.environment);
-    assert_eq!(adopted.state.receipts, capture.state.receipts);
-    assert_eq!(
-        adopted.state.step(&publication),
-        Ok(FrontierStep::AlreadyApplied),
-        "adoption retains the exact applied receipt across the publisher fence"
-    );
-    let mut changed_receipt = publication.clone();
-    changed_receipt.outcome = StateResolutionOutcome::Applied {
-        changes: vec![ResolvedStateChange::Put {
-            key: "count".into(),
-            value: json!(2),
-        }],
-    };
-    assert_eq!(
-        adopted.state.step(&changed_receipt),
-        Err(FrontierRefusal::ReceiptMismatch { found: 1 })
-    );
-    assert_eq!(adopted.subscriptions[0].segment, SegmentOrdinal(1));
-    let mut lost_capacity = capture.clone();
-    lost_capacity.held_calls = 0;
-    assert_eq!(
-        lost_capacity.check_capture(&Cut::request(capture.reason).observe(0)),
-        Err(ContinuationRefusal::CapacityFrontier {
-            expected: 3,
-            found: 0,
-        })
-    );
-    let mut foreign_segment = capture.clone();
-    foreign_segment.state.owner_segment = SegmentOrdinal(1);
-    assert_eq!(
-        foreign_segment.check_capture(&Cut::request(capture.reason).observe(0)),
-        Err(ContinuationRefusal::SegmentFrontier)
-    );
-    let mut unfinished = capture.clone();
-    unfinished.entries[0].record.events.pop();
-    unfinished.events.0 -= 1;
-    assert_eq!(
-        unfinished.check_capture(&Cut::request(unfinished.reason).observe(0)),
-        Err(ContinuationRefusal::UnacknowledgedAttempt)
-    );
-    let mut missing = capture;
-    missing.entries.clear();
-    assert_eq!(
-        missing.ledger().unwrap_err(),
-        ContinuationRefusal::EventFrontier
-    );
 }
 
 /// L19: a published state frontier survives the tagged journal envelope.

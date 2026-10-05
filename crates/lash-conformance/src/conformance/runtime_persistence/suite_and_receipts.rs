@@ -391,10 +391,11 @@ pub async fn commit_rejects_follow_on_bytes_over_budget(store: Arc<dyn RuntimeSt
         .validate_budget()
         .expect("the commit without a pending follow-on must fit");
     commit.pending_follow_on = Some(crate::store::PendingFollowOn {
-        continuation: None,
         follow_on_turn_id: crate::TurnId::from("oversized:agent-frame:1"),
         frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "oversized"),
-        task: "q".repeat(BYTE_LIMIT * 2),
+        owes: crate::store::FollowOnWork::FrameTask {
+            task: "q".repeat(BYTE_LIMIT * 2),
+        },
         resolved_run: crate::conformance::helpers::default_resolved_run(),
         chain_depth: 1,
         attempts: 0,
@@ -489,13 +490,14 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(store: Arc<
     .await;
     commit.committed_attachment_ids = vec![attachment_id];
     commit.pending_follow_on = Some(crate::store::PendingFollowOn {
-        continuation: None,
         follow_on_turn_id: crate::TurnId::from("all-families:agent-frame:1"),
         frame_id: state
             .current_frame_node_id
             .clone()
             .expect("the initial frame is current"),
-        task: "follow-up".to_string(),
+        owes: crate::store::FollowOnWork::FrameTask {
+            task: "follow-up".to_string(),
+        },
         resolved_run: crate::conformance::helpers::default_resolved_run(),
         chain_depth: 1,
         attempts: 0,

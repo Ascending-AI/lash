@@ -6,8 +6,8 @@
 //! attempt is durably acknowledged; a Deferred source does not hold the cut,
 //! its subscription transfers instead. Capturable then transfers, in one
 //! ownership move, every Run event, retained material, pending source,
-//! owed launch and cancel, the state frontier, the held capacity and the
-//! protocol's VM continuation. No native future, socket or borrowed context
+//! owed launch and cancel. The journal derives capacity and applied state;
+//! the boundary container carries its reason and VM continuation. No native future, socket or borrowed context
 //! transfers. Turn and process segments share this record and its laws and
 //! keep their own lifecycle transactions.
 //!
@@ -20,13 +20,12 @@ use serde::{Deserialize, Serialize};
 
 use super::retention::{MaterialHolder, RetainedBundle};
 use super::run_event::{
-    RunAttemptEntry, RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger, RunLifecycle,
-    SegmentOrdinal,
+    RunAttemptEntry, RunEventRefusal, RunJournalEntry, RunLedger, RunLifecycle, SegmentOrdinal,
 };
-use super::source_seal::{SourceDescriptor, SourceSubscription};
-use super::state_command::StateFrontier;
+use super::source_seal::SourceDescriptor;
+use crate::await_event_identity::AwaitEventKey;
 use crate::effect_opener::EffectOpener;
-use crate::process_identity::{ProcessExecutionEnvRef, StartKey};
+use crate::process_identity::ProcessExecutionEnvRef;
 
 /// Where a requested cut stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -86,11 +85,7 @@ impl Cut {
 pub struct RunTransfer {
     /// The logical Run's owner address.
     pub owner: EffectOpener,
-    pub reason: BoundaryReason,
     pub from: SegmentOrdinal,
-    /// Every event below this ordinal transfers; the successor appends at
-    /// it.
-    pub events: RunEventOrdinal,
     /// Acknowledged admission, selection, decision, drain and consumption facts.
     pub entries: Vec<RunJournalEntry>,
     /// Acknowledged independent X receipts, in recorded selection order.
@@ -107,19 +102,9 @@ pub struct RunTransfer {
     /// Every unconsumed payload, in bundles retained under the transferring
     /// segment's lease before publication. The successor acquires its own
     /// lease on each before the predecessor releases.
-    pub material: Vec<RetainedBundle>,
+    pub material: Vec<TransferBundle>,
     /// Pending sources, rebound to the successor on adoption.
-    pub subscriptions: Vec<SourceSubscription>,
-    /// Declared starts admitted and not yet launched.
-    pub owed_starts: Vec<StartKey>,
-    /// Cancels owed to launched starts.
-    pub owed_cancels: Vec<StartKey>,
-    pub state: StateFrontier,
-    /// Tool-call capacity the Run holds (K1): every unretired held round
-    /// and every cell round. Adoption checks it against the records.
-    pub held_calls: u32,
-    /// Whether the protocol committed a VM continuation with the cut.
-    pub vm_continuation: bool,
+    pub subscriptions: Vec<AwaitEventKey>,
 }
 
 /// Why a transfer cannot be captured or adopted.
@@ -130,10 +115,6 @@ pub struct RunTransfer {
 pub enum ContinuationRefusal {
     #[error("the captured Run records were refused: {cause}")]
     Records { cause: RunEventRefusal },
-    #[error("the captured event frontier differs from its acknowledged records")]
-    EventFrontier,
-    #[error("the captured capacity differs from the Run's acknowledged calls")]
-    CapacityFrontier { expected: u32, found: u32 },
     #[error("the captured segment frontier does not name its writer")]
     SegmentFrontier,
     #[error("the process continuation has no admitted segment authority")]
@@ -148,10 +129,6 @@ pub enum ContinuationRefusal {
     NotQuiescent,
     #[error("material is journal-local and cannot cross segments")]
     UnretainedMaterial,
-    #[error("retained material is not held by the transferring segment's lease")]
-    UnleasedMaterial,
-    #[error("a subscription is not held by the transferring segment")]
-    ForeignSubscription,
     #[error("the transfer belongs to another logical Run")]
     ForeignOwner,
     #[error("the logical Run is terminal; its transfer is void")]
@@ -177,7 +154,7 @@ impl RunTransfer {
     /// Rebuild the fold from acknowledged records, without executing a body.
     ///
     /// # Errors
-    /// A malformed event stream or an event frontier that lost records.
+    /// A malformed event stream.
     pub fn ledger(&self) -> Result<RunLedger, ContinuationRefusal> {
         let mut ledger = RunLedger::new(self.owner.clone());
         for entry in &self.entries {
@@ -185,10 +162,7 @@ impl RunTransfer {
                 .append(entry.record.segment, &entry.record)
                 .map_err(|cause| ContinuationRefusal::Records { cause })?;
         }
-        if ledger.next_ordinal() != self.events {
-            return Err(ContinuationRefusal::EventFrontier);
-        }
-        ledger.admit_successor(self.state.owner_segment);
+        ledger.admit_successor(self.from);
         Ok(ledger)
     }
 
@@ -197,23 +171,13 @@ impl RunTransfer {
     /// # Errors
     ///
     /// [`ContinuationRefusal`] for a cut still quiescing, material outside
-    /// a retained bundle, a bundle the transferring segment holds no lease
-    /// on, or a subscription another segment holds.
-    pub fn check_capture(&self, cut: &Cut) -> Result<(), ContinuationRefusal> {
-        if cut.phase != CutPhase::Capturable {
+    /// a retained bundle, or a malformed journal.
+    pub fn check_capture(&self, phase: CutPhase) -> Result<(), ContinuationRefusal> {
+        if phase != CutPhase::Capturable {
             return Err(ContinuationRefusal::NotQuiescent);
         }
-        if !self.material.iter().all(RetainedBundle::is_retained) {
+        if !self.material.iter().all(TransferBundle::is_retained) {
             return Err(ContinuationRefusal::UnretainedMaterial);
-        }
-        let holder = self.holder();
-        if self.material.iter().any(|bundle| bundle.holder != holder) {
-            return Err(ContinuationRefusal::UnleasedMaterial);
-        }
-        if self.subscriptions.iter().any(|subscription| {
-            subscription.owner != self.owner || subscription.segment != self.from
-        }) {
-            return Err(ContinuationRefusal::ForeignSubscription);
         }
         if self.sources.iter().any(|source| source.owner != self.owner) {
             return Err(ContinuationRefusal::ForeignSource);
@@ -242,19 +206,12 @@ impl RunTransfer {
         if ledger.unacknowledged_local() != 0 {
             return Err(ContinuationRefusal::UnacknowledgedAttempt);
         }
-        if self.state.owner_segment != self.from
-            || self
-                .entries
-                .iter()
-                .any(|entry| entry.record.segment > self.from)
+        if self
+            .entries
+            .iter()
+            .any(|entry| entry.record.segment > self.from)
         {
             return Err(ContinuationRefusal::SegmentFrontier);
-        }
-        if self.held_calls != ledger.held_calls() {
-            return Err(ContinuationRefusal::CapacityFrontier {
-                expected: ledger.held_calls(),
-                found: self.held_calls,
-            });
         }
         Ok(())
     }
@@ -278,11 +235,11 @@ impl RunTransfer {
     /// [`ContinuationRefusal::OwnerTerminal`] once the Run settled or was
     /// cancelled, and [`ContinuationRefusal::NotSuccessor`].
     pub fn adopt(
-        mut self,
+        self,
         owner: &EffectOpener,
         lifecycle: RunLifecycle,
         successor: SegmentOrdinal,
-    ) -> Result<Self, ContinuationRefusal> {
+    ) -> Result<AdoptedRun, ContinuationRefusal> {
         if &self.owner != owner {
             return Err(ContinuationRefusal::ForeignOwner);
         }
@@ -295,10 +252,70 @@ impl RunTransfer {
                 found: successor.0,
             });
         }
-        for subscription in &mut self.subscriptions {
-            subscription.segment = successor;
+        Ok(AdoptedRun {
+            transfer: self,
+            successor,
+        })
+    }
+}
+
+/// Successor ownership is local execution state, never part of the stored capture.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdoptedRun {
+    pub transfer: RunTransfer,
+    pub successor: SegmentOrdinal,
+}
+
+impl AdoptedRun {
+    /// Rebuild the journal and fence the predecessor before the first append.
+    ///
+    /// # Errors
+    /// A malformed event stream.
+    pub fn ledger(&self) -> Result<RunLedger, ContinuationRefusal> {
+        let mut ledger = self.transfer.ledger()?;
+        ledger.admit_successor(self.successor);
+        Ok(ledger)
+    }
+}
+
+/// Material published by a Run capture. Its lease holder is the capture's
+/// `(owner, from)`; storing it here would admit a contradictory second owner.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransferBundle {
+    pub artifact: crate::artifact_referrer::ArtifactName,
+    pub references: Vec<super::material::MaterialRef>,
+    pub copy_bytes: u64,
+}
+
+impl From<RetainedBundle> for TransferBundle {
+    fn from(bundle: RetainedBundle) -> Self {
+        Self {
+            artifact: bundle.artifact,
+            references: bundle.references,
+            copy_bytes: bundle.copy_bytes,
         }
-        self.state.owner_segment = successor;
-        Ok(self)
+    }
+}
+
+impl TransferBundle {
+    /// Reconstruct the holder at the store boundary from its capture.
+    #[must_use]
+    pub fn held_by(&self, holder: MaterialHolder) -> RetainedBundle {
+        RetainedBundle {
+            holder,
+            artifact: self.artifact.clone(),
+            references: self.references.clone(),
+            copy_bytes: self.copy_bytes,
+        }
+    }
+
+    fn is_retained(&self) -> bool {
+        self.artifact.store == crate::artifact_referrer::ArtifactStoreId::ToolMaterial
+            && !self.references.is_empty()
+            && self.references.iter().all(|reference| matches!(
+                &reference.location,
+                super::material::MaterialLocation::RetainedArtifact { artifact } if artifact == &self.artifact
+            ))
     }
 }

@@ -424,7 +424,7 @@ impl LashRuntime {
             .pending_follow_on
             .as_deref()
             .filter(|owed| owed.is_turn(&trace_turn_id))
-            .and_then(|owed| owed.continuation.as_ref());
+            .and_then(|owed| owed.owes.continuation());
         let opener_state = continuation
             .map(|owed| {
                 crate::session::OpenerState::from_snapshot_for(

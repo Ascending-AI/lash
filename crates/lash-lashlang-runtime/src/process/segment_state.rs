@@ -255,13 +255,10 @@ pub(super) fn capture_segment(
     reason: lash_core::BoundaryReason,
     program_hash: &str,
 ) -> Result<lash_core::SegmentHandover, (String, &'static str)> {
-    let mut tool_run = host
+    let tool_run = host
         .ctx
         .run_continuation_snapshot()
         .map_err(|error| (error.to_string(), "tool Run is not capturable; continuing"))?;
-    if let Some(run) = &mut tool_run {
-        run.vm_continuation = true;
-    }
     let segment_state = LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm,

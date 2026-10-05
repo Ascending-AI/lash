@@ -132,7 +132,7 @@ impl RuntimeExecutionContext<'_> {
             return Err(crate::tool_run::ContinuationRefusal::ForeignOwner);
         }
         self.validate_process_run(&transfer, false)?;
-        transfer.check_capture(&crate::tool_run::Cut::request(transfer.reason).observe(0))?;
+        transfer.check_capture(crate::tool_run::CutPhase::Capturable)?;
         self.opener_groups.lock_recover().run = Some(Box::new(transfer));
         Ok(())
     }
@@ -156,7 +156,7 @@ impl RuntimeExecutionContext<'_> {
         let transfer = self.opener_groups.lock_recover().run.as_deref().cloned();
         if let Some(transfer) = &transfer {
             self.validate_process_run(transfer, false)?;
-            transfer.check_capture(&crate::tool_run::Cut::request(transfer.reason).observe(0))?;
+            transfer.check_capture(crate::tool_run::CutPhase::Capturable)?;
         }
         Ok(transfer)
     }
@@ -183,7 +183,7 @@ impl RuntimeExecutionContext<'_> {
             return Err(crate::tool_run::ContinuationRefusal::SegmentFrontier);
         }
         self.validate_process_run(&transfer, true)?;
-        transfer.check_capture(&crate::tool_run::Cut::request(transfer.reason).observe(0))?;
+        transfer.check_capture(crate::tool_run::CutPhase::Capturable)?;
         // Keep the predecessor reference in the codec for the coordinator's
         // adoption. The registry validates authority without advancing twice.
         transfer

@@ -218,8 +218,7 @@ async fn s34(leg: lash_upgrade_harness::e2e::case::Leg) -> Result<()> {
         let pending: lash::persistence::PendingFollowOn =
             serde_json::from_value(head["pending_follow_on"].clone())?;
         let transfer = pending
-            .continuation
-            .as_ref()
+            .owes.continuation()
             .and_then(|continuation| continuation.opener.run.as_deref())
             .context("published follow-on lacks canonical Run transfer")?;
         std::fs::write(

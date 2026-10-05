@@ -305,8 +305,8 @@ impl Shared {
             let receipt = lash_core::store::decode_runtime_commit_receipt(&session, &turn, &raw)?;
             if let Some(follow_on) = &receipt.pending_follow_on
                 && follow_on
-                    .continuation
-                    .as_ref()
+                    .owes
+                    .continuation()
                     .and_then(|c| c.opener.run.as_deref())
                     .is_some()
             {

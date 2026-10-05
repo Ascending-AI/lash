@@ -131,7 +131,7 @@ fn transfer(evidence: &Evidence, work: &WorkIdentity) -> Result<RunTransfer> {
                 "retained artifact belongs to a different Run"
             );
             let value = snapshot
-                .pointer("/receipt/pending_follow_on/continuation/opener/run")
+                .pointer("/receipt/pending_follow_on/owes/opener/run")
                 .ok_or_else(|| anyhow!("store artifact has no canonical transfer"))?;
             let actual: RunTransfer = serde_json::from_value(value.clone())?;
             ensure!(
@@ -230,14 +230,7 @@ async fn hand_over(
     store_cut(&published, BarrierKind::ContinuationPublished)?;
     let transferred = scenario.read().await?;
     let cut = transfer(&transferred, scenario.work()?)?;
-    cut.check_capture(&lash_core::tool_run::Cut {
-        reason: cut.reason,
-        phase: lash_core::tool_run::CutPhase::Capturable,
-    })?;
-    ensure!(
-        cut.vm_continuation,
-        "physical successor lost the VM continuation"
-    );
+    cut.check_capture(lash_core::tool_run::CutPhase::Capturable)?;
     Ok((published, transferred))
 }
 
@@ -429,11 +422,7 @@ fn assert_s12(
         transfer
             .sources
             .iter()
-            .all(|source| source.owner == transfer.owner)
-            && transfer
-                .subscriptions
-                .iter()
-                .all(|subscription| subscription.owner == transfer.owner),
+            .all(|source| source.owner == transfer.owner),
         "pending source authority drifted"
     );
     ensure!(
@@ -724,11 +713,11 @@ pub async fn publication_crash(
 /// L09/L13/L16: the OS exit receipt never substitutes for a logical close.
 fn assert_s31(evidence: &Evidence, work: &WorkIdentity, cut: &RunTransfer) -> Result<()> {
     ensure!(
-        cut.vm_continuation && !cut.sources.is_empty() && !cut.material.is_empty(),
-        "process lost VM, pending source or retained material"
+        !cut.sources.is_empty() && !cut.material.is_empty(),
+        "process lost pending source or retained material"
     );
     ensure!(
-        cut.environment.is_some() && cut.held_calls > 0,
+        cut.environment.is_some() && cut.ledger()?.held_calls() > 0,
         "process lost admitted environment/capacity"
     );
     ensure!(
@@ -780,7 +769,11 @@ pub async fn remove_retained(
     let (_, transferred) = hand_over(scenario, Some(&gate)).await?;
     let cut = transfer(&transferred, &work)?;
     ensure!(
-        !cut.material.is_empty() && cut.material.iter().all(|bundle| bundle.is_retained()),
+        !cut.material.is_empty()
+            && cut
+                .material
+                .iter()
+                .all(|bundle| bundle.held_by(cut.holder()).is_retained()),
         "the cut published no retained owner-qualified material: {:?}",
         cut.material
     );
