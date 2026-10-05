@@ -479,26 +479,6 @@ lash_restate_suite(
 )
 
 lash_restate_suite(
-    name = "restate_effect_group_live",
-    test = ":lash-restate__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "effect-group",
-    leg = "live",
-    shard_count = 3,
-)
-
-lash_restate_suite(
-    name = "restate_effect_group_replay",
-    test = ":lash-restate__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "effect-group",
-    leg = "replay",
-    shard_count = 3,
-)
-
-lash_restate_suite(
     name = "restate_process_await_live",
     test = ":lash-restate__unit_test__rust_test",
     env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
@@ -556,6 +536,26 @@ lash_restate_suite(
     suite = "remote-cancellation",
     leg = "replay",
     shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_run_conformance_live",
+    test = ":lash-restate__unit_test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "run-conformance",
+    leg = "live",
+    shard_count = 3,
+)
+
+lash_restate_suite(
+    name = "restate_run_conformance_replay",
+    test = ":lash-restate__unit_test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "run-conformance",
+    leg = "replay",
+    shard_count = 3,
 )
 
 lash_restate_suite(

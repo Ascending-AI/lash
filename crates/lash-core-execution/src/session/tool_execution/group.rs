@@ -1,7 +1,7 @@
 //! Aggregate consumer modes and deferred completion projection.
 
 use super::*;
-use crate::runtime::effect::GroupWakePolicy;
+use crate::runtime::effect::RunAggregateWakePolicy;
 
 /// How a group's consumer decides its aggregate (ADR 0099 §10 L1). A
 /// caller-side loop decision, never journaled; [`Self::wake`] is the journaled
@@ -22,11 +22,11 @@ impl ToolAggregateConsumer {
     /// The three-way journaled wake policy this four-way consumer mode folds
     /// into every child's envelope (ADR 0099 §10 L1, ADR 0065).
     #[must_use]
-    pub fn wake(self) -> GroupWakePolicy {
+    pub fn wake(self) -> RunAggregateWakePolicy {
         match self {
-            Self::AllSettled | Self::All => GroupWakePolicy::All,
-            Self::Race => GroupWakePolicy::First,
-            Self::Any => GroupWakePolicy::FirstSuccess,
+            Self::AllSettled | Self::All => RunAggregateWakePolicy::All,
+            Self::Race => RunAggregateWakePolicy::First,
+            Self::Any => RunAggregateWakePolicy::FirstSuccess,
         }
     }
 

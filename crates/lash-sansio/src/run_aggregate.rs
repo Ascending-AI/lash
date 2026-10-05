@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// has no default, so a missing rule cannot be replayed under a guess.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum GroupWakePolicy {
+pub enum RunAggregateWakePolicy {
     /// Wake on the first settlement of any kind.
     First,
     /// Wake on the first success, or after every child fails.
@@ -17,7 +17,7 @@ pub enum GroupWakePolicy {
     All,
 }
 
-impl GroupWakePolicy {
+impl RunAggregateWakePolicy {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::First => "first",

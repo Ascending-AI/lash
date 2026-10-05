@@ -5,7 +5,6 @@ pub mod causal;
 mod compat;
 pub mod core_support;
 pub mod definition_id;
-mod effect_group;
 mod effect_identity;
 mod frame_key;
 pub mod future;
@@ -13,6 +12,7 @@ pub mod handle;
 pub mod identity;
 pub mod json_decode;
 pub mod json_schema;
+mod run_aggregate;
 pub use json_schema::{InvalidSchemaKind, JsonSchema, SchemaAdmissionError, ValueMismatch};
 pub mod llm;
 pub mod llm_profile;
@@ -115,7 +115,6 @@ pub use compat::{VersionRange, VersionRangeError};
 pub use definition_id::{
     DEFINITION_ID_FIELD, DEFINITION_ID_PREFIX, InvalidProcessDefinitionId, ProcessDefinitionId,
 };
-pub use effect_group::GroupWakePolicy;
 pub use effect_identity::{
     EffectAddress, EffectIdentityError, EffectJournalIdentity, ExecutionScope,
 };
@@ -142,6 +141,7 @@ pub use process_cursor::{
 };
 pub use redacted::Redacted;
 pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput};
+pub use run_aggregate::RunAggregateWakePolicy;
 pub use sansio::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExpandedRow,

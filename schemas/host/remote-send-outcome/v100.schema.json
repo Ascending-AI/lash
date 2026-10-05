@@ -13016,7 +13016,7 @@
       "type": "string"
     },
     "ScopeId": {
-      "description": "A scope a process may live until.\n\nAn effect opener (a logical turn run, a session operation, one process)\nor a session. A session is never an effect-group opener:\nit owns lifetimes, not effects.",
+      "description": "A scope a process may live until.\n\nAn effect opener (a logical turn run, a session operation, one process)\nor a session. A session is never a tool Run opener:\nit owns lifetimes, not effects.",
       "oneOf": [
         {
           "description": "An effect opener's scope.",

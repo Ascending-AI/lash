@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// A scope a process may live until.
 ///
 /// An effect opener (a logical turn run, a session operation, one process)
-/// or a session. A session is never an effect-group opener:
+/// or a session. A session is never a tool Run opener:
 /// it owns lifetimes, not effects.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", content = "scope", rename_all = "snake_case")]

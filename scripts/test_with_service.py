@@ -241,7 +241,7 @@ class WithServiceBehaviour(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "scripts/ci"))
         import restate_matrix
 
-        for suite in ("server-double", "effect-group"):
+        for suite in ("server-double", "run-conformance"):
             for exit_code in (0, 7):
                 with self.subTest(suite=suite, exit_code=exit_code), tempfile.TemporaryDirectory() as raw:
                     directory = pathlib.Path(raw)
@@ -272,13 +272,13 @@ class WithServiceBehaviour(unittest.TestCase):
                     self.assertNotIn("postgres://", result.stdout)
                     self.assertEqual([], docker.logged())
 
-    def test_effect_group_recipe_reaches_both_hermetic_legs(self) -> None:
+    def test_run_conformance_recipe_reaches_both_hermetic_legs(self) -> None:
         justfile = (ROOT / "justfile").read_text(encoding="utf-8")
-        recipe = justfile.split("\neffect-group-conformance-e2e:\n", 1)[1]
+        recipe = justfile.split("\nrun-conformance-e2e:\n", 1)[1]
         recipe = recipe.split("\n# ", 1)[0]
         self.assertNotIn('${LASH_POSTGRES_DATABASE_URL:?', recipe)
         for leg in ("live", "replay"):
-            self.assertIn(f"suite effect-group --leg {leg}", recipe)
+            self.assertIn(f"suite run-conformance --leg {leg}", recipe)
 
     def run_wrapper(
         self,

@@ -97,7 +97,7 @@ impl RuntimeTurnDriver<'_> {
                     let effect_loop: EffectLoop<'_> =
                         Box::pin(self.run_effect_loop(messages, event_tx.clone(), run_offset));
                     let result = effect_loop.await;
-                    Box::pin(self.end_opener_groups(result)).await
+                    Box::pin(self.end_tool_run(result)).await
                 }
             })
             .await

@@ -86,7 +86,7 @@ pub enum TraceNodeWaitKind {
     Signal,
     ChildProcess,
     ToolBatch,
-    EffectGroup,
+    RunAggregate,
 }
 
 impl TraceNodeWaitKind {
@@ -96,7 +96,7 @@ impl TraceNodeWaitKind {
             Self::Signal => "signal",
             Self::ChildProcess => "child_process",
             Self::ToolBatch => "tool_batch",
-            Self::EffectGroup => "effect_group",
+            Self::RunAggregate => "run_aggregate",
         }
     }
 }
@@ -119,10 +119,10 @@ pub enum TraceNodeAwaited {
         batch_id: String,
         position: usize,
     },
-    EffectGroup {
+    RunAggregate {
         group_key: String,
         position: usize,
-        wake: lash_sansio::GroupWakePolicy,
+        wake: lash_sansio::RunAggregateWakePolicy,
     },
 }
 
@@ -133,7 +133,7 @@ impl TraceNodeAwaited {
             Self::Signal { .. } => TraceNodeWaitKind::Signal,
             Self::ChildProcesses { .. } => TraceNodeWaitKind::ChildProcess,
             Self::ToolBatch { .. } => TraceNodeWaitKind::ToolBatch,
-            Self::EffectGroup { .. } => TraceNodeWaitKind::EffectGroup,
+            Self::RunAggregate { .. } => TraceNodeWaitKind::RunAggregate,
         }
     }
 }

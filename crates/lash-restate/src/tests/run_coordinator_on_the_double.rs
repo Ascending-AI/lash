@@ -10,7 +10,7 @@
 //! runs only the step that never became durable.
 //!
 //! The seeded law ports the group index's drain-transitivity oracle
-//! (`effect_group_drain_transitivity`) to the Run's records: it fails when a
+//! (historically `effect_group_drain_transitivity`) to the Run's records: it fails when a
 //! final's declarations are issued while a lower-ranked committed final, of
 //! either kind, has not seated, when a call is presented out of rank order,
 //! or when a Deferred descriptor takes a rank or a presentation.

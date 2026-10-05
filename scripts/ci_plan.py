@@ -1038,7 +1038,7 @@ def _is_stores_path(path: str, path_class: PathClass, store_dirs: frozenset[str]
 #   a second table.
 # * `RESTATE_SUITE_PACKAGES` — what the registry cannot name: the Restate
 #   endpoints and runbooks the suites mount, and `lash-conformance`, whose
-#   law definitions the effect-group suite expands into its test binary.
+#   law definitions the run-conformance suite expands into its test binary.
 # * `RESTATE_CORE_SUBTREES` — the Restate execution path inside the two
 #   shared runtime crates, matched on path segments so `src/` and its
 #   `tests/` kernel mirrors count alike.
@@ -1062,7 +1062,7 @@ def restate_suite_dirs(root: str | None = None) -> frozenset[str]:
 # workbench endpoint (`agent-workbench-restate-e2e` tests it beside a
 # Restate container), the runbooks whose binaries and scenarios the workers
 # and process-operations legs drive, and the conformance law catalogue the
-# effect-group suite's `conformance_and_poison` cases are built from — a law
+# run-conformance suite's `conformance_and_poison` cases are built from — a law
 # edit can fail the suite without touching another selected path (#2148).
 RESTATE_SUITE_PACKAGES = frozenset(
     {

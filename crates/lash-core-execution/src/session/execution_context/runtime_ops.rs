@@ -147,7 +147,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
             incorporation_ledger: Arc::default(),
-            opener_groups: Arc::default(),
+            opener_run: Arc::default(),
             tool_requests: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
             parent_invocation: None,
@@ -238,12 +238,12 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
     fn opener_state(&self) -> OpenerState {
         OpenerState {
             ledger: Arc::clone(&self.incorporation_ledger),
-            run_state: Arc::clone(&self.opener_groups),
+            run_state: Arc::clone(&self.opener_run),
         }
     }
     fn with_opener_state(mut self, state: OpenerState) -> Self {
         self.incorporation_ledger = state.ledger;
-        self.opener_groups = state.run_state;
+        self.opener_run = state.run_state;
         self
     }
 }

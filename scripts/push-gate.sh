@@ -248,8 +248,8 @@ run_e2e_suite() {
   step "Restate e2e: agent-workbench"
   just agent-workbench-restate-e2e
 
-  step "Restate e2e: effect-group conformance"
-  just effect-group-conformance-e2e
+  step "Restate e2e: run-conformance conformance"
+  just run-conformance-e2e
 
   step "Restate/Postgres/S3 workers e2e"
   LASH_E2E_S3_PORT="${LASH_E2E_S3_PORT:-$((port_base + 40))}" \

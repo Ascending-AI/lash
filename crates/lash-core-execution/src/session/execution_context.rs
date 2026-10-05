@@ -146,7 +146,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// before exhaustion (ADR 0099 §7). Shared with the ledger through
     /// [`OpenerState`](crate::session::OpenerState): the opener's owner hands
     /// one state to every phase context it builds.
-    pub(crate) opener_groups: Arc<std::sync::Mutex<crate::session::OpenerRunRegistry>>,
+    pub(crate) opener_run: Arc<std::sync::Mutex<crate::session::OpenerRunRegistry>>,
     /// Retained request receipts used to commit each call's logical terminal.
     pub(crate) tool_requests: Arc<
         std::sync::Mutex<
@@ -481,7 +481,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
-            opener_groups: Arc::clone(&self.opener_groups),
+            opener_run: Arc::clone(&self.opener_run),
             tool_requests: Arc::clone(&self.tool_requests),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
         })

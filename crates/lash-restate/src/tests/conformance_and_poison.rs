@@ -288,7 +288,7 @@ mod recorded_execution_controls_live {
     }
 
     lash_conformance::turn_config_tests!(@law [
-        #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+        #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     ] {
         live_harness("recorded-controls-redrive").await
     }; (a_redrive_runs_under_the_execution_controls_its_run_recorded, "turn-config-recorded-controls-redrive"));
@@ -296,13 +296,13 @@ mod recorded_execution_controls_live {
     // FIG-4389's recorded termination law beside it: the redrive assembles
     // the terminal the run's recorded policy decides.
     lash_conformance::turn_config_tests!(@law [
-        #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+        #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     ] {
         live_harness("recorded-termination-redrive").await
     }; (a_redrive_assembles_the_terminal_its_run_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
 
     lash_conformance::turn_config_tests!(@law [
-        #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+        #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     ] {
         live_harness("recorded-request-defaults-redrive").await
     }; (a_redrive_calls_the_model_with_the_request_defaults_its_run_recorded, "turn-config-recorded-request-defaults-redrive"));
@@ -312,7 +312,7 @@ mod recorded_execution_controls_live {
 // attempts in that handler's journal, which the recording contexts cannot
 // serve (FIG-3397).
 lash_conformance::turn_runner_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness =
             Arc::new(conformance_harness::LiveConformanceHarness::start_for_tools().await);
@@ -355,7 +355,7 @@ lash_conformance::turn_runner_tests!(
 // LashProcessWorkflow on the law's worker, and the crash is a failed handler
 // attempt that Restate redelivers.
 lash_conformance::migrated_tools_redrive_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
@@ -390,7 +390,7 @@ lash_conformance::migrated_tools_redrive_tests!(
 // handler, its summarizer completion is journaled by the real server, and
 // each crash is a failed handler attempt Restate redelivers.
 lash_conformance::frame_open_redrive_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
@@ -407,7 +407,7 @@ lash_conformance::frame_open_redrive_tests!(
 // death is a failed handler attempt Restate redelivers, and the second input
 // is accepted in between.
 lash_conformance::queued_input_runs_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
@@ -426,7 +426,7 @@ lash_conformance::queued_input_runs_tests!(
 // `LashProcessWorkflow`, and the first emission's crash is a failed handler
 // attempt Restate redelivers.
 lash_conformance::bound_trigger_duplicate_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
@@ -483,7 +483,7 @@ fn declared_start_tier(
 }
 
 lash_conformance::declared_start_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let tier = declared_start_tier(&harness);
@@ -497,7 +497,7 @@ lash_conformance::declared_start_tests!(
 // recorded attempt of the turn's one Run. The process-bridge producer
 // executes its worker in the test process and stays on the in-process tiers.
 lash_conformance::tool_batch_parallelism_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
@@ -533,7 +533,7 @@ lash_conformance::tool_batch_parallelism_tests!(
 
 // The `batch` sugar laws (ADR 0116 §7.2) on live Restate.
 lash_conformance::batch_sugar_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
@@ -563,7 +563,7 @@ lash_conformance::batch_sugar_tests!(
 // redelivers. The process-admission law executes its worker in the test
 // process and stays on the double's tiers.
 lash_conformance::tool_call_identity_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         // Restate state outlives a run, so each run names its own sessions.
@@ -582,7 +582,7 @@ lash_conformance::tool_call_identity_tests!(
 // probe handler, a lost worker fails the attempt retryably, and Restate
 // redelivers the invocation, replaying its journal into the redrive.
 lash_conformance::vm_broker_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         // Restate state outlives a run: each run names its own sessions.
@@ -597,7 +597,7 @@ lash_conformance::vm_broker_tests!(
 // delivers again, and a lost substrate is the invocation killed and purged
 // through the admin API, then submitted afresh.
 lash_conformance::segment_redrive_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         // Restate state outlives a run: each run names its own processes.
@@ -614,7 +614,7 @@ lash_conformance::segment_redrive_tests!(
 // replays the invocation's journal against a head that already holds the
 // commit. The turn calls no tool, so it runs on the replay leg too.
 lash_conformance::admitted_head_redrive_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
@@ -746,7 +746,7 @@ lash_conformance::wake_delivery_conflict_tests!({
 // The session-config settlement laws on the Restate backend: its engine host
 // over one SQLite memory store set per law.
 lash_conformance::session_config_settlement_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = conformance_harness::LiveConformanceHarness::start().await;
         let make = harness.backend_factory();
@@ -755,7 +755,7 @@ lash_conformance::session_config_settlement_tests!(
 );
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+#[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
 async fn live_restate_executing_effect_quiescence_witness() {
     let harness = conformance_harness::LiveConformanceHarness::start().await;
     tokio::time::timeout(
@@ -768,7 +768,7 @@ async fn live_restate_executing_effect_quiescence_witness() {
 }
 
 lash_conformance::effect_host_await_event_witness_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    #[ignore = "requires an isolated Restate server; run by `just run-conformance-e2e`"]
     {
         let harness = Arc::new(conformance_harness::LiveConformanceHarness::start().await);
         let make = harness.effect_host_factory();

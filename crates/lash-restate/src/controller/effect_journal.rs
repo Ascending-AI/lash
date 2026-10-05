@@ -24,6 +24,9 @@ use serde::{Deserialize, Serialize};
 
 /// The effect-journal generation this build writes and replays.
 ///
+/// Historical command-stream changes (the retired group routes below are
+/// history, not current handlers):
+///
 /// 1: the first stamped generation (FIG-3672). Every entry written before the
 /// stamp existed is refused.
 /// 2: a turn's decision state rides its recorded outcomes (FIG-3672 P7). The

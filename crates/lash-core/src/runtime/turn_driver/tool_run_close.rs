@@ -61,16 +61,16 @@ impl<'run> RuntimeTurnDriver<'run> {
     }
 
     /// The opener's end ahead of the turn's terminal checkpoint: close,
-    /// finalize and incorporate every group the turn formed, so what the
+    /// finalize and incorporate the tool Run the turn opened, so what the
     /// losers' settlements carry — checkpoint messages, possession, usage —
     /// is delivered and committed by that checkpoint, before the turn's
     /// outcome (§7 step 2 precedes the outcome commit). Messages it delivers
     /// reopen the turn exactly as any checkpoint message at completion does.
-    pub(super) async fn finish_opener_groups_before_completion(&self) -> Result<(), RuntimeError> {
-        self.close_turn_groups().await.map(drop)
+    pub(super) async fn finish_tool_run_before_completion(&self) -> Result<(), RuntimeError> {
+        self.close_turn_tool_run().await.map(drop)
     }
 
-    /// Close, finalize and incorporate every group this turn's opener holds.
+    /// Close, finalize and incorporate this turn's tool Run.
     ///
     /// `run` passes its effect loop's result through: a clean loop whose end
     /// fails returns that failure, so the turn does not commit an outcome
@@ -78,7 +78,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     /// outcome commit), while an already-failed loop keeps its own error and
     /// the end's failure is only traced — the turn is not committing, and the
     /// recorded `closing` is what its retry resumes from. A turn that reached
-    /// its terminal checkpoint already ended its groups there; this pass then
+    /// its terminal checkpoint already ended its tool Run there; this pass then
     /// finds nothing left.
     ///
     /// A loop that aborts without a recorded cancellation — a live fault or
@@ -86,9 +86,9 @@ impl<'run> RuntimeTurnDriver<'run> {
     /// Closing under `Cancel` would
     /// cancel-decide a child whose run the fault interrupted, and the redrive
     /// would then serve that child's cancellation as its recorded outcome: the
-    /// live fault turned into an outcome after all. The groups stay live, and
-    /// the redrive's `recover_opener_groups` or its reopen runs them on.
-    pub(super) async fn end_opener_groups(
+    /// live fault turned into an outcome after all. The tool Run stays live, and
+    /// the redrive's `recover_tool_run` or its reopen runs them on.
+    pub(super) async fn end_tool_run(
         &self,
         result: Result<(crate::MessageSequence, usize), RuntimeError>,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
@@ -104,7 +104,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         {
             return result;
         }
-        match self.close_turn_groups().await {
+        match self.close_turn_tool_run().await {
             Ok(_) => result,
             Err(error) => match result {
                 Ok(_) => Err(error),
@@ -121,7 +121,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         }
     }
 
-    async fn close_turn_groups(&self) -> Result<(), RuntimeError> {
+    async fn close_turn_tool_run(&self) -> Result<(), RuntimeError> {
         if !self.opener_state.holds_tool_run() {
             return Ok(());
         }

@@ -389,11 +389,7 @@ fn a_key_fence_leaves_keys_outside_the_namespace_to_the_host() {
         upper: range.upper,
         refusal: divergence.into_error(&SealAttribution::default()),
     });
-    assert!(
-        guard
-            .admit(Some("effect-group-incorporate:elsewhere"))
-            .is_ok()
-    );
+    assert!(guard.admit(Some("run-incorporate:elsewhere")).is_ok());
     assert!(guard.admit(None).is_ok());
     assert!(guard.tripped().is_none());
 }

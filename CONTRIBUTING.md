@@ -196,7 +196,7 @@ offsets are stable:
   port's last decimal digit;
 - `+10` push/confidence PostgreSQL, `+11` push S3, `+12` mutation PostgreSQL;
 - `+30..+34` agent-workbench Restate, endpoint, and PostgreSQL;
-- `+35..+39` effect-group-conformance Restate (admin, ingress, node, two
+- `+35..+39` run-conformance Restate (admin, ingress, node, two
   endpoints); it is serialized by the
   checkout lock;
 - `+40` distributed-worker S3;

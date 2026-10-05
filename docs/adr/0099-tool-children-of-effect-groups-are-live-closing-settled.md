@@ -248,7 +248,7 @@ owner-death fences; they are not a second tool execution journal.
 ### 10. Aggregate laws
 
 **L1 — the four-way consumer mode is independent of the three-way wake policy.**
-`GroupWakePolicy` has exactly three variants — `First`, `FirstSuccess`, `All` —
+`RunAggregateWakePolicy` has exactly three variants — `First`, `FirstSuccess`, `All` —
 and `all` and `allSettled` share `All`: they ask for the same thing and differ
 only in how far the caller consumes. The wake policy is recorded admission
 identity; the consumer mode is a caller-side loop decision and is never

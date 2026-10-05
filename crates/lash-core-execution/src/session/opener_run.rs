@@ -39,7 +39,7 @@ impl OpenerState {
         self.ledger.lock_recover().absorb(ledger);
     }
 
-    /// Capture the logical Run's state without closing or consuming a group.
+    /// Capture the logical Run's state without closing or consuming the Run.
     #[must_use]
     pub fn snapshot(&self) -> crate::store::RunOpenerState {
         let registry = self.run_state.lock_recover();
@@ -133,13 +133,13 @@ impl RuntimeExecutionContext<'_> {
         }
         self.validate_process_run(&transfer, false)?;
         transfer.check_capture(crate::tool_run::CutPhase::Capturable)?;
-        self.opener_groups.lock_recover().run = Some(Box::new(transfer));
+        self.opener_run.lock_recover().run = Some(Box::new(transfer));
         Ok(())
     }
 
     /// Take the carried receipts to rebuild the successor's coordinator.
     pub fn take_run_continuation(&self) -> Option<crate::tool_run::RunTransfer> {
-        self.opener_groups
+        self.opener_run
             .lock_recover()
             .run
             .take()
@@ -153,7 +153,7 @@ impl RuntimeExecutionContext<'_> {
     pub fn run_continuation_snapshot(
         &self,
     ) -> Result<Option<crate::tool_run::RunTransfer>, crate::tool_run::ContinuationRefusal> {
-        let transfer = self.opener_groups.lock_recover().run.as_deref().cloned();
+        let transfer = self.opener_run.lock_recover().run.as_deref().cloned();
         if let Some(transfer) = &transfer {
             self.validate_process_run(transfer, false)?;
             transfer.check_capture(crate::tool_run::CutPhase::Capturable)?;
@@ -189,7 +189,7 @@ impl RuntimeExecutionContext<'_> {
         transfer
             .clone()
             .adopt(&owner, transfer.ledger()?.lifecycle(), successor)?;
-        self.opener_groups.lock_recover().run = Some(Box::new(transfer));
+        self.opener_run.lock_recover().run = Some(Box::new(transfer));
         Ok(())
     }
     fn validate_process_run(

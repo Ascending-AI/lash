@@ -6,7 +6,7 @@
 //! the only effect engine. The SQL effect-engine path was retired in
 //! 476264fbea, after the PostgreSQL engine deletion in 4f03596847. Effect
 //! records, tool-intent batches, await-event resolution and revocation,
-//! runtime-operation journaling and retirement, and the whole effect-group
+//! runtime-operation journaling and retirement, and the historical effect-group
 //! lifecycle — are not part of this surface.
 
 use super::*;

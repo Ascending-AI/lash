@@ -46,7 +46,7 @@ impl NamespaceFilterProbe for NamespaceFilterProbeImpl {
     reason = "the live suite supplies endpoint and server addresses"
 )]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires the pinned live Restate server: the effect-group suite runs it"]
+#[ignore = "requires the pinned live Restate server: the run-conformance suite runs it"]
 async fn every_admin_filter_excludes_foreign_and_dotted_namespaces() {
     let admin_url = std::env::var("RESTATE_ADMIN_URL").expect("live admin URL");
     let ingress_url = std::env::var("RESTATE_INGRESS_URL").expect("live ingress URL");

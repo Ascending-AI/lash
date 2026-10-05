@@ -15,7 +15,7 @@ use crate::{RuntimeServices, ToolProvider};
 
 mod execution_context;
 pub(crate) use execution_context::ToolObservationAttribution;
-mod opener_groups;
+mod opener_run;
 mod process_handles;
 mod settlement_incorporation;
 mod tool_attempt;
@@ -30,7 +30,7 @@ pub(crate) use execution_context::{
     attach_process_invocation_correlation, attach_process_lineage,
     clear_process_invocation_correlation, execution_claim_of, process_lineage_of,
 };
-pub use opener_groups::{OpenerRunRegistry, OpenerState};
+pub use opener_run::{OpenerRunRegistry, OpenerState};
 pub use settlement_incorporation::{Incorporated, IncorporationLedger, SettlementSource};
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{

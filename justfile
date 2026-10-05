@@ -125,7 +125,7 @@ workbench-continue-as-budget-gate:
   kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=continue_as_warning_override --test_output=errors
   kiln test //crates/lash-protocol-rlm:protocol_drivers__test --test_arg=scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_seed --test_output=errors
 
-# The regression gate for the Restate effect-group choreography. Its suites are
+# The regression gate for the Restate tool Run contract. Its suites are
 # `#[ignore]`d because they need a Restate server, so this recipe is the only
 # thing that runs them: `scripts/ci/restate_suite.py` selects remote actions
 # that run every ignored law of the suite (they ask libtest for
@@ -134,25 +134,25 @@ workbench-continue-as-budget-gate:
 # laws again with every await suspended and replayed (the replay leg). The
 # suite's filters are registered in `scripts/restate-suites.toml`, its replay
 # divergences in `scripts/restate-divergences/`.
-effect-group-conformance-e2e:
+run-conformance-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
   source "{{repo}}/scripts/worktree-gate-env.sh"
-  lash_gate_acquire_locks effect-group-conformance-e2e
+  lash_gate_acquire_locks run-conformance-e2e
 
   # The test binaries run with the crate dir as cwd, so a relative artifact
   # dir (which is what CI exports) is anchored at the repo root.
-  artifacts="${LASH_EFFECT_GROUP_ARTIFACT_DIR:-target/functional-e2e-artifacts/effect-group-conformance}"
+  artifacts="${LASH_RUN_CONFORMANCE_ARTIFACT_DIR:-target/functional-e2e-artifacts/run-conformance}"
   case "$artifacts" in
     /*) ;;
     *) artifacts="{{repo}}/$artifacts" ;;
   esac
   mkdir -p "$artifacts"
 
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg live \
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite run-conformance --leg live \
     --artifacts "$artifacts"
 
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg replay \
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite run-conformance --leg replay \
     --artifacts "$artifacts"
 
   # Run-control's crash-gap laws run on both server legs (FIG-4516).

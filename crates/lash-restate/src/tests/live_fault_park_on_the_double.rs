@@ -64,7 +64,7 @@ mod over_postgres {
     use super::*;
 
     lash_conformance::live_fault_park_tests!(
-        #[ignore = "requires isolated PostgreSQL; run through the effect-group suite with pg16"]
+        #[ignore = "requires isolated PostgreSQL; run through the run-conformance suite with pg16"]
         {
             double_fixture(HarnessStoreTier::Postgres, "postgres").await
         }
@@ -77,7 +77,7 @@ mod live {
     use super::*;
 
     lash_conformance::live_fault_park_tests!(
-        #[ignore = "requires an isolated Restate server; run by the effect-group suite"]
+        #[ignore = "requires an isolated Restate server; run by the run-conformance suite"]
         {
             fixture(LiveConformanceHarness::start_for_tools().await, "live")
         }

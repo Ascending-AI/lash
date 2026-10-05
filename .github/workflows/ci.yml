@@ -2314,7 +2314,7 @@ jobs:
         if: env.RUN_FUNCTIONAL_E2E == 'true'
         env:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
-          LASH_EFFECT_GROUP_ARTIFACT_DIR: target/functional-e2e-artifacts/effect-group-conformance
+          LASH_RUN_CONFORMANCE_ARTIFACT_DIR: target/functional-e2e-artifacts/run-conformance
           AGENT_WORKBENCH_E2E_ARTIFACT_DIR: target/functional-e2e-artifacts/agent-workbench
         run: |
           set -euo pipefail

@@ -74,11 +74,13 @@ pub enum AggregateConsumer {
 
 impl AggregateConsumer {
     #[must_use]
-    pub const fn wake(self) -> lash_sansio::GroupWakePolicy {
+    pub const fn wake(self) -> lash_sansio::RunAggregateWakePolicy {
         match self {
-            Self::Race => lash_sansio::GroupWakePolicy::First,
-            Self::Any => lash_sansio::GroupWakePolicy::FirstSuccess,
-            Self::All | Self::AllSettled | Self::ListBatch => lash_sansio::GroupWakePolicy::All,
+            Self::Race => lash_sansio::RunAggregateWakePolicy::First,
+            Self::Any => lash_sansio::RunAggregateWakePolicy::FirstSuccess,
+            Self::All | Self::AllSettled | Self::ListBatch => {
+                lash_sansio::RunAggregateWakePolicy::All
+            }
         }
     }
 }

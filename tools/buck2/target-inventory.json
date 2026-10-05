@@ -54732,10 +54732,6 @@
       "live": "//crates/lash:restate_drain_hand_over_postgres_live",
       "replay": "//crates/lash:restate_drain_hand_over_postgres_replay"
     },
-    "effect-group": {
-      "live": "//crates/lash-restate:restate_effect_group_live",
-      "replay": "//crates/lash-restate:restate_effect_group_replay"
-    },
     "host-send-wait": {
       "live": "//crates/lash-restate-test:restate_host_send_wait_live",
       "replay": "//crates/lash-restate-test:restate_host_send_wait_replay"
@@ -54787,6 +54783,10 @@
     "replay-after-advance": {
       "live": "//crates/lash:restate_replay_after_advance_live",
       "replay": "//crates/lash:restate_replay_after_advance_replay"
+    },
+    "run-conformance": {
+      "live": "//crates/lash-restate:restate_run_conformance_live",
+      "replay": "//crates/lash-restate:restate_run_conformance_replay"
     },
     "run-control": {
       "live": "//crates/lash-restate:restate_run_control_live",
@@ -54849,14 +54849,14 @@
       "//crates/lash-restate-test:restate_session_shifts_replay",
       "//crates/lash-restate:restate_attachment_attach_live",
       "//crates/lash-restate:restate_attachment_attach_replay",
-      "//crates/lash-restate:restate_effect_group_live",
-      "//crates/lash-restate:restate_effect_group_replay",
       "//crates/lash-restate:restate_process_await_live",
       "//crates/lash-restate:restate_process_await_replay",
       "//crates/lash-restate:restate_refused_successor_drain_live",
       "//crates/lash-restate:restate_refused_successor_drain_replay",
       "//crates/lash-restate:restate_remote_cancellation_live",
       "//crates/lash-restate:restate_remote_cancellation_replay",
+      "//crates/lash-restate:restate_run_conformance_live",
+      "//crates/lash-restate:restate_run_conformance_replay",
       "//crates/lash-restate:restate_run_control_live",
       "//crates/lash-restate:restate_run_control_replay",
       "//crates/lash:restate_drain_hand_over_live",

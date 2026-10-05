@@ -28,7 +28,7 @@ Duplicate aliases consume one unique call. Empty aggregates retain their
 language semantics; an empty race never fabricates a result.
 
 Timer leaves and admitted effect handles use `AggregatePlan`, recorded timer
-admission and the Run's selection schedule. `GroupWakePolicy` remains a sansio
+admission and the Run's selection schedule. `RunAggregateWakePolicy` remains a sansio
 consumer-policy enum; it is not a service or execution owner.
 
 An early result leaves losing calls live under the logical Run. Program effects

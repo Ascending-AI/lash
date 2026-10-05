@@ -427,26 +427,6 @@
       },
       "type": "object"
     },
-    "GroupWakePolicy": {
-      "description": "Aggregate wake rule. Run-owned aggregates preserve these semantics;\nthe rule does not require a durable group dispatcher.\n\n`Promise.all` and `Promise.allSettled` both use [`All`](Self::All): the\ncaller's early exit on rejection is not a host wake rule. The wire shape\nhas no default, so a missing rule cannot be replayed under a guess.",
-      "oneOf": [
-        {
-          "const": "first",
-          "description": "Wake on the first settlement of any kind.",
-          "type": "string"
-        },
-        {
-          "const": "first_success",
-          "description": "Wake on the first success, or after every child fails.",
-          "type": "string"
-        },
-        {
-          "const": "all",
-          "description": "Deliver every settlement in durable rank order.",
-          "type": "string"
-        }
-      ]
-    },
     "InvalidSchemaKind": {
       "enum": [
         "null",
@@ -640,6 +620,26 @@
         "backoff"
       ],
       "type": "string"
+    },
+    "RunAggregateWakePolicy": {
+      "description": "Aggregate wake rule. Run-owned aggregates preserve these semantics;\nthe rule does not require a durable group dispatcher.\n\n`Promise.all` and `Promise.allSettled` both use [`All`](Self::All): the\ncaller's early exit on rejection is not a host wake rule. The wire shape\nhas no default, so a missing rule cannot be replayed under a guess.",
+      "oneOf": [
+        {
+          "const": "first",
+          "description": "Wake on the first settlement of any kind.",
+          "type": "string"
+        },
+        {
+          "const": "first_success",
+          "description": "Wake on the first success, or after every child fails.",
+          "type": "string"
+        },
+        {
+          "const": "all",
+          "description": "Deliver every settlement in durable rank order.",
+          "type": "string"
+        }
+      ]
     },
     "SchemaAdmissionError": {
       "oneOf": [
@@ -2394,11 +2394,11 @@
               "type": "integer"
             },
             "type": {
-              "const": "effect_group",
+              "const": "run_aggregate",
               "type": "string"
             },
             "wake": {
-              "$ref": "#/$defs/GroupWakePolicy"
+              "$ref": "#/$defs/RunAggregateWakePolicy"
             }
           },
           "required": [

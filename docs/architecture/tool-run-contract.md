@@ -328,7 +328,7 @@ an effect the caller issued before the drain keeps progressing while a
 final's declarations are held. Concurrent attempts and their recorded
 schedule are FIG-4879's. The laws are
 `crates/lash-restate/src/tests/run_coordinator_on_the_double.rs`, including
-the drain-transitivity oracle ported from `effect_group_drain_transitivity`.
+the drain-transitivity oracle ported from the historical `effect_group_drain_transitivity`.
 
 **Attempt stream (FIG-4880).** The bounded stream a body emits belongs to its
 attempt's capture (X): `SingletonAttempt::stream` is an

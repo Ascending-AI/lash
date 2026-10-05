@@ -1,7 +1,7 @@
 //! Endpoint and store support for native Run, process and scope laws.
 #![allow(clippy::disallowed_methods)]
 use super::live_turn_probe::ConformanceTurnProbe as _;
-pub(super) const HARNESS_BUILD: &str = "effect-group-conformance";
+pub(super) const HARNESS_BUILD: &str = "run-conformance";
 use crate::durable_wait::arm_wait_registration_witness;
 use crate::process::{LashProcessWorkflowImpl, RestateProcessRunner};
 use crate::{
@@ -52,7 +52,7 @@ impl RestateProcessRunner for ToolProcessRunner {
         Ok(lash_core::ProcessRunOutcome::Terminal {
             output: Box::new(lash_core::ProcessAwaitOutput::from_tool_output(
                 lash_core::ToolCallOutput::success(serde_json::json!({
-                    "runner": "effect-group-conformance"
+                    "runner": "run-conformance"
                 })),
             )),
             prelude: Vec::new(),
@@ -163,7 +163,7 @@ impl RestateProcessRunner for LawProcessRunner {
 /// Which Restate server a harness executes its endpoint through.
 #[derive(Clone)]
 pub(super) enum HarnessServer {
-    /// A live `restate-server` (the `just effect-group-conformance-e2e`
+    /// A live `restate-server` (the `just run-conformance-e2e`
     /// gate): the endpoint serves over TCP and registers through the admin
     /// API the environment names.
     Live,
@@ -333,7 +333,7 @@ impl LiveConformanceHarness {
             (Some((admin_url, bind_addr, endpoint_url)), _) => {
                 let listener = tokio::net::TcpListener::bind(bind_addr)
                     .await
-                    .expect("bind Restate effect-group endpoint");
+                    .expect("bind Restate run-conformance endpoint");
                 let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
                 let server = tokio::spawn(async move {
                     crate::serve_endpoint(
@@ -354,7 +354,7 @@ impl LiveConformanceHarness {
                 server
                     .register(endpoint)
                     .await
-                    .expect("register the effect-group endpoint on the server double");
+                    .expect("register the run-conformance endpoint on the server double");
                 (None, None)
             }
             (None, HarnessAdmin::Live { .. }) => {
@@ -397,7 +397,7 @@ impl LiveConformanceHarness {
             crate::RestateIngressClient::new(self.connection.clone()),
             self.session_shifts.clone(),
             lash_core::engine::EngineGeneration::fixed(
-                lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
+                lash_core::engine::BuildGeneration::for_test("run-conformance"),
             ),
             crate::RestateNamespace::default(),
             Arc::new(crate::session_control::RestateSessionControl {
@@ -409,7 +409,7 @@ impl LiveConformanceHarness {
                 processes: self.stores.process_registry(),
                 continuations: self.stores.process_continuations(),
                 generation: lash_core::engine::EngineGeneration::fixed(
-                    lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
+                    lash_core::engine::BuildGeneration::for_test("run-conformance"),
                 ),
                 sessions: self.stores.session_store_factory(),
             }),
@@ -566,7 +566,7 @@ impl LiveConformanceHarness {
                             .expect("valid authority"),
                     )
                     .stamped(lash_core::engine::BuildGeneration::for_test(
-                        "effect-group-conformance",
+                        "run-conformance",
                     )),
                 )))
             })
@@ -604,7 +604,7 @@ impl LiveConformanceHarness {
             let _ = shutdown_tx.send(());
         }
         if let Some(server) = self.server.lock().await.take() {
-            server.await.expect("Restate effect-group endpoint task");
+            server.await.expect("Restate run-conformance endpoint task");
         }
         if let Some(census) = census {
             match census {
@@ -943,7 +943,7 @@ pub(super) async fn open_invocations(admin: &HarnessAdmin) -> HashMap<String, St
 
 fn required(name: &str) -> String {
     std::env::var(name)
-        .unwrap_or_else(|_| panic!("{name} must be set by `just effect-group-conformance-e2e`"))
+        .unwrap_or_else(|_| panic!("{name} must be set by `just run-conformance-e2e`"))
 }
 
 async fn wait_for_endpoint(addr: SocketAddr) {
@@ -954,7 +954,7 @@ async fn wait_for_endpoint(addr: SocketAddr) {
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "Restate effect-group endpoint did not open at {addr}"
+            "Restate run-conformance endpoint did not open at {addr}"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -974,7 +974,7 @@ async fn register_deployment(admin_url: &str, endpoint_url: &str) {
         }))
         .send()
         .await
-        .expect("register Restate effect-group deployment");
+        .expect("register Restate run-conformance deployment");
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     assert!(

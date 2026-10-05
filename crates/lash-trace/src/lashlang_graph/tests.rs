@@ -1092,7 +1092,7 @@ fn sleep_wait_uses_record_time_and_completion_dominates_permutations() {
 }
 
 #[test]
-fn signal_and_effect_group_waits_keep_the_observed_awaited_identity() {
+fn signal_and_run_aggregate_waits_keep_the_observed_awaited_identity() {
     use lash_sansio::ExecutionNodeKind as Kind;
     let signal = record_at(
         node_waiting(
@@ -1106,20 +1106,20 @@ fn signal_and_effect_group_waits_keep_the_observed_awaited_identity() {
         ),
         100,
     );
-    let group = record_at(
+    let aggregate = record_at(
         node_waiting(
             "tool",
             Kind::ResourceOperation,
             1,
-            crate::TraceNodeAwaited::EffectGroup {
+            crate::TraceNodeAwaited::RunAggregate {
                 group_key: "scope:group:batch:1".to_string(),
                 position: 2,
-                wake: lash_sansio::GroupWakePolicy::FirstSuccess,
+                wake: lash_sansio::RunAggregateWakePolicy::FirstSuccess,
             },
         ),
         200,
     );
-    let graph = TraceLashlangGraphStore::fold(None, &[signal, group]).expect("wait graph");
+    let graph = TraceLashlangGraphStore::fold(None, &[signal, aggregate]).expect("wait graph");
     assert!(graph.nodes.iter().any(|node| matches!(
         &node.observation,
         TraceLashlangNodeObservation::Waiting {
@@ -1130,10 +1130,10 @@ fn signal_and_effect_group_waits_keep_the_observed_awaited_identity() {
     assert!(graph.nodes.iter().any(|node| matches!(
         &node.observation,
         TraceLashlangNodeObservation::Waiting {
-            awaited: crate::TraceNodeAwaited::EffectGroup {
+            awaited: crate::TraceNodeAwaited::RunAggregate {
                 group_key,
                 position: 2,
-                wake: lash_sansio::GroupWakePolicy::FirstSuccess,
+                wake: lash_sansio::RunAggregateWakePolicy::FirstSuccess,
             },
             ..
         } if group_key == "scope:group:batch:1"

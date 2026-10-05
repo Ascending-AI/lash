@@ -31,7 +31,7 @@
 # started, or since the last progress marker it wrote (the runner's
 # `PROGRESS_MARKER`). A test that writes none is bounded end to end.
 
-[suites.effect-group]
+[suites.run-conformance]
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"
 filters = [
@@ -50,7 +50,7 @@ shards = 3
 # (FIG-4309).
 timeout_seconds = 360
 
-[suites.effect-group.replay]
+[suites.run-conformance.replay]
 # Every replay failure gates the suite. Remaining held-back laws have their
 # own ticket and reason in scripts/restate-divergences/.
 

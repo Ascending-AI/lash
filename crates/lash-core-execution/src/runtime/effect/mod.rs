@@ -54,7 +54,7 @@ pub use executor::{
 pub use identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
 };
-pub use lash_sansio::GroupWakePolicy;
+pub use lash_sansio::RunAggregateWakePolicy;
 pub use lash_sansio::{CausalRef, EffectAddress};
 #[cfg(any(test, feature = "testing"))]
 pub use layered_host::{EffectLayer, LayeredEffectHost};
