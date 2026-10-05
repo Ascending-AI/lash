@@ -279,6 +279,7 @@ PACKAGE_DEPS = {
             "jsonschema": "//third-party/rust:p0196",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_typescript": "//crates/lash-typescript:lash-typescript",
+            "lashlang": "//crates/lashlang:lashlang",
             "proptest": "//third-party/rust:p0263",
             "tokio": "//third-party/rust:p0399"
         },

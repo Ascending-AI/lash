@@ -511,6 +511,23 @@ mod tests {
             .expect("valid metadata")
     }
 
+    /// Recorded owners expose the recorded prompt budget, independently of
+    /// output capacity (ADR 0026), through both binding and session config.
+    #[test]
+    fn recorded_profile_and_config_preserve_the_prompt_budget() {
+        for prompt_budget in [1, 8_192, 200_000] {
+            let metadata = LlmProfileMetadata::builder("provider/model")
+                .context_window_tokens(prompt_budget)
+                .output_token_capacity(1_024)
+                .build()
+                .expect("valid metadata");
+            let recorded = RecordedLlmProfile::mint("host/model".into(), metadata);
+            assert_eq!(recorded.context_window_tokens(), prompt_budget);
+            let config = LlmProfileConfig::new(recorded);
+            assert_eq!(config.context_window_tokens(), prompt_budget);
+        }
+    }
+
     #[test]
     fn output_token_limits_validate_stored_facts_and_reject_the_old_shape() {
         for wire in [

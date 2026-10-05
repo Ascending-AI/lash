@@ -66,7 +66,9 @@ url = { workspace = true }
 # versioned dev-dependency back onto it would be a publish cycle (a
 # versioned dev-dep survives into the published manifest and has to
 # resolve on the index). Path-only dev-deps are stripped when packaging.
-lash-typescript = { package = "lash-internal-typescript", path = "../lash-typescript" }
+lash-typescript = { package = "lash-internal-typescript", path = "../lash-typescript", features = ["testing"] }
+# Integration tests use this crate's AST builders and batch-answer helpers.
+lashlang = { package = "lash-internal-lashlang", path = ".", features = ["testing"] }
 criterion = { version = "0.5", features = ["async_tokio"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
