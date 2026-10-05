@@ -19,7 +19,7 @@ use lash_core::engine::{
     shift_admission_replay_key,
 };
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::{RestateTestServer, ServerConfig};
+use lash_restate_test::{RestateTestServer, ServerConfig, TimeMode};
 use restate_sdk::endpoint::{HandlerOptions, ServiceOptions};
 use restate_sdk::service::Service;
 use restate_sdk::service::macro_support::ServiceBoxFuture;
@@ -30,6 +30,14 @@ use crate::session_shifts::{
 };
 
 const MAX_ATTEMPTS: u64 = 3;
+
+/// The handler options of the laws that crash and swap a held attempt: a
+/// small attempt budget, then pause.
+fn held_options() -> HandlerOptions {
+    HandlerOptions::new()
+        .retry_policy_max_attempts(MAX_ATTEMPTS)
+        .retry_policy_pause_on_max_attempts()
+}
 
 /// The one service of the swapped deployment: whichever build is current
 /// serves each request.
@@ -166,9 +174,11 @@ where
     async fn start(
         seed: u64,
         handler: &str,
+        options: HandlerOptions,
+        time: TimeMode,
         build: impl Fn(RestateSessionShiftsSlot, lash_core::engine::BuildGeneration) -> S,
     ) -> Self {
-        let server = RestateTestServer::new(ServerConfig::default().with_seed(seed))
+        let server = RestateTestServer::new(ServerConfig::default().with_seed(seed).time(time))
             .expect("start the server double");
         let connection =
             RestateConnection::with_transport(server.ingress_url(), server.transport());
@@ -186,14 +196,7 @@ where
             },
             S::discover(),
         )
-        .options(
-            ServiceOptions::new().handler(
-                handler,
-                HandlerOptions::new()
-                    .retry_policy_max_attempts(MAX_ATTEMPTS)
-                    .retry_policy_pause_on_max_attempts(),
-            ),
-        );
+        .options(ServiceOptions::new().handler(handler, options));
         let endpoint = Endpoint::builder().bind(definition);
         let endpoint = if handler == "shift" {
             endpoint.bind(
@@ -257,7 +260,9 @@ where
     /// The law, once the first attempt is held past its first recorded step:
     /// `steps` are the run commands the handler journaled up to it, the first
     /// of which carries the generation.
-    async fn replays_parked_under_another_generation(&self, target: &str, steps: &[String]) {
+    /// `target`'s invocation, once its first attempt is held past its first
+    /// recorded step.
+    async fn held(&self, target: &str) -> lash_restate_test::InvocationView {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
         while self.shifts.passes.load(Ordering::SeqCst) == 0 {
             assert!(
@@ -266,12 +271,15 @@ where
             );
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        let invocation = self
-            .server
+        self.server
             .invocations()
             .into_iter()
             .find(|view| view.target == target)
-            .expect("the invocation");
+            .expect("the invocation")
+    }
+
+    async fn replays_parked_under_another_generation(&self, target: &str, steps: &[String]) {
+        let invocation = self.held(target).await;
         let journaled = self.commands(&invocation.id);
         let mut expected: Vec<_> = std::iter::once((MessageType::InputCommand, None))
             .chain(
@@ -363,15 +371,21 @@ where
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_session_shift_replayed_under_another_generation_parks_at_its_leg_start() {
-    let swap = Swap::start(0x3980_5e55, "shift", |slot, generation| {
-        LashSessionImpl::new(
-            slot,
-            test_restate_authority_id(),
-            generation,
-            &crate::services::DEFAULT_NAMESPACE,
-        )
-        .serve()
-    })
+    let swap = Swap::start(
+        0x3980_5e55,
+        "shift",
+        held_options(),
+        TimeMode::auto(),
+        |slot, generation| {
+            LashSessionImpl::new(
+                slot,
+                test_restate_authority_id(),
+                generation,
+                &crate::services::DEFAULT_NAMESPACE,
+            )
+            .serve()
+        },
+    )
     .await;
     let session = SessionId::from("folded");
     let request = ShiftRequestId::new("r-folded");
@@ -422,9 +436,17 @@ async fn a_session_shift_replayed_under_another_generation_parks_at_its_leg_star
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_run_execution_replayed_under_another_generation_parks_at_its_first_step() {
-    let swap = Swap::start(0x3980_7a11, "run", |slot, generation| {
+/// A `LashTurn` deployment of `G_a`'s run handler, swappable to `G_b`, with
+/// `options` on its `run` handler; and the target of the run it was sent.
+async fn run_swap(
+    seed: u64,
+    options: HandlerOptions,
+    time: TimeMode,
+) -> (
+    Swap<impl Service<Future = ServiceBoxFuture> + Discoverable + Send + Sync + 'static>,
+    String,
+) {
+    let swap = Swap::start(seed, "run", options, time, |slot, generation| {
         LashTurnImpl::new(
             slot,
             test_restate_authority_id(),
@@ -435,9 +457,8 @@ async fn a_run_execution_replayed_under_another_generation_parks_at_its_first_st
         .serve()
     })
     .await;
-    let session = SessionId::from("folded");
     let request = ShiftRequest {
-        session: session.clone(),
+        session: SessionId::from("folded"),
         request: ShiftRequestId::new("r-folded"),
         intended_lane: None,
     };
@@ -457,12 +478,80 @@ async fn a_run_execution_replayed_under_another_generation_parks_at_its_first_st
         )
         .await
         .expect("send the run run");
+    (swap, format!("LashTurn/{key}/run"))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_execution_replayed_under_another_generation_parks_at_its_first_step() {
+    let (swap, target) = run_swap(0x3980_7a11, held_options(), TimeMode::auto()).await;
     swap.replays_parked_under_another_generation(
-        &format!("LashTurn/{key}/run"),
+        &target,
         &[format!(
             "lash:{}",
             shift_admission_replay_key(&ShiftRequestId::new("r-folded"), 0)
         )],
     )
     .await;
+}
+
+/// FIG-5081: a run refused under another generation pauses on the turn
+/// handler's own retry ladder, not the server's. On a server with Restate's
+/// stock ladder (500 ms doubling to a minute: about 64 s across a turn
+/// handler's attempts) every attempt of the swapped build refuses the kept
+/// journal, and the invocation pauses within half a minute of virtual time
+/// after the held attempt died, ready for a redrive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_refused_under_another_generation_pauses_within_half_a_minute() {
+    let (swap, target) =
+        run_swap(0x5081_7a11, crate::turn_handler_options(), TimeMode::Manual).await;
+    let invocation = swap.held(&target).await;
+    *swap.current.lock_recover() = Arc::clone(&swap.swapped);
+    let died_at = swap.server.now_ms();
+    assert!(swap.server.crash(&invocation.id), "crash the held attempt");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let paused = loop {
+        let view = swap
+            .server
+            .invocations()
+            .into_iter()
+            .find(|view| view.id == invocation.id)
+            .expect("the invocation");
+        if view.status == "paused" {
+            break view;
+        }
+        let timers = swap.server.timers();
+        if !timers.is_empty() {
+            assert!(
+                timers
+                    .iter()
+                    .all(|timer| timer.invocation == invocation.id && timer.kind == "retry"),
+                "only the refused run's retry is pending: {timers:#?}"
+            );
+            swap.server.fire_next_timer();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "`{target}` never paused: {view:#?}"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    };
+    let failure = paused
+        .last_failure
+        .clone()
+        .expect("the refused attempt's failure")
+        .1;
+    assert!(
+        failure.contains("RetiredGeneration"),
+        "every retry refused the kept journal: {failure}"
+    );
+    assert_eq!(
+        u64::from(paused.retry_count),
+        crate::TURN_HANDLER_MAX_ATTEMPTS,
+        "the run paused at its attempt budget: {paused:#?}"
+    );
+    let waited = swap.server.now_ms() - died_at;
+    assert!(
+        waited <= 30_000,
+        "the refused run paused {waited} ms after its held attempt died, on the server's ladder"
+    );
 }

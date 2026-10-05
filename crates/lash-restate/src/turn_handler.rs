@@ -12,7 +12,10 @@
 //! Every attempt of a diverged invocation refuses the same way, so a turn
 //! handler bounds them: after [`TURN_HANDLER_MAX_ATTEMPTS`] the invocation
 //! pauses instead of burning retries, keeping its journal for an operator to
-//! resume, cancel, or fork.
+//! resume, cancel, or fork. The handler also paces those attempts itself
+//! (FIG-5081): on the server's default ladder (Restate's: 500 ms doubling to a
+//! minute) a park would sit backing off for about a minute before it pauses
+//! and can be redriven.
 //!
 //! [`parked_turn_failure`] is the one way a handler ends a parked attempt.
 //! It is a retryable failure, because nothing else can end it: a park is
@@ -30,10 +33,25 @@ use restate_sdk::service::{IntoServiceDefinition, ServiceDefinition};
 /// mirrors the in-process driver's transient attempt budget.
 pub const TURN_HANDLER_MAX_ATTEMPTS: u64 = 8;
 
+/// The delay before a turn handler's first retry; each later one doubles it,
+/// up to [`TURN_HANDLER_RETRY_MAX_INTERVAL`].
+const TURN_HANDLER_RETRY_INITIAL_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(500);
+
+/// The longest delay between two attempts of a turn handler.
+const TURN_HANDLER_RETRY_MAX_INTERVAL: std::time::Duration = std::time::Duration::from_secs(4);
+
 /// The options of a handler that runs a lash turn: at most
-/// [`TURN_HANDLER_MAX_ATTEMPTS`] attempts, then pause.
+/// [`TURN_HANDLER_MAX_ATTEMPTS`] attempts, 500 ms apart doubling to 4 s,
+/// then pause. An invocation whose every attempt fails — a parked turn, or a
+/// deployment down for good — pauses about 20 s after its first failure,
+/// whatever retry ladder the server defaults to; a deployment back within
+/// that window is retried through.
 pub fn turn_handler_options() -> HandlerOptions {
     HandlerOptions::new()
+        .retry_policy_initial_interval(TURN_HANDLER_RETRY_INITIAL_INTERVAL)
+        .retry_policy_exponentiation_factor(2.0)
+        .retry_policy_max_interval(TURN_HANDLER_RETRY_MAX_INTERVAL)
         .retry_policy_max_attempts(TURN_HANDLER_MAX_ATTEMPTS)
         .retry_policy_pause_on_max_attempts()
 }

@@ -2783,9 +2783,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Exceeds e2e_h3__test's 300 s Kiln test timeout: on the replay leg each RetiredGeneration park waits 70-150 s of Restate retry backoff before the journal pauses (crates/lash-upgrade-harness/tests/e2e/park.rs:47; turn refused 19:03:11, paused 19:05:40; operation refused 19:06:00, paused 19:07:12), so park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_replay is killed at 5:00.2 before its redrive/cancel race; receipt .kiln/FIG-5056/proof/case-5 in the FIG-5056 fork.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
+            "test": "park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_replay"
+          }
         },
         {
           "variant": "default",
