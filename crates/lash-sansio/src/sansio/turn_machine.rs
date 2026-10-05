@@ -113,19 +113,26 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
     }
 
-    pub fn waiting_tool_results(
+    /// The tool round the machine waits on, if that is what it waits on: its
+    /// calls while the runtime has not admitted them, its settled dispatch
+    /// state once it has, and how its slots fold back into the response.
+    pub fn waiting_tool_round(
         &self,
-    ) -> Option<(&serde_json::Value, &crate::sansio::ToolExpansionPlan)> {
+    ) -> Option<(
+        &[PendingToolCall],
+        Option<&serde_json::Value>,
+        &crate::sansio::ToolExpansionPlan,
+    )> {
         match &self.state {
             MachineState::Waiting {
                 work:
                     PendingWork::WaitingForToolResults {
-                        settled: Some(state),
+                        calls,
+                        settled,
                         expansion,
-                        ..
                     },
                 ..
-            } => Some((state, expansion)),
+            } => Some((calls, settled.as_ref(), expansion)),
             _ => None,
         }
     }

@@ -1,13 +1,16 @@
 //! A turn's segment boundary (FIG-4739): the quiet point at which a physical
 //! turn ends so its logical run goes on in a new invocation.
 //!
-//! A boundary is taken before a later model call or after every tool dispatch
-//! has settled and the Run owns its pending completions. The successor picks
+//! A boundary is taken before a later model call, after every tool dispatch
+//! has settled and the Run owns its pending completions, or when a drain's
+//! frozen Run refuses a tool round's admission (FIG-5075). The successor picks
 //! up committed history and the owed waiting phase without repeating the
-//! model call or dispatch. A boundary is never proactive: it is taken because the
-//! invocation's journal reached its budget, or because the build it runs on
-//! asked the turn to hand over, and both answers are recorded facts, so a
-//! replay ends the turn where its first execution did.
+//! model call or dispatch: it admits a refused round from the calls the model
+//! call recorded, and awaits an admitted one. A boundary is never proactive:
+//! it is taken because the invocation's journal reached its budget, or
+//! because the build it runs on asked the turn to hand over, and both answers
+//! are recorded facts, so a replay ends the turn where its first execution
+//! did.
 
 use super::*;
 
@@ -200,7 +203,10 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
     ) -> Result<(), RuntimeError> {
         if let Some(tools) = self.segment.resume_tools.take() {
-            let (state, expansion) = serde_json::from_value(tools).map_err(|error| {
+            // A round the predecessor's Run refused at admission owes its
+            // calls, and this turn admits them; an admitted round owes its
+            // settled dispatch, and this turn awaits it (FIG-5075).
+            let (calls, settled, expansion) = serde_json::from_value(tools).map_err(|error| {
                 RuntimeError::new(
                     RuntimeErrorCode::ExecutionStateCaptureFailed,
                     error.to_string(),
@@ -208,8 +214,8 @@ impl RuntimeTurnDriver<'_> {
             })?;
             self.segment.model_calls = 1;
             machine.resume_with(crate::sansio::PendingWork::WaitingForToolResults {
-                calls: Vec::new(),
-                settled: Some(state),
+                calls,
+                settled,
                 expansion,
             });
         }
@@ -229,19 +235,22 @@ impl RuntimeTurnDriver<'_> {
         Ok(())
     }
 
+    /// Ends the turn at a segment boundary while it waits on a tool round,
+    /// owing the round to the successor: its unadmitted calls, or its settled
+    /// dispatch state.
     pub(super) async fn end_waiting_for_tool_results(
         &mut self,
         machine: &mut TurnMachine,
         run_offset: usize,
         reason: crate::BoundaryReason,
     ) -> Result<(), RuntimeError> {
-        let (state, expansion) = machine.waiting_tool_results().ok_or_else(|| {
+        let round = machine.waiting_tool_round().ok_or_else(|| {
             RuntimeError::new(
                 RuntimeErrorCode::ExecutionStateCaptureFailed,
-                "a tool wait handed over without its settled round",
+                "a tool round handed over while the turn waited on none",
             )
         })?;
-        let tools = serde_json::to_value((state, expansion)).map_err(|error| {
+        let tools = serde_json::to_value(round).map_err(|error| {
             RuntimeError::new(
                 RuntimeErrorCode::ExecutionStateCaptureFailed,
                 error.to_string(),

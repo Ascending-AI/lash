@@ -433,9 +433,10 @@ impl RuntimeTurnDriver<'_> {
             Ok(super::tools::ToolRoundAdmission::Refused(results)) => {
                 return self.deliver_tool_results(machine, id, results);
             }
-            Err(err) => {
-                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
-                return Ok(());
+            Err(error) => {
+                return self
+                    .end_unanswered_tool_round(machine, run_offset, error)
+                    .await;
             }
         };
         let state = serde_json::to_value(round).map_err(|error| {
@@ -463,6 +464,26 @@ impl RuntimeTurnDriver<'_> {
                 .end_waiting_for_tool_results(machine, run_offset, reason)
                 .await;
         }
+        Ok(())
+    }
+
+    /// Ends the turn's wait on a tool round the Run did not answer, whether
+    /// it refused the round's admission or the await on its results. A
+    /// generation drain's hand-over is a hand-over in both (FIG-5075): the
+    /// turn ends at a boundary owing the round, and the successor admits or
+    /// awaits it. Every other cause fails or aborts the turn.
+    async fn end_unanswered_tool_round(
+        &mut self,
+        machine: &mut TurnMachine,
+        run_offset: usize,
+        error: crate::RuntimeEffectControllerError,
+    ) -> Result<(), RuntimeError> {
+        if error.code == RuntimeErrorCode::TurnWaitHandedOver {
+            return self
+                .end_waiting_for_tool_results(machine, run_offset, crate::BoundaryReason::HandOver)
+                .await;
+        }
+        Self::fail_or_abort_runtime_effect_controller(machine, error)?;
         Ok(())
     }
 
@@ -537,26 +558,11 @@ impl RuntimeTurnDriver<'_> {
                 outcome: crate::session::ToolAggregateOutcome::AllResults(replies),
                 ..
             }) => replies,
-            Err(error) if error.code == RuntimeErrorCode::TurnWaitHandedOver => {
-                drop(context);
-                let state = serde_json::to_value(round).map_err(|error| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::ExecutionStateCaptureFailed,
-                        error.to_string(),
-                    )
-                })?;
-                machine.settle_tool_dispatch(state);
-                return self
-                    .end_waiting_for_tool_results(
-                        machine,
-                        run_offset,
-                        crate::BoundaryReason::HandOver,
-                    )
-                    .await;
-            }
             Err(error) => {
-                Self::fail_or_abort_runtime_effect_controller(machine, error)?;
-                return Ok(());
+                drop(context);
+                return self
+                    .end_unanswered_tool_round(machine, run_offset, error)
+                    .await;
             }
             Ok(_) => {
                 return Err(RuntimeError::new(

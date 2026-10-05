@@ -5,16 +5,19 @@
 //! asks the model again. While the run's first model call is in flight on
 //! build N, build N+1 registers and an operator marks N draining.
 //!
-//! - **hand-over**: the run's physical turn on N commits at the quiet point
-//!   before its second model call, owing the run's continuation, and N's
-//!   shift hands over. N+1 admits the continuation, which asks the model
-//!   from the committed history: the tool is never called again, the model
-//!   is asked exactly twice, and the send that started the run on N is
-//!   answered by the turn N+1 ran.
+//! - **hand-over**: the drain freezes the run's tool Run on N, so N refuses
+//!   the tool round the first model call asked for (FIG-5075). The run's
+//!   physical turn on N commits there, owing the round, and N's shift hands
+//!   over. N+1 admits the continuation, which admits the round from the
+//!   calls the committed history records and asks the model again: the tool
+//!   runs once, the model is asked exactly twice, and the send that started
+//!   the run on N is answered by the turn N+1 ran.
+//! - **refused round**: the continuation runs the refused round before it
+//!   asks the model, and answers the very call N's model call recorded.
 //!
 //! - **crash**: the hand-over law again, with one invocation dying once on
 //!   either side of a durable record of the hand-over: N's run before its
-//!   drain-mark read is recorded and after its boundary commit, N's shift
+//!   round's cut check is recorded and after its boundary commit, N's shift
 //!   before it sends the shift on, and N+1's continuation before its first
 //!   step and after its final commit. The run ends the same: the tool ran
 //!   once and the model was asked twice.
@@ -767,9 +770,9 @@ impl RunRoll {
 /// durable record the hand-over writes.
 #[derive(Clone, Copy, Debug)]
 enum Crash {
-    /// N's run dies with its drain-mark read unrecorded, before its
-    /// boundary commit: its replay reads the mark again.
-    OldRunBeforeItsDrainMarkIsRecorded,
+    /// N's run dies with its tool round's admission unrecorded, before its
+    /// boundary commit: its replay checks the drain's cut again.
+    OldRunBeforeItsCutCheckIsRecorded,
     /// N's run dies after its boundary commit, with its outcome unrecorded:
     /// its replay ends at the boundary its journal recorded and answers the
     /// commit's receipt.
@@ -799,9 +802,9 @@ impl Crash {
         };
         let continuation = "follow-on:run-run:agent-frame:1#0";
         match self {
-            Self::OldRunBeforeItsDrainMarkIsRecorded => {
+            Self::OldRunBeforeItsCutCheckIsRecorded => {
                 run_execution(CrashPoint::BeforeRunResultEnding {
-                    suffix: "drain-mark:run-run:1".to_owned(),
+                    suffix: ":admit".to_owned(),
                 })
             }
             Self::OldRunAfterItsBoundaryCommit => run_execution(outcome("run-run")),
@@ -855,9 +858,9 @@ async fn a_run_on_a_draining_build_goes_on_in_a_new_invocation(
         "the run's answer is its continuation's"
     );
 
-    // No effect the first invocation incorporated ran again: one tool call,
-    // and one model call on each side of the boundary, the second asked from
-    // the history the boundary committed.
+    // No effect ran twice: one tool call, and one model call on each side
+    // of the boundary, the second asked from the history the boundary
+    // committed and the round the continuation admitted.
     assert_eq!(roll.executed.load(Ordering::SeqCst), 1, "the tool ran once");
     let requests = roll.model.requests.lock_recover().clone();
     assert_eq!(requests.len(), 2, "the model was asked once per invocation");
@@ -999,6 +1002,64 @@ async fn a_cancel_after_the_hand_over_reaches_the_continuation(storage: Storage)
     );
     assert_eq!(roll.executed.load(Ordering::SeqCst), 1, "the tool ran once");
     assert_eq!(roll.model.requests.lock_recover().len(), 2);
+    roll.assert_ended().await
+}
+
+/// FIG-5075: the drain freezes the Run's admission on N, so the tool round
+/// the model asked for on N is refused there. The refusal is a hand-over,
+/// not a failure: N's turn ends owing the round, and the continuation on
+/// N+1 admits it from the calls N's model call recorded. The tool runs once,
+/// before the continuation asks the model, and the model is never asked for
+/// those calls again.
+async fn a_tool_round_the_drain_refuses_hands_over_to_the_newest_build(
+    storage: Storage,
+) -> Result<()> {
+    let mut roll = RunRoll::start(storage, "run-segment-refused-round", &[1, 2]).await?;
+    roll.model.release.notify_one();
+    tokio::time::timeout(WEDGE, roll.model.reached.notified())
+        .await
+        .expect("the continuation asks the model on the newest build");
+    assert_eq!(
+        roll.builds().await.len(),
+        2,
+        "the run's shift moved to the newest build"
+    );
+    assert_eq!(
+        roll.executed.load(Ordering::SeqCst),
+        1,
+        "the continuation ran the refused round before asking the model"
+    );
+    let requests = roll.model.requests.lock_recover().clone();
+    assert_eq!(
+        requests.len(),
+        2,
+        "the model was not asked for the calls again"
+    );
+    let answered: Vec<_> = requests[1]
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter_map(|block| match block {
+            LlmContentBlock::ToolResult { call_id, .. } => Some(call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        answered,
+        ["lookup-1"],
+        "the continuation answers the call N's model call recorded"
+    );
+    roll.model.release.notify_one();
+    let output = tokio::time::timeout(WEDGE, roll.sent().output())
+        .await
+        .expect("the run ends")?;
+    assert_eq!(
+        output.result.outcome,
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage {
+            text: "answered after 1 tool result(s)".to_owned(),
+        }),
+    );
+    assert_eq!(roll.executed.load(Ordering::SeqCst), 1, "the tool ran once");
     roll.assert_ended().await
 }
 
@@ -1222,6 +1283,10 @@ async fn cancel_after(storage: Storage, (): ()) -> Result<()> {
     a_cancel_after_the_hand_over_reaches_the_continuation(storage).await
 }
 
+async fn refused_round(storage: Storage, (): ()) -> Result<()> {
+    a_tool_round_the_drain_refuses_hands_over_to_the_newest_build(storage).await
+}
+
 async fn hands_over(storage: Storage, crash: Option<Crash>) -> Result<()> {
     a_run_on_a_draining_build_goes_on_in_a_new_invocation(storage, crash).await
 }
@@ -1231,13 +1296,13 @@ drain_hand_over_laws! {
     run_hands_over_sqlite_file: hands_over, Storage::SqliteFile, None;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     run_hands_over_postgres: hands_over, Storage::Postgres, None;
-    run_crash_old_run_before_drain_mark_sqlite_memory:
-        hands_over, Storage::SqliteMemory, Some(Crash::OldRunBeforeItsDrainMarkIsRecorded);
-    run_crash_old_run_before_drain_mark_sqlite_file:
-        hands_over, Storage::SqliteFile, Some(Crash::OldRunBeforeItsDrainMarkIsRecorded);
+    run_crash_old_run_before_cut_check_sqlite_memory:
+        hands_over, Storage::SqliteMemory, Some(Crash::OldRunBeforeItsCutCheckIsRecorded);
+    run_crash_old_run_before_cut_check_sqlite_file:
+        hands_over, Storage::SqliteFile, Some(Crash::OldRunBeforeItsCutCheckIsRecorded);
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    run_crash_old_run_before_drain_mark_postgres:
-        hands_over, Storage::Postgres, Some(Crash::OldRunBeforeItsDrainMarkIsRecorded);
+    run_crash_old_run_before_cut_check_postgres:
+        hands_over, Storage::Postgres, Some(Crash::OldRunBeforeItsCutCheckIsRecorded);
     run_crash_old_run_after_boundary_commit_sqlite_memory:
         hands_over, Storage::SqliteMemory, Some(Crash::OldRunAfterItsBoundaryCommit);
     run_crash_old_run_after_boundary_commit_sqlite_file:
@@ -1278,6 +1343,10 @@ drain_hand_over_laws! {
     run_cancel_after_sqlite_file: cancel_after, Storage::SqliteFile, ();
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     run_cancel_after_postgres: cancel_after, Storage::Postgres, ();
+    run_refused_round_sqlite_memory: refused_round, Storage::SqliteMemory, ();
+    run_refused_round_sqlite_file: refused_round, Storage::SqliteFile, ();
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+    run_refused_round_postgres: refused_round, Storage::Postgres, ();
     run_journal_budget_sqlite_memory: journal_budget, Storage::SqliteMemory, false;
     run_journal_budget_sqlite_file: journal_budget, Storage::SqliteFile, false;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]

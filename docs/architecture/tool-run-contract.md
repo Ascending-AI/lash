@@ -141,6 +141,18 @@ unconsumed material and pending source descriptors through its existing snapshot
 Standard, RLM and generic aggregate callers share this recorded selection path
 (FIG-4894/1863/4895).
 
+A generation drain cuts a Run that may hand over through the same callbacks
+(FIG-4976): the admission or consumption step that observes the drain records
+`CutChecked` in place of its event and freezes admission. The caller receives
+`TurnWaitHandedOver` and hands over; it never fails the turn on it. A cell
+captures itself and its successor issues the cell again. A standard turn ends
+at a `HandOver` boundary whether the frozen Run refused its round's admission
+or its await on the round (FIG-5075), through one mapping. The continuation
+owes a refused round its unadmitted calls, and the successor admits them from
+the history the boundary committed; it owes an admitted round its settled
+cursor, and the successor awaits it. The model call that asked for the round
+is never repeated. Every other refusal keeps its own handling.
+
 The plugin registrar mints every callback key from `CallbackSlot`, so a
 callback slot cannot exist without its key prefix and its state authority.
 
