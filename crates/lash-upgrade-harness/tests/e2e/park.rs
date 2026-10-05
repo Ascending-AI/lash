@@ -107,6 +107,29 @@ fn s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_postg
     s22(Permutation::provisioned(StoreKind::PostgreSql, Leg::Live)?)
 }
 
+/// S22 on the replay leg: the runner's always-suspending Restate makes
+/// every resumption replay its journal.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries and private replay-leg Restate"]
+fn s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_replay()
+-> anyhow::Result<()> {
+    s22(Permutation::provisioned(
+        StoreKind::SqliteFile,
+        Leg::Replay,
+    )?)
+}
+
+/// S22 on the replay leg over the case's own PostgreSQL database.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries, private replay-leg Restate and PostgreSQL"]
+fn s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_postgresql_replay()
+-> anyhow::Result<()> {
+    s22(Permutation::provisioned(
+        StoreKind::PostgreSql,
+        Leg::Replay,
+    )?)
+}
+
 pub fn s22(permutation: Permutation) -> anyhow::Result<()> {
     use anyhow::{Context, ensure};
     use lash_upgrade_harness::harness::block_on;

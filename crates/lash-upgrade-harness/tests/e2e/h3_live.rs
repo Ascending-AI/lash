@@ -5,9 +5,9 @@
 use anyhow::{Context, Result, ensure};
 use lash_core::tool_run::{SealOutcome, SourceSeal};
 use lash_upgrade_harness::e2e::{
-    case::{ArtifactIdentity, CaseLease, CaseSpec, Permutation, StoreKind},
+    case::{ArtifactIdentity, CaseLease, CaseSpec, Leg, Permutation, StoreKind},
     control::{CleanupReceipt, ProcessReceipt, WorkIdentity},
-    evidence::{CaseReceipt, Evidence, Verdict},
+    evidence::{CaseReceipt, Evidence, JournalFact, Verdict},
 };
 use lash_upgrade_harness::harness::{
     Case, NodeBinary, NodeBuilds, ServeOptions, Services, ServingNode, block_on, wait_for,
@@ -196,6 +196,57 @@ pub fn kept(completion: &Completion, first: &SourceSeal) -> bool {
         Completion::RetentionRefused(refusal) => refusal["kind"] == "HolderEnded",
         Completion::Sealed { .. } => false,
     }
+}
+
+/// The runner-served Restate's Prometheus endpoint: `restate_suite.py serve`
+/// binds its ingress, admin and node roles from the gate's port base + 45,
+/// and the node port serves the metrics.
+fn served_metrics_url() -> Result<String> {
+    let base: u16 = std::env::var("LASH_E2E_PORT_BASE")
+        .context("runner port base")?
+        .parse()?;
+    Ok(format!("http://127.0.0.1:{}/metrics", base + 47))
+}
+
+/// What a replay-leg journal proves. The always-suspending server ends an
+/// attempt at every await, so a Command appended after a Notification was
+/// written by a resumed attempt that first replayed every Command recorded
+/// before that Notification.
+fn replayed(facts: &[JournalFact]) -> Result<Value> {
+    let is = |fact: &JournalFact, kind: &str| {
+        fact.value
+            .as_object()
+            .is_some_and(|entry| entry.contains_key(kind))
+    };
+    let last = facts
+        .iter()
+        .rposition(|fact| is(fact, "Command"))
+        .context("journal records no command")?;
+    let resumed = facts[..last]
+        .iter()
+        .rposition(|fact| is(fact, "Notification"))
+        .context("no command follows a notification: the invocation never resumed")?;
+    let replayed: Vec<&str> = facts[..resumed]
+        .iter()
+        .filter(|fact| is(fact, "Command"))
+        .map(|fact| fact.entry_type.as_str())
+        .collect();
+    let appended: Vec<&str> = facts[resumed..]
+        .iter()
+        .filter(|fact| is(fact, "Command"))
+        .map(|fact| fact.entry_type.as_str())
+        .collect();
+    ensure!(
+        replayed.len() > 1,
+        "the resumed attempt replayed only its input: {replayed:?}"
+    );
+    Ok(json!({
+        "kind": "replayed_journal",
+        "invocation": facts[resumed].invocation,
+        "resumed_after": facts[resumed].index,
+        "replayed_commands": replayed,
+        "appended_commands": appended,
+    }))
 }
 
 fn sql(value: &str) -> String {
@@ -509,6 +560,12 @@ impl Live {
             &format!("journal-{invocation}.json"),
             &serde_json::to_value(&facts)?,
         )?;
+        if self.permutation.leg == Leg::Replay {
+            let replay =
+                replayed(&facts).with_context(|| format!("{invocation} never replayed"))?;
+            self.record(&format!("replay-{invocation}.json"), &replay)?;
+            self.evidence.stores.push(replay);
+        }
         self.evidence.journals.extend(facts);
         Ok(())
     }
@@ -522,6 +579,12 @@ impl Live {
     }
 
     pub fn finish(mut self) -> Result<()> {
+        let leg = block_on(lash_upgrade_harness::e2e::cluster::observe_leg(
+            self.permutation.leg,
+            &[served_metrics_url()?],
+            &self.case.gate_dir(),
+        ))?;
+        self.evidence.stores.push(leg);
         let lease = &self.lease;
         self.record(
             "ownership.json",

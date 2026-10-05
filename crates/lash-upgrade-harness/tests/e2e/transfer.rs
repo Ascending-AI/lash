@@ -175,6 +175,28 @@ fn s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes_postgresql(
     s13(Permutation::provisioned(StoreKind::PostgreSql, Leg::Live)?)
 }
 
+/// S13 on the replay leg: the runner's always-suspending Restate makes
+/// every resumption replay its journal.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries and private replay-leg Restate"]
+fn s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes_replay() -> Result<()> {
+    s13(Permutation::provisioned(
+        StoreKind::SqliteFile,
+        Leg::Replay,
+    )?)
+}
+
+/// S13 on the replay leg over the case's own PostgreSQL database.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries, private replay-leg Restate and PostgreSQL"]
+fn s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes_postgresql_replay()
+-> Result<()> {
+    s13(Permutation::provisioned(
+        StoreKind::PostgreSql,
+        Leg::Replay,
+    )?)
+}
+
 pub fn s13(permutation: Permutation) -> Result<()> {
     use crate::h3_live::{Live, command};
     use lash_upgrade_harness::harness::block_on;

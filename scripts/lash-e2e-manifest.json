@@ -1617,7 +1617,11 @@
           "server_nodes": 1,
           "binaries": [
             "host",
-            "vm_worker"
+            "vm_worker",
+            "synthetic_next_host",
+            "operator",
+            "synthetic_next_operator",
+            "synthetic_next_vm_worker"
           ],
           "artifacts": [
             "journal",
@@ -1629,7 +1633,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Held for FIG-4998 (cold-reopen replay): the upgrade-node case transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes runs on the sqlite_file store's live leg only until replay certifies a journal reopened cold.",
+          "hold_reason": "Product red after FIG-4998: on the replay leg the Deferred operation Run's LashTurn/run journal hits Restate [570 Journal mismatch] (recorded 'call' at command index 16, the replay attempts 'run'), stays backing-off, and transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes_replay times out at crates/lash-upgrade-harness/tests/e2e/transfer.rs:326 (live.quiesce, h3_live.rs:576 \"every case invocation to settle\"); receipt .kiln/FIG-5056/proof/case-1 in the FIG-5056 fork.",
           "registration": null
         },
         {
@@ -1678,7 +1682,11 @@
           "server_nodes": 1,
           "binaries": [
             "host",
-            "vm_worker"
+            "vm_worker",
+            "synthetic_next_host",
+            "operator",
+            "synthetic_next_operator",
+            "synthetic_next_vm_worker"
           ],
           "artifacts": [
             "journal",
@@ -1689,9 +1697,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Held for FIG-4998 (cold-reopen replay): the upgrade-node case transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes runs on the postgresql store's live leg only until replay certifies a journal reopened cold.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
+            "test": "transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes_postgresql_replay"
+          }
         }
       ],
       "setup": "Real invocation remains pinned to N; N+1 present.",
@@ -2524,7 +2535,11 @@
           "server_nodes": 1,
           "binaries": [
             "host",
-            "vm_worker"
+            "vm_worker",
+            "synthetic_next_host",
+            "operator",
+            "synthetic_next_operator",
+            "synthetic_next_vm_worker"
           ],
           "artifacts": [
             "journal",
@@ -2536,7 +2551,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Held for FIG-4998 (cold-reopen replay): the upgrade-node case process::s21_source_seal_stays_immutable_on_the_upgrade_node runs on the sqlite_file store's live leg only until replay certifies a journal reopened cold.",
+          "hold_reason": "Red after FIG-4998: process::s21_source_seal_stays_immutable_on_the_upgrade_node_replay fails at crates/lash-upgrade-harness/tests/e2e/process.rs:756 because the lash-upgrade-node h3 control cannot open the SQLite store set while the serving host writes it (crates/lash-upgrade-harness/src/node.rs:456: \"database is locked\", SQLite code 5); the run also logs the 570 command-index-16 journal mismatch; receipt .kiln/FIG-5056/proof/case-3 in the FIG-5056 fork.",
           "registration": null
         },
         {
@@ -2585,7 +2600,11 @@
           "server_nodes": 1,
           "binaries": [
             "host",
-            "vm_worker"
+            "vm_worker",
+            "synthetic_next_host",
+            "operator",
+            "synthetic_next_operator",
+            "synthetic_next_vm_worker"
           ],
           "artifacts": [
             "journal",
@@ -2597,7 +2616,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Held for FIG-4998 (cold-reopen replay): the upgrade-node case process::s21_source_seal_stays_immutable_on_the_upgrade_node runs on the postgresql store's live leg only until replay certifies a journal reopened cold.",
+          "hold_reason": "Product red after FIG-4998: on the replay leg the Deferred operation Run's LashTurn/run journal hits Restate [570 Journal mismatch] (recorded 'call' at command index 16, the replay attempts 'run'), and process::s21_source_seal_stays_immutable_on_the_upgrade_node_postgresql_replay fails at crates/lash-upgrade-harness/tests/e2e/process.rs:769 (\"resolved Run kept or opened another journal\", invocation backing-off); receipt .kiln/FIG-5056/proof/case-2 in the FIG-5056 fork.",
           "registration": null
         }
       ],
@@ -2665,7 +2684,11 @@
           "server_nodes": 1,
           "binaries": [
             "host",
-            "vm_worker"
+            "vm_worker",
+            "synthetic_next_host",
+            "operator",
+            "synthetic_next_operator",
+            "synthetic_next_vm_worker"
           ],
           "artifacts": [
             "journal",
@@ -2677,7 +2700,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Held for FIG-4998 (cold-reopen replay): the upgrade-node case park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes runs on the sqlite_file store's live leg only until replay certifies a journal reopened cold.",
+          "hold_reason": "Exceeds e2e_h3__test's 300 s Kiln test timeout: on the replay leg each RetiredGeneration park waits 70-150 s of Restate retry backoff before the journal pauses (crates/lash-upgrade-harness/tests/e2e/park.rs:47; turn refused 19:03:11, paused 19:05:40; operation refused 19:06:00, paused 19:07:12), so park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_replay is killed at 5:00.2 before its redrive/cancel race; receipt .kiln/FIG-5056/proof/case-5 in the FIG-5056 fork.",
           "registration": null
         },
         {
@@ -2726,7 +2749,11 @@
           "server_nodes": 1,
           "binaries": [
             "host",
-            "vm_worker"
+            "vm_worker",
+            "synthetic_next_host",
+            "operator",
+            "synthetic_next_operator",
+            "synthetic_next_vm_worker"
           ],
           "artifacts": [
             "journal",
@@ -2737,9 +2764,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Held for FIG-4998 (cold-reopen replay): the upgrade-node case park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes runs on the postgresql store's live leg only until replay certifies a journal reopened cold.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
+            "test": "park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_postgresql_replay"
+          }
         }
       ],
       "setup": "Turn/process/operation owners; park before and after persisted commit on file SQLite/PG.",

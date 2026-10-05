@@ -489,6 +489,29 @@ fn s21_source_seal_stays_immutable_on_the_upgrade_node_postgresql() -> Result<()
     s21(Permutation::provisioned(StoreKind::PostgreSql, Leg::Live)?)
 }
 
+/// S21 on the replay leg: the runner's always-suspending Restate makes
+/// every resumption replay its journal.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries and private replay-leg Restate"]
+fn s21_source_seal_stays_immutable_on_the_upgrade_node_replay() -> Result<()> {
+    use lash_upgrade_harness::e2e::case::{Leg, Permutation, StoreKind};
+    s21(Permutation::provisioned(
+        StoreKind::SqliteFile,
+        Leg::Replay,
+    )?)
+}
+
+/// S21 on the replay leg over the case's own PostgreSQL database.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries, private replay-leg Restate and PostgreSQL"]
+fn s21_source_seal_stays_immutable_on_the_upgrade_node_postgresql_replay() -> Result<()> {
+    use lash_upgrade_harness::e2e::case::{Leg, Permutation, StoreKind};
+    s21(Permutation::provisioned(
+        StoreKind::PostgreSql,
+        Leg::Replay,
+    )?)
+}
+
 pub fn s21(permutation: lash_upgrade_harness::e2e::case::Permutation) -> Result<()> {
     use lash_core::tool_run::{
         SealOutcome, SealRefusal, SealWriter, SegmentOrdinal, SourceRefusal, SourceSeal,
