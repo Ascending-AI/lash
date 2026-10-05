@@ -56,18 +56,29 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
         .expect("enqueue source work");
     let source_scope = crate::ExecutionScope::turn(source_id.clone(), "same-turn");
     let fork_scope = crate::ExecutionScope::turn(fork_id.clone(), "same-turn");
-    let wait =
-        crate::AwaitEventWaitIdentity::tool_completion(crate::ToolCallId::fixture("same-call"));
+    // This law owns an application wait, not an admitted tool source (K4).
+    // Minting a tool completion key alone does not arm its source.
+    let wait = crate::AwaitEventWaitIdentity::Custom {
+        key: "same-wait".into(),
+    };
     let source_key = host
         .await_event_key(&source_scope, wait.clone())
         .await
         .expect("source wait");
-    host.resolve_await_event(
-        &source_key,
-        crate::Resolution::Ok(serde_json::json!("source-only")),
-    )
-    .await
-    .expect("settle source wait");
+    let resolved = host
+        .resolve_await_event(
+            &source_key,
+            crate::Resolution::Ok(serde_json::json!("source-only")),
+        )
+        .await
+        .expect("settle source wait");
+    assert_eq!(resolved, crate::ResolveOutcome::Accepted);
+    assert_eq!(
+        host.peek_await_event(&source_key)
+            .await
+            .expect("source wait is settled"),
+        Some(crate::Resolution::Ok(serde_json::json!("source-only")))
+    );
     let source_head_meta = source.load_session_head_meta().await.expect("source head");
     let source_revision = source_head_meta
         .as_ref()

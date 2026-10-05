@@ -312,15 +312,14 @@ impl crate::plugin::PluginOperation for HostCancellableTask {
 
 impl crate::plugin::PluginTask for HostCancellableTask {}
 
-/// A plugin task whose first run returns at once, and whose every later run
-/// waits for its cancellation and then appends the note its arguments name:
-/// the task a crash between its return and its settlement makes run again.
+/// A plugin task that appends the same note on every execution. Its first
+/// execution returns at once; a rerun waits for a late cancellation before
+/// reproducing the same output and graph draft.
 struct HostReturnsOnceTask;
 
 impl crate::plugin::PluginOperation for HostReturnsOnceTask {
     const NAME: &'static str = "conformance_host_returns_once_task";
-    const DESCRIPTION: &'static str = "Return at once on the first run; on a later run, wait \
-         until cancelled, then append a note to the session, as a host's plugin task.";
+    const DESCRIPTION: &'static str = "Append a note, waiting for cancellation on a rerun.";
     const SESSION_PARAM: crate::plugin::SessionParam = crate::plugin::SessionParam::Required;
     type Args = serde_json::Value;
     type Output = serde_json::Value;
@@ -429,11 +428,10 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
             .with_plugin_task_value::<HostReturnsOnceTask, _, _>(move |ctx, args| {
                 let probe = returns_once_probe.clone();
                 async move {
-                    if probe.returns_once_task_runs.fetch_add(1, Ordering::SeqCst) == 0 {
-                        return Ok(serde_json::json!({"returned": "at once"}));
+                    if probe.returns_once_task_runs.fetch_add(1, Ordering::SeqCst) != 0 {
+                        probe.returns_once_task_rerun.notify_one();
+                        ctx.cancellation_token.cancelled().await;
                     }
-                    probe.returns_once_task_rerun.notify_one();
-                    ctx.cancellation_token.cancelled().await;
                     append_note(&ctx.session_graph, ctx.session_id, &args).await
                 }
             }),
@@ -1437,8 +1435,9 @@ pub async fn command_cancellation_before_admission_withdraws_it(
 /// that settlement back by the command's receipt; a later cancel finds that
 /// settlement. The lane goes on: the input queued after the task runs in the
 /// same shift. Killed at `crash` and redriven, the task settles cancelled
-/// once, and a redrive that finds the cancel already requested runs none of
-/// the task's code again.
+/// once. FIG-4893 records the pre-run peek: a redrive after that peek replays
+/// the task even when the live signal now holds a cancel. The recorded
+/// completion peek keeps the cancelled outcome and discards both drafts.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1546,14 +1545,17 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
     );
     assert_eq!(
         probe.cancellable_task_runs.load(Ordering::SeqCst),
-        1,
-        "the task's code ran once, after admission: a redrive after the cancel won runs none of it"
+        match crash {
+            Some(HostCommandCrash::BeforeCommit | HostCommandCrash::AfterCommit) => 2,
+            Some(HostCommandCrash::AfterLaneRead) | None => 1,
+        },
+        "the task replays its recorded pre-run peek; a cut before that peek runs its code once"
     );
     let head = law.head().await;
     assert_eq!(
         head.head_revision,
-        before + 2,
-        "the cancelled task's settlement and the next run each commit once"
+        before + 4,
+        "the operation and next turn each publish one plugin transition and commit once"
     );
     let path = active_path(&head.graph);
     assert!(
@@ -1567,18 +1569,17 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
 }
 
-/// The note a host's plugin task appends only on a run after a crash, once
-/// cancelled.
+/// The note a task reproduces on replay, even when a late cancel arrives
+/// after its recorded completion decision (FIG-4893).
 const RERUN_TASK_NOTE: &str = "a note the host's plugin task appended after its rerun";
 
-/// FIG-4453: a host's cancel reaches a plugin task whose shift died after
-/// the task's code returned and before the commit that settles it. Nothing
-/// of that return, nor of the shift's decision to keep it, is durable: the
-/// redrive runs the task's code again under a live cancel signal, and a
-/// host's cancel during that run answers `Requested`, stops the task's code
-/// and settles the command `Cancelled`, with nothing of either run
-/// committed. The lane goes on: the input queued after the task runs in the
-/// same shift.
+/// A cancel reaches a task rerun after a crash before settlement, but cannot
+/// change its recorded completion decision. FIG-4893 (196ff1c4a9) records
+/// the final peek before the settling commit, amending FIG-4453's earlier
+/// live-peek contract. The live signal still answers `Requested` and stops
+/// the rerun's code; the replayed final peek keeps the original completed
+/// result and commits its reproduced graph draft exactly once (ADR 0105).
+/// The input queued after the task runs in the same shift.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1645,16 +1646,24 @@ pub async fn host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_se
         ),
     )
     .await
-    .expect("the redrive applying the cancelled rerun ends");
+    .expect("the redrive applying the completed task ends");
 
     assert!(
         matches!(
             law.command_outcome(&receipt).await,
             Some(crate::SessionCommandOutcome::PluginOperation {
-                outcome: crate::PluginOperationCommandOutcome::Cancelled,
-            })
+                outcome: crate::PluginOperationCommandOutcome::Completed {
+                    plugin_id,
+                    output,
+                    events,
+                    pending_turn_inputs,
+                },
+            }) if plugin_id == HOST_PLUGIN_ID
+                && output == serde_json::json!({"text": RERUN_TASK_NOTE, "appended": true})
+                && events.is_empty()
+                && pending_turn_inputs.is_empty()
         ),
-        "the rerun task settles cancelled through its command's commit"
+        "the recorded completion decision survives a late cancel during replay"
     );
     assert_eq!(
         probe.returns_once_task_runs.load(Ordering::SeqCst),
@@ -1664,16 +1673,14 @@ pub async fn host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_se
     let head = law.head().await;
     assert_eq!(
         head.head_revision,
-        before + 2,
-        "the cancelled task's settlement and the next run each commit once"
+        before + 4,
+        "the operation and next turn each publish one plugin transition and commit once"
     );
     let path = active_path(&head.graph);
+    let note = position_of_once(&path, RERUN_TASK_NOTE);
     assert!(
-        !path.iter().any(|text| text == RERUN_TASK_NOTE),
-        "nothing of the cancelled task commits: {path:?}"
-    );
-    assert!(
-        position_of_once(&path, "answer 1") < position_of_once(&path, "second question"),
+        position_of_once(&path, "answer 1") < note
+            && note < position_of_once(&path, "second question"),
         "the input queued after the task runs once the task settled: {path:?}"
     );
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);

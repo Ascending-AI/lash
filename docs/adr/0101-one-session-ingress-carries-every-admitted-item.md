@@ -178,16 +178,18 @@ only a host's cancel writes; a cancel of a command that already settled
 finds its settlement and writes nothing. The signal is a durable request,
 never a decision: the shift peeks it before the task runs, as a step the
 operation run records so its replay takes the same branch, fires the task's
-cancellation token when the cancel lands, and peeks it again the moment the
-task's code returns. A cancel requested by then settles the command
+cancellation token when the cancel lands, and records another peek the moment
+the task's code returns. A cancel requested by then settles the command
 `PluginOperationCommandOutcome::Cancelled` with nothing of the task
 committed; otherwise it settles with the task's own outcome. The settling
-commit is the one record of that decision (FIG-4453): a shift that dies
-before it leaves nothing decided, and its redrive runs the task's code again
-under the same live signal, or none of it once the cancel was requested. A
-cancel landing after the shift's last peek reaches nothing, and the
-settlement says so. Neither the withdrawal nor the cancel takes the runtime
-writer, which the shift applying the commands holds. The runtime
+commit publishes that recorded decision (FIG-4893): a redrive replays the recorded
+peeks, including after a crash before settlement. A recorded pre-run peek
+that found no cancel runs the task's code again under the live signal; a
+recorded pre-run cancel runs none of it. The completion peek preserves the
+first execution's completed or cancelled decision. A cancel landing after
+that peek can stop rerun code but cannot change the settlement. Neither the
+withdrawal nor the cancel takes the runtime writer, which the shift applying
+the commands holds. The runtime
 writer is never held while a settlement is awaited. A command run, once it drained the lane, writes its
 `RunTerminalCause::CommandsApplied` terminal and arms its scope close, so its
 journal is retired like a turn run's; an operation run ends the same way once

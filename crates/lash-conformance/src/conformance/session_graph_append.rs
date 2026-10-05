@@ -467,7 +467,7 @@ async fn append_conformance_runtime(
     store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
 ) -> crate::LashRuntime {
-    let state = crate::conformance::helpers::load_window_state(store, &request.session_id)
+    let mut state = crate::conformance::helpers::load_window_state(store, &request.session_id)
         .await
         .expect("load session state for the append conformance runtime")
         .unwrap_or_else(|| crate::RuntimeSessionState {
@@ -475,11 +475,14 @@ async fn append_conformance_runtime(
             policy: request.config.session_policy(),
             ..crate::RuntimeSessionState::new(request.config.session_policy())
         });
+    if state.policy.model.is_none() {
+        state.policy = request.config.session_policy();
+    }
     // The protocol-session capability is embedder-supplied; the in-tree fake is
     // enough here because this suite never runs a turn.
     let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
     let plugins = match state.plugin_state() {
-        Some(snapshot) => host.build_session(PluginSessionRequest::rematerialization(
+        Some(snapshot) => host.defer_session(PluginSessionRequest::rematerialization(
             request.session_id.clone(),
             snapshot,
             crate::plugin::SessionAuthorityContext {
@@ -487,12 +490,57 @@ async fn append_conformance_runtime(
                 ..Default::default()
             },
         )),
-        None => host.build_session(PluginSessionRequest::creation(
+        None => host.defer_session(PluginSessionRequest::creation(
             request.session_id.clone(),
             Default::default(),
         )),
     }
     .expect("append conformance plugin session");
+    // FIG-4857: a store-backed runtime constructs its session only from a
+    // published native view. Record and publish the fixture's admission
+    // before asking that session to apply host commands.
+    let transition = host.transition_plugins(
+        crate::plugin::PluginTransitionRequest {
+            id: crate::plugin::PluginTransitionId(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::session_operation(&request.session_id, "append-fixture"),
+                    "plugin-transition",
+                )
+                .expect("append fixture transition identity"),
+            ),
+            owner: crate::RuntimeOwner::Session(request.session_id.clone()),
+            base: crate::plugin::PluginTransitionBase::Session {
+                head: crate::store::SessionHeadRef {
+                    generation: store
+                        .read_session_state_version(&request.session_id)
+                        .await
+                        .expect("state version"),
+                    revision: state.head_revision,
+                    leaf: state.session_graph.leaf_node_id.clone(),
+                    checkpoint: state.checkpoint_ref.clone(),
+                },
+            },
+            target: host
+                .admit_plugins(store.as_ref())
+                .await
+                .expect("admit fixture plugins"),
+        },
+        &plugins.export_state(),
+        &state.authority.plugin_config,
+    );
+    let plugins = plugins
+        .materialize_transition_candidate(&transition)
+        .expect("materialize the append fixture's recorded plugin view");
+    state
+        .capture_plugin_states(plugins.as_ref())
+        .expect("capture the append fixture's native view");
+    commit_conformance_state(store, &mut state)
+        .await
+        .expect("publish the append fixture's native view");
+    let state = crate::conformance::helpers::load_window_state(store, &request.session_id)
+        .await
+        .expect("reload the append fixture's published components")
+        .expect("the append fixture has a published head");
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
