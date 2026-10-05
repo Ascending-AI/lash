@@ -143,7 +143,7 @@ impl RunExecution {
             terminal_written: false,
             work_remaining: true,
             trace_scope: None,
-            cancel_intent: admitted.root().map(|root| root.cancel_intent.clone()),
+            cancel_intent: Some(admitted.root().cancel_intent.clone()),
         }
     }
 
@@ -1444,12 +1444,7 @@ async fn emit_close_step(
 }
 
 fn recorded_seal(admitted: &Admitted) -> Result<crate::engine::SealVerdict, ShiftAbort> {
-    let root = admitted.root().ok_or_else(|| {
-        ShiftAbort::Refused(RuntimeError::new(
-            RuntimeErrorCode::RuntimeStoreCorrupt,
-            "run lacks its recorded root admission",
-        ))
-    })?;
+    let root = admitted.root();
     Ok(match &root.seal {
         crate::store::ShiftEpochSeal::Sealed(fence) => {
             crate::engine::SealVerdict::Sealed(fence.clone())

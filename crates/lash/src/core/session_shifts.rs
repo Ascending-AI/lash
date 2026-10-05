@@ -197,7 +197,8 @@ impl lash_core::shift::ShiftAdmissionMaterializer for FreshAdmissionMaterializer
     async fn request(
         &self,
         store: &lash_core::SessionStore,
-        admitted: &lash_core::engine::Admitted,
+        selection: &lash_core::store::ShiftAdmissionSelection,
+        admitted_generation: &lash_core::engine::BuildGeneration,
         preparation: &lash_core::store::ShiftAdmissionPreparation,
         executor: lash_core::store::RunExecutor,
         scope: &lash_core::AdmittedScope,
@@ -205,7 +206,7 @@ impl lash_core::shift::ShiftAdmissionMaterializer for FreshAdmissionMaterializer
         lash_core::store::AdmitRunRequest,
         lash_core::RuntimeEffectControllerError,
     > {
-        let handle = open_admission_runtime(&self.config, admitted.session())
+        let handle = open_admission_runtime(&self.config, store.session_id())
             .await
             .map_err(|failure| {
                 lash_core::RuntimeEffectControllerError::from(failure.into_abort().error().clone())
@@ -221,7 +222,8 @@ impl lash_core::shift::ShiftAdmissionMaterializer for FreshAdmissionMaterializer
         lash_core::shift::ShiftAdmissionMaterializer::request(
             &template,
             store,
-            admitted,
+            selection,
+            admitted_generation,
             preparation,
             executor,
             scope,

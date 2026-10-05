@@ -158,20 +158,38 @@ impl RollShifts {
             .get(&request.session)
             .and_then(|ledger| ledger.open.front().cloned());
         match next {
-            Some(item) => AdmitVerdict::Admit(admission_body::admitted(
-                request.session.clone(),
-                TurnId::fixture(item),
-                request.request.clone(),
-                lash_core::engine::AdmissionId::new(format!(
+            Some(item) => AdmitVerdict::Admit({
+                let receipt_session: lash_core::SessionId = request.session.clone();
+                let receipt_admission = lash_core::engine::AdmissionId::new(format!(
                     "{}#{ordinal}",
                     request.request.as_str()
-                )),
-                0,
-                admitting_generation.clone(),
-                lash_core::engine::AdmittedWork::Queued {
-                    head: lash_core::BatchId::from("scripted-batch"),
-                },
-            )),
+                ));
+                admission_body::admitted(
+                    receipt_session.clone(),
+                    request.request.clone(),
+                    receipt_admission.clone(),
+                    admitting_generation.clone(),
+                    lash_core::store::ShiftAdmissionReceipt {
+                        selection: lash_core::store::ShiftAdmissionSelection {
+                            run: TurnId::fixture(item),
+                            work: lash_core::engine::AdmittedWork::Queued {
+                                head: lash_core::BatchId::from("scripted-batch"),
+                            },
+                            observed_epoch: 0,
+                        },
+                        run_start: lash_core::store::RunStartNonce::new(receipt_admission.as_str()),
+                        seal: lash_core::store::ShiftEpochSeal::Sealed(
+                            lash_core::store_backend_support::sealed_shift_fence(
+                                receipt_session.clone(),
+                                1,
+                                receipt_admission.clone(),
+                            ),
+                        ),
+                        cancel_intent: lash_core::TurnCancelIntentSnapshot::Absent,
+                        run_admission: None,
+                    },
+                )
+            }),
             None => AdmitVerdict::Idle,
         }
     }

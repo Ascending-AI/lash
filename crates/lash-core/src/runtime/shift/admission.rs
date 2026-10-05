@@ -284,15 +284,6 @@ impl AdmitShiftRunner {
                 run,
             });
         }
-        let admitted = crate::engine::admission_body::admitted(
-            session_id.clone(),
-            run,
-            self.request.request.clone(),
-            identity.clone(),
-            preparation.epoch.epoch,
-            self.request.build_generation.clone(),
-            work.clone(),
-        );
         let prepared = if matches!(
             work,
             AdmittedWork::Input { .. } | AdmittedWork::Queued { .. }
@@ -306,11 +297,12 @@ impl AdmitShiftRunner {
             let request = materializer
                 .request(
                     &store,
-                    &admitted,
+                    selection,
+                    &self.request.build_generation,
                     &preparation,
                     self.executor.clone(),
                     &self.run_scope.clone().unwrap_or_else(|| {
-                        crate::engine::shift_run_scope(session_id, admitted.run())
+                        crate::engine::shift_run_scope(session_id, &selection.run)
                     }),
                 )
                 .await?;
@@ -402,14 +394,11 @@ impl AdmitShiftRunner {
     fn mint(&self, receipt: crate::store::ShiftAdmissionReceipt) -> Admitted {
         crate::engine::admission_body::admitted(
             self.request.session.clone(),
-            receipt.selection.run.clone(),
             self.request.request.clone(),
             admission_id(&self.request.request, self.ordinal),
-            receipt.selection.observed_epoch,
             self.request.build_generation.clone(),
-            receipt.selection.work.clone(),
+            receipt,
         )
-        .with_root(receipt)
     }
 }
 

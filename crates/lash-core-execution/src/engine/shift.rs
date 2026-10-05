@@ -409,29 +409,19 @@ impl ShiftAbort {
 /// build one.
 #[doc(hidden)]
 pub mod admission_body {
-    use super::super::admission::{AdmissionId, Admitted, AdmittedWork, ShiftRequestId};
+    use super::super::admission::{AdmissionId, Admitted, ShiftRequestId};
     use super::super::contracts::BuildGeneration;
-    use crate::{SessionId, TurnId};
+    use crate::SessionId;
 
     #[must_use]
     pub fn admitted(
         session: SessionId,
-        run: TurnId,
         request: ShiftRequestId,
         admission: AdmissionId,
-        observed_epoch: u64,
         admitted_generation: BuildGeneration,
-        work: AdmittedWork,
+        receipt: lash_core_store::store::ShiftAdmissionReceipt,
     ) -> Admitted {
-        Admitted::minted(
-            session,
-            run,
-            request,
-            admission,
-            observed_epoch,
-            admitted_generation,
-            work,
-        )
+        Admitted::minted(session, request, admission, admitted_generation, receipt)
     }
 }
 
@@ -474,17 +464,62 @@ mod tests {
     }
 
     fn admitted(run: &TurnId) -> Admitted {
+        let receipt_session: SessionId = SessionId::from("s");
+        let receipt_admission = super::super::admission::AdmissionId::new("r:0");
         admission_body::admitted(
-            SessionId::from("s"),
-            run.clone(),
+            receipt_session.clone(),
             ShiftRequestId::new("r"),
-            super::super::admission::AdmissionId::new("r:0"),
-            0,
+            receipt_admission.clone(),
             super::super::contracts::BuildGeneration::for_test("t0"),
-            AdmittedWork::Queued {
-                head: crate::BatchId::from("qwb:head"),
+            lash_core_store::store::ShiftAdmissionReceipt {
+                selection: lash_core_store::store::ShiftAdmissionSelection {
+                    run: run.clone(),
+                    work: AdmittedWork::Queued {
+                        head: crate::BatchId::from("qwb:head"),
+                    },
+                    observed_epoch: 0,
+                },
+                run_start: lash_core_store::store::RunStartNonce::new(receipt_admission.as_str()),
+                seal: lash_core_store::store::ShiftEpochSeal::Sealed(
+                    lash_core_store::store_backend_support::sealed_shift_fence(
+                        receipt_session.clone(),
+                        1,
+                        receipt_admission.clone(),
+                    ),
+                ),
+                cancel_intent: crate::TurnCancelIntentSnapshot::Absent,
+                run_admission: None,
             },
         )
+    }
+
+    /// S04 F2: an executable admission cannot exist without its recorded receipt.
+    #[test]
+    fn an_admission_without_its_receipt_is_refused() {
+        let run = TurnId::from("receipt-run");
+        let mut body = serde_json::to_value(admitted(&run)).expect("encode admission");
+        body.as_object_mut()
+            .expect("admission object")
+            .remove("receipt");
+        assert!(serde_json::from_value::<Admitted>(body.clone()).is_err());
+        body["receipt"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<Admitted>(body).is_err());
+
+        let selected = admitted(&run);
+        let body = serde_json::to_value(&selected).expect("encode admission");
+        for copy in ["run", "work", "observed_epoch", "root"] {
+            assert!(
+                body.get(copy).is_none(),
+                "selection is stored only in the receipt"
+            );
+        }
+        let decoded: Admitted = serde_json::from_value(body).expect("receipt admission");
+        assert_eq!(decoded.run(), &decoded.root().selection.run);
+        assert_eq!(decoded.work(), &decoded.root().selection.work);
+        assert_eq!(
+            decoded.observed_epoch(),
+            decoded.root().selection.observed_epoch
+        );
     }
 
     /// The rules outlive a handoff (FIG-4523): the leg a shift continues on

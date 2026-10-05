@@ -53,11 +53,7 @@ async fn parked(
                 };
                 service.contains("LashTurn")
                     && server
-                        .object_state(service, key)
-                        .get("admission")
-                        .and_then(|bytes| {
-                            serde_json::from_slice::<lash_core::engine::Admitted>(bytes).ok()
-                        })
+                        .turn_admission(service, key)
                         .is_some_and(|admitted| admitted.session() == session)
                     && (has_source_reader
                         || server

@@ -47,15 +47,36 @@ impl SessionShifts for OwnerDriver {
                         operation: operation.clone(),
                     },
                 );
-                Ok(AdmitVerdict::Admit(admission_body::admitted(
-                    self.session.clone(),
-                    self.run.clone(),
-                    request.request.clone(),
-                    AdmissionId::new(format!("{}#{ordinal}", request.request.as_str())),
-                    0,
-                    generation.clone(),
-                    work,
-                )))
+                Ok(AdmitVerdict::Admit({
+                    let receipt_session: lash_core::SessionId = self.session.clone();
+                    let receipt_admission =
+                        AdmissionId::new(format!("{}#{ordinal}", request.request.as_str()));
+                    admission_body::admitted(
+                        receipt_session.clone(),
+                        request.request.clone(),
+                        receipt_admission.clone(),
+                        generation.clone(),
+                        lash_core::store::ShiftAdmissionReceipt {
+                            selection: lash_core::store::ShiftAdmissionSelection {
+                                run: self.run.clone(),
+                                work,
+                                observed_epoch: 0,
+                            },
+                            run_start: lash_core::store::RunStartNonce::new(
+                                receipt_admission.as_str(),
+                            ),
+                            seal: lash_core::store::ShiftEpochSeal::Sealed(
+                                lash_core::store_backend_support::sealed_shift_fence(
+                                    receipt_session.clone(),
+                                    1,
+                                    receipt_admission.clone(),
+                                ),
+                            ),
+                            cancel_intent: lash_core::TurnCancelIntentSnapshot::Absent,
+                            run_admission: None,
+                        },
+                    )
+                }))
             },
         )
         .await

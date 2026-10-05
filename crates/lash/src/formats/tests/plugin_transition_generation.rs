@@ -582,11 +582,45 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
         "durable result replays"
     );
     let lane = format!("LashTurn_g{recorded}");
+    let admitted = {
+        let receipt_session: lash_core::SessionId = SESSION.into();
+        let receipt_admission = AdmissionId::new("shift#0");
+        admission_body::admitted(
+            receipt_session.clone(),
+            ShiftRequestId::new("shift"),
+            receipt_admission.clone(),
+            recorded.clone(),
+            lash_core::store::ShiftAdmissionReceipt {
+                selection: lash_core::store::ShiftAdmissionSelection {
+                    run: RUN.into(),
+                    work: AdmittedWork::Queued {
+                        head: "head".into(),
+                    },
+                    observed_epoch: 0,
+                },
+                run_start: lash_core::store::RunStartNonce::new(receipt_admission.as_str()),
+                seal: lash_core::store::ShiftEpochSeal::Sealed(
+                    lash_core::store_backend_support::sealed_shift_fence(
+                        receipt_session.clone(),
+                        1,
+                        receipt_admission.clone(),
+                    ),
+                ),
+                cancel_intent: lash_core::TurnCancelIntentSnapshot::Absent,
+                run_admission: None,
+            },
+        )
+    };
     let _: bool = ingress
-        .call_workflow_json(&lane, "22:predecessor-transitionrun", "run", &lash_restate::Call::new(serde_json::json!({
-            "sender_generation": recorded,
-            "admitted": admission_body::admitted(SESSION.into(), RUN.into(), ShiftRequestId::new("shift"), AdmissionId::new("shift#0"), 0, recorded.clone(), AdmittedWork::Queued { head: "head".into() }),
-        })))
+        .call_workflow_json(
+            &lane,
+            "22:predecessor-transitionrun",
+            "run",
+            &lash_restate::Call::new(serde_json::json!({
+                "sender_generation": recorded,
+                "admitted": admitted,
+            })),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -603,6 +637,16 @@ async fn run_terminal_attachment_refuses_predecessor_before_decode_and_retains_d
     predecessor_journal_keeps_its_lane(
         crate::restate::JOURNAL_LOGIC_EPOCH - 1,
         PredecessorShape::UntaggedTransition,
+    )
+    .await;
+}
+
+/// L21 / S04 F1: replacing the admission state changes the turn's recorded commands.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stamped_turn_state_refuses_predecessor_before_decode_and_retains_drain() {
+    predecessor_journal_keeps_its_lane(
+        crate::restate::JOURNAL_LOGIC_EPOCH - 1,
+        PredecessorShape::RootAdmission,
     )
     .await;
 }

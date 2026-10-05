@@ -14,9 +14,7 @@ impl Fixture {
         let input = parts.enqueue("first", Some(&format!("{name}-run"))).await;
         let admitted =
             super::super::run_admission_fixture::admit(&parts, runner, "control-root").await;
-        let root = admitted
-            .root()
-            .expect("atomic admission retains its receipt");
+        let root = admitted.root();
         let ShiftEpochSeal::Sealed(lease) = &root.seal else {
             panic!("the root owns its fence: {:?}", root.seal);
         };

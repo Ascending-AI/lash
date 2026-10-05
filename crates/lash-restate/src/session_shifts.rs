@@ -89,7 +89,7 @@ use lash_core::engine::{
 };
 use lash_core::{SessionId, SessionShifts, SessionWorkEngine};
 use restate_sdk::context::{
-    CallFuture, ContextReadState, ContextSideEffects, ContextWriteState, ObjectContext, RunFuture,
+    CallFuture, ContextReadState, ContextSideEffects, ObjectContext, RunFuture,
     SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
@@ -175,7 +175,7 @@ use continuation::{continuation_generation, drain_answered, session_shift_contin
 ///         SHIFT_HANDLER, TURN_OUTCOME_STATE, shift_session_journal,
 ///         execute_run_journal,
 ///     ),
-///     items(path = "crates/lash-restate/src/session_shifts/intent.rs", TURN_ADMISSION_STATE, turn_invocation_key),
+///     items(path = "crates/lash-restate/src/session_shifts/intent.rs", turn_invocation_key),
 ///     items(path = "crates/lash-restate/src/sentinel.rs", GENERATION_SENTINEL),
 /// )
 /// version_surface = "drain"
@@ -205,17 +205,17 @@ const RUN_BOUNDARY_STEP: &str = "lash.shift.boundary";
 /// The `LashTurn` handler `run` sends its run's owed scope close to.
 const CLOSE_HANDLER: &str = "close";
 
-/// The `LashTurn` state entry `run` records the run's outcome under once it
-/// ended, terminally included; `outcome` reads it back.
+/// The `LashTurn` state entry retaining selection and completion. Both shared
+/// handlers project from this stamped record.
 const TURN_OUTCOME_STATE: &str = "outcome";
 
-/// The stored format of the run outcome `LashTurn` records under its
+/// The stored format of the turn state `LashTurn` records under its
 /// `outcome` state, in the stamped `{format, body}` envelope (ADR 0115
 /// §3.4). Stored shapes change in place during the version freeze. Handler
 /// command changes move the journal logic epoch and retain the old drain lane.
 ///
 /// version_guard(
-///     roots(path = "crates/lash-restate/src/session_shifts/intent.rs", RestateRunOutcome),
+///     roots(path = "crates/lash-restate/src/session_shifts/intent.rs", LashTurnState),
 ///     roots(path = "crates/lash-core-execution/src/engine/admission.rs", SealVerdict),
 ///     roots(path = "crates/lash-core-store/src/store/shift_fence.rs", AdmissionId, ShiftFence),
 ///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", ErrorEnvelope),
@@ -246,7 +246,7 @@ pub(crate) const TURN_OUTCOME_FORMATS: StoredValueFormats = StoredValueFormats {
 };
 
 mod intent;
-use intent::TURN_ADMISSION_STATE;
+use intent::LashTurnState;
 pub use intent::{
     RestateRunCloseRequest, RestateRunOutcome, RestateRunRequest, RestateSessionShiftRequest,
     recorded_turn_invocation_key, turn_invocation_key,
@@ -756,18 +756,11 @@ impl LashTurn for LashTurnImpl {
         call: Call<()>,
     ) -> HandlerResult<Reply<Option<RestateRunOutcome>>> {
         let (wire, ()) = call.open()?;
-        let recorded = ctx
-            .get::<Vec<u8>>(TURN_OUTCOME_STATE)
-            .await?
-            .map(|bytes| {
-                object_state::decode_stamped_bytes(
-                    TURN_OUTCOME_STATE,
-                    &bytes,
-                    &TURN_OUTCOME_FORMATS,
-                )
-            })
-            .transpose()?;
-        Ok(Reply::at(wire, recorded))
+        let recorded = read_turn_state(&ctx).await?;
+        Ok(Reply::at(
+            wire,
+            recorded.and_then(LashTurnState::into_outcome),
+        ))
     }
 
     async fn admission(
@@ -776,11 +769,10 @@ impl LashTurn for LashTurnImpl {
         call: Call<()>,
     ) -> HandlerResult<Reply<Option<Admitted>>> {
         let (wire, ()) = call.open()?;
+        let recorded = read_turn_state(&ctx).await?;
         Ok(Reply::at(
             wire,
-            ctx.get::<Json<Admitted>>(TURN_ADMISSION_STATE)
-                .await?
-                .map(|Json(admitted)| admitted),
+            recorded.and_then(LashTurnState::into_admission),
         ))
     }
 
@@ -1167,29 +1159,34 @@ async fn execute_run_journal(
                     ));
                 }
             };
-            let answer = RestateRunOutcome::Stopped { stop };
+            let answer = RestateRunOutcome::Stopped { stop: stop.clone() };
             object_state::set_stamped(
                 controller.context(),
                 TURN_OUTCOME_STATE,
                 writer,
-                answer.clone(),
+                LashTurnState::Stopped { stop },
             );
             return Ok(answer);
         }
     };
     if let Err(stop) = rules.before(&admitted) {
-        let answer = RestateRunOutcome::Stopped { stop };
+        let answer = RestateRunOutcome::Stopped { stop: stop.clone() };
         object_state::set_stamped(
             controller.context(),
             TURN_OUTCOME_STATE,
             writer,
-            answer.clone(),
+            LashTurnState::Stopped { stop },
         );
         return Ok(answer);
     }
-    controller
-        .context()
-        .set(TURN_ADMISSION_STATE, Json(admitted.clone()));
+    object_state::set_stamped(
+        controller.context(),
+        TURN_OUTCOME_STATE,
+        writer,
+        LashTurnState::Selected {
+            admitted: admitted.clone(),
+        },
+    );
     let scoped = controller
         .scoped_effect_controller(shift_run_scope(admitted.session(), admitted.run()))
         .map_err(refused_scope)?;
@@ -1238,7 +1235,7 @@ async fn execute_run_journal(
         controller.context(),
         TURN_OUTCOME_STATE,
         writer,
-        RestateRunOutcome::Ran {
+        LashTurnState::Ran {
             admitted: selected.clone(),
             outcome: ended,
         },
@@ -1247,6 +1244,14 @@ async fn execute_run_journal(
         admitted: selected,
         outcome,
     })
+}
+
+async fn read_turn_state(ctx: &SharedWorkflowContext<'_>) -> HandlerResult<Option<LashTurnState>> {
+    ctx.get::<Vec<u8>>(TURN_OUTCOME_STATE)
+        .await?
+        .map(|bytes| LashTurnState::decode(&bytes))
+        .transpose()
+        .map_err(Into::into)
 }
 
 /// What `LashTurn/{session}:{request}#{ordinal}/close` journals: the kernel's recorded

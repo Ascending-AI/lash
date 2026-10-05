@@ -24,6 +24,140 @@ use crate::{LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRegistrationError};
 use lash_core::engine::ShiftStop;
 use lash_core_store::compat::CompatRefusal;
 
+/// S04 F1: both shared handlers project from one stamped turn record.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn turn_admission_and_outcome_share_one_stamped_record() {
+    let roll = SessionRoll::start(0x5029).await;
+    let session = lash_sansio::SessionId::from("one-turn-record");
+    let gn = generation("N");
+    roll.shifts.accept(&session, "selected-run");
+    roll.send(&session, "one-record", &gn, &session_lane("N"))
+        .await;
+    roll.attach(&session, "one-record", &gn, &session_lane("N"))
+        .await;
+    let key = crate::session_shifts::turn_invocation_key(
+        &SessionRoll::shift_body(&session, "one-record", Some(&gn)).request,
+        0,
+    );
+    let mut state = roll.server.object_state("LashTurn", &key);
+    assert_eq!(
+        state.len(),
+        1,
+        "one stamped value owns selection and completion"
+    );
+    let mut recorded: serde_json::Value =
+        serde_json::from_slice(state.get("outcome").expect("turn state")).expect("JSON");
+    assert_eq!(recorded["format"], LASH_TURN_OUTCOME_FORMAT_VERSION);
+    let admitted = roll
+        .ingress
+        .call_lash_workflow::<_, Option<lash_core::engine::Admitted>>(
+            "LashTurn",
+            &key,
+            "admission",
+            &(),
+        )
+        .await
+        .expect("read admission")
+        .expect("selected");
+    let outcome = roll
+        .ingress
+        .call_lash_workflow::<_, Option<crate::RestateRunOutcome>>("LashTurn", &key, "outcome", &())
+        .await
+        .expect("read outcome");
+    assert!(
+        matches!(outcome, Some(crate::RestateRunOutcome::Ran { admitted: ref selected, .. }) if selected == &admitted)
+    );
+
+    let completed = recorded["body"].clone();
+    for (body, has_admission, has_outcome) in [
+        (
+            serde_json::json!({"state": "selected", "admitted": admitted}),
+            true,
+            false,
+        ),
+        (
+            serde_json::json!({"state": "stopped", "stop": {"stop": "idle"}}),
+            false,
+            true,
+        ),
+    ] {
+        recorded["body"] = body;
+        state.insert(
+            "outcome".into(),
+            serde_json::to_vec(&recorded).expect("encode"),
+        );
+        roll.server
+            .set_object_state("LashTurn", &key, state.clone());
+        let admission = roll
+            .ingress
+            .call_lash_workflow::<_, Option<lash_core::engine::Admitted>>(
+                "LashTurn",
+                &key,
+                "admission",
+                &(),
+            )
+            .await
+            .expect("read admission");
+        let outcome = roll
+            .ingress
+            .call_lash_workflow::<_, Option<crate::RestateRunOutcome>>(
+                "LashTurn",
+                &key,
+                "outcome",
+                &(),
+            )
+            .await
+            .expect("read outcome");
+        assert_eq!(admission.is_some(), has_admission);
+        assert_eq!(outcome.is_some(), has_outcome);
+    }
+    recorded["body"] = completed;
+    recorded["body"]["outcome"]["run"] = serde_json::json!("a-different-run");
+    state.insert(
+        "outcome".into(),
+        serde_json::to_vec(&recorded).expect("encode"),
+    );
+    roll.server
+        .set_object_state("LashTurn", &key, state.clone());
+    for handler in ["admission", "outcome"] {
+        let error = roll
+            .ingress
+            .call_lash_workflow::<_, serde_json::Value>("LashTurn", &key, handler, &())
+            .await
+            .expect_err("refuse inconsistent completion");
+        let crate::RestateHttpError::Status { body, .. } = error else {
+            panic!("unexpected error: {error}")
+        };
+        let response: serde_json::Value = serde_json::from_str(&body).expect("error JSON");
+        assert_eq!(
+            crate::wire::typed_terminal(response["message"].as_str().expect("message"))
+                .expect("typed corruption")
+                .code,
+            lash_core::RuntimeErrorCode::RuntimeStoreCorrupt
+        );
+    }
+    recorded["format"] = serde_json::json!(LASH_TURN_OUTCOME_FORMAT_VERSION + 10);
+    recorded["body"] = serde_json::Value::Null;
+    state.insert(
+        "outcome".into(),
+        serde_json::to_vec(&recorded).expect("encode"),
+    );
+    roll.server.set_object_state("LashTurn", &key, state);
+    for handler in ["admission", "outcome"] {
+        let error = roll
+            .ingress
+            .call_lash_workflow::<_, serde_json::Value>("LashTurn", &key, handler, &())
+            .await
+            .expect_err("refuse before decoding");
+        assert_eq!(
+            crate::object_state::ingress_stored_format_refusal(&error)
+                .expect("typed refusal")
+                .code,
+            lash_core::RuntimeErrorCode::EngineObjectStateFormatUnsupported
+        );
+    }
+}
+
 /// The three object families, bound alone on a double: they call no other
 /// service on the paths these tests take.
 async fn object_families() -> (RestateTestServer, crate::RestateIngressClient) {

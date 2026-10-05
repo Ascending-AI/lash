@@ -39,7 +39,58 @@ pub enum RestateRunOutcome {
     },
 }
 
-pub(super) const TURN_ADMISSION_STATE: &str = "admission";
+/// The one durable value retained by a turn, before and after execution.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub(super) enum LashTurnState {
+    Selected {
+        admitted: Admitted,
+    },
+    Stopped {
+        stop: ShiftStop,
+    },
+    Ran {
+        admitted: Admitted,
+        outcome: RunOutcome,
+    },
+}
+
+impl LashTurnState {
+    pub(super) fn into_admission(self) -> Option<Admitted> {
+        match self {
+            Self::Selected { admitted } | Self::Ran { admitted, .. } => Some(admitted),
+            Self::Stopped { .. } => None,
+        }
+    }
+
+    pub(super) fn into_outcome(self) -> Option<RestateRunOutcome> {
+        match self {
+            Self::Selected { .. } => None,
+            Self::Stopped { stop } => Some(RestateRunOutcome::Stopped { stop }),
+            Self::Ran { admitted, outcome } => Some(RestateRunOutcome::Ran { admitted, outcome }),
+        }
+    }
+
+    pub(super) fn decode(bytes: &[u8]) -> Result<Self, restate_sdk::errors::TerminalError> {
+        let state: Self = crate::object_state::decode_stamped_bytes(
+            super::TURN_OUTCOME_STATE,
+            bytes,
+            &super::TURN_OUTCOME_FORMATS,
+        )?;
+        if let Self::Ran { admitted, outcome } = &state
+            && admitted.run() != outcome.run()
+        {
+            return Err(restate_sdk::errors::TerminalError::new(
+                lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::RuntimeStoreCorrupt,
+                    "turn outcome names a different run than its recorded admission",
+                )
+                .to_record(),
+            ));
+        }
+        Ok(state)
+    }
+}
 
 /// The request `LashTurn/{session}:{request}#{ordinal}/close` runs: the scope close the
 /// key's `run` owed once its run's terminal evidence was durable

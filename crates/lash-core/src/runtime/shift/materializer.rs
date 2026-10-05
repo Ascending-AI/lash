@@ -6,7 +6,8 @@ pub trait ShiftAdmissionMaterializer: Send + Sync {
     async fn request(
         &self,
         store: &crate::store::SessionStore,
-        admitted: &Admitted,
+        selection: &crate::store::ShiftAdmissionSelection,
+        admitted_generation: &crate::engine::BuildGeneration,
         preparation: &crate::store::ShiftAdmissionPreparation,
         executor: crate::store::RunExecutor,
         scope: &crate::AdmittedScope,
@@ -39,12 +40,13 @@ impl ShiftAdmissionMaterializer for ShiftAdmissionTemplate {
     async fn request(
         &self,
         store: &crate::store::SessionStore,
-        admitted: &Admitted,
+        selection: &crate::store::ShiftAdmissionSelection,
+        admitted_generation: &crate::engine::BuildGeneration,
         preparation: &crate::store::ShiftAdmissionPreparation,
         executor: crate::store::RunExecutor,
         scope: &crate::AdmittedScope,
     ) -> Result<crate::store::AdmitRunRequest, crate::RuntimeEffectControllerError> {
-        let head = match admitted.work() {
+        let head = match &selection.work {
             crate::engine::AdmittedWork::Input { head } => {
                 crate::store::AdmittedHead::Input(head.clone())
             }
@@ -111,7 +113,7 @@ impl ShiftAdmissionMaterializer for ShiftAdmissionTemplate {
         Ok(crate::store::AdmitRunRequest {
             fence: preparation.prospective_fence.clone(),
             unsealed_epoch: Some(preparation.epoch.epoch),
-            run: admitted.run().clone(),
+            run: selection.run.clone(),
             head,
             max_inputs: self
                 .host
@@ -121,13 +123,13 @@ impl ShiftAdmissionMaterializer for ShiftAdmissionTemplate {
             policy: self.policy.clone(),
             base,
             turn_index,
-            admitted_generation: admitted.admitted_generation().clone(),
+            admitted_generation: admitted_generation.clone(),
             executor,
             plugins,
             turn_cancellation: Some(crate::store::TurnCancellationBinding {
                 binding_id: binding_id.to_string(),
                 admitted_scope: crate::runtime::effect::executor::admitted_turn_cancel_scope(
-                    &crate::TurnAddress::new(admitted.session(), admitted.run()),
+                    &crate::TurnAddress::new(store.session_id(), &selection.run),
                     scoped.execution_scope(),
                     binding_id,
                 ),

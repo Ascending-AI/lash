@@ -173,7 +173,7 @@ pub async fn a_fresh_root_journal_refuses_the_retained_admission_nonce(
                     panic!("the first root admits pending work");
                 };
                 assert!(matches!(
-                    admitted.root().expect("retained atomic receipt").seal,
+                    admitted.root().seal,
                     crate::store::ShiftEpochSeal::Sealed(_)
                 ));
                 let run = admitted.run().clone();
@@ -214,7 +214,7 @@ pub async fn a_fresh_root_journal_refuses_the_retained_admission_nonce(
                 };
                 assert!(
                     matches!(
-                        admitted.root().expect("retained atomic receipt").seal,
+                        admitted.root().seal,
                         crate::store::ShiftEpochSeal::ExecutionLost
                     ),
                     "the fresh root refuses the predecessor's nonce at admission"

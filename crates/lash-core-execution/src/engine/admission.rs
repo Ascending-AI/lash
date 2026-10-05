@@ -83,52 +83,38 @@ pub enum SealRefusal {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Admitted {
     session: SessionId,
-    run: TurnId,
     request: ShiftRequestId,
     admission: AdmissionId,
-    observed_epoch: u64,
     /// The drain generation of the build that admitted the run, recorded
     /// with the admission (FIG-3795 S9, FIG-4742): the run's admission
     /// stamps it, and the run's resume routes by it.
     admitted_generation: super::contracts::BuildGeneration,
-    /// What the run executes.
-    work: AdmittedWork,
-    root: Option<Box<lash_core_store::store::ShiftAdmissionReceipt>>,
+    receipt: Box<lash_core_store::store::ShiftAdmissionReceipt>,
 }
 
 pub use lash_core_store::store::AdmittedWork;
 
 impl Admitted {
-    #[must_use]
-    pub fn with_root(mut self, root: lash_core_store::store::ShiftAdmissionReceipt) -> Self {
-        self.root = Some(Box::new(root));
-        self
-    }
-
-    pub fn root(&self) -> Option<&lash_core_store::store::ShiftAdmissionReceipt> {
-        self.root.as_deref()
+    /// The atomic receipt retained by this recorded root admission.
+    pub fn root(&self) -> &lash_core_store::store::ShiftAdmissionReceipt {
+        &self.receipt
     }
 
     /// Only the `AdmitShift` body mints an admission, through
     /// [`admission_body::admitted`](super::shift::admission_body::admitted).
     pub(super) fn minted(
         session: SessionId,
-        run: TurnId,
         request: ShiftRequestId,
         admission: AdmissionId,
-        observed_epoch: u64,
         admitted_generation: super::contracts::BuildGeneration,
-        work: AdmittedWork,
+        receipt: lash_core_store::store::ShiftAdmissionReceipt,
     ) -> Self {
         Self {
             session,
-            run,
             request,
             admission,
-            observed_epoch,
             admitted_generation,
-            work,
-            root: None,
+            receipt: Box::new(receipt),
         }
     }
 
@@ -151,7 +137,7 @@ impl Admitted {
     }
 
     pub fn run(&self) -> &TurnId {
-        &self.run
+        &self.receipt.selection.run
     }
 
     pub fn request(&self) -> &ShiftRequestId {
@@ -165,7 +151,7 @@ impl Admitted {
 
     /// The shift epoch admission read; the seal advances it by one.
     pub fn observed_epoch(&self) -> u64 {
-        self.observed_epoch
+        self.receipt.selection.observed_epoch
     }
 
     /// The drain generation of the build that holds the run: the one whose
@@ -178,12 +164,12 @@ impl Admitted {
 
     /// What the run executes.
     pub fn work(&self) -> &AdmittedWork {
-        &self.work
+        &self.receipt.selection.work
     }
 
     /// The host operation the run executes, when it executes one.
     pub fn operation(&self) -> Option<lash_core_store::tool_run::OperationRun> {
-        match &self.work {
+        match self.work() {
             AdmittedWork::Operation { operation } => {
                 Some(lash_core_store::tool_run::OperationRun {
                     session_id: self.session.clone(),

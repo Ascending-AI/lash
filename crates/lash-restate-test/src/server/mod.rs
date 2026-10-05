@@ -1024,14 +1024,22 @@ impl RestateTestServer {
                 if !service.contains("LashTurn") {
                     return false;
                 }
-                self.object_state(service, key)
-                    .get("admission")
-                    .and_then(|bytes| {
-                        serde_json::from_slice::<lash_core::engine::Admitted>(bytes).ok()
-                    })
+                self.turn_admission(service, key)
                     .is_some_and(|admitted| admitted.session() == session && admitted.run() == run)
             })
             .collect()
+    }
+
+    /// The selection retained in a turn's stamped state, before or after its run ended.
+    pub fn turn_admission(&self, service: &str, key: &str) -> Option<lash_core::engine::Admitted> {
+        let state = self.object_state(service, key);
+        let recorded: serde_json::Value = serde_json::from_slice(state.get("outcome")?).ok()?;
+        recorded.get("format")?.as_u64()?;
+        let body = recorded.get("body")?;
+        match body.get("state")?.as_str()? {
+            "selected" | "ran" => serde_json::from_value(body.get("admitted")?.clone()).ok(),
+            _ => None,
+        }
     }
 
     /// Replace the whole state the object or workflow `key` of `service`

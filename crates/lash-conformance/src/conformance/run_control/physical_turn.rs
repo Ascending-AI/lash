@@ -69,10 +69,7 @@ pub async fn a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit(
         .enqueue("first", Some("later-physical-park-run"))
         .await;
     let admitted = admit_root(&parts, &runner, "park-root").await;
-    let root = admitted
-        .root()
-        .expect("the atomic root retains its receipt")
-        .clone();
+    let root = admitted.root().clone();
     let ShiftEpochSeal::Sealed(lease) = &root.seal else {
         panic!("the root owns its fence: {:?}", root.seal);
     };

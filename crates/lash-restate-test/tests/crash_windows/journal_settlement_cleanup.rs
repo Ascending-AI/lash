@@ -91,17 +91,31 @@ impl SessionShifts for HeldShifts {
                                 matches!(seal, lash_core::store::ShiftEpochSeal::Sealed(_)),
                                 "the invocation records its root executor: {seal:?}"
                             );
-                            AdmitVerdict::Admit(admission_body::admitted(
-                                self.session.clone(),
-                                "shiftless-run".into(),
-                                request.request.clone(),
-                                admission,
-                                stored.epoch,
-                                admitting_generation.clone(),
-                                lash_core::engine::AdmittedWork::Input {
-                                    head: "awaited-input".into(),
-                                },
-                            ))
+                            AdmitVerdict::Admit({
+                                let receipt_session: lash_core::SessionId = self.session.clone();
+                                let receipt_admission = admission;
+                                admission_body::admitted(
+                                    receipt_session.clone(),
+                                    request.request.clone(),
+                                    receipt_admission.clone(),
+                                    admitting_generation.clone(),
+                                    lash_core::store::ShiftAdmissionReceipt {
+                                        selection: lash_core::store::ShiftAdmissionSelection {
+                                            run: "shiftless-run".into(),
+                                            work: lash_core::engine::AdmittedWork::Input {
+                                                head: "awaited-input".into(),
+                                            },
+                                            observed_epoch: stored.epoch,
+                                        },
+                                        run_start: lash_core::store::RunStartNonce::new(
+                                            receipt_admission.as_str(),
+                                        ),
+                                        seal,
+                                        cancel_intent: lash_core::TurnCancelIntentSnapshot::Absent,
+                                        run_admission: None,
+                                    },
+                                )
+                            })
                         } else {
                             AdmitVerdict::Idle
                         }

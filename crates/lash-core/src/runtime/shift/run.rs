@@ -63,10 +63,8 @@ impl LashRuntime {
                 empty_drain: None,
             });
         }
-        let answer: Result<RunAdmissionAnswer, RuntimeError> = admitted
-            .root()
-            .and_then(|root| root.run_admission.clone())
-            .ok_or_else(|| {
+        let answer: Result<RunAdmissionAnswer, RuntimeError> =
+            admitted.root().run_admission.clone().ok_or_else(|| {
                 RuntimeError::new(
                     RuntimeErrorCode::RuntimeStoreCorrupt,
                     "turn lacks its recorded root composition",
@@ -958,7 +956,7 @@ pub(super) async fn execute_headless_run(
     headless: HeadlessRun,
 ) -> Result<RunOutcome, ShiftAbort> {
     let run = admitted.run().clone();
-    let admission = match admitted.root().and_then(|root| root.run_admission.clone()) {
+    let admission = match admitted.root().run_admission.clone() {
         Some(RunAdmissionAnswer::Admitted { admission, .. }) => admission,
         Some(RunAdmissionAnswer::Refused { .. }) => return Ok(RunOutcome::Ceded { run }),
         None => {
