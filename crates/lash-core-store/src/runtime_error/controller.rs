@@ -160,6 +160,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::TransitionPlugins
                 | RuntimeEffectKind::ObserveDrainMark
                 | RuntimeEffectKind::RecoverFollowOn
+                | RuntimeEffectKind::RestoreRunMaterial
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::ResolveConfigTransaction
                 | RuntimeEffectKind::CloseRunScope

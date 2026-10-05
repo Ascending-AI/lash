@@ -1,7 +1,7 @@
 //! Host-owned controls stay outside the engine journal. Only the engine
 //! invokes the tool and task bodies; HTTP observers cannot drive a turn.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use lash::direct::LlmOutputPart;
@@ -32,6 +32,7 @@ pub struct BodyReceipt {
 pub struct Controls {
     gates: Mutex<BTreeMap<String, Arc<Notify>>>,
     entered: Mutex<Vec<BodyReceipt>>,
+    fulfilled_tasks: Mutex<BTreeSet<(Option<lash::SessionId>, String)>>,
 }
 
 impl Controls {
@@ -181,7 +182,16 @@ impl SessionPlugin for ConsumerPlugin {
             .typed_task::<EchoTask, _, _>(move |ctx, text| {
                 let controls = controls.clone();
                 async move {
-                    if text.starts_with("hold:") {
+                    // A task body runs again when its journal resumes. The
+                    // external hold belongs to the operation, so replay must
+                    // observe its release rather than consume a new permit.
+                    let operation = (
+                        ctx.session_id.clone(),
+                        ctx.scoped_effect_controller.scope_id().to_owned(),
+                    );
+                    if text.starts_with("hold:")
+                        && !controls.fulfilled_tasks.lock_recover().contains(&operation)
+                    {
                         controls
                             .enter(
                                 BodyReceipt {
@@ -192,6 +202,7 @@ impl SessionPlugin for ConsumerPlugin {
                                 &ctx.cancellation_token,
                             )
                             .await;
+                        controls.fulfilled_tasks.lock_recover().insert(operation);
                     }
                     Ok(PluginOperationOutcome::new(text))
                 }
@@ -239,5 +250,82 @@ impl StaticToolExecute for Echo {
             });
         }
         ToolOutcome::ok(Value::String(args.text)).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::{Context as _, ensure};
+    use serde_json::json;
+    use std::time::Duration;
+    /// S30: replay of a fulfilled external task hold keeps its original receipt;
+    /// a fresh operation with identical input still needs its own release.
+    #[test]
+    fn s30_replayed_task_keeps_one_body_receipt() -> anyhow::Result<()> {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .thread_stack_size(8 * 1024 * 1024)
+            .build()?
+            .block_on(async {
+                use std::sync::Arc;
+                let double = lash_restate_test::backend(
+                    0x5002,
+                    lash_restate_test::ServerConfig::default().always_replay(true),
+                )
+                .await?;
+                let controls = Arc::new(super::Controls::default());
+                let metadata = lash::LlmProfileMetadata::builder("s30-double")
+                    .context_window_tokens(8192)
+                    .build()?;
+                let registry = lash::LlmProfileRegistry::new().register(
+                    "consumer",
+                    lash::RegisteredLlmProfile::new(metadata, super::provider()),
+                )?;
+                let core = lash::LashCore::standard_builder(double.lash_backend())
+                    .llm_profiles(Arc::new(registry))
+                    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                    .plugin(Arc::new(super::ConsumerPlugin(controls.clone())))
+                    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                        "s30", "double",
+                    ))?;
+                core.session("s30-double")
+                    .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                        "consumer",
+                        lash::TurnBudget::Unbounded,
+                        lash::MaxToolCalls::new(8),
+                    )))
+                    .await?;
+                let session = core.session("s30-double").open().await?;
+                for (ordinal, id) in ["first", "second"].into_iter().enumerate() {
+                    let task = session
+                        .plugin_operations()
+                        .start_task::<super::EchoTask>("hold:task".into(), id)
+                        .await?;
+                    tokio::time::timeout(Duration::from_secs(5), async {
+                        while controls.receipts().len() <= ordinal {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .context("the new operation enters its own body")?;
+                    let run = task.run().clone();
+                    drop(task);
+                    ensure!(controls.release("hold:task"), "the task's gate exists");
+                    let result =
+                        tokio::time::timeout(Duration::from_secs(5), session.run(run).result())
+                            .await
+                            .context("a released task must complete under replay")??;
+                    ensure!(
+                        result.output == json!("hold:task"),
+                        "the task kept its output"
+                    );
+                    ensure!(
+                        controls.receipts().len() == ordinal + 1,
+                        "replay does not repeat an external task receipt"
+                    );
+                }
+                Ok(())
+            })
     }
 }

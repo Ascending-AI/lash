@@ -483,6 +483,14 @@ pub enum RuntimeEffectCommand {
         follow_on: crate::TurnId,
         attempts: u32,
     },
+    /// Acquire and read a successor's material once, before it can retire its
+    /// holder. Replay serves the canonical payloads from this step's journal.
+    RestoreRunMaterial {
+        holder: crate::tool_run::MaterialHolder,
+        bundles: Vec<crate::tool_run::RetainedBundle>,
+        aliases: Vec<crate::tool_run::MaterialRef>,
+        available: Vec<crate::store::plugin_writers::PluginRevision>,
+    },
     /// Admit the next run of a session shift (ADR 0105 §2, FIG-3600); every
     /// replay decodes the recorded verdict instead of re-reading the store.
     AdmitShift {
@@ -641,6 +649,7 @@ impl RuntimeEffectCommand {
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
+            Self::RestoreRunMaterial { .. } => RuntimeEffectKind::RestoreRunMaterial,
             Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
             Self::DrawRunStart { .. } => RuntimeEffectKind::DrawRunStart,
@@ -1274,6 +1283,10 @@ pub enum RuntimeEffectOutcome {
     /// head its turn runs on (FIG-4380).
     RecoverFollowOn {
         answer: Box<crate::store::FollowOnRecoveryAnswer>,
+    },
+    /// Canonical material read under the successor's lease before execution.
+    RestoreRunMaterial {
+        materials: Vec<crate::tool_run::MaterialEntry>,
     },
     /// The shift admission's recorded verdict.
     AdmitShift {

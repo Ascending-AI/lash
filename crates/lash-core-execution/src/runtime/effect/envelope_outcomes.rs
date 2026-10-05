@@ -229,6 +229,7 @@ impl RuntimeEffectOutcome {
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
+            Self::RestoreRunMaterial { .. } => RuntimeEffectKind::RestoreRunMaterial,
             Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
             Self::DrawRunStart { .. } => RuntimeEffectKind::DrawRunStart,

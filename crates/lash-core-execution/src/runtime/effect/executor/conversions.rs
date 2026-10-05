@@ -208,3 +208,79 @@ impl RuntimeEffectLocalRunner for LiveStepRunner<'_> {
         (self.run)(envelope, live).await
     }
 }
+
+/// Only the first successor execution reads the retained store; the owning
+/// invocation records its payloads before its commit can end the lease.
+struct RunMaterialReader<'run>(&'run dyn crate::store::ToolMaterialStore);
+
+#[async_trait::async_trait]
+impl RuntimeEffectLocalRunner for RunMaterialReader<'_> {
+    async fn execute(
+        self: Box<Self>,
+        envelope: RuntimeEffectEnvelope,
+        _effect_attempt: Option<crate::EffectAttempt>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let RuntimeEffectCommand::RestoreRunMaterial {
+            holder,
+            bundles,
+            aliases,
+            available,
+        } = envelope.command
+        else {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "Run material reader requires a restore command",
+            ));
+        };
+        let mut materials = Vec::new();
+        for bundle in &bundles {
+            let acquired = self
+                .0
+                .acquire_material(&holder, bundle)
+                .await
+                .map_err(material_read_error)?;
+            for alias in &aliases {
+                let Some(reference) = acquired.references.iter().find(|reference| {
+                    reference.owner == alias.owner
+                        && reference.role == alias.role
+                        && reference.digest == alias.digest
+                }) else {
+                    continue;
+                };
+                let payload = self
+                    .0
+                    .read_material(&holder, reference, &alias.owner, &available)
+                    .await
+                    .map_err(material_read_error)?;
+                materials.push(crate::tool_run::MaterialEntry::Available {
+                    reference: alias.clone(),
+                    payload: Box::new(payload),
+                });
+            }
+        }
+        Ok(RuntimeEffectOutcome::RestoreRunMaterial { materials })
+    }
+}
+
+fn material_read_error(
+    error: crate::tool_run::MaterialRetentionError,
+) -> RuntimeEffectControllerError {
+    let retryable = matches!(error, crate::tool_run::MaterialRetentionError::Store(_));
+    let error = crate::tool_dispatch::SingletonRunError::Material(error).into_controller_error();
+    if retryable {
+        error.retryable_uncommitted_derivation()
+    } else {
+        error
+    }
+}
+
+impl<'run> RuntimeEffectLocalExecutor<'run> {
+    pub(crate) fn restore_run_material(store: &'run dyn crate::store::ToolMaterialStore) -> Self {
+        Self {
+            state: RuntimeEffectLocalExecutorState::Runner(Box::new(RunMaterialReader(store))),
+            replay_trace: None,
+            served_only: None,
+            issued: crate::trace::StepIssue::default(),
+        }
+    }
+}

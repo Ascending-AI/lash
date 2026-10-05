@@ -186,6 +186,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::ObserveDrainMark { .. }
         | RuntimeEffectCommand::PluginCallbacks { .. }
         | RuntimeEffectCommand::RecoverFollowOn { .. }
+        | RuntimeEffectCommand::RestoreRunMaterial { .. }
         | RuntimeEffectCommand::ReadSessionCommandRun { .. }
         | RuntimeEffectCommand::IngestTriggerOccurrence { .. }
         | RuntimeEffectCommand::AdmitTriggerDelivery { .. }

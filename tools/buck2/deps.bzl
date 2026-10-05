@@ -39,7 +39,9 @@ PACKAGE_DEPS = {
     },
     "e2e-consumer": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "lash_restate_test": "//crates/lash-restate-test:lash-restate-test"
+        },
         "normal": {
             "anyhow": "//third-party/rust:p0011",
             "axum": "//third-party/rust:p0021",

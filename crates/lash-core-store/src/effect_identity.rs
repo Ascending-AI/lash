@@ -75,6 +75,8 @@ pub enum RuntimeEffectKind {
     /// (FIG-4361): run the owed follow-on under its raised recovery count,
     /// commit it exhausted, or cede a follow-on the head owes no longer.
     RecoverFollowOn,
+    /// The successor segment's recorded read of its retained Run material.
+    RestoreRunMaterial,
     /// A session shift's recorded admission (ADR 0105 §2, FIG-3600): the run
     /// it admitted, with its base and turn index, or why it admitted none.
     AdmitShift,
@@ -142,6 +144,7 @@ impl RuntimeEffectKind {
             Self::ObserveDrainMark => "observe_drain_mark",
             Self::PluginCallbacks => "plugin_callbacks",
             Self::RecoverFollowOn => "recover_follow_on",
+            Self::RestoreRunMaterial => "restore_run_material",
             Self::AdmitShift => "admit_shift",
             Self::TraceBoundary => "trace_boundary",
             Self::DrawRunStart => "draw_run_start",

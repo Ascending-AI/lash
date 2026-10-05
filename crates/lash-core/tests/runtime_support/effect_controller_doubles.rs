@@ -582,6 +582,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::ObserveDrainMark { .. }
             | RuntimeEffectCommand::PluginCallbacks { .. }
             | RuntimeEffectCommand::RecoverFollowOn { .. }
+            | RuntimeEffectCommand::RestoreRunMaterial { .. }
             | RuntimeEffectCommand::AdmitShift { .. }
             | RuntimeEffectCommand::DrawRunStart { .. }
             | RuntimeEffectCommand::ResolveTurnConfig { .. }

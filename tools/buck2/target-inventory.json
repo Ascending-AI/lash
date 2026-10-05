@@ -54185,6 +54185,7 @@
       "dependencies": [
         "anyhow",
         "axum",
+        "lash-internal-restate-test",
         "lash-runtime",
         "opentelemetry_sdk",
         "reqwest",

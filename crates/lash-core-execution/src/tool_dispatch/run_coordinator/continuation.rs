@@ -273,30 +273,35 @@ impl<'a> RunCoordinator<'a> {
                 opener: run.journal.owner.clone(),
                 segment: successor,
             };
-            for bundle in &transfer.material {
-                let acquired = store.acquire_material(&holder, bundle).await?;
-                for alias in &transfer.material_aliases {
-                    let Some(reference) = acquired.references.iter().find(|reference| {
-                        reference.owner == alias.owner
-                            && reference.role == alias.role
-                            && reference.digest == alias.digest
-                    }) else {
-                        continue;
-                    };
-                    let payload = store
-                        .read_material(
-                            &holder,
-                            reference,
-                            &alias.owner,
-                            &run.journal.materials.available,
-                        )
-                        .await?;
-                    run.journal
-                        .materials
-                        .entries
-                        .insert(alias.clone(), Some(payload));
-                }
-            }
+            let name = format!("run:restore-material:{}", successor.0);
+            let invocation = crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(scoped.execution_scope().clone(), &name)
+                    .map_err(crate::RuntimeEffectControllerError::from)?,
+                crate::RuntimeAttribution::default(),
+                &name,
+            );
+            let outcome = scoped
+                .execute_effect(
+                    crate::RuntimeEffectEnvelope::new(
+                        invocation,
+                        crate::RuntimeEffectCommand::RestoreRunMaterial {
+                            holder,
+                            bundles: transfer.material.clone(),
+                            aliases: transfer.material_aliases.clone(),
+                            available: run.journal.materials.available.clone(),
+                        },
+                    ),
+                    crate::RuntimeEffectLocalExecutor::restore_run_material(store),
+                )
+                .await?;
+            let crate::RuntimeEffectOutcome::RestoreRunMaterial { materials } = outcome else {
+                return Err(crate::RuntimeEffectControllerError::wrong_outcome(
+                    crate::RuntimeEffectKind::RestoreRunMaterial,
+                    outcome.kind(),
+                )
+                .into());
+            };
+            run.journal.materials.admit(materials)?;
         }
         for entry in &transfer.entries {
             run.journal
@@ -314,12 +319,23 @@ impl<'a> RunCoordinator<'a> {
             .map(|source| (source.call_id.clone(), source))
             .collect();
         if let Some(plugins) = handlers.plugin_session() {
+            // Turn preparation already admitted publication ownership. The
+            // transferred snapshot supplies values and receipts, but cannot
+            // move that ownership back to its predecessor's physical turn.
+            let publication_segment = plugins
+                .export_state()
+                .plugins
+                .values()
+                .map(|namespace| namespace.publication.owner_segment)
+                .max()
+                .unwrap_or_default()
+                .max(successor);
             if let Some(state) = &transfer.plugin_state {
                 plugins
                     .hydrate_state(state)
                     .map_err(RuntimeEffectControllerError::from)?;
             }
-            plugins.adopt_state_segment(successor);
+            plugins.adopt_state_segment(publication_segment);
         }
         let events: Vec<_> = run
             .journal

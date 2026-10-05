@@ -1056,9 +1056,9 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(
         "each model call was asked once, from the history committed before it"
     );
 
-    // The first invocation asked the model once and took the boundary before
-    // its second call; each continuation did the same, until the last
-    // answered: one `LashTurn` run per model call.
+    // With a one-effect budget, each tool round takes one boundary after
+    // its model call and another after the successor's recorded material
+    // restoration. The final invocation asks the model for the answer.
     let Engine::Double(double) = &engine else {
         unreachable!("the law runs on the double");
     };
@@ -1082,7 +1082,7 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(
         .collect();
     assert_eq!(
         runs.len(),
-        TOOL_ROUNDS + 1,
+        2 * TOOL_ROUNDS + 1,
         "the run went on in a new invocation at every quiet point: {runs:?}"
     );
     let store = lash_core::runtime::live_session_view(&core.store_factory, &session_id)
