@@ -110,18 +110,18 @@ fn journal_listing(server: &RestateTestServer) -> Vec<String> {
     lines
 }
 
-/// K3/K9 (FIG-4998): after a cold reopen with C's and A's X durable (in that
-/// order) and B unfinished, the Run decides C, A, B — selection follows the
-/// journal, never the source order of ready handles.
+/// K3/K9 and R4 (FIG-4998): after a cold reopen with C's, D's and A's X
+/// durable in that order and B unfinished, the Run decides C, D, A, B.
+/// Three durable acknowledgments also pin the owner's queue order.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn k9_cold_reopen_decides_durable_attempts_in_acknowledgment_order() {
     let calls: Arc<Vec<_>> = Arc::new(
-        ["a", "b", "c"]
+        ["a", "b", "c", "d"]
             .iter()
             .map(|label| (call(label, &Kind::IntentFree), Kind::IntentFree))
             .collect(),
     );
-    let [a, b, c]: [ToolCallId; 3] = calls
+    let [a, b, c, d]: [ToolCallId; 4] = calls
         .iter()
         .map(|(call, _)| call.call_id.clone())
         .collect::<Vec<_>>()
@@ -129,16 +129,21 @@ async fn k9_cold_reopen_decides_durable_attempts_in_acknowledgment_order() {
         .unwrap();
     let mut probe = Probe::new(&calls);
     probe.always_replay = true;
-    for id in [&a, &b, &c] {
+    for id in [&a, &b, &c, &d] {
         probe.gates.insert(id.clone(), Arc::new(Gate::default()));
     }
-    let (script_a, script_b, script_c) = (a.clone(), b.clone(), c.clone());
+    let (script_a, script_b, script_c, script_d) = (a.clone(), b.clone(), c.clone(), d.clone());
     probe.script = Some(Arc::new(move |server, probe| {
-        let (a, b, c) = (script_a.clone(), script_b.clone(), script_c.clone());
+        let (a, b, c, d) = (
+            script_a.clone(),
+            script_b.clone(),
+            script_c.clone(),
+            script_d.clone(),
+        );
         Box::pin(async move {
-            wait_until(BUDGET, "all three gated bodies to enter", || {
+            wait_until(BUDGET, "all four gated bodies to enter", || {
                 let entered = probe.executions.lock().unwrap();
-                [&a, &b, &c]
+                [&a, &b, &c, &d]
                     .iter()
                     .all(|id| entered.iter().any(|(executed, _)| executed == *id))
             })
@@ -146,6 +151,11 @@ async fn k9_cold_reopen_decides_durable_attempts_in_acknowledgment_order() {
             probe.gates[&c].release();
             wait_until(BUDGET, "C's attempt:1 completion", || {
                 run_completion_landed(&server, &name(&c, "attempt:1"))
+            })
+            .await;
+            probe.gates[&d].release();
+            wait_until(BUDGET, "D's attempt:1 completion", || {
+                run_completion_landed(&server, &name(&d, "attempt:1"))
             })
             .await;
             probe.gates[&a].release();
@@ -187,10 +197,11 @@ async fn k9_cold_reopen_decides_durable_attempts_in_acknowledgment_order() {
         .collect();
     assert_eq!(
         decided,
-        vec![c.clone(), a.clone(), b.clone()],
+        vec![c.clone(), d.clone(), a.clone(), b.clone()],
         "the cold owner decides in X acknowledgment order"
     );
     assert_eq!(probe.executions_of(&a), 1, "a's durable X never repeats");
     assert_eq!(probe.executions_of(&c), 1, "c's durable X never repeats");
+    assert_eq!(probe.executions_of(&d), 1, "d's durable X never repeats");
     assert_eq!(probe.executions_of(&b), 2, "b's unfinished X redelivers");
 }

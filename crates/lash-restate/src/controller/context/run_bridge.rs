@@ -89,9 +89,8 @@ struct State<T> {
 pub(super) struct Callback<T>(Arc<Mutex<State<T>>>);
 pub(super) struct Owner<T>(Arc<Mutex<State<T>>>);
 
-/// What one issued X's two halves share: the SDK result future, the output
-/// it produced once, whether X settled, and the waker that re-arms the
-/// progress half when it does.
+/// What one issued X's two halves share: the SDK result future, whether X
+/// settled, and the waker that re-arms the progress half when it does.
 struct Acknowledgement<R: Future> {
     result: Pin<Box<R>>,
     settled: bool,
