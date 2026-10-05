@@ -85,6 +85,7 @@ fn round(members: Vec<AdmittedCall>) -> RoundAdmission {
         owner: opener(),
         members,
         operands,
+        capacity: CapacityScope::Held,
     }
 }
 
@@ -341,18 +342,7 @@ fn declarations_refuse_typed() {
 #[test]
 fn one_invalid_member_admits_no_member() {
     let ok = round(vec![call("a"), call("b")]);
-    let admitted = ok.clone().admit(&available(), |_| false).unwrap();
-    assert_eq!(admitted.reserved_calls(), 2);
-
-    let mut aliased = round(vec![call("a")]);
-    aliased.operands = vec![0, 0];
-    assert_eq!(
-        aliased
-            .admit(&available(), |_| false)
-            .unwrap()
-            .reserved_calls(),
-        1
-    );
+    ok.clone().admit(&available(), |_| false).unwrap();
 
     let mut duplicate = round(vec![call("a"), call("a")]);
     duplicate.operands = vec![0, 1];
@@ -1433,7 +1423,7 @@ fn transfer() -> RunTransfer {
         owed_starts: Vec::new(),
         owed_cancels: Vec::new(),
         state: StateFrontier::default(),
-        reserved_calls: 1,
+        held_calls: 1,
         vm_continuation: true,
     }
 }
@@ -1977,7 +1967,8 @@ fn l09_capture_rebuilds_the_complete_acknowledged_run() {
     capture.environment = Some(crate::process_identity::ProcessExecutionEnvRef::new(
         "admitted-process-environment",
     ));
-    capture.reserved_calls = 2;
+    // The round of three is held whole: two members are unpresented.
+    capture.held_calls = 3;
     capture.subscriptions = vec![SourceSubscription {
         source: source.source.clone(),
         owner: opener(),
@@ -2020,7 +2011,7 @@ fn l09_capture_rebuilds_the_complete_acknowledged_run() {
     assert!(ledger.consumed(&prior.call_id));
     assert!(!ledger.consumed(&committed.call_id));
     assert!(!ledger.drain_frontier_open(3));
-    assert_eq!(ledger.reserved_calls(), 2);
+    assert_eq!(ledger.held_calls(), 3);
     assert_eq!(ledger.unacknowledged_local(), 0);
     assert_eq!(adopted.sources, vec![source]);
     assert_eq!(adopted.environment, capture.environment);
@@ -2043,11 +2034,11 @@ fn l09_capture_rebuilds_the_complete_acknowledged_run() {
     );
     assert_eq!(adopted.subscriptions[0].segment, SegmentOrdinal(1));
     let mut lost_capacity = capture.clone();
-    lost_capacity.reserved_calls = 0;
+    lost_capacity.held_calls = 0;
     assert_eq!(
         lost_capacity.check_capture(&Cut::request(capture.reason).observe(0)),
         Err(ContinuationRefusal::CapacityFrontier {
-            expected: 2,
+            expected: 3,
             found: 0,
         })
     );
@@ -2094,4 +2085,60 @@ fn l19_publication_receipts_round_trip_inside_a_journal_variant() {
     assert_eq!(serde_json::from_slice::<Journal>(&bytes).unwrap(), record);
     let bytes = rmp_serde::to_vec_named(&record).unwrap();
     assert_eq!(rmp_serde::from_slice::<Journal>(&bytes).unwrap(), record);
+}
+
+/// K1: a round reserves one call per unique member, aliases nothing more. A
+/// held round keeps its whole reservation until every member is presented;
+/// a cell's round counts for the Run's whole life, and only for that cell.
+#[test]
+fn capacity_holds_a_round_whole_until_every_member_is_presented() {
+    let (a, b, c) = (call("held-a"), call("held-b"), call("cell-c"));
+    let mut log = Log::new();
+    let mut held = round(vec![a.clone(), b.clone()]);
+    held.operands = vec![0, 0, 1];
+    log.push(RunEvent::Admitted { round: held }).unwrap();
+    let cell = CapacityScope::Cell {
+        key: "cell-1".into(),
+    };
+    log.push(RunEvent::Admitted {
+        round: RoundAdmission {
+            capacity: cell.clone(),
+            ..round(vec![c.clone()])
+        },
+    })
+    .unwrap();
+    assert_eq!(log.ledger.counted(&CapacityScope::Held), 2);
+    assert_eq!(log.ledger.counted(&cell), 1);
+    assert_eq!(
+        log.ledger.counted(&CapacityScope::Cell {
+            key: "cell-2".into()
+        }),
+        0
+    );
+    assert_eq!(log.ledger.held_calls(), 3);
+    let present = |log: &mut Log, id: &ToolCallId, rank| {
+        log.push(done(id, 1)).unwrap();
+        log.push(decided(id, rank, final_of(1, false))).unwrap();
+        log.push(RunEvent::Presented {
+            call_id: id.clone(),
+            presentation: None,
+            failure: None,
+        })
+        .unwrap();
+    };
+    present(&mut log, &a.call_id, 1);
+    assert_eq!(
+        log.ledger.counted(&CapacityScope::Held),
+        2,
+        "a presented winner releases nothing while its sibling is held"
+    );
+    present(&mut log, &b.call_id, 2);
+    present(&mut log, &c.call_id, 3);
+    assert_eq!(log.ledger.counted(&CapacityScope::Held), 0);
+    assert_eq!(
+        log.ledger.counted(&cell),
+        1,
+        "a cell counts every call it made"
+    );
+    assert_eq!(log.ledger.held_calls(), 1);
 }

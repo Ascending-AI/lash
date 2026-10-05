@@ -40,9 +40,9 @@ pub mod state_command;
 pub mod tool_hooks;
 
 pub use admission::{
-    AdmissionRefusal, AdmittedBinding, AdmittedCall, AdmittedRound, DeclarationRefusal,
-    ExternalCancelPolicy, OutcomeShape, PresentationBinding, RecordedRetryPolicy, RoundAdmission,
-    RuntimeCallPolicy, ToolDeclaration,
+    AdmissionRefusal, AdmittedBinding, AdmittedCall, AdmittedRound, CapacityScope,
+    DeclarationRefusal, ExternalCancelPolicy, OutcomeShape, PresentationBinding,
+    RecordedRetryPolicy, RoundAdmission, RuntimeCallPolicy, ToolDeclaration,
 };
 pub use aggregate::{AggregateConsumer, AggregateLeaf, AggregatePlan};
 pub use continuation::{ContinuationRefusal, Cut, CutPhase, RunTransfer};

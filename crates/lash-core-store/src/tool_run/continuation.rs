@@ -115,9 +115,9 @@ pub struct RunTransfer {
     /// Cancels owed to launched starts.
     pub owed_cancels: Vec<StartKey>,
     pub state: StateFrontier,
-    /// Tool-call capacity the Run still holds, including settled work a
-    /// consumer still needs.
-    pub reserved_calls: u32,
+    /// Tool-call capacity the Run holds (K1): every unretired held round
+    /// and every cell round. Adoption checks it against the records.
+    pub held_calls: u32,
     /// Whether the protocol committed a VM continuation with the cut.
     pub vm_continuation: bool,
 }
@@ -243,10 +243,10 @@ impl RunTransfer {
         {
             return Err(ContinuationRefusal::SegmentFrontier);
         }
-        if self.reserved_calls != ledger.reserved_calls() {
+        if self.held_calls != ledger.held_calls() {
             return Err(ContinuationRefusal::CapacityFrontier {
-                expected: ledger.reserved_calls(),
-                found: self.reserved_calls,
+                expected: ledger.held_calls(),
+                found: self.held_calls,
             });
         }
         Ok(())

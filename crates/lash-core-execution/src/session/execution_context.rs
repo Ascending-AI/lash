@@ -151,13 +151,6 @@ pub struct RuntimeExecutionContext<'run> {
             std::collections::BTreeMap<crate::ToolCallId, crate::store::ToolRequestReceipt>,
         >,
     >,
-    /// The tool calls this context's cell has made, per group key, counted
-    /// against the session's recorded `max_tool_calls` (FIG-4546). A turn
-    /// builds a fresh context per cell, so this is the cell's own total; a
-    /// redrive re-executes the cell and forms the same groups in the same
-    /// order, so it refuses the same call. Shared by clones and `to_static`.
-    /// A process counts what it holds instead, in `opener_groups`.
-    pub(crate) cell_tool_calls: Arc<std::sync::Mutex<std::collections::BTreeMap<String, usize>>>,
     /// The latest `max_tool_calls` refusal this execution met, kept typed for
     /// the language runtime that reports the failed cell or process: its own
     /// error channel carries the refusal's class, code and message only.
@@ -487,7 +480,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
             opener_groups: Arc::clone(&self.opener_groups),
             tool_requests: Arc::clone(&self.tool_requests),
-            cell_tool_calls: Arc::clone(&self.cell_tool_calls),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
         })
     }

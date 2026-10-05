@@ -243,7 +243,7 @@ pub fn assert_s31(evidence: &Evidence, work: &WorkIdentity) -> Result<()> {
         "process lost VM, pending source or retained material"
     );
     ensure!(
-        cut.environment.is_some() && cut.reserved_calls > 0,
+        cut.environment.is_some() && cut.held_calls > 0,
         "process lost admitted environment/capacity"
     );
     ensure!(

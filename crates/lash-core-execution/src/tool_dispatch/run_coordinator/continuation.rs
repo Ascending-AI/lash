@@ -119,7 +119,7 @@ impl RunCoordinator<'_> {
                     .map(|state| (state.ordinal, state.receipt()))
                     .collect(),
             },
-            reserved_calls: self.journal.ledger.reserved_calls(),
+            held_calls: self.journal.ledger.held_calls(),
             vm_continuation: false,
             environment: self.environment.clone(),
             plugin_state: self

@@ -69,20 +69,6 @@ impl OpenerState {
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
-    /// The tool calls this context's cell has made so far, by group key
-    /// (FIG-4546), for a segment boundary inside the cell: the successor
-    /// segment runs the rest of the same cell, so it counts on from these.
-    #[must_use]
-    pub fn cell_tool_calls_snapshot(&self) -> std::collections::BTreeMap<String, usize> {
-        self.cell_tool_calls.lock_recover().clone()
-    }
-
-    /// Resume counting a cell's tool calls from what its predecessor segment
-    /// made.
-    pub fn restore_cell_tool_calls(&self, made: std::collections::BTreeMap<String, usize>) {
-        *self.cell_tool_calls.lock_recover() = made;
-    }
-
     /// The prefix every group key this opener forms carries: `{scope}:group:`.
     pub(crate) fn own_group_key_prefix(&self) -> String {
         format!("{}:group:", self.execution_scope_id())
@@ -90,42 +76,9 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// The key of the group a language command forms (FIG-3586): the opener's
     /// group prefix, then its positional key. The prefix is a frozen logical
-    /// identity shared by aggregate admission and the per-cell call budget.
+    /// identity of aggregate admission.
     pub(crate) fn command_group_key(&self, command: &crate::CommandReplayKey) -> String {
         format!("{}{command}", self.own_group_key_prefix())
-    }
-
-    /// Admit this logical aggregate's `calls` against the cell's recorded
-    /// `max_tool_calls` before any body starts. Replay reuses the admission.
-    /// Process capacity is reserved by the native Run coordinator.
-    pub(crate) async fn reserve_tool_calls(
-        &self,
-        group_key: &str,
-        calls: usize,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        if calls == 0 {
-            return Ok(());
-        }
-        let limit = self.max_tool_calls();
-        let mut made = self.cell_tool_calls.lock_recover();
-        if made.contains_key(group_key) {
-            return Ok(());
-        }
-        let counted = made.values().sum::<usize>();
-        if counted.saturating_add(calls) <= limit.get() {
-            made.insert(group_key.to_string(), calls);
-            return Ok(());
-        }
-        let exceeded = crate::ToolCallLimitExceeded {
-            scope: crate::ToolCallLimitScope::Cell,
-            limit,
-            counted,
-            requested: calls,
-        };
-        *self.tool_call_limit_refusal.lock_recover() = Some(exceeded);
-        Err(RuntimeEffectControllerError::max_tool_calls_exceeded(
-            exceeded,
-        ))
     }
 
     /// The latest `max_tool_calls` refusal this execution met, typed. A

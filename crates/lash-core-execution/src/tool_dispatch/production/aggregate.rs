@@ -93,32 +93,30 @@ impl<'run> ProductionToolHandlers<'run> {
             }
         }
         let key = self.context.command_group_key(&command);
-        if self.context.process_id().is_some() {
-            let requested = leaves
-                .iter()
-                .filter_map(|leaf| match leaf {
-                    ToolAggregateLeaf::Tool(invocation) if !run.contains_call(&invocation.id) => {
-                        Some(&invocation.id)
-                    }
-                    _ => None,
-                })
-                .collect::<std::collections::BTreeSet<_>>()
-                .len();
-            let counted = run.held_call_count();
-            let limit = self.context.max_tool_calls();
-            if counted.saturating_add(requested) > limit.get() {
-                let exceeded = crate::ToolCallLimitExceeded {
-                    scope: crate::ToolCallLimitScope::Process,
-                    limit,
-                    counted,
-                    requested,
-                };
-                *self.context.tool_call_limit_refusal.lock_recover() = Some(exceeded);
-                return Err(
-                    crate::RuntimeEffectControllerError::max_tool_calls_exceeded(exceeded).into(),
-                );
+        // A process holds its calls at once; a cell counts every call it
+        // makes, and a protocol step without a cell is its own group.
+        let capacity = if self.context.process_id().is_some() {
+            crate::tool_run::CapacityScope::Held
+        } else {
+            crate::tool_run::CapacityScope::Cell {
+                key: parent
+                    .as_ref()
+                    .and_then(crate::RuntimeInvocation::effect_replay_key)
+                    .map_or_else(|| key.clone(), str::to_owned),
             }
-        }
+        };
+        let requested = leaves
+            .iter()
+            .filter_map(|leaf| match leaf {
+                ToolAggregateLeaf::Tool(invocation) if !run.contains_call(&invocation.id) => {
+                    Some(&invocation.id)
+                }
+                _ => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        run.admit_capacity(&capacity, requested, self.context.max_tool_calls())
+            .map_err(crate::RuntimeEffectControllerError::max_tool_calls_exceeded)?;
         let mut plan = AggregatePlan {
             key: key.clone(),
             leaves: Vec::new(),
@@ -375,6 +373,7 @@ impl<'run> ProductionToolHandlers<'run> {
         run.start_aggregate(
             &plan,
             &calls,
+            capacity,
             self.clone(),
             RecordedRetryPolicy::Never,
             self.context.dispatch().clock.as_ref(),

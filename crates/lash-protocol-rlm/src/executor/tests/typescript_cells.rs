@@ -1553,3 +1553,92 @@ fn l12_reused_call_identity_refuses_argument_drift_before_execution() {
         handler.close().await.expect("close handler");
     });
 }
+
+/// K1: a cell's `max_tool_calls` counts each call once, at the round that
+/// admitted it. An aggregate over a promise the Run already owns reserves
+/// only its new calls, so it fits at the limit, and the cell's next call is
+/// refused with every earlier call counted once.
+#[test]
+fn cell_limit_counts_an_owned_promise_once() {
+    block_on(async {
+        use lash_core::facade_support::ToolInvocation;
+        use lash_core::session::{ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateRequest};
+        let double =
+            crate::testing::kernel_double(SEED + 4980, lash_restate_test::ServerConfig::default())
+                .await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open handler");
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            crate::testing::double_ports(&double, &handler),
+            Arc::new(EchoToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
+        )
+        .with_execution_env_spec(lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::AdmittedPluginConfig::default(),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(4),
+            ),
+        ))
+        .with_parent_invocation(lash_core::testing::exec_code_invocation(
+            "test-session",
+            "test-turn",
+            0,
+            0,
+            "exec_code:limit",
+            "limit-cell:0",
+        ));
+        context
+            .drive_tool_run(None, |context| async move {
+                let request = |command: &str, ids: &[&str]| ToolAggregateRequest {
+                    leaves: ids
+                        .iter()
+                        .map(|id| {
+                            ToolAggregateLeaf::Tool(ToolInvocation::new(
+                                lash_core::ToolCallId::fixture(id),
+                                "tool:echo".into(),
+                                serde_json::json!({"text": id}),
+                            ))
+                        })
+                        .collect(),
+                    consumer: ToolAggregateConsumer::All,
+                    settled_value_after: None,
+                    command: lash_core::CommandReplayKey::new(command),
+                };
+                context
+                    .admit_tool_run_aggregate(request("promise", &["owned"]))
+                    .await
+                    .expect("the promise is admitted");
+                let cursor = context
+                    .admit_tool_run_aggregate(request("all", &["owned", "b", "c", "d"]))
+                    .await
+                    .expect("an aggregate over the owned promise reserves only its new calls");
+                context
+                    .await_tool_run_aggregate(&cursor, ToolAggregateConsumer::All)
+                    .await
+                    .expect("the aggregate answers");
+                let refusal = context
+                    .admit_tool_run_aggregate(request("next", &["e"]))
+                    .await
+                    .expect_err("the cell's fifth call is past its limit");
+                let expected = lash_core::ToolCallLimitExceeded {
+                    scope: lash_core::ToolCallLimitScope::Cell,
+                    limit: lash_core::MaxToolCalls::new(4),
+                    counted: 4,
+                    requested: 1,
+                };
+                assert_eq!(refusal.tool_call_limit_exceeded(), Some(expected));
+                assert_eq!(context.tool_call_limit_refusal(), Some(expected));
+                context
+                    .close_opener_groups()
+                    .await
+                    .expect("logical closing");
+            })
+            .await
+            .expect("owned program");
+        drop(context);
+        handler.close().await.expect("close handler");
+    });
+}

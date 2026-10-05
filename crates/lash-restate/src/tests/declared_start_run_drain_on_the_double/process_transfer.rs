@@ -58,7 +58,7 @@ impl RestateProcessRunner for Runner {
                 .unwrap();
             assert_eq!(transfer.owed_starts, vec![start_key("process-transfer")]);
             assert_eq!(transfer.environment, call.environment);
-            assert_eq!(transfer.reserved_calls, 1);
+            assert_eq!(transfer.held_calls, 1);
             assert_eq!(
                 self.starter.launches().len(),
                 usize::from(self.launched_before_cut)

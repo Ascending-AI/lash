@@ -559,6 +559,7 @@ async fn cancelled_spending_calls_and_unreturned_losers_keep_recorded_provider_r
                         })
                         .collect(),
                     operands: vec![0, 1],
+                    capacity: lash_core::tool_run::CapacityScope::Held,
                 };
                 round.clone().admit(&[revision(1)], |_| true).unwrap();
                 let mut ledger = RunLedger::new(owner.clone());
@@ -831,6 +832,7 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                             owner: owner.clone(),
                             members,
                             operands: vec![0, 1, 2],
+                            capacity: lash_core::tool_run::CapacityScope::Held,
                         },
                     }],
                     vec![

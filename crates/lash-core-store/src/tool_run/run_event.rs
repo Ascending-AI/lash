@@ -477,6 +477,8 @@ pub struct RunLedger {
     calls: BTreeMap<ToolCallId, CallState>,
     aggregates: BTreeMap<String, AggregatePlan>,
     elapsed: std::collections::BTreeSet<(String, u32)>,
+    /// Every admitted round's capacity scope and unique members (K1).
+    rounds: Vec<(super::CapacityScope, Vec<ToolCallId>)>,
 }
 
 impl RunLedger {
@@ -493,6 +495,7 @@ impl RunLedger {
             calls: BTreeMap::new(),
             aggregates: BTreeMap::new(),
             elapsed: std::collections::BTreeSet::new(),
+            rounds: Vec::new(),
         }
     }
 
@@ -589,10 +592,34 @@ impl RunLedger {
             .collect()
     }
 
-    /// Capacity held by admitted calls whose consumer still needs the result.
+    /// The calls counted against `scope`'s `max_tool_calls` (K1): a held
+    /// round counts all its members until every one is presented; a cell's
+    /// rounds count for the Run's whole life.
     #[must_use]
-    pub fn reserved_calls(&self) -> u32 {
-        self.calls.values().filter(|call| !call.consumed).count() as u32
+    pub fn counted(&self, scope: &super::CapacityScope) -> u32 {
+        self.rounds
+            .iter()
+            .filter(|(admitted, _)| admitted == scope)
+            .map(|(_, members)| self.reserved(scope, members))
+            .sum()
+    }
+
+    /// The tool-call capacity the Run holds: every unretired held round and
+    /// every cell round. A continuation carries exactly this value (K6).
+    #[must_use]
+    pub fn held_calls(&self) -> u32 {
+        self.rounds
+            .iter()
+            .map(|(scope, members)| self.reserved(scope, members))
+            .sum()
+    }
+
+    fn reserved(&self, scope: &super::CapacityScope, members: &[ToolCallId]) -> u32 {
+        let retired = *scope == super::CapacityScope::Held
+            && members
+                .iter()
+                .all(|id| self.calls.get(id).is_some_and(|call| call.presented));
+        if retired { 0 } else { members.len() as u32 }
     }
 
     /// Issued local attempts or retry timers not yet accepted by the Run.
@@ -921,6 +948,14 @@ impl RunLedger {
                 },
             );
         }
+        self.rounds.push((
+            round.capacity.clone(),
+            round
+                .members
+                .iter()
+                .map(|member| member.call_id.clone())
+                .collect(),
+        ));
         Ok(())
     }
 

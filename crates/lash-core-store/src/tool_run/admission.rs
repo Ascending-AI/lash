@@ -163,6 +163,22 @@ pub struct RoundAdmission {
     /// Source operand slots in source order, each the index of its member.
     /// Two slots naming one member are aliases of one call.
     pub operands: Vec<u32>,
+    /// Whose `max_tool_calls` the members count against.
+    pub capacity: CapacityScope,
+}
+
+/// Whose `max_tool_calls` a round's members count against, fixed when the
+/// round is admitted (K1). Each unique member reserves one call; operand
+/// aliases reserve nothing more.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "capacity", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CapacityScope {
+    /// Held by the Run until every member of the round is presented: what a
+    /// process holds at once.
+    Held,
+    /// Counted for one cell, or one protocol step, for the Run's whole life:
+    /// every call that cell makes.
+    Cell { key: String },
 }
 
 /// Why a round was refused. One refused member admits no member.
@@ -284,13 +300,6 @@ impl AdmittedRound {
     #[must_use]
     pub fn record(&self) -> &RoundAdmission {
         &self.0
-    }
-
-    /// The tool-call capacity the round reserves before any member starts:
-    /// one per unique call, aliases included once.
-    #[must_use]
-    pub fn reserved_calls(&self) -> usize {
-        self.0.members.len()
     }
 
     #[must_use]

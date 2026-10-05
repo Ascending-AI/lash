@@ -101,15 +101,25 @@ async fn turn_receipts(side: CrashSide) {
                         )
                         .await
                         .unwrap();
-                    run.start_round(&earlier, handlers.clone(), Default::default())
-                        .await
-                        .unwrap();
+                    run.start_round(
+                        &earlier,
+                        lash_core::tool_run::CapacityScope::Held,
+                        handlers.clone(),
+                        Default::default(),
+                    )
+                    .await
+                    .unwrap();
                     while run.progress().await.unwrap().is_some() {}
                     // A later cell uses this same logical opener, not a fresh registry.
                     let later_cell = opener.clone();
-                    run.start_round(&current, handlers, Default::default())
-                        .await
-                        .unwrap();
+                    run.start_round(
+                        &current,
+                        lash_core::tool_run::CapacityScope::Held,
+                        handlers,
+                        Default::default(),
+                    )
+                    .await
+                    .unwrap();
                     let committed = store
                         .load_session_head_meta(&lash_core::SessionId::from("session"))
                         .await
@@ -478,6 +488,7 @@ async fn cancellation_closes_captured_and_adopted_losers() {
                     run.start_aggregate(
                         &plan,
                         &round,
+                        lash_core::tool_run::CapacityScope::Held,
                         probe.clone(),
                         Default::default(),
                         &SystemClock,

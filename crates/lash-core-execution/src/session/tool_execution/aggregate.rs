@@ -23,6 +23,8 @@
 //! its losers belong to the opener from that moment (§11 clause 3). Nothing
 //! about a loser's value is ever synthesized (L6).
 
+use lash_sansio::sync::MutexExt as _;
+
 use super::*;
 
 /// One unique leaf of an aggregate, in first-appearance order.
@@ -113,20 +115,8 @@ impl RuntimeExecutionContext<'_> {
         &self,
         request: ToolAggregateRequest,
     ) -> Result<ToolRunAggregateCursor, crate::RuntimeEffectControllerError> {
-        let calls = request
-            .leaves
-            .iter()
-            .filter_map(|leaf| match leaf {
-                ToolAggregateLeaf::Tool(invocation) => Some(&invocation.id),
-                _ => None,
-            })
-            .collect::<std::collections::BTreeSet<_>>()
-            .len();
-        if self.process_id().is_none() {
-            self.reserve_tool_calls(&self.command_group_key(&request.command), calls)
-                .await?;
-        }
-        self.tool_run
+        let admitted = self
+            .tool_run
             .as_ref()
             .ok_or_else(|| {
                 crate::RuntimeEffectControllerError::from(
@@ -139,7 +129,15 @@ impl RuntimeExecutionContext<'_> {
                 self.tool_run_env_spec(),
                 self.tool_observation_attribution(),
             )
-            .await
+            .await;
+        if let Some(exceeded) = admitted
+            .as_ref()
+            .err()
+            .and_then(crate::RuntimeEffectControllerError::tool_call_limit_exceeded)
+        {
+            *self.tool_call_limit_refusal.lock_recover() = Some(exceeded);
+        }
+        admitted
     }
     pub async fn consume_tool_run_aggregate(
         &self,

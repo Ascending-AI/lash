@@ -160,6 +160,7 @@ async fn l18_all_drains_a_committed_operand_before_the_remaining_bodies_finish()
                     run.start_aggregate(
                         &plan,
                         &round,
+                        lash_core::tool_run::CapacityScope::Held,
                         Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                         Default::default(),
                         &SystemClock,
@@ -174,6 +175,7 @@ async fn l18_all_drains_a_committed_operand_before_the_remaining_bodies_finish()
                     run.start_aggregate(
                         &independent,
                         std::slice::from_ref(&program_call),
+                        lash_core::tool_run::CapacityScope::Held,
                         Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                         Default::default(),
                         &SystemClock,
@@ -306,6 +308,7 @@ async fn l18_protected_io_stays_live_after_every_x_ack_and_recovers_mid_v() {
                     run.start_aggregate(
                         &plan,
                         &round,
+                        lash_core::tool_run::CapacityScope::Held,
                         Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                         Default::default(),
                         &SystemClock,
@@ -431,6 +434,7 @@ async fn l06_race_returns_before_inline_loser_and_keeps_it_unconsumed() {
                     run.start_aggregate(
                         &plan,
                         &round,
+                        lash_core::tool_run::CapacityScope::Held,
                         Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                         Default::default(),
                         &SystemClock,
@@ -550,6 +554,7 @@ async fn l05_check_cancel_is_an_operand_rejection_before_and_after() {
                         run.start_aggregate(
                             &plan,
                             &round,
+                            lash_core::tool_run::CapacityScope::Held,
                             Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                             Default::default(),
                             &SystemClock,
@@ -688,6 +693,7 @@ async fn l05_check_cancel_never_replaces_an_earlier_winner() {
                         run.start_aggregate(
                             &plan,
                             &round,
+                            lash_core::tool_run::CapacityScope::Held,
                             Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                             Default::default(),
                             &SystemClock,
@@ -804,6 +810,7 @@ async fn aggregate_case(
                 run.start_aggregate(
                     &plan,
                     &round,
+                    lash_core::tool_run::CapacityScope::Held,
                     Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                     Default::default(),
                     &SystemClock,
@@ -954,6 +961,7 @@ async fn l05_empty_immediate_prefix_and_timers_admit_pending_siblings() {
                     run.start_aggregate(
                         &empty,
                         &[],
+                        lash_core::tool_run::CapacityScope::Held,
                         Arc::clone(&handlers),
                         Default::default(),
                         &SystemClock,
@@ -980,6 +988,7 @@ async fn l05_empty_immediate_prefix_and_timers_admit_pending_siblings() {
                 run.start_aggregate(
                     &immediate,
                     &[],
+                    lash_core::tool_run::CapacityScope::Held,
                     Arc::clone(&handlers),
                     Default::default(),
                     &SystemClock,
@@ -1024,9 +1033,16 @@ async fn l05_empty_immediate_prefix_and_timers_admit_pending_siblings() {
                     ],
                     operands: vec![0, 1, 2, 2, 3],
                 };
-                run.start_aggregate(&prefix, &round, handlers, Default::default(), &SystemClock)
-                    .await
-                    .unwrap();
+                run.start_aggregate(
+                    &prefix,
+                    &round,
+                    lash_core::tool_run::CapacityScope::Held,
+                    handlers,
+                    Default::default(),
+                    &SystemClock,
+                )
+                .await
+                .unwrap();
                 assert!(run.records().iter().flat_map(|record| &record.events).any(|event| matches!(event, RunEvent::Admitted { round } if round.members.iter().any(|member| member.call_id == calls[0].0.call_id))));
                 assert!(matches!(
                     run.consume_aggregate("prefix", AggregateConsumer::Race)
@@ -1057,6 +1073,7 @@ async fn l05_empty_immediate_prefix_and_timers_admit_pending_siblings() {
                 run.start_aggregate(
                     &timer,
                     &[],
+                    lash_core::tool_run::CapacityScope::Held,
                     Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                     Default::default(),
                     &SystemClock,
@@ -1133,6 +1150,7 @@ async fn l03_l04_only_logical_closing_cancels_and_accepted_finals_still_drain() 
                     run.start_aggregate(
                         &plan,
                         &round,
+                        lash_core::tool_run::CapacityScope::Held,
                         Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                         Default::default(),
                         &SystemClock,
@@ -1267,6 +1285,7 @@ async fn closing_deferred_seal_case(resolved: bool) {
                 run.start_aggregate(
                     &plan,
                     &round,
+                    lash_core::tool_run::CapacityScope::Held,
                     Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                     Default::default(),
                     &SystemClock,
@@ -1410,6 +1429,7 @@ async fn l06_l16_worker_loss_recovers_the_loser_without_closing_or_consuming_it(
                     run.start_aggregate(
                         &plan,
                         &round,
+                        lash_core::tool_run::CapacityScope::Held,
                         Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                         Default::default(),
                         &SystemClock,
@@ -1517,6 +1537,7 @@ async fn l05_timer_replay_keeps_the_recorded_admission_instant_and_wake() {
                 run.start_aggregate(
                     &plan,
                     &[],
+                    lash_core::tool_run::CapacityScope::Held,
                     Arc::new(Probe::new(&[])),
                     Default::default(),
                     &SystemClock,
@@ -1603,6 +1624,7 @@ async fn l05_l06_l09_generic_timer_and_admitted_handles_share_the_run() {
                     RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
                 run.start_round(
                     &round,
+                    lash_core::tool_run::CapacityScope::Held,
                     Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
                     Default::default(),
                 )

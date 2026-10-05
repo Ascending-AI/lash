@@ -400,7 +400,7 @@ pub async fn run_handover_commits_material_ownership_with_the_head(
         owed_starts: Vec::new(),
         owed_cancels: Vec::new(),
         state: StateFrontier::default(),
-        reserved_calls: 0,
+        held_calls: 0,
         vm_continuation: false,
     };
     let mut state = RuntimeSessionState {

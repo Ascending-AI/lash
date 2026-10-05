@@ -145,6 +145,7 @@ impl RestateProcessRunner for Runner {
             run.start_aggregate(
                 &prior,
                 &calls[..2],
+                lash_core::tool_run::CapacityScope::Held,
                 Arc::clone(&handlers),
                 Default::default(),
                 &SystemClock,
@@ -167,6 +168,7 @@ impl RestateProcessRunner for Runner {
                 run.start_aggregate(
                     &current,
                     &calls[2..],
+                    lash_core::tool_run::CapacityScope::Held,
                     Arc::clone(&handlers),
                     Default::default(),
                     &SystemClock,
@@ -184,7 +186,9 @@ impl RestateProcessRunner for Runner {
             assert_eq!(transfer.ledger().unwrap().lifecycle(), RunLifecycle::Live);
             assert!(self.probe.cancelled_calls.lock().unwrap().is_empty());
             if !self.held {
-                assert_eq!(transfer.reserved_calls, 3);
+                // K1: the race holds its whole round while its Deferred loser
+                // is unpresented, and the current round holds its two calls.
+                assert_eq!(transfer.held_calls, 4);
                 assert_eq!(transfer.subscriptions.len(), 2);
                 assert_eq!(
                     self.probe.presentations.lock().unwrap().as_slice(),
@@ -240,6 +244,21 @@ impl RestateProcessRunner for Runner {
                 .map(|entry| entry.record.clone())
                 .collect::<Vec<_>>()
         );
+        if !self.held {
+            // K6 carries the very count the successor's admission enforces.
+            let limit = lash_core::MaxToolCalls::new(transfer.held_calls as usize);
+            let held = lash_core::tool_run::CapacityScope::Held;
+            assert_eq!(run.admit_capacity(&held, 0, limit), Ok(()));
+            assert_eq!(
+                run.admit_capacity(&held, 1, limit),
+                Err(lash_core::ToolCallLimitExceeded {
+                    scope: lash_core::ToolCallLimitScope::Process,
+                    limit,
+                    counted: 4,
+                    requested: 1,
+                })
+            );
+        }
         assert!(matches!(
             transfer
                 .clone()

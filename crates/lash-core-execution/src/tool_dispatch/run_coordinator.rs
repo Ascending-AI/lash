@@ -750,26 +750,31 @@ pub struct RunCoordinator<'a> {
 }
 
 impl<'a> RunCoordinator<'a> {
-    pub(crate) fn held_call_count(&self) -> usize {
-        // A race winner releases no part of its round's reservation while
-        // any sibling is still held. Admission records survive cold replay
-        // and continuation; operand aliases never add another member.
-        self.journal
-            .records
-            .iter()
-            .flat_map(|record| &record.events)
-            .filter_map(|event| match event {
-                RunEvent::Admitted { round }
-                    if round
-                        .members
-                        .iter()
-                        .any(|member| !self.presented.contains_key(&member.call_id)) =>
-                {
-                    Some(round.members.len())
-                }
-                _ => None,
-            })
-            .sum()
+    /// Refuse `requested` new calls past `limit` for `scope`, counted from
+    /// the Run's recorded rounds (K1). This is the one place either tool-call
+    /// limit is enforced; the count a continuation carries is the same fold.
+    ///
+    /// # Errors
+    /// The typed refusal naming the limit, the count and the request.
+    pub fn admit_capacity(
+        &self,
+        scope: &crate::tool_run::CapacityScope,
+        requested: usize,
+        limit: crate::MaxToolCalls,
+    ) -> Result<(), crate::ToolCallLimitExceeded> {
+        let counted = self.journal.ledger.counted(scope) as usize;
+        if counted.saturating_add(requested) <= limit.get() {
+            return Ok(());
+        }
+        Err(crate::ToolCallLimitExceeded {
+            scope: match scope {
+                crate::tool_run::CapacityScope::Held => crate::ToolCallLimitScope::Process,
+                crate::tool_run::CapacityScope::Cell { .. } => crate::ToolCallLimitScope::Cell,
+            },
+            limit,
+            counted,
+            requested,
+        })
     }
     pub(crate) fn prepared_value(
         &self,
@@ -1051,10 +1056,16 @@ impl<'a> RunCoordinator<'a> {
         handlers: &dyn SingletonToolHandlers,
         retry: crate::tool_run::RecordedRetryPolicy,
     ) -> Result<(AdmittedCall, SingletonPreparedRequest), SingletonRunError> {
-        self.admit_round(std::slice::from_ref(call), handlers, retry, None)
-            .await?
-            .pop()
-            .ok_or_else(|| boundary(&call.call_id))
+        self.admit_round(
+            std::slice::from_ref(call),
+            handlers,
+            retry,
+            None,
+            crate::tool_run::CapacityScope::Held,
+        )
+        .await?
+        .pop()
+        .ok_or_else(|| boundary(&call.call_id))
     }
 
     async fn admit_round(
@@ -1063,6 +1074,7 @@ impl<'a> RunCoordinator<'a> {
         handlers: &dyn SingletonToolHandlers,
         retry: crate::tool_run::RecordedRetryPolicy,
         aggregate: Option<(&crate::tool_run::AggregatePlan, &dyn crate::Clock)>,
+        capacity: crate::tool_run::CapacityScope,
     ) -> Result<Vec<(AdmittedCall, SingletonPreparedRequest)>, SingletonRunError> {
         if self.faulted {
             return Err(RunCutRefusal::InvocationFailed.into());
@@ -1201,6 +1213,7 @@ impl<'a> RunCoordinator<'a> {
                     owner: journal_owner.clone(),
                     members,
                     operands,
+                    capacity,
                 },
             }];
             if let Some((plan, clock)) = aggregate {

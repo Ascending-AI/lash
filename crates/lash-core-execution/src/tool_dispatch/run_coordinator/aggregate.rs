@@ -107,6 +107,7 @@ impl<'a> RunCoordinator<'a> {
         &mut self,
         plan: &AggregatePlan,
         calls: &[SingletonToolCall],
+        capacity: crate::tool_run::CapacityScope,
         handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         retry: crate::tool_run::RecordedRetryPolicy,
         clock: &dyn crate::Clock,
@@ -131,7 +132,7 @@ impl<'a> RunCoordinator<'a> {
         }
         self.begin_frame()?;
         let result = self
-            .start_round_inner(calls, handlers, retry, Some((plan, clock)))
+            .start_round_inner(calls, capacity, handlers, retry, Some((plan, clock)))
             .await
             .map(|_| ());
         self.active_frame = false;

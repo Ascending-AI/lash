@@ -149,7 +149,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             incorporation_ledger: Arc::default(),
             opener_groups: Arc::default(),
             tool_requests: Arc::default(),
-            cell_tool_calls: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
             parent_invocation: None,
             turn_phase_probe: None,

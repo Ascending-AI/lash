@@ -1402,8 +1402,8 @@ pub mod runtime {
     };
     pub use lash_core::tool_run::{
         AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AggregateConsumer, AggregateLeaf,
-        AggregatePlan, AttributedVerdict, Cut, CutPhase, RecordedRetryPolicy, RunLifecycle,
-        RunTransfer, SegmentOrdinal,
+        AggregatePlan, AttributedVerdict, CapacityScope, Cut, CutPhase, RecordedRetryPolicy,
+        RunLifecycle, RunTransfer, SegmentOrdinal,
     };
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::engine::{

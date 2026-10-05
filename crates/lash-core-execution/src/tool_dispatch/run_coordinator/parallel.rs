@@ -127,11 +127,14 @@ impl<'a> RunCoordinator<'a> {
     pub async fn start_round(
         &mut self,
         calls: &[SingletonToolCall],
+        capacity: crate::tool_run::CapacityScope,
         handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         retry: RecordedRetryPolicy,
     ) -> Result<Vec<(ToolCallId, DecidedCall)>, SingletonRunError> {
         self.begin_frame()?;
-        let result = self.start_round_inner(calls, handlers, retry, None).await;
+        let result = self
+            .start_round_inner(calls, capacity, handlers, retry, None)
+            .await;
         self.active_frame = false;
         self.note_fault(&result);
         result
@@ -140,12 +143,13 @@ impl<'a> RunCoordinator<'a> {
     pub(super) async fn start_round_inner(
         &mut self,
         calls: &[SingletonToolCall],
+        capacity: crate::tool_run::CapacityScope,
         handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         retry: RecordedRetryPolicy,
         aggregate: Option<(&crate::tool_run::AggregatePlan, &dyn crate::Clock)>,
     ) -> Result<Vec<(ToolCallId, DecidedCall)>, SingletonRunError> {
         let admitted = self
-            .admit_round(calls, handlers.as_ref(), retry, aggregate)
+            .admit_round(calls, handlers.as_ref(), retry, aggregate, capacity)
             .await?;
         let mut decisions = Vec::new();
         for call in calls {
@@ -836,7 +840,7 @@ impl<'a> RunCoordinator<'a> {
         retry: RecordedRetryPolicy,
     ) -> Result<Vec<DecidedCall>, SingletonRunError> {
         let mut decisions: BTreeMap<_, _> = self
-            .start_round(calls, handlers, retry)
+            .start_round(calls, crate::tool_run::CapacityScope::Held, handlers, retry)
             .await?
             .into_iter()
             .collect();

@@ -1186,7 +1186,6 @@ async fn suspend_cell(
             .map(cell_segment::RecordedPrint)
             .collect(),
         host: host.ledgers(),
-        cell_tool_calls: ctx.cell_tool_calls_snapshot(),
         started_process_ids: ctx.started_process_ids(),
     };
     state.suspend_cell(segment.encode()?);

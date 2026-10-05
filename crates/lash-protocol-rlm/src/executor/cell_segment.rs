@@ -91,8 +91,6 @@ pub(super) struct CellSegmentState {
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
     pub prints: Vec<RecordedPrint>,
     pub host: CellHostLedgers,
-    /// The tool calls the cell has made, by group key (FIG-4546).
-    pub cell_tool_calls: BTreeMap<String, usize>,
     pub started_process_ids: Vec<lash_core::ProcessId>,
 }
 
@@ -127,6 +125,5 @@ impl CellSegmentState {
     /// The parent ledgers of `ctx` a boundary hands over.
     pub(super) fn restore_context(&self, ctx: &RuntimeExecutionContext<'_>) {
         ctx.restore_started_process_ids(&self.started_process_ids);
-        ctx.restore_cell_tool_calls(self.cell_tool_calls.clone());
     }
 }
