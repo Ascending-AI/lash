@@ -1,0 +1,222 @@
+{
+  "scenario": "run-handover",
+  "generation": "d91236f337b3",
+  "services": {
+    "LashDurableWaitIndex": {
+      "is_revoked": [
+        [
+          "InputCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "OutputCommand"
+        ]
+      ],
+      "peek_turn_gate": [
+        [
+          "InputCommand",
+          "GetLazyStateKeysCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "OutputCommand"
+        ]
+      ],
+      "register": [
+        [
+          "InputCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "SetStateCommand wait-index/v2/wait/#",
+          "OutputCommand"
+        ]
+      ],
+      "reinstate": [
+        [
+          "InputCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateKeysCommand",
+          "SetStateCommand _compat",
+          "GetLazyStateCommand",
+          "SetStateCommand wait-index/v2/metadata",
+          "OutputCommand"
+        ]
+      ],
+      "resolve": [
+        [
+          "InputCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "CallCommand LashDurableWaitWorkflow/resolve",
+          "SetStateCommand wait-index/v2/metadata",
+          "OutputCommand"
+        ],
+        [
+          "InputCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "CallCommand LashDurableWaitWorkflow/resolve",
+          "SetStateCommand wait-index/v2/wait/#",
+          "SetStateCommand wait-index/v2/metadata",
+          "OutputCommand"
+        ]
+      ],
+      "retire_run": [
+        [
+          "InputCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateKeysCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "ClearStateCommand wait-index/v2/wait/#",
+          "ClearStateCommand wait-index/v2/wait/#",
+          "ClearStateCommand wait-index/v2/wait/#",
+          "ClearStateCommand wait-index/v2/wait/#",
+          "ClearStateCommand wait-index/v2/wait/#",
+          "ClearStateCommand wait-index/v2/wait/#",
+          "OutputCommand"
+        ]
+      ],
+      "settle": [
+        [
+          "InputCommand",
+          "GetLazyStateCommand",
+          "GetLazyStateCommand",
+          "SetStateCommand wait-index/v2/wait/#",
+          "OutputCommand"
+        ]
+      ]
+    },
+    "LashDurableWaitWorkflow": {
+      "await_resolution": [
+        [
+          "InputCommand",
+          "CallCommand LashDurableWaitIndex/register",
+          "PeekPromiseCommand",
+          "GetPromiseCommand",
+          "CallCommand LashDurableWaitIndex/settle",
+          "OutputCommand"
+        ]
+      ],
+      "peek": [
+        [
+          "InputCommand",
+          "PeekPromiseCommand",
+          "OutputCommand"
+        ]
+      ],
+      "resolve": [
+        [
+          "InputCommand",
+          "PeekPromiseCommand",
+          "CompletePromiseCommand",
+          "OutputCommand"
+        ]
+      ]
+    },
+    "LashSession": {
+      "shift": [
+        [
+          "InputCommand",
+          "RunCommand lash.shift.leg",
+          "CallCommand LashTurn/run",
+          "RunCommand lash.shift.boundary",
+          "CallCommand LashTurn/run",
+          "RunCommand lash.shift.boundary",
+          "CallCommand LashTurn/run",
+          "OutputCommand"
+        ]
+      ]
+    },
+    "LashTurn": {
+      "close": [
+        [
+          "InputCommand",
+          "RunCommand lash:shift-close:run-handover",
+          "OutputCommand"
+        ]
+      ],
+      "run": [
+        [
+          "InputCommand",
+          "RunCommand lash:shift-run-start:ingress:ti:#:1#0",
+          "RunCommand lash:shift-admission:ingress:ti:#:1#0",
+          "SetStateCommand admission",
+          "RunCommand lash:plugin-transition:run-handover",
+          "RunCommand lash:turn-config:run-handover",
+          "RunCommand lash:trace:turn:run-handover:started",
+          "CallCommand LashDurableWaitIndex/peek_turn_gate",
+          "RunCommand lash:replay-corpus-run-handover:run-handover:1:0:sync_execution_environment:1",
+          "RunCommand lash:replay-corpus-run-handover:run-handover:1:0:before_llm_call:2",
+          "RunCommand lash:replay-corpus-run-handover:run-handover:1:0:llm_call:2",
+          "CallCommand LashDurableWaitIndex/peek_turn_gate",
+          "RunCommand lash:run:aggregate:run-handover:group:replay-corpus-run-handover:run-handover:1:0:tool_batch:3:admit [admitted, aggregate_admitted]",
+          "RunCommand lash:run:tc_#:attempt:1 [x:done]",
+          "RunCommand lash:run:schedule:2 [attempt_recorded, decided]",
+          "CallCommand LashDurableWaitIndex/resolve",
+          "CallCommand LashDurableWaitIndex/resolve",
+          "OneWayCallCommand LashDurableWaitIndex/resolve",
+          "SetStateCommand outcome",
+          "OutputCommand"
+        ],
+        [
+          "InputCommand",
+          "RunCommand lash:shift-run-start:ingress:ti:#:1#1",
+          "RunCommand lash:shift-admission:ingress:ti:#:1#1",
+          "SetStateCommand admission",
+          "RunCommand lash:shift-follow-on:follow-on:run-handover:agent-frame:1#0",
+          "RunCommand lash:plugin-transition:follow-on:run-handover:agent-frame:1#0",
+          "RunCommand lash:turn-config:run-handover:agent-frame:1",
+          "RunCommand lash:trace:turn:run-handover:agent-frame:1:started",
+          "CallCommand LashDurableWaitIndex/peek_turn_gate",
+          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:1:2:0:sync_execution_environment:1",
+          "RunCommand lash:run:schedule:4 [presented, consumed, incorporated]",
+          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:1:2:1:checkpoint:3",
+          "CallCommand LashDurableWaitIndex/peek_turn_gate",
+          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:1:2:1:sync_execution_environment:4",
+          "CallCommand LashDurableWaitIndex/resolve",
+          "CallCommand LashDurableWaitIndex/resolve",
+          "OneWayCallCommand LashDurableWaitIndex/resolve",
+          "SetStateCommand outcome",
+          "OutputCommand"
+        ],
+        [
+          "InputCommand",
+          "RunCommand lash:shift-run-start:ingress:ti:#:1#2",
+          "RunCommand lash:shift-admission:ingress:ti:#:1#2",
+          "SetStateCommand admission",
+          "RunCommand lash:shift-follow-on:follow-on:run-handover:agent-frame:2#0",
+          "RunCommand lash:plugin-transition:follow-on:run-handover:agent-frame:2#0",
+          "RunCommand lash:turn-config:run-handover:agent-frame:2",
+          "RunCommand lash:trace:turn:run-handover:agent-frame:2:started",
+          "CallCommand LashDurableWaitIndex/peek_turn_gate",
+          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:sync_execution_environment:1",
+          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:before_llm_call:2",
+          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:llm_call:2",
+          "CallCommand LashDurableWaitIndex/peek_turn_gate",
+          "RunCommand lash:run:lifecycle:Closing [lifecycle]",
+          "RunCommand lash:run:lifecycle:Settled [lifecycle]",
+          "RunCommand lash:replay-corpus-run-handover:run-handover:agent-frame:2:3:0:checkpoint:3",
+          "CallCommand LashDurableWaitIndex/resolve",
+          "CallCommand LashDurableWaitIndex/resolve",
+          "OneWayCallCommand LashDurableWaitIndex/resolve",
+          "OneWayCallCommand LashTurn/close",
+          "SetStateCommand outcome",
+          "OutputCommand"
+        ]
+      ]
+    }
+  }
+}

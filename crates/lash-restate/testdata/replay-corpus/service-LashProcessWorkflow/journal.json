@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashProcessWorkflow",
   "service": "LashProcessWorkflow",
-  "generation": "899e972d3383",
+  "generation": "d91236f337b3",
   "handlers": {
     "await_cancel": [
       [

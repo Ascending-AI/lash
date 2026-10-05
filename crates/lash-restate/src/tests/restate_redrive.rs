@@ -3,19 +3,6 @@ use super::*;
 mod shift_fixtures;
 use shift_fixtures::registered;
 
-/// A terminal process run's suspension tail: the terminal pair, then the
-/// `lash.process.parent-end` pair applied right after terminal completion
-/// (FIG-3822), then complete-promise, call, and suspension.
-const TERMINAL_PROCESS_SUSPENSION_MESSAGES: [u16; 7] = [
-    RESTATE_RUN_COMMAND_MESSAGE_TYPE,
-    RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
-    RESTATE_RUN_COMMAND_MESSAGE_TYPE,
-    RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
-    RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
-    RESTATE_CALL_COMMAND_MESSAGE_TYPE,
-    RESTATE_SUSPENSION_MESSAGE_TYPE,
-];
-
 #[tokio::test]
 async fn a_durable_wait_request_has_only_a_key_and_refuses_runtime_deadlines() {
     let key = restate_await_event_key(
@@ -968,8 +955,10 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
     }));
 
     // The timer won its recorded race with the cancel promise: the woken
-    // segment goes straight on to releasing its journal pin from the scope's index
-    // (FIG-3673; the FIG-3149 wake peek is subsumed by the race).
+    // segment publishes its terminal through a journaled run first and only
+    // then releases its journal pin from the scope's index (FIG-3673; the
+    // publication precedes the release since 52fa3d7335, and the FIG-3149
+    // wake peek is subsumed by the race).
     let completed_effect = encode_recorded_commands_replay(
         process_id.as_str(),
         &input,
@@ -977,46 +966,90 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         process_journal_completion(true),
     )
     .expect("splice completed effect prefix");
-    let effect_cleared =
+    let terminal_publication =
         invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", completed_effect)
             .await
-            .expect("effect completion should clear the effect from the scope's index");
+            .expect("effect completion should propose the terminal-publication run");
     assert_eq!(
-        restate_call_frames(&effect_cleared)
-            .expect("decode effect-clearing calls")
+        restate_message_types(&terminal_publication).expect("decode terminal-publication frames"),
+        vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ],
+        "effect completion proposes the terminal-publication run before the pin release"
+    );
+    let published_replay = encode_recorded_commands_replay(
+        process_id.as_str(),
+        &input,
+        &[&effect_suspension, &terminal_publication],
+        process_journal_completion(true),
+    )
+    .expect("splice the published terminal prefix");
+    let pin_release = invoke_endpoint_body_with_json_call_responses_then_suspend(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        published_replay,
+        Vec::new(),
+    )
+    .await
+    .expect("terminal publication should reach the journal-pin release");
+    assert_eq!(
+        restate_call_frames(&pin_release)
+            .expect("decode pin-release calls")
             .iter()
             .map(|call| (call.service.as_str(), call.handler.as_str()))
             .collect::<Vec<_>>(),
         vec![("LashDurableWaitIndex", "release_process_journal")],
-        "the completed segment releases its scope's pin before terminal delivery"
+        "with its terminal published the segment releases its scope's pin"
     );
     assert_eq!(
-        restate_message_types(&effect_cleared).expect("decode effect-clearing frames"),
+        restate_message_types(&pin_release).expect("decode pin-release frames"),
         vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
+        ],
+        "endpoint error: {:?}",
+        restate_error_message(&pin_release)
     );
-    let cleared_replay = encode_recorded_commands_replay(
+    let released_replay = encode_recorded_commands_replay(
         process_id.as_str(),
         &input,
-        &[&effect_suspension, &effect_cleared],
+        &[&effect_suspension, &terminal_publication, &pin_release],
         process_journal_completion(true),
     )
-    .expect("splice the cleared effect prefix");
+    .expect("splice the released-pin prefix");
     let terminal_delivery_suspension = invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "LashProcessWorkflow",
         "run",
-        cleared_replay,
+        released_replay,
         Vec::new(),
     )
     .await
-    .expect("effect completion should reach terminal delivery");
+    .expect("pin release should reach terminal delivery");
+    assert_eq!(
+        restate_call_frames(&terminal_delivery_suspension)
+            .expect("decode terminal-delivery calls")
+            .iter()
+            .map(|call| (call.service.as_str(), call.handler.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("LashProcessWorkflow", "complete_terminal")],
+        "the released pin precedes terminal delivery"
+    );
     assert_eq!(
         restate_message_types(&terminal_delivery_suspension)
-            .expect("decode effectful terminal suspension"),
-        TERMINAL_PROCESS_SUSPENSION_MESSAGES
+            .expect("decode terminal-delivery frames"),
+        vec![
+            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ],
+        "endpoint error: {:?}",
+        restate_error_message(&terminal_delivery_suspension)
     );
 
     let complete_replay = encode_recorded_commands_replay(
@@ -1024,7 +1057,8 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         &input,
         &[
             &effect_suspension,
-            &effect_cleared,
+            &terminal_publication,
+            &pin_release,
             &terminal_delivery_suspension,
         ],
         process_journal_completion(true),

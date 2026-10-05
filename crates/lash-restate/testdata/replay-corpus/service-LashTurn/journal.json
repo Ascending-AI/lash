@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashTurn",
   "service": "LashTurn",
-  "generation": "899e972d3383",
+  "generation": "d91236f337b3",
   "handlers": {
     "close": [
       [
@@ -24,10 +24,10 @@
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:0:before_llm_call:2",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:0:llm_call:2",
         "CallCommand LashDurableWaitIndex/peek_turn_gate",
-        "RunCommand lash:run:aggregate:replay-corpus-turn:group:replay-corpus-session:replay-corpus-turn:1:0:tool_batch:3:admit",
-        "RunCommand lash:run:tc_#:attempt:1",
-        "RunCommand lash:run:schedule:2",
-        "RunCommand lash:run:tc_#:present",
+        "RunCommand lash:run:aggregate:replay-corpus-turn:group:replay-corpus-session:replay-corpus-turn:1:0:tool_batch:3:admit [admitted, aggregate_admitted]",
+        "RunCommand lash:run:tc_#:attempt:1 [x:done]",
+        "RunCommand lash:run:schedule:2 [attempt_recorded, decided]",
+        "RunCommand lash:run:schedule:4 [presented, consumed, incorporated]",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:checkpoint:4",
         "CallCommand LashDurableWaitIndex/peek_turn_gate",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:sync_execution_environment:5",
@@ -35,8 +35,8 @@
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:before_llm_call:6",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:llm_call:6",
         "CallCommand LashDurableWaitIndex/peek_turn_gate",
-        "RunCommand lash:run:lifecycle:Closing",
-        "RunCommand lash:run:lifecycle:Settled",
+        "RunCommand lash:run:lifecycle:Closing [lifecycle]",
+        "RunCommand lash:run:lifecycle:Settled [lifecycle]",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:checkpoint:7",
         "CallCommand LashDurableWaitIndex/resolve",
         "CallCommand LashDurableWaitIndex/resolve",

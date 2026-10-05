@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub(super) mod run_scenarios;
 pub(super) mod service_journals;
 use service_journals::HandlerJournals;
 
@@ -74,7 +75,8 @@ pub(super) async fn current_generation() -> lash_core::engine::BuildGeneration {
         ),
         RestateConfig::new(connection.clone(), connection, test_restate_authority_id()),
     )));
-    let core = service_journals::build_core(backend, &Arc::new(tokio::sync::Semaphore::new(0)));
+    let core =
+        service_journals::build_core(backend, &Arc::new(tokio::sync::Semaphore::new(0)), None);
     core.build_generation().clone()
 }
 
@@ -117,6 +119,18 @@ struct ServiceJournalFixture {
     handlers: HandlerJournals,
 }
 
+/// One run-behaviour scenario's whole deployment: every lash service's
+/// handler journals, recorded from the real handlers on the server double
+/// (FIG-4902).
+#[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunScenarioFixture {
+    scenario: String,
+    generation: lash_core::engine::BuildGeneration,
+    /// Every lash service's handler journals, by stable service name.
+    services: BTreeMap<String, HandlerJournals>,
+}
+
 #[derive(Clone, Copy)]
 struct Scenario {
     name: &'static str,
@@ -144,8 +158,8 @@ fn service_scenario_name(service: &str) -> String {
     format!("service-{service}")
 }
 
-/// Every scenario the corpus owes a fixture: the controller scenarios and
-/// one per lash service.
+/// Every scenario the corpus owes a fixture: the controller scenarios, one
+/// per lash service, and the run-behaviour scenarios.
 fn registered_scenario_names() -> Vec<String> {
     let mut names = SCENARIOS
         .iter()
@@ -154,6 +168,11 @@ fn registered_scenario_names() -> Vec<String> {
             lash_service_names()
                 .iter()
                 .map(|service| service_scenario_name(service)),
+        )
+        .chain(
+            run_scenarios::RUN_SCENARIOS
+                .iter()
+                .map(|name| name.to_string()),
         )
         .collect::<Vec<_>>();
     names.sort();
@@ -318,6 +337,69 @@ fn replay_service_fixture(
     }))
 }
 
+/// Every run-behaviour scenario's recorded journals against what its real
+/// handlers write now, on a fresh server double over SQLite memory — and the
+/// scenario's semantic assertion runs again every recording.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn replay_corpus_run_scenarios_match_the_real_handlers() {
+    let generation = current_generation().await;
+    for scenario in run_scenarios::RUN_SCENARIOS {
+        let current = run_scenarios::record(scenario).await;
+        let result = replay_run_fixture(read_run_fixture(scenario), &current, &generation)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{error}: {}",
+                    std::error::Error::source(&error).expect("a divergence names its cause")
+                )
+            });
+        match result {
+            ReplayComparison::Compared => println!("{scenario}: handler journals compared"),
+            ReplayComparison::DifferentGeneration { recorded, current } => println!(
+                "{scenario}: different generation, not compared (recorded {recorded}, current {current})",
+            ),
+        }
+    }
+    println!(
+        "release journal replay: {} run scenarios",
+        run_scenarios::RUN_SCENARIOS.len()
+    );
+}
+
+fn replay_run_fixture(
+    fixture: RunScenarioFixture,
+    current: &BTreeMap<String, HandlerJournals>,
+    generation: &lash_core::engine::BuildGeneration,
+) -> Result<ReplayComparison, ReplayDivergence> {
+    if fixture.generation != *generation {
+        return Ok(ReplayComparison::DifferentGeneration {
+            recorded: fixture.generation,
+            current: generation.clone(),
+        });
+    }
+    let differing = fixture
+        .services
+        .keys()
+        .chain(current.keys())
+        .filter(|service| fixture.services.get(*service) != current.get(*service))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if differing.is_empty() {
+        return Ok(ReplayComparison::Compared);
+    }
+    let only = |journals: &BTreeMap<String, HandlerJournals>| {
+        journals
+            .iter()
+            .filter(|(service, _)| differing.contains(*service))
+            .map(|(service, journals)| (service.clone(), journals.clone()))
+            .collect()
+    };
+    Err(ReplayDivergence(ReplayFailure::RunScenario {
+        scenario: fixture.scenario,
+        recorded: only(&fixture.services),
+        current: only(current),
+    }))
+}
+
 #[tokio::test]
 async fn replay_corpus_fixtures_match_current_controller() {
     let fixture_names = fixture_scenario_names();
@@ -376,6 +458,12 @@ enum ReplayFailure {
         service: String,
         recorded: HandlerJournals,
         current: HandlerJournals,
+    },
+    #[error("run scenario `{scenario}` recorded {recorded:#?}, current {current:#?}")]
+    RunScenario {
+        scenario: String,
+        recorded: BTreeMap<String, HandlerJournals>,
+        current: BTreeMap<String, HandlerJournals>,
     },
 }
 
@@ -550,6 +638,24 @@ fn every_replay_fixture_records_one_generation_and_an_ordered_journal() {
             "{service} records the steps of every handler it ran"
         );
     }
+    for scenario in run_scenarios::RUN_SCENARIOS {
+        let fixture = read_run_fixture(scenario);
+        assert_eq!(fixture.scenario, *scenario);
+        assert_eq!(
+            fixture.generation, fixtures[0].generation,
+            "{scenario} is in the same generation"
+        );
+        assert!(
+            !fixture.services.is_empty()
+                && fixture.services.values().all(|journals| {
+                    !journals.is_empty()
+                        && journals
+                            .values()
+                            .all(|set| !set.is_empty() && set.iter().all(|steps| !steps.is_empty()))
+                }),
+            "{scenario} records the steps of every handler it ran"
+        );
+    }
 }
 
 #[test]
@@ -621,6 +727,18 @@ async fn regenerate_replay_corpus_fixtures() {
             service: service.clone(),
         };
         let path = service_fixture_path(&service);
+        std::fs::create_dir_all(path.parent().expect("fixture parent"))
+            .expect("create replay corpus scenario directory");
+        std::fs::write(path, json_with_newline(&fixture)).expect("write replay corpus fixture");
+    }
+
+    for scenario in run_scenarios::RUN_SCENARIOS {
+        let fixture = RunScenarioFixture {
+            scenario: scenario.to_string(),
+            generation: recorded.generation.clone(),
+            services: run_scenarios::record(scenario).await,
+        };
+        let path = run_fixture_path(scenario);
         std::fs::create_dir_all(path.parent().expect("fixture parent"))
             .expect("create replay corpus scenario directory");
         std::fs::write(path, json_with_newline(&fixture)).expect("write replay corpus fixture");
@@ -748,6 +866,21 @@ fn service_fixture_path(service: &str) -> PathBuf {
     fixture_root()
         .join(service_scenario_name(service))
         .join("journal.json")
+}
+
+fn read_run_fixture(scenario: &str) -> RunScenarioFixture {
+    let path = run_fixture_path(scenario);
+    serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "run scenario `{scenario}` has no replay corpus fixture at {}: {error}",
+            path.display()
+        )
+    }))
+    .expect("decode committed run scenario fixture")
+}
+
+fn run_fixture_path(scenario: &str) -> PathBuf {
+    fixture_root().join(scenario).join("journal.json")
 }
 
 fn fixture_scenario_names() -> Vec<String> {

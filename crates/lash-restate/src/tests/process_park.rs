@@ -192,11 +192,94 @@ pub(super) async fn a_diverged_process_body_parks_once_and_completes_when_restor
         "the feed records the park exactly once"
     );
 
-    // The retry a build that can replay the journal runs completes the
-    // process once and closes the park.
-    let restored = invoke_process_workflow_body(&endpoint, "run", retry(), true)
+    // The retry a build that can replay the journal runs publishes its
+    // terminal through journaled runs first, then releases the journal pin
+    // and seals the terminal's source before delivering it — each stage
+    // journaled before the wait it suspends on.
+    let publication = invoke_process_workflow_body(&endpoint, "run", retry(), false)
         .await
-        .expect("the restored retry completes");
+        .expect("the restored retry proposes its terminal publication");
+    assert_eq!(
+        restate_message_types(&publication),
+        Some(vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]),
+        "the restored retry proposes the terminal-publication run first"
+    );
+    let published = encode_journal_retry(
+        process_id.as_str(),
+        &input,
+        &[&first[..], &publication[..]].concat(),
+        journaled + 1,
+    )
+    .expect("encode Restate's retry over the published terminal");
+    let second_publication = invoke_process_workflow_body(&endpoint, "run", published, false)
+        .await
+        .expect("the restored retry proposes its second terminal run");
+    assert_eq!(
+        restate_message_types(&second_publication),
+        Some(vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]),
+        "the published terminal lands before the scope's pin release"
+    );
+    let published_twice = encode_journal_retry(
+        process_id.as_str(),
+        &input,
+        &[&first[..], &publication[..], &second_publication[..]].concat(),
+        journaled + 2,
+    )
+    .expect("encode Restate's retry over both publication runs");
+    let pin_release = invoke_process_workflow_body(&endpoint, "run", published_twice, false)
+        .await
+        .expect("the restored retry reaches its journal-pin release");
+    let pin_release_calls = restate_call_frames(&pin_release)
+        .map(|calls| {
+            calls
+                .iter()
+                .map(|call| format!("{}/{}", call.service, call.handler))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    assert_eq!(
+        pin_release_calls,
+        vec!["LashDurableWaitIndex/release_process_journal"],
+        "the published terminal precedes the scope's pin release"
+    );
+    assert_eq!(
+        restate_message_types(&pin_release),
+        Some(vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]),
+        "the restored retry journals the pin release"
+    );
+    let released = encode_journal_retry(
+        process_id.as_str(),
+        &input,
+        &[
+            &first[..],
+            &publication[..],
+            &second_publication[..],
+            &pin_release[..],
+        ]
+        .concat(),
+        journaled + 3,
+    )
+    .expect("encode Restate's retry over the released pin");
+    let restored = invoke_endpoint_body_with_json_call_responses_then_suspend(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        released,
+        vec![serde_json::json!({ "status": "accepted" })],
+    )
+    .await
+    .expect("the restored retry resolves its terminal's source and delivers it");
     assert!(
         restate_error_message(&restored).is_none(),
         "the restored retry completes: {restored:?}"

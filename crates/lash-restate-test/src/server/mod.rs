@@ -678,6 +678,30 @@ impl JournalEntryView {
         }
     }
 
+    /// The completion slot an entry resolves: a `RunCommand`'s
+    /// `result_completion_id`, or a `RunCompletionNotification`'s
+    /// `completion_id`; `None` on every other entry. Pairing entries on it
+    /// matches a `ctx.run` step to the completion that answered it, however
+    /// the notifications interleave.
+    pub fn completion_id(&self) -> Option<u32> {
+        use prost::Message as _;
+        match self.ty {
+            MessageType::RunCommand => Some(
+                crate::protocol::generated::RunCommandMessage::decode(self.payload.clone())
+                    .ok()?
+                    .result_completion_id,
+            ),
+            MessageType::RunCompletionNotification => Some(
+                crate::protocol::generated::RunCompletionNotificationMessage::decode(
+                    self.payload.clone(),
+                )
+                .ok()?
+                .completion_id,
+            ),
+            _ => None,
+        }
+    }
+
     /// The input an `InputCommand` entry carried — the invocation's request
     /// body; `None` on every other entry.
     pub fn input(&self) -> Option<bytes::Bytes> {

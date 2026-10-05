@@ -555,7 +555,7 @@ fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
 /// `lash-build-generation/v1` BLAKE3 domain, first six bytes. The stored
 /// marker still migrates, so the session-state row stays outside the
 /// drain-policy rows; its admission is hashed because work routed on a lane
-/// — an effect group's children, a successor — must run on a build that
+/// — a successor segment or process — must run on a build that
 /// admits every session the lane's opener admitted. Two builds whose session
 /// admission differs therefore never share a lane, and neither do two whose
 /// plugins differ in any behaviour revision or only in order: a replay on
