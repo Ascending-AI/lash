@@ -217,7 +217,7 @@ pub(crate) struct IndexedWait {
 /// An effect executing under the scope inside a handler, keyed by replay
 /// key: recorded at start, cleared at completion (FIG-2499 quiescence).
 /// version_surface = "coexist"
-/// version_guard(items(DURABLE_WAIT_INDEX_EFFECT_PREFIX, durable_wait_index_effect_key), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", scope_effects_and_groups_are_quiescent))
+/// version_guard(items(DURABLE_WAIT_INDEX_EFFECT_PREFIX, durable_wait_index_effect_key), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", scope_effects_are_quiescent))
 const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
 /// A process segment can issue effects until its journal closes. Its single
 /// pin replaces the two index calls around each effect (FIG-4849).

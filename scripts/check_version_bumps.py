@@ -2556,6 +2556,16 @@ class Reachability:
         segments = tuple(part.strip() for part in written.split("::") if part.strip())
         if not segments:
             raise _Unresolved(f"{kind} = {written!r} names nothing")
+        if (
+            kind == "deserialize_with"
+            and segments == ("Option", "deserialize")
+            and self._resolve_path(("Option",), origin.path, origin.modules, [], ()) is _STANDARD
+        ):
+            # Serde's standard Option implementation uses the field's normal
+            # representation. The attribute still changes missing-field
+            # admission, so it and the field's payload remain guarded.
+            opaque.append((written, "a deserialize_with adapter of the standard library"))
+            return []
         function = None if kind == "with" else segments[-1]
         module = segments if kind == "with" else segments[:-1]
         if function is not None and not module:

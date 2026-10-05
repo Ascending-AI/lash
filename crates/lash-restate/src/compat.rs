@@ -33,7 +33,7 @@ pub use lash_sansio::VersionRange;
 ///         RestateProcessHandOverRequest, RestateProcessCancelSignal,
 ///     ),
 ///     roots(
-///         path = "crates/lash-restate/src/session_shifts.rs", RestateSessionShiftRequest,
+///         path = "crates/lash-restate/src/session_shifts/intent.rs", RestateSessionShiftRequest,
 ///         RestateRunRequest, RestateRunCloseRequest,
 ///     ),
 ///     roots(path = "crates/lash-restate/src/object_state.rs", ObjectUpgradeResponse),

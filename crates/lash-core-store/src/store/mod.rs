@@ -1,6 +1,6 @@
 //! The runtime's settled-session persistence contract and shared store types.
 /// version_surface = "coexist"
-/// version_guard(items(LASH_BLOB_DOMAIN_VERSION, for_content))
+/// version_guard(items(LASH_BLOB_DOMAIN_VERSION), items(path = "crates/lash-core-store/src/store/session_head.rs", for_content))
 const LASH_BLOB_DOMAIN_VERSION: &str = "lash-blob/v2";
 
 use crate::SessionId;

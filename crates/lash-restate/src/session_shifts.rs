@@ -165,15 +165,17 @@ use continuation::{continuation_generation, drain_answered, session_shift_contin
 ///         path = "crates/lash-core-execution/src/engine/admission.rs",
 ///         path = "crates/lash-core-execution/src/engine/shift.rs",
 ///         path = "crates/lash-core-execution/src/engine/contracts.rs",
+///         path = "crates/lash-core-store/src/store/shift_admission.rs",
 ///         cover(
 ///             Admitted, AdmittedWork, AdmitRequest, AdmitVerdict, SealVerdict, RunOutcome,
 ///             ShiftOutcome, ShiftStop, ShiftRequest,
 ///         ),
 ///     ),
 ///     items(
-///         SHIFT_HANDLER, TURN_OUTCOME_STATE, TURN_ADMISSION_STATE, turn_invocation_key, shift_session_journal,
+///         SHIFT_HANDLER, TURN_OUTCOME_STATE, shift_session_journal,
 ///         execute_run_journal,
 ///     ),
+///     items(path = "crates/lash-restate/src/session_shifts/intent.rs", TURN_ADMISSION_STATE, turn_invocation_key),
 ///     items(path = "crates/lash-restate/src/sentinel.rs", GENERATION_SENTINEL),
 /// )
 /// version_surface = "drain"

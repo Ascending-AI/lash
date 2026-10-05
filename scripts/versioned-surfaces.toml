@@ -71,6 +71,21 @@ constant_path = "crates/lashlang/src/runtime/cache.rs"
 reason = "identifies a process-local cache rather than a serialized shape"
 
 [[unregistered]]
+constant = "ERROR_VERSION"
+constant_path = "crates/lash-core-execution/src/plugin/actions.rs"
+reason = "plugin-owned per-operation error codec version supplied by each PluginOperation implementation, not a lash surface counter"
+
+[[unregistered]]
+constant = "ERROR_VERSION"
+constant_path = "crates/lash-conformance/src/conformance/frame_open_redrive/host_commands.rs"
+reason = "test-only operation error codec versions for the frame-open redrive conformance laws"
+
+[[unregistered]]
+constant = "ERROR_VERSION"
+constant_path = "crates/lash-conformance/src/conformance/shift_admission.rs"
+reason = "test-only operation error codec version for the shift-admission conformance laws"
+
+[[unregistered]]
 constant = "MIN_SUPPORTED_WORKER_PROTOCOL_VERSION"
 constant_path = "crates/lash-vm-protocol/src/version.rs"
 reason = "lower read bound for WORKER_PROTOCOL_VERSION, not a separately written format"

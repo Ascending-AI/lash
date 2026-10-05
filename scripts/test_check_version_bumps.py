@@ -838,6 +838,32 @@ class Reachable(Fixture):
         self.assertEqual(code, 1, output)
         self.assertIn("mod stamp", output)
 
+    def test_option_deserialize_keeps_its_attribute_and_payload_guarded(self) -> None:
+        source = "crates/demo/src/dto/hello.rs"
+        attribute = '#[serde(deserialize_with = "Option::deserialize")]'
+        dto = ROOTED_DTO.replace(
+            "pub body: Body,", f"{attribute}\n    pub body: Option<Body>,"
+        )
+        self.write(source, dto)
+        self.base = self.commit("require an explicit optional body")
+        code, output = self.verdict(self.base)
+        self.assertEqual(code, 0, output)
+        code, output = self.changed("crates/demo/src/model.rs", "pub n: u32,", "pub n: u64,")
+        self.assertEqual(code, 1, output)
+        self.assertIn("guarded shape changed (Leaf;", output)
+        self.write("crates/demo/src/model.rs", MODEL)
+        code, output = self.changed(source, attribute, "")
+        self.assertEqual(code, 1, output)
+        self.assertIn("guarded shape changed (Hello;", output)
+        self.write(source, dto)
+        code, output = self.changed(source, "Option::deserialize", "Option::unknown_adapter")
+        self.assertEqual(code, 2, output)
+        self.assertIn("names no adapter this tree declares", output)
+        self.write(source, dto + "\n#[derive(Deserialize)]\npub struct Option<T>(T);\n")
+        code, output = self.verdict(self.commit("shadow the standard Option type"))
+        self.assertEqual(code, 2, output)
+        self.assertIn("names no adapter this tree declares", output)
+
     def test_an_adapter_the_tree_does_not_declare_cannot_be_evaluated(self) -> None:
         code, output = self.changed("crates/demo/src/dto/hello.rs", 'with = "stamp"', 'with = "gone"')
         self.assertEqual(code, 2, output)
