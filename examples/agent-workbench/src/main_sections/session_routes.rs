@@ -1,6 +1,6 @@
 use super::*;
 
-// The session-management routes: the roster the selector renders, the create
+// The session-management routes: the roster the session sidebar renders, the create
 // flow, and the durable selection a query-less `/api/` call resolves through.
 // They live beside the chat routes rather than in them because they are about
 // *which* session is served, not about serving one.

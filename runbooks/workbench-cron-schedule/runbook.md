@@ -239,10 +239,11 @@ This phase distinguishes a valid non-current schedule from a retired-session orp
    `S0`, capture its exact `payload.job_key` as `J` and require that `J` has the `{S0}:`
    prefix.
 2. Record the current count of `agent_workbench.cron.restate.run` records whose payload has both `job_session_id == S0` and `job_key == J`.
-3. Open a second scoped tab bound to a fresh session `S1` through **new session tab**, which
-   is what moves the workbench's current session off `S0`; leave `S0` alive and undeleted,
-   and do not cancel `J`. `POST /api/sessions/select` only accepts a session on the roster
-   and answers 404 `not on the roster` for a tab-scoped id, so it is not the affordance here.
+3. Move the workbench's current session off `S0` onto a fresh session `S1` by clicking the
+   sidebar's **new chat** (`#newChat`), which creates `S1`, selects it and switches the tab to
+   it in place; leave `S0` alive and undeleted, and do not cancel `J`. `POST
+   /api/sessions/select` only accepts a session on the roster and answers 404 `not on the
+   roster` for a tab-scoped id, so selecting by hand is not the affordance here.
 4. Wait for two schedule intervals. PASS only if the scoped run-record count for `(S0, J)` increases by at least two, both new records say `decision_basis == "session_store_meta_present"` and `session_state == "live"`, and there is no scoped `agent_workbench.cron.restate.zombie_cancelled` record. This is the non-current-live gate.
 5. Delete `S0` through the supported scoped session-delete path,
    `DELETE /api/session?session_id=<S0>` — the page's **reset** control acts on the tab's own

@@ -284,3 +284,42 @@ fn a_reset_carries_the_slot_name_to_the_rotated_session() {
 
 // ADR 0096: the typed dialect-pin conflict fixture (FIG-1555) is gone with
 // `RlmSessionConfigConflict::Dialect`.
+
+/// An unnamed session takes its first prompt as its sidebar title; a named
+/// one, and a session already titled, keep theirs. Selecting a session does
+/// not reorder the list: only a sent prompt makes a session recently active.
+#[test]
+fn the_first_prompt_titles_an_unnamed_session_and_selection_keeps_the_order() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let sessions = WorkbenchSessions::persistent(temp.path().join("session-id")).expect("roster");
+    let unnamed = new_session_id();
+    sessions.record(unnamed.clone(), unnamed.to_string());
+    let named = new_session_id();
+    sessions.record(named.clone(), "typescript work".to_string());
+    let carried = new_session_id();
+    sessions.record(carried.clone(), new_session_id().to_string());
+
+    sessions.record_prompt(
+        &unnamed,
+        "\n  Fix   the flaky   cron test\nand explain why it flaked",
+    );
+    sessions.record_prompt(&unnamed, "a later prompt never retitles it");
+    sessions.record_prompt(&named, "this prompt is not a title");
+    sessions.record_prompt(&carried, &"long ".repeat(40));
+
+    let name = |id: &SessionId| sessions.entry(id).expect("rostered").name;
+    assert_eq!(name(&unnamed), "Fix the flaky cron test");
+    assert_eq!(name(&named), "typescript work");
+    let long_title = name(&carried);
+    assert_eq!(long_title.chars().count(), 60);
+    assert!(long_title.ends_with('…'));
+
+    let active_before = sessions.entry(&named).expect("rostered").last_active_ms;
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    sessions.select(&named).expect("rostered session selects");
+    assert_eq!(
+        sessions.entry(&named).expect("rostered").last_active_ms,
+        active_before,
+        "selecting is not use"
+    );
+}

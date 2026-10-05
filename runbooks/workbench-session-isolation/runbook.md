@@ -15,8 +15,8 @@ markers and structural API state, never exact assistant prose.
 
 ## Scenario-specific golden rules
 
-1. **Two explicit session tabs, one process.** Use **new session tab** twice and retain
-   both generated `session_id` query parameters. Do not boot a second workbench.
+1. **Two explicit session tabs, one process.** Use the sidebar's **new chat** twice and
+   retain both generated `session_id` query parameters. Do not boot a second workbench.
 2. **Scope every session API read.** Query `/api/state`, `/api/triggers`, and `/api/work`
    with that tab's `?session_id=...`. An unscoped `/api/work` response is runtime-wide
    and is not isolation evidence.
@@ -44,7 +44,8 @@ markers and structural API state, never exact assistant prose.
   `bash scripts/agent-workbench-dev.sh down --port <port>` with the same env. (The
   `just agent-workbench` / `just agent-workbench-down` recipes name the same operations but
   do not carry this row's environment.)
-- UI affordances: **new session tab**, rendered session id, chat composer/transcript,
+- UI affordances: the chats sidebar (**new chat** `#newChat`, session rows in `#chatList`),
+  rendered session id, chat composer/transcript,
   running/idle pill, Red/Blue trigger buttons, registrations rail, and work rail.
 - Scoped backend truth for session `<S>`:
   `GET /api/state?session_id=<S>`, `GET /api/triggers?session_id=<S>`,
@@ -63,11 +64,15 @@ filenames only as aliases; record the full generated session ids in `00-sessions
 
 ## Phase 0 — Boot two isolated tabs
 
-Boot and gate `/healthz`. From the landing tab, activate **new session tab** twice and
-capture the two opened pages as Tab A and Tab B. **new session tab** opens a popup: a
-headless driver must capture the new page (`context.expect_page()` or equivalent). Clicking
-and then reading the same page silently leaves the operator on the landing session, and
-golden rule 5 voids the run if both tabs collapse onto one session. Record each URL
+Boot and gate `/healthz`. From the landing tab, click **new chat** (`#newChat`) twice. Each
+click creates a session, selects it and switches the landing tab to it in place, pinning the
+tab's URL to `?session_id=<id>`: after the first click record that id as A, after the second
+as B, waiting each time for `#sessionId` to show the new id. Then open two pages at
+`/?session_id=<A>` and `/?session_id=<B>` as Tab A and Tab B (or ctrl/middle-click each
+session's row in `#chatList`, whose link carries the same query; a headless driver must then
+capture the new page with `context.expect_page()` or equivalent). Reading the landing page
+instead of the opened pages leaves the operator on whichever session it last switched to,
+and golden rule 5 voids the run if both tabs collapse onto one session. Record each URL
 `session_id`, the rendered session id — the text of `#sessionId` — and
 `/api/state.settings.session_id`; require all three to agree within each
 tab and require A ≠ B. Both tabs must report the same server origin. Save

@@ -284,8 +284,9 @@ pub(crate) async fn send_turn(
             session_id: session_id.clone(),
         })?;
     // Last-active is a fact about use, so it moves when a turn is sent rather
-    // than when a poll reads the session.
-    state.sessions.touch(&session_id);
+    // than when a poll reads the session; an unnamed session takes its first
+    // prompt as its title.
+    state.sessions.record_prompt(&session_id, &text);
     let attachment = match attachment_id.as_deref() {
         None => None,
         Some(attachment_id) => match state

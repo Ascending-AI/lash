@@ -381,7 +381,7 @@ pub(crate) struct SessionSelectRequest {
     pub(crate) session_id: SessionId,
 }
 
-/// One session as the selector renders it.
+/// One session as the sidebar renders it.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct SessionView {
     pub(crate) session_id: SessionId,

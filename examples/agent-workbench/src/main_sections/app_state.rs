@@ -891,13 +891,21 @@ impl WorkbenchSessions {
         self.record(session_id.clone(), session_id.to_string());
     }
 
-    pub(crate) fn touch(&self, session_id: &SessionId) {
+    /// A sent prompt is what makes a session recently active, and the first
+    /// prompt of a session nobody named is its title, the way a chat list
+    /// titles a conversation by what it is about rather than by its id.
+    pub(crate) fn record_prompt(&self, session_id: &SessionId, prompt: &str) {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let mut roster = self.roster.lock_recover();
         let Some(entry) = roster.get_mut(session_id) else {
             return;
         };
         entry.last_active_ms = now_ms;
+        if session_name_is_unnamed(&entry.name, session_id)
+            && let Some(title) = session_title_from_prompt(prompt)
+        {
+            entry.name = title;
+        }
         self.persist_roster(&roster);
     }
 
@@ -916,7 +924,7 @@ impl WorkbenchSessions {
         self.roster.lock_recover().get(session_id).cloned()
     }
 
-    /// The roster, oldest first, which is the order the selector renders.
+    /// The roster, oldest first; the sidebar re-orders it by recency.
     pub(crate) fn list(&self) -> Vec<WorkbenchSessionEntry> {
         let mut entries = self
             .roster
@@ -941,7 +949,8 @@ impl WorkbenchSessions {
         *self.current.lock_recover() = session_id.clone();
         drop(roster);
         self.persist();
-        self.touch(session_id);
+        // Selecting is reading, not use: the list keeps its order under the
+        // operator's click.
         Some(entry)
     }
 
@@ -985,6 +994,38 @@ impl WorkbenchSessions {
             )
         });
     }
+}
+
+/// The longest title a first prompt is cut to, so a list row stays one line.
+const SESSION_TITLE_MAX_CHARS: usize = 60;
+
+/// A roster name nobody chose: the session's own id, or a generated id a
+/// replacement carried over from the slot it rotated.
+pub(crate) fn session_name_is_unnamed(name: &str, session_id: &SessionId) -> bool {
+    name == session_id.as_str()
+        || name
+            .strip_prefix(SESSION_ID_PREFIX)
+            .and_then(|rest| rest.strip_prefix('-'))
+            .is_some_and(|rest| {
+                rest.len() == 32 && rest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+}
+
+/// The prompt's first line, whitespace collapsed, cut on a char boundary.
+pub(crate) fn session_title_from_prompt(prompt: &str) -> Option<String> {
+    let line = prompt
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+    let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= SESSION_TITLE_MAX_CHARS {
+        return Some(collapsed);
+    }
+    let cut = collapsed
+        .chars()
+        .take(SESSION_TITLE_MAX_CHARS - 1)
+        .collect::<String>();
+    Some(format!("{}…", cut.trim_end()))
 }
 
 pub(crate) fn new_session_id() -> SessionId {

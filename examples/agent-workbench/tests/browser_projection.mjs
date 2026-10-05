@@ -3573,3 +3573,47 @@ test("canonical reply adoption removes only the matching typed preview", () => {
   assert.deepEqual(removed, ['preview']);
   assert.equal(context.assistantDraft, null);
 });
+
+test("the session sidebar titles, orders and highlights chats", () => {
+  const context = {};
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_SESSION_SIDEBAR", "WORKBENCH_SESSION_SIDEBAR")}
+     this.sessionTitle = sessionTitle;
+     this.sidebarSessions = sidebarSessions;
+     this.sessionAge = sessionAge;`,
+    context,
+  );
+  const generated = "workbench-0123456789abcdef0123456789abcdef";
+  const listing = {
+    current_session_id: "workbench-b",
+    sessions: [
+      { session_id: "workbench-a", name: "workbench-a", created_at_ms: 10, last_active_ms: 10 },
+      { session_id: "workbench-b", name: "Fix the cron test", created_at_ms: 20, last_active_ms: 50 },
+      { session_id: "workbench-c", name: generated, created_at_ms: 30, last_active_ms: 30 },
+    ],
+  };
+  // JSON crosses the vm realm boundary, so the comparison is structural.
+  const rows = JSON.parse(JSON.stringify(context.sidebarSessions(listing, "workbench-b")));
+  assert.deepEqual(
+    rows.map(row => [row.id, row.title.text, row.title.untitled, row.current]),
+    [
+      ["workbench-b", "Fix the cron test", false, true],
+      ["workbench-c", "New chat", true, false],
+      ["workbench-a", "New chat", true, false],
+    ],
+  );
+  // A tab pinned to a session the roster does not carry still lists and
+  // highlights it.
+  const pinned = JSON.parse(JSON.stringify(context.sidebarSessions(listing, "workbench-external")));
+  assert.equal(pinned.length, 4);
+  assert.deepEqual(
+    pinned.filter(row => row.current).map(row => row.id),
+    ["workbench-external"],
+  );
+  const now = 10 * 24 * 3600 * 1000;
+  assert.equal(context.sessionAge(0, now), "");
+  assert.equal(context.sessionAge(now - 30 * 1000, now), "now");
+  assert.equal(context.sessionAge(now - 5 * 60 * 1000, now), "5m");
+  assert.equal(context.sessionAge(now - 3 * 3600 * 1000, now), "3h");
+  assert.equal(context.sessionAge(now - 2 * 24 * 3600 * 1000, now), "2d");
+});
