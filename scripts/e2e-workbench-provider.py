@@ -18,8 +18,35 @@ import time
 import urllib.parse
 import urllib.request
 
-COUNTER = """() => {
+COUNTER = r"""(() => {
     window.replyCounts = [];
+    // Done is a live product-stream event, retired from /api/state once the
+    // turn settles. Tee the browser's own stream to keep what it received.
+    window.productStreamItems = [];
+    window.productStreamErrors = [];
+    const fetch = window.fetch.bind(window);
+    window.fetch = async (...args) => {
+        const response = await fetch(...args);
+        if (new URL(response.url).pathname === '/api/events') {
+            const reader = response.clone().body.getReader();
+            const decoder = new TextDecoder();
+            (async () => {
+                let buffer = '';
+                while (true) {
+                    const {value, done} = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, {stream: true});
+                    let newline;
+                    while ((newline = buffer.indexOf('\n')) >= 0) {
+                        const line = buffer.slice(0, newline).trim();
+                        buffer = buffer.slice(newline + 1);
+                        if (line) window.productStreamItems.push(JSON.parse(line));
+                    }
+                }
+            })().catch(error => window.productStreamErrors.push(String(error)));
+        }
+        return response;
+    };
     const install = () => {
         const timeline = document.querySelector('#timeline');
         if (!timeline) return;
@@ -34,7 +61,7 @@ COUNTER = """() => {
     } else {
         install();
     }
-}"""
+})()"""
 
 
 def write(path, value):
@@ -114,14 +141,24 @@ def browser(args):
         assert accepted["accepted"] is True and not accepted["queued"], accepted
         return accepted["turn_id"]
 
-    def admitted_input(session, turn):
+    def recorded_input(session, turn):
         def probe():
             snapshot = try_store(session)
             if snapshot is None:
                 return None
+            # A fast failed Run may settle before the first read. Admission
+            # remains recorded on the Run; terminal input bindings are cleared.
+            runs = [row for row in snapshot["session_runs"] if row["run"] == turn
+                    and row["admission_json"]]
+            if len(runs) != 1:
+                return None
+            admission = json.loads(runs[0]["admission_json"])
+            inputs = admission["inputs"]["inputs"]
+            assert len(inputs) == 1, admission
+            assert inputs[0]["session_id"] == session and inputs[0]["source_key"] == turn, admission
             return next((row for row in snapshot["pending_turn_inputs"]
-                         if row["admitted_run"] == turn), None)
-        return poll(f"accepted input bound to Run {turn}", probe)
+                         if row["input_id"] == inputs[0]["input_id"]), None)
+        return poll(f"accepted input recorded by Run {turn}", probe)
 
     def settled_terminal(session, count):
         def probe():
@@ -154,7 +191,7 @@ def browser(args):
             if args.scenario == "s26-rate-limit":
                 page = open_page(chrome, session)
                 turn = submit(page, "answer once")
-                work = admitted_input(session, turn)
+                work = recorded_input(session, turn)
                 entered = control("provider-barrier", {"barrier": "answer-started"})
                 assert entered["entered"]["occurrence"] == "rate-limit-1", entered
                 counts_a = page.evaluate("window.replyCounts")
@@ -171,7 +208,8 @@ def browser(args):
                 usage = final["observation"]["usage"]
                 assert usage["input_tokens"] == 11 and usage["output_tokens"] == 2, usage
                 bound = store(session)["pending_turn_inputs"]
-                assert any(row["input_id"] == work["input_id"] and row["admitted_run"] == turn
+                assert any(row["input_id"] == work["input_id"] and row["state"] == "completed"
+                           and row["admitted_run"] is None and row["admitted_by"] is None
                            for row in bound), bound
                 runs = [r for r in store(session)["session_runs"] if r["run"] == turn]
                 assert len(runs) == 1 and runs[0]["terminal_kind"] == "answered", runs
@@ -190,7 +228,8 @@ def browser(args):
                 requests = control("provider-requests")["requests"]
                 assert len(requests) == 2 and requests[0] == requests[1], requests
                 observations = control("observations",
-                                       {"session_id": session, "cursor": cursor})["items"]
+                                       {"session_id": session, "turn_id": turn,
+                                        "cursor": cursor})["items"]
                 assert "one answer" in json.dumps(observations), observations
                 terminal_items = [i for i in observations if i["type"] == "terminal_replacement"]
                 assert terminal_items, "no terminal_replacement observation"
@@ -219,23 +258,26 @@ def browser(args):
             elif args.scenario == "s26-partial-disconnect":
                 page = open_page(chrome, session)
                 turn = submit(page, "partial answer")
-                work = admitted_input(session, turn)
+                work = recorded_input(session, turn)
                 expect(page.locator("#timeline")).to_contain_text("partial", timeout=90000)
                 final, terminals = settled_terminal(session, 1)
                 outcome = terminals[0]["outcome"]
                 assert outcome["status"] == "failed" and outcome["done_reason"] == "provider_error", outcome
                 assert not visible_assistants(final), final["transcript"]
                 assert no_open_input(final), final["pending_turn_inputs"]
-                settlements = final["turn_failure_settlements"]
-                refusal = [e["refusal"] for s in settlements for e in s["evidence"]]
-                assert refusal, "no charge-safety refusal evidence settled"
-                assert any(r["protocol_position"] == "output_started" for r in refusal), refusal
-                partials = [e["partial_output"] for s in settlements for e in s["evidence"]
-                            if e.get("partial_output")]
-                assert any("partial" in p["text"] for p in partials), settlements
+                # The adapter refuses retry directly. ChargeSafety settlements
+                # are for policy-denied retryable failures, a different cause.
+                records = [e["record"] for e in final["product_events"]["events"]
+                           if e["type"] == "model_call_recorded"]
+                assert len(records) == 1 and len(records[0]["attempts"]) == 1, records
+                attempt = records[0]["attempts"][0]
+                assert attempt["protocol_position"] == "output_started", attempt
+                assert attempt["outcome"] == "failed" and attempt["error"]["class"] == "transport", attempt
+                assert attempt["retry_decision"] == {"outcome": "declined", "cause": "not_retryable"}, attempt
                 runs = [r for r in store(session)["session_runs"] if r["run"] == turn]
                 assert len(runs) == 1 and runs[0]["terminal_kind"] == "failed", runs
-                assert "transport" in (runs[0]["terminal_cause_json"] or ""), runs
+                cause = json.loads(runs[0]["terminal_cause_json"])
+                assert cause["turn"] == turn and cause["outcome"] == {"stopped": "provider_error"}, cause
                 failed = [r for r in trace(session) if r["type"] == "llm_call_failed"]
                 assert len(failed) == 1, failed
                 attempts = failed[0].get("attempts") or []
@@ -257,24 +299,32 @@ def browser(args):
                 write(directory / "s26-partial-evidence.json", {
                     "api": final, "store": store(session), "trace": trace(session),
                     "requests": requests, "turn": turn, "input_id": work["input_id"],
+                    "attempt": attempt,
                 })
                 write(directory / "scorecard.json", {
                     "scenario": "s26-partial-disconnect", "selected": 1, "executed": 1,
                     "verdict": "PASS", "turn": turn, "input_id": work["input_id"],
-                    "settlements": settlements,
+                    "attempt": attempt,
                 })
             elif args.scenario == "s27-auth-next-run":
                 page = open_page(chrome, session)
                 first = submit(page, "invalid credentials")
-                work_first = admitted_input(session, first)
+                work_first = recorded_input(session, first)
                 failed, terminals = settled_terminal(session, 1)
                 outcome = terminals[0]["outcome"]
                 assert outcome["status"] == "failed" and outcome["done_reason"] == "provider_error", outcome
-                failed_events = [e for e in failed["product_events"]["events"]
-                                 if e.get("type") == "done"
-                                 and e.get("turn_id") == first
-                                 and e.get("outcome") == "failed"]
-                assert failed_events, "API carried no failed Done event for the auth Run"
+                page.wait_for_function("""turn => window.productStreamItems.some(
+                    item => item.type === 'event' && item.event.type === 'done'
+                         && item.event.turn_id === turn
+                )""", arg=first)
+                done_events = [i["event"] for i in page.evaluate("window.productStreamItems")
+                               if i["type"] == "event"
+                               and i["event"].get("type") == "done"
+                               and i["event"].get("turn_id") == first]
+                assert len(done_events) == 1, done_events
+                # Done.Completed means the turn committed its own outcome,
+                # including ProviderError. Done.Failed is a host/commit failure.
+                assert done_events[0].get("outcome", "completed") == "completed", done_events
                 calls = [r for r in trace(session) if r["type"] == "llm_call_failed"]
                 assert len(calls) == 1, calls
                 attempts = calls[0].get("attempts") or []
@@ -285,13 +335,14 @@ def browser(args):
                 assert not [r for r in trace(session) if r["type"] == "llm_call_completed"]
                 runs = [r for r in store(session)["session_runs"] if r["run"] == first]
                 assert len(runs) == 1 and runs[0]["terminal_kind"] == "failed", runs
-                assert "auth" in (runs[0]["terminal_cause_json"] or "").lower(), runs
+                cause = json.loads(runs[0]["terminal_cause_json"])
+                assert cause["turn"] == first and cause["outcome"] == {"stopped": "provider_error"}, cause
                 requests = control("provider-requests")["requests"]
                 assert len(requests) == 1, "auth failure was retried"
                 assert no_open_input(failed), failed["pending_turn_inputs"]
                 second = submit(page, "fresh valid request")
                 assert second != first
-                work_second = admitted_input(session, second)
+                work_second = recorded_input(session, second)
                 assert work_second["input_id"] != work_first["input_id"]
                 final, terminals = settled_terminal(session, 2)
                 assert terminals[-1]["outcome"]["status"] == "completed", terminals
@@ -308,6 +359,7 @@ def browser(args):
                     "settlements": final["turn_failure_settlements"],
                     "turns": [first, second],
                     "inputs": [work_first["input_id"], work_second["input_id"]],
+                    "done_events": done_events,
                 })
                 projection.assert_three_layers(page, final, database,
                                                directory / "s27-browser.json",
@@ -319,7 +371,7 @@ def browser(args):
             elif args.scenario == "s18-application-timer":
                 page = open_page(chrome, session)
                 turn = submit(page, "await the application timer")
-                work = admitted_input(session, turn)
+                work = recorded_input(session, turn)
                 suspended = control("restate-suspended")
                 assert suspended["invocation"] and suspended["wake_up_time"] > 0, suspended
                 write(directory / "s18-suspended.json", suspended)
@@ -344,7 +396,8 @@ def browser(args):
                 requests = control("provider-requests")["requests"]
                 assert len(requests) == 1, "cancellation caused a second model request"
                 observations = control("observations",
-                                       {"session_id": session, "cursor": cursor})["items"]
+                                       {"session_id": session, "turn_id": turn,
+                                        "cursor": cursor})["items"]
                 terminal_items = [i for i in observations if i["type"] == "terminal_replacement"]
                 assert terminal_items, "late follower never observed the run's terminal"
                 late = open_page(chrome, session)

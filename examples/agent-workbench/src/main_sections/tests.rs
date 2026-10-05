@@ -183,6 +183,9 @@ mod deferred_tools_tests;
 #[path = "tests/done_stream_items.rs"]
 mod done_stream_items_tests;
 #[cfg(test)]
+#[path = "tests/provider_tool_projection.rs"]
+mod provider_tool_projection_tests;
+#[cfg(test)]
 #[path = "tests/tool_loss.rs"]
 mod tool_loss_tests;
 /// A durable test core over `backend`, whose RLM factory keeps its Lashlang

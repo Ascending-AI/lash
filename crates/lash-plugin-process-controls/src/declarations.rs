@@ -26,7 +26,7 @@ use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 use crate::done_without_intents;
 
 fn definition_property(description: &str) -> Value {
-    serde_json::json!({ "type": "object", "description": description, "properties": { "id": definition_id_schema(), "signature": {"oneOf": [{"type": "object", "properties": {"signature": {"const": "unknown"}}, "required": ["signature"], "additionalProperties": false}, {"type": "object", "properties": {"signature": {"const": "known"}, "encoding": {}}, "required": ["signature", "encoding"], "additionalProperties": false}]} }, "required": ["id", "signature"], "additionalProperties": false })
+    serde_json::json!({ "type": "object", "description": description, "properties": { "id": definition_id_schema(), "signature": {"anyOf": [{"type": "object", "properties": {"signature": {"const": "unknown"}}, "required": ["signature"], "additionalProperties": false}, {"type": "object", "properties": {"signature": {"const": "known"}, "encoding": {}}, "required": ["signature", "encoding"], "additionalProperties": false}]} }, "required": ["id", "signature"], "additionalProperties": false })
 }
 
 pub fn definition_id_schema() -> Value {
@@ -38,7 +38,7 @@ pub fn definition_id_schema() -> Value {
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
 pub fn process_start_tool_definition() -> ToolDefinition {
-    ToolDefinition::raw("tool:start_process", "start_process", "Start a durable process by immutable definition or tagged definition ID and return its handle.",
+    ToolDefinition::raw("tool:start_process", "start_process", "Start a durable process by immutable definition or tagged definition ID and return its handle. Pass exactly one of `definition` or `definition_id`.",
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -47,7 +47,6 @@ pub fn process_start_tool_definition() -> ToolDefinition {
                 "args": { "type": "object" },
                 "label": { "type": "string" }
             },
-            "oneOf": [{"required": ["definition"], "not": {"required": ["definition_id"]}}, {"required": ["definition_id"], "not": {"required": ["definition"]}}],
             "additionalProperties": false
         }),
         serde_json::json!({"x-lash": {"kind": "process_unknown"}})).expect("valid declared tool schemas")

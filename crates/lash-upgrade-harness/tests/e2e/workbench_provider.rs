@@ -382,6 +382,9 @@ async fn observations(
     let cursor = input["cursor"]
         .as_str()
         .context("observations lacks cursor")?;
+    let turn = input["turn_id"]
+        .as_str()
+        .context("observations lacks turn_id")?;
     let response = host.observations(session, cursor).await?;
     ensure!(
         response.status().is_success(),
@@ -409,7 +412,10 @@ async fn observations(
                 continue;
             }
             let item: Value = serde_json::from_str(line)?;
-            let terminal = item["type"] == "terminal_replacement";
+            // Session initialization/config commits can precede this Run.
+            // Keep their frames, but stop only at the selected turn's commit.
+            let terminal =
+                item["type"] == "terminal_replacement" && item["event"]["turn_id"] == turn;
             if let Some(event) = item.get("event") {
                 RemoteSessionObservationEvent::decode_json(&serde_json::to_vec(event)?).map_err(
                     |error| anyhow!("observation frame fails remote-protocol decode: {error}"),
