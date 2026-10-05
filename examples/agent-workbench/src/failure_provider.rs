@@ -163,9 +163,11 @@ impl DevProviderScenario {
             }
             (Self::RetryResetPartial, _) => finish_cell("\"FIG-1350 retry replacement\""),
             (Self::FailedProcess, _) => cell(
-                r#"const FIG425_deterministic_failure = async (request: unknown) => {
+                r#"const FIG425_deterministic_failure = await processes.create({ dialect: "typescript", source: `
+const fail = async (request: unknown) => {
   throw "deterministic durable process failure";
 };
+` });
 await processes.start({ definition: FIG425_deterministic_failure, args: { request: 1 } });
 finish("started deterministic failing process");"#,
             ),

@@ -49,7 +49,41 @@ pub fn process_create_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
         serde_json::json!({
-            "x-lash": { "kind": "process_unknown" },
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "object",
+                    "properties": {
+                        "$lash_definition_id": {
+                            "type": "string",
+                            "pattern": "^lash\\.definition:sha256:[0-9a-f]{64}$",
+                        },
+                    },
+                    "required": ["$lash_definition_id"],
+                    "additionalProperties": false,
+                },
+                "signature": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "properties": { "signature": { "const": "unknown" } },
+                            "required": ["signature"],
+                            "additionalProperties": false,
+                        },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "signature": { "const": "known" },
+                                "encoding": {},
+                            },
+                            "required": ["signature", "encoding"],
+                            "additionalProperties": false,
+                        },
+                    ],
+                },
+            },
+            "required": ["id", "signature"],
+            "additionalProperties": false,
             "description": "The created process definition.",
         }),
     ).expect("valid declared tool schemas")
@@ -233,6 +267,37 @@ fn refuse(message: impl std::fmt::Display) -> ToolAttemptOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_output_is_an_immutable_definition_record() {
+        // FIG-4177 (bf41d19ca5): create returns the descriptor consumed by start.
+        let definition = process_create_tool_definition();
+        let schema = &definition.contract.output_schema.canonical;
+        let id = lash_core::ProcessDefinitionId::from_sha256_digest([1; 32]);
+        for signature in [
+            lash_core::ProcessSignature::Unknown,
+            lash_core::ProcessSignature::known(serde_json::json!({ "result": "number" })),
+        ] {
+            let value =
+                serde_json::to_value(lash_core::ProcessDefinition::new(id.clone(), signature))
+                    .expect("serialized definition");
+            schema
+                .validate(&value)
+                .expect("create returns a definition");
+        }
+        for invalid in [
+            serde_json::json!({ "id": id }),
+            serde_json::json!({ "id": id, "signature": { "signature": "known" } }),
+            serde_json::json!({ "id": id, "signature": { "signature": "unknown" }, "source": ANSWER }),
+            serde_json::json!({ "id": { "$lash_definition_id": "not-a-definition" }, "signature": { "signature": "unknown" } }),
+        ] {
+            assert!(
+                schema.validate(&invalid).is_err(),
+                "not a definition: {invalid}"
+            );
+        }
+    }
+
     const DIALECT: &str = "typescript";
     const ANSWER: &str = "const answer = async (): Promise<number> => { return 42; };";
     const ECHO: &str = "const relay = async () => { return await demo.echo({text: 'hi'}); };";

@@ -791,10 +791,13 @@ async fn stop_over_real_process_await_commits_cancelled_terminal_inner() {
         .complete(|_| async {
             Ok(text_response(
                 r#"<typescript>
-const hold_for_stop = async () => {
+// FIG-4177 (bf41d19ca5): start takes the record returned by create.
+const hold_for_stop = await processes.create({ dialect: "typescript", source: `
+const hold = async () => {
   await sleep(600000);
   return "unreachable";
 };
+` });
 const handle = await processes.start({ definition: hold_for_stop });
 finish(await handle);
 </typescript>"#,

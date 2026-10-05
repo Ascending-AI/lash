@@ -3008,6 +3008,8 @@ test("settled transcript rendering consumes canonical reasoning and code disclos
   const append = () => timeline.children.push({ dataset: {} });
   const renderContext = {
     timeline,
+    // FIG-4971 (f698ed67b25): the settled renderer clears its empty placeholder.
+    clearEmpty() {},
     renderMessage(message) { rendered.push(["message", message.id]); append(); },
     appendReasoning(text, id, turnId) { rendered.push(["reasoning", id, text, turnId]); append(); },
     appendCodeBlock(row) { rendered.push(["code_block", row.id, row.code, row.output]); append(); },

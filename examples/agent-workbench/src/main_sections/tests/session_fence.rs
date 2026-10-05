@@ -302,10 +302,13 @@ async fn deleting_a_session_with_a_running_turn_cancels_it_before_retiring_inner
         .complete(|_| async {
             Ok(text_response(
                 r#"<typescript>
-const hold_for_delete = async () => {
+// FIG-4177 (bf41d19ca5): start takes the record returned by create.
+const hold_for_delete = await processes.create({ dialect: "typescript", source: `
+const hold = async () => {
   await sleep(600000);
   return "unreachable";
 };
+` });
 const handle = await processes.start({ definition: hold_for_delete });
 finish(await handle);
 </typescript>"#,

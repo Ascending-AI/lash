@@ -206,6 +206,28 @@ fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
                 .expect("workbench tutorial tool binding");
         }
     }
+    // FIG-4177 (bf41d19ca5): create returns the immutable definition record
+    // start accepts. Read that shape from the shipped start contract.
+    let start = lash::process_controls::process_start_tool_definition();
+    let definition_schema =
+        start.contract().input_schema.canonical()["properties"]["definition"].clone();
+    resources
+        .add_module_operation_contract(
+            ["processes"],
+            "Processes",
+            "create",
+            "tool:create_process",
+            &lash::rlm::lang::OperationContract::new(
+                serde_json::json!({
+                    "type": "object",
+                    "properties": { "source": { "type": "string" }, "dialect": { "type": "string" } },
+                    "required": ["source", "dialect"],
+                    "additionalProperties": false
+                }),
+                definition_schema,
+            ),
+        )
+        .expect("link process create operation");
     add_process_control_operations(&mut resources);
     lash::rlm::lang::LashlangHostEnvironment::new(resources, workbench_lashlang_abilities())
 }
@@ -393,6 +415,30 @@ impl TutorialHost {
             return Ok(lash::rlm::lang::from_json(serde_json::json!([
                 tutorial_trigger_handle()
             ])));
+        }
+        if host_operation == "tool:create_process" {
+            // Creation now takes source text. Keep the tutorial law's check
+            // of the process body against the host surface before mocking its
+            // publication receipt, just as the inline body was link-checked.
+            let Some(lash::rlm::lang::Value::String(source)) = call
+                .args
+                .first()
+                .and_then(lash::rlm::lang::Value::as_record)
+                .and_then(|input| input.get("source"))
+            else {
+                return Err(lash::rlm::lang::ExecutionHostError::new(
+                    "the tutorial must create a process from source text",
+                ));
+            };
+            lash::typescript::link(source.as_str(), &self.environment).map_err(|error| {
+                lash::rlm::lang::ExecutionHostError::new(format!(
+                    "the tutorial's process source does not link: {error}"
+                ))
+            })?;
+            return Ok(lash::rlm::lang::from_json(serde_json::json!({
+                "id": { "$lash_definition_id": format!("lash.definition:sha256:{}", "0".repeat(64)) },
+                "signature": { "signature": "unknown" }
+            })));
         }
         if host_operation == process_start {
             return Ok(lash::rlm::lang::from_json(tutorial_process_handle()));
