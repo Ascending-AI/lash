@@ -1126,7 +1126,7 @@
       "dependencies": "Base, B00/B01, F02",
       "cases": [
         {
-          "variant": "default",
+          "variant": "inline",
           "store": "sqlite_file",
           "leg": "live",
           "channel": "rlm",
@@ -1148,9 +1148,42 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Product red on rerun (FIG-4983): the predecessor Run never observes the accepted generation drain (no CutChecked), so finish closes it and cancels the live loser; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s11_inline_loser"
+          }
+        },
+        {
+          "variant": "deferred",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s11_deferred_loser"
+          }
         },
         {
           "variant": "default",

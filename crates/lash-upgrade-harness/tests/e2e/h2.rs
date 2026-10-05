@@ -94,8 +94,8 @@ impl Row {
             }
         }
     }
-    /// H3's transfer rows: their successor serves behind its own transport,
-    /// and each case's evidence is scoped to the logical Run's own segments.
+    /// H3's transfer rows: each case's evidence is scoped to the logical
+    /// Run's own segments.
     pub(super) fn transfers(self) -> bool {
         matches!(
             self,
@@ -151,7 +151,7 @@ pub(super) struct Shared {
     /// Set once the predecessor is retired or killed for good: every later
     /// follow and resolution goes to the successor, the only host left.
     pub(super) predecessor_gone: Mutex<bool>,
-    /// A transfer row boots N+1 when it requests the drain, not before.
+    /// A row with a successor boots N+1 when it requests the drain, not before.
     successor_boot: Mutex<Option<(ArtifactIdentity, CaseLease)>>,
 }
 impl Shared {
@@ -271,11 +271,12 @@ impl Shared {
         }
         for (turn, raw) in rows {
             // A commit's key names the logical turn it belongs to in its scope.
-            if self.row.transfers()
-                && serde_json::from_str::<serde_json::Value>(&turn)
-                    .ok()
-                    .and_then(|key| key.pointer("/scope/turn_id").cloned())
-                    != Some(json!(work.run))
+            // A follow-on's own commits re-carry the continuation it still
+            // owes; only the Run's own commit publishes it.
+            if serde_json::from_str::<serde_json::Value>(&turn)
+                .ok()
+                .and_then(|key| key.pointer("/scope/turn_id").cloned())
+                != Some(json!(work.run))
             {
                 continue;
             }
@@ -596,7 +597,7 @@ impl HostAdapter for Host {
                         .into(),
                 );
             }
-            if previous.is_none() && self.0.row.transfers() {
+            if previous.is_none() && self.0.successor.lock().await.is_some() {
                 // N+1 registers only when the roll begins. Registered first,
                 // it would take the session's admission and run the turn itself.
                 *self.0.successor_boot.lock().await = Some((
@@ -613,28 +614,6 @@ impl HostAdapter for Host {
                         cleanup: Vec::new(),
                     },
                 ));
-            } else if previous.is_none()
-                && let Some(successor) = self.0.successor.lock().await.as_mut()
-            {
-                let mut next_lease = CaseLease {
-                    gate_id: lease.gate_id.clone(),
-                    namespace: lease.namespace.clone(),
-                    authority: lease.authority.clone(),
-                    directory: lease.directory.join("successor"),
-                    postgres_url: lease.postgres_url.clone(),
-                    ports: lease.ports.clone(),
-                    deadline: lease.deadline,
-                    processes: Vec::new(),
-                    cleanup: Vec::new(),
-                };
-                std::fs::create_dir_all(&next_lease.directory)?;
-                let next = successor.boot(artifact, &mut next_lease).await?;
-                ensure!(
-                    next.process.pid != ready.process.pid,
-                    "successor reused the predecessor process"
-                );
-                lease.processes.extend(next_lease.processes);
-                lease.cleanup.extend(next_lease.cleanup);
             }
             *self.0.ready.lock().await = Some(ready.clone());
             Ok(ready)
@@ -678,6 +657,16 @@ impl HostAdapter for Host {
                         "successor reused the predecessor process"
                     );
                 }
+                // Draining N cuts only a Run N executes. Had N+1 registered
+                // before the input, it would have admitted and run the turn.
+                let endpoint = self.0.proxy.lock().await.endpoint.clone();
+                let deployment = self.0.view.deployment_at(&endpoint).await?;
+                let segments = self.0.segments(run).await?;
+                ensure!(
+                    segments.iter().any(|segment| segment.id == admitted.segment
+                        && segment.pinned_deployment_id.as_deref() == Some(deployment.id.as_str())),
+                    "the drained generation does not execute the Run: {segments:?}"
+                );
                 let predecessor = self.0.host.lock().await;
                 let generation = predecessor
                     .control(reqwest::Method::GET, "/api/e2e/generation", None)
@@ -996,7 +985,7 @@ pub async fn run(row: Row) -> Result<()> {
     if needs_successor {
         lease.ports.extend([base + 20, base + 21]);
     }
-    if row.transfers() {
+    if needs_successor {
         lease.ports.push(base + 22);
     }
     let server = super::artifact(
@@ -1043,9 +1032,9 @@ pub async fn run(row: Row) -> Result<()> {
         ("OPENROUTER_API_KEY".into(), "case-owned-fixture".into()),
         ("AGENT_WORKBENCH_PROTOCOL".into(), protocol.into()),
     ]);
-    // A transfer row's successor serves behind its own transport, so a case
-    // can hold the successor segment's Start between publication and adoption.
-    let successor_proxy = if row.transfers() {
+    // A row's successor serves behind its own transport, so a case can hold
+    // the successor segment's Start between publication and adoption.
+    let successor_proxy = if needs_successor {
         Some(
             V7Proxy::start(
                 std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, base + 22))?,

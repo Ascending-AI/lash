@@ -8,7 +8,7 @@ use lash_core::ToolCallId;
 use lash_core::tool_run::{AttemptResult, CallDecision, LogicalTerminal, RunEvent, RunLifecycle};
 use lash_remote_protocol::RemoteTurnStatus;
 use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseSpec, Channel, StoreKind};
-use lash_upgrade_harness::e2e::control::{BarrierKind, ToolControl};
+use lash_upgrade_harness::e2e::control::{Barrier, BarrierKind, ToolControl};
 use lash_upgrade_harness::e2e::evidence::Evidence;
 use lash_upgrade_harness::e2e::host::{HostCommand, HostKind};
 use lash_upgrade_harness::e2e::provider::ProviderKind;
@@ -419,6 +419,21 @@ pub async fn live_loser(
             "Deferred loser has no acknowledged descriptor"
         );
     }
+    // N+1 resumes a program that never awaits the loser again, and its close
+    // discharges a pending loser: the Deferred source resolves before N+1 starts.
+    let mut owner = scenario.work()?.clone();
+    owner.call = None;
+    owner.ordinal = None;
+    let starting = Barrier {
+        work: owner,
+        kind: BarrierKind::SuccessorStarting,
+    };
+    if deferred {
+        scenario
+            .control
+            .tool(ToolControl::Hold(starting.clone()))
+            .await?;
+    }
     let request = scenario
         .host
         .command(HostCommand::Transfer {
@@ -500,6 +515,7 @@ pub async fn live_loser(
                 .any(|subscription| subscription.source == descriptor),
             "transfer lost pending Deferred subscription"
         );
+        scenario.wait(starting.clone()).await?;
         let mut work = scenario.work()?.clone();
         work.call = Some(loser.to_string());
         work.ordinal = Some(1);
@@ -510,10 +526,10 @@ pub async fn live_loser(
                 value: serde_json::json!("loser"),
             })
             .await?;
+        scenario.release(starting).await?;
     }
-    let evidence = scenario
-        .finish(RemoteTurnStatus::Answered, Some("winner"))
-        .await?;
+    let evidence = scenario.finish(RemoteTurnStatus::Answered, None).await?;
+    super::handover::assert_final_value(&evidence, "winner")?;
     for call in [winner, loser, after] {
         assert_call(&evidence, call, LogicalTerminal::Final)?;
         assert_body_identity(&evidence, call, Some(1))?;

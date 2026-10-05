@@ -307,7 +307,7 @@ async fn await_later(scenario: &mut Scenario<'_>) -> Result<ToolCallId> {
 }
 
 /// An RLM program answers with `finish(value)`: the follow's typed final value.
-fn assert_final_value(evidence: &Evidence, expected: &str) -> Result<()> {
+pub(super) fn assert_final_value(evidence: &Evidence, expected: &str) -> Result<()> {
     let outcome = evidence
         .outputs
         .last()
