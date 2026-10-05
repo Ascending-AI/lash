@@ -13,61 +13,15 @@ impl LashRuntime {
         &self.state
     }
 
-    /// Whether this open declared it will not run a turn (FIG-3353). The host
-    /// configuration is the per-open authority: `RuntimeSessionState` carries
-    /// a copy so cloned states and store-level stamping self-guard, but every
-    /// whole-state replacement rebuilds the field, so the runtime reasserts
-    /// the marker from here at each adoption and stamp boundary.
-    pub(in crate::runtime) fn preserves_persisted_tool_state(&self) -> bool {
-        self.host.core.control.tool_surface_open_mode
-            == crate::ToolSurfaceOpenMode::PreservePersisted
-    }
-
-    /// Reassert the per-open tool-preservation claim onto the resident state
-    /// after a whole-state replacement or before a stamp boundary.
-    pub(in crate::runtime) fn reapply_tool_state_preservation_marker(&mut self) {
-        self.state.preserve_tool_state_snapshot = self.preserves_persisted_tool_state();
-    }
-
-    /// The shared gate for the `PreservePersisted` contract (FIG-3353): an
-    /// open that declared it would not run a turn may never execute one — its
-    /// tool surface was never reconciled and no `ToolSourcePolicy` was
-    /// enforced, so every turn-execution entry refuses before admission.
-    pub(in crate::runtime) fn refuse_turn_execution_on_preserved_tool_surface(
-        &self,
-    ) -> Result<(), RuntimeError> {
-        if self.preserves_persisted_tool_state() {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface,
-                format!(
-                    "session `{}` was opened with `ToolSurfaceOpenMode::PreservePersisted` \
-                     (enqueue-only); reopen it in `Reconcile` mode to run a turn",
-                    self.state.session_id
-                ),
-            ));
-        }
-        Ok(())
-    }
-
     /// Stamp the live tool and plugin state onto the resident state.
     ///
     /// # Errors
     /// The typed refusal of a plugin namespace that cannot be written in
     /// the format its admission recorded (FIG-4747).
     pub fn stamp_live_plugin_state(&mut self) -> Result<(), RuntimeError> {
-        // Whole-state replacements (resident reload, append-receipt replay)
-        // rebuild `self.state`; reassert the per-open claim before the flag
-        // is consulted so the durable snapshot is never lost in the gap.
-        self.reapply_tool_state_preservation_marker();
         if let Some(session) = self.session.as_ref() {
-            // A `PreservePersisted` open never reconciled its registry, so
-            // exporting it would overwrite the durable surface with whatever
-            // the sources happen to advertise. The loaded snapshot stays on
-            // the state and rides the next commit forward untouched.
-            if !self.state.preserve_tool_state_snapshot {
-                let snapshot = session.plugins().tool_registry().export_state();
-                self.state.set_tool_state_snapshot(Some(snapshot));
-            }
+            let snapshot = session.plugins().tool_registry().export_state();
+            self.state.set_tool_state_snapshot(Some(snapshot));
             self.state
                 .capture_plugin_states(session.plugins(), self.fleet_format())?;
         }
@@ -77,22 +31,16 @@ impl LashRuntime {
     /// Make `state` the resident runtime state. Every whole-state swap goes
     /// through here (durable adoption and reload, append rollback and receipt
     /// replay, settled config commands, turn commits, session creation), so
-    /// none can skip what a replacement owes the live session:
-    ///
-    /// - the replacement rebuilds the marker field, so the per-open
-    ///   `PreservePersisted` claim is reasserted from host configuration
-    ///   before any later stamp consults it (FIG-3353);
-    /// - the whole resident authority, tool access and subagent context (the
-    ///   two inputs of the plugin catalog projection), is published to the
-    ///   live plugin session, invalidating discovery caches only when it
-    ///   changed, so live discovery always reflects the settled authority
-    ///   (FIG-2415, FIG-2987).
+    /// none can skip what a replacement owes the live session: the whole
+    /// resident authority, tool access and subagent context (the two inputs
+    /// of the plugin catalog projection), is published to the live plugin
+    /// session, invalidating discovery caches only when it changed, so live
+    /// discovery always reflects the settled authority (FIG-2415, FIG-2987).
     pub(in crate::runtime) fn install_resident_state(
         &mut self,
         state: crate::RuntimeSessionState,
     ) -> Result<(), crate::FormatRefusal> {
         self.state = state;
-        self.reapply_tool_state_preservation_marker();
         self.publish_resident_authority()
     }
 
@@ -248,13 +196,10 @@ impl LashRuntime {
     /// refreshed from the live session.
     pub async fn export_persisted_state(&mut self) -> Result<RuntimeSessionState, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
-        self.reapply_tool_state_preservation_marker();
         let mut state = self.state.clone();
         if let Some(session) = self.session.as_ref() {
-            if !state.preserve_tool_state_snapshot {
-                let snapshot = session.plugins().tool_registry().export_state();
-                state.set_tool_state_snapshot(Some(snapshot));
-            }
+            let snapshot = session.plugins().tool_registry().export_state();
+            state.set_tool_state_snapshot(Some(snapshot));
             state.capture_plugin_states(session.plugins(), self.fleet_format())?;
         }
         Ok(state)

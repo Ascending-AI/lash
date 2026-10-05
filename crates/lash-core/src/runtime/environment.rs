@@ -200,12 +200,6 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    /// See [`crate::ToolSurfaceOpenMode`]; the default is `Reconcile`.
-    pub fn with_tool_surface_open_mode(mut self, mode: crate::ToolSurfaceOpenMode) -> Self {
-        self.env.core.control.tool_surface_open_mode = mode;
-        self
-    }
-
     pub fn with_termination(mut self, termination: TerminationPolicy) -> Self {
         self.env.core.control.termination = termination;
         self

@@ -44,9 +44,9 @@ A core installs one plugin set, and every session, open, resume, engine shift
 and process worker of that core runs that set. No open, resume or worker adds
 plugins of its own: a session's behaviour is the plugin config it recorded at
 creation, changed only by its owners' typed config commands. An open still
-states physical facts — the provider that serves the recorded route, the
-tool-source policy that refuses an unavailable source, and enqueue-only mode —
-and none of them selects behaviour.
+states physical facts — the provider that serves the recorded route and the
+tool-source policy that refuses an unavailable source — and neither selects
+behaviour.
 
 A process runs under the environment its start captured: its starter's
 recorded policy and plugin config. That holds for a session-turn process as

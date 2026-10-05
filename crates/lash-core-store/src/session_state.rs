@@ -714,12 +714,6 @@ pub struct RuntimeSessionState {
     /// while host-side edits can add resident nodes before they commit.
     #[serde(skip)]
     pub persisted_node_ids: crate::PersistedNodeIds,
-    /// Runtime-only marker set by a `PreservePersisted` open (FIG-3353): the
-    /// loaded tool-state snapshot is durable truth and is never restamped from
-    /// the live registry. Skipped on serialize — it is a per-open claim, not
-    /// durable session content.
-    #[serde(skip)]
-    pub preserve_tool_state_snapshot: bool,
 }
 
 impl RuntimeSessionState {
@@ -740,7 +734,6 @@ impl RuntimeSessionState {
             head_revision: 0,
             config_revision: 0,
             persisted_node_ids: crate::PersistedNodeIds::default(),
-            preserve_tool_state_snapshot: false,
         }
     }
 
@@ -780,7 +773,6 @@ impl RuntimeSessionState {
             head_revision: 0,
             config_revision: 0,
             persisted_node_ids: crate::PersistedNodeIds::default(),
-            preserve_tool_state_snapshot: false,
         };
         state.ensure_agent_frame_initialized();
         state

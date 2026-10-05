@@ -870,6 +870,42 @@ async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
     Ok(())
 }
 
+/// A run admitted while the only open of its session cannot execute still
+/// executes (FIG-5091): that open never hosts the run, and the engine opens
+/// its own runtime instead of refusing the run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_admitted_beside_a_non_executing_open_executes() -> Result<()> {
+    let fixture = fixture(1).await?;
+    let session_id = lash_core::SessionId::from("send-beside-non-executing");
+    let builder = fixture.core.session(session_id.clone()).created().await;
+    let store =
+        crate::session::resolve_existing_session(&fixture.core.store_factory, &session_id).await?;
+    let state = crate::session::load_state_from_store(&session_id, &store).await?;
+    let bystander = builder.observe_with_state(state).await?;
+
+    let output = fixture
+        .core
+        .session(session_id)
+        .durable()
+        .await?
+        .send(TurnInput::text("run beside the bystander"))
+        .id(crate::TurnId::parse("beside-non-executing").expect("nonblank host identity"))
+        .output()
+        .await?;
+    assert!(
+        output
+            .assistant_message()
+            .is_some_and(|reply| reply.contains("run beside the bystander")),
+        "{output:?}"
+    );
+    assert_eq!(
+        bystander.read_view().turn_index(),
+        0,
+        "the run never executed on the non-executing open"
+    );
+    Ok(())
+}
+
 /// A session the engine opens before any host committed it (a send through a
 /// durable handle to a brand-new session) pins its protocol's per-session
 /// options with its first commit, as a host's open does, so a later open

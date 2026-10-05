@@ -681,7 +681,6 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
     let session = state
         .core
         .session(session_id.clone())
-        .enqueue_only()
         .open()
         .await
         .map_err(|error| {

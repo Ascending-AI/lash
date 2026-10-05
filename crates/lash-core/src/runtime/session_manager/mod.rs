@@ -346,7 +346,6 @@ impl CurrentOwnerCapability {
             head_revision: state.head_revision,
             config_revision: state.config_revision,
             persisted_node_ids: state.persisted_node_ids.clone(),
-            preserve_tool_state_snapshot: state.preserve_tool_state_snapshot,
         }
     }
 

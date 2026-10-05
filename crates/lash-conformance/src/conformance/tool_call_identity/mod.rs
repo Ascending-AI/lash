@@ -646,28 +646,16 @@ impl World {
         &self,
         phase_probe: Option<Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>>,
     ) -> crate::LashRuntime {
-        self.runtime_with_tool_open_mode(phase_probe, crate::ToolSurfaceOpenMode::Reconcile)
-            .await
-    }
-
-    pub(crate) async fn runtime_with_tool_open_mode(
-        &self,
-        phase_probe: Option<Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>>,
-        mode: crate::ToolSurfaceOpenMode,
-    ) -> crate::LashRuntime {
-        self.runtime_on_store(phase_probe, mode, self.store().await)
-            .await
+        self.runtime_on_store(phase_probe, self.store().await).await
     }
 
     #[expect(clippy::expect_used, reason = "conformance fixture assertions")]
     pub(crate) async fn runtime_on_store(
         &self,
         phase_probe: Option<Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>>,
-        mode: crate::ToolSurfaceOpenMode,
         store: Arc<dyn crate::RuntimeStore>,
     ) -> crate::LashRuntime {
-        let (mut config, factories) = self.host_and_factories();
-        config.control.tool_surface_open_mode = mode;
+        let (config, factories) = self.host_and_factories();
         let policy = crate::testing::mock_session_policy();
         let mut builder =
             crate::LashRuntime::builder(config, crate::testing::runtime_lease_owner())

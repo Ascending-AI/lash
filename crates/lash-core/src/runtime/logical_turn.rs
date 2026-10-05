@@ -503,9 +503,6 @@ impl LashRuntime {
         shift_fence: Option<&ShiftFence>,
         stopwatch: TurnStopwatch,
     ) -> Result<AgentFrameRun, RuntimeError> {
-        // FIG-3353: the shared funnel for every logical turn — an open that
-        // declared it would not run one is refused before any effect.
-        self.refuse_turn_execution_on_preserved_tool_surface()?;
         let (follow_turn_context, supplied_trace_turn_id) = start.continuation_state();
         // A session operation owns no turn (FIG-3607 contract 4): a logical
         // turn is opened by its run's turn scope, or runs inside a process

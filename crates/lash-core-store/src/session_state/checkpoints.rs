@@ -278,16 +278,10 @@ impl RuntimeSessionState {
             &dyn SessionPluginStateSource,
         ) -> Result<crate::PluginState, crate::RuntimeError>,
     ) -> Result<(), crate::RuntimeError> {
-        // A `PreservePersisted` open (FIG-3353) never reconciled its registry,
-        // so refreshing tool state here would overwrite the durable surface
-        // with whatever the sources happen to advertise. The loaded snapshot
-        // rides the next commit forward untouched.
-        if !self.preserve_tool_state_snapshot {
-            let generation = plugins.tool_state_generation();
-            if self.tool_state_ref().is_none() || self.tool_state_generation() != Some(generation) {
-                let snapshot = plugins.export_tool_state();
-                self.set_tool_state_snapshot(Some(snapshot));
-            }
+        let generation = plugins.tool_state_generation();
+        if self.tool_state_ref().is_none() || self.tool_state_generation() != Some(generation) {
+            let snapshot = plugins.export_tool_state();
+            self.set_tool_state_snapshot(Some(snapshot));
         }
 
         // Ownership and receipt evidence can change without a values-generation

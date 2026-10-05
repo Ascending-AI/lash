@@ -385,13 +385,7 @@ impl LashRuntime {
                 (*session.plugins().admitted_plugin_config().config).clone();
         }
         session.invalidate_runtime_caches();
-        // A `PreservePersisted` open never installed its snapshot, so the
-        // reload does not reconcile it either (FIG-3353).
-        let preserve_persisted_tools = self.host.core.control.tool_surface_open_mode
-            == crate::ToolSurfaceOpenMode::PreservePersisted;
-        if !preserve_persisted_tools
-            && let Some(tool_state) = durable_state.tool_state_snapshot().cloned()
-        {
+        if let Some(tool_state) = durable_state.tool_state_snapshot().cloned() {
             // The re-sync has no return value to hand the host, so the
             // installer's delivery is the contract: trace evidence plus the
             // typed report the runtime retains for
@@ -417,14 +411,12 @@ impl LashRuntime {
             })?;
             tool_restore = Some(report);
         }
-        if !preserve_persisted_tools {
-            session.refresh_tool_catalog().await.map_err(|err| {
-                (
-                    ResidentReloadStage::ToolCatalogRefresh,
-                    restore_session_error(err),
-                )
-            })?;
-        }
+        session.refresh_tool_catalog().await.map_err(|err| {
+            (
+                ResidentReloadStage::ToolCatalogRefresh,
+                restore_session_error(err),
+            )
+        })?;
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = durable_state.session_id.clone();
         protocol_session
@@ -535,10 +527,6 @@ impl LashRuntime {
                 )
                 .await?;
             }
-            // The durable reload replaced the whole resident state; the
-            // install reasserts the per-open `PreservePersisted` claim from
-            // host configuration so later stamps keep the loaded snapshot
-            // (FIG-3353).
             self.install_resident_state(durable_state)
                 .map_err(|error| {
                     (

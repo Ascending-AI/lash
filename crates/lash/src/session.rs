@@ -25,9 +25,8 @@ use lash_remote_protocol::{
 /// Every facade session's store comes from the core's backend catalog;
 /// there is no way to hand a session a store from anywhere else.
 ///
-/// The builder carries only what one open supplies — the tool-source policy
-/// and [`enqueue_only`](Self::enqueue_only): physical binding and
-/// acquisition, never behaviour. A session's behaviour is recorded config:
+/// The builder carries only what one open supplies — the tool-source policy:
+/// physical binding and acquisition, never behaviour. A session's behaviour is recorded config:
 /// the model it runs is the binding it recorded, and the plugins it runs are
 /// the core's, configured by the plugin config it recorded at creation
 /// (FIG-4396). It is stated once, in the [`SessionCreation`] passed to
@@ -39,8 +38,6 @@ pub struct SessionBuilder {
 
     /// Per-open override of the core's tool-source policy (FIG-3367).
     pub(crate) tool_source_policy: Option<lash_core::ToolSourcePolicy>,
-    /// Set when the host declares this open will not run a turn (FIG-3353).
-    pub(crate) tool_surface_open_mode: Option<lash_core::ToolSurfaceOpenMode>,
 }
 
 /// What a session is created with: the argument of
@@ -113,19 +110,6 @@ impl SessionBuilder {
     /// which carries the report.
     pub fn tool_source_policy(mut self, policy: lash_core::ToolSourcePolicy) -> Self {
         self.tool_source_policy = Some(policy);
-        self
-    }
-
-    /// Open for enqueueing or host commands while preserving the recorded tools.
-    ///
-    /// This open skips tool reconciliation and the catalog rebuild, preserving
-    /// the persisted tool state on subsequent host command commits. The opened
-    /// runtime cannot execute a turn with an unreconciled tool surface.
-    /// Submit input through [`LashSession::send`]; the engine reconciles the
-    /// tools in its own execution runtime.
-    /// See [`ToolSurfaceOpenMode::PreservePersisted`](lash_core::ToolSurfaceOpenMode).
-    pub fn enqueue_only(mut self) -> Self {
-        self.tool_surface_open_mode = Some(lash_core::ToolSurfaceOpenMode::PreservePersisted);
         self
     }
 
@@ -213,8 +197,8 @@ impl SessionBuilder {
     /// Session Execution Lease, no plugin session, no lifecycle event. Run the
     /// session with [`open`](Self::open), or admit durable input for its first
     /// turn with `create(creation).await?.send(input)`. The builder's open
-    /// knobs — tool-source policy, `enqueue_only` — belong to an open and
-    /// take no part in creation.
+    /// knob, the tool-source policy, belongs to an open and takes no part in
+    /// creation.
     ///
     /// The creation spec's model key is minted into a recorded binding here,
     /// through the core's models; a key they do not register is refused with
@@ -461,9 +445,6 @@ impl SessionBuilder {
             // facade sees the same choice.
             env.core.control.tool_source_policy = policy;
         }
-        if let Some(mode) = self.tool_surface_open_mode {
-            env.core.control.tool_surface_open_mode = mode;
-        }
 
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
@@ -505,6 +486,9 @@ impl SessionBuilder {
             Arc::clone(&self.core.live_replay_store),
         );
         let process_lifecycle_route = self.core.process_lifecycle_feed.register(&handle);
+        // Only an open that executes hosts the session's runs: a reader's
+        // open never registers, and with no open registered the engine opens
+        // its own runtime for the run (FIG-5091).
         if resident {
             binding.register_resident(&handle);
         }

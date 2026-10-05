@@ -106,10 +106,6 @@ impl LashRuntime {
         mut input: TurnInput,
         opts: TurnOptions<'_>,
     ) -> Result<AgentFrameRun, RuntimeError> {
-        // FIG-3353: an enqueue-only (`PreservePersisted`) open may never run a
-        // turn — refuse before the acceptance commit becomes admission
-        // evidence.
-        self.refuse_turn_execution_on_preserved_tool_surface()?;
         clear_process_invocation_correlation_for_ordinary_turn(
             &mut input,
             opts.scoped_effect_controller().execution_scope(),

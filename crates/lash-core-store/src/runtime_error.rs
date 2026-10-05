@@ -181,14 +181,6 @@ runtime_error_codes! {
         /// session, so nothing will answer the wait. Configuring the core with a
         /// session-work engine is the recovery.
         SessionWorkUnavailable = "session_work_unavailable" => Terminal,
-        // the open declared it runs no turn; the same open refuses identically.
-        /// A turn was attempted on a runtime opened with
-        /// `ToolSurfaceOpenMode::PreservePersisted` (FIG-3353). That open declared
-        /// it would not run a turn: its tool surface was never reconciled and no
-        /// `ToolSourcePolicy` was enforced, so no direct or queued turn may
-        /// execute against it. Reopening the session in `Reconcile` mode is the
-        /// recovery; retrying the identical call on this open fails identically.
-        TurnExecutionRequiresReconciledToolSurface = "turn_execution_requires_reconciled_tool_surface" => Terminal,
         // transactional write authority was contended; the identical commit is safe to retry.
         /// The store aborted a commit before publication because transactional
         /// write authority was contended. Retrying the same operation unchanged is

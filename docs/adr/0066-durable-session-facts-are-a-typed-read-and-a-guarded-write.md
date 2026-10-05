@@ -42,7 +42,7 @@ transaction. An existing id refuses with `SessionAlreadyExists`.
 
 `SessionBuilder::open` opens an existing id and reads its recorded head.
 `UnknownSession` and `SessionDeleted` are typed refusals. The builder carries
-the tool-source policy and the enqueue-only mode; it carries no replacement
+the tool-source policy; it carries no replacement
 session config. A registry that cannot bind the recorded model key refuses
 its requests with `LlmProfileUnavailable`.
 

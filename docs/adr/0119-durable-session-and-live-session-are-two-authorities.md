@@ -29,7 +29,7 @@ The session builder has three principal terminal verbs; exactly one creates.
 
 The store admission answer decides which racing create succeeds. Hosts that
 want create-or-open state that sequence explicitly. Open-time options are
-physical only: tool-source policy and enqueue-only mode. The recorded model
+physical only: the tool-source policy. The recorded model
 key binds against the core's registry when a request runs; a key it cannot
 serve is `LlmProfileUnavailable`. An open installs
 no plugins: the session runs its core's one plugin set under the plugin config
@@ -175,23 +175,26 @@ load, observer reconciliation and plugin initialization can precede it.
 Sources: `crates/lash-core/src/runtime/tool_restore.rs:124` and
 `crates/lash-core/src/runtime/lifecycle.rs:239`.
 
-### Opens that will not run a turn
+### Only an open that executes hosts a run
 
-`SessionBuilder::enqueue_only()` selects
-`ToolSurfaceOpenMode::PreservePersisted`. The runtime keeps the loaded tool
-snapshot without installing it, rebuilding its catalog, changing its tool
-generation or producing a restore report. Resident re-sync follows the same
-rule. At state-adoption and stamping boundaries, runtime configuration
-reasserts preservation, so commits carry the loaded snapshot forward.
+A session's runs execute on the most recent open a host holds in this
+process, which carries what the host configured on it, or on a runtime the
+engine opens itself when no host holds one. Every `open()` and
+`open_with_state()` reconciles its tools and can execute, so it may host the
+session's runs. `observe_with_state()` is the one open that never executes:
+it never registers, and a run admitted while it is the only open runs on the
+engine's own runtime (FIG-5091).
 
-Turn entry refuses this mode before admission with
-`TurnExecutionRequiresReconciledToolSurface`. Running requires reopening in
-default `Reconcile` mode, which restores tools, applies policy and rebuilds
-the catalog. Hosts that need no runtime can use `durable()` directly.
+There is no enqueue-only open. A host that sends or reads the queue without a
+runtime uses `durable()`. A host command needs a live session, and it queues
+as a session command that the shift applies on the runtime that executes the
+session's runs (FIG-4202). Earlier, an enqueue-only open kept its tools
+unreconciled, refused every turn and was still registered as the runtime
+that runs the session's turns. A run admitted beside it was therefore refused
+terminally.
 
-Sources: `crates/lash/src/session.rs:142`,
-`crates/lash-core/src/runtime/session_api.rs:24`, and
-`crates/lash-core/src/runtime/turn_loop/resident_session.rs:383`.
+Sources: `crates/lash/src/session.rs` (`open_resolved`) and
+`crates/lash/src/core/session_shifts.rs` (`shift_runtime`).
 
 ## Consequences
 

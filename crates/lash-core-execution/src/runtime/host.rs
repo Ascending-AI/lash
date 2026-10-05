@@ -150,15 +150,6 @@ pub struct RuntimeControlConfig {
     /// It is carried on the host config, not on the session, so every
     /// runtime-initiated construction honours the host's choice.
     pub tool_source_policy: crate::ToolSourcePolicy,
-    /// What an open does with the persisted tool surface. Defaults to
-    /// [`ToolSurfaceOpenMode::Reconcile`](crate::ToolSurfaceOpenMode). An open
-    /// that will not run a turn — enqueue-only or read-only — is declared with
-    /// [`PreservePersisted`](crate::ToolSurfaceOpenMode::PreservePersisted),
-    /// which skips the tool-state reconcile and catalog rebuild so an open on
-    /// a core without the session's sources cannot orphan or restamp its
-    /// persisted tools (FIG-3353). Carried on the host config so every
-    /// construction below the facade sees the same choice.
-    pub tool_surface_open_mode: crate::ToolSurfaceOpenMode,
     /// Where the shift reports a logical run's closed scope, after the
     /// run's terminal evidence is durable (FIG-3607 item 7). Defaults to
     /// [`NoScopeClose`](crate::engine::NoScopeClose); a host composition that
@@ -235,7 +226,6 @@ impl RuntimeHostConfig {
                 lease_timings: crate::LeaseTimings::default(),
                 process_tool_visibility_filter: None,
                 tool_source_policy: crate::ToolSourcePolicy::default(),
-                tool_surface_open_mode: crate::ToolSurfaceOpenMode::default(),
                 scope_close: Arc::new(crate::engine::NoScopeClose),
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
             },

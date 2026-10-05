@@ -3,7 +3,6 @@
 
 use crate::ProcessEventLogTestSupport as _;
 use crate::SessionId;
-use lash_sansio::sync::MutexExt as _;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -539,183 +538,6 @@ pub async fn external_completion_without_observer_writes_nothing(tier: ToolCallI
     runtime.park().await.expect("park runtime");
 }
 
-/// Apply the host append `request` to `runtime` as the session's command
-/// lane does (FIG-4202): submitted and sealed outside the tier, drained in a
-/// handler of `tier`, which lends the drain its controller (a tier whose
-/// effect host runs effects only in a handler), and settled after it. A
-/// replay of the handler reads back the lane its journal recorded.
-async fn append_in_a_handler(
-    tier: &ToolCallIdentityTier,
-    world: &World,
-    runtime: &Arc<tokio::sync::Mutex<crate::LashRuntime>>,
-    store: &Arc<dyn crate::RuntimeStore>,
-    request: crate::AppendSessionNodesRequest,
-) -> Result<crate::AppendSessionNodesOutcome, crate::RuntimeError> {
-    let key = request.operation_id.clone();
-    let (receipt, fence) = crate::testing::runtime_helpers::submit_host_command(
-        store.as_ref(),
-        &world.session_id,
-        crate::SessionCommand::AppendSessionNodes {
-            request: Box::new(request),
-        },
-        &key,
-    )
-    .await?;
-    let drained = Arc::new(std::sync::Mutex::new(Ok(Vec::new())));
-    let scope = crate::AdmittedScope::turn(
-        world.session_id.clone(),
-        crate::TurnId::fixture(format!("host-append:{}", receipt.batch_id)),
-    );
-    let (drain_runtime, drain_fence, report) = (runtime.clone(), fence.clone(), drained.clone());
-    tier.runner
-        .run_turn(
-            scope,
-            Arc::new(move |scope| {
-                let (runtime, fence, report) =
-                    (drain_runtime.clone(), drain_fence.clone(), report.clone());
-                Box::pin(async move {
-                    let mut runtime = runtime.lock().await;
-                    let run = crate::testing::runtime_helpers::drain_host_commands(
-                        &mut runtime,
-                        &fence,
-                        Some(&scope),
-                    )
-                    .await;
-                    // A refused command settles too: the handler ends.
-                    *report.lock_recover() = run;
-                    crate::ConformanceTurnEnd::Settled
-                })
-            }),
-        )
-        .await;
-    let drained = std::mem::replace(&mut *drained.lock_recover(), Ok(Vec::new()))?;
-    let mut runtime = runtime.lock().await;
-    crate::testing::runtime_helpers::append_outcome(
-        crate::testing::runtime_helpers::settle_host_command(
-            &mut runtime,
-            receipt.clone(),
-            drained.contains(&receipt.batch_id),
-        )
-        .await?,
-    )
-}
-
-#[expect(clippy::expect_used, reason = "conformance fixture assertions")]
-pub async fn tool_restore_policy_survives_every_rebuild_and_rollback(tier: ToolCallIdentityTier) {
-    let world = World::new(&tier, "tool-restore-policy");
-    assert_finished(
-        "seed",
-        &world
-            .run(&world.turn("seed", vec![text("persisted tool surface")]))
-            .await,
-    );
-    let store = world.store().await;
-    let mut seed_state = crate::conformance::helpers::load_window_state(&store, &world.session_id)
-        .await
-        .expect("seed checkpoint read")
-        .expect("seed checkpoint exists");
-    let mut surface = seed_state
-        .tool_state_snapshot()
-        .cloned()
-        .expect("seed surface populated");
-    surface.generation = 42;
-    seed_state.set_tool_state_snapshot(Some(surface));
-    let commit = crate::RuntimeCommit::persisted_state_for_test(&seed_state);
-    crate::testing::store_fixtures::commit_runtime_state_for_test(
-        &store,
-        commit,
-        "distinct-persisted-surface",
-    )
-    .await
-    .expect("commit a surface different from the fresh live registry");
-    let mut runtime = world
-        .runtime_with_tool_open_mode(None, crate::ToolSurfaceOpenMode::PreservePersisted)
-        .await;
-    runtime
-        .refresh_session_graph_from_store()
-        .await
-        .expect("load persisted surface before observing it");
-    let reference = runtime
-        .state()
-        .tool_state_ref()
-        .cloned()
-        .expect("persisted surface reference");
-    assert!(runtime.state().preserve_tool_state_snapshot);
-    let request = crate::AppendSessionNodesRequest {
-        operation_id: "preserving-append".into(),
-        nodes: vec![crate::SessionAppendNode::plugin(
-            "policy-pin",
-            serde_json::json!("once"),
-        )],
-        requires_ancestor_node_id: None,
-    };
-    // A host append is a session command the lane applies (FIG-4202), in a
-    // handler of the tier. The last phase's append names an ancestor off the
-    // active path, so its command settles refused and resident state gives
-    // way to the durable head.
-    let runtime = Arc::new(tokio::sync::Mutex::new(runtime));
-    for phase in 0..4 {
-        if phase == 0 {
-            crate::testing::invalidate_resident_session_state_for_testing(
-                &mut *runtime.lock().await,
-            );
-        }
-        if phase == 1 {
-            runtime
-                .lock()
-                .await
-                .refresh_session_graph_from_store()
-                .await
-                .expect("head rebuild");
-        }
-        if phase < 3 {
-            append_in_a_handler(&tier, &world, &runtime, &store, request.clone())
-                .await
-                .expect("append or receipt replay");
-        } else {
-            let mut refused = request.clone();
-            refused.operation_id = "preserving-append-stale".into();
-            refused.requires_ancestor_node_id = Some("not-on-the-active-path".into());
-            let outcome = append_in_a_handler(&tier, &world, &runtime, &store, refused).await;
-            assert!(
-                !matches!(
-                    outcome,
-                    Ok(crate::AppendSessionNodesOutcome::Appended { .. })
-                ),
-                "an append off the active path is refused: {outcome:?}"
-            );
-        }
-        let mut runtime = runtime.lock().await;
-        runtime
-            .stamp_live_plugin_state()
-            .expect("the live plugin state is captured");
-        assert!(
-            runtime.state().preserve_tool_state_snapshot,
-            "phase {phase}"
-        );
-        assert_eq!(
-            runtime.state().tool_state_ref(),
-            Some(&reference),
-            "phase {phase}"
-        );
-    }
-    let runtime = Arc::try_unwrap(runtime)
-        .ok()
-        .expect("the law holds the runtime alone")
-        .into_inner();
-    Box::pin(runtime.park())
-        .await
-        .expect("commit after rollback");
-    let mut reopened = world
-        .runtime_with_tool_open_mode(None, crate::ToolSurfaceOpenMode::PreservePersisted)
-        .await;
-    reopened
-        .refresh_session_graph_from_store()
-        .await
-        .expect("cold read loads the persisted surface");
-    assert_eq!(reopened.state().tool_state_ref(), Some(&reference));
-}
-
 #[expect(clippy::expect_used, reason = "conformance fixture assertions")]
 pub async fn live_and_durable_queue_paths_share_results_and_capability_refusals(
     tier: ToolCallIdentityTier,
@@ -918,11 +740,8 @@ pub async fn live_and_durable_queue_paths_share_results_and_capability_refusals(
     );
     let blocked: Arc<dyn crate::RuntimeStore> =
         Arc::new(QueueCapabilityRefusal(world.store().await));
-    let blocked_runtime = crate::RuntimeHandle::new(
-        world
-            .runtime_on_store(None, crate::ToolSurfaceOpenMode::Reconcile, blocked.clone())
-            .await,
-    );
+    let blocked_runtime =
+        crate::RuntimeHandle::new(world.runtime_on_store(None, blocked.clone()).await);
     let blocked_view = crate::store::SessionStore::new(blocked, world.session_id.clone())
         .expect("capability-refusing view");
     let live = blocked_runtime

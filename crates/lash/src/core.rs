@@ -480,7 +480,6 @@ impl LashCore {
             session_id,
 
             tool_source_policy: None,
-            tool_surface_open_mode: None,
         }
     }
 
