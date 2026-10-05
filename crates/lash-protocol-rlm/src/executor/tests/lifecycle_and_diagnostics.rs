@@ -1246,6 +1246,8 @@ pub(super) async fn execute_with_host_environment_and_archives(
         .expect("open the cell's handler");
     let artifact_store = crate::testing::fresh_sqlite_memory_artifact_store().await;
     let ctx = super::triggers::trigger_tool_context(
+        &double,
+        None,
         crate::testing::double_ports(&double, &handler),
         crate::testing::sqlite_memory_trigger_store().await,
         &artifact_store,

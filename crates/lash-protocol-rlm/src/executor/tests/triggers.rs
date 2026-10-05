@@ -97,7 +97,13 @@ fn calendar_trigger_grant(route: &str) -> lash_lashlang_runtime::TriggerGrant {
 /// only through the tool's realized intent: the tool resolves the target
 /// against `artifact_store`, and realization publishes the cell's execution
 /// env through the router's env store, the one the referrer ports hold.
+/// Realization runs in its own invocation on `double` (ADR 0130), so the
+/// double realizes with this cell's dispatch services, as a deployment's
+/// worker realizes with its own; `realization_layer` observes that
+/// invocation's effects as the ports' layer observes the cell's.
 pub(super) async fn trigger_tool_context<'run>(
+    double: &lash_restate_test::RestateTestBackend,
+    realization_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
     ports: impl Into<lash_core::testing::TestExecutionPorts<'run>>,
     trigger_store: Arc<dyn lash_core::TriggerStore>,
     artifact_store: &lashlang::LashlangArtifacts,
@@ -143,12 +149,88 @@ pub(super) async fn trigger_tool_context<'run>(
             lash_lashlang_runtime::register_trigger_tool_definition(),
         ]))
         .trigger_router(Some(router));
-    match invocation {
+    let built = match invocation {
         Some(invocation) => builder.runtime_parent_invocation(invocation),
         None => builder,
     }
-    .build()
-    .into_runtime()
+    .build();
+    double.install_tool_realizer(Arc::new(CellRealizer::of(
+        &built.dispatch,
+        realization_layer,
+    )));
+    built.into_runtime()
+}
+
+/// Realizes a cell's protected intents in their realization invocation with
+/// the cell's own process service, trigger router and process engines, under
+/// the owner and lineage the request recorded.
+struct CellRealizer {
+    processes: Arc<dyn lash_core::ProcessService>,
+    trigger_router: Option<lash_core::triggers::TriggerRouter>,
+    process_engines: lash_core::ProcessEngineRegistry,
+    layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
+}
+
+impl CellRealizer {
+    fn of(
+        dispatch: &lash_core::tool_dispatch::ToolDispatchContext<'_>,
+        layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
+    ) -> Self {
+        let context = dispatch.intent_realization_context();
+        Self {
+            processes: context.processes,
+            trigger_router: context.trigger_router,
+            process_engines: context.process_engines,
+            layer,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::tool_dispatch::ToolRealizer for CellRealizer {
+    async fn realize(
+        &self,
+        request: lash_core::tool_dispatch::RealizationRequest,
+        scoped: lash_core::ScopedEffectController<'_>,
+    ) -> Result<lash_core::tool_dispatch::RealizationReceipt, lash_core::RuntimeEffectControllerError>
+    {
+        let dispatch = request.payload.dispatch.ok_or_else(|| {
+            lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::RuntimeToolRunShape,
+                "an intent realization has no recorded dispatch",
+            )
+        })?;
+        let effect_controller = match &self.layer {
+            Some(layer) => {
+                lash_core::testing::LayeredEffectHost::layer_scoped(scoped, Arc::clone(layer))
+                    .map_err(|error| {
+                        lash_core::RuntimeEffectControllerError::new(
+                            lash_core::RuntimeErrorCode::RuntimeToolRunShape,
+                            format!("layer the realization's controller: {error}"),
+                        )
+                    })?
+            }
+            None => scoped,
+        };
+        let context = lash_core::tool_dispatch::IntentRealizationContext {
+            effect_controller,
+            owner: dispatch.owner,
+            processes: Arc::clone(&self.processes),
+            trigger_router: self.trigger_router.clone(),
+            process_engines: self.process_engines.clone(),
+            parent_invocation: dispatch.parent_invocation,
+            process_lineage: dispatch.process_lineage,
+            process_originator: dispatch.process_originator,
+        };
+        let outcomes = lash_core::tool_dispatch::execute_final_tool_intents(
+            &context,
+            &request.call_id,
+            &request.payload.intents,
+            None,
+        )
+        .await?;
+        Ok(lash_core::tool_dispatch::RealizationReceipt { outcomes })
+    }
 }
 
 async fn execute_with_deferred_trigger(
@@ -170,6 +252,8 @@ async fn execute_with_deferred_trigger(
     let response = execute_code_with_trigger_test_render(
         &mut state,
         trigger_tool_context(
+            &double,
+            None,
             crate::testing::double_ports(&double, &handler),
             crate::testing::sqlite_memory_trigger_store().await,
             &artifact_store,
@@ -390,6 +474,8 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
         let response = execute_code_with_trigger_test_render(
             &mut state,
             trigger_tool_context(
+                &double,
+                None,
                 crate::testing::double_ports(&double, &handler),
                 crate::testing::sqlite_memory_trigger_store().await,
                 &artifact_store,
@@ -546,6 +632,8 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         .expect("open the cell's handler");
     let artifact_store = crate::testing::fresh_sqlite_memory_artifact_store().await;
     let ctx = trigger_tool_context(
+        &double,
+        Some(Arc::new(capture.clone())),
         crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),
         crate::testing::sqlite_memory_trigger_store().await,
         &artifact_store,
@@ -852,6 +940,8 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
         let first = execute_code_unbounded_with_test_render(
             &mut state,
             trigger_tool_context(
+                &double,
+                None,
                 crate::testing::double_ports(&double, &handler),
                 trigger_store.clone(),
                 &artifact_store,
@@ -902,6 +992,8 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
         let unrelated = execute_code_unbounded_with_test_render(
             &mut state,
             trigger_tool_context(
+                &double,
+                None,
                 crate::testing::double_ports(&double, &handler),
                 trigger_store.clone(),
                 &artifact_store,

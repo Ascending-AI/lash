@@ -1094,6 +1094,8 @@
     "tests::journal_cut_runner::served_process_start_on_the_server_double::a_drifted_spawn_cut_before_its_start_marker_parks": 996,
     "tests::journal_cut_runner::served_process_start_on_the_server_double::a_drifted_spawn_whose_start_was_issued_is_served": 606,
     "tests::l02_a_hidden_terminal_pending_fuses_without_a_synchronous_wake": 1,
+    "tests::l02_a_parked_realization_receipt_fuses_on_a_hidden_terminal": 1,
+    "tests::l02_a_parked_run_source_selection_fuses_on_a_hidden_terminal": 1,
     "tests::l02_a_registered_sibling_wake_keeps_a_pending_result_live": 1,
     "tests::l02_terminal_observation_preserves_the_outer_handler_notification": 1,
     "tests::live_turn_probe::tests::a_crashed_or_aborted_attempt_gives_way_unless_it_repeats": 1,

@@ -1451,6 +1451,8 @@ trait TerminalStateGuardProbe {
     async fn sibling_wake() -> HandlerResult<Json<u32>>;
     async fn hidden_terminal() -> HandlerResult<Json<()>>;
     async fn terminal_notification() -> HandlerResult<Json<()>>;
+    async fn parked_run_selection() -> HandlerResult<Json<()>>;
+    async fn parked_realization_attach() -> HandlerResult<Json<()>>;
 }
 
 struct TerminalStateGuardProbeImpl;
@@ -1553,6 +1555,58 @@ impl TerminalStateGuardProbe for TerminalStateGuardProbeImpl {
         .await;
         Ok(Json(()))
     }
+
+    async fn parked_run_selection(&self, ctx: WorkflowContext<'_>) -> HandlerResult<Json<()>> {
+        // A Run owner parks on the VM selector over a source the journal
+        // cannot answer yet; the closed input suspends the attempt there.
+        let timer = restate_sdk::context::ContextTimers::sleep(&ctx, Duration::from_secs(2));
+        let key = SealedDurableFuture::handle(&timer)
+            .map(u32::from)
+            .expect("the sleep registers a notification");
+        let state = timer.inner_context();
+        let mut selection = RestateControllerContext::select_run_sources(&ctx, vec![key]);
+        assert_owner_repoll_stays_pending(&mut selection, &state).await;
+        Ok(Json(()))
+    }
+
+    async fn parked_realization_attach(&self, ctx: WorkflowContext<'_>) -> HandlerResult<Json<()>> {
+        // The registered sleep lends its SDK attempt state; the Run owner
+        // parks on the realization's receipt the journal cannot answer yet.
+        let timer = restate_sdk::context::ContextTimers::sleep(&ctx, Duration::from_secs(2));
+        let state = timer.inner_context();
+        let selectable = RestateControllerContext::attach_run_realization(
+            &ctx,
+            "inv_parked_realization".to_owned(),
+        )
+        .await
+        .expect("the attach registers");
+        let mut receipt = selectable.value;
+        assert_owner_repoll_stays_pending(&mut receipt, &state).await;
+        Ok(Json(()))
+    }
+}
+
+/// Poll `parked` the way an effect owner does: once per pass, under its own
+/// waker, with nothing above it consulting the attempt's terminal state
+/// between passes.
+async fn assert_owner_repoll_stays_pending<T>(
+    parked: &mut Pin<Box<dyn Future<Output = T> + Send + '_>>,
+    state: &restate_sdk::endpoint::ContextInternal,
+) {
+    std::future::poll_fn(|_| {
+        let mut owner = Context::from_waker(Waker::noop());
+        assert!(parked.as_mut().poll(&mut owner).is_pending());
+        assert!(
+            state.is_failed_or_suspended(),
+            "SDK hid its terminal error behind Pending"
+        );
+        assert!(
+            parked.as_mut().poll(&mut owner).is_pending(),
+            "the owner's next pass must not re-enter the SDK"
+        );
+        Poll::Ready(())
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -1592,6 +1646,53 @@ async fn l02_a_hidden_terminal_pending_fuses_without_a_synchronous_wake() {
             RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
         ]
+    );
+}
+
+/// L02: an effect owner re-polling its parked VM source selection after the
+/// SDK recorded a suspension stays Pending instead of re-entering the SDK
+/// (FIG-5068).
+#[tokio::test]
+async fn l02_a_parked_run_source_selection_fuses_on_a_hidden_terminal() {
+    let endpoint = Endpoint::builder()
+        .bind(TerminalStateGuardProbeImpl.serve())
+        .build();
+    let output = invoke_endpoint(
+        &endpoint,
+        "TerminalStateGuardProbe",
+        "parked_run_selection",
+        "parked-run-selection",
+        &(),
+    )
+    .await
+    .expect("a parked selection must not re-enter the SDK");
+    assert_eq!(
+        restate_message_types(&output).unwrap(),
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+}
+
+/// L02: the same for a parked realization receipt (FIG-5068).
+#[tokio::test]
+async fn l02_a_parked_realization_receipt_fuses_on_a_hidden_terminal() {
+    let endpoint = Endpoint::builder()
+        .bind(TerminalStateGuardProbeImpl.serve())
+        .build();
+    let output = invoke_endpoint(
+        &endpoint,
+        "TerminalStateGuardProbe",
+        "parked_realization_attach",
+        "parked-realization-attach",
+        &(),
+    )
+    .await
+    .expect("a parked realization receipt must not re-enter the SDK");
+    assert_eq!(
+        restate_message_types(&output).unwrap().last(),
+        Some(&RESTATE_SUSPENSION_MESSAGE_TYPE)
     );
 }
 

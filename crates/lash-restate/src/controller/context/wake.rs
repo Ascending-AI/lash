@@ -142,7 +142,8 @@ where
     }
 }
 
-#[cfg(test)]
+/// Fuse a context future a lash owner polls outside the SDK's handler future:
+/// a source selection or an awaited receipt.
 pub(crate) fn guard_restate_context_future<F>(
     future: F,
     context: ContextInternal,

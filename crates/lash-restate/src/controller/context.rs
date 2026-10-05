@@ -99,6 +99,10 @@ type GateWait<'run, T> =
 /// name: the index of the first the journal completes, non-consuming so every
 /// other source stays awaitable — [`first_completed`] for sources a
 /// coordinator names by key.
+///
+/// A Run owner parks here, polling every request once per pass with no SDK
+/// handler future above it to consult a recorded suspension first, so the
+/// selection fuses on the attempt's terminal state like a Run result.
 fn select_run_sources<'ctx, 'run, C>(
     context: &'run C,
     keys: Vec<u32>,
@@ -113,7 +117,8 @@ where
             .into_iter()
             .map(|key| Some(key.into()))
             .collect::<Vec<_>>();
-        let index = inner.select(handles.clone()).await?;
+        let selection = inner.select(handles.clone());
+        let index = wake::guard_restate_context_future(selection, inner.clone()).await?;
         if index < handles.len() {
             Ok(index)
         } else {
@@ -122,6 +127,29 @@ where
             )))
         }
     })
+}
+
+/// A realization's receipt, awaited by the Run owner once the selector chose
+/// it: fused on the attempt's terminal state for the same reason as
+/// [`select_run_sources`].
+async fn receipt_attach<F>(
+    attach: F,
+) -> Result<lash_core::tool_dispatch::RealizationReceipt, lash_core::RuntimeEffectControllerError>
+where
+    F: Future<
+            Output = Result<
+                crate::Reply<lash_core::tool_dispatch::RealizationReceipt>,
+                TerminalError,
+            >,
+        > + SealedDurableFuture,
+{
+    let state = attach.inner_context();
+    wake::guard_restate_context_future(attach, state)
+        .await
+        .map(|reply| reply.body)
+        .map_err(|error| {
+            crate::wire::lash_terminal(&error, lash_core::RuntimeErrorCode::EngineEffectController)
+        })
 }
 
 /// A fresh gate awakeable, erased for the race.
@@ -394,9 +422,7 @@ Box::pin(async move {
                     ))?;
                     Ok(lash_core::tool_dispatch::IssuedRealization { invocation_id: invocation.invocation_id().to_owned(), receipt: RunSelectable {
                         key: Box::pin(std::future::ready(Ok(SelectKey::from_engine(u32::from(handle))))),
-                        value: Box::pin(async move {
-                            attach.await.map(|reply| reply.body).map_err(|error| crate::wire::lash_terminal(&error, lash_core::RuntimeErrorCode::EngineEffectController))
-                        }),
+                        value: Box::pin(receipt_attach(attach)),
                     } })
                 })
 }
@@ -412,7 +438,7 @@ Box::pin(async move {
                         let handle = handle.ok_or_else(|| lash_core::RuntimeEffectControllerError::new(lash_core::RuntimeErrorCode::EngineEffectController, "realization attach has no notification"))?;
                         Ok(lash_core::tool_dispatch::RunSelectable {
                             key: Box::pin(std::future::ready(Ok(lash_core::tool_dispatch::SelectKey::from_engine(u32::from(handle))))),
-                            value: Box::pin(async move { attach.await.map(|reply| reply.body).map_err(|error| crate::wire::lash_terminal(&error, lash_core::RuntimeErrorCode::EngineEffectController)) }),
+                            value: Box::pin(receipt_attach(attach)),
                         })
                     })
                 }
