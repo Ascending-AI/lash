@@ -112,6 +112,30 @@ pub enum EffectOpener {
     },
 }
 
+impl From<&EffectOpener> for lash_trace::TraceToolOwner {
+    fn from(opener: &EffectOpener) -> Self {
+        match opener {
+            EffectOpener::Turn {
+                session_id,
+                turn_id,
+            } => Self::Turn {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+            },
+            EffectOpener::Process { process_id } => Self::Process {
+                process_id: process_id.clone(),
+            },
+            EffectOpener::SessionOperation {
+                session_id,
+                operation_id,
+            } => Self::Operation {
+                session_id: session_id.clone(),
+                operation_id: operation_id.clone(),
+            },
+        }
+    }
+}
+
 impl EffectOpener {
     /// The opener of one turn.
     #[must_use]

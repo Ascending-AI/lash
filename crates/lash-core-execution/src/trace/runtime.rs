@@ -950,48 +950,21 @@ impl TraceStanding {
     }
 }
 
-/// The scope of a call under its logical owner and retained parent anchor.
+/// The scope of a call under its admitted logical owner. A retained trace
+/// parent supplies only the causal anchor, even across physical turns.
 pub fn tool_trace_scope(
-    parent: &DurableTraceScope,
+    opener: &crate::EffectOpener,
+    parent: Option<&DurableTraceScope>,
     call_id: &crate::ToolCallId,
     started_at_ms: u64,
-) -> Option<DurableTraceScope> {
-    use lash_trace::TraceToolOwner;
-    let owner = match &parent.scope.owner {
-        TraceScopeOwner::Turn {
-            session_id,
-            turn_id,
-        } => TraceToolOwner::Turn {
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
-        },
-        TraceScopeOwner::Run { session_id, run } => TraceToolOwner::Run {
-            session_id: session_id.clone(),
-            run: run.clone(),
-        },
-        TraceScopeOwner::Process { process_id } => TraceToolOwner::Process {
-            process_id: process_id.clone(),
-        },
-        TraceScopeOwner::Operation {
-            session_id,
-            operation_id,
-        } => TraceToolOwner::Operation {
-            session_id: session_id.clone(),
-            operation_id: operation_id.clone(),
-        },
-        TraceScopeOwner::Tool { owner, .. } => owner.clone(),
-        _ => return None,
-    };
-    Some(DurableTraceScope {
+) -> DurableTraceScope {
+    DurableTraceScope {
         scope: TraceScopeId::admission(TraceScopeOwner::Tool {
-            owner,
+            owner: lash_trace::TraceToolOwner::from(opener),
             call_id: call_id.to_string(),
         }),
-        cause: match &parent.anchor {
-            TraceAnchor::Untraced => TraceCause::Root,
-            TraceAnchor::Context(context) => TraceCause::Parent(context.clone()),
-        },
+        cause: parent.map_or(TraceCause::Root, DurableTraceScope::parent_cause),
         anchor: TraceAnchor::Untraced,
         started_at_ms,
-    })
+    }
 }

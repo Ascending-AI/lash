@@ -2229,10 +2229,20 @@ class Reachability:
             index = self._file(path)
         except _Unresolved:
             return []
-        return self._default_build(
+        direct = self._default_build(
             Shape(path, name, offset, kind, modules)
             for found, kind, offset, modules in index.types
             if found == name
+        )
+        if direct:
+            return direct
+        # Explicit roots and reachable references use the same declaration
+        # lookup. Keep the path constraint: a macro call in another module
+        # cannot satisfy a stale root, even when it declares the same name.
+        return self._default_build(
+            shape
+            for shape in self._macro_declared(self.crate_of(path), name)
+            if shape.path == path
         )
 
     def resolve(self, ref: TypeRef, origin: Shape, opaque: list[tuple[str, str]]) -> list[Shape]:
@@ -2704,6 +2714,16 @@ class Reachability:
         crate = self.crate_of(shape.path)
         indexed = self._index(crate)
         content = self.view.projected(shape.path) or ""
+        hand_written = False
+        for path, index in indexed.items():
+            if shape.name not in index.serde_impls:
+                continue
+            text = self.view.projected(path) or ""
+            impls = named_rust_serde_impls(
+                text, (f"Serialize for {shape.name}", f"Deserialize for {shape.name}")
+            )
+            extra.extend((path, name, value) for name, value in impls.items())
+            hand_written = hand_written or bool(impls)
         if shape.kind.startswith("macro "):
             macro = shape.kind.partition(" ")[2]
             extra.extend(
@@ -2719,16 +2739,6 @@ class Reachability:
             return result
 
         parsed = parse_shape(content, shape.offset)
-        hand_written = False
-        for path, index in indexed.items():
-            if shape.name not in index.serde_impls:
-                continue
-            text = self.view.projected(path) or ""
-            impls = named_rust_serde_impls(
-                text, (f"Serialize for {shape.name}", f"Deserialize for {shape.name}")
-            )
-            extra.extend((path, name, value) for name, value in impls.items())
-            hand_written = hand_written or bool(impls)
         if hand_written and not parsed.derives_serde:
             opaque.append(
                 (shape.label, "its Serde impls are hand-written; the impls are guarded")

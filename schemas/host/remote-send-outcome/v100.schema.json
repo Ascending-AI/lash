@@ -16131,7 +16131,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "One logical agent turn.",
+          "description": "One physical agent turn, including a follow-on within a run.",
           "properties": {
             "kind": {
               "const": "turn",
@@ -16263,29 +16263,7 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "properties": {
-            "kind": {
-              "const": "run",
-              "type": "string"
-            },
-            "run": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "session_id": {
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "session_id",
-            "run"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
+          "description": "The admitted logical run, whose turn id stays fixed across follow-ons.",
           "properties": {
             "kind": {
               "const": "turn",

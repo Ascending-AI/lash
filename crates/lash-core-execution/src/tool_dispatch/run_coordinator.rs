@@ -1347,7 +1347,7 @@ fn observation_record(
     if !projections.is_empty() {
         record.trace = Some(crate::tool_run::RunTraceFacts {
             at_ms: 0,
-            owner: crate::trace::run_receipts::tool_owner(owner),
+            owner: lash_trace::TraceToolOwner::from(owner),
             admissions: BTreeMap::new(),
             projections,
         });

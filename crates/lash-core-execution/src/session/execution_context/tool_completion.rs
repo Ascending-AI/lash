@@ -22,14 +22,14 @@ impl RuntimeExecutionContext<'_> {
             else {
                 return Ok(());
             };
-            let owner =
+            let opener =
                 crate::EffectOpener::for_scope(&self.admitted_scope()).map_err(|error| {
                     crate::RuntimeEffectControllerError::new(
                         crate::RuntimeErrorCode::RuntimeToolRunShape,
                         error.to_string(),
                     )
                 })?;
-            let owner = crate::trace::run_receipts::tool_owner(&owner);
+            let owner = lash_trace::TraceToolOwner::from(&opener);
             let payload = serde_json::json!({
                 "call_id": record.call_id,
                 "provider_call_id": record.provider_call_id,
@@ -57,10 +57,10 @@ impl RuntimeExecutionContext<'_> {
                         let mut candidate = None;
                         let scope = tracing
                             .as_ref()
-                            .and_then(|tracing| tracing.scope.as_ref())
-                            .and_then(|parent| {
+                            .map(|tracing| {
                                 crate::trace::tool_trace_scope(
-                                    parent,
+                                    &opener,
+                                    tracing.scope.as_ref(),
                                     &call.call_id,
                                     requested_at_ms,
                                 )

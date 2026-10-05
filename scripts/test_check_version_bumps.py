@@ -877,6 +877,32 @@ class Reachable(Fixture):
         self.assertEqual(code, 1, output)
         self.assertIn("Serialize for Code", output)
 
+    def test_macro_declared_roots_guard_the_invocation_and_definition(self) -> None:
+        """An explicit guard root covers a declarative table's generated type."""
+        self.write(
+            "crates/demo/src/peer.rs",
+            ROOTED_PEER.replace("Hello)", "HelloId)"),
+        )
+        self.write("crates/demo/src/ids.rs", IDS.replace("Serialize, Deserialize", "Clone"))
+        self.write("crates/demo/src/dto/hello.rs", ROOTED_DTO + '\nimpl Serialize for HelloId {\n    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {\n        serializer.serialize_str("identity")\n    }\n}\n')
+        self.base = self.commit("root the macro-declared identity")
+        code, output = self.verdict(self.base)
+        self.assertEqual(code, 0, output)
+        view = gate.RevisionView(self.repo, self.git("rev-parse", "HEAD"))
+        guard = gate.Guard("roots", ("crates/demo/src/dto/hello.rs",), ("HelloId",))
+        closure, missing = gate.closure_of(view, guard)
+        self.assertFalse(missing)
+        self.assertIn("Serialize for HelloId", {label for _, label, _ in closure.entries})
+        wrong_path = gate.Guard("roots", ("crates/demo/src/ids.rs",), ("HelloId",))
+        _, missing = gate.closure_of(view, wrong_path)
+        self.assertTrue(missing, "the root must name the invocation's path")
+        code, output = self.changed("crates/demo/src/ids.rs", "$name(String)", "$name(u64)")
+        self.assertEqual(code, 1, output)
+        self.assertIn("identity!", output)
+        code, output = self.changed("crates/demo/src/dto/hello.rs", '"identity"', '"renamed"')
+        self.assertEqual(code, 1, output)
+        self.assertIn("Serialize for HelloId", output)
+
     def test_a_macro_declared_type_is_guarded_as_its_macro(self) -> None:
         code, output = self.changed("crates/demo/src/ids.rs", "$name(String)", "$name(u64)")
         self.assertEqual(code, 1, output)

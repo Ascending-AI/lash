@@ -46,9 +46,6 @@ impl ToolRequestReceipt {
     }
     pub fn owner_key(&self) -> Result<String, StoreError> {
         let scope = match &self.owner {
-            lash_trace::TraceToolOwner::Run { session_id, run } => {
-                crate::ExecutionScope::turn(session_id, run)
-            }
             lash_trace::TraceToolOwner::Turn {
                 session_id,
                 turn_id,
@@ -73,8 +70,7 @@ impl ToolCompletionReceipt {
 
 fn owner_session(owner: &lash_trace::TraceToolOwner) -> Option<SessionId> {
     match owner {
-        lash_trace::TraceToolOwner::Run { session_id, .. }
-        | lash_trace::TraceToolOwner::Turn { session_id, .. }
+        lash_trace::TraceToolOwner::Turn { session_id, .. }
         | lash_trace::TraceToolOwner::Operation { session_id, .. } => Some(session_id.clone()),
         lash_trace::TraceToolOwner::Process { .. } => None,
     }

@@ -1995,10 +1995,6 @@ async fn tool_receipt_law(
             session_id: session_id.clone(),
             turn_id: "receipt-turn".into(),
         },
-        lash::tracing::TraceToolOwner::Run {
-            session_id: session_id.clone(),
-            run: "receipt-run".into(),
-        },
         lash::tracing::TraceToolOwner::Operation {
             session_id: session_id.clone(),
             operation_id: "receipt-operation".into(),

@@ -545,7 +545,7 @@ impl TraceCause {
 pub enum TraceScopeOwner {
     /// An admitted run, the owner of its execution.
     Run { session_id: SessionId, run: TurnId },
-    /// One logical agent turn.
+    /// One physical agent turn, including a follow-on within a run.
     Turn {
         session_id: SessionId,
         turn_id: TurnId,
@@ -576,10 +576,7 @@ pub enum TraceScopeOwner {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TraceToolOwner {
-    Run {
-        session_id: SessionId,
-        run: TurnId,
-    },
+    /// The admitted logical run, whose turn id stays fixed across follow-ons.
     Turn {
         session_id: SessionId,
         turn_id: TurnId,

@@ -10,8 +10,8 @@ use crate::{
     RuntimeEffectControllerError, ScopedEffectController, ToolCallId,
 };
 use lash_trace::{
-    DurableTraceScope, TraceAnchor, TraceCause, TraceContext, TraceEvent, TraceScopeId,
-    TraceScopeOwner, TraceToolOwner, TraceToolTerminal, TraceTransitionKind,
+    DurableTraceScope, TraceContext, TraceEvent, TraceScopeOwner, TraceToolOwner,
+    TraceToolTerminal, TraceTransitionKind,
 };
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -86,18 +86,13 @@ impl RunRecordObserver {
             return Ok((step, None));
         };
         let runtime = bound.frontier.runtime().unwrap_or_default();
-        let owner = match bound.parent.as_ref().map(|scope| &scope.scope.owner) {
-            Some(TraceScopeOwner::Run { session_id, run }) => TraceToolOwner::Run {
-                session_id: session_id.clone(),
-                run: run.clone(),
-            },
-            _ => tool_owner(&EffectOpener::for_scope(&bound.admitted).map_err(|error| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeToolRunShape,
-                    error.to_string(),
-                )
-            })?),
-        };
+        let opener = EffectOpener::for_scope(&bound.admitted).map_err(|error| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeToolRunShape,
+                error.to_string(),
+            )
+        })?;
+        let owner = TraceToolOwner::from(&opener);
         let observations = RunObservations {
             runtime: runtime.clone(),
         };
@@ -114,24 +109,14 @@ impl RunRecordObserver {
             for event in &entry.record.events {
                 if let RunEvent::Admitted { round } = event {
                     for member in &round.members {
-                        let scope = TraceScopeId::admission(TraceScopeOwner::Tool {
-                            owner: owner.clone(),
-                            call_id: member.call_id.to_string(),
-                        });
-                        let cause = match bound.parent.as_ref().map(|scope| &scope.anchor) {
-                            Some(TraceAnchor::Context(context)) => {
-                                TraceCause::Parent(context.clone())
-                            }
-                            _ => TraceCause::Root,
-                        };
                         admissions.insert(
                             member.call_id.clone(),
-                            DurableTraceScope {
-                                scope,
-                                cause,
-                                anchor: TraceAnchor::Untraced,
-                                started_at_ms: at_ms,
-                            },
+                            super::tool_trace_scope(
+                                &opener,
+                                bound.parent.as_ref(),
+                                &member.call_id,
+                                at_ms,
+                            ),
                         );
                     }
                 }
@@ -160,28 +145,6 @@ impl RunRecordObserver {
             Ok(entry)
         });
         Ok((body, Some(observations)))
-    }
-}
-
-pub(crate) fn tool_owner(opener: &EffectOpener) -> TraceToolOwner {
-    match opener {
-        EffectOpener::Turn {
-            session_id,
-            turn_id,
-        } => TraceToolOwner::Turn {
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
-        },
-        EffectOpener::Process { process_id } => TraceToolOwner::Process {
-            process_id: process_id.clone(),
-        },
-        EffectOpener::SessionOperation {
-            session_id,
-            operation_id,
-        } => TraceToolOwner::Operation {
-            session_id: session_id.clone(),
-            operation_id: operation_id.clone(),
-        },
     }
 }
 

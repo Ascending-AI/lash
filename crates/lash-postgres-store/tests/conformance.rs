@@ -2398,10 +2398,6 @@ async fn neutral_tool_receipts_are_first_writers_and_retire_with_their_scope() {
             session_id: "neutral-tool".into(),
             turn_id: "turn".into(),
         },
-        TraceToolOwner::Run {
-            session_id: "neutral-tool".into(),
-            run: "run".into(),
-        },
         TraceToolOwner::Operation {
             session_id: "neutral-tool".into(),
             operation_id: "operation".into(),
@@ -2410,6 +2406,7 @@ async fn neutral_tool_receipts_are_first_writers_and_retire_with_their_scope() {
             process_id: ProcessId::fixture("neutral-tool-process"),
         },
     ];
+    let expected_receipts = owners.len();
     for (index, owner) in owners.into_iter().enumerate() {
         let request = ToolRequestReceipt {
             owner,
@@ -2475,5 +2472,5 @@ async fn neutral_tool_receipts_are_first_writers_and_retire_with_their_scope() {
         })
         .await
         .unwrap();
-    assert_eq!(report.removed_receipt_count, 4);
+    assert_eq!(report.removed_receipt_count, expected_receipts);
 }

@@ -47,3 +47,71 @@ fn runtime_feedback_composition_identity_includes_instruction_authority() {
     request.instructions = Some(Arc::from(""));
     assert_ne!(trace_composition_key(&request, &[]), absent);
 }
+
+/// S14 F2: a physical-turn trace parent never becomes a tool's durable owner.
+#[test]
+fn tool_receipt_owner_stays_on_the_admitted_run_across_physical_turns() {
+    use lash_trace::{
+        DurableTraceScope, TraceAnchor, TraceCause, TraceScopeId, TraceScopeOwner, TraceToolOwner,
+    };
+    let call_id = crate::ToolCallId::fixture("same-call");
+    let opener = crate::EffectOpener::turn("session", "logical-run");
+    let owner = TraceToolOwner::from(&opener);
+    let mut scopes = Vec::new();
+    for turn_id in ["logical-run", "logical-run:follow-on:1"] {
+        let parent = DurableTraceScope {
+            scope: TraceScopeId::admission(TraceScopeOwner::Turn {
+                session_id: "session".into(),
+                turn_id: turn_id.into(),
+            }),
+            cause: TraceCause::Root,
+            anchor: TraceAnchor::Untraced,
+            started_at_ms: 1,
+        };
+        let scope = tool_trace_scope(&opener, Some(&parent), &call_id, 2);
+        assert_eq!(
+            scope.scope.owner,
+            TraceScopeOwner::Tool {
+                owner: owner.clone(),
+                call_id: call_id.to_string(),
+            }
+        );
+        scopes.push(scope.scope);
+    }
+    assert_eq!(scopes[0], scopes[1]);
+    let request = crate::store::ToolRequestReceipt {
+        owner,
+        request_key: call_id.to_string(),
+        payload_digest: "digest".into(),
+        payload: serde_json::Value::Null,
+        scope: None,
+        context: Default::default(),
+        requested_at_ms: 2,
+    };
+    assert_eq!(
+        request.owner_key().unwrap(),
+        serde_json::to_string(&opener.admitted_scope().scope()).unwrap()
+    );
+    let parent = DurableTraceScope {
+        scope: TraceScopeId::admission(TraceScopeOwner::TriggerOccurrence {
+            occurrence_id: "occurrence".into(),
+        }),
+        cause: TraceCause::Root,
+        anchor: TraceAnchor::Untraced,
+        started_at_ms: 1,
+    };
+    assert_eq!(
+        tool_trace_scope(&opener, Some(&parent), &call_id, 2).scope,
+        scopes[0]
+    );
+    assert_eq!(
+        tool_trace_scope(&opener, None, &call_id, 2).scope,
+        scopes[0]
+    );
+    assert!(
+        serde_json::from_value::<TraceToolOwner>(serde_json::json!({
+            "kind": "run", "session_id": "session", "run": "logical-run"
+        }))
+        .is_err()
+    );
+}
