@@ -190,8 +190,20 @@ impl<'a> RunCoordinator<'a> {
                 decision: CallDecision::Cancelled,
             });
         }
-        let process_id =
-            launch_start(&mut self.journal, &call.call_id, &obligation, binding).await?;
+        let template = self.journal.record(Vec::new());
+        let launch = launch_start(
+            self.journal.scoped,
+            template,
+            &call.call_id,
+            &obligation,
+            binding,
+        )
+        .await?;
+        let Some(RunEvent::StartLaunched { process_id, .. }) = launch.record.events.first() else {
+            return Err(boundary(&call.call_id));
+        };
+        let process_id = process_id.clone();
+        self.journal.accept(launch)?;
         let descriptor = crate::tool_run::SourceDescriptor {
             source: source.clone(),
             call_id: call.call_id.clone(),
@@ -334,15 +346,18 @@ impl<'a> RunCoordinator<'a> {
                 }
                 _ => return Err(boundary(id)),
             };
-            discharge_start(
-                &mut self.journal,
+            let template = self.journal.record(Vec::new());
+            let discharge = discharge_start(
+                self.journal.scoped,
+                template,
                 id,
                 &obligation,
-                None,
-                waiting.handlers.get(),
+                waiting.handlers.clone(),
                 process_id,
+                self.journal.ledger.lifecycle() == crate::tool_run::RunLifecycle::Closing,
             )
             .await?;
+            self.journal.accept(discharge)?;
         }
         match seal {
             SourceSeal::Cancelled => {

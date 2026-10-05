@@ -1,18 +1,136 @@
 //! Protected declarations, declared starts and presentation in rank order.
 
 use super::*;
+use crate::runtime::process::WorkerTerminationReceipt;
 use crate::tool_dispatch::singleton_run::{IsolatedProcessDescriptor, SingletonPresentationError};
-use futures_util::FutureExt;
+use futures_util::future::{BoxFuture, FutureExt};
+use lash_sansio::sync::MutexExt;
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// The compact outcomes one V's protected preparation produced beside its
+/// schedule: the start events, the launched process and its receipt.
+#[derive(Clone, Default)]
+pub(super) struct Prepared {
+    events: Vec<RunEvent>,
+    launched: Option<ProcessId>,
+    termination: Option<WorkerTerminationReceipt>,
+}
+
+/// One V's owner-driven protected preparation: launch, the discharge
+/// decision with its effects, then realization. Every part of it runs
+/// outside V's step so a served V still replays its journal commands.
+enum Preparation<'a> {
+    Running(BoxFuture<'a, Result<Prepared, SingletonRunError>>),
+    Done(Prepared),
+    Failed(Option<SingletonRunError>),
+}
+
+/// The parts V's body computed outside the schedule step; the schedule's
+/// own record supplies the ordinal and the consumer's `consume` at
+/// selection time.
+pub(super) struct PresentedParts {
+    prefix: Vec<RunEvent>,
+    presentation: Option<MaterialRef>,
+    failure: Option<crate::tool_run::HookCause>,
+    projections: BTreeMap<ToolCallId, serde_json::Value>,
+    materials: Vec<MaterialEntry>,
+}
+
+impl PresentedParts {
+    /// Build V's record inside the schedule step: the prepared start events
+    /// and the declarations' settlement precede the presentation events.
+    pub(super) fn entry(
+        &self,
+        call_id: &ToolCallId,
+        template: RunRecord,
+        consume: bool,
+        opener: &EffectOpener,
+    ) -> RunJournalEntry {
+        let mut events = self.prefix.clone();
+        events.extend(presented(
+            call_id,
+            self.presentation.clone(),
+            consume,
+            self.failure.clone(),
+        ));
+        RunJournalEntry {
+            state: Vec::new(),
+            record: observation_record(
+                RunRecord { events, ..template },
+                opener,
+                self.projections.clone(),
+            ),
+            materials: self.materials.clone(),
+        }
+    }
+}
 
 /// Protected work remains owned while the schedule accepts other results.
 pub(super) struct PendingPresentation<'a> {
     pub call_id: ToolCallId,
     pub handle: parallel::Handle<'a>,
     pub consume: bool,
+    /// The discharge decision a served V record supplies — the launched
+    /// process and its `cancelled` — before the preparation decides.
+    pub(super) recorded: std::sync::Arc<std::sync::Mutex<Option<(ProcessId, bool)>>>,
     owed: Owed<'a>,
     fresh: std::sync::Arc<AtomicBool>,
-    launched: Option<ProcessId>,
+    preparation: Preparation<'a>,
+}
+
+impl<'a> PendingPresentation<'a> {
+    /// Poll `future`, then poll a running preparation once — on every pass,
+    /// including the pass `future` is already ready because the schedule
+    /// was served. A ready output is shown to `inspect` before the
+    /// preparation's own poll in that pass. A preparation fault is stored,
+    /// not returned: V's body then faults through its channel exactly like
+    /// the old in-body fault.
+    pub(super) async fn beside<F: std::future::Future>(
+        &mut self,
+        future: F,
+        mut inspect: impl FnMut(&F::Output),
+    ) -> F::Output {
+        tokio::pin!(future);
+        std::future::poll_fn(|context| {
+            let ready = future.as_mut().poll(context);
+            if let std::task::Poll::Ready(output) = &ready {
+                inspect(output);
+            }
+            if let Preparation::Running(preparation) = &mut self.preparation {
+                match preparation.as_mut().poll(context) {
+                    std::task::Poll::Ready(Ok(prepared)) => {
+                        self.preparation = Preparation::Done(prepared);
+                    }
+                    std::task::Poll::Ready(Err(error)) => {
+                        self.preparation = Preparation::Failed(Some(error));
+                    }
+                    std::task::Poll::Pending => {}
+                }
+            }
+            ready
+        })
+        .await
+    }
+
+    /// Drive the preparation to its end: a running one is awaited alone, a
+    /// failed one returns the stored error and a done one is its outcome.
+    pub(super) async fn finish_preparation(&mut self) -> Result<&Prepared, SingletonRunError> {
+        if let Preparation::Running(preparation) = &mut self.preparation {
+            let result = preparation.await;
+            self.preparation = match result {
+                Ok(prepared) => Preparation::Done(prepared),
+                Err(error) => Preparation::Failed(Some(error)),
+            };
+        }
+        match &mut self.preparation {
+            Preparation::Done(prepared) => Ok(prepared),
+            Preparation::Failed(error) => {
+                Err(error.take().unwrap_or_else(|| boundary(&self.call_id)))
+            }
+            Preparation::Running(_) => unreachable!("a running preparation was awaited"),
+        }
+    }
 }
 
 impl<'a> RunCoordinator<'a> {
@@ -38,50 +156,19 @@ impl<'a> RunCoordinator<'a> {
     async fn drain_inner(
         &mut self,
     ) -> Result<Vec<(ToolCallId, SingletonTerminal)>, SingletonRunError> {
-        self.drain_starts().await?;
-        let owed = std::mem::take(&mut self.owed);
-        let mut terminals = Vec::with_capacity(owed.len());
-        for (rank, owed) in owed {
-            let call_id = owed.call_id.clone();
-            terminals.push((call_id, self.present(rank, owed, true).await?));
-        }
-        Ok(terminals)
-    }
-
-    pub(super) async fn present(
-        &mut self,
-        rank: u64,
-        owed: Owed<'a>,
-        consume: bool,
-    ) -> Result<SingletonTerminal, SingletonRunError> {
-        self.present_inner(rank, owed, consume).await
-    }
-
-    async fn present_inner(
-        &mut self,
-        rank: u64,
-        owed: Owed<'a>,
-        consume: bool,
-    ) -> Result<SingletonTerminal, SingletonRunError> {
-        let pending = self.begin_presentation(rank, owed, consume).await?;
-        let handle = pending.handle.clone();
-        self.journal.scoped.admit_journal_write()?;
-        let entry = self
-            .journal
-            .scoped
-            .controller()
-            .record_run_record(
-                record_name(&pending.call_id, "present"),
-                Box::pin(async move {
-                    match handle.await.map_err(|error| error.to_string())? {
-                        parallel::Ready::Presentation(entry) => Ok(entry.as_ref().clone()),
-                        _ => unreachable!("a presentation handle returns V"),
-                    }
-                }),
-            )
-            .await?;
-        let record = self.journal.accept(entry)?;
-        self.finish_presentation(pending, &record)
+        let ids: Vec<ToolCallId> = self
+            .owed
+            .values()
+            .map(|owed| owed.call_id.clone())
+            .collect();
+        let consumed: BTreeSet<ToolCallId> = ids.iter().cloned().collect();
+        self.drain_through(u64::MAX, &consumed).await?;
+        ids.into_iter()
+            .map(|id| {
+                let terminal = self.terminal(&id)?;
+                Ok((id, terminal))
+            })
+            .collect()
     }
 
     pub(super) async fn begin_presentation(
@@ -99,15 +186,16 @@ impl<'a> RunCoordinator<'a> {
         let journal = &mut self.journal;
         let (CallDecision::Final { declares, .. }, Some(capture)) = (&decision, capture.clone())
         else {
-            let record = journal.record(presented(&call_id, None, consume, None));
             let fresh = std::sync::Arc::new(AtomicBool::new(false));
             let executed = std::sync::Arc::clone(&fresh);
             let handle = async move {
                 executed.store(true, Ordering::Relaxed);
                 Ok(parallel::Ready::Presentation(std::sync::Arc::new(
-                    RunJournalEntry {
-                        state: Vec::new(),
-                        record,
+                    PresentedParts {
+                        prefix: Vec::new(),
+                        presentation: None,
+                        failure: None,
+                        projections: BTreeMap::new(),
                         materials: Vec::new(),
                     },
                 )))
@@ -119,7 +207,8 @@ impl<'a> RunCoordinator<'a> {
                 handle,
                 owed,
                 fresh,
-                launched: None,
+                recorded: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                preparation: Preparation::Done(Prepared::default()),
                 consume,
             });
         };
@@ -130,13 +219,12 @@ impl<'a> RunCoordinator<'a> {
         // Its declared start is admitted with them and drains before they
         // settle.
         let mut settle = Vec::new();
-        let mut launched = None;
-        let mut termination = None;
+        let mut obligation = None;
         if *declares {
             if !journal.ledger.drain_frontier_open(rank) {
                 return Err(RunEventRefusal::DrainFrontier { call_id }.into());
             }
-            let obligation = match capture.start() {
+            obligation = match capture.start() {
                 Some(start) => Some(recorded_obligation(journal, &call_id, start)?),
                 None => None,
             };
@@ -162,47 +250,134 @@ impl<'a> RunCoordinator<'a> {
                     }),
                 )
                 .await?;
-            if let Some(obligation) = &obligation {
-                let isolated = match &capture {
-                    SingletonCapture::Isolated { binding } => Some(binding.as_ref()),
-                    _ => None,
-                };
-                let (process, receipt) =
-                    drain_start(journal, &call_id, obligation, isolated, handlers).await?;
-                launched = Some(process);
-                termination = receipt;
-            }
             settle.push(RunEvent::DeclarationsSettled {
                 call_id: call_id.clone(),
             });
         }
 
-        // V: presentation, owning only bytes distinct from the output, in one
-        // record with its incorporation.
-        let present_record = journal.record(Vec::new());
-        let owner = journal.materials.owner.clone();
-        let final_capture = capture.clone();
-        let declares = *declares;
-        let step_call = call_id.clone();
-        let descriptor = match (&capture, &launched) {
-            (SingletonCapture::Isolated { binding }, Some(process_id)) => {
-                Some(IsolatedProcessDescriptor {
-                    process_id: process_id.clone(),
-                    start_key: binding.start.start_key.clone(),
-                    boundary: binding.boundary,
-                    termination,
-                })
-            }
+        // P, the one protected preparation this V owns: the launch, the
+        // discharge decision and its effects, then realization. None of it
+        // owns an SDK run: the external calls run beside V's schedule on
+        // every replay, and the only journal the preparation leaves is V's
+        // own record, which carries both start events. A served V supplies
+        // its recorded decision through `recorded` before P's next poll.
+        let isolated = match &capture {
+            SingletonCapture::Isolated { binding } => Some(binding.as_ref().clone()),
             _ => None,
         };
+        let closing = journal.ledger.lifecycle() == crate::tool_run::RunLifecycle::Closing;
+        let realize = *declares && !capture.intents().is_empty();
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let recorded = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let prepare_recorded = std::sync::Arc::clone(&recorded);
+        let prepare_call = call_id.clone();
+        let prepare_capture = capture.clone();
+        let prepare_handlers = callback.clone();
+        let preparation = async move {
+            let prepared = async {
+                let mut prepared = Prepared::default();
+                if let Some(obligation) = &obligation {
+                    let handlers = prepare_handlers.get();
+                    let process_id = handlers.launch_start(obligation).await.map_err(
+                        |message| {
+                            RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::EngineEffectController,
+                                message,
+                            )
+                        },
+                    )?;
+                    prepared.launched = Some(process_id.clone());
+                    prepared.events.push(RunEvent::StartLaunched {
+                        call_id: prepare_call.clone(),
+                        start_key: obligation.start_key().clone(),
+                        process_id: process_id.clone(),
+                    });
+                    let recorded_decision = prepare_recorded.lock_recover().clone();
+                    let cancelled = match recorded_decision {
+                        Some((recorded_id, cancelled)) => {
+                            if recorded_id != process_id {
+                                return Err(RuntimeEffectControllerError::new(
+                                    crate::RuntimeErrorCode::EffectReplayDivergence,
+                                    format!(
+                                        "call {prepare_call}'s recorded launch names another process"
+                                    ),
+                                )
+                                .into());
+                            }
+                            cancelled
+                        }
+                        None => start::decide_discharge(obligation, handlers, closing)
+                            .await
+                            .map_err(|message| {
+                                RuntimeEffectControllerError::new(
+                                    crate::RuntimeErrorCode::EngineEffectController,
+                                    message,
+                                )
+                            })?,
+                    };
+                    prepared.events.push(RunEvent::StartDischarged {
+                        call_id: prepare_call.clone(),
+                        start_key: obligation.start_key().clone(),
+                        cancelled,
+                    });
+                    prepared.termination = start::discharge_effects(
+                        &prepare_call,
+                        obligation,
+                        isolated.as_ref(),
+                        handlers,
+                        &process_id,
+                        cancelled,
+                    )
+                    .await?;
+                }
+                if realize {
+                    prepare_handlers
+                        .get()
+                        .realize_capture(&prepare_call, &prepare_capture)
+                        .await
+                        .map_err(|message| {
+                            SingletonRunError::from(RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::EngineEffectController,
+                                message,
+                            ))
+                        })?;
+                }
+                Ok::<_, SingletonRunError>(prepared)
+            }
+            .await;
+            let _ = send.send(match &prepared {
+                Ok(prepared) => Ok(prepared.clone()),
+                Err(error) => Err(error.to_string()),
+            });
+            prepared
+        }
+        .boxed();
+
+        // V: presentation, owning only bytes distinct from the output. Its
+        // body only awaits P's outcome over the channel; the schedule's own
+        // record supplies the ordinal and `consume` at selection time.
+        let owner = journal.materials.owner.clone();
+        let final_capture = capture.clone();
+        let step_call = call_id.clone();
         let observation_decision = decision.clone();
         let fresh = std::sync::Arc::new(AtomicBool::new(false));
         let executed = std::sync::Arc::clone(&fresh);
-        let present: crate::RunRecordStep<'a> = Box::pin(async move {
+        let present = async move {
+            let prepared = receive
+                .await
+                .map_err(|_| "the protected preparation ended before V".to_owned())??;
             let handlers = callback.get();
-            if declares && !final_capture.intents().is_empty() {
-                handlers.realize_capture(&step_call, &final_capture).await?;
-            }
+            let descriptor = match (&final_capture, &prepared.launched) {
+                (SingletonCapture::Isolated { binding }, Some(process_id)) => {
+                    Some(IsolatedProcessDescriptor {
+                        process_id: process_id.clone(),
+                        start_key: binding.start.start_key.clone(),
+                        boundary: binding.boundary,
+                        termination: prepared.termination.clone(),
+                    })
+                }
+                _ => None,
+            };
             let (text, failure) = match descriptor {
                 Some(descriptor) => (encode(&descriptor)?, None),
                 None => match handlers.present(&step_call, &final_capture).await {
@@ -232,37 +407,28 @@ impl<'a> RunCoordinator<'a> {
                 owned.push(entry);
                 Some(reference)
             };
-            let mut events = settle;
-            events.extend(presented(&step_call, presentation, consume, failure));
             executed.store(true, Ordering::Relaxed);
-            let projections = projection
-                .into_iter()
-                .map(|value| (step_call.clone(), value))
-                .collect();
-            Ok(RunJournalEntry {
-                state: Vec::new(),
-                record: observation_record(
-                    RunRecord {
-                        events,
-                        ..present_record
-                    },
-                    &match &owner {
-                        MaterialOwner::Run { opener } => opener.clone(),
-                        _ => unreachable!("a Run owns its presentation"),
-                    },
-                    projections,
-                ),
+            let mut prefix = prepared.events;
+            prefix.extend(settle);
+            Ok::<_, String>(PresentedParts {
+                prefix,
+                presentation,
+                failure,
+                projections: projection
+                    .into_iter()
+                    .map(|value| (step_call.clone(), value))
+                    .collect(),
                 materials: owned,
             })
-        });
+        };
         let handle = async move {
-            let entry = present.await.map_err(|message| {
+            let parts = present.await.map_err(|message| {
                 RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::EngineEffectController,
                     message,
                 )
             })?;
-            Ok(parallel::Ready::Presentation(std::sync::Arc::new(entry)))
+            Ok(parallel::Ready::Presentation(std::sync::Arc::new(parts)))
         }
         .boxed()
         .shared();
@@ -271,7 +437,8 @@ impl<'a> RunCoordinator<'a> {
             handle,
             owed,
             fresh,
-            launched,
+            recorded,
+            preparation: Preparation::Running(preparation),
             consume,
         })
     }
@@ -284,7 +451,7 @@ impl<'a> RunCoordinator<'a> {
         let PendingPresentation {
             owed,
             fresh,
-            launched,
+            preparation,
             ..
         } = pending;
         let Owed {
@@ -294,6 +461,12 @@ impl<'a> RunCoordinator<'a> {
             capture,
         } = owed;
         let handlers = handlers.get();
+        let prepared = match preparation {
+            Preparation::Done(prepared) => prepared,
+            Preparation::Running(_) | Preparation::Failed(_) => {
+                return Err(boundary(&call_id));
+            }
+        };
         let presentation_ref = record
             .events
             .iter()
@@ -302,6 +475,17 @@ impl<'a> RunCoordinator<'a> {
                 _ => None,
             })
             .flatten();
+        let launched = record.events.iter().find_map(|event| match event {
+            RunEvent::StartLaunched { process_id, .. } => Some(process_id.clone()),
+            _ => None,
+        });
+        if launched != prepared.launched {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::EffectReplayDivergence,
+                format!("call {call_id}'s presented start is not its launched one"),
+            )
+            .into());
+        }
         self.presented.insert(
             call_id.clone(),
             PresentedCall {

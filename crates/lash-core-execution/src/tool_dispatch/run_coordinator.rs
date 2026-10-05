@@ -47,7 +47,7 @@ mod deferred;
 mod drain;
 mod parallel;
 mod start;
-use start::{bind_start, discharge_start, drain_start, launch_start, recorded_obligation};
+use start::{bind_start, discharge_start, launch_start, recorded_obligation};
 
 pub use aggregate::RunAggregateOutcome;
 pub use bodies::RunBodies;

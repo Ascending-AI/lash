@@ -73,8 +73,10 @@ where
     )
 }
 
-/// D borrows its callback instead of adding it to the SDK's owned progress set.
-/// An owned D waiting for X prevents the suspension that acknowledges X.
+/// D borrows its callback instead of adding it to the SDK's owned progress set:
+/// an owned D waiting for X prevents the suspension that acknowledges X, while
+/// the owner's await of its executing borrowed D keeps the invocation live once
+/// no X is outstanding.
 /// Run::poll registers D before invoking this body, preserving selection order.
 pub(super) fn schedule<'run, C, T, F>(
     context: &'run C,

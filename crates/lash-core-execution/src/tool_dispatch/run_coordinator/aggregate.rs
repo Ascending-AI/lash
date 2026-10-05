@@ -389,24 +389,21 @@ impl<'a> RunCoordinator<'a> {
         result
     }
 
-    async fn drain_through(
+    pub(super) async fn drain_through(
         &mut self,
         through: u64,
         consumed: &BTreeSet<ToolCallId>,
     ) -> Result<(), SingletonRunError> {
         self.drain_starts().await?;
-        while self
-            .owed
-            .first_key_value()
-            .is_some_and(|(rank, _)| *rank <= through)
-        {
-            let Some((rank, owed)) = self.owed.pop_first() else {
-                break;
-            };
-            let consume = consumed.contains(&owed.call_id);
-            self.present(rank, owed, consume).await?;
+        let mut presentation = None;
+        loop {
+            self.begin_aggregate_drain(through, consumed, &mut presentation)
+                .await?;
+            if presentation.is_none() {
+                return Ok(());
+            }
+            self.progress_with_presentation(&mut presentation).await?;
         }
-        Ok(())
     }
 
     #[must_use]

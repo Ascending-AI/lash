@@ -302,8 +302,8 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
             "operation Run uses the turn service: {journal:?}"
         );
         let steps = match label {
-            "singleton" | "parallel" => &["admit", "attempt", "schedule", "present"][..],
-            "deferred" => &["admit", "attempt", "schedule"][..],
+            // Every decision and every V is a `lash:run:schedule:` record.
+            "singleton" | "parallel" | "deferred" => &["admit", "attempt", "schedule"][..],
             _ => unreachable!(),
         };
         let events: Vec<_> = journal.2.iter().flat_map(|record| &record.events).collect();
@@ -1432,7 +1432,13 @@ fn decision(records: &[RunRecord]) -> Vec<CallDecision> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_done_singleton_is_four_records_and_reruns_only_unrecorded_work_at_every_cut() {
     let call = call("four-records");
-    let steps = ["admit", "attempt:1", "decide", "present"];
+    // V is the Run's schedule record: the three per-call records carry one
+    // event each, so V is `lash:run:schedule:3`.
+    let journaled = [
+        names(&call.call_id, &["admit", "attempt:1", "decide"]),
+        vec!["lash:run:schedule:3".to_owned()],
+    ]
+    .concat();
     for cut in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
         let crash = match cut {
             None => Vec::new(),
@@ -1440,11 +1446,10 @@ async fn a_done_singleton_is_four_records_and_reruns_only_unrecorded_work_at_eve
                 ty: MessageType::OutputCommand,
             }],
             Some(step) => vec![CrashPoint::BeforeRunResult {
-                name: Some(names(&call.call_id, &steps)[step].clone()),
+                name: Some(journaled[step].clone()),
             }],
         };
         let probe = Probe::new(Probe::done(), CancelAt::Never);
-        let started = std::time::Instant::now();
         let driven = drive(
             0x4877,
             crash,
@@ -1502,21 +1507,9 @@ async fn a_done_singleton_is_four_records_and_reruns_only_unrecorded_work_at_eve
                 vec!["presented", "consumed", "incorporated"],
             ]
         );
-        let (journaled, raw, bytes, calls) = driven.journal();
-        assert_eq!(
-            journaled,
-            names(&call.call_id, &steps),
-            "four source records"
-        );
+        let (found, .., calls) = driven.journal();
+        assert_eq!(found, journaled, "four source records");
         assert_eq!(calls, 0, "no child invocation or group call");
-        eprintln!(
-            "C01-double width=1 cut={cut:?} source_records={} raw_engine_records={raw} \
-             journal_rpc_commands={calls} journal_bytes={bytes} application_transactions=0 \
-             serial_record_waits={} elapsed_us={}",
-            journaled.len(),
-            journaled.len(),
-            started.elapsed().as_micros()
-        );
     }
 }
 
@@ -1581,7 +1574,12 @@ async fn final_and_cancel_choose_one_terminal_around_the_durable_decision() {
             assert_eq!(probe.presentations.load(Ordering::SeqCst), 0);
             assert_eq!(
                 journaled,
-                names(&call.call_id, &["admit", "attempt:1", "decide", "present"])
+                // A withheld V is the schedule record at ordinal 3.
+                [
+                    names(&call.call_id, &["admit", "attempt:1", "decide"]),
+                    vec!["lash:run:schedule:3".to_owned()]
+                ]
+                .concat()
             );
         } else {
             assert!(
@@ -1602,10 +1600,12 @@ async fn final_and_cancel_choose_one_terminal_around_the_durable_decision() {
             );
             assert_eq!(
                 journaled,
-                names(
-                    &call.call_id,
-                    &["admit", "attempt:1", "decide", "declare", "present"]
-                )
+                // The declaring call's V follows its declare record.
+                [
+                    names(&call.call_id, &["admit", "attempt:1", "decide", "declare"]),
+                    vec!["lash:run:schedule:4".to_owned()]
+                ]
+                .concat()
             );
         }
         assert_eq!(decisions.len(), 1, "exactly one final-or-cancel");
@@ -1621,7 +1621,12 @@ async fn final_and_cancel_choose_one_terminal_around_the_durable_decision() {
 async fn a_final_settles_its_declarations_before_presentation_at_every_cut() {
     let mut call = call("declares");
     call.declaration = ToolDeclaration::default().with_intents([ToolIntentKind::EmitTrigger]);
-    let steps = ["admit", "attempt:1", "decide", "declare", "present"];
+    // The declaring call's V is the schedule record after its declare.
+    let steps = [
+        names(&call.call_id, &["admit", "attempt:1", "decide", "declare"]),
+        vec!["lash:run:schedule:4".to_owned()],
+    ]
+    .concat();
     for cut in [2, 3, 4] {
         let probe = Probe::new(
             SingletonBodyOutcome::Done {
@@ -1635,7 +1640,7 @@ async fn a_final_settles_its_declarations_before_presentation_at_every_cut() {
         let driven = drive(
             0x4877,
             vec![CrashPoint::BeforeRunResult {
-                name: Some(names(&call.call_id, &steps)[cut].clone()),
+                name: Some(steps[cut].clone()),
             }],
             call.clone(),
             call.clone(),
@@ -1661,11 +1666,13 @@ async fn a_final_settles_its_declarations_before_presentation_at_every_cut() {
         assert_eq!(probe.executions(), 1);
         assert_eq!(
             probe.realizations.load(Ordering::SeqCst),
+            // The realization lives in the protected preparation: only a
+            // dropped V record replays an attempt that already ran it.
             1 + usize::from(cut == 4),
             "cut {cut}: only an unsettled declaration boundary asks again"
         );
         assert_eq!(probe.realized.lock().unwrap().len(), 1, "one realization");
-        assert_eq!(driven.journal().0, names(&call.call_id, &steps));
+        assert_eq!(driven.journal().0, steps);
     }
 }
 

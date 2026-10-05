@@ -16,7 +16,7 @@
 //! or when a Deferred descriptor takes a rank or a presentation.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use std::time::Duration;
@@ -35,7 +35,10 @@ use lash_core::tool_run::{
     ExternalCancelPolicy, PresentationBinding, RunEvent, RunEventOrdinal, RunJournalEntry,
     RunLifecycle, RunRecord, SegmentOrdinal, ToolDeclaration,
 };
-use lash_core::{AdmittedScope, EffectOpener, ScopedEffectController, ToolCallId};
+use lash_core::{
+    AdmittedScope, EffectOpener, Lifetime, ProcessExecutionEnvRef, ProcessId, ProcessInput,
+    ProcessProvenance, ProcessStartRegistration, ScopedEffectController, StartKey, ToolCallId,
+};
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use lash_sansio::{SessionStreamEvent, ToolIntentKind};
@@ -71,6 +74,8 @@ fn owner() -> EffectOpener {
 enum Kind {
     /// Done, declaring these intents.
     Declares(Vec<ToolIntentKind>),
+    /// Done, declaring one process start.
+    Starts,
     /// Done, declaring nothing.
     IntentFree,
     Failed,
@@ -88,6 +93,7 @@ enum Kind {
 fn call(label: &str, kind: &Kind) -> SingletonToolCall {
     let declaration = match kind {
         Kind::Declares(intents) => ToolDeclaration::default().with_intents(intents.iter().copied()),
+        Kind::Starts => ToolDeclaration::default().with_intents([ToolIntentKind::StartProcess]),
         Kind::IntentFree
         | Kind::Failed
         | Kind::Cached
@@ -105,7 +111,9 @@ fn call(label: &str, kind: &Kind) -> SingletonToolCall {
         binding: binding(),
         available: vec![revision()],
         cancel: ExternalCancelPolicy::Ignore,
-        environment: None,
+        // A start without an environment is refused.
+        environment: matches!(kind, Kind::Starts)
+            .then(|| ProcessExecutionEnvRef::new("process-env:fig4977")),
     }
 }
 
@@ -127,6 +135,10 @@ enum Seen {
     Unrelated,
     RealizeBegin(ToolCallId),
     RealizeEnd(ToolCallId),
+    /// A declared start's launch began.
+    LaunchBegin(ToolCallId),
+    /// A declared start's hold discharged.
+    Discharged(ToolCallId),
 }
 
 /// The callbacks of every call of one Run, with a count of every execution.
@@ -165,6 +177,12 @@ struct Probe {
     realized: Mutex<Vec<(ToolCallId, ToolIntentKind)>>,
     /// Calls whose realization holds until the unrelated effect has run.
     held: BTreeSet<ToolCallId>,
+    /// The launch registrar: a key always answers the process it got first.
+    processes: Mutex<BTreeMap<StartKey, ProcessId>>,
+    launches: Mutex<Vec<(ToolCallId, ProcessId)>>,
+    discharges: Mutex<Vec<(ToolCallId, ProcessId, bool)>>,
+    /// Calls whose launch holds until the unrelated effect has run.
+    held_launch: BTreeSet<ToolCallId>,
     /// Slow external acknowledgment after the fenced outcome exists.
     held_after_realization: BTreeSet<ToolCallId>,
     unrelated: AtomicBool,
@@ -217,6 +235,10 @@ impl Probe {
             executions: Mutex::new(Vec::new()),
             realized: Mutex::new(Vec::new()),
             held: BTreeSet::new(),
+            processes: Mutex::new(BTreeMap::new()),
+            launches: Mutex::new(Vec::new()),
+            discharges: Mutex::new(Vec::new()),
+            held_launch: BTreeSet::new(),
             held_after_realization: BTreeSet::new(),
             unrelated: AtomicBool::new(false),
             unrelated_ran: tokio::sync::Notify::new(),
@@ -370,6 +392,22 @@ impl SingletonToolHandlers for Probe {
                 output: output_of(call_id),
                 intents: intents.clone(),
                 start: None,
+            },
+            Kind::Starts => SingletonBodyOutcome::Done {
+                commands: Default::default(),
+                output: output_of(call_id),
+                intents: Vec::new(),
+                start: Some(Box::new(
+                    ProcessStartRegistration::of_target(
+                        ProcessInput::Engine {
+                            kind: "fig4977-index".into(),
+                            payload: serde_json::json!({ "call": call_id.to_string() }),
+                        },
+                        ProcessProvenance::host(),
+                        Lifetime::Detached,
+                    )
+                    .with_start_key(Some(StartKey::for_host(format!("fig4977-{call_id}")))),
+                )),
             },
             Kind::Retry { after_ms } if attempt.attempt == AttemptOrdinal::FIRST => {
                 SingletonBodyOutcome::RetryableFailure {
@@ -553,6 +591,15 @@ impl SingletonToolHandlers for Probe {
             );
         }
         drop(realized);
+        if capture.start().is_some() {
+            let launched = self.launches.lock().unwrap();
+            let discharged = self.discharges.lock().unwrap();
+            assert!(
+                launched.iter().any(|(id, _)| id == call_id)
+                    && discharged.iter().any(|(id, _, _)| id == call_id),
+                "{call_id}'s launched start is discharged before its presentation"
+            );
+        }
         self.presentations.lock().unwrap().push(call_id.clone());
         if self.presentation_failure {
             return Err(
@@ -577,18 +624,57 @@ impl SingletonToolHandlers for Probe {
 
     async fn launch_start(
         &self,
-        _obligation: &DeclaredStartObligation,
+        obligation: &DeclaredStartObligation,
     ) -> Result<lash_core::ProcessId, String> {
-        Err("these laws declare no start".to_owned())
+        self.seen
+            .lock()
+            .unwrap()
+            .push(Seen::LaunchBegin(obligation.call_id.clone()));
+        if self.held_launch.contains(&obligation.call_id) {
+            // A blocked launch: it holds until the unrelated effect has made
+            // progress, which it must while this drains.
+            loop {
+                let ran = self.unrelated_ran.notified();
+                if self.unrelated.load(Ordering::SeqCst) {
+                    break;
+                }
+                tokio::time::timeout(Duration::from_millis(50), ran)
+                    .await
+                    .ok();
+            }
+        }
+        let process = self
+            .processes
+            .lock()
+            .unwrap()
+            .entry(obligation.start_key().clone())
+            .or_insert_with(|| {
+                lash_core::ProcessId::fixture(&format!("fig4977-{}", obligation.call_id))
+            })
+            .clone();
+        self.launches
+            .lock()
+            .unwrap()
+            .push((obligation.call_id.clone(), process.clone()));
+        Ok(process)
     }
 
     async fn discharge_start(
         &self,
-        _obligation: &DeclaredStartObligation,
-        _process_id: &lash_core::ProcessId,
-        _cancel: bool,
+        obligation: &DeclaredStartObligation,
+        process_id: &lash_core::ProcessId,
+        cancel: bool,
     ) -> Result<(), String> {
-        Err("these laws declare no start".to_owned())
+        self.discharges.lock().unwrap().push((
+            obligation.call_id.clone(),
+            process_id.clone(),
+            cancel,
+        ));
+        self.seen
+            .lock()
+            .unwrap()
+            .push(Seen::Discharged(obligation.call_id.clone()));
+        Ok(())
     }
 }
 
@@ -1143,10 +1229,15 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
             schedule(7),
             UNRELATED.to_owned(),
             name(&ids[0], "declare"),
-            name(&ids[0], "present"),
-            name(&ids[1], "present"),
+            // Every V is the schedule record selected through
+            // progress_with_presentation, named by its first event's
+            // ordinal: a declaring rank's V carries DeclarationsSettled
+            // before its presentation events, so each V's ordinal follows
+            // the records admitted before it.
+            schedule(10),
+            schedule(14),
             name(&ids[2], "declare"),
-            name(&ids[2], "present"),
+            schedule(18),
         ];
         if cancel_after_rank_3 {
             program.push(Step::Cancel);
@@ -1158,7 +1249,7 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
                 name(&ids[3], "admit"),
                 name(&ids[3], "attempt:1"),
                 schedule(23),
-                name(&ids[3], "present"),
+                schedule(25),
             ]);
         }
         let program = Arc::new(program);
@@ -1915,8 +2006,9 @@ async fn l04_stream_publishes_only_after_presentation_acceptance() {
         };
         let driven = drive(
             492608,
+            // V is the schedule record after the three per-call records.
             vec![CrashPoint::BeforeRunResult {
-                name: Some(name(&calls[0].0.call_id, "present")),
+                name: Some("lash:run:schedule:3".to_owned()),
             }],
             Arc::clone(&calls),
             Arc::new(program),

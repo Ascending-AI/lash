@@ -13,21 +13,27 @@ pub(super) struct ProgramRelease {
     server: lash_restate_test::RestateTestServer,
 }
 
+/// Whether `call_id`'s protected work began: an intent realization or a
+/// declared start's launch.
+fn began_protected(probe: &Probe, call_id: &ToolCallId) -> bool {
+    probe.seen().iter().any(|event| {
+        matches!(
+            event,
+            Seen::RealizeBegin(id) | Seen::LaunchBegin(id) if id == call_id
+        )
+    })
+}
+
 impl ProgramRelease {
     pub(super) async fn run(&self, probe: &Probe) {
         loop {
-            if probe
-                .seen()
-                .contains(&Seen::RealizeBegin(self.ranked[0].clone()))
-            {
+            if began_protected(probe, &self.ranked[0]) {
                 break;
             }
             tokio::task::yield_now().await;
         }
         assert!(
-            !probe
-                .seen()
-                .contains(&Seen::RealizeBegin(self.ranked[2].clone())),
+            !began_protected(probe, &self.ranked[2]),
             "L18: higher declarations cannot bypass the blocked lower drain"
         );
         assert_eq!(
@@ -79,9 +85,7 @@ impl ProgramRelease {
             tokio::task::yield_now().await;
         }
         assert!(
-            !probe
-                .seen()
-                .contains(&Seen::RealizeBegin(self.ranked[2].clone())),
+            !began_protected(probe, &self.ranked[2]),
             "rank 3 remains behind the blocked lower drain after its D"
         );
     }
@@ -263,6 +267,562 @@ async fn l18_all_drains_a_committed_operand_before_the_remaining_bodies_finish()
             "rank 2 commits and seats while rank 1's declaration is blocked"
         );
     }
+}
+
+/// FIG-4977 / L18, K5, §101: a rank's declared start launches and
+/// discharges inside its own presentation while a lower rank's launch is
+/// blocked. The blocked launch must not hold the Run journal: rank 2 seats,
+/// the unrelated program tool publishes its D, and rank 3's start waits
+/// only for rank 1's discharge.
+#[tokio::test]
+async fn l18_k5_ranked_starts_launch_and_discharge_per_rank_while_a_lower_launch_is_blocked() {
+    let calls = Arc::new(vec![
+        (call("k5-rank-one", &Kind::Starts), Kind::Starts),
+        (call("k5-rank-two", &Kind::IntentFree), Kind::IntentFree),
+        (call("k5-rank-three", &Kind::Starts), Kind::Starts),
+    ]);
+    let ids: Vec<_> = calls.iter().map(|(call, _)| call.call_id.clone()).collect();
+    // The V path journals no start:* records: a launch or discharge effect
+    // reruns on every replayed attempt and the events live only in V's
+    // record, so the cut points are the declarations, the V schedules, and
+    // one full-replay crash after everything is durable.
+    let mut cuts = vec![
+        Some(CrashPoint::BeforeFrame {
+            ty: MessageType::OutputCommand,
+        }),
+        Some(CrashPoint::BeforeRunResult {
+            name: Some(name(&ids[2], "declare")),
+        }),
+        Some(CrashPoint::BeforeRunResult {
+            name: Some(name(&ids[0], "declare")),
+        }),
+        None,
+    ];
+    while let Some(cut) = cuts.pop() {
+        let program_call = call("k5-unrelated-program", &Kind::IntentFree);
+        let mut all_calls = calls.as_ref().clone();
+        all_calls.push((program_call.clone(), Kind::IntentFree));
+        let mut probe = Probe::new(&all_calls);
+        probe.body_barrier = Some(Arc::new(tokio::sync::Barrier::new(3)));
+        probe.parallel_order = ids.clone();
+        probe.gate = Some((ids[1].clone(), ids[0].clone()));
+        probe.held_launch.insert(ids[0].clone());
+        let backend = lash_restate_test::backend(4977, ServerConfig::default())
+            .await
+            .unwrap();
+        let crashes = lash_restate_test::CrashCount::new();
+        assert!(backend.server().on_crash(crashes.listener()));
+        if let Some(cut) = &cut {
+            backend.server().crash_on(CrashRule::new(cut.clone()));
+        }
+        probe.program_release = Some(ProgramRelease {
+            call_id: program_call.call_id.clone(),
+            ranked: [ids[0].clone(), ids[1].clone(), ids[2].clone()],
+            server: backend.server().clone(),
+        });
+        let probe = Arc::new(probe);
+        let finished = Arc::new(Mutex::new(Vec::new()));
+        let attempt: lash_restate_test::HandlerAttempt = {
+            let probe = Arc::clone(&probe);
+            let calls = Arc::clone(&calls);
+            let finished = Arc::clone(&finished);
+            let ids = ids.clone();
+            Arc::new(move |scoped| {
+                let probe = Arc::clone(&probe);
+                let calls = Arc::clone(&calls);
+                let finished = Arc::clone(&finished);
+                let program_call = program_call.clone();
+                let ids = ids.clone();
+                Box::pin(async move {
+                    let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+                    let plan = aggregate_plan("protected-k5-all", &round, vec![0, 1, 2]);
+                    let mut run =
+                        RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                    run.start_aggregate(
+                        &plan,
+                        &round,
+                        lash_core::tool_run::CapacityScope::Held,
+                        Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                        Default::default(),
+                        &SystemClock,
+                    )
+                    .await
+                    .unwrap();
+                    let independent = aggregate_plan(
+                        "independent-k5-program-effect",
+                        std::slice::from_ref(&program_call),
+                        vec![0],
+                    );
+                    run.start_aggregate(
+                        &independent,
+                        std::slice::from_ref(&program_call),
+                        lash_core::tool_run::CapacityScope::Held,
+                        Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                        Default::default(),
+                        &SystemClock,
+                    )
+                    .await
+                    .unwrap();
+                    let answer = run
+                        .consume_aggregate(&plan.key, AggregateConsumer::All)
+                        .await;
+                    let results = match answer.unwrap() {
+                        RunAggregateOutcome::AllResults(results) => results,
+                        other => panic!("the aggregate completes: {other:?}"),
+                    };
+                    assert_eq!(results.len(), 3);
+                    assert!(matches!(results[1], Some(SingletonTerminal::Final { .. })));
+                    {
+                        let processes = probe.processes.lock().unwrap();
+                        for index in [0usize, 2] {
+                            let key = StartKey::for_host(format!("fig4977-{}", ids[index]));
+                            assert!(
+                                matches!(
+                                    &results[index],
+                                    Some(SingletonTerminal::Final {
+                                        launched: Some(process),
+                                        ..
+                                    }) if *process == processes[&key]
+                                ),
+                                "rank {} presents the process its key registered",
+                                index + 1
+                            );
+                        }
+                    }
+                    assert!(
+                        matches!(run.consume_aggregate(&independent.key, AggregateConsumer::All).await.unwrap(), RunAggregateOutcome::AllResults(results) if results.len() == 1)
+                    );
+                    run.close().await.unwrap();
+                    finished.lock().unwrap().push(run.into_records());
+                })
+            })
+        };
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+        )
+        .await
+        .expect("L18/K5: rank 1's blocked launch must not hold the Run journal")
+        .unwrap_or_else(|error| panic!("cut={cut:?}: {error}"));
+        assert_eq!(
+            crashes.get(),
+            u64::from(cut.is_some()),
+            "cut={cut:?}: the named boundary must execute"
+        );
+        if cut.is_none() {
+            // Cut each V boundary selected by the recorded schedule: every
+            // V is a schedule record carrying its Presented event.
+            for view in backend.server().invocations() {
+                for entry in backend.server().journal(&view.id).unwrap() {
+                    let Some(Ok(bytes)) = entry.run_completion() else {
+                        continue;
+                    };
+                    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    let Some(record) = value.get("record") else {
+                        continue;
+                    };
+                    let record: RunRecord = serde_json::from_value(record.clone()).unwrap();
+                    if record
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, RunEvent::Presented { .. }))
+                    {
+                        cuts.push(Some(CrashPoint::BeforeRunResult {
+                            name: Some(format!("lash:run:schedule:{}", record.first.0)),
+                        }));
+                    }
+                }
+            }
+        }
+        let finished = finished.lock().unwrap();
+        let records = finished.last().expect("the aggregate completed");
+        assert!(
+            drain_violations(records, &BTreeSet::new(), None).is_empty(),
+            "cut={cut:?}: the protected drain remains transitive"
+        );
+
+        // Every launch answered the process its key registered first.
+        let processes = probe.processes.lock().unwrap();
+        assert_eq!(processes.len(), 2, "cut={cut:?}: one process per start key");
+        for (id, process) in probe.launches.lock().unwrap().iter() {
+            let key = StartKey::for_host(format!("fig4977-{id}"));
+            assert_eq!(
+                processes.get(&key),
+                Some(process),
+                "cut={cut:?}: a replayed launch of {id} recovers its registered process"
+            );
+        }
+
+        // Both start events join the same V record as the call's
+        // presentation, with the registered process and no cancellation.
+        for id in [&ids[0], &ids[2]] {
+            let key = StartKey::for_host(format!("fig4977-{id}"));
+            let process = &processes[&key];
+            let presented: Vec<_> = records
+                .iter()
+                .filter(|record| {
+                    record.events.iter().any(|event| {
+                        matches!(event, RunEvent::Presented { call_id, .. } if call_id == id)
+                    })
+                })
+                .collect();
+            assert_eq!(presented.len(), 1, "cut={cut:?}: {id} is presented once");
+            let events = &presented[0].events;
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, RunEvent::StartLaunched { call_id, start_key, process_id }
+                        if call_id == id && start_key == &key && process_id == process))
+                    .count(),
+                1,
+                "cut={cut:?}: {id}'s V record carries its launch"
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, RunEvent::StartDischarged { call_id, start_key, cancelled }
+                        if call_id == id && start_key == &key && !cancelled))
+                    .count(),
+                1,
+                "cut={cut:?}: {id}'s V record carries its discharge"
+            );
+        }
+        drop(processes);
+
+        // Rank 3's launch never bypasses rank 1's discharge; the unrelated
+        // effect is what released the held launch.
+        let seen = probe.seen();
+        let discharged = seen
+            .iter()
+            .position(|event| *event == Seen::Discharged(ids[0].clone()))
+            .expect("rank 1 discharged");
+        for (position, event) in seen.iter().enumerate() {
+            if *event == Seen::LaunchBegin(ids[2].clone()) {
+                assert!(
+                    position > discharged,
+                    "cut={cut:?}: rank 3's launch preceded rank 1's discharge: {seen:?}"
+                );
+            }
+        }
+        let unrelated = seen
+            .iter()
+            .position(|event| *event == Seen::Unrelated)
+            .expect("the unrelated effect ran");
+        assert!(
+            unrelated < discharged,
+            "cut={cut:?}: the unrelated effect progressed while rank 1's launch was held: {seen:?}"
+        );
+
+        let rank_one_declare = name(&ids[0], "declare");
+        for id in &ids {
+            assert_eq!(
+                probe.executions_of(id),
+                if matches!(
+                    &cut,
+                    Some(CrashPoint::BeforeRunResult { name: Some(cut_name) }) if *cut_name == rank_one_declare
+                ) && *id != ids[0]
+                {
+                    2
+                } else {
+                    1
+                },
+                "cut={cut:?}: only the still-unrecorded higher bodies redeliver"
+            );
+        }
+    }
+}
+
+/// FIG-4977 / interrogate finding 1: rank 1's realization issues one
+/// journaled command of its own. When a higher-ranked X wins the schedule
+/// window that command was issued in, a full replay must still register it
+/// at its recorded position — a served V cannot skip the work its body ran.
+#[tokio::test]
+async fn l18_a_nested_realization_command_replays_after_a_higher_x_wins_its_window() {
+    struct NestedIntent<'a> {
+        scoped: &'a ScopedEffectController<'a>,
+        probe: Arc<Probe>,
+        call_id: ToolCallId,
+        mutations: Arc<AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl SingletonToolHandlers for NestedIntent<'_> {
+        async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
+            self.probe.prepare(call).await
+        }
+        async fn before_checks(
+            &self,
+            call: &SingletonToolCall,
+            request: &SingletonPreparedRequest,
+        ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
+            self.probe.before_checks(call, request).await
+        }
+        async fn execute(
+            &self,
+            attempt: SingletonAttempt<'_>,
+        ) -> Result<SingletonBodyOutcome, String> {
+            self.probe.execute(attempt).await
+        }
+        async fn after_checks(
+            &self,
+            call_id: &ToolCallId,
+            capture: &SingletonCapture,
+        ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
+            self.probe.after_checks(call_id, capture).await
+        }
+        async fn run_cancel_requested(&self) -> Result<bool, String> {
+            self.probe.run_cancel_requested().await
+        }
+        async fn wait_run_retry(
+            &self,
+            call_id: &ToolCallId,
+            timer: lash_core::tool_dispatch::RunRetryTimer<'_>,
+        ) -> Result<lash_core::tool_dispatch::RunRetryWake, lash_core::RuntimeEffectControllerError>
+        {
+            self.probe.wait_run_retry(call_id, timer).await
+        }
+        async fn realize_declarations(
+            &self,
+            call_id: &ToolCallId,
+            intents: &[ToolIntentKind],
+        ) -> Result<(), String> {
+            if *call_id == self.call_id {
+                self.scoped
+                    .controller()
+                    .record_run_record(
+                        "l18:external-intent".to_owned(),
+                        Box::pin(async {
+                            self.mutations.fetch_add(1, Ordering::SeqCst);
+                            Ok(lash_core::tool_run::RunJournalEntry {
+                                state: Vec::new(),
+                                materials: Vec::new(),
+                                record: RunRecord {
+                                    segment: SegmentOrdinal(0),
+                                    first: RunEventOrdinal(0),
+                                    events: Vec::new(),
+                                    trace: None,
+                                },
+                            })
+                        }),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
+            self.probe.realize_declarations(call_id, intents).await
+        }
+        async fn present(
+            &self,
+            call_id: &ToolCallId,
+            capture: &SingletonCapture,
+        ) -> Result<String, lash_core::tool_dispatch::SingletonPresentationError> {
+            self.probe.present(call_id, capture).await
+        }
+        fn emit_stream(&self, call_id: &ToolCallId, stream: &AttemptStream) {
+            self.probe.emit_stream(call_id, stream);
+        }
+        async fn launch_start(
+            &self,
+            obligation: &DeclaredStartObligation,
+        ) -> Result<lash_core::ProcessId, String> {
+            self.probe.launch_start(obligation).await
+        }
+        async fn discharge_start(
+            &self,
+            obligation: &DeclaredStartObligation,
+            process_id: &lash_core::ProcessId,
+            cancel: bool,
+        ) -> Result<(), String> {
+            self.probe
+                .discharge_start(obligation, process_id, cancel)
+                .await
+        }
+    }
+    let calls = Arc::new(vec![
+        (
+            call(
+                "nested-rank-one",
+                &Kind::Declares(vec![ToolIntentKind::EmitTrigger]),
+            ),
+            Kind::Declares(vec![ToolIntentKind::EmitTrigger]),
+        ),
+        (call("nested-rank-two", &Kind::IntentFree), Kind::IntentFree),
+        (
+            call(
+                "nested-rank-three",
+                &Kind::Declares(vec![ToolIntentKind::EmitTrigger]),
+            ),
+            Kind::Declares(vec![ToolIntentKind::EmitTrigger]),
+        ),
+    ]);
+    let ids: Vec<_> = calls.iter().map(|(call, _)| call.call_id.clone()).collect();
+    let program_call = call("nested-unrelated-program", &Kind::IntentFree);
+    let mut all_calls = calls.as_ref().clone();
+    all_calls.push((program_call.clone(), Kind::IntentFree));
+    let mut probe = Probe::new(&all_calls);
+    probe.body_barrier = Some(Arc::new(tokio::sync::Barrier::new(3)));
+    probe.parallel_order = ids.clone();
+    probe.gate = Some((ids[1].clone(), ids[0].clone()));
+    probe.held.insert(ids[0].clone());
+    let backend = lash_restate_test::backend(4977, ServerConfig::default())
+        .await
+        .unwrap();
+    let crashes = lash_restate_test::CrashCount::new();
+    assert!(backend.server().on_crash(crashes.listener()));
+    // V and the nested command are durable; the lost output replays the
+    // whole journal.
+    backend
+        .server()
+        .crash_on(CrashRule::new(CrashPoint::BeforeFrame {
+            ty: MessageType::OutputCommand,
+        }));
+    probe.program_release = Some(ProgramRelease {
+        call_id: program_call.call_id.clone(),
+        ranked: [ids[0].clone(), ids[1].clone(), ids[2].clone()],
+        server: backend.server().clone(),
+    });
+    let probe = Arc::new(probe);
+    let mutations = Arc::new(AtomicUsize::new(0));
+    let finished = Arc::new(Mutex::new(Vec::new()));
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let probe = Arc::clone(&probe);
+        let calls = Arc::clone(&calls);
+        let finished = Arc::clone(&finished);
+        let mutations = Arc::clone(&mutations);
+        let nested = ids[0].clone();
+        Arc::new(move |scoped| {
+            let probe = Arc::clone(&probe);
+            let calls = Arc::clone(&calls);
+            let finished = Arc::clone(&finished);
+            let mutations = Arc::clone(&mutations);
+            let program_call = program_call.clone();
+            let nested = nested.clone();
+            Box::pin(async move {
+                let handlers: Arc<dyn SingletonToolHandlers + '_> = Arc::new(NestedIntent {
+                    scoped: &scoped,
+                    probe,
+                    call_id: nested,
+                    mutations,
+                });
+                let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+                let plan = aggregate_plan("nested-protected-all", &round, vec![0, 1, 2]);
+                let mut run =
+                    RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                run.start_aggregate(
+                    &plan,
+                    &round,
+                    lash_core::tool_run::CapacityScope::Held,
+                    Arc::clone(&handlers) as Arc<dyn SingletonToolHandlers>,
+                    Default::default(),
+                    &SystemClock,
+                )
+                .await
+                .unwrap();
+                let independent = aggregate_plan(
+                    "nested-independent-program-effect",
+                    std::slice::from_ref(&program_call),
+                    vec![0],
+                );
+                run.start_aggregate(
+                    &independent,
+                    std::slice::from_ref(&program_call),
+                    lash_core::tool_run::CapacityScope::Held,
+                    handlers,
+                    Default::default(),
+                    &SystemClock,
+                )
+                .await
+                .unwrap();
+                let answer = run
+                    .consume_aggregate(&plan.key, AggregateConsumer::All)
+                    .await;
+                assert!(
+                    matches!(answer.unwrap(), RunAggregateOutcome::AllResults(results) if results.len() == 3 && results.iter().all(Option::is_some))
+                );
+                assert!(
+                    matches!(run.consume_aggregate(&independent.key, AggregateConsumer::All).await.unwrap(), RunAggregateOutcome::AllResults(results) if results.len() == 1)
+                );
+                run.close().await.unwrap();
+                finished.lock().unwrap().push(run.into_records());
+            })
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+    )
+    .await
+    .expect("L18: a served V replays the journaled commands its body issued")
+    .unwrap();
+    assert_eq!(crashes.get(), 1, "the handler output was lost once");
+    assert_eq!(mutations.load(Ordering::SeqCst), 1, "one external mutation");
+    let finished = finished.lock().unwrap();
+    let records = finished.last().expect("the aggregate completed");
+    assert!(
+        drain_violations(records, &BTreeSet::new(), None).is_empty(),
+        "the protected drain remains transitive"
+    );
+    // The journal proves the case: the nested command sits strictly between
+    // two schedule commands, and the first selected another call's work.
+    let entries: Vec<_> = backend
+        .server()
+        .invocations()
+        .iter()
+        .flat_map(|view| backend.server().journal(&view.id).unwrap())
+        .collect();
+    // A command's record lives on its completion notification; the command
+    // names the notification by its result completion id.
+    let completions: BTreeMap<u64, Option<RunRecord>> = entries
+        .iter()
+        .filter(|entry| entry.ty == MessageType::RunCompletionNotification)
+        .filter_map(|entry| {
+            let id = super::super::endpoint_protocol::protobuf_varint_field(&entry.payload, 1)?;
+            let record = entry
+                .run_completion()
+                .and_then(Result::ok)
+                .and_then(|bytes| {
+                    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+                    serde_json::from_value::<RunRecord>(value.get("record")?.clone()).ok()
+                });
+            Some((id, record))
+        })
+        .collect();
+    let journal: Vec<(String, Option<RunRecord>)> = entries
+        .iter()
+        .filter(|entry| entry.ty == MessageType::RunCommand)
+        .map(|entry| {
+            let record = super::super::endpoint_protocol::protobuf_varint_field(&entry.payload, 11)
+                .and_then(|id| completions.get(&id).and_then(|record| record.clone()));
+            (entry.name.clone().unwrap_or_default(), record)
+        })
+        .collect();
+    let nested_at = journal
+        .iter()
+        .position(|(name, _)| name == "l18:external-intent")
+        .expect("the nested command is journaled");
+    let before = journal[..nested_at]
+        .iter()
+        .rposition(|(name, _)| name.starts_with("lash:run:schedule:"))
+        .expect("a schedule precedes the nested command");
+    let after = journal[nested_at + 1..]
+        .iter()
+        .position(|(name, _)| name.starts_with("lash:run:schedule:"))
+        .map(|position| nested_at + 1 + position)
+        .expect("a schedule follows the nested command");
+    assert!(before < nested_at && nested_at < after);
+    let selected = journal[before]
+        .1
+        .as_ref()
+        .expect("the earlier schedule recorded its selection");
+    assert!(
+        selected.events.iter().any(|event| matches!(
+            event,
+            RunEvent::AttemptRecorded { .. } | RunEvent::Decided { .. }
+        )) && !selected
+            .events
+            .iter()
+            .any(|event| matches!(event, RunEvent::Presented { .. })),
+        "the window that registered the nested command selected other work first: {:?}",
+        selected.events
+    );
 }
 
 #[tokio::test]

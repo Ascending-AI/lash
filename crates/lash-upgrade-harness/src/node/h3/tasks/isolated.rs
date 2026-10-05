@@ -414,7 +414,7 @@ async fn run(
         call.segment,
         call.available.clone(),
     );
-    let driven = async {
+    let driven = Box::pin(async {
         let decided = run
             .start_round(
                 std::slice::from_ref(&call),
@@ -435,7 +435,7 @@ async fn run(
         let terminals = run.drain().await.map_err(|error| error.to_string())?;
         run.close().await.map_err(|error| error.to_string())?;
         Ok::<_, String>(terminals)
-    }
+    })
     .await;
     let (record, output) = match &driven {
         Ok(terminals) => {

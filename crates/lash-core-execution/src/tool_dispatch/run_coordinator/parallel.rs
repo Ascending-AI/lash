@@ -2,6 +2,7 @@
 use super::*;
 use crate::tool_run::{RecordedRetryPolicy, RunAttemptEntry};
 use futures_util::future::{BoxFuture, FutureExt, Shared, select_all};
+use lash_sansio::sync::MutexExt;
 
 pub(super) type Handle<'a> = Shared<BoxFuture<'a, Result<Ready, RuntimeEffectControllerError>>>;
 
@@ -12,7 +13,7 @@ pub(super) enum Ready {
     Timer,
     /// A stop cut a retry backoff before its timer fired: never an elapse.
     TimerStopped,
-    Presentation(std::sync::Arc<RunJournalEntry>),
+    Presentation(std::sync::Arc<drain::PresentedParts>),
 }
 
 pub(super) struct AggregateTimer<'a> {
@@ -333,9 +334,15 @@ impl<'a> RunCoordinator<'a> {
 
             // Register a replayed D before polling an unfinished X. Only a
             // fresh schedule requests selection; its owner waits for X ACK
-            // outside the SDK callback. Protected V runs inside the borrowed
-            // callback, keeping the invocation live even after all X ACKs.
-            // Cached V never polls or repeats protected callbacks.
+            // outside the SDK callback. V's presentation runs in the
+            // borrowed callback; its protected preparation is polled by the
+            // owner beside the schedule on live and replayed V, so its
+            // nested commands replay at their recorded positions. The
+            // borrowed D lets the invocation suspend to acknowledge
+            // outstanding X, and once no X is outstanding the owner's await
+            // of its executing borrowed D keeps the invocation live
+            // (shared-core only suspends when input is closed and no awaited
+            // handle is an executing run).
             let needs_selection = std::sync::Arc::new(tokio::sync::Notify::new());
             let needed = std::sync::Arc::clone(&needs_selection);
             let (send_choice, receive_choice) = tokio::sync::oneshot::channel();
@@ -369,33 +376,16 @@ impl<'a> RunCoordinator<'a> {
                 let ready = ready.map_err(|error| error.to_string())?;
                 let (work, ordinal, timer, delay) = match selected_work {
                     SelectedWork::Presentation { call_id, consume } => {
-                        let Ready::Presentation(entry) = ready else {
+                        let Ready::Presentation(parts) = ready else {
                             return Err("a presentation returned an X receipt".to_owned());
                         };
+                        let opener = match &owner {
+                            MaterialOwner::Run { opener } => opener.clone(),
+                            _ => return Err("a Run owns its presentation".to_owned()),
+                        };
+                        let entry = parts.entry(&call_id, record, consume, &opener);
                         if !entry.record.events.iter().any(|event| matches!(event, RunEvent::Presented { call_id: id, .. } if *id == call_id)) {
                             return Err("a presentation returned another call".to_owned());
-                        }
-                        let mut entry = entry.as_ref().clone();
-                        // V takes its ordinal when selected, after any X+D
-                        // accepted while its protected work was unfinished.
-                        entry.record.first = record.first;
-                        if consume
-                            && !entry
-                                .record
-                                .events
-                                .iter()
-                                .any(|event| matches!(event, RunEvent::Consumed { .. }))
-                        {
-                            let position = entry
-                                .record
-                                .events
-                                .iter()
-                                .position(|event| matches!(event, RunEvent::Incorporated { .. }))
-                                .ok_or("V has no incorporation")?;
-                            entry
-                                .record
-                                .events
-                                .insert(position, RunEvent::Consumed { call_id });
                         }
                         return Ok(entry);
                     }
@@ -527,16 +517,60 @@ impl<'a> RunCoordinator<'a> {
                 .record_run_schedule(name, step);
             tokio::pin!(selection);
             tokio::pin!(selector);
-            let selected = tokio::select! {
-                biased;
-                result = &mut selection => result?,
-                () = &mut selector => selection.await?,
+            let schedule = async {
+                tokio::select! {
+                    biased;
+                    result = &mut selection => result,
+                    () = &mut selector => selection.await,
+                }
+            };
+            let selected = match presentation.as_mut() {
+                Some(pending) => {
+                    // A served V record carries the discharge decision its
+                    // preparation repeats: hand the launched process and
+                    // `cancelled` to it before its next poll.
+                    let recorded = std::sync::Arc::clone(&pending.recorded);
+                    let protected_call = pending.call_id.clone();
+                    pending
+                        .beside(schedule, move |output| {
+                            let Ok(entry) = output else {
+                                return;
+                            };
+                            if !entry.record.events.iter().any(|event| {
+                                matches!(event, RunEvent::Presented { call_id, .. } if *call_id == protected_call)
+                            }) {
+                                return;
+                            }
+                            let launched = entry.record.events.iter().find_map(|event| match event {
+                                RunEvent::StartLaunched { call_id, process_id, .. }
+                                    if *call_id == protected_call =>
+                                {
+                                    Some(process_id.clone())
+                                }
+                                _ => None,
+                            });
+                            let discharged = entry.record.events.iter().find_map(|event| match event {
+                                RunEvent::StartDischarged { call_id, cancelled, .. }
+                                    if *call_id == protected_call =>
+                                {
+                                    Some(*cancelled)
+                                }
+                                _ => None,
+                            });
+                            if let (Some(process_id), Some(cancelled)) = (launched, discharged) {
+                                *recorded.lock_recover() = Some((process_id, cancelled));
+                            }
+                        })
+                        .await?
+                }
+                None => schedule.await?,
             };
             if let Some(pending) = presentation.as_ref()
                 && selected.record.events.iter().any(|event| matches!(event, RunEvent::Presented { call_id, .. } if *call_id == pending.call_id))
             {
                 let call_id = pending.call_id.clone();
-                let pending = presentation.take().ok_or_else(|| boundary(&call_id))?;
+                let mut pending = presentation.take().ok_or_else(|| boundary(&call_id))?;
+                pending.finish_preparation().await?;
                 let record = self.journal.accept(selected)?;
                 self.finish_presentation(pending, &record)?;
                 return Ok(None);
@@ -584,7 +618,17 @@ impl<'a> RunCoordinator<'a> {
                     } => entry.timer && entry.work.call.call_id == *call_id,
                     _ => false,
                 })
-                .ok_or_else(|| boundary(&self.pending[0].work.call.call_id))?;
+                .ok_or_else(|| match event {
+                    RunEvent::AttemptRecorded { call_id, .. }
+                    | RunEvent::RetryScheduled { call_id, .. }
+                    | RunEvent::Decided { call_id, .. }
+                    | RunEvent::Presented { call_id, .. } => boundary(call_id),
+                    _ => RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::EffectReplayDivergence,
+                        "the schedule selected no issued attempt",
+                    )
+                    .into(),
+                })?;
             let pending_entry = self.pending.remove(position);
             let ordinal = pending_entry.ordinal;
             let work = pending_entry.work;

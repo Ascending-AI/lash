@@ -7,9 +7,10 @@
 //! start key, bound by the Run to the Run's environment (the start is an
 //! engine process lash executes) and to a consumer hold that carries the
 //! call's recorded cancel policy. The declaration
-//! record admits it, `start:launch` registers it under its key and
-//! `start:discharge` follows the policy and releases the hold, before the
-//! presentation settles the declarations. A crash drops the attempt that hit
+//! record admits it; the presentation's protected preparation registers it
+//! under its key and follows the discharge policy, releasing the hold, so
+//! V's own record carries both start events before the presentation
+//! settles the declarations. A crash drops the attempt that hit
 //! it, and the double replays the invocation into the same handler.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -46,14 +47,15 @@ const PLUGIN: &str = "fig4884-tools";
 const OUTPUT: &str = "fig4884 started";
 const PRESENTATION: &str = "fig4884 presented";
 const ENVIRONMENT: &str = "process-env:fig4884";
-const STEPS: [&str; 7] = [
+const STEPS: [&str; 5] = [
     "admit",
     "attempt:1",
     "decide",
     "declare",
-    "start:launch",
-    "start:discharge",
-    "present",
+    // The V path journals no start:* records: launch and discharge are the
+    // preparation's effects, and both events ride inside V's own schedule
+    // record, named for its first event's ordinal.
+    "schedule:5",
 ];
 
 fn binding() -> AdmittedBinding {
@@ -630,7 +632,7 @@ async fn drive_with_replay(
         replay.ingress.set(ingress).ok();
     }
     if let Some(step) = crash {
-        let name = format!("lash:run:{}:{step}", call.call_id);
+        let name = step_name(&call.call_id, step);
         let point = if replay.is_some() {
             // Binding drift is judged before a fresh attempt. Its command
             // must not already occupy the positional journal's next slot.
@@ -710,16 +712,21 @@ async fn drive_with_replay(
     Driven { backend, returned }
 }
 
-/// The record names of `steps`. A one-member round records its decision
-/// in the Run's schedule record, named by its first event ordinal.
-fn names(call_id: &ToolCallId, steps: &[&str]) -> Vec<String> {
-    steps
-        .iter()
-        .map(|step| match *step {
+/// A step's journal name: `schedule:N` is the Run's schedule record (a
+/// one-member round records its decision in the one at ordinal 1, and
+/// every V is one too); any other step is the call's own record.
+fn step_name(call_id: &ToolCallId, step: &str) -> String {
+    match step.strip_prefix("schedule:") {
+        Some(ordinal) => format!("lash:run:schedule:{ordinal}"),
+        None => match step {
             "decide" => "lash:run:schedule:1".to_owned(),
-            step => format!("lash:run:{call_id}:{step}"),
-        })
-        .collect()
+            _ => format!("lash:run:{call_id}:{step}"),
+        },
+    }
+}
+
+fn names(call_id: &ToolCallId, steps: &[&str]) -> Vec<String> {
+    steps.iter().map(|step| step_name(call_id, step)).collect()
 }
 
 /// The start events of the records, in order.
@@ -803,14 +810,17 @@ async fn a_declared_start_drains_inside_its_declarations_at_every_cut() {
                 rerun("attempt:1"),
                 "{tier:?} {cut:?}"
             );
+            // The launch and discharge effects rerun on every handler
+            // attempt that replays through the preparation — of these cuts
+            // only a lost V record replays through it.
             assert_eq!(
                 starter.launches(),
-                vec![process.clone(); rerun("start:launch")],
+                vec![process.clone(); rerun("schedule:5")],
                 "{tier:?} {cut:?}: every launch recovers the same process"
             );
             assert_eq!(
                 starter.discharges(),
-                vec![(process.clone(), false); rerun("start:discharge")],
+                vec![(process.clone(), false); rerun("schedule:5")],
                 "{tier:?} {cut:?}"
             );
             assert_eq!(
@@ -861,7 +871,8 @@ async fn a_cancel_before_admission_forbids_the_start_and_one_after_recovers_it()
             driven.journal(),
             names(
                 &forbidden.call_id,
-                &["admit", "attempt:1", "decide", "present"]
+                // A withheld V is the schedule record at ordinal 3.
+                &["admit", "attempt:1", "decide", "schedule:3"]
             )
         );
         assert_eq!(
@@ -871,25 +882,28 @@ async fn a_cancel_before_admission_forbids_the_start_and_one_after_recovers_it()
         );
 
         for (label, policy, cancel_at, crash, cancelled) in [
+            // The V schedule record is the only crashable boundary past the
+            // declarations: its loss replays the whole preparation — the
+            // launch and the discharge effects alike.
             (
                 "cancels",
                 CancelExternalWork,
                 CancelAt::Launch,
-                Some("start:launch"),
+                Some("schedule:5"),
                 true,
             ),
             (
                 "cancels-twice",
                 CancelExternalWork,
                 CancelAt::Launch,
-                Some("start:discharge"),
+                Some("schedule:5"),
                 true,
             ),
             (
                 "ignores",
                 Ignore,
                 CancelAt::Launch,
-                Some("start:launch"),
+                Some("schedule:5"),
                 false,
             ),
             (
@@ -1000,7 +1014,11 @@ async fn a_start_without_key_environment_or_declaration_is_refused_before_admiss
         assert!(start_events(&records).is_empty());
         assert_eq!(
             driven.journal(),
-            names(&call.call_id, &["admit", "attempt:1", "decide", "present"]),
+            // A refusing final declares nothing, so its V is schedule:3.
+            names(
+                &call.call_id,
+                &["admit", "attempt:1", "decide", "schedule:3"]
+            ),
             "a refused start declares nothing"
         );
         assert_eq!(stores.rows().await, Vec::new());
@@ -1200,7 +1218,8 @@ async fn an_isolated_call_starts_its_registered_process_without_an_ordinary_body
             );
             assert_eq!(
                 starter.launches(),
-                vec![process.clone(); 1 + usize::from(cut == Some("start:launch"))]
+                // Only a lost V record replays through the preparation.
+                vec![process.clone(); 1 + usize::from(cut == Some("schedule:5"))]
             );
             assert_eq!(
                 start_events(&records),
@@ -1223,9 +1242,11 @@ async fn an_isolated_cancel_forbids_launch_or_recovers_and_reaps_the_same_worker
         for (cancel_at, cut) in [
             (CancelAt::Preparation, None),
             (CancelAt::Launch, None),
-            (CancelAt::Launch, Some("start:launch")),
-            (CancelAt::Launch, Some("start:discharge")),
-            (CancelAt::Launch, Some("present")),
+            // Each of these drops the V schedule record: the launch, the
+            // discharge and the presentation are all inside it now.
+            (CancelAt::Launch, Some("schedule:5")),
+            (CancelAt::Launch, Some("schedule:5")),
+            (CancelAt::Launch, Some("schedule:5")),
         ] {
             let stores = Stores::open(tier).await;
             let call = isolated_call("physical", ExternalCancelPolicy::CancelExternalWork);

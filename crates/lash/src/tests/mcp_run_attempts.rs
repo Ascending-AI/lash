@@ -239,15 +239,20 @@ async fn drive(
         .await
         .unwrap();
     if let Some(step) = crash {
+        // A `schedule:N` step is the Run's schedule record (every V now is
+        // one, and a one-member round records its decision in the one at
+        // ordinal 1); any other step is the call's own record.
+        let name = match step.strip_prefix("schedule:") {
+            Some(ordinal) => format!("lash:run:schedule:{ordinal}"),
+            None => match step {
+                "decide" => "lash:run:schedule:1".to_owned(),
+                _ => format!("lash:run:{}:{step}", call.call_id),
+            },
+        };
         backend
             .server()
             .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
-                // A one-member round records its decision in the schedule
-                // record named by its first event ordinal.
-                name: Some(match step {
-                    "decide" => "lash:run:schedule:1".to_owned(),
-                    step => format!("lash:run:{}:{step}", call.call_id),
-                }),
+                name: Some(name),
             }));
     }
     let returned = Arc::new(Mutex::new(None));
@@ -296,7 +301,8 @@ async fn l02_mcp_replays_only_unrecorded_attempts_and_remote_dedup_is_explicit()
             Some("admit"),
             Some("attempt:1"),
             Some("decide"),
-            Some("present"),
+            // V is the schedule record after the three per-call records.
+            Some("schedule:3"),
         ] {
             let mut trace = tempfile::NamedTempFile::new().unwrap();
             let mut effects = tempfile::NamedTempFile::new().unwrap();
@@ -362,7 +368,7 @@ async fn l03_mcp_run_cancellation_withholds_undecided_results_and_preserves_fina
             cancel_before_decision,
             presentations: AtomicUsize::new(0),
         });
-        let terminal = drive(probe.clone(), call, Some("present")).await;
+        let terminal = drive(probe.clone(), call, Some("schedule:3")).await;
         if cancel_before_decision {
             assert_eq!(
                 terminal,

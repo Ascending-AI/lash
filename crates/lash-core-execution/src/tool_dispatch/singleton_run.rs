@@ -32,16 +32,19 @@
 //! the Run's environment when lash executes the process and to a consumer
 //! hold that carries the call's recorded cancel policy, under the body's
 //! stable start key. The start drains inside the final's declarations: it is
-//! admitted in the record that issues them (`declare`), registered under its
-//! key (`start:launch`), and discharged (`start:discharge`) — the Run's
-//! cancellation read once, the recorded policy followed and the hold
-//! released — before the presentation settles them. A cancellation before
+//! admitted in the record that issues them (`declare`), then the
+//! presentation's protected preparation registers it under its key, reads
+//! the Run's cancellation once for the discharge decision and discharges it —
+//! all outside any journaled command, beside the schedule command whose
+//! record then carries both start events. A deferred start journals
+//! `start:launch` and `start:discharge` carriers instead, awaited in order
+//! by its owner. A cancellation before
 //! the decision is durable withholds the final, so its start is never
-//! admitted and never launches. One after it cannot forbid the start: a lost
-//! launch launches again under the same key, which the registrar answers
-//! with the process it registered first, and the discharge then cancels that
-//! process when the recorded policy says so. No task outlives the drain, and
-//! the start holds the process only until its launch is durable.
+//! admitted and never launches. One after it cannot forbid the start: every
+//! replayed preparation launches again under the same key, which the
+//! registrar answers with the process it registered first, and the discharge
+//! then follows the decision V's record carried. No task outlives the drain,
+//! and the start holds the process only until its launch is durable.
 //!
 //! [`RuntimeEffectController::record_run_record`]: crate::RuntimeEffectController::record_run_record
 //!
@@ -547,9 +550,9 @@ pub trait SingletonToolHandlers: Send + Sync {
 
     /// Register a final's declared start under its key (K5): the
     /// registration fixes its binding, lifetime, environment and consumer
-    /// hold, and arms its delivery. A crash before the launch record is
-    /// durable launches again under the same key, so the registrar must
-    /// answer the process it registered first.
+    /// hold, and arms its delivery. The launch runs again on every replay
+    /// that reaches it, under the same key, so the registrar must answer
+    /// the process it registered first.
     async fn launch_start(&self, obligation: &DeclaredStartObligation)
     -> Result<ProcessId, String>;
 
@@ -564,8 +567,9 @@ pub trait SingletonToolHandlers: Send + Sync {
     }
 
     /// Discharge a launched start: cancel `process_id` when `cancel`, then
-    /// release the obligation's consumer hold. A crash before the discharge
-    /// record is durable repeats both, so both must be idempotent.
+    /// release the obligation's consumer hold. The effects follow the
+    /// journaled decision and repeat on every replay that reaches them, so
+    /// both must be idempotent.
     async fn discharge_start(
         &self,
         obligation: &DeclaredStartObligation,
