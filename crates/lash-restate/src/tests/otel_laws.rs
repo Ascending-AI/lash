@@ -317,7 +317,7 @@ async fn golden_tree_survives_replay_and_redrive() {
         "one segment terminal, one start and terminal for turn/tool, one committed run terminal and awaited process terminal; records: {:?}",
         first_records
             .iter()
-            .map(|record| record.event.kind())
+            .map(|record| record.event.kind().as_str())
             .collect::<Vec<_>>()
     );
     let first_spans = spans.get_finished_spans().expect("exported first tree");
@@ -416,8 +416,16 @@ async fn golden_tree_survives_replay_and_redrive() {
         tool_anchor.span_context.span_id()
     );
     for (span, started, terminal) in [
-        (turn_span, "turn_started", "turn_completed"),
-        (tool_span, "tool_call_started", "tool_call_completed"),
+        (
+            turn_span,
+            lash_trace::TraceEventKind::TurnStarted,
+            lash_trace::TraceEventKind::TurnCompleted,
+        ),
+        (
+            tool_span,
+            lash_trace::TraceEventKind::ToolCallStarted,
+            lash_trace::TraceEventKind::ToolCallCompleted,
+        ),
     ] {
         let start = first_records
             .iter()

@@ -168,7 +168,7 @@ impl OtelTelemetry {
         if span.is_recording() {
             let mut attrs = vec![
                 A::RecordId.value(record.id.clone()),
-                A::EventType.value(record.event.kind()),
+                A::EventType.value(record.event.kind().as_str()),
                 A::ScopeBoundary.value(i64::try_from(scope.scope.boundary).unwrap_or(i64::MAX)),
             ];
             if let Some(session) = &record.context.session_id {

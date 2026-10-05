@@ -1,7 +1,7 @@
 use lash_trace::{
     TraceBranchSelection, TraceContext, TraceDurableTimerStatus, TraceDurableWaitResolution,
     TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue,
-    TraceError, TraceEvent, TraceExecToolCall, TraceJournaledEffectStatus,
+    TraceError, TraceEvent, TraceEventKind, TraceExecToolCall, TraceJournaledEffectStatus,
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
     TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
     TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse,
@@ -338,6 +338,12 @@ fn event_samples() -> Vec<TraceEvent> {
                 input_json: None,
                 usage: None,
             },
+        },
+        TraceEvent::ToolReceipt {
+            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            name: "search".to_string(),
+            started_at_ms: 1,
+            terminal: Some(lash_trace::TraceToolTerminal::Final),
         },
         TraceEvent::ToolCallStarted {
             call_id: lash_sansio::ToolCallId::fixture("call-1"),
@@ -716,6 +722,30 @@ fn language_execution_records() -> Vec<TraceRecord> {
         .collect()
 }
 
+/// Every emitted serde tag must be recognised by the reader's derived vocabulary.
+#[test]
+fn every_trace_event_serde_tag_round_trips_through_its_kind() {
+    use std::collections::HashSet;
+    use strum::VariantArray;
+
+    let mut sampled_kinds = HashSet::new();
+    for event in event_samples() {
+        let wire = serde_json::to_value(&event).expect("encode event");
+        let tag = wire["type"].as_str().expect("event type tag");
+        let kind = tag
+            .parse::<TraceEventKind>()
+            .expect("recognise emitted tag");
+        assert_eq!(kind, event.kind());
+        assert_eq!(kind.as_str(), tag);
+        sampled_kinds.insert(kind);
+    }
+    assert_eq!(
+        sampled_kinds,
+        TraceEventKind::VARIANTS.iter().copied().collect(),
+        "every event variant needs a serde round-trip sample"
+    );
+}
+
 #[test]
 fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
     let validator = published_schema(include_str!(
@@ -736,7 +766,7 @@ fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
         let kind = event.kind();
         let record = fixture_record(context.clone(), event);
         let value = serde_json::to_value(&record).expect("encode record");
-        assert_schema_accepts(&validator, &value, kind);
+        assert_schema_accepts(&validator, &value, kind.as_str());
     }
     for record in language_execution_records() {
         let value = serde_json::to_value(&record).expect("encode record");

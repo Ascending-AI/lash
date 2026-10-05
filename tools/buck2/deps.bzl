@@ -869,6 +869,7 @@ PACKAGE_DEPS = {
             "serde": "//third-party/rust:p0331",
             "serde_json": "//third-party/rust:p0338",
             "sha2": "//third-party/rust:p0345",
+            "strum": "//third-party/rust:p0374",
             "thiserror": "//third-party/rust:p0392",
             "uuid": "//third-party/rust:p0440"
         }

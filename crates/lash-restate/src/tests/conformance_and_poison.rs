@@ -999,7 +999,7 @@ pub(super) async fn durable_trace_is_observed_once_across_a_redrive_and_adds_no_
         .records
         .lock_recover()
         .iter()
-        .map(|record| record.event.kind())
+        .map(|record| record.event.kind().as_str())
         .collect::<Vec<_>>();
     assert_eq!(
         events,

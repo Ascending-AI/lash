@@ -965,7 +965,10 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                                         .lock()
                                         .unwrap()
                                         .iter()
-                                        .filter(|record| record.event.kind() == "tool_receipt")
+                                        .filter(|record| {
+                                            record.event.kind()
+                                                == lash_trace::TraceEventKind::ToolReceipt
+                                        })
                                         .count();
                                     assert_eq!(
                                         count,

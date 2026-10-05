@@ -315,6 +315,46 @@ fn jsonl_trace_sink_recovers_from_torn_tail() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// FIG-5025: emitted attempt and domain terminals must not be skipped as future kinds.
+#[test]
+fn trace_reader_preserves_attempt_and_domain_completions() {
+    let records = [
+        fixture_record(
+            TraceContext::default(),
+            TraceEvent::LlmAttemptCompleted {
+                attempt: TraceLlmAttempt {
+                    ordinal: 1,
+                    provider: None,
+                    request_model: "model".to_string(),
+                    response_model: None,
+                    started_at_ms: None,
+                    ended_at_ms: None,
+                    outcome: TraceLlmAttemptOutcome::Completed,
+                    error: None,
+                    usage: None,
+                },
+            },
+        ),
+        fixture_record(
+            TraceContext::default(),
+            TraceEvent::DomainCompleted {
+                completion: TraceDomainCompletion::new(
+                    TraceDomainOperation::Run,
+                    1,
+                    TraceDomainStatus::Completed,
+                ),
+            },
+        ),
+    ];
+    let text: String = records
+        .iter()
+        .map(|record| format!("{}\n", serde_json::to_string(record).expect("encode trace")))
+        .collect();
+    let read = parse_trace_jsonl_records(&text).expect("read trace");
+    assert_eq!(read.records, records, "both emitted terminals must survive");
+    assert_eq!(read.skipped_unknown_kinds, 0);
+}
+
 #[test]
 fn trace_reader_skips_unknown_kinds_and_counts_them() {
     let mut known = serde_json::to_value(fixture_record(

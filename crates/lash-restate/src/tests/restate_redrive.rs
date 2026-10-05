@@ -949,7 +949,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
 
     let effect_suspension = park_process_on_its_timer(&endpoint, &process_id, &input).await;
     assert!(trace_sink.records.lock_recover().iter().any(|record| {
-        record.event.kind() == "durable_timer_started"
+        record.event.kind() == lash_trace::TraceEventKind::DurableTimerStarted
             && record.context.run_id.as_deref() == Some("fig811-workflow-trace")
             && record.context.session_id.as_deref() == Some("session")
     }));

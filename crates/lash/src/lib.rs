@@ -1540,11 +1540,11 @@ pub mod tracing {
         AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
         InvalidTraceLinks, TraceAdmissionCandidate, TraceAnchor, TraceAttemptId,
         TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainCompletion,
-        TraceDomainOperation, TraceDomainProjector, TraceDomainStatus, TraceHostOperation,
-        TraceLinks, TraceLlmAttempt, TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory,
-        TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner, TraceToolOwner,
-        TraceToolTerminal, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags,
-        W3cTraceId, W3cTraceState,
+        TraceDomainOperation, TraceDomainProjector, TraceDomainStatus, TraceEventKind,
+        TraceHostOperation, TraceLinks, TraceLlmAttempt, TraceRecordIdentity, TraceScopeAdmission,
+        TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
+        TraceToolOwner, TraceToolTerminal, TraceTransitionKind, UntracedScopes, W3cSpanId,
+        W3cTraceFlags, W3cTraceId, W3cTraceState,
     };
     pub use lash_trace::{
         TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,

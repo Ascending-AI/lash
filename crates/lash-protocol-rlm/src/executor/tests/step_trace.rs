@@ -247,7 +247,7 @@ fn oversized_link_failure_diagnostic_is_bounded_without_changing_feedback() {
         assert!(diagnostic.chars().count() > 4000);
         let steps: Vec<_> = records
             .iter()
-            .filter(|r| r.event.kind() == "program_step")
+            .filter(|r| r.event.kind() == lash_trace::TraceEventKind::ProgramStep)
             .collect();
         assert_eq!(steps.len(), 1);
         let event = serde_json::to_value(&steps[0].event).unwrap();
