@@ -472,9 +472,9 @@ async fn drain_sealed_final(
     } = sealed;
     let intent_outcomes = match minting_emission {
         Some(minting_emission) => {
-            let mut intent_context = context.clone();
+            let mut intent_context =
+                super::intent_executor::IntentRealizationContext::from(context);
             intent_context.parent_invocation = Some(minting_emission);
-            intent_context.observation_call_key = None;
             let intent_outcomes = super::execute_final_tool_intents(
                 &intent_context,
                 &recorded_call_id,

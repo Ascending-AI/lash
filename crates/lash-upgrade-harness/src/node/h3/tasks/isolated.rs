@@ -563,14 +563,6 @@ impl SingletonToolHandlers for IsolatedHandlers {
         Ok(())
     }
 
-    async fn realize_declarations(
-        &self,
-        _: &lash_core::ToolCallId,
-        _: &[lash_core::ToolIntentKind],
-    ) -> Result<(), String> {
-        Err("an isolated start is not realized as an intent".into())
-    }
-
     async fn present(
         &self,
         _: &lash_core::ToolCallId,

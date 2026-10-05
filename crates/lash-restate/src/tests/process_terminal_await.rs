@@ -126,6 +126,7 @@ impl World {
         let endpoint = crate::services::bind_lash_services(
             Endpoint::builder(),
             crate::services::LashServiceParts {
+                tool_realizer: Arc::new(crate::tests::NoIntentsRealizer),
                 effect_host: &host,
 
                 admin: crate::RestateAdminClient::new(match &server {

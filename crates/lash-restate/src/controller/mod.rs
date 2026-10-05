@@ -646,6 +646,27 @@ where
         self.start_journal_run_prepare(name, step)
     }
 
+    async fn issue_run_realization<'run>(
+        &'run self,
+        request: lash_core::tool_dispatch::RealizationRequest,
+    ) -> Result<lash_core::tool_dispatch::IssuedRealization<'run>, RuntimeEffectControllerError>
+    {
+        self.context
+            .issue_run_realization(&self.namespace, request)
+            .await
+    }
+
+    /// Attach to previously issued protected work without sending or executing it again.
+    async fn attach_run_realization<'run>(
+        &'run self,
+        invocation_id: String,
+    ) -> Result<
+        lash_core::tool_dispatch::RunSelectable<'run, lash_core::tool_dispatch::RealizationReceipt>,
+        RuntimeEffectControllerError,
+    > {
+        self.context.attach_run_realization(invocation_id).await
+    }
+
     fn start_run_retry(&self, backoff_ms: u64) -> lash_core::tool_dispatch::RunRetryTimer<'_> {
         let timer = self
             .context

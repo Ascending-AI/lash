@@ -94,6 +94,7 @@ mod object_state;
 mod object_upgrade;
 mod process;
 mod process_stop;
+mod realization;
 mod sentinel;
 mod serve;
 mod services;

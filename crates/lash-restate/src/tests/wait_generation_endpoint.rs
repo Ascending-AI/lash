@@ -70,6 +70,7 @@ async fn build_endpoint_builder(
     let endpoint = crate::services::bind_lash_services_reading(
         Endpoint::builder(),
         crate::services::LashServiceParts {
+            tool_realizer: Arc::new(crate::tests::NoIntentsRealizer),
             effect_host: &host,
             admin: crate::RestateAdminClient::new(connection.clone()),
             materials: stores.tool_material_store(),

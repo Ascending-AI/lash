@@ -232,6 +232,13 @@ impl RunTransfer {
             return Err(ContinuationRefusal::UnretainedMaterial);
         }
         let ledger = self.ledger()?;
+        for call_id in ledger.owed_realizations() {
+            if ledger.realization_invocation(&call_id).is_none() {
+                return Err(ContinuationRefusal::Records {
+                    cause: RunEventRefusal::RealizationOwed { call_id },
+                });
+            }
+        }
         if ledger.unacknowledged_local() != 0 {
             return Err(ContinuationRefusal::UnacknowledgedAttempt);
         }

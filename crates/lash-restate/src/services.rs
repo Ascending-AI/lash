@@ -80,6 +80,7 @@ use crate::durable_wait::{
 };
 use crate::object_state::FleetView;
 use crate::process::{LashProcessWorkflow as _, LashProcessWorkflowImpl, RestateProcessRunner};
+use crate::realization::LashToolRealization as _;
 use crate::session_shifts::{
     LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl, RestateSessionShiftsSlot,
 };
@@ -354,6 +355,8 @@ lash_services! {
     DurableWaitRegistry => "LashDurableWaitIndex", Shared, object(crate::durable_wait::DURABLE_WAIT_REGISTRY_FAMILY);
     /// The segment runner a process submission starts and awaits.
     ProcessWorkflow => "LashProcessWorkflow", Pinned;
+    /// An admitted final realizes its intents in this invocation journal.
+    ToolRealization => "LashToolRealization", Pinned;
     /// One session's shift: admits runs and runs each in its `LashTurn`
     /// (FIG-3600).
     SessionShifts => "LashSession", Pinned;
@@ -559,6 +562,21 @@ lash_clients! {
 /// A handler-side call to `handler` of the workflow `key` under `route`:
 /// the one way lash's handlers address a pinned service, so the name a
 /// call addresses is always a route, never the name a typed client bakes in.
+pub(crate) fn routed_service<'ctx, C, Req, Res>(
+    ctx: &C,
+    route: &ServiceRoute,
+    handler: &str,
+    request: Req,
+) -> Request<'ctx, Call<Req>, Reply<Res>>
+where
+    C: ContextClient<'ctx>,
+{
+    ctx.request(
+        RequestTarget::service(route.name().into_owned(), handler),
+        Call::journaled(request),
+    )
+}
+
 pub(crate) fn routed_workflow<'ctx, C, Req, Res>(
     ctx: &C,
     route: &ServiceRoute,
@@ -713,6 +731,7 @@ pub(crate) struct LashServiceParts<'a, R> {
     pub(crate) attachments: Arc<dyn lash_core::AttachmentReferrers>,
     /// The process workflow over the deployment's process worker.
     pub(crate) process_workflow: LashProcessWorkflowImpl<R>,
+    pub(crate) tool_realizer: Arc<dyn lash_core::tool_dispatch::ToolRealizer>,
     /// Where the session handlers find the driver the core installs.
     pub(crate) session_shifts: RestateSessionShiftsSlot,
     /// The deployment's drain generation: every journal-bearing handler
@@ -754,6 +773,7 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
         attachments,
         materials,
         process_workflow,
+        tool_realizer,
         session_shifts,
         build_generation,
         namespace,
@@ -816,6 +836,19 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
                     .serve(),
                     &name,
                     claimed().enable_lazy_state(true),
+                    &wire,
+                ),
+                LashService::ToolRealization => bind_as(
+                    builder,
+                    crate::realization::LashToolRealizationImpl::new(
+                        Arc::clone(&tool_realizer),
+                        effect_host.authority_id().clone(),
+                        build_generation.clone(),
+                        namespace.clone(),
+                    )
+                    .serve(),
+                    &name,
+                    claimed().handler("realize", crate::turn_handler_options()),
                     &wire,
                 ),
                 LashService::ProcessWorkflow => bind_as(

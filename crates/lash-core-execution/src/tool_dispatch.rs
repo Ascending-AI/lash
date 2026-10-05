@@ -9,6 +9,7 @@ mod intent_executor;
 mod pending_resolver;
 mod preparation;
 mod production;
+mod realization;
 mod retry;
 pub(crate) use production::ProductionToolHandlers;
 mod run_coordinator;
@@ -25,15 +26,20 @@ pub use pending_resolver::{
     consumer_hold_owner, discharge_abandoned_call, finish_parked_wait,
     model_visible_intent_outcomes,
 };
+pub use realization::{
+    IssuedRealization, RealizationDispatch, RealizationPayload, RealizationReceipt,
+    RealizationRequest, ToolRealizer,
+};
 pub use run_coordinator::{
     DecidedCall, RunAggregateOutcome, RunBodies, RunCoordinator, RunCutRefusal,
 };
 pub use singleton_run::{
     BeforeCheckReply, IsolatedProcessDescriptor, RecordedIsolatedStart, RunAttemptBody,
-    RunAttemptHandle, RunAttemptResult, RunAttemptStep, RunRetryTimer, RunStartPrepareStep,
-    RunStartPrepared, RunStepHandle, SingletonAttempt, SingletonBodyOutcome, SingletonCapture,
-    SingletonDrift, SingletonPreparedRequest, SingletonPresentationError, SingletonRunError,
-    SingletonStart, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
+    RunAttemptHandle, RunAttemptResult, RunAttemptStep, RunRetryTimer, RunSelectKey,
+    RunSelectValue, RunSelectable, RunStartPrepareStep, RunStartPrepared, RunStepHandle, SelectKey,
+    SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
+    SingletonPreparedRequest, SingletonPresentationError, SingletonRunError, SingletonStart,
+    SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
 };
 
 pub(crate) use atomic_attempt::AtomicToolAttempt;
@@ -49,6 +55,7 @@ pub use context::{
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
 pub use hooks::finalize_tool_result_with_execution_context;
 pub(crate) use hooks::{attempt_occurrence, deferred_occurrence};
+pub use intent_executor::IntentRealizationContext;
 #[cfg(feature = "testing")]
 pub use intent_executor::execute_final_tool_intents;
 #[cfg(not(feature = "testing"))]

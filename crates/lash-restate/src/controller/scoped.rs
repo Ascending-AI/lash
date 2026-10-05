@@ -69,6 +69,16 @@ where
         self.recording_controller(started.admitted_scope().clone())
     }
 
+    /// The scope already admitted by the Run that sent a realization request.
+    /// This handler is the only route besides a started process segment to a
+    /// process-scope controller: it executes only the final's protected intents.
+    pub(crate) fn realization_controller<'run>(
+        &'run self,
+        admitted: lash_core::AdmittedScope,
+    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+        self.recording_controller(admitted)
+    }
+
     /// A process-scope controller for a test that executes effects without a
     /// workflow handler, and so without an admitted segment.
     #[cfg(test)]

@@ -72,6 +72,9 @@ mod plugin_namespace_tests;
 use lash_core_store::queued_drain_policy;
 mod plugin_transition;
 mod process_runtime;
+mod realization_runtime;
+#[doc(hidden)]
+pub use realization_runtime::realize_tool_intents;
 mod run_start;
 pub mod scenario_contracts;
 mod session_administration;

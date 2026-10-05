@@ -60,3 +60,6 @@ crates/lash-core-execution/src/tool_dispatch/run_coordinator/parallel.rs  |  let
 crates/lash-core-execution/src/tool_dispatch/run_coordinator/parallel.rs  |  tokio::select! {  |  1  # RECORDED cached schedules register before unresolved X is awaited; L03 l03_native_cancel_replays_before_the_inline_loser_ack pins replay registration order
 
 crates/lash-core-execution/src/tool_dispatch/run_coordinator/parallel.rs  |  let (ready, selected_work) = tokio::select! {  |  1  # RECORDED fresh SDK schedule folds acknowledged preparation or X; cached schedules never repeat the choice; L18 l18_started_prepare_does_not_hold_other_attempt_decisions pins concurrent preparation
+
+crates/lash-core-execution/src/tool_dispatch/singleton_run.rs  |  Pin<Box<dyn Future<Output = Result<SelectKey, RuntimeEffectControllerError>> + Send + 'run>>;  |  1  # RECORDED the engine notification identity of a journaled send+attach registration (FIG-4987); the schedule records the receipt its source answers
+crates/lash-core-execution/src/tool_dispatch/singleton_run.rs  |  Pin<Box<dyn Future<Output = Result<T, RuntimeEffectControllerError>> + Send + 'run>>;  |  1  # RECORDED the receipt source a journaled send+attach registration returns; the journaled schedule selection answers it

@@ -37,6 +37,7 @@ pub use lash_sansio::VersionRange;
 ///         RestateRunRequest, RestateRunCloseRequest,
 ///     ),
 ///     roots(path = "crates/lash-restate/src/object_state.rs", ObjectUpgradeResponse),
+///     roots(path = "crates/lash-core-execution/src/tool_dispatch/realization.rs", RealizationRequest, RealizationReceipt),
 ///     items(COMPAT_KEY),
 ///     items(
 ///         path = "crates/lash-restate/src/wire.rs", wire_unsupported, incompatible,

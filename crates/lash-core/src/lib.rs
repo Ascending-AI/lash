@@ -864,7 +864,9 @@ pub use tool_provider::{
 };
 #[doc(hidden)]
 pub mod core_internal {
-    pub use crate::runtime::{ProcessRuntimeContext, ProcessRuntimePorts, RuntimeSessionServices};
+    pub use crate::runtime::{
+        ProcessRuntimeContext, ProcessRuntimePorts, RuntimeSessionServices, realize_tool_intents,
+    };
     pub use lash_core_execution::core_internal::{
         RuntimeEffectLocalRunner, RuntimeExecutionContextRuntimeOps, StartKeyDerivation,
         attach_process_invocation_correlation, clear_process_invocation_correlation,

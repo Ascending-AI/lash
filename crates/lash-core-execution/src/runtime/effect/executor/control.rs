@@ -497,6 +497,36 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         }
     }
 
+    /// Send `request` to the realization service under its key and attach to
+    /// the invocation the send created (ADR 0130). The send and the attach
+    /// are issued at this call's position; the returned selectable's value is
+    /// awaited only by a fresh schedule's selector.
+    async fn issue_run_realization<'run>(
+        &'run self,
+        request: crate::tool_dispatch::RealizationRequest,
+    ) -> Result<crate::tool_dispatch::IssuedRealization<'run>, RuntimeEffectControllerError> {
+        let _ = request;
+        Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineControlUnsupported,
+            "this controller issues no Run realization",
+        ))
+    }
+
+    /// Attach to previously issued protected work without sending or executing it again.
+    async fn attach_run_realization<'run>(
+        &'run self,
+        invocation_id: String,
+    ) -> Result<
+        crate::tool_dispatch::RunSelectable<'run, crate::tool_dispatch::RealizationReceipt>,
+        RuntimeEffectControllerError,
+    > {
+        let _ = invocation_id;
+        Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineControlUnsupported,
+            "this controller attaches no realization",
+        ))
+    }
+
     /// Register a durable retry backoff now, preserving its deadline on replay.
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
         let _ = backoff_ms;

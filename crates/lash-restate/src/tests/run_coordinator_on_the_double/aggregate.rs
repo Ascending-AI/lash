@@ -146,6 +146,7 @@ async fn l18_all_drains_a_committed_operand_before_the_remaining_bodies_finish()
             server: backend.server().clone(),
         });
         let probe = Arc::new(probe);
+        backend.install_tool_realizer(probe.clone());
         let finished = Arc::new(Mutex::new(Vec::new()));
         let attempt: lash_restate_test::HandlerAttempt = {
             let probe = Arc::clone(&probe);
@@ -286,6 +287,7 @@ async fn l06_race_returns_before_inline_loser_and_keeps_it_unconsumed() {
     let backend = lash_restate_test::backend(4882, ServerConfig::default())
         .await
         .unwrap();
+    backend.install_tool_realizer(probe.clone());
     let attempt: lash_restate_test::HandlerAttempt = {
         let returned = Arc::clone(&returned);
         let probe = Arc::clone(&probe);
@@ -401,6 +403,7 @@ async fn l05_check_cancel_is_an_operand_rejection_before_and_after() {
             let backend = lash_restate_test::backend(4925, ServerConfig::default())
                 .await
                 .unwrap();
+            backend.install_tool_realizer(probe.clone());
             let finished = Arc::new(AtomicBool::new(false));
             let attempt: lash_restate_test::HandlerAttempt = {
                 let probe = Arc::clone(&probe);
@@ -540,6 +543,7 @@ async fn l05_check_cancel_never_replaces_an_earlier_winner() {
             let backend = lash_restate_test::backend(0x492505, ServerConfig::default())
                 .await
                 .unwrap();
+            backend.install_tool_realizer(probe.clone());
             let finished = Arc::new(AtomicBool::new(false));
             let attempt: lash_restate_test::HandlerAttempt = {
                 let probe = Arc::clone(&probe);
@@ -661,6 +665,7 @@ async fn aggregate_case(
     let backend = lash_restate_test::backend(4882, ServerConfig::default())
         .await
         .unwrap();
+    backend.install_tool_realizer(probe.clone());
     let attempt: lash_restate_test::HandlerAttempt = {
         let probe = Arc::clone(&probe);
         let results = Arc::clone(&results);
@@ -1001,6 +1006,7 @@ async fn l03_l04_only_logical_closing_cancels_and_accepted_finals_still_drain() 
         let backend = lash_restate_test::backend(0x488203, ServerConfig::default())
             .await
             .unwrap();
+        backend.install_tool_realizer(probe.clone());
         let attempt: lash_restate_test::HandlerAttempt = {
             let calls = Arc::clone(&calls);
             let records = Arc::clone(&records);
@@ -1134,6 +1140,7 @@ async fn closing_deferred_seal_case(resolved: bool) {
     let backend = lash_restate_test::backend(0x488204, ServerConfig::default())
         .await
         .unwrap();
+    backend.install_tool_realizer(probe.clone());
     let ingress = backend.ingress();
     let records = Arc::new(Mutex::new(Vec::new()));
     let attempt: lash_restate_test::HandlerAttempt = {
@@ -1272,6 +1279,7 @@ async fn l06_l16_worker_loss_recovers_the_loser_without_closing_or_consuming_it(
     let backend = lash_restate_test::backend(0x488206, ServerConfig::default())
         .await
         .unwrap();
+    backend.install_tool_realizer(probe.clone());
     backend
         .server()
         .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
@@ -1477,6 +1485,7 @@ async fn l05_l06_l09_generic_timer_and_admitted_handles_share_the_run() {
     let backend = lash_restate_test::backend(4895, ServerConfig::default())
         .await
         .unwrap();
+    backend.install_tool_realizer(probe.clone());
     let attempt: lash_restate_test::HandlerAttempt = {
         let probe = Arc::clone(&probe);
         let finished = Arc::clone(&finished);

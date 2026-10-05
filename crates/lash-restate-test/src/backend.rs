@@ -555,6 +555,10 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
     /// The backend a runtime runs on: lash-restate's engine over the store
     /// set, connected to the server double. Hand it to a core wherever a
     /// test used a SQLite effect backend.
+    pub fn install_tool_realizer(&self, realizer: Arc<dyn lash_core::tool_dispatch::ToolRealizer>) {
+        self.processes.install_tool_realizer(realizer);
+    }
+
     pub fn lash_backend(&self) -> lash_core::Backend {
         lash_core::Backend::new(self.restate.clone())
     }
@@ -896,6 +900,10 @@ impl SeparateBuild {
     }
 
     /// The backend a core of this build runs on.
+    pub fn install_tool_realizer(&self, realizer: Arc<dyn lash_core::tool_dispatch::ToolRealizer>) {
+        self.processes.install_tool_realizer(realizer);
+    }
+
     pub fn lash_backend(&self) -> lash_core::Backend {
         lash_core::Backend::new(self.restate.clone())
     }

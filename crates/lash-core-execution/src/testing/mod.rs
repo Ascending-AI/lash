@@ -1378,8 +1378,9 @@ async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
         None => builder,
     };
     let dispatch = build_atomic_tool_dispatch(builder);
+    let context = crate::tool_dispatch::IntentRealizationContext::from(dispatch.as_ref());
     crate::tool_dispatch::execute_final_tool_intents(
-        dispatch.as_ref(),
+        &context,
         tool_call_id,
         intents,
         child_trace_hook,

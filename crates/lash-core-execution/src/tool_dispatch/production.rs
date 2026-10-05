@@ -5,7 +5,8 @@ use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use crate::session::tool_execution::{ToolAggregateOutcome, ToolAggregateRequest};
 use crate::tool_run::*;
 use crate::{
-    PreparedToolCall, RuntimeExecutionContext, ToolCallOutput, ToolCallRecord, ToolIntents,
+    PreparedToolCall, RuntimeEffectControllerError, RuntimeExecutionContext, ToolCallOutput,
+    ToolCallRecord, ToolIntents,
 };
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
@@ -1021,32 +1022,38 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         }
         Ok(())
     }
-    async fn realize_declarations(
-        &self,
-        _call_id: &crate::ToolCallId,
-        _intents: &[crate::ToolIntentKind],
-    ) -> Result<(), String> {
-        Err("declarations need their canonical capture".to_owned())
-    }
-    async fn realize_capture(
+    async fn realization(
         &self,
         call_id: &crate::ToolCallId,
         capture: &SingletonCapture,
-    ) -> Result<(), String> {
-        let captured: Captured = decode(capture.output().ok_or("final has no canonical output")?)?;
+    ) -> Result<RealizationPayload, RuntimeEffectControllerError> {
+        let shape = |message: String| {
+            RuntimeEffectControllerError::new(crate::RuntimeErrorCode::RuntimeToolRunShape, message)
+        };
+        let captured: Captured = decode(
+            capture
+                .output()
+                .ok_or_else(|| shape("final has no canonical output".into()))?,
+        )
+        .map_err(shape)?;
         let prepared = self
             .prepared
             .lock_recover()
             .get(call_id)
             .cloned()
-            .ok_or("the final has no admitted preparation")?;
-        let mut dispatch = self.dispatch(&prepared.input).await?;
+            .ok_or_else(|| shape("the final has no admitted preparation".into()))?;
+        let mut dispatch = self.context.dispatch().as_ref().clone();
+        dispatch.parent_invocation = prepared.input.parent.clone();
+        dispatch.execution_env_spec = self
+            .context
+            .recorded_tool_run_env_spec(&prepared.input.environment)
+            .await?;
         let attempt = match captured.occurrence {
             crate::plugin::ToolHookOccurrence::Attempt { attempt }
             | crate::plugin::ToolHookOccurrence::DeferredCompletion { attempt } => attempt,
             crate::plugin::ToolHookOccurrence::Admission
             | crate::plugin::ToolHookOccurrence::Cached => {
-                return Err("tool declarations have no recorded attempt".into());
+                return Err(shape("tool declarations have no recorded attempt".into()));
             }
         };
         dispatch.parent_invocation = Some(
@@ -1054,17 +1061,26 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 .attempt_invocation(&dispatch, &prepared.call, attempt.get())
                 .into(),
         );
-        let outcomes = intent_executor::execute_final_tool_intents(
-            &dispatch,
-            call_id,
-            &captured.intents,
-            None,
-        )
-        .await
-        .map_err(|error| error.to_string())?;
+        Ok(RealizationPayload {
+            intents: captured.intents,
+            dispatch: Some(RealizationDispatch {
+                owner: dispatch.owner,
+                parent_invocation: dispatch.parent_invocation,
+                process_lineage: dispatch.process_lineage,
+                process_originator: dispatch.process_originator,
+                environment: dispatch.execution_env_spec,
+                plugin_admission: dispatch.plugins.plugin_admission(),
+            }),
+        })
+    }
+    fn adopt_realization(
+        &self,
+        call_id: &crate::ToolCallId,
+        receipt: &RealizationReceipt,
+    ) -> Result<(), RuntimeEffectControllerError> {
         self.declarations
             .lock_recover()
-            .insert(call_id.clone(), outcomes);
+            .insert(call_id.clone(), receipt.outcomes.clone());
         Ok(())
     }
     async fn present(

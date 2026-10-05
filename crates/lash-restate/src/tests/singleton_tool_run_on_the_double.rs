@@ -1201,22 +1201,6 @@ impl SingletonToolHandlers for Probe {
         Ok(self.cancel.load(Ordering::SeqCst))
     }
 
-    async fn realize_declarations(
-        &self,
-        call_id: &ToolCallId,
-        intents: &[ToolIntentKind],
-    ) -> Result<(), String> {
-        self.realizations.fetch_add(1, Ordering::SeqCst);
-        let mut realized = self.realized.lock().unwrap();
-        // The exactly-once fence, keyed by call and declaration.
-        for kind in intents {
-            if !realized.contains(&(call_id.clone(), *kind)) {
-                realized.push((call_id.clone(), *kind));
-            }
-        }
-        Ok(())
-    }
-
     async fn present(
         &self,
         call_id: &ToolCallId,
@@ -1316,6 +1300,7 @@ async fn drive(
     let backend = lash_restate_test::backend(seed, ServerConfig::default())
         .await
         .unwrap();
+    backend.install_tool_realizer(probe.clone());
     for point in crashes {
         backend.server().crash_on(CrashRule::new(point));
     }
@@ -1388,6 +1373,9 @@ fn events(records: &[RunRecord]) -> Vec<Vec<&'static str>> {
                     RunEvent::Decided { .. } => "decided",
                     RunEvent::DeclarationsIssued { .. } => "declarations_issued",
                     RunEvent::DeclarationsSettled { .. } => "declarations_settled",
+                    RunEvent::RealizationAdmitted { .. } => "realization_admitted",
+                    RunEvent::RealizationIssued { .. } => "realization_issued",
+                    RunEvent::Realized { .. } => "realized",
                     RunEvent::StartAdmitted { .. } => "start_admitted",
                     RunEvent::StartLaunched { .. } => "start_launched",
                     RunEvent::StartDischarged { .. } => "start_discharged",
@@ -1858,13 +1846,12 @@ async fn an_undeclared_outcome_is_refused_before_anything_it_declared_is_realize
 /// became durable. Serving V must not bypass the nested command it issued.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn l04_a_journaled_intent_replays_before_its_protected_presentation() {
-    struct JournaledIntent<'a> {
-        scoped: &'a lash_core::ScopedEffectController<'a>,
+    struct JournaledIntent {
         probe: Arc<Probe>,
         mutations: Arc<AtomicUsize>,
     }
     #[async_trait::async_trait]
-    impl SingletonToolHandlers for JournaledIntent<'_> {
+    impl SingletonToolHandlers for JournaledIntent {
         async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
             self.probe.prepare(call).await
         }
@@ -1891,34 +1878,6 @@ async fn l04_a_journaled_intent_replays_before_its_protected_presentation() {
         async fn run_cancel_requested(&self) -> Result<bool, String> {
             Ok(false)
         }
-
-        async fn realize_declarations(
-            &self,
-            call: &ToolCallId,
-            intents: &[ToolIntentKind],
-        ) -> Result<(), String> {
-            self.scoped
-                .controller()
-                .record_run_record(
-                    "l04:external-intent".to_owned(),
-                    Box::pin(async {
-                        self.mutations.fetch_add(1, Ordering::SeqCst);
-                        Ok(lash_core::tool_run::RunJournalEntry {
-                            state: Vec::new(),
-                            materials: Vec::new(),
-                            record: RunRecord {
-                                segment: SegmentOrdinal(0),
-                                first: lash_core::tool_run::RunEventOrdinal(0),
-                                events: Vec::new(),
-                                trace: None,
-                            },
-                        })
-                    }),
-                )
-                .await
-                .map_err(|error| error.to_string())?;
-            self.probe.realize_declarations(call, intents).await
-        }
         async fn present(
             &self,
             call: &ToolCallId,
@@ -1942,6 +1901,53 @@ async fn l04_a_journaled_intent_replays_before_its_protected_presentation() {
             Err("the witness declares no start".into())
         }
     }
+    #[async_trait::async_trait]
+    impl lash_core::tool_dispatch::ToolRealizer for JournaledIntent {
+        async fn realize(
+            &self,
+            request: lash_core::tool_dispatch::RealizationRequest,
+            scoped: lash_core::ScopedEffectController<'_>,
+        ) -> Result<
+            lash_core::tool_dispatch::RealizationReceipt,
+            lash_core::RuntimeEffectControllerError,
+        > {
+            let call_id = &request.call_id;
+            let intents = match &self.probe.body {
+                SingletonBodyOutcome::Done { intents, .. } => intents.clone(),
+                _ => Vec::new(),
+            };
+            let operation = async {
+                scoped
+                    .controller()
+                    .record_run_record(
+                        "l04:external-intent".to_owned(),
+                        Box::pin(async {
+                            self.mutations.fetch_add(1, Ordering::SeqCst);
+                            Ok(lash_core::tool_run::RunJournalEntry {
+                                state: Vec::new(),
+                                materials: Vec::new(),
+                                record: RunRecord {
+                                    segment: SegmentOrdinal(0),
+                                    first: lash_core::tool_run::RunEventOrdinal(0),
+                                    events: Vec::new(),
+                                    trace: None,
+                                },
+                            })
+                        }),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                self.probe.record_intents(call_id, &intents).await
+            };
+            operation.await.map_err(|message| {
+                lash_core::RuntimeEffectControllerError::from(
+                    lash_core::PluginError::attempt_fault(message),
+                )
+            })?;
+            Ok(Default::default())
+        }
+    }
+
     let backend = lash_restate_test::backend(0x493309, ServerConfig::default())
         .await
         .unwrap();
@@ -1966,20 +1972,19 @@ async fn l04_a_journaled_intent_replays_before_its_protected_presentation() {
     let mutations = Arc::new(AtomicUsize::new(0));
     let returned: Returned = Arc::new(Mutex::new(Vec::new()));
     let attempt: lash_restate_test::HandlerAttempt = {
+        let realization_slot = backend.process_worker_slot();
         let mutations = mutations.clone();
         let returned = returned.clone();
         Arc::new(move |scoped| {
+            let realization_slot = realization_slot.clone();
             let call = call.clone();
             let probe = probe.clone();
             let mutations = mutations.clone();
             let returned = returned.clone();
             Box::pin(async move {
-                let handlers = JournaledIntent {
-                    scoped: &scoped,
-                    probe,
-                    mutations,
-                };
-                let result = run_singleton(&scoped, &call, Arc::new(handlers)).await;
+                let handlers = Arc::new(JournaledIntent { probe, mutations });
+                realization_slot.install_tool_realizer(handlers.clone());
+                let result = run_singleton(&scoped, &call, handlers).await;
                 returned.lock().unwrap().push(result);
             })
         })
@@ -1999,4 +2004,45 @@ async fn l04_a_journaled_intent_replays_before_its_protected_presentation() {
         .expect("the replay completed");
     assert!(matches!(result.terminal, SingletonTerminal::Final { .. }));
     assert_eq!(mutations.load(Ordering::SeqCst), 1, "one external mutation");
+}
+
+impl Probe {
+    pub(super) async fn record_intents(
+        &self,
+        call_id: &ToolCallId,
+        intents: &[ToolIntentKind],
+    ) -> Result<(), String> {
+        self.realizations.fetch_add(1, Ordering::SeqCst);
+        let mut realized = self.realized.lock().unwrap();
+        // The exactly-once fence, keyed by call and declaration.
+        for kind in intents {
+            if !realized.contains(&(call_id.clone(), *kind)) {
+                realized.push((call_id.clone(), *kind));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::tool_dispatch::ToolRealizer for Probe {
+    async fn realize(
+        &self,
+        request: lash_core::tool_dispatch::RealizationRequest,
+        _scoped: lash_core::ScopedEffectController<'_>,
+    ) -> Result<lash_core::tool_dispatch::RealizationReceipt, lash_core::RuntimeEffectControllerError>
+    {
+        let intents = match &self.body {
+            SingletonBodyOutcome::Done { intents, .. } => intents.clone(),
+            _ => Vec::new(),
+        };
+        self.record_intents(&request.call_id, &intents)
+            .await
+            .map_err(|message| {
+                lash_core::RuntimeEffectControllerError::from(
+                    lash_core::PluginError::attempt_fault(message),
+                )
+            })?;
+        Ok(Default::default())
+    }
 }

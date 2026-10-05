@@ -343,14 +343,6 @@ impl SingletonToolHandlers for Starter {
         Ok(())
     }
 
-    async fn realize_declarations(
-        &self,
-        _call_id: &ToolCallId,
-        _intents: &[ToolIntentKind],
-    ) -> Result<(), String> {
-        Err("a declared start is not realized as an intent".to_owned())
-    }
-
     async fn present(
         &self,
         call_id: &ToolCallId,

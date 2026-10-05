@@ -246,18 +246,6 @@ impl SingletonToolHandlers for Echo {
     async fn run_cancel_requested(&self) -> Result<bool, String> {
         Ok((self.cancelled)())
     }
-
-    async fn realize_declarations(
-        &self,
-        _: &lash_core::ToolCallId,
-        intents: &[lash_core::ToolIntentKind],
-    ) -> Result<(), String> {
-        if intents.is_empty() {
-            Ok(())
-        } else {
-            Err("H3 echo admits no declarations".into())
-        }
-    }
     async fn present(
         &self,
         _: &lash_core::ToolCallId,

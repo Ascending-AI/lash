@@ -230,6 +230,7 @@ impl<'a> RunCoordinator<'a> {
                 || plan.operands.is_empty()
                 || (self.pending.is_empty()
                     && self.timers.is_empty()
+                    && self.realizing.is_empty()
                     && self.owed.is_empty()
                     && presentation.is_none())
             {
@@ -442,7 +443,7 @@ impl<'a> RunCoordinator<'a> {
             self.cancel(&call_id, handlers.get(), source.as_ref())
                 .await?;
         }
-        while !self.pending.is_empty() {
+        while !self.pending.is_empty() || !self.realizing.is_empty() {
             self.progress_inner().await?;
         }
         self.drain_starts().await?;

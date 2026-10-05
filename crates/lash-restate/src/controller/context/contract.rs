@@ -118,6 +118,48 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         })
     }
 
+    /// Send one admitted realization and register its attach notification.
+    fn issue_run_realization<'run>(
+        &'run self,
+        namespace: &'run crate::RestateNamespace,
+        request: lash_core::tool_dispatch::RealizationRequest,
+    ) -> crate::JournaledFuture<
+        'run,
+        lash_core::tool_dispatch::IssuedRealization<'run>,
+        lash_core::RuntimeEffectControllerError,
+    >
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async move {
+            let _ = (namespace, request);
+            Err(lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::EngineControlUnsupported,
+                "this context issues no realization",
+            ))
+        })
+    }
+
+    fn attach_run_realization<'run>(
+        &'run self,
+        invocation_id: String,
+    ) -> crate::JournaledFuture<
+        'run,
+        lash_core::tool_dispatch::RunSelectable<'run, lash_core::tool_dispatch::RealizationReceipt>,
+        lash_core::RuntimeEffectControllerError,
+    >
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async move {
+            let _ = invocation_id;
+            Err(lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::EngineControlUnsupported,
+                "this context attaches no realization",
+            ))
+        })
+    }
+
     /// Submits the process's workflow run.
     ///
     /// The failure is classified because the scheduling boundary compensates on

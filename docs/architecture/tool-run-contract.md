@@ -305,8 +305,12 @@ runs several calls in one logical Run, each admitted as a singleton round.
 durable. `drain` then works through every decided call in rank order. A final
 whose result declares intents issues them (`declare`) only once every
 committed final ranked below it is seated (`RunLedger::drain_frontier_open`),
-realizes them behind their exactly-once fences inside its `present` step,
-and settles them in the same record as its presentation and incorporation.
+sends intent realization to `LashToolRealization` under the Run/call idempotency
+key and records its durable invocation ID (ADR 0130). That invocation owns
+every nested intent command. The Run selects and adopts its durable receipt
+before presentation, then settles declarations in the presentation and
+incorporation record. A physical cut transfers the invocation ID while
+realization continues; the successor attaches to that exact invocation.
 An intent-free final seats at its decision without waiting, so its seat
 certifies nothing about lower ranks: the frontier is every lower rank, never
 only the one just below (L18), and the fold refuses a declaration issued

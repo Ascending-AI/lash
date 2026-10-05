@@ -284,6 +284,28 @@ where
         self.inner.start_run_prepare(name, step)
     }
 
+    async fn issue_run_realization<'step>(
+        &'step self,
+        request: lash_core::tool_dispatch::RealizationRequest,
+    ) -> Result<lash_core::tool_dispatch::IssuedRealization<'step>, RuntimeEffectControllerError>
+    {
+        self.inner.issue_run_realization(request).await
+    }
+
+    /// Attach to previously issued protected work without sending or executing it again.
+    async fn attach_run_realization<'step>(
+        &'step self,
+        invocation_id: String,
+    ) -> Result<
+        lash_core::tool_dispatch::RunSelectable<
+            'step,
+            lash_core::tool_dispatch::RealizationReceipt,
+        >,
+        RuntimeEffectControllerError,
+    > {
+        self.inner.attach_run_realization(invocation_id).await
+    }
+
     fn start_run_retry(&self, backoff_ms: u64) -> lash_core::tool_dispatch::RunRetryTimer<'_> {
         self.inner.start_run_retry(backoff_ms)
     }

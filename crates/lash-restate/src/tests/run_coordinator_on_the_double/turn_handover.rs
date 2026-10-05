@@ -65,6 +65,7 @@ async fn turn_receipts(side: CrashSide) {
         probe.materials = Some(store.clone());
         probe.gate = Some((calls[2].0.call_id.clone(), calls[0].0.call_id.clone()));
         let probe = Arc::new(probe);
+        backend.install_tool_realizer(probe.clone());
         let crashes = lash_restate_test::CrashCount::new();
         assert!(backend.server().on_crash(crashes.listener()));
         let armed = Arc::new(AtomicBool::new(false));
@@ -459,6 +460,7 @@ async fn cancellation_closes_captured_and_adopted_losers() {
         let mut probe = Probe::new(&calls);
         probe.materials = Some(stores.session_store_factory());
         let probe = Arc::new(probe);
+        backend.install_tool_realizer(probe.clone());
         let captured = Arc::new(Mutex::new(None));
         let attempt: lash_restate_test::HandlerAttempt = {
             let probe = probe.clone();
@@ -699,6 +701,7 @@ async fn l13_k6_old_cut_replays_after_successor_material_retirement() {
     let mut probe = Probe::new(&[(call.clone(), Kind::IntentFree)]);
     probe.materials = Some(backend.stores().process_env_store());
     let probe = Arc::new(probe);
+    backend.install_tool_realizer(probe.clone());
     let captures = Arc::new(Mutex::new(Vec::new()));
     let retired = Arc::new(AtomicBool::new(false));
     backend

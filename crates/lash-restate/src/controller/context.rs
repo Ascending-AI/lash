@@ -346,6 +346,47 @@ macro_rules! impl_restate_controller_context {
                     run_bridge::register(self, effect_name, None, future)
                 }
 
+                fn issue_run_realization<'run>(
+                    &'run self, namespace: &'run crate::RestateNamespace,
+                    request: lash_core::tool_dispatch::RealizationRequest,
+                ) -> crate::JournaledFuture<'run, lash_core::tool_dispatch::IssuedRealization<'run>, lash_core::RuntimeEffectControllerError>
+                where 'ctx: 'run {
+Box::pin(async move {
+                    use lash_core::tool_dispatch::{RunSelectable, SelectKey};
+                    let key = request.key.to_string();
+                    let send = crate::services::routed_service::<_, _, lash_core::tool_dispatch::RealizationReceipt>(
+                        self, &namespace.stable(crate::LashService::ToolRealization), "realize", request,
+                    ).idempotency_key(key).send();
+                    let invocation = send.await.map_err(|error| crate::wire::lash_terminal(&error, lash_core::RuntimeErrorCode::EngineEffectController))?;
+                    let attach = invocation.attach::<crate::Reply<lash_core::tool_dispatch::RealizationReceipt>>();
+                    let handle = SealedDurableFuture::handle(&attach).ok_or_else(|| lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::EngineEffectController, "realization attach has no engine notification",
+                    ))?;
+                    Ok(lash_core::tool_dispatch::IssuedRealization { invocation_id: invocation.invocation_id().to_owned(), receipt: RunSelectable {
+                        key: Box::pin(std::future::ready(Ok(SelectKey::from_engine(u32::from(handle))))),
+                        value: Box::pin(async move {
+                            attach.await.map(|reply| reply.body).map_err(|error| crate::wire::lash_terminal(&error, lash_core::RuntimeErrorCode::EngineEffectController))
+                        }),
+                    } })
+                })
+}
+
+
+                fn attach_run_realization<'run>(&'run self, invocation_id: String)
+                    -> crate::JournaledFuture<'run, lash_core::tool_dispatch::RunSelectable<'run, lash_core::tool_dispatch::RealizationReceipt>, lash_core::RuntimeEffectControllerError>
+                    where 'ctx: 'run {
+                    let invocation = ContextClient::invocation_handle(self, invocation_id);
+                    let attach = invocation.attach::<crate::Reply<lash_core::tool_dispatch::RealizationReceipt>>();
+                    let handle = SealedDurableFuture::handle(&attach);
+                    Box::pin(async move {
+                        let handle = handle.ok_or_else(|| lash_core::RuntimeEffectControllerError::new(lash_core::RuntimeErrorCode::EngineEffectController, "realization attach has no notification"))?;
+                        Ok(lash_core::tool_dispatch::RunSelectable {
+                            key: Box::pin(std::future::ready(Ok(lash_core::tool_dispatch::SelectKey::from_engine(u32::from(handle))))),
+                            value: Box::pin(async move { attach.await.map(|reply| reply.body).map_err(|error| crate::wire::lash_terminal(&error, lash_core::RuntimeErrorCode::EngineEffectController)) }),
+                        })
+                    })
+                }
+
                 fn start_process_workflow<'run>(
                     &'run self,
                     namespace: &'run crate::RestateNamespace,

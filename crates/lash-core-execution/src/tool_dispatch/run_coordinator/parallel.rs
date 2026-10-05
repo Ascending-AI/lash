@@ -11,6 +11,18 @@ pub(super) enum Ready {
     /// The durable timer fired.
     Timer,
     StartPrepared(std::sync::Arc<crate::tool_dispatch::RunStartPrepared>),
+    /// A realization invocation answered its receipt.
+    Realization(std::sync::Arc<RealizationReceipt>),
+}
+
+/// A final's issued realization whose receipt a schedule window selects and
+/// records (ADR 0130).
+pub(super) struct Realizing<'a> {
+    /// The engine notification identity the controller returned with the
+    /// attach; the schedule holds it beside the source and never polls it.
+    pub key: Shared<crate::tool_dispatch::RunSelectKey<'a>>,
+    /// The attach's receipt source, one of the schedule's selected works.
+    pub handle: Handle<'a>,
 }
 
 pub(super) struct AggregateTimer<'a> {
@@ -33,6 +45,9 @@ enum SelectedWork<'a> {
     AggregateTimer {
         key: String,
         leaf: u32,
+    },
+    Realization {
+        call_id: ToolCallId,
     },
 }
 
@@ -254,15 +269,18 @@ impl<'a> RunCoordinator<'a> {
         &mut self,
         presentation: &mut Option<drain::PendingPresentation<'a>>,
     ) -> Result<Option<(ToolCallId, DecidedCall)>, SingletonRunError> {
-        if presentation
-            .as_ref()
-            .is_some_and(|pending| pending.handle.is_none())
-        {
+        if presentation.as_ref().is_some_and(|pending| {
+            pending.handle.is_none() && !self.realizing.contains_key(&pending.call_id)
+        }) {
             let pending = presentation.take().ok_or(RunEventRefusal::EmptyRecord)?;
             self.present_pending(pending).await?;
             return Ok(None);
         }
-        if self.pending.is_empty() && self.timers.is_empty() && presentation.is_none() {
+        if self.pending.is_empty()
+            && self.timers.is_empty()
+            && self.realizing.is_empty()
+            && presentation.is_none()
+        {
             return Ok(None);
         }
         let mut decision = None;
@@ -296,6 +314,14 @@ impl<'a> RunCoordinator<'a> {
                     SelectedWork::AggregateTimer {
                         key: timer.key.clone(),
                         leaf: timer.leaf,
+                    },
+                )
+            }));
+            choices.extend(self.realizing.iter().map(|(call_id, realizing)| {
+                (
+                    realizing.handle.clone(),
+                    SelectedWork::Realization {
+                        call_id: call_id.clone(),
                     },
                 )
             }));
@@ -389,9 +415,30 @@ impl<'a> RunCoordinator<'a> {
                             state: Vec::new(),
                         });
                     }
+                    SelectedWork::Realization { call_id } => {
+                        let Ready::Realization(receipt) = ready else {
+                            return Err(format!("a realization returned {}", describe(&ready)));
+                        };
+                        let (reference, material) = mint(
+                            &owner,
+                            MaterialRole::RealizationReceipt,
+                            encode(receipt.as_ref())?,
+                        )?;
+                        return Ok(RunJournalEntry {
+                            record: RunRecord {
+                                events: vec![RunEvent::Realized {
+                                    call_id,
+                                    receipt: reference,
+                                }],
+                                ..record
+                            },
+                            materials: vec![material],
+                            state: Vec::new(),
+                        });
+                    }
                     SelectedWork::AggregateTimer { key, leaf } => {
                         if !matches!(ready, Ready::Timer) {
-                            return Err("aggregate timer returned an X receipt".to_owned());
+                            return Err(format!("aggregate timer returned {}", describe(&ready)));
                         }
                         return Ok(RunJournalEntry {
                             record: RunRecord {
@@ -476,6 +523,7 @@ impl<'a> RunCoordinator<'a> {
                         }
                     }
                     Ready::StartPrepared(_) => Err("an X returned a preparation".to_owned()),
+                    Ready::Realization(_) => Err("an X returned a realization receipt".to_owned()),
                     Ready::Timer => {
                         if !timer {
                             return Err("an X handle returned a timer wake".to_owned());
@@ -552,6 +600,31 @@ impl<'a> RunCoordinator<'a> {
                     })?;
                 self.timers.remove(position).handle.await?;
                 self.journal.accept(selected)?;
+                return Ok(None);
+            }
+            if let RunEvent::Realized { call_id, receipt } = event {
+                let call_id = call_id.clone();
+                let receipt = receipt.clone();
+                // A served record must not poll the attach: the issued
+                // handle and its engine notification identity are dropped,
+                // never awaited.
+                let entry = self.realizing.remove(&call_id).ok_or_else(|| {
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::EffectReplayDivergence,
+                        format!("the schedule selected no issued realization for {call_id}"),
+                    )
+                })?;
+                let Realizing { key, handle } = entry;
+                drop(handle);
+                drop(key);
+                self.journal.accept(selected)?;
+                let receipt: RealizationReceipt = self.journal.materials.decode(&receipt)?;
+                let handlers = self
+                    .handlers
+                    .get(&call_id)
+                    .cloned()
+                    .ok_or_else(|| boundary(&call_id))?;
+                handlers.get().adopt_realization(&call_id, &receipt)?;
                 return Ok(None);
             }
             let position = self
@@ -865,6 +938,15 @@ impl<'a> RunCoordinator<'a> {
         .boxed()
         .shared();
         Ok(handle)
+    }
+}
+
+fn describe(ready: &Ready) -> &'static str {
+    match ready {
+        Ready::Attempt(_) => "an X receipt",
+        Ready::Timer => "a timer wake",
+        Ready::Realization(_) => "a realization receipt",
+        Ready::StartPrepared(_) => "a preparation",
     }
 }
 

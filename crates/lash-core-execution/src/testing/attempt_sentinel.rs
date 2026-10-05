@@ -303,6 +303,26 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.start_run_prepare(name, step)
     }
 
+    async fn issue_run_realization<'run>(
+        &'run self,
+        request: crate::tool_dispatch::RealizationRequest,
+    ) -> Result<crate::tool_dispatch::IssuedRealization<'run>, RuntimeEffectControllerError> {
+        self.ledger
+            .record(format!("run_realization:{}", request.key));
+        self.inner.issue_run_realization(request).await
+    }
+
+    /// Attach to previously issued protected work without sending or executing it again.
+    async fn attach_run_realization<'run>(
+        &'run self,
+        invocation_id: String,
+    ) -> Result<
+        crate::tool_dispatch::RunSelectable<'run, crate::tool_dispatch::RealizationReceipt>,
+        RuntimeEffectControllerError,
+    > {
+        self.inner.attach_run_realization(invocation_id).await
+    }
+
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
         self.ledger.record(format!("run_retry:{backoff_ms}"));
         self.inner.start_run_retry(backoff_ms)

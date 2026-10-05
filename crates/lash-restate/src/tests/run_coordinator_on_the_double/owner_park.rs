@@ -276,6 +276,7 @@ impl World {
         let endpoint = crate::services::bind_lash_services(
             restate_sdk::endpoint::Endpoint::builder(),
             crate::services::LashServiceParts {
+                tool_realizer: Arc::new(crate::tests::NoIntentsRealizer),
                 effect_host: &host,
                 materials: stores.process_env_store(),
 

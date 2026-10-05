@@ -201,7 +201,7 @@ impl Ancestry {
 
 /// What a process hands the starts made inside it: its own scope and its
 /// ancestry, and the session capability its descendants inherit.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessLineage {
     ancestry: Ancestry,
     session: Option<SessionId>,

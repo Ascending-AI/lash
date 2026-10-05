@@ -81,6 +81,26 @@ pub trait EffectLayer: Send + Sync + 'static {
         inner.start_run_prepare(name, step)
     }
 
+    async fn issue_run_realization<'run>(
+        &'run self,
+        inner: &'run dyn RuntimeEffectController,
+        request: crate::tool_dispatch::RealizationRequest,
+    ) -> Result<crate::tool_dispatch::IssuedRealization<'run>, RuntimeEffectControllerError> {
+        inner.issue_run_realization(request).await
+    }
+
+    /// Attach to previously issued protected work without sending or executing it again.
+    async fn attach_run_realization<'run>(
+        &'run self,
+        inner: &'run dyn RuntimeEffectController,
+        invocation_id: String,
+    ) -> Result<
+        crate::tool_dispatch::RunSelectable<'run, crate::tool_dispatch::RealizationReceipt>,
+        RuntimeEffectControllerError,
+    > {
+        inner.attach_run_realization(invocation_id).await
+    }
+
     /// Whether the layered controller owns commit backpressure, as an
     /// engine-backed controller does.
     fn owns_commit_backpressure(&self, inner: &dyn RuntimeEffectController) -> bool {
@@ -707,6 +727,28 @@ impl RuntimeEffectController for LayeredController<'_> {
     ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_dispatch::RunStartPrepared> {
         self.layer
             .start_run_prepare(self.inner.as_ref(), name, step)
+    }
+
+    async fn issue_run_realization<'run>(
+        &'run self,
+        request: crate::tool_dispatch::RealizationRequest,
+    ) -> Result<crate::tool_dispatch::IssuedRealization<'run>, RuntimeEffectControllerError> {
+        self.layer
+            .issue_run_realization(self.inner.as_ref(), request)
+            .await
+    }
+
+    /// Attach to previously issued protected work without sending or executing it again.
+    async fn attach_run_realization<'run>(
+        &'run self,
+        invocation_id: String,
+    ) -> Result<
+        crate::tool_dispatch::RunSelectable<'run, crate::tool_dispatch::RealizationReceipt>,
+        RuntimeEffectControllerError,
+    > {
+        self.layer
+            .attach_run_realization(self.inner.as_ref(), invocation_id)
+            .await
     }
 
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {

@@ -91,6 +91,7 @@ pub(crate) fn process_segment_workflow_key(process_id: &ProcessId, segment_ordin
     }
 }
 
+mod realization;
 mod runner_failure;
 pub(crate) use runner_failure::{handler_error_from_plugin, journal_or_retry};
 use runner_failure::{is_replay_mismatch, is_terminal_runner_error, terminal_process_output};
@@ -1206,6 +1207,7 @@ impl RestateProcessDeployment {
             worker,
             segment_effect_budget,
             retry_max_attempts,
+            tool_realizer: _,
         } = serving;
         let mut workflow = LashProcessWorkflowImpl::new(
             Arc::new(RestateCoreProcessRunner { worker }),
@@ -1231,6 +1233,7 @@ impl RestateProcessDeployment {
 /// into one with the default policy.
 pub struct RestateProcessServing {
     worker: ProcessWorkerSource,
+    tool_realizer: Option<Arc<dyn lash_core::tool_dispatch::ToolRealizer>>,
     segment_effect_budget: Option<SegmentEffectBudget>,
     retry_max_attempts: u64,
 }
@@ -1240,6 +1243,23 @@ pub struct RestateProcessServing {
 pub(crate) type SegmentEffectBudget = Arc<dyn Fn(&ProcessRegistration) -> u64 + Send + Sync>;
 
 impl RestateProcessServing {
+    /// Serve protected intent execution on `realizer` in its own invocation.
+    pub fn with_tool_realizer(
+        mut self,
+        realizer: Arc<dyn lash_core::tool_dispatch::ToolRealizer>,
+    ) -> Self {
+        self.tool_realizer = Some(realizer);
+        self
+    }
+
+    pub(crate) fn tool_realizer(&self) -> Arc<dyn lash_core::tool_dispatch::ToolRealizer> {
+        self.tool_realizer.clone().unwrap_or_else(|| {
+            Arc::new(RestateCoreProcessRunner {
+                worker: self.worker.clone(),
+            })
+        })
+    }
+
     /// Serve processes on `worker` under the default segment policy: 10,000
     /// completed effects per incarnation.
     pub fn new(worker: DurableProcessWorker) -> Self {
@@ -1255,6 +1275,7 @@ impl RestateProcessServing {
     fn from_source(worker: ProcessWorkerSource) -> Self {
         Self {
             worker,
+            tool_realizer: None,
             segment_effect_budget: None,
             retry_max_attempts: PROCESS_HANDLER_MAX_ATTEMPTS,
         }
@@ -1302,9 +1323,18 @@ impl From<RestateProcessWorkerSlot> for RestateProcessServing {
 #[derive(Clone, Default)]
 pub struct RestateProcessWorkerSlot {
     worker: Arc<std::sync::RwLock<Option<DurableProcessWorker>>>,
+    tool_realizer: Arc<std::sync::RwLock<Option<Arc<dyn lash_core::tool_dispatch::ToolRealizer>>>>,
 }
 
 impl RestateProcessWorkerSlot {
+    /// Install the protected-intent realizer on an endpoint built over this slot.
+    pub fn install_tool_realizer(&self, realizer: Arc<dyn lash_core::tool_dispatch::ToolRealizer>) {
+        *self
+            .tool_realizer
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(realizer);
+    }
+
     /// An empty slot.
     pub fn new() -> Self {
         Self::default()

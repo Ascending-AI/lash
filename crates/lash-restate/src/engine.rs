@@ -243,6 +243,8 @@ impl RestateEngine {
         crate::compat::DeploymentWire::serve_host_fleet(crate::object_state::FleetView::of(
             self.stores.process_registry(),
         ));
+        let processes = processes.into();
+        let tool_realizer = processes.tool_realizer();
         Ok(bind_lash_services(
             restate_sdk::endpoint::Endpoint::builder(),
             LashServiceParts {
@@ -255,11 +257,12 @@ impl RestateEngine {
                 process_workflow: self
                     .process
                     .workflow(
-                        processes.into(),
+                        processes,
                         build_generation.clone(),
                         self.stores.attachment_referrers(),
                     )
                     .with_generation_drain(self.stores.generation_drain()),
+                tool_realizer,
                 session_shifts: self.session_work.shifts_slot().clone(),
                 build_generation,
                 namespace: self.namespace.clone(),

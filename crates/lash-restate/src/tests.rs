@@ -1615,3 +1615,19 @@ mod conformance_harness;
 mod harness_store_tiers;
 
 mod wait_generation_endpoint;
+
+pub(crate) struct NoIntentsRealizer;
+#[async_trait::async_trait]
+impl lash_core::tool_dispatch::ToolRealizer for NoIntentsRealizer {
+    async fn realize(
+        &self,
+        _: lash_core::tool_dispatch::RealizationRequest,
+        _: lash_core::ScopedEffectController<'_>,
+    ) -> Result<lash_core::tool_dispatch::RealizationReceipt, lash_core::RuntimeEffectControllerError>
+    {
+        Err(lash_core::RuntimeEffectControllerError::new(
+            lash_core::RuntimeErrorCode::RuntimeToolRunShape,
+            "fixture admits no intent realization",
+        ))
+    }
+}

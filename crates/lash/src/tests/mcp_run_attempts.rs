@@ -137,14 +137,6 @@ impl SingletonToolHandlers for Probe {
         Ok(self.cancel.load(Ordering::SeqCst))
     }
 
-    async fn realize_declarations(
-        &self,
-        _: &ToolCallId,
-        _: &[lash_sansio::ToolIntentKind],
-    ) -> Result<(), String> {
-        panic!("inline MCP declares no Lash effects")
-    }
-
     async fn present(
         &self,
         _: &ToolCallId,

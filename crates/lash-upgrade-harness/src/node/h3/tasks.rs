@@ -172,14 +172,6 @@ impl SingletonToolHandlers for Pending {
     async fn run_cancel_requested(&self) -> Result<bool, String> {
         self.0.run_cancel_requested().await
     }
-
-    async fn realize_declarations(
-        &self,
-        call: &lash_core::ToolCallId,
-        intents: &[lash_core::ToolIntentKind],
-    ) -> Result<(), String> {
-        self.0.realize_declarations(call, intents).await
-    }
     async fn present(
         &self,
         call: &lash_core::ToolCallId,

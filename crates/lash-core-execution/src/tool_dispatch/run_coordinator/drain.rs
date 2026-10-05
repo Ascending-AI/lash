@@ -20,6 +20,132 @@ pub(super) struct PendingPresentation<'a> {
 }
 
 impl<'a> RunCoordinator<'a> {
+    pub(super) async fn admit_declarations(
+        &mut self,
+        rank: u64,
+        call_id: ToolCallId,
+        capture: &SingletonCapture,
+        declares: bool,
+        handlers: &dyn SingletonToolHandlers,
+    ) -> Result<Option<DeclaredStartObligation>, SingletonRunError> {
+        let journal = &mut self.journal;
+        let mut obligation = None;
+        if declares {
+            let realize = !capture.intents().is_empty();
+            obligation = match capture.start() {
+                Some(start) => Some(recorded_obligation(journal, &call_id, start)?),
+                None => None,
+            };
+            let issued_prior = journal.records.iter().flat_map(|record| &record.events).any(
+                |event| matches!(event, RunEvent::DeclarationsIssued { call_id: id } if *id == call_id),
+            );
+            if issued_prior {
+                if realize {
+                    let recorded = journal
+                        .records
+                        .iter()
+                        .flat_map(|record| &record.events)
+                        .find_map(|event| match event {
+                            RunEvent::Realized {
+                                call_id: id,
+                                receipt,
+                            } if *id == call_id => Some(receipt.clone()),
+                            _ => None,
+                        });
+                    if let Some(reference) = recorded {
+                        let receipt: RealizationReceipt = journal.materials.decode(&reference)?;
+                        handlers.adopt_realization(&call_id, &receipt)?;
+                    } else if !self.realizing.contains_key(&call_id) {
+                        let invocation_id = journal
+                            .ledger
+                            .realization_invocation(&call_id)
+                            .ok_or_else(|| RunEventRefusal::RealizationOwed {
+                                call_id: call_id.clone(),
+                            })?
+                            .to_owned();
+                        journal.scoped.admit_journal_write()?;
+                        let receipt = journal
+                            .scoped
+                            .controller()
+                            .attach_run_realization(invocation_id)
+                            .await?;
+                        self.register_realization(call_id.clone(), receipt);
+                    }
+                }
+            } else {
+                if !journal.ledger.drain_frontier_open(rank) {
+                    return Err(RunEventRefusal::DrainFrontier { call_id }.into());
+                }
+                let mut issue = vec![RunEvent::DeclarationsIssued {
+                    call_id: call_id.clone(),
+                }];
+                if let Some(obligation) = &obligation {
+                    issue.push(RunEvent::StartAdmitted {
+                        call_id: call_id.clone(),
+                        start_key: obligation.start_key().clone(),
+                    });
+                }
+                let realization_key =
+                    realize.then(|| RealizationKey::for_call(&journal.owner, &call_id));
+                if let Some(key) = &realization_key {
+                    issue.push(RunEvent::RealizationAdmitted {
+                        call_id: call_id.clone(),
+                        key: key.clone(),
+                    });
+                }
+                let issued = journal.record(issue);
+                journal
+                    .append(
+                        record_name(&call_id, "declare"),
+                        Box::pin(async move {
+                            Ok(RunJournalEntry {
+                                state: Vec::new(),
+                                record: issued,
+                                materials: Vec::new(),
+                            })
+                        }),
+                    )
+                    .await?;
+                if let Some(key) = realization_key {
+                    // The send and the attach issue at this position of the
+                    // Run's program; a replay re-sends under the same key,
+                    // which the service dedups to the first invocation.
+                    let payload = handlers.realization(&call_id, capture).await?;
+                    journal.scoped.admit_journal_write()?;
+                    let issued = journal
+                        .scoped
+                        .controller()
+                        .issue_run_realization(RealizationRequest {
+                            key,
+                            scope: journal.scoped.admitted_scope().clone(),
+                            call_id: call_id.clone(),
+                            payload,
+                        })
+                        .await?;
+                    let sent = journal.record(vec![RunEvent::RealizationIssued {
+                        call_id: call_id.clone(),
+                        invocation_id: issued.invocation_id,
+                    }]);
+                    journal
+                        .append(
+                            record_name(&call_id, "realization:issued"),
+                            Box::pin(async move {
+                                Ok(RunJournalEntry {
+                                    record: sent,
+                                    state: Vec::new(),
+                                    materials: Vec::new(),
+                                })
+                            }),
+                        )
+                        .await?;
+                    self.register_realization(call_id.clone(), issued.receipt);
+                }
+            }
+        }
+
+        Ok(obligation)
+    }
+
     /// Drain every decided call in rank order: a final's declarations once
     /// every lower committed final is seated, then its presentation with its
     /// incorporation (V).
@@ -69,7 +195,6 @@ impl<'a> RunCoordinator<'a> {
         let decision = owed.decision.clone();
         let capture = owed.capture.clone();
         restore_contributions(&self.journal, &call_id, handlers)?;
-        let journal = &mut self.journal;
         let (CallDecision::Final { declares, .. }, Some(capture)) = (&decision, capture.clone())
         else {
             return Ok(PendingPresentation {
@@ -88,42 +213,17 @@ impl<'a> RunCoordinator<'a> {
         // before its presentation.
         // Its declared start is admitted with them and drains before they
         // settle.
-        let mut settle = Vec::new();
-        let mut obligation = None;
-        if *declares {
-            if !journal.ledger.drain_frontier_open(rank) {
-                return Err(RunEventRefusal::DrainFrontier { call_id }.into());
-            }
-            obligation = match capture.start() {
-                Some(start) => Some(recorded_obligation(journal, &call_id, start)?),
-                None => None,
-            };
-            let mut issue = vec![RunEvent::DeclarationsIssued {
+        let obligation = self
+            .admit_declarations(rank, call_id.clone(), &capture, *declares, handlers)
+            .await?;
+        let settle = if *declares {
+            vec![RunEvent::DeclarationsSettled {
                 call_id: call_id.clone(),
-            }];
-            if let Some(obligation) = &obligation {
-                issue.push(RunEvent::StartAdmitted {
-                    call_id: call_id.clone(),
-                    start_key: obligation.start_key().clone(),
-                });
-            }
-            let issued = journal.record(issue);
-            journal
-                .append(
-                    record_name(&call_id, "declare"),
-                    Box::pin(async move {
-                        Ok(RunJournalEntry {
-                            state: Vec::new(),
-                            record: issued,
-                            materials: Vec::new(),
-                        })
-                    }),
-                )
-                .await?;
-            settle.push(RunEvent::DeclarationsSettled {
-                call_id: call_id.clone(),
-            });
-        }
+            }]
+        } else {
+            Vec::new()
+        };
+        let journal = &mut self.journal;
 
         let isolated = match &capture {
             SingletonCapture::Isolated { binding } => Some(binding.as_ref().clone()),
@@ -162,9 +262,8 @@ impl<'a> RunCoordinator<'a> {
         })
     }
 
-    /// V is issued once at the drain frontier, after preparation's durable
-    /// window. Realization stays at this owner point until its receipt path
-    /// joins the schedule (ADR 0130).
+    /// V is issued once at the drain frontier after preparation and the
+    /// independent realization receipt have been accepted and adopted.
     pub(super) async fn present_pending(
         &mut self,
         pending: PendingPresentation<'a>,
@@ -174,21 +273,6 @@ impl<'a> RunCoordinator<'a> {
         let capture = pending.owed.capture.clone();
         let call_id = pending.call_id.clone();
         let prepared = pending.prepared.clone();
-        if matches!(decision, CallDecision::Final { declares: true, .. })
-            && let Some(capture) = &capture
-            && !capture.intents().is_empty()
-        {
-            handlers
-                .get()
-                .realize_capture(&call_id, capture)
-                .await
-                .map_err(|message| {
-                    RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::EngineEffectController,
-                        message,
-                    )
-                })?;
-        }
         let template = self.journal.record(Vec::new());
         let owner = self.journal.materials.owner.clone();
         let opener = self.journal.owner.clone();

@@ -58,9 +58,9 @@ pub use refusal::{
 };
 pub use retention::{MaterialBundle, MaterialHolder, MaterialRetentionError, RetainedBundle};
 pub use run_event::{
-    AttemptOrdinal, AttemptResult, CallDecision, PendingStart, ResultSource, RunAttemptEntry,
-    RunEvent, RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger, RunLifecycle,
-    RunRecord, RunTraceFacts, SegmentOrdinal,
+    AttemptOrdinal, AttemptResult, CallDecision, PendingStart, RealizationKey, ResultSource,
+    RunAttemptEntry, RunEvent, RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger,
+    RunLifecycle, RunRecord, RunTraceFacts, SegmentOrdinal,
 };
 pub use source_seal::{
     SealOutcome, SealRefusal, SealWriter, SourceAuthority, SourceDescriptor, SourceRefusal,

@@ -4,8 +4,50 @@ use tracing::Instrument as _;
 
 use super::ToolDispatchContext;
 
+/// The dispatch fields intent realization reads, carried without the rest of
+/// a [`ToolDispatchContext`] so a realization that runs outside the Run's own
+/// invocation (ADR 0130) can supply them from its request.
+pub struct IntentRealizationContext<'run> {
+    pub effect_controller: crate::runtime::ScopedEffectController<'run>,
+    pub owner: crate::ExecutionOwner,
+    pub processes: Arc<dyn crate::ProcessService>,
+    pub trigger_router: Option<crate::TriggerRouter>,
+    pub process_engines: crate::ProcessEngineRegistry,
+    pub parent_invocation: Option<crate::RuntimeInvocation>,
+    pub process_lineage: Option<crate::ProcessLineage>,
+    pub process_originator: Option<crate::ProcessOriginator>,
+}
+
+impl<'run> From<&ToolDispatchContext<'run>> for IntentRealizationContext<'run> {
+    fn from(context: &ToolDispatchContext<'run>) -> Self {
+        Self {
+            effect_controller: context.effect_controller.clone(),
+            owner: context.owner.clone(),
+            processes: Arc::clone(&context.processes),
+            trigger_router: context.trigger_router.clone(),
+            process_engines: context.process_engines.clone(),
+            parent_invocation: context.parent_invocation.clone(),
+            process_lineage: context.process_lineage.clone(),
+            process_originator: context.process_originator.clone(),
+        }
+    }
+}
+
+impl IntentRealizationContext<'_> {
+    /// Attribution available without a causal parent comes only from the
+    /// admitted execution scope, exactly as
+    /// [`ToolDispatchContext::parentless_attribution`] resolves it.
+    pub(crate) fn parentless_attribution(&self) -> crate::RuntimeAttribution {
+        self.effect_controller
+            .execution_scope()
+            .session_id()
+            .map(crate::RuntimeAttribution::for_session)
+            .unwrap_or_else(crate::RuntimeAttribution::none)
+    }
+}
+
 pub async fn execute_final_tool_intents(
-    context: &ToolDispatchContext<'_>,
+    context: &IntentRealizationContext<'_>,
     tool_call_id: &lash_sansio::ToolCallId,
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
@@ -256,7 +298,7 @@ pub(super) fn admit_batch(
 }
 
 fn refuse_all(
-    context: &ToolDispatchContext<'_>,
+    context: &IntentRealizationContext<'_>,
     execution_scope_id: &str,
     tool_call_id: &lash_sansio::ToolCallId,
     intents: &crate::ToolIntents,
@@ -321,7 +363,7 @@ pub(crate) fn declaring_identity(
 }
 
 fn derive_identity(
-    context: &ToolDispatchContext<'_>,
+    context: &IntentRealizationContext<'_>,
     execution_scope_id: &str,
     tool_call_id: &lash_sansio::ToolCallId,
     intent_index: usize,
@@ -359,7 +401,7 @@ fn refused(
 }
 
 pub(super) fn validate_trigger_registration_authority(
-    context: &ToolDispatchContext<'_>,
+    context: &IntentRealizationContext<'_>,
     intent: &crate::RegisterTriggerIntent,
 ) -> Option<crate::ToolIntentRefusalReason> {
     let expected_owner = match crate::resolve_trigger_owner_scope(
@@ -409,7 +451,7 @@ pub(super) fn validate_trigger_registration_authority(
     reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
 )]
 async fn execute_one(
-    context: &ToolDispatchContext<'_>,
+    context: &IntentRealizationContext<'_>,
     intent: &crate::ToolIntent,
     identity: &crate::ToolIntentIdentity,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
@@ -556,7 +598,7 @@ async fn execute_one(
     reason = "the controller carries an admitted scope"
 )]
 async fn realize_definition(
-    context: &ToolDispatchContext<'_>,
+    context: &IntentRealizationContext<'_>,
     identity: &crate::ToolIntentIdentity,
     command: crate::ProcessCommand,
 ) -> Result<crate::ProcessDefinition, crate::PluginError> {
@@ -603,7 +645,7 @@ async fn realize_definition(
     reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
 )]
 async fn register_recorded_trigger(
-    context: &ToolDispatchContext<'_>,
+    context: &IntentRealizationContext<'_>,
     router: &crate::TriggerRouter,
     identity: &crate::ToolIntentIdentity,
     intent: &crate::RegisterTriggerIntent,

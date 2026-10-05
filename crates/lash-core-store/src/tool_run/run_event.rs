@@ -21,6 +21,13 @@
 //! it is admitted with them, launched under its key, and discharged — its
 //! recorded cancel policy followed and its consumer hold released — before
 //! they settle. A start key names one start of the Run.
+//!
+//! A final's intent realization (ADR 0130) is likewise admitted with its
+//! declarations and must record its receipt — `Realized`, carrying a
+//! [`MaterialRole::RealizationReceipt`](super::material::MaterialRole)
+//! material the Run's schedule selected — before they settle. A
+//! realization key names one realization of the Run; the work itself runs
+//! in its own invocation, outside this journal.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -37,6 +44,35 @@ use crate::ProcessId;
 use crate::await_event_identity::AwaitEventKey;
 use crate::effect_opener::EffectOpener;
 use crate::process_identity::StartKey;
+
+/// The idempotency key of one final's intent realization, in the invocation
+/// it runs under (ADR 0130): `run:{opener}:{call_id}:realize`.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(transparent)]
+pub struct RealizationKey(String);
+
+impl RealizationKey {
+    /// The realization key of `call_id` in the Run `opener` opens.
+    #[must_use]
+    pub fn for_call(opener: &EffectOpener, call_id: &ToolCallId) -> Self {
+        Self(format!(
+            "run:{}:{call_id}:realize",
+            opener.identity_encoding()
+        ))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for RealizationKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
 
 /// The ordinal of an attempt of one logical call, from 1. A crash
 /// redelivery keeps it; only a reported retry advances it.
@@ -300,6 +336,21 @@ pub enum RunEvent {
         start_key: StartKey,
         cancelled: bool,
     },
+    /// A final's intent realization is admitted with its declarations; from
+    /// here it runs in its own invocation under `key`.
+    RealizationAdmitted {
+        call_id: ToolCallId,
+        key: RealizationKey,
+    },
+    /// The realization's receipt, selected by the Run's schedule.
+    RealizationIssued {
+        call_id: ToolCallId,
+        invocation_id: String,
+    },
+    Realized {
+        call_id: ToolCallId,
+        receipt: MaterialRef,
+    },
     /// V: the call's model-facing presentation.
     Presented {
         call_id: ToolCallId,
@@ -437,6 +488,10 @@ pub enum RunEventRefusal {
         call_id: ToolCallId,
         start_key: StartKey,
     },
+    #[error("call {call_id}'s realization is out of order")]
+    RealizationOrder { call_id: ToolCallId },
+    #[error("call {call_id}'s declarations cannot settle while its realization is owed")]
+    RealizationOwed { call_id: ToolCallId },
     #[error("the lifecycle cannot move from {from:?} to {to:?}")]
     Lifecycle {
         from: RunLifecycle,
@@ -454,6 +509,14 @@ enum StartProgress {
     Discharged,
 }
 
+/// How far a call's admitted realization has run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RealizationProgress {
+    Admitted,
+    Issued(String),
+    Realized,
+}
+
 #[derive(Clone, Debug)]
 struct CallState {
     cancel: super::ExternalCancelPolicy,
@@ -468,6 +531,8 @@ struct CallState {
     declarations_issued: bool,
     /// The declared start, admitted with the declarations.
     start: Option<(StartKey, StartProgress)>,
+    /// The intent realization, admitted with the declarations.
+    realization: Option<(RealizationKey, RealizationProgress)>,
     seated: bool,
     presented: bool,
     consumed: bool,
@@ -583,6 +648,22 @@ impl RunLedger {
             Some((lower, CallDecision::Final { .. })) if *lower < rank => other.seated,
             _ => true,
         })
+    }
+
+    /// The calls whose admitted realization has not recorded its receipt,
+    /// in call order: each is owed its `Realized` by whichever segment owns
+    /// the Run next.
+    #[must_use]
+    pub fn owed_realizations(&self) -> Vec<ToolCallId> {
+        self.calls
+            .iter()
+            .filter_map(|(call_id, call)| match &call.realization {
+                Some((_, RealizationProgress::Admitted | RealizationProgress::Issued(_))) => {
+                    Some(call_id.clone())
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// The admitted starts not yet discharged, in call order: each is owed
@@ -873,6 +954,13 @@ impl RunLedger {
                         start_key: start_key.clone(),
                     });
                 }
+                if let Some((_, RealizationProgress::Admitted | RealizationProgress::Issued(_))) =
+                    &call.realization
+                {
+                    return Err(RunEventRefusal::RealizationOwed {
+                        call_id: call_id.clone(),
+                    });
+                }
                 call.seated = true;
                 Ok(())
             }
@@ -893,6 +981,32 @@ impl RunLedger {
                 &StartProgress::Launched,
                 StartProgress::Discharged,
             ),
+            RunEvent::RealizationAdmitted { call_id, key } => self.admit_realization(call_id, key),
+            RunEvent::RealizationIssued {
+                call_id,
+                invocation_id,
+            } => match &mut self.call(call_id)?.realization {
+                Some((_, progress @ RealizationProgress::Admitted))
+                    if !invocation_id.is_empty() =>
+                {
+                    *progress = RealizationProgress::Issued(invocation_id.clone());
+                    Ok(())
+                }
+                _ => Err(RunEventRefusal::RealizationOrder {
+                    call_id: call_id.clone(),
+                }),
+            },
+            RunEvent::Realized { call_id, receipt } => match &mut self.call(call_id)?.realization {
+                Some((_, progress @ RealizationProgress::Issued(_)))
+                    if receipt.role == super::MaterialRole::RealizationReceipt =>
+                {
+                    *progress = RealizationProgress::Realized;
+                    Ok(())
+                }
+                _ => Err(RunEventRefusal::RealizationOrder {
+                    call_id: call_id.clone(),
+                }),
+            },
             RunEvent::Presented { call_id, .. } => {
                 let call = self.call(call_id)?;
                 let final_unseated =
@@ -951,6 +1065,7 @@ impl RunLedger {
                     decision: None,
                     declarations_issued: false,
                     start: None,
+                    realization: None,
                     seated: false,
                     presented: false,
                     consumed: false,
@@ -1105,6 +1220,47 @@ impl RunLedger {
             });
         }
         call.start = Some((start_key.clone(), StartProgress::Admitted));
+        Ok(())
+    }
+
+    pub fn realization_invocation(&self, call_id: &ToolCallId) -> Option<&str> {
+        match &self.calls.get(call_id)?.realization {
+            Some((_, RealizationProgress::Issued(invocation_id))) => Some(invocation_id),
+            _ => None,
+        }
+    }
+
+    /// Admit a final's intent realization: only inside its issued,
+    /// unsettled declarations, one realization per call, and never under a
+    /// key another call of the Run holds.
+    fn admit_realization(
+        &mut self,
+        call_id: &ToolCallId,
+        key: &RealizationKey,
+    ) -> Result<(), RunEventRefusal> {
+        let reused = self.calls.values().any(|call| {
+            call.realization
+                .as_ref()
+                .is_some_and(|(admitted, _)| admitted == key)
+        });
+        if reused {
+            return Err(RunEventRefusal::RealizationOrder {
+                call_id: call_id.clone(),
+            });
+        }
+        let call = self.call(call_id)?;
+        let admitting = matches!(
+            call.decision,
+            Some((_, CallDecision::Final { declares: true, .. }))
+        ) && call.declarations_issued
+            && !call.seated
+            && call.realization.is_none();
+        if !admitting {
+            return Err(RunEventRefusal::RealizationOrder {
+                call_id: call_id.clone(),
+            });
+        }
+        call.realization = Some((key.clone(), RealizationProgress::Admitted));
         Ok(())
     }
 

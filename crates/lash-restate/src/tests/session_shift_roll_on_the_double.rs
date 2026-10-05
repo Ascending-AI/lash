@@ -334,6 +334,7 @@ impl SessionRoll {
             crate::services::bind_lash_services(
                 Endpoint::builder(),
                 crate::services::LashServiceParts {
+                    tool_realizer: Arc::new(crate::tests::NoIntentsRealizer),
                     effect_host: &host,
 
                     admin: crate::RestateAdminClient::new(connection.clone()),

@@ -55,6 +55,8 @@
 //! before releasing the consumer hold. Ordinary bodies retain their own
 //! timeout behavior and are never rerouted into this start path.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use lash_sansio::{ToolCallId, ToolIntentKind};
@@ -508,21 +510,25 @@ pub trait SingletonToolHandlers: Send + Sync {
         Err("external cancellation requires an installed handler".to_owned())
     }
 
-    /// Realize a final's declared intents behind their exactly-once fences.
-    /// A crash before the declarations settle realizes them again, so the
-    /// fence is what makes them once.
-    async fn realize_declarations(
+    /// The realization payload of a final whose capture declares intents
+    /// (ADR 0130). Deterministic from the call's admitted facts; the send
+    /// itself is journaled, so a replay serves it rather than resending.
+    async fn realization(
         &self,
-        call_id: &ToolCallId,
-        intents: &[ToolIntentKind],
-    ) -> Result<(), String>;
+        _call_id: &ToolCallId,
+        _capture: &SingletonCapture,
+    ) -> Result<super::RealizationPayload, RuntimeEffectControllerError> {
+        Ok(super::RealizationPayload::default())
+    }
 
-    async fn realize_capture(
+    /// Adopt the receipt the Run selected, before V presents it. Live and
+    /// replay alike.
+    fn adopt_realization(
         &self,
-        call_id: &ToolCallId,
-        capture: &SingletonCapture,
-    ) -> Result<(), String> {
-        self.realize_declarations(call_id, capture.intents()).await
+        _call_id: &ToolCallId,
+        _receipt: &super::RealizationReceipt,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Ok(())
     }
 
     /// The model-facing presentation of a final result (V). A declared
@@ -678,6 +684,34 @@ pub struct RunStartPrepared {
 pub type RunStartPrepareStep<'run> = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<RunStartPrepared, String>> + Send + 'run>,
 >;
+
+/// The engine notification that completes one selectable source. Opaque to the
+/// coordinator; only the controller that issued it interprets it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SelectKey(u32);
+impl SelectKey {
+    pub fn from_engine(raw: u32) -> Self {
+        Self(raw)
+    }
+    pub fn engine(self) -> u32 {
+        self.0
+    }
+}
+pub type RunSelectKey<'run> =
+    Pin<Box<dyn Future<Output = Result<SelectKey, RuntimeEffectControllerError>> + Send + 'run>>;
+pub type RunSelectValue<'run, T> =
+    Pin<Box<dyn Future<Output = Result<T, RuntimeEffectControllerError>> + Send + 'run>>;
+/// One VM-notified source a Run schedule can select (an X result, a retry or
+/// aggregate timer, a realization receipt, a start:prepare run).
+pub struct RunSelectable<'run, T> {
+    /// The engine notification identity. A future because a forwarding
+    /// controller (the executor's native Run task) learns it after queueing
+    /// the registration; the Restate controller answers it ready.
+    pub key: RunSelectKey<'run>,
+    /// The source's value. Awaited only after the combinator chose it (or for a
+    /// served D's recorded choice); never polled to race other sources.
+    pub value: RunSelectValue<'run, T>,
+}
 
 /// A durable backoff registered before its result is awaited.
 pub type RunRetryTimer<'run> = std::pin::Pin<

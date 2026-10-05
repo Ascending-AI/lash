@@ -32,6 +32,21 @@ pub enum EffectControllerTaskRequest {
             Result<crate::tool_dispatch::RunStartPrepared, RuntimeEffectControllerError>,
         >,
     },
+    IssueRunRealization {
+        invocation: oneshot::Sender<Result<String, RuntimeEffectControllerError>>,
+        request: crate::tool_dispatch::RealizationRequest,
+        key: oneshot::Sender<Result<crate::tool_dispatch::SelectKey, RuntimeEffectControllerError>>,
+        value: oneshot::Sender<
+            Result<crate::tool_dispatch::RealizationReceipt, RuntimeEffectControllerError>,
+        >,
+    },
+    AttachRunRealization {
+        invocation_id: String,
+        key: oneshot::Sender<Result<crate::tool_dispatch::SelectKey, RuntimeEffectControllerError>>,
+        value: oneshot::Sender<
+            Result<crate::tool_dispatch::RealizationReceipt, RuntimeEffectControllerError>,
+        >,
+    },
     StartRunRetry {
         backoff_ms: u64,
         response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
@@ -141,6 +156,62 @@ impl EffectControllerTaskRequest {
                     .await;
                 })
             }
+            Self::IssueRunRealization {
+                invocation,
+                request,
+                key,
+                value,
+            } => {
+                // Issue in request order; the send and the attach are the
+                // task-side controller's journaled commands. Both halves of
+                // the returned selectable resolve inside the task and answer
+                // their own channel.
+                Box::pin(async move {
+                    match controller.issue_run_realization(request).await {
+                        Ok(issued) => {
+                            let _ = invocation.send(Ok(issued.invocation_id));
+                            let selectable = issued.receipt;
+                            futures_util::future::join(
+                                async move {
+                                    let _ = key.send(selectable.key.await);
+                                },
+                                async move {
+                                    let _ = value.send(selectable.value.await);
+                                },
+                            )
+                            .await;
+                        }
+                        Err(error) => {
+                            let _ = invocation.send(Err(error.clone()));
+                            let _ = key.send(Err(error.clone()));
+                            let _ = value.send(Err(error));
+                        }
+                    }
+                })
+            }
+            Self::AttachRunRealization {
+                invocation_id,
+                key,
+                value,
+            } => Box::pin(async move {
+                match controller.attach_run_realization(invocation_id).await {
+                    Ok(selectable) => {
+                        futures_util::future::join(
+                            async move {
+                                let _ = key.send(selectable.key.await);
+                            },
+                            async move {
+                                let _ = value.send(selectable.value.await);
+                            },
+                        )
+                        .await;
+                    }
+                    Err(error) => {
+                        let _ = key.send(Err(error.clone()));
+                        let _ = value.send(Err(error));
+                    }
+                }
+            }),
             Self::StartRunRetry {
                 backoff_ms,
                 response,
@@ -570,6 +641,58 @@ impl RuntimeEffectController for EffectTaskController {
             }),
             result: Box::pin(native_run_response(response_rx)),
         }
+    }
+
+    async fn issue_run_realization<'run>(
+        &'run self,
+        request: crate::tool_dispatch::RealizationRequest,
+    ) -> Result<crate::tool_dispatch::IssuedRealization<'run>, RuntimeEffectControllerError> {
+        let (invocation_tx, invocation_rx) = oneshot::channel();
+        let (key_tx, key_rx) = oneshot::channel();
+        let (value_tx, value_rx) = oneshot::channel();
+        // Queue now: the send and the attach register in request order, and
+        // the task reports the key it learned back over its own channel.
+        self.requests
+            .send(EffectControllerTaskRequest::IssueRunRealization {
+                invocation: invocation_tx,
+                request,
+                key: key_tx,
+                value: value_tx,
+            })
+            .map_err(|_| {
+                native_run_task_closed("native Run controller task is no longer running")
+            })?;
+        Ok(crate::tool_dispatch::IssuedRealization {
+            invocation_id: native_run_response(invocation_rx).await?,
+            receipt: crate::tool_dispatch::RunSelectable {
+                key: Box::pin(native_run_response(key_rx)),
+                value: Box::pin(native_run_response(value_rx)),
+            },
+        })
+    }
+
+    async fn attach_run_realization<'run>(
+        &'run self,
+        invocation_id: String,
+    ) -> Result<
+        crate::tool_dispatch::RunSelectable<'run, crate::tool_dispatch::RealizationReceipt>,
+        RuntimeEffectControllerError,
+    > {
+        let (key_tx, key_rx) = oneshot::channel();
+        let (value_tx, value_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::AttachRunRealization {
+                invocation_id,
+                key: key_tx,
+                value: value_tx,
+            })
+            .map_err(|_| {
+                native_run_task_closed("native Run controller task is no longer running")
+            })?;
+        Ok(crate::tool_dispatch::RunSelectable {
+            key: Box::pin(native_run_response(key_rx)),
+            value: Box::pin(native_run_response(value_rx)),
+        })
     }
 
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {

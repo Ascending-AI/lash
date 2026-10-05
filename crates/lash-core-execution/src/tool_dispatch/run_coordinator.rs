@@ -35,6 +35,10 @@
 //! same drain: admitted in its `declare` record, registered under its key
 //! (`start:launch`) and discharged (`start:discharge`) before its
 //! presentation settles the declarations.
+//!
+//! A final's declared intents are admitted with its declarations and
+//! realized in their own durable invocation: the Run's journal records only
+//! the admission and the receipt its schedule selects (ADR 0130).
 
 use std::collections::BTreeMap;
 
@@ -46,6 +50,7 @@ mod continuation;
 mod deferred;
 mod drain;
 mod parallel;
+mod realization;
 mod start;
 use start::{bind_start, discharge_start, launch_start, recorded_obligation};
 
@@ -61,6 +66,7 @@ use super::singleton_run::{
     SingletonBodyOutcome, SingletonCapture, SingletonDrift, SingletonPreparedRequest,
     SingletonRunError, SingletonStart, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
 };
+use super::{RealizationReceipt, RealizationRequest};
 use crate::runtime::effect::{AttemptStreamRecorder, ScopedEffectController};
 use crate::runtime::process::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, IsolatedStartRefusal,
@@ -71,8 +77,8 @@ use crate::tool_run::{
     AdmissionRefusal, AdmittedCall, AfterCheckVerdict, AttemptOrdinal, AttemptResult,
     AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CallDecision, CheckRecord,
     DeclarationRefusal, ExternalCancelPolicy, MaterialEntry, MaterialLocation, MaterialOwner,
-    MaterialPayload, MaterialRef, MaterialRefusal, MaterialRole, OutcomeShape, ResultSource,
-    RoundAdmission, RunEvent, RunEventRefusal, RunJournalEntry, RunLedger, RunRecord,
+    MaterialPayload, MaterialRef, MaterialRefusal, MaterialRole, OutcomeShape, RealizationKey,
+    ResultSource, RoundAdmission, RunEvent, RunEventRefusal, RunJournalEntry, RunLedger, RunRecord,
     RuntimeCallPolicy, SegmentOrdinal,
 };
 use crate::{
@@ -732,6 +738,8 @@ pub struct RunCoordinator<'a> {
     bodies: RunBodies<'a>,
     /// Decided calls whose presentation is owed, by rank.
     owed: BTreeMap<u64, Owed<'a>>,
+    /// Issued realizations awaiting their schedule-selected receipt.
+    realizing: BTreeMap<ToolCallId, parallel::Realizing<'a>>,
     pending: Vec<parallel::Pending<'a>>,
     attempts: Vec<crate::tool_run::RunAttemptEntry>,
     handlers: BTreeMap<ToolCallId, Handlers<'a>>,
@@ -885,6 +893,7 @@ impl<'a> RunCoordinator<'a> {
             },
             bodies: RunBodies::new(),
             owed: BTreeMap::new(),
+            realizing: BTreeMap::new(),
             pending: Vec::new(),
             attempts: Vec::new(),
             handlers: BTreeMap::new(),

@@ -33,8 +33,11 @@ receipt the realization answers.
    frame, the Run sends one request to the realization service and attaches to
    the invocation the send created. Both commands sit at deterministic
    positions of the Run's program, never beside the schedule.
-2. **The realization invocation.** `LashToolRealization` is a pinned Restate
-   service (one lane per build generation, like the process workflow). Its
+2. **The realization invocation.** `LashToolRealization` is a journal-bearing
+   Restate service, bound under its stable name and this build's generation
+   name like the process workflow. The Run sends to the stable name, as a
+   process's first segment does; Restate keeps the invocation on the
+   deployment that began it. Its
    `realize` handler admits a controller over the Run's admitted execution
    scope, so intent identities, effect addresses and referrer claims are the
    ones the Run would have minted, and realizes the intents through the
@@ -42,28 +45,28 @@ receipt the realization answers.
    invocation's journal. A replay of the realization replays only its own
    commands; a replay of the Run never meets them.
 3. **Receipt.** The realization answers a `RealizationReceipt`: the ordered
-   `ToolIntentExecutionOutcome` of every intent. The attach handle is a Run
-   schedule choice beside the issued X results. Only a fresh schedule's
-   selector awaits it, exactly as it awaits an X result half; a served
-   schedule never polls it. The window that selects it records
-   `Realized { call_id, receipt }`, with the receipt as Run-owned material.
-   The Run adopts the recorded receipt (live and on replay alike) before V
-   presents, and V settles the declarations as before. Realization therefore
-   never polls an SDK result beside the scheduler.
-4. **Declared starts.** A declared start's launch and its discharge make no
-   journal commands: the launch registers under its stable `StartKey` and the
-   registrar answers the process it registered first, and discharge follows the
-   recorded decision through idempotent effects. They stay in the owner-driven
-   preparation beside the schedule. They are not part of the realization
-   invocation.
+   `ToolIntentExecutionOutcome` of every intent. The attach handle is a VM
+   notification like an X result half, and it joins the Run's single
+   first-completed selection over every selectable source: pending X results,
+   timers and realization receipts. That selection is one combinator await,
+   issued before the decision step it feeds, so a replay resolves it from the
+   journal in recorded order; a served decision stays authoritative. The step
+   that selects a receipt records `Realized { call_id, receipt }`, with the
+   receipt as Run-owned material. The Run adopts the recorded receipt (live and
+   on replay alike) before V presents, and V settles the declarations as
+   before. Realization therefore never polls an SDK result beside the
+   scheduler.
+4. **Declared starts.** A declared start's launch and discharge are not part of
+   the realization invocation. They run as the Run's own started step, issued
+   once in the `declare` frame and selected like an X result, so no
+   preparation runs beside the schedule.
 
 ## Identities and idempotency
 
 - The realization key is `run:{opener}:{call}:realize`: the Run's opener and
   the final's `ToolCallId`. A Run realizes each final at most once.
-- The send carries the key as its Restate idempotency key, on the Run
-  handler's own generation lane. A duplicate send under the key attaches to the
-  first invocation.
+- The send carries the key as its Restate idempotency key. A duplicate send
+  under the key reaches the first invocation.
 - Intent identities are unchanged: each intent's replay key derives from the
   session, the Run's execution scope, the call id, the intent index and the
   attempt invocation, exactly as before. The stores' exactly-once fences key on
@@ -81,22 +84,25 @@ cancellation of the Run invocation does not propagate to it.
 
 ## Handover
 
-An admitted realization is issued work. `quiesce` selects every admitted
-realization's receipt, as it selects every issued X's durable acknowledgement,
-before the cut is capturable. The transfer carries the `Realized` record and its
-receipt material, so the successor adopts the receipt by reference and presents
-without realizing again. The predecessor's realization ran once; the successor
-receives its receipt once.
+An admitted realization is independently owned work. The Run records
+`RealizationIssued { call_id, invocation_id }` after the idempotent send.
+A physical cut waits for local X acknowledgements and transfers that record
+alongside the rest of the Run. It does not wait for an independent realization.
+The successor attaches to exactly that invocation id, selects its receipt once,
+and records `Realized` before V. It never sends another request or executes the
+realization body. If the predecessor already selected the receipt, its material
+transfers with the Run and the successor adopts it without attaching again.
+An expired or missing engine result refuses the attach; it never authorizes a
+fresh realization. No native future or VM notification key crosses the cut.
 
 ## Consequences
 
 - `SingletonToolHandlers` does not realize intents. A handler answers the
   realization's payload for a final (`realization`) and adopts the receipt
   (`adopt_realization`). The deployment's `ToolRealizer` executes the payload.
-- The protected preparation beside the schedule only launches and discharges
-  declared starts.
-- A final with intents costs one more schedule record (`Realized`) and two
-  commands (send, attach) in the Run's journal, and one invocation.
+- A final with intents adds an issued-reference record and a receipt schedule
+  record (`Realized`), a send and an attach in the Run's journal, and one
+  independent invocation.
 
 ## Rejected alternatives
 
@@ -108,12 +114,6 @@ receives its receipt once.
   owns its journal, but it is a model-visible value with its own owner, lineage,
   wake and retention. Every intent would realize under the process's owner
   instead of the session's, changing identities and lineage.
-- **Attach to an in-flight realization from the successor.** The successor could
-  re-send under the same key and attach. A finished invocation's lane is
-  deregistered once its build drains, so the successor's attach would race the
-  predecessor's deployment removal. Selecting the receipt before capture leaves
-  nothing in flight to transfer.
-
 ## Evidence
 
 The laws are in `crates/lash-restate/src/tests/run_coordinator_on_the_double/realization.rs`.
