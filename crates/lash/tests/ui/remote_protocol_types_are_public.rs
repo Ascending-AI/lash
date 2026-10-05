@@ -165,7 +165,10 @@ fn inspect_send(outcome: lash::remote::turn_result::RemoteSendOutcome) {
         } => {
             let _ = reason;
         }
-        RemoteSendOutcome::Withdrawn { gaps, .. } => {
+        RemoteSendOutcome::Refused { run, refusal, .. } => {
+            let _ = (run, refusal);
+        }
+        RemoteSendOutcome::Withdrawn { gaps, .. } | RemoteSendOutcome::NotAccepted { gaps, .. } => {
             let _ = gaps;
         }
     }

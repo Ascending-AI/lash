@@ -640,9 +640,13 @@ pub(super) async fn follow(
                     })));
                 }
                 Resolution::Refused { run, refusal } => {
-                    adoption.adopt(run, tap).await;
+                    adoption.adopt(run.clone(), tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
-                    return Err(EmbedError::Runtime(refusal));
+                    return Ok(Followed::Answered(Box::new(SendOutcome::Refused {
+                        run: Some(run),
+                        refusal: Box::new(refusal),
+                        gaps: observation.gaps,
+                    })));
                 }
                 Resolution::Faulted(fault) => {
                     drain(ctx, &mut adoption, &mut observation, tap).await;
@@ -655,15 +659,21 @@ pub(super) async fn follow(
                         gaps: observation.gaps,
                     })));
                 }
-                Resolution::Withdrawn => {
+                resolution @ (Resolution::Withdrawn | Resolution::NotAccepted) => {
                     // A shift refused after it claimed the input leaves no
                     // application behind either: the refusal is the answer.
                     if let Some(error) = refused.take() {
-                        return Err(EmbedError::Runtime(error));
+                        return Ok(Followed::Answered(Box::new(SendOutcome::Refused {
+                            run: None,
+                            refusal: Box::new(error),
+                            gaps: observation.gaps,
+                        })));
                     }
                     ctx.refresh().await?;
-                    return Ok(Followed::Answered(Box::new(SendOutcome::Withdrawn {
-                        gaps: observation.gaps,
+                    let gaps = observation.gaps;
+                    return Ok(Followed::Answered(Box::new(match resolution {
+                        Resolution::Withdrawn => SendOutcome::Withdrawn { gaps },
+                        _ => SendOutcome::NotAccepted { gaps },
                     })));
                 }
                 Resolution::Undecided { run } => {
@@ -692,8 +702,13 @@ pub(super) async fn follow(
                             }));
                         }
                     }
+                    // The input's shift was refused: the refusal is the answer.
                     if let Some(error) = refused.take() {
-                        return Err(EmbedError::Runtime(error));
+                        return Ok(Followed::Answered(Box::new(SendOutcome::Refused {
+                            run: adoption.run.clone(),
+                            refusal: Box::new(error),
+                            gaps: observation.gaps,
+                        })));
                     }
                     // Wait on the terminal only while a store read has just
                     // shown the run undecided: a run this read shows ended

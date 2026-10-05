@@ -170,6 +170,71 @@ async fn refused_terminal(
     Ok(())
 }
 
+/// A refused run's outcome is the typed `Refused` answer, never an `Err`:
+/// the refusal is the run's recorded terminal, so the follower answers it as
+/// data, both on the send's own handle and on a handle attached by its id,
+/// and its remote shape carries the same typed refusal (FIG-5092).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_runs_outcome_is_refused_with_its_typed_refusal() -> Result<()> {
+    const SESSION: &str = "finalize-refused-outcome";
+    const TURN: &str = "finalize-refused-outcome";
+    let fixture = Fixture::with_plugins(vec![failing_after_turn(
+        Arc::new(AtomicUsize::new(0)),
+        finalize_refusal,
+    )])
+    .await?;
+    let session = fixture
+        .core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
+
+    let handle = session
+        .send(TurnInput::text("finalize refuses"))
+        .id(crate::TurnId::parse(TURN).expect("nonblank host identity"))
+        .await?;
+    let input_id = handle.input_id().clone();
+    let outcome = handle
+        .outcome()
+        .await
+        .expect("a refused run answers its recorded refusal as an outcome");
+    let attached = session
+        .attach_id(crate::TurnId::parse(TURN).expect("nonblank host identity"))
+        .outcome()
+        .await
+        .expect("a handle attached by the id answers the same refusal");
+    for outcome in [&outcome, &attached] {
+        let crate::SendOutcome::Refused { run, refusal, .. } = outcome else {
+            panic!("a refused run answers Refused: {outcome:?}");
+        };
+        assert_eq!(run.as_ref().map(crate::TurnId::as_str), Some(TURN));
+        assert_finalize_refusal(&EmbedError::Runtime(refusal.as_ref().clone()));
+        assert_eq!(outcome.status(), crate::TurnStatus::Failed);
+        assert!(outcome.output().is_none(), "a refused run has no report");
+    }
+
+    let remote = outcome.to_remote(&session.session_id(), &input_id);
+    remote
+        .validate()
+        .expect("a refused run's remote outcome is consistent");
+    let lash_remote_protocol::RemoteSendOutcome::Refused { run, refusal, .. } = &remote else {
+        panic!("the remote outcome is Refused: {remote:?}");
+    };
+    assert_eq!(run.as_ref().map(crate::TurnId::as_str), Some(TURN));
+    assert_eq!(
+        refusal.code,
+        lash_sansio::FailureCode::from(&lash_core::RuntimeErrorCode::PluginFinalizeTurn),
+        "the remote refusal keeps its typed code: {refusal:?}"
+    );
+    assert_eq!(
+        remote.status(),
+        lash_remote_protocol::RemoteTurnStatus::Failed
+    );
+    Ok(())
+}
+
 fn assert_finalize_refusal(error: &EmbedError) {
     let EmbedError::Runtime(runtime) = error else {
         panic!("the refusal is the typed runtime error: {error:?}");

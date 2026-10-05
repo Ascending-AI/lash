@@ -647,6 +647,20 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
     );
 
     let outcome = waiting.outcome().await?;
+    assert!(
+        matches!(outcome, crate::SendOutcome::Withdrawn { .. }),
+        "a withdrawn input answers Withdrawn: {outcome:?}"
+    );
+    assert!(
+        matches!(
+            session
+                .attach_id(crate::TurnId::parse("withdrawn-run").expect("nonblank host identity"))
+                .outcome()
+                .await?,
+            crate::SendOutcome::Withdrawn { .. }
+        ),
+        "the withdrawal stays on record under its id"
+    );
     assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     assert!(
         outcome.output().is_none(),
@@ -1150,13 +1164,63 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
             .status(),
         crate::TurnStatus::Answered
     );
-    // An id nothing was accepted under answers like a withdrawn input.
-    let never = durable
-        .attach_id(crate::TurnId::parse("never-sent").expect("nonblank host identity"))
+    Ok(())
+}
+
+/// An id lash never accepted answers `NotAccepted`, never `Withdrawn`: lash
+/// holds no record under it, so a send under the same id is accepted as new.
+/// A withdrawn input keeps its withdrawal on record and answers `Withdrawn`
+/// (FIG-5092).
+async fn an_id_never_accepted_answers_not_accepted() -> Result<()> {
+    let fixture = fixture(1).await?;
+    let session = fixture
+        .core
+        .session(crate::SessionId::parse("send-not-accepted").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
+    let never = crate::TurnId::parse("never-sent").expect("nonblank host identity");
+    let live = session.attach_id(never.clone()).outcome().await?;
+    let durable = session.durable().attach_id(never.clone()).outcome().await?;
+    for outcome in [&live, &durable] {
+        assert!(
+            matches!(outcome, crate::SendOutcome::NotAccepted { .. }),
+            "an id nothing was accepted under answers NotAccepted: {outcome:?}"
+        );
+        assert_eq!(outcome.status(), crate::TurnStatus::NotAccepted);
+        assert_eq!(outcome.run(), None);
+        assert!(outcome.output().is_none());
+    }
+    let input_id = session.attach_id(never.clone()).input_id().clone();
+    let remote = live.to_remote(&session.session_id(), &input_id);
+    remote
+        .validate()
+        .expect("a never-accepted input's remote outcome is consistent");
+    assert!(
+        matches!(
+            remote,
+            lash_remote_protocol::RemoteSendOutcome::NotAccepted { .. }
+        ),
+        "{remote:?}"
+    );
+    assert_eq!(
+        remote.status(),
+        lash_remote_protocol::RemoteTurnStatus::NotAccepted
+    );
+
+    // A send under the id is accepted as new and runs.
+    let sent = session
+        .send(TurnInput::text("sent at last"))
+        .id(never.clone())
+        .await?
         .outcome()
         .await?;
-    assert_eq!(never.status(), crate::TurnStatus::Cancelled);
-    assert!(never.output().is_none());
+    assert_eq!(sent.status(), crate::TurnStatus::Answered, "{sent:?}");
+    assert_eq!(
+        session.attach_id(never).outcome().await?.status(),
+        crate::TurnStatus::Answered
+    );
     Ok(())
 }
 
@@ -1389,7 +1453,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
             .await?;
         assert_eq!(
             outcome.status(),
-            crate::TurnStatus::Cancelled,
+            crate::TurnStatus::NotAccepted,
             "`{never}` of a refused batch was never accepted"
         );
     }
@@ -1828,6 +1892,11 @@ macro_rules! send_handle_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
                 super::a_host_reattaches_by_its_id_alone().await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn an_id_never_accepted_answers_not_accepted() -> Result<()> {
+                super::an_id_never_accepted_answers_not_accepted().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

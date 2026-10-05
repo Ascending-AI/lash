@@ -937,6 +937,10 @@ impl LashSession {
     /// [`SendHandle`](crate::SendHandle); `send(input).output().await` is the
     /// one-call form. The turn runs on the session's engine, not in the
     /// caller's future: dropping the handle stops nothing.
+    ///
+    /// A send whose response was lost is sent again under the same
+    /// [`id`](crate::SendBuilder::id) with the same content: the retry
+    /// accepts the input exactly once and answers its run.
     pub fn send(&self, input: TurnInput) -> crate::SendBuilder {
         crate::SendBuilder::new(crate::send::SendTarget::Live(self.clone()), input)
     }
@@ -969,6 +973,14 @@ impl LashSession {
     /// ([`SendBuilder::id`](crate::SendBuilder::id)): after a restart, with
     /// nothing but the id. It follows the input wherever it went, including
     /// into another run, and never commits anything.
+    ///
+    /// An id lash holds no record of answers
+    /// [`SendOutcome::NotAccepted`](crate::SendOutcome::NotAccepted), and a
+    /// withdrawn input answers
+    /// [`Withdrawn`](crate::SendOutcome::Withdrawn). A host that lost a
+    /// send's response does not attach to learn whether it was accepted: it
+    /// sends the same id with the same content again, which accepts the input
+    /// exactly once and answers its run.
     pub fn attach_id(&self, id: TurnId) -> crate::SendHandle {
         crate::send::attach_id(crate::send::SendTarget::Live(self.clone()), id)
     }

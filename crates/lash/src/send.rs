@@ -399,6 +399,13 @@ impl SendBuilder {
     /// A retry validates the original submission digest, including after
     /// settlement. Identical content returns the original acceptance; changed
     /// content is refused.
+    ///
+    /// This is the recovery for a lost response: a host that does not know
+    /// whether a send was accepted sends the same id with the same content
+    /// again. That send accepts the input exactly once, however many times it
+    /// is repeated, and its handle answers the one run. Reading
+    /// [`attach_id`](crate::LashSession::attach_id) instead answers only what
+    /// lash holds now: [`SendOutcome::NotAccepted`] when it holds nothing.
     pub fn id(mut self, id: TurnId) -> Self {
         self.id = Some(id);
         self
@@ -556,6 +563,11 @@ impl std::future::IntoFuture for SendBuilder {
 // ---------------------------------------------------------------------------
 
 /// The recorded answer to a send. Each variant carries only its own data.
+///
+/// A run's terminal refusal is a variant, never an `Err`: a handle's
+/// `outcome()` answers `Err` when it could not read the answer, which asking
+/// again retries, or while the session carries a fault an operator must
+/// clear (ADR 0109 §9).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SendOutcome {
@@ -578,7 +590,28 @@ pub enum SendOutcome {
         stalled: StalledDelivery,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
+    /// The run ended with a typed refusal no retry could change, and no turn
+    /// of it committed (ADR 0069 §6): the run's recorded terminal answer. A
+    /// shift the engine refused before any run took the input answers its
+    /// refusal the same way, with no `run`.
+    Refused {
+        run: Option<TurnId>,
+        refusal: Box<lash_core::RuntimeError>,
+        gaps: Vec<lash_core::facade_support::LiveReplayGap>,
+    },
+    /// The input was withdrawn before any run took it. Its withdrawal stays
+    /// on record, so a send under the same id answers this withdrawal and
+    /// runs nothing.
     Withdrawn {
+        gaps: Vec<lash_core::facade_support::LiveReplayGap>,
+    },
+    /// Lash holds no record of the input: it was never accepted, or it was
+    /// withdrawn and [`vacuum`](lash_core::store::StoreMaintenance::vacuum)
+    /// has since reclaimed the withdrawal. A send under the same id is
+    /// accepted as new. A host that lost a send's response re-sends the same
+    /// id with the same content rather than reading this answer
+    /// ([`SendBuilder::id`]).
+    NotAccepted {
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
 }
@@ -600,6 +633,9 @@ pub enum TurnStatus {
     /// its obligation. Not terminal: the input stays durable, and a host
     /// re-awaits it once re-armed.
     Stalled(StalledDelivery),
+    /// Lash holds no record of the input: see
+    /// [`SendOutcome::NotAccepted`].
+    NotAccepted,
 }
 
 /// An accepted input the engine was never handed: its ingress obligation
@@ -647,7 +683,9 @@ impl SendOutcome {
             Self::Settled { output, .. } => output.status(),
             Self::Parked { parked, .. } => TurnStatus::Parked(parked.clone()),
             Self::Stalled { stalled, .. } => TurnStatus::Stalled(stalled.clone()),
+            Self::Refused { .. } => TurnStatus::Failed,
             Self::Withdrawn { .. } => TurnStatus::Cancelled,
+            Self::NotAccepted { .. } => TurnStatus::NotAccepted,
         }
     }
 
@@ -655,7 +693,8 @@ impl SendOutcome {
         match self {
             Self::Settled { run, .. } | Self::OperationSettled { run, .. } => Some(run),
             Self::Parked { parked, .. } => Some(&parked.run),
-            Self::Stalled { .. } | Self::Withdrawn { .. } => None,
+            Self::Refused { run, .. } => run.as_ref(),
+            Self::Stalled { .. } | Self::Withdrawn { .. } | Self::NotAccepted { .. } => None,
         }
     }
 
@@ -665,7 +704,22 @@ impl SendOutcome {
             Self::OperationSettled { .. }
             | Self::Parked { .. }
             | Self::Stalled { .. }
-            | Self::Withdrawn { .. } => None,
+            | Self::Refused { .. }
+            | Self::Withdrawn { .. }
+            | Self::NotAccepted { .. } => None,
+        }
+    }
+
+    /// The typed refusal a [`Refused`](Self::Refused) run ended with.
+    pub fn refusal(&self) -> Option<&lash_core::RuntimeError> {
+        match self {
+            Self::Refused { refusal, .. } => Some(refusal),
+            Self::OperationSettled { .. }
+            | Self::Settled { .. }
+            | Self::Parked { .. }
+            | Self::Stalled { .. }
+            | Self::Withdrawn { .. }
+            | Self::NotAccepted { .. } => None,
         }
     }
 
@@ -675,7 +729,9 @@ impl SendOutcome {
             Self::OperationSettled { .. }
             | Self::Parked { .. }
             | Self::Stalled { .. }
-            | Self::Withdrawn { .. } => None,
+            | Self::Refused { .. }
+            | Self::Withdrawn { .. }
+            | Self::NotAccepted { .. } => None,
         }
     }
 
@@ -687,7 +743,9 @@ impl SendOutcome {
             | Self::Settled { gaps, .. }
             | Self::Parked { gaps, .. }
             | Self::Stalled { gaps, .. }
-            | Self::Withdrawn { gaps } => gaps,
+            | Self::Refused { gaps, .. }
+            | Self::Withdrawn { gaps }
+            | Self::NotAccepted { gaps } => gaps,
         }
     }
 
@@ -697,7 +755,9 @@ impl SendOutcome {
             | Self::Settled { gaps, .. }
             | Self::Parked { gaps, .. }
             | Self::Stalled { gaps, .. }
-            | Self::Withdrawn { gaps } => gaps,
+            | Self::Refused { gaps, .. }
+            | Self::Withdrawn { gaps }
+            | Self::NotAccepted { gaps } => gaps,
         }
     }
 
@@ -760,7 +820,19 @@ impl SendOutcome {
                 },
                 gaps,
             },
+            Self::Refused { run, refusal, .. } => RemoteSendOutcome::Refused {
+                session_id,
+                input_id,
+                run: run.clone(),
+                refusal: Box::new(refusal.as_ref().clone().into()),
+                gaps,
+            },
             Self::Withdrawn { .. } => RemoteSendOutcome::Withdrawn {
+                session_id,
+                input_id,
+                gaps,
+            },
+            Self::NotAccepted { .. } => RemoteSendOutcome::NotAccepted {
                 session_id,
                 input_id,
                 gaps,
@@ -934,8 +1006,9 @@ impl SendHandle {
         .await
     }
 
-    /// [`outcome`](Self::outcome) narrowed to a settled turn. A parked run,
-    /// or an input withdrawn before it ran, answers
+    /// [`outcome`](Self::outcome) narrowed to a settled turn. A refused run
+    /// answers its typed refusal as [`EmbedError::Runtime`]; a parked run, an
+    /// input withdrawn before it ran, or one lash never accepted answers
     /// [`SendError::NotSettled`].
     pub async fn output(self) -> Result<TurnOutput> {
         let input_id = self.receipt.input_id.clone();
@@ -1114,6 +1187,7 @@ impl<Output, Error> RunHandle<Output, Error> {
                     }))
                 }
             },
+            SendOutcome::Refused { refusal, .. } => Err(EmbedError::Runtime(*refusal)),
             _ => Err(EmbedError::from(SendError::NotSettled {
                 input_id: InputId::from(run.stored()),
                 status,
@@ -1197,8 +1271,8 @@ pub(crate) fn attach(target: SendTarget, input_id: InputId) -> SendHandle {
 }
 
 /// A handle on the input a send accepted under host id `id`: a keyed input's
-/// id is derived from its session and key, so no read finds it. An id that
-/// was never accepted answers like a withdrawn input.
+/// id is derived from its session and key, so no read finds it. An id lash
+/// holds no record of answers [`SendOutcome::NotAccepted`].
 pub(crate) fn attach_id(target: SendTarget, id: TurnId) -> SendHandle {
     let input_id =
         lash_core::PendingTurnInputDraft::keyed_input_id(&target.session_id(), id.as_str());
@@ -1225,6 +1299,7 @@ pub(crate) fn run(target: SendTarget, run: TurnId) -> RunHandle {
 pub(crate) fn settled_output(input_id: InputId, outcome: SendOutcome) -> Result<TurnOutput> {
     match outcome {
         SendOutcome::Settled { output, .. } => Ok(*output),
+        SendOutcome::Refused { refusal, .. } => Err(EmbedError::Runtime(*refusal)),
         outcome => Err(EmbedError::from(SendError::NotSettled {
             input_id,
             status: outcome.status(),

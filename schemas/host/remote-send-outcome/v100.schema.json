@@ -16744,6 +16744,47 @@
     },
     {
       "additionalProperties": false,
+      "description": "The run ended with a typed refusal no retry could change, and no turn\nof it committed; `run` is absent when the engine refused the shift\nbefore any run took the input. `refusal` keeps its typed code and\nclass: a runtime refusal is `error_type` `lash.runtime` with the\nruntime error, typed cause included, as its payload, and a plugin's\nown refusal is that plugin's failure.",
+      "properties": {
+        "gaps": {
+          "items": {
+            "$ref": "#/$defs/RemoteLiveReplayGap"
+          },
+          "type": "array"
+        },
+        "input_id": {
+          "type": "string"
+        },
+        "refusal": {
+          "$ref": "#/$defs/PluginOperationFailure"
+        },
+        "run": {
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "refused",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "session_id",
+        "input_id",
+        "refusal"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The input was withdrawn before any run took it; its withdrawal is on\nrecord, so a send under the same id answers this withdrawal.",
       "properties": {
         "gaps": {
           "items": {
@@ -16760,6 +16801,35 @@
         },
         "type": {
           "const": "withdrawn",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "session_id",
+        "input_id"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Lash holds no record of the input: it was never accepted, or its\nwithdrawal was reclaimed. A send under the same id is accepted as new.",
+      "properties": {
+        "gaps": {
+          "items": {
+            "$ref": "#/$defs/RemoteLiveReplayGap"
+          },
+          "type": "array"
+        },
+        "input_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "not_accepted",
           "type": "string"
         }
       },

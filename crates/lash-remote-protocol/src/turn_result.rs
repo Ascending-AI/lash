@@ -234,6 +234,9 @@ pub enum RemoteTurnStatus {
         /// When it stalled, in milliseconds since the Unix epoch.
         stalled_at_ms: u64,
     },
+    /// Lash holds no record of the input: it was never accepted, or its
+    /// withdrawal was reclaimed. A send under the same id is accepted as new.
+    NotAccepted,
 }
 
 /// The recorded answer to a sent input. Status and run are derived from
@@ -270,7 +273,32 @@ pub enum RemoteSendOutcome {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         gaps: Vec<crate::observations::RemoteLiveReplayGap>,
     },
+    /// The run ended with a typed refusal no retry could change, and no turn
+    /// of it committed; `run` is absent when the engine refused the shift
+    /// before any run took the input. `refusal` keeps its typed code and
+    /// class: a runtime refusal is `error_type` `lash.runtime` with the
+    /// runtime error, typed cause included, as its payload, and a plugin's
+    /// own refusal is that plugin's failure.
+    Refused {
+        session_id: SessionId,
+        input_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<TurnId>,
+        refusal: Box<lash_sansio::PluginOperationFailure>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gaps: Vec<crate::observations::RemoteLiveReplayGap>,
+    },
+    /// The input was withdrawn before any run took it; its withdrawal is on
+    /// record, so a send under the same id answers this withdrawal.
     Withdrawn {
+        session_id: SessionId,
+        input_id: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gaps: Vec<crate::observations::RemoteLiveReplayGap>,
+    },
+    /// Lash holds no record of the input: it was never accepted, or its
+    /// withdrawal was reclaimed. A send under the same id is accepted as new.
+    NotAccepted {
         session_id: SessionId,
         input_id: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -331,7 +359,9 @@ impl RemoteSendOutcome {
             | Self::Settled { session_id, .. }
             | Self::Parked { session_id, .. }
             | Self::Stalled { session_id, .. }
-            | Self::Withdrawn { session_id, .. } => session_id,
+            | Self::Refused { session_id, .. }
+            | Self::Withdrawn { session_id, .. }
+            | Self::NotAccepted { session_id, .. } => session_id,
         }
     }
 
@@ -341,7 +371,9 @@ impl RemoteSendOutcome {
             | Self::Settled { input_id, .. }
             | Self::Parked { input_id, .. }
             | Self::Stalled { input_id, .. }
-            | Self::Withdrawn { input_id, .. } => input_id,
+            | Self::Refused { input_id, .. }
+            | Self::Withdrawn { input_id, .. }
+            | Self::NotAccepted { input_id, .. } => input_id,
         }
     }
 
@@ -350,7 +382,8 @@ impl RemoteSendOutcome {
             Self::OperationSettled { run, .. } => Some(run),
             Self::Settled { report, .. } => Some(&report.turn_id),
             Self::Parked { parked, .. } => Some(&parked.run),
-            Self::Stalled { .. } | Self::Withdrawn { .. } => None,
+            Self::Refused { run, .. } => run.as_ref(),
+            Self::Stalled { .. } | Self::Withdrawn { .. } | Self::NotAccepted { .. } => None,
         }
     }
 
@@ -360,7 +393,22 @@ impl RemoteSendOutcome {
             Self::OperationSettled { .. }
             | Self::Parked { .. }
             | Self::Stalled { .. }
-            | Self::Withdrawn { .. } => None,
+            | Self::Refused { .. }
+            | Self::Withdrawn { .. }
+            | Self::NotAccepted { .. } => None,
+        }
+    }
+
+    /// The typed refusal a [`Refused`](Self::Refused) run ended with.
+    pub fn refusal(&self) -> Option<&lash_sansio::PluginOperationFailure> {
+        match self {
+            Self::Refused { refusal, .. } => Some(refusal),
+            Self::OperationSettled { .. }
+            | Self::Settled { .. }
+            | Self::Parked { .. }
+            | Self::Stalled { .. }
+            | Self::Withdrawn { .. }
+            | Self::NotAccepted { .. } => None,
         }
     }
 
@@ -370,7 +418,9 @@ impl RemoteSendOutcome {
             | Self::Settled { gaps, .. }
             | Self::Parked { gaps, .. }
             | Self::Stalled { gaps, .. }
-            | Self::Withdrawn { gaps, .. } => gaps,
+            | Self::Refused { gaps, .. }
+            | Self::Withdrawn { gaps, .. }
+            | Self::NotAccepted { gaps, .. } => gaps,
         }
     }
 
@@ -398,7 +448,9 @@ impl RemoteSendOutcome {
                 last_error: stalled.last_error.clone(),
                 stalled_at_ms: stalled.stalled_at_ms,
             },
+            Self::Refused { .. } => RemoteTurnStatus::Failed,
             Self::Withdrawn { .. } => RemoteTurnStatus::Cancelled,
+            Self::NotAccepted { .. } => RemoteTurnStatus::NotAccepted,
         }
     }
 
@@ -469,7 +521,13 @@ impl RemoteSendOutcome {
                 }
                 require_non_empty(TYPE, "stalled.reason", &stalled.reason)
             }
-            Self::Withdrawn { .. } => Ok(()),
+            Self::Refused { run, refusal, .. } => {
+                if let Some(run) = run {
+                    require_non_empty(TYPE, "run", run)?;
+                }
+                require_non_empty(TYPE, "refusal.error_type", &refusal.error_type)
+            }
+            Self::Withdrawn { .. } | Self::NotAccepted { .. } => Ok(()),
         }
     }
 }

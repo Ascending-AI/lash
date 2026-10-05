@@ -369,10 +369,13 @@ async fn follow_once(
     }
     .map_err(AppError::runtime)?;
     // Answered, Failed and Cancelled runs ran and settled: each has a report
-    // the page shows. A parked run, or an input withdrawn before it ran, has
-    // none.
+    // the page shows. A refused run answers its typed refusal. A parked run,
+    // or an input withdrawn before it ran, has none.
     let output = match outcome {
         lash::SendOutcome::Settled { output, .. } => output.result,
+        lash::SendOutcome::Refused { refusal, .. } => {
+            return Err(AppError::runtime(lash::EmbedError::Runtime(*refusal)));
+        }
         outcome => return Err(unsettled_turn(&outcome.status())),
     };
     record_turn_output_for_profile(

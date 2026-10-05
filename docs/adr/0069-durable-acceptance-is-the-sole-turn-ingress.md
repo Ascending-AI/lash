@@ -135,7 +135,8 @@ it fails retryably with `SessionRunPending` and records no verdict.
 The refused acceptor adopts its run's outcome. Once the run has ended, the
 acceptor's retry finds its input answered and returns the outcome the recorded
 executor committed, read from the run's terminal evidence on the durable
-head; a refused run answers its refusal. Until then the acceptor waits,
+head; a refused run answers its refusal, as the typed `SendOutcome::Refused`
+answer rather than an error of the read (FIG-5092). Until then the acceptor waits,
 retryably. A lost acceptor recorded nothing, so the relay's ask executes its run
 once, as the session's own run; an acceptor that sealed or admitted its run
 before it was lost is redriven by its own engine, and when that run is gone for

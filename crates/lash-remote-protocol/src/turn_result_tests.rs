@@ -335,7 +335,25 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
         },
         gaps: Vec::new(),
     };
+    let refused = RemoteSendOutcome::Refused {
+        session_id: session_id.clone(),
+        input_id: input_id.clone(),
+        run: Some("run".into()),
+        refusal: Box::new(
+            lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::PluginFinalizeTurn,
+                "the finalize hook refused",
+            )
+            .into(),
+        ),
+        gaps: Vec::new(),
+    };
     let withdrawn = RemoteSendOutcome::Withdrawn {
+        session_id: session_id.clone(),
+        input_id: input_id.clone(),
+        gaps: Vec::new(),
+    };
+    let not_accepted = RemoteSendOutcome::NotAccepted {
         session_id,
         input_id,
         gaps: Vec::new(),
@@ -344,7 +362,10 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
     assert_eq!(settled.run(), Some(&TurnId::from("run")));
     assert!(matches!(parked.status(), RemoteTurnStatus::Parked { .. }));
     assert!(matches!(stalled.status(), RemoteTurnStatus::Stalled { .. }));
+    assert_eq!(refused.status(), RemoteTurnStatus::Failed);
+    assert_eq!(refused.run(), Some(&TurnId::from("run")));
     assert_eq!(withdrawn.status(), RemoteTurnStatus::Cancelled);
+    assert_eq!(not_accepted.status(), RemoteTurnStatus::NotAccepted);
     let operation = RemoteSendOutcome::OperationSettled {
         session_id: SessionId::from("session"),
         input_id: "operation".into(),
@@ -369,7 +390,15 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
     let schema = serde_json::to_value(schemars::schema_for!(RemoteSendOutcome)).expect("schema");
     let validator = jsonschema::validator_for(&schema).expect("validator");
     for outcome in [
-        settled, failed, cancelled, parked, stalled, withdrawn, operation,
+        settled,
+        failed,
+        cancelled,
+        parked,
+        stalled,
+        refused,
+        withdrawn,
+        not_accepted,
+        operation,
     ] {
         outcome.validate().expect("variant validates");
         let value = serde_json::to_value(&outcome).expect("serialize");
@@ -388,7 +417,8 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
             RemoteSendOutcome::Settled { .. } => Some("report"),
             RemoteSendOutcome::Parked { .. } => Some("parked"),
             RemoteSendOutcome::Stalled { .. } => Some("stalled"),
-            RemoteSendOutcome::Withdrawn { .. } => None,
+            RemoteSendOutcome::Refused { .. } => Some("refusal"),
+            RemoteSendOutcome::Withdrawn { .. } | RemoteSendOutcome::NotAccepted { .. } => None,
         } {
             let mut missing = value.clone();
             missing.as_object_mut().expect("object").remove(field);

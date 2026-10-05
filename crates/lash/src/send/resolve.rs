@@ -20,8 +20,12 @@ use crate::error::Result;
 pub(super) enum Resolution {
     /// Not settled yet. `run` is known once a turn applied the input.
     Undecided { run: Option<TurnId> },
-    /// The input left the queue without any turn applying it.
+    /// The input left the queue without any turn applying it, and its
+    /// withdrawal is on record.
     Withdrawn,
+    /// No record of the input exists: it was never accepted, or its
+    /// withdrawal was reclaimed.
+    NotAccepted,
     /// The run's final physical turn committed with `outcome`.
     Settled { run: TurnId, outcome: TurnOutcome },
     OperationSettled {
@@ -79,7 +83,7 @@ pub(super) async fn resolve_input(
         return resolve_run(parts, &run).await;
     }
     if !open {
-        return Ok(Resolution::Withdrawn);
+        return unbound_input(parts, &receipt.input_id).await;
     }
     match parts.store.session_fault().await {
         Ok(Some(fault)) => return Ok(Resolution::Faulted(fault.record.runtime_error())),
@@ -90,6 +94,38 @@ pub(super) async fn resolve_input(
         Some(stalled) => Resolution::Stalled(stalled),
         None => Resolution::Undecided { run: None },
     })
+}
+
+/// An input with no run binding and no open row: a withdrawal on record, or
+/// no record at all. The input target's resolution reads the row in any
+/// state: a terminal row no run is bound to is a withdrawal, and nothing
+/// recorded is pending. A run that took the input since the reads above
+/// answers it instead, on the next resolution.
+async fn unbound_input(parts: &SendParts, input: &InputId) -> Result<Resolution> {
+    let resolution = match parts
+        .store
+        .resolve_target(&lash_core::Target::Input(input.clone()))
+        .await
+    {
+        Err(lash_core::StoreError::ForkTargetUnavailable { .. }) => Resolution::Withdrawn,
+        Err(lash_core::StoreError::ForkTargetPending { .. }) => Resolution::NotAccepted,
+        Ok(_) | Err(lash_core::StoreError::ForkTargetPruned { .. }) => {
+            return Ok(Resolution::Undecided { run: None });
+        }
+        Err(error) => return Err(store_error(error)),
+    };
+    // An unavailable target is also a run that ended without a commit:
+    // only an input no run is bound to is withdrawn.
+    if parts
+        .store
+        .run_of_input(input)
+        .await
+        .map_err(store_error)?
+        .is_some()
+    {
+        return Ok(Resolution::Undecided { run: None });
+    }
+    Ok(resolution)
 }
 
 /// The open input's delivery, when its ingress obligation stalled. A store

@@ -59,13 +59,15 @@ fn terminal_error(err: impl Display) -> TerminalError {
     TerminalError::new(err.to_string())
 }
 
-/// A settled run's output. A run that parked holds its work until an
-/// operator resolves the park, and an input withdrawn before it ran has no
-/// turn: neither is an answer this workflow can report, so each ends the
+/// A settled run's output. A refused run ends the invocation terminally with
+/// its typed refusal. A run that parked holds its work until an operator
+/// resolves the park, and an input withdrawn before it ran has no turn:
+/// neither is an answer this workflow can report, so each ends the
 /// invocation terminally with the status it answered.
 fn settled_output(outcome: lash::SendOutcome) -> HandlerResult<lash::TurnOutput> {
     match outcome {
         lash::SendOutcome::Settled { output, .. } => Ok(*output),
+        lash::SendOutcome::Refused { refusal, .. } => Err(terminal_error(refusal).into()),
         outcome => Err(terminal_error(format!(
             "the turn answered {:?} without a settled turn",
             outcome.status()

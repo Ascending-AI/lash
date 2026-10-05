@@ -63,7 +63,10 @@ fn inspect_send(outcome: lash::SendOutcome) {
         lash::SendOutcome::Stalled { stalled, gaps } => {
             let _ = (stalled, gaps);
         }
-        lash::SendOutcome::Withdrawn { gaps } => {
+        lash::SendOutcome::Refused { run, refusal, gaps } => {
+            let _ = (run, refusal, gaps);
+        }
+        lash::SendOutcome::Withdrawn { gaps } | lash::SendOutcome::NotAccepted { gaps } => {
             let _ = gaps;
         }
     }
