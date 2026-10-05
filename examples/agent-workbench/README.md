@@ -103,20 +103,20 @@ provides deterministic RLM requests without a model service.
 From an isolated Kiln fork, run either browser scenario with one command:
 
 ```sh
-python3 scripts/workbench-e2e-gate.py s28_workbench_mcp_peer_restart
-python3 scripts/workbench-e2e-gate.py s29_workbench_kill_after_acceptance
+python3 scripts/e2e-gate.py //crates/lash-upgrade-harness:e2e_hosts__test s28_workbench_mcp_peer_restart
+python3 scripts/e2e-gate.py //crates/lash-upgrade-harness:e2e_hosts__test s29_workbench_kill_after_acceptance
 ```
 
 The runner enters the fork's private Kiln gate, prebuilds the workbench and VM
 worker, starts pinned Restate, and forwards the harness environment to an exact,
 uncached local `kiln test`. It prepares a Python environment with
 `playwright==1.62.0` through `uv`; Chromium must already be installed in
-`~/.cache/ms-playwright`. Any later workbench browser test in `e2e_hosts` can
-use the same command with its full test name. Runs serialize within the fork
-and write fresh artifacts under `target/workbench-e2e/`, or a fresh in-fork
-directory supplied with `--artifacts`. The final line reports executed, passed
-and failed counts from Kiln's JUnit output and the artifact path. A failed
-scenario exits nonzero and retains its logs, SQLite data and cleanup receipts.
+`~/.cache/ms-playwright`. Any registered `e2e_hosts` test can use the same
+command with its full test name. Runs serialize within the fork and write
+fresh artifacts under `target/e2e-gate/`, or a fresh in-fork directory supplied
+with `--artifacts`. The final line reports executed, passed and failed counts
+from Kiln's JUnit output and the artifact path. A failed scenario exits nonzero
+and retains its logs, SQLite data and cleanup receipts.
 
 S28 and S29 keep their `full` and `release` tiers in `scripts/lash-e2e-manifest.json`.
 For exact-source execution through the planner on a clean committed checkout:

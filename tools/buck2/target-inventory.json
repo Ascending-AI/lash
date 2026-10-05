@@ -53244,7 +53244,7 @@
         {
           "build_label": "//crates/lash-upgrade-harness:h1_recovery__test",
           "cargo": "h1_recovery",
-          "cargo_only": "requires private native Restate and owned node artifacts; run each full-path witness through tests/e2e/run_provider_recovery.py in a Kiln service gate",
+          "cargo_only": "requires private native Restate and owned node artifacts; run each full-path witness through scripts/e2e-gate.py in a Kiln gate",
           "check_label": "//crates/lash-upgrade-harness:h1_recovery__test[check]",
           "clippy_label": "//crates/lash-upgrade-harness:h1_recovery__test__clippy[clippy.txt]",
           "kind": "test",

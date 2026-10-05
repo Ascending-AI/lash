@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -24,7 +25,10 @@ SMOKE = {"S01", "S02", "S17", "S18", "S26", "S30"}
 AUDITS = {"F04", "Z0A", "Z0P", "Z01", "Z02", "Z03", "Z04", "Z05"}
 GATES = {"phase_a", "facade", "schema"}
 COUNTS = ("selected", "executed", "passed", "failed", "not_run")
-WORKBENCH_RUNNER = "scripts/workbench-e2e-gate.py"
+RUNNER = "scripts/e2e-gate.py"
+SPEC = importlib.util.spec_from_file_location("e2e_gate", ROOT / RUNNER)
+GATE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(GATE)
 SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 AXES = ("scenario", "variant", "store", "leg", "channel")
@@ -45,7 +49,7 @@ def case_key(row: dict) -> str:
 
 def load_manifest(path: Path = MANIFEST) -> dict:
     manifest = json.loads(path.read_text())
-    require(set(manifest) == {"scenarios", "server", "controller", "release_audits", "release_gates"}, "invalid manifest fields")
+    require(set(manifest) == {"scenarios", "server", "release_audits", "release_gates"}, "invalid manifest fields")
     server = manifest["server"]
     require(server["protocol"] == "V7" and DIGEST.fullmatch(server["archive_sha256"]) is not None, "invalid server pin")
     require(server["executable_sha256"] is None or DIGEST.fullmatch(server["executable_sha256"]) is not None, "invalid server executable pin")
@@ -77,17 +81,15 @@ def load_manifest(path: Path = MANIFEST) -> dict:
                 require(bool(case["hold_reason"]) and registration is None, f"{key}: held row needs reason and no registration")
             else:
                 require(not case["hold_reason"] and isinstance(registration, dict), f"{key}: ready row needs registration")
+                require(set(registration) == {"commit", "label", "test"}, f"{key}: invalid registration fields")
                 require(SHA.fullmatch(registration["commit"]) is not None, f"{key}: invalid registration commit")
-                require(registration["label"].startswith("//crates/lash-upgrade-harness:"), f"{key}: wrong controller owner")
+                require(registration["label"] in GATE.LABELS, f"{key}: unknown runner label")
                 require(bool(registration["test"]) and not registration["test"].startswith("-") and not any(c.isspace() for c in registration["test"]), f"{key}: need full test path")
-                if "runner" in registration:
-                    require(registration["runner"] == WORKBENCH_RUNNER and registration["label"] == "//crates/lash-upgrade-harness:e2e_hosts__test", f"{key}: invalid browser runner")
-                    require(case["store"] == "sqlite_file" and case["leg"] == "live", f"{key}: browser runner needs its implemented SQLite-file/live oracle")
             require({"journal", "store", "host", "trace", "cleanup", "junit", "provenance"} <= set(case["artifacts"]), f"{key}: incomplete required artifacts")
         require(len(keys) == len(set(keys)), f"{scenario['id']}: duplicate permutation")
     smoke = select(manifest, "smoke", [])
     require(len(smoke) == 6 and {r['scenario'] for r in smoke} == SMOKE, "smoke must select exactly its six scenarios")
-    require(all(r["leg"] == "live" and r["store"] == ("sqlite_file" if r["scenario"] == "S02" else "sqlite_memory") for r in smoke), "smoke needs live SQLite rows, S02 persisted")
+    require(all(r["leg"] == "live" and r["store"] == ("sqlite_file" if r["scenario"] in {"S01", "S02", "S18", "S26"} else "sqlite_memory") for r in smoke), "smoke needs live SQLite rows; S01/S02/S18/S26 persisted")
     deterministic = {f"S{i:02}" for i in range(1, 35)}
     for tier in ("full", "release"):
         require({r["scenario"] for r in select(manifest, tier, [])} == deterministic, f"{tier}: deterministic catalogue incomplete")
@@ -214,65 +216,29 @@ def reconcile(expected: dict, receipt: dict, root: Path, manifest: dict) -> dict
     return {"source_sha": expected["source_sha"], "tier": expected["tier"], "counts": actual, "groups": groups, "status": "passed"}
 
 
-def check_catalog(rows: list[dict], catalog: list[dict]) -> None:
-    require(isinstance(catalog, list), "controller catalog must be a list")
-    keys = [entry["key"] for entry in catalog]
-    require(len(keys) == len(set(keys)), "duplicate controller case registration")
-    entries = {entry["key"]: entry for entry in catalog}
-    for row in rows:
-        key = case_key(row)
-        require(key in entries, f"stale selector: {key}")
-        registered = entries[key]
-        require(registered["label"] == row["registration"]["label"] and registered["test"] == row["registration"]["test"], f"stale test registration: {key}")
-
-
 def write(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
-def run_controller(expected: dict, manifest: dict, artifacts: Path) -> Path:
-    require(bool(os.environ.get("KILN_GATE_ID")), "run requires a private kiln gate")
-    require(not expected["held"], f"unavailable registrations: {', '.join(expected['held'])}")
-    require(not expected["guarded"], f"unlanded arc guards: {', '.join(expected['guarded'])}")
-    controller = manifest["controller"]
-    require(controller is not None, "controller execution protocol not yet pinned; no cases executed")
-    require(SHA.fullmatch(controller["commit"]) is not None and ancestor(controller["commit"], expected["source_sha"]), "controller not landed in candidate ancestry")
-    require(controller["label"].startswith("//crates/lash-upgrade-harness:"), "wrong controller owner")
-    require(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() == expected["source_sha"], "checkout differs from exact source SHA")
-    require(not subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True).strip(), "execution requires a clean source checkout")
-    for row in expected["cases"]:
-        require(ancestor(row["registration"]["commit"], expected["source_sha"]), f"{case_key(row)}: registration not landed")
-    report = artifacts / "build.json"
-    subprocess.run(["kiln", "build", controller["label"], "--materializations", "final", "--build-report", str(report)], cwd=ROOT, check=True)
-    binary = subprocess.check_output([sys.executable, "tools/buck2/outputs.py", "--report", str(report), "--label", controller["label"], "--single"], cwd=ROOT, text=True).strip()
-    catalog = json.loads(subprocess.check_output([binary, "list", "--json"], cwd=ROOT, text=True))
-    check_catalog(expected["cases"], catalog)
-    # This protocol is inactive until H0 pins a controller registration. The
-    # controller owns binaries, readiness, faults and teardown for every case.
-    subprocess.run([binary, "run", "--plan", str(artifacts / "plan.json"), "--artifacts", str(artifacts)], cwd=ROOT, check=True)
-    return artifacts / "receipt.json"
-
-
-def run_workbench(expected: dict, artifacts: Path) -> dict:
+def run_cases(expected: dict, artifacts: Path) -> dict:
     require(not expected["held"], f"unavailable registrations: {', '.join(expected['held'])}")
     require(not expected["guarded"], f"unlanded arc guards: {', '.join(expected['guarded'])}")
     require(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() == expected["source_sha"], "checkout differs from exact source SHA")
     require(not subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True).strip(), "execution requires a clean source checkout")
     for row in expected["cases"]:
-        require(row["registration"].get("runner") == WORKBENCH_RUNNER, "selection mixes browser and controller registrations")
         require(ancestor(row["registration"]["commit"], expected["source_sha"]), f"{case_key(row)}: registration not landed")
     rows = []
     for index, row in enumerate(expected["cases"]):
         directory = artifacts / f"case-{index}"
         code = subprocess.call([
-            "python3", str(ROOT / WORKBENCH_RUNNER), row["registration"]["test"],
+            "python3", str(ROOT / RUNNER), row["registration"]["label"], row["registration"]["test"],
             "--artifacts", str(directory),
         ], cwd=ROOT)
         execution = json.loads((directory / "execution.json").read_text())
-        require(execution["scenario"] == row["registration"]["test"], "wrong browser scenario report")
+        require(execution["scenario"] == row["registration"]["test"], "wrong scenario report")
         executed = execution["counts"]["executed"] == 1
         if executed:
-            require(execution["source_sha"] == expected["source_sha"], "wrong browser source report")
+            require(execution["source_sha"] == expected["source_sha"], "wrong source report")
         status = "passed" if executed and code == 0 and execution["counts"]["passed"] == 1 else ("failed" if executed else "not_run")
         rows.append({"key": case_key(row), "executed": executed, "status": status, "artifacts": str(directory)})
     # These are execution results. Tier certification still requires reconcile's
@@ -310,11 +276,9 @@ def main() -> int:
             print(json.dumps(expected, indent=2))
             return 0
         if args.command == "run":
-            if any((row["registration"] or {}).get("runner") == WORKBENCH_RUNNER for row in expected["cases"]):
-                result = run_workbench(expected, args.artifacts)
-                print(json.dumps(result))
-                return int(result["counts"]["passed"] != result["counts"]["selected"])
-            args.receipt = run_controller(expected, manifest, args.artifacts)
+            result = run_cases(expected, args.artifacts)
+            print(json.dumps(result))
+            return int(result["counts"]["passed"] != result["counts"]["selected"])
         result = reconcile(expected, json.loads(args.receipt.read_text()), args.receipt.parent, manifest)
         result["receipt_sha256"] = digest(args.receipt)
         result["manifest_sha256"] = expected["manifest_sha256"]

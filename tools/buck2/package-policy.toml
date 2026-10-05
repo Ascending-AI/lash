@@ -37,7 +37,7 @@ packages = ["lash-upgrade-harness"]
 kinds = ["test"]
 targets = ["h1_recovery"]
 tags = ["manual", "cargo-service-gate"]
-reason = "requires private native Restate and owned node artifacts; run each full-path witness through tests/e2e/run_provider_recovery.py in a Kiln service gate"
+reason = "requires private native Restate and owned node artifacts; run each full-path witness through scripts/e2e-gate.py in a Kiln gate"
 
 [[rule]]
 packages = ["lash-internal-s3-store"]

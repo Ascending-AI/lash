@@ -54,17 +54,12 @@ kiln test //crates/lash-upgrade-harness:h1_providers__test \
 
 The three existing recovery procedures require private native Restate and
 prebuilt owned-node artifacts. `h1_recovery` is a manual service target, excluded
-from broad developer selection. Build the artifacts, then name one procedure:
+from broad developer selection. Name one procedure through the committed runner:
 
 ```sh
 . ./env.sh
-kiln build //crates/lash-upgrade-harness:h1_recovery__test__rust_test \
-  //crates/lash-upgrade-harness:lash-upgrade-node__bin \
-  --materializations final --build-report .buck2/h1-build-report.json
-kiln gate lash fig-4932 -- python3 \
-  crates/lash-upgrade-harness/tests/e2e/run_provider_recovery.py \
-  --report .buck2/h1-build-report.json \
-  --test s03_ambiguous_acceptance_survives_host_sigkill
+python3 scripts/e2e-gate.py //crates/lash-upgrade-harness:h1_recovery__test \
+  s03_ambiguous_acceptance_survives_host_sigkill
 ```
 
 The other full paths are

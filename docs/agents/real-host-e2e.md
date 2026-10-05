@@ -2,24 +2,23 @@
 
 `scripts/lash-e2e-manifest.json` owns scenario selection. It lists S01–S36,
 their named laws/risks, owner lanes, store/leg/channel/variant permutations,
-required artifacts and landing dependencies. The initial machinery is inactive:
-every registration is held, the controller is unregistered, and no CI job is
-enabled. Plans are inventory, never passing execution evidence. The activation
-follow-up pins the six smoke receipts before enabling push/full/release jobs.
-Runtime registration holds are distinct from `arc_guards`. Arc guards name the
-exact product ticket and an initially absent landing commit; they refuse
-certification until that commit is in candidate and main ancestry. S22 guards
-FIG-4896–4900, S13's final drain path guards FIG-4900, and S18's final wait
-contract guards FIG-4897. F02/FIG-1863 was already landed at intake; S35/S36
-have no F02 guard. H0 is no product arc guard.
+required artifacts and landing dependencies. Every implemented case is
+registered and runs through `scripts/e2e-gate.py`; held rows keep a named
+reason and refuse execution and certification. Plans are inventory, never
+passing execution evidence. Runtime registration holds are distinct from
+`arc_guards`. Arc guards name the exact product ticket and its landing commit;
+they refuse certification until that commit is in candidate and main ancestry.
+S22 guards FIG-4896–4900, S13's final drain path guards FIG-4900, and S18's
+final wait contract guards FIG-4897; all are landed. F02/FIG-1863 was already
+landed at intake; S35/S36 have no F02 guard.
 
-Smoke selects exactly S01/S02/S17/S18/S26/S30 on the live leg. S02 uses file
-SQLite; the other five use memory SQLite. Full and release select the same
+Smoke selects exactly S01/S02/S17/S18/S26/S30 on the live leg. S01/S02/S18/S26
+use file SQLite; S17/S30 use memory SQLite. Full and release select the same
 deterministic catalogue; live-provider cases S35/S36 are separate. Counts cover
-each permutation. The planned variants remain held until their scenario owner
-confirms its exact cuts and registers its full test paths. S33 reuses the
-existing Phase A operator choreography; it does not introduce another operator
-supervisor. Existing supervisors and the Restate law board remain until parity.
+each permutation. Held rows keep their variant hold until the named owner
+lands its implementation. S33 reuses the existing Phase A operator
+choreography; it does not introduce another operator supervisor. Existing
+supervisors and the Restate law board remain until parity.
 
 Read a plan without booting services:
 
@@ -35,22 +34,23 @@ release plan always selects the whole release catalogue. Held rows appear in
 `plan.json`; `run` and `reconcile` refuse them. Missing credentials in the
 optional live tier produce `not_run`, which cannot certify a deterministic tier.
 
-After activation, the common entrypoint runs under a private gate:
+`run` executes each selected case through the committed runner:
 
 ```sh
-kiln gate lash <fork> -- python3 scripts/lash-e2e.py run --tier full \
-  --sha "$(git rev-parse HEAD)" --artifacts target/e2e-full
+python3 scripts/lash-e2e.py run --tier smoke \
+  --sha "$(git rev-parse HEAD)" --artifacts target/e2e-smoke
 ```
 
-The controller registration must name an ancestor commit and a generated
-`lash-upgrade-harness` binary label. Execution requires a clean checkout at the
-exact SHA. `kiln build` materializes that executable through its build report.
-The proposed H8 controller protocol, to be pinned with H0 during activation, is
-`list --json` (case key, owning label and exact test path) followed by
-`run --plan <plan.json> --artifacts <directory>`. Stale case or test selectors
-refuse before boot. H0 owns prebuilt host/server materialization, the service
-lease, readiness, faults, supervision and teardown. This script owns no service
-processes and inserts no journal commands.
+Every ready registration names an ancestor commit, one of the runner's labels
+and a full test path. Execution requires a clean checkout at the exact SHA.
+For each case the planner calls
+`python3 scripts/e2e-gate.py <label> <test> --artifacts <dir>/case-<i>`. The
+runner enters the fork's private Kiln gate, materializes the union of
+binaries the registered selectors need in one `kiln build`, serves pinned
+Restate, and runs an exact uncached `kiln test` under
+`scripts/ci/restate_suite.py`. Its JUnit must contain exactly the registered
+test. Stale case or test selectors refuse before boot. This script owns no
+service processes and inserts no journal commands.
 
 The producer writes `receipt.json` using
 `scripts/lash-e2e-receipt.schema.json`. It carries the source SHA, manifest
@@ -96,8 +96,9 @@ artifacts; `run` requires a fresh directory, and a diagnostic rerun uses a
 separate directory and cannot replace that failure. Conclusions carry receipt
 and manifest digests; consumers must compare these with the retained inputs.
 Event barriers and deadline-bound predicate probes belong in the
-controller; sleeps cannot establish readiness, completion or cleanup.
+case and its evidence; sleeps cannot establish readiness, completion or
+cleanup.
 
-The six laws in `scripts/test_lash_e2e.py` pin R8 selection, counts, artifact and
+The seven laws in `scripts/test_lash_e2e.py` pin R8 selection, counts, artifact and
 release-evidence rules using synthetic envelopes. They execute no host cases
 and provide no live-substrate, upgrade or release proof.

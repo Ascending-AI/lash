@@ -16,7 +16,7 @@
       "cases": [
         {
           "variant": "default",
-          "store": "sqlite_memory",
+          "store": "sqlite_file",
           "leg": "live",
           "channel": "standard",
           "tiers": [
@@ -38,13 +38,17 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "5dc9d368425fcd6b5318eec8b5fa75ae2ee87289",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s01_workbench_singleton"
+          }
         },
         {
           "variant": "default",
-          "store": "sqlite_memory",
+          "store": "sqlite_file",
           "leg": "replay",
           "channel": "standard",
           "tiers": [
@@ -66,11 +70,11 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: tools::s01_workbench_singleton proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
-      "setup": "Workbench Standard, one echo tool, real Restate/SQLite.",
+      "setup": "Workbench Standard, one echo tool, real Restate/file SQLite.",
       "fault": "None; replay leg suspends.",
       "observable": "One original call identity, independently decoded A/X/D/V facts in owning Run, one reply; no second body on replay.",
       "arc_guards": [],
@@ -112,9 +116,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "1c71f4dd569411f702be63d5c1722e4e5009bbe3",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s02_cold_partial"
+          }
         },
         {
           "variant": "default",
@@ -140,7 +148,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: tools::s02_cold_partial proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -167,7 +175,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL oracle: tools::s02_cold_partial proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -194,7 +202,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: tools::s02_cold_partial proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -239,9 +247,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "c7c1c70de9e6977fffbc535782f82f615b8c0590",
+            "label": "//crates/lash-upgrade-harness:h1_recovery__test",
+            "test": "s03_ambiguous_acceptance_survives_host_sigkill"
+          }
         },
         {
           "variant": "default",
@@ -267,7 +279,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: s03_ambiguous_acceptance_survives_host_sigkill proves the sqlite_file/live leg only; FIG-4932 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -314,7 +326,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: the proposal/ACK-drop choreography was deferred by FIG-4932; no owner ticket filed.",
           "registration": null
         },
         {
@@ -341,7 +353,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: the proposal/ACK-drop choreography was deferred by FIG-4932; no owner ticket filed.",
           "registration": null
         },
         {
@@ -368,7 +380,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: the proposal/ACK-drop choreography was deferred by FIG-4932; no owner ticket filed.",
           "registration": null
         },
         {
@@ -395,7 +407,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: the proposal/ACK-drop choreography was deferred by FIG-4932; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -441,9 +453,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "1c71f4dd569411f702be63d5c1722e4e5009bbe3",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s05_opposite_batch_order"
+          }
         },
         {
           "variant": "default",
@@ -469,7 +485,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: tools::s05_opposite_batch_order proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -496,7 +512,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL oracle: tools::s05_opposite_batch_order proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -523,7 +539,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: tools::s05_opposite_batch_order proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -567,9 +583,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "c7c1c70de9e6977fffbc535782f82f615b8c0590",
+            "label": "//crates/lash-upgrade-harness:h1_recovery__test",
+            "test": "s06_reported_retries_preserve_backoff_and_reverse_ready_order"
+          }
         },
         {
           "variant": "default",
@@ -595,7 +615,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: s06_reported_retries_preserve_backoff_and_reverse_ready_order proves the sqlite_file/live leg only; FIG-4932 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -641,9 +661,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "c7c1c70de9e6977fffbc535782f82f615b8c0590",
+            "label": "//crates/lash-upgrade-harness:h1_recovery__test",
+            "test": "s07_cancellation_during_backoff_survives_cold_restart"
+          }
         },
         {
           "variant": "default",
@@ -669,7 +693,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: s07_cancellation_during_backoff_survives_cold_restart proves the sqlite_file/live leg only; FIG-4932 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -714,9 +738,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "1c71f4dd569411f702be63d5c1722e4e5009bbe3",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s08_pre_final"
+          }
         },
         {
           "variant": "default",
@@ -742,7 +770,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: cancel::s08_pre_final proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -769,7 +797,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL oracle: cancel::s08_pre_final proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -796,7 +824,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: cancel::s08_pre_final proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -818,7 +846,38 @@
       "dependencies": "Base, C03, F01",
       "cases": [
         {
-          "variant": "default",
+          "variant": "before-intent",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "1c71f4dd569411f702be63d5c1722e4e5009bbe3",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s09_before_intent"
+          }
+        },
+        {
+          "variant": "after-intent",
           "store": "sqlite_file",
           "leg": "live",
           "channel": "standard",
@@ -841,7 +900,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Pending product fix and rerun: FIG-4983 reruns cancel::s09_after_intent after FIG-4977 (nested intent replay).",
           "registration": null
         },
         {
@@ -868,7 +927,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: cancel::s09_before_intent proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -895,7 +954,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL oracle: cancel::s09_before_intent proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -922,7 +981,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: cancel::s09_before_intent proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -968,7 +1027,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Pending fixture fix and rerun: FIG-4983 owns cancel::s10_empty_middle_rank (hold placement) after FIG-4977.",
           "registration": null
         },
         {
@@ -995,7 +1054,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Pending fixture fix and rerun: FIG-4983 owns cancel::s10_empty_middle_rank (hold placement) after FIG-4977.",
           "registration": null
         },
         {
@@ -1022,7 +1081,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Pending fixture fix and rerun: FIG-4983 owns cancel::s10_empty_middle_rank (hold placement) after FIG-4977.",
           "registration": null
         },
         {
@@ -1049,7 +1108,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Pending fixture fix and rerun: FIG-4983 owns cancel::s10_empty_middle_rank (hold placement) after FIG-4977.",
           "registration": null
         }
       ],
@@ -1095,7 +1154,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Pending rerun: FIG-4983 reruns cancel::s11_inline_loser and cancel::s11_deferred_loser after FIG-4976.",
           "registration": null
         },
         {
@@ -1122,7 +1181,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Pending rerun: FIG-4983 reruns cancel::s11_inline_loser and cancel::s11_deferred_loser after FIG-4976.",
           "registration": null
         },
         {
@@ -1149,7 +1208,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Pending rerun: FIG-4983 reruns cancel::s11_inline_loser and cancel::s11_deferred_loser after FIG-4976.",
           "registration": null
         },
         {
@@ -1176,7 +1235,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Pending rerun: FIG-4983 reruns cancel::s11_inline_loser and cancel::s11_deferred_loser after FIG-4976.",
           "registration": null
         }
       ],
@@ -1224,7 +1283,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s12_retire_pending_source); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1251,7 +1310,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s12_retire_pending_source); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1278,7 +1337,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s12_retire_pending_source); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1305,7 +1364,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s12_retire_pending_source); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -1351,7 +1410,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented on a real host: e2e_h3 transfer::s13_owned_work_refuses_operator_retirement_sqlite_memory and transfer::s13_unreadable_registry_fails_closed_sqlite_memory are SQLite-memory/double component witnesses without N/N+1 coexistence; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1378,7 +1437,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented on a real host: e2e_h3 transfer::s13_owned_work_refuses_operator_retirement_sqlite_memory and transfer::s13_unreadable_registry_fails_closed_sqlite_memory are SQLite-memory/double component witnesses without N/N+1 coexistence; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1405,7 +1464,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented on a real host: e2e_h3 transfer::s13_owned_work_refuses_operator_retirement_sqlite_memory and transfer::s13_unreadable_registry_fails_closed_sqlite_memory are SQLite-memory/double component witnesses without N/N+1 coexistence; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1432,7 +1491,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented on a real host: e2e_h3 transfer::s13_owned_work_refuses_operator_retirement_sqlite_memory and transfer::s13_unreadable_registry_fails_closed_sqlite_memory are SQLite-memory/double component witnesses without N/N+1 coexistence; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -1442,7 +1501,7 @@
       "arc_guards": [
         {
           "ticket": "FIG-4900",
-          "commit": null
+          "commit": "ff23d44d2e94bbc11839700b8b9b2326db64f1a8"
         }
       ]
     },
@@ -1483,9 +1542,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H4 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "cc1fd26cd2b11e16997211e4a18e8291029e75a8",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "fleet::s14_leader_loss_reuses_durable_x_and_original_run"
+          }
         }
       ],
       "setup": "Three-node local cluster, two Lash workers, PG, acknowledged input plus unfinished tool.",
@@ -1530,9 +1593,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H4 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "cc1fd26cd2b11e16997211e4a18e8291029e75a8",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "fleet::s15_minority_tool_cancel_race_has_one_winner_after_heal"
+          }
         }
       ],
       "setup": "Three-node cluster + shared PG; same Run visible to clients.",
@@ -1555,7 +1622,7 @@
       "dependencies": "Base, PG, B01/P58",
       "cases": [
         {
-          "variant": "default",
+          "variant": "terminal-publication",
           "store": "postgresql",
           "leg": "live",
           "channel": "standard",
@@ -1577,9 +1644,44 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H4 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "cc1fd26cd2b11e16997211e4a18e8291029e75a8",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "fleet::s16_in_flight_terminal_blocks_drain_and_disconnect_keeps_fence"
+          }
+        },
+        {
+          "variant": "sigkill-redrive",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "cc1fd26cd2b11e16997211e4a18e8291029e75a8",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "fleet::s16_sigkill_redrives_same_invocation_without_a_second_seal"
+          }
         },
         {
           "variant": "default",
@@ -1605,7 +1707,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H4 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: fleet::s16_in_flight_terminal_blocks_drain_and_disconnect_keeps_fence and fleet::s16_sigkill_redrives_same_invocation_without_a_second_seal prove the postgresql/live leg only; FIG-4935 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -1651,7 +1753,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: only the double row process::s17_operation_drop_and_follow_sqlite_memory exists; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1678,7 +1780,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: only the double row process::s17_operation_drop_and_follow_sqlite_memory exists; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1705,7 +1807,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: only the double row process::s17_operation_drop_and_follow_sqlite_memory exists; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1732,7 +1834,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: only the double row process::s17_operation_drop_and_follow_sqlite_memory exists; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1757,9 +1859,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "e2ef3c73e61fe90eaed87c2408318f5d44a13b30",
+            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
+            "test": "process::s17_operation_drop_and_follow_sqlite_memory"
+          }
         }
       ],
       "setup": "Workbench plugin task issues a tool and returns completion; node::h3::double_fixture proves admission and follow on the server double.",
@@ -1784,9 +1890,9 @@
       "cases": [
         {
           "variant": "process-await-cancel",
-          "store": "sqlite_memory",
+          "store": "sqlite_file",
           "leg": "live",
-          "channel": "standard",
+          "channel": "rlm",
           "tiers": [
             "smoke",
             "full",
@@ -1807,7 +1913,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witness is e2e_h3 process::s18_cancel_suspended_application_timer_sqlite_memory (in-process double).",
           "registration": null
         }
       ],
@@ -1817,7 +1923,7 @@
       "arc_guards": [
         {
           "ticket": "FIG-4897",
-          "commit": null
+          "commit": "33c244ec8f04d51e798b1855623e611d5d67a41a"
         }
       ]
     },
@@ -1858,7 +1964,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: FIG-4934 deferred isolated start cuts; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1885,7 +1991,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: FIG-4934 deferred isolated start cuts; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1912,7 +2018,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: FIG-4934 deferred isolated start cuts; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1939,7 +2045,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: FIG-4934 deferred isolated start cuts; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -1984,7 +2090,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: FIG-4934 deferred OS termination and reaping; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2011,7 +2117,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: FIG-4934 deferred OS termination and reaping; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2038,7 +2144,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: FIG-4934 deferred OS termination and reaping; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2065,7 +2171,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: FIG-4934 deferred OS termination and reaping; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -2112,7 +2218,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented on a real host: e2e_h3 process::s21_resolved_before_subscription_sqlite_memory and process::s21_cancelled_source_refuses_revival_sqlite_memory are double component witnesses without transfer/protected drain; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2139,7 +2245,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented on a real host: e2e_h3 process::s21_resolved_before_subscription_sqlite_memory and process::s21_cancelled_source_refuses_revival_sqlite_memory are double component witnesses without transfer/protected drain; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2166,7 +2272,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented on a real host: e2e_h3 process::s21_resolved_before_subscription_sqlite_memory and process::s21_cancelled_source_refuses_revival_sqlite_memory are double component witnesses without transfer/protected drain; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2193,7 +2299,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented on a real host: e2e_h3 process::s21_resolved_before_subscription_sqlite_memory and process::s21_cancelled_source_refuses_revival_sqlite_memory are double component witnesses without transfer/protected drain; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -2239,7 +2345,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/park.rs is a catalogue-only spec; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2266,7 +2372,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/park.rs is a catalogue-only spec; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2293,7 +2399,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/park.rs is a catalogue-only spec; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2320,7 +2426,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/park.rs is a catalogue-only spec; FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -2330,23 +2436,23 @@
       "arc_guards": [
         {
           "ticket": "FIG-4896",
-          "commit": null
+          "commit": "02b1932ae190b9feb0ef0194e99921754817d5b9"
         },
         {
           "ticket": "FIG-4897",
-          "commit": null
+          "commit": "33c244ec8f04d51e798b1855623e611d5d67a41a"
         },
         {
           "ticket": "FIG-4898",
-          "commit": null
+          "commit": "4ebaa76943fd5d90a419163a56ca0e8fba93a38c"
         },
         {
           "ticket": "FIG-4899",
-          "commit": null
+          "commit": "b6dfca7bb91800c79aaf47094a77ee088c4bfb9f"
         },
         {
           "ticket": "FIG-4900",
-          "commit": null
+          "commit": "ff23d44d2e94bbc11839700b8b9b2326db64f1a8"
         }
       ]
     },
@@ -2387,7 +2493,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s23_cancel_then_fresh_input); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2414,7 +2520,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s23_cancel_then_fresh_input); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2441,7 +2547,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s23_cancel_then_fresh_input); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2468,7 +2574,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s23_cancel_then_fresh_input); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -2517,9 +2623,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "be1f9a7e7b1214a2567c07e408a5e54c59681976",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work"
+          }
         },
         {
           "variant": "default",
@@ -2549,7 +2659,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work proves the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2580,7 +2690,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL oracle: plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work proves the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2611,7 +2721,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work proves the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -2634,7 +2744,7 @@
       "dependencies": "Base, P58/B01/B02; materialized default/synthetic-next pair in R",
       "cases": [
         {
-          "variant": "default",
+          "variant": "same-key",
           "store": "sqlite_file",
           "leg": "live",
           "channel": "standard",
@@ -2660,9 +2770,83 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "a5ef59ce555ac1d61735a4c6f599f6cde8caa4f7",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling"
+          }
+        },
+        {
+          "variant": "disjoint-keys",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "a5ef59ce555ac1d61735a4c6f599f6cde8caa4f7",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling"
+          }
+        },
+        {
+          "variant": "namespaces",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "a5ef59ce555ac1d61735a4c6f599f6cde8caa4f7",
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling"
+          }
         },
         {
           "variant": "default",
@@ -2692,7 +2876,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling prove the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2723,7 +2907,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL oracle: plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling prove the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2754,7 +2938,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling prove the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -2779,7 +2963,7 @@
       "cases": [
         {
           "variant": "recorded-429-retry",
-          "store": "sqlite_memory",
+          "store": "sqlite_file",
           "leg": "live",
           "channel": "standard",
           "tiers": [
@@ -2802,12 +2986,12 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
           "registration": null
         },
         {
           "variant": "recorded-429-retry",
-          "store": "sqlite_memory",
+          "store": "sqlite_file",
           "leg": "replay",
           "channel": "standard",
           "tiers": [
@@ -2829,12 +3013,12 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
           "registration": null
         },
         {
           "variant": "partial-stream-reset",
-          "store": "sqlite_memory",
+          "store": "sqlite_file",
           "leg": "live",
           "channel": "standard",
           "tiers": [
@@ -2856,12 +3040,12 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
           "registration": null
         },
         {
           "variant": "partial-stream-reset",
-          "store": "sqlite_memory",
+          "store": "sqlite_file",
           "leg": "replay",
           "channel": "standard",
           "tiers": [
@@ -2883,12 +3067,12 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
           "registration": null
         },
         {
           "variant": "observer-reconnect",
-          "store": "sqlite_memory",
+          "store": "sqlite_file",
           "leg": "live",
           "channel": "standard",
           "tiers": [
@@ -2910,12 +3094,12 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
           "registration": null
         },
         {
           "variant": "observer-reconnect",
-          "store": "sqlite_memory",
+          "store": "sqlite_file",
           "leg": "replay",
           "channel": "standard",
           "tiers": [
@@ -2937,7 +3121,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
           "registration": null
         }
       ],
@@ -2982,7 +3166,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s27_authentication_failure_permits_the_next_run.",
           "registration": null
         },
         {
@@ -3009,7 +3193,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s27_authentication_failure_permits_the_next_run.",
           "registration": null
         }
       ],
@@ -3061,8 +3245,7 @@
           "registration": {
             "commit": "701146c054b6a4345de747db539d999076389e2e",
             "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s28_workbench_mcp_peer_restart",
-            "runner": "scripts/workbench-e2e-gate.py"
+            "test": "s28_workbench_mcp_peer_restart"
           },
           "host": "workbench"
         },
@@ -3197,8 +3380,7 @@
           "registration": {
             "commit": "f3eda494c9528a2ae176853495970ec0a7e0c041",
             "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s29_workbench_kill_after_acceptance",
-            "runner": "scripts/workbench-e2e-gate.py"
+            "test": "s29_workbench_kill_after_acceptance"
           }
         },
         {
@@ -3225,7 +3407,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL workbench recovery oracle; the browser runner registers SQLite-file/live/standard only.",
+          "hold_reason": "Missing PostgreSQL oracle: s29_workbench_kill_after_acceptance proves the sqlite_file/live leg only; FIG-4974 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -3273,9 +3455,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "85c0dd46e29360dc7ad10fa89e8f78dbc22b8b40",
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s30_external_consumer_accept_follow_cancel"
+          }
         },
         {
           "variant": "default",
@@ -3301,7 +3487,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: s30_external_consumer_accept_follow_cancel proves the sqlite_memory/live leg only; FIG-4937 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -3349,7 +3535,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s31_publication_crash); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3376,7 +3562,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s31_publication_crash); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3403,7 +3589,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s31_publication_crash); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3430,7 +3616,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s31_publication_crash); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -3477,7 +3663,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s32_remove_retained_result); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3504,7 +3690,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s32_remove_retained_result); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3531,7 +3717,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s32_remove_retained_result); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3558,7 +3744,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s32_remove_retained_result); FIG-4934 deferred it; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -3608,7 +3794,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Certified through the Phase A release gate (release_gates.phase_a), not this runner; companion selector phase_a negotiated_wire_both_directions::s33_negotiated_wire_both_directions_sqlite runs under the Phase A gate.",
           "registration": null
         },
         {
@@ -3639,7 +3825,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Certified through the Phase A release gate (release_gates.phase_a), not this runner; companion selector phase_a negotiated_wire_both_directions::s33_negotiated_wire_both_directions_sqlite runs under the Phase A gate.",
           "registration": null
         },
         {
@@ -3670,7 +3856,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Certified through the Phase A release gate (release_gates.phase_a), not this runner; companion selector phase_a negotiated_wire_both_directions::s33_negotiated_wire_both_directions_sqlite runs under the Phase A gate.",
           "registration": null
         },
         {
@@ -3701,7 +3887,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Certified through the Phase A release gate (release_gates.phase_a), not this runner; companion selector phase_a negotiated_wire_both_directions::s33_negotiated_wire_both_directions_sqlite runs under the Phase A gate.",
           "registration": null
         }
       ],
@@ -3745,9 +3931,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H7 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "commit": "fb4bf54cc57ff1c713e2d48ca348c1e980b8f253",
+            "label": "//crates/lash-upgrade-harness:e2e_telemetry__test",
+            "test": "s34_otlp_retry_transfer_and_shutdown"
+          }
         },
         {
           "variant": "default",
@@ -3773,7 +3963,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H7 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Missing replay oracle: s34_otlp_retry_transfer_and_shutdown proves the sqlite_file/live leg only; FIG-4938 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -3819,7 +4009,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Paid live row: hosts.rs s35_file_edit_bugfix runs only with capped live credentials and is NotRun without them; outside FIG-4986.",
           "registration": null
         },
         {
@@ -3845,7 +4035,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Paid live row: hosts.rs s35_missing_helper_file runs only with capped live credentials and is NotRun without them; outside FIG-4986.",
           "registration": null
         },
         {
@@ -3871,7 +4061,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Paid live row: hosts.rs s35_config_contract_edit runs only with capped live credentials and is NotRun without them; outside FIG-4986.",
           "registration": null
         }
       ],
@@ -3915,7 +4105,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "Paid live row: hosts.rs s36_workbench_weather runs only with capped live credentials and is NotRun without them; outside FIG-4986.",
           "registration": null
         }
       ],
@@ -3932,7 +4122,6 @@
     "executable_sha256": null,
     "protocol": "V7"
   },
-  "controller": null,
   "release_audits": {
     "F04": "FIG-4896",
     "Z0A": "FIG-4897",

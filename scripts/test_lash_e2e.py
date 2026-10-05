@@ -80,12 +80,16 @@ class ReceiptLaws(unittest.TestCase):
     def test_r8_smoke_is_six_rows_and_held_rows_never_certify(self):
         planned = e2e.plan(self.manifest, "b" * 64, "smoke", [], SOURCE)
         self.assertEqual(planned["selected"], 6)
-        self.assertEqual(len(planned["held"]), 6)
+        self.assertEqual(planned["held"], [
+            "S18/process-await-cancel/sqlite_file/live/rlm",
+            "S26/recorded-429-retry/sqlite_file/live/standard",
+        ])
         self.assertEqual({r["scenario"] for r in planned["cases"]}, e2e.SMOKE)
         live = e2e.plan(self.manifest, "b" * 64, "live", [], SOURCE)
         self.assertEqual(live["guarded"], [])
-        final = e2e.plan(self.manifest, "b" * 64, "full", ["S22"], SOURCE)
-        self.assertEqual(len(final["guarded"]), final["selected"])
+        with patch.object(e2e, "ancestor", return_value=True):
+            final = e2e.plan(self.manifest, "b" * 64, "full", ["S22"], SOURCE)
+        self.assertEqual(final["guarded"], [])
         self.assertEqual({g["ticket"] for r in final["cases"] for g in r["arc_guards"]}, {f"FIG-{i}" for i in range(4896, 4901)})
         with self.assertRaisesRegex(ValueError, "held cases"):
             e2e.reconcile(planned, {}, self.root, self.manifest)
@@ -98,20 +102,10 @@ class ReceiptLaws(unittest.TestCase):
         for tier, selectors in [("smoke", ["S99"]), ("smoke", ["S14"]), ("smoke", ["S01", "S01"]), ("release", ["S01"])]:
             with self.subTest(tier=tier, selectors=selectors), self.assertRaises(ValueError):
                 e2e.plan(self.manifest, "b" * 64, tier, selectors, SOURCE)
-        _, expected, _ = self.fixture()
-        with self.assertRaisesRegex(ValueError, "stale selector"):
-            e2e.check_catalog(expected["cases"], [])
-        catalog = [{"key": e2e.case_key(r), **r["registration"]} for r in expected["cases"]]
-        e2e.check_catalog(expected["cases"], catalog)
-        catalog[0]["test"] = "removed::law"
-        with self.assertRaisesRegex(ValueError, "stale test"):
-            e2e.check_catalog(expected["cases"], catalog)
         args = ["lash-e2e.py", "run", "--tier", "smoke", "--sha", SOURCE, "--artifacts", str(self.root)]
-        planned = e2e.plan(self.manifest, e2e.digest(e2e.MANIFEST), "smoke", [], SOURCE)
-        e2e.write(self.root / "plan.json", planned)
-        with patch.object(sys, "argv", args), patch.dict(os.environ, {"KILN_GATE_ID": "synthetic-receipt-law"}), patch.object(e2e, "run_controller") as controller:
+        with patch.object(sys, "argv", args), patch.object(e2e.subprocess, "call") as command:
             self.assertEqual(e2e.main(), 1)
-            controller.assert_not_called()
+            command.assert_not_called()
 
     def test_r8_counts_and_identity_reconcile_per_store_and_leg(self):
         manifest, expected, receipt = self.fixture()
@@ -196,33 +190,33 @@ class ReceiptLaws(unittest.TestCase):
         expected = e2e.plan(self.manifest, "b" * 64, "full", ["S28"], SOURCE, [key])
         self.assertEqual([e2e.case_key(row) for row in expected["cases"]], [key])
         self.assertEqual(expected["held"], [])
-        self.assertIsNone(self.manifest["controller"])
         with self.assertRaisesRegex(ValueError, "release certification"):
             e2e.plan(self.manifest, "b" * 64, "release", [], SOURCE, [key])
         with self.assertRaisesRegex(ValueError, "absent"):
             e2e.plan(self.manifest, "b" * 64, "full", ["S29"], SOURCE, [key])
 
-        def browser_run(command, **kwargs):
-            self.assertEqual(command[2], "s28_workbench_mcp_peer_restart")
+        def runner_call(command, **kwargs):
+            self.assertEqual(command[2], "//crates/lash-upgrade-harness:e2e_hosts__test")
+            self.assertEqual(command[3], "s28_workbench_mcp_peer_restart")
             directory = Path(command[-1])
             directory.mkdir()
             e2e.write(directory / "execution.json", {
-                "scenario": command[2], "source_sha": SOURCE,
+                "scenario": command[3], "label": command[2], "source_sha": SOURCE,
                 "counts": {"executed": 1, "passed": 0, "failed": 1},
             })
             return 32
 
         with patch.object(e2e, "ancestor", return_value=True), \
              patch.object(e2e.subprocess, "check_output", side_effect=[SOURCE + "\n", ""]), \
-             patch.object(e2e.subprocess, "call", side_effect=browser_run):
-            result = e2e.run_workbench(expected, self.root)
+             patch.object(e2e.subprocess, "call", side_effect=runner_call):
+            result = e2e.run_cases(expected, self.root)
         self.assertEqual(result["counts"], {"selected": 1, "executed": 1, "passed": 0, "failed": 1, "not_run": 0})
         self.assertIs(result["certified"], False)
         self.assertFalse((self.root / "conclusion.json").exists())
         held = e2e.plan(self.manifest, "b" * 64, "full", ["S28"], SOURCE)
         with self.assertRaisesRegex(ValueError, "unavailable registrations"), \
              patch.object(e2e.subprocess, "call") as command:
-            e2e.run_workbench(held, self.root)
+            e2e.run_cases(held, self.root)
             command.assert_not_called()
 
 
