@@ -113,7 +113,7 @@ def browser(args):
 
     initial = state()
     session = initial["settings"]["session_id"]
-    assert not initial["active_turns"] and not initial["messages"], "S29 session must be fresh"
+    assert not initial["active_turns"] and not [row for row in initial["transcript"] if not row["suppressed"]], "S29 session must be fresh"
     url = args.base_url + "/?" + urllib.parse.urlencode({"session_id": session})
     with sync_playwright() as playwright:
         chrome = playwright.chromium.launch()
@@ -185,7 +185,7 @@ def browser(args):
                 assert counts and max(counts) == 1, "live observer duplicated or lost recovered reply"
                 write(directory / f"s29-live-dom-{index}.json", {
                     "reply_counts": counts,
-                    "nodes": observer.locator("#timeline > *").evaluate_all(
+                    "nodes": observer.locator("#timelineRows > *").evaluate_all(
                         "nodes => nodes.map(node => ({id:node.dataset.transcriptRowId, turn:node.dataset.turnId, text:node.textContent, class:node.className}))"),
                 })
                 projection.assert_three_layers(observer, final, rows, directory / f"s29-observer-{index}.json", navigation_wait="domcontentloaded")

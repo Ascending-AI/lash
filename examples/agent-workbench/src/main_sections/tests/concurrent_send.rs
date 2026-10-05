@@ -753,6 +753,7 @@ async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating()
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await
@@ -790,6 +791,7 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
         at: "2026-08-30T00:00:00Z".to_string(),
         attachments: Vec::new(),
         provenance: None,
+        client_nonce: None,
     });
     append_started_graph(
         &state.lashlang_execution,
@@ -896,6 +898,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
                 model: Some("test-model".to_string()),
                 model_variant: None,
                 attachment_id: None,
+                client_nonce: None,
             }),
         )
         .await
@@ -947,6 +950,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await
@@ -1062,6 +1066,7 @@ async fn a_send_queues_if_queued_work_claims_after_its_idle_read() {
                     model: Some("test-model".to_string()),
                     model_variant: None,
                     attachment_id: None,
+                    client_nonce: None,
                 }),
             )
             .await
@@ -1170,6 +1175,7 @@ async fn a_panicked_turn_submission_cleans_up_and_publishes_failure() {
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await
@@ -1228,6 +1234,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
                     model: Some("test-model".to_string()),
                     model_variant: None,
                     attachment_id: None,
+                    client_nonce: None,
                 }),
             )
             .await
@@ -1270,6 +1277,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await
@@ -1303,6 +1311,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await
@@ -1324,6 +1333,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await
@@ -1453,6 +1463,7 @@ async fn a_stalled_turn_does_not_block_competing_recovery_open() {
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await

@@ -42,6 +42,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await
@@ -81,6 +82,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await
@@ -154,14 +156,6 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         ("user", ordinary_prompt),
         ("assistant", "ordinary follow-frame answer"),
     ];
-    assert_eq!(
-        projected
-            .messages
-            .iter()
-            .map(|message| (message.role.as_str(), message.text.as_str()))
-            .collect::<Vec<_>>(),
-        expected_rows
-    );
     let canonical = projected
         .transcript
         .iter()
@@ -195,8 +189,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         vec![switched_reply_turn_id, ordinary_turn_id]
     );
     assert!(
-        projected
-            .messages
+        canonical
             .iter()
             .all(|message| !message.text.contains("hidden-middle-seed")
                 && !message.text.contains("hidden-final-seed"))
@@ -315,12 +308,6 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
     ))
     .await
     .expect("read state at frame-switch boundary");
-    let api_user_rows = boundary
-        .state
-        .messages
-        .iter()
-        .filter(|message| message.role == "user")
-        .count();
     let transcript_user_rows = boundary
         .transcript
         .iter()
@@ -338,17 +325,14 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         })
         .count();
     // Six pre-switch rows, the switch request, and the task that opened the
-    // follow frame (FIG-3143).
-    assert_eq!(
-        api_user_rows, 8,
-        "committed user rows disappeared from /api/state"
-    );
+    // follow frame (FIG-3143). The UI sent all but the task, which exists only
+    // as a committed row: a state read never writes it into the product lane.
     assert_eq!(
         transcript_user_rows, 8,
         "committed user rows disappeared from the rendered transcript"
     );
     assert_eq!(
-        product_user_rows, 8,
+        product_user_rows, 7,
         "product user rows were retired at the switch"
     );
 
@@ -489,27 +473,6 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
             "carry on in the next frame".to_owned(),
         ])
         .collect::<Vec<_>>();
-    let user_rows = boundary
-        .state
-        .messages
-        .iter()
-        .filter(|message| message.role == "user")
-        .collect::<Vec<_>>();
-    assert_eq!(
-        user_rows
-            .iter()
-            .map(|message| message.text.clone())
-            .collect::<Vec<_>>(),
-        expected_text
-    );
-    assert_eq!(
-        user_rows
-            .iter()
-            .map(|message| &message.id)
-            .collect::<BTreeSet<_>>()
-            .len(),
-        6
-    );
     let canonical = boundary
         .transcript
         .iter()

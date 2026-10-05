@@ -175,7 +175,8 @@
   },
   "examples/agent-workbench": {
     "compile_data": [
-      "assets/index.html"
+      "assets/index.html",
+      "assets/timeline.js"
     ]
   },
   "examples/integrator-contract": {

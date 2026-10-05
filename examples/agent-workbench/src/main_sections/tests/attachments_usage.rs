@@ -334,22 +334,17 @@ fn assert_snapshot_attachment(
     snapshot: &StateReadSnapshot,
     expected_id: &lash::attachments::AttachmentId,
 ) {
-    let attached_messages = snapshot
-        .messages
+    let attached_rows = snapshot
+        .transcript
         .iter()
-        .filter(|message| !message.attachments.is_empty())
+        .filter(|row| row.suppressed.is_none() && !row.content.attachments.is_empty())
         .collect::<Vec<_>>();
     assert_eq!(
-        attached_messages.len(),
+        attached_rows.len(),
         1,
-        "the snapshot must carry exactly one attached message"
+        "the snapshot must carry exactly one attached row"
     );
-    let attachment = &attached_messages[0].attachments[0];
-    assert_eq!(attachment.attachment_id, expected_id.to_string());
-    assert_eq!(
-        attachment.retrieve_url,
-        format!("/api/attachments/{expected_id}")
-    );
+    assert_eq!(&attached_rows[0].content.attachments[0].id, expected_id);
 }
 
 fn attachment_usage_gate_core(

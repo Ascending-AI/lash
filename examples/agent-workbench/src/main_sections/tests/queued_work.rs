@@ -147,7 +147,8 @@ fn workbench_lists_and_controls_individual_queued_batches() {
 
         // The engine executes every pending batch; the page only cancels one.
         assert!(!ui::INDEX_HTML.contains("Run only this queued-work batch now"));
-        assert!(ui::INDEX_HTML.contains("Cancel this pending queued-work batch"));
+        assert!(!ui::TIMELINE_JS.contains("Run only this queued-work batch now"));
+        assert!(ui::TIMELINE_JS.contains("Cancel this pending queued-work batch"));
         let _ = std::fs::remove_dir_all(data_dir);
     });
 }
@@ -740,12 +741,9 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             app_state(State(state.clone()), Query(SessionQuery::default()))
                 .await
                 .expect("read live reasoned send snapshot");
-        let live_send_agent_rows = live_send_snapshot
-            .state
-            .messages
-            .iter()
-            .filter(|message| message.role == "assistant" && message.text == REASONED_REPLY)
-            .map(|message| message.id.clone())
+        let live_send_agent_rows = shown_replies(&live_send_snapshot)
+            .into_iter()
+            .filter(|text| text == REASONED_REPLY)
             .collect::<Vec<_>>();
         assert_eq!(
             live_send_agent_rows.len(),
@@ -835,13 +833,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         let Json(snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
             .await
             .expect("read wake keeps-previous snapshot");
-        let agent_rows = snapshot
-            .state
-            .messages
-            .iter()
-            .filter(|message| message.role == "assistant")
-            .map(|message| message.text.clone())
-            .collect::<Vec<_>>();
+        let agent_rows = shown_replies(&snapshot);
         assert_eq!(
             agent_rows,
             vec![REASONED_REPLY.to_string(), WAKE_REPLY.to_string()],
@@ -859,11 +851,9 @@ async fn await_rendered_assistant_text(state: &AppState, text: &str) {
             let Json(snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
                 .await
                 .expect("read the workbench snapshot");
-            if snapshot
-                .state
-                .messages
+            if shown_replies(&snapshot)
                 .iter()
-                .any(|message| message.role == "assistant" && message.text.contains(text))
+                .any(|reply| reply.contains(text))
             {
                 return;
             }

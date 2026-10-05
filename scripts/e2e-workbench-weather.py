@@ -54,7 +54,7 @@ def main():
     initial = state()
     session = initial["settings"]["session_id"]
     assert initial["settings"]["model"] == args.model, initial["settings"]
-    assert not initial["messages"] and not initial["active_turns"], initial
+    assert not [row for row in initial["transcript"] if not row["suppressed"]] and not initial["active_turns"], initial
     initial_store = store(session)
     assert not initial_store["graph_nodes"] and not trace(session), "weather session is not fresh"
     save("00-state.json", initial)

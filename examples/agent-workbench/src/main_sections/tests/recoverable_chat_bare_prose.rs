@@ -18,13 +18,7 @@ async fn settled_assistant_rows(
     )
     .await
     .expect("project settled workbench state");
-    let assistant_texts = snapshot
-        .state
-        .messages
-        .iter()
-        .filter(|message| message.role == "assistant")
-        .map(|message| message.text.clone())
-        .collect::<Vec<_>>();
+    let assistant_texts = shown_replies(&snapshot);
     let reasoning_rows = snapshot
         .transcript
         .iter()
@@ -309,4 +303,63 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
         ],
         "each iteration keeps its own collapsed reasoning row"
     );
+}
+
+/// A host restart re-follows every claimed turn and settles it again
+/// (`resume_turn_followers`). The reply that settlement publishes is named by
+/// its turn, so the second settlement is the same row, not a second reply the
+/// page then shows until a rebuild removed it (FIG-5086).
+#[tokio::test]
+async fn a_resettled_turn_publishes_its_reply_once() {
+    const REPLY: &str = "the one reply";
+    let provider = lash::testing::TestProvider::builder()
+        .kind("recoverable-chat-resettled-reply")
+        .complete(|_| async { Ok(text_response(REPLY)) })
+        .build()
+        .into_handle();
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state_with_provider(&double, 16, provider).await;
+    let session_id = state.current_session_id();
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
+        .open()
+        .await
+        .expect("open resettled session");
+    let turn_id = TurnId::from("resettled-turn");
+    let output = session
+        .send(lash::TurnInput::text("answer once"))
+        .id(lash::TurnId::parse("resettled-turn").expect("nonblank host identity"))
+        .output_into(&ChannelTurnEvents {
+            turn_state: Arc::new(Mutex::new(TurnStreamState::default())),
+        })
+        .await
+        .expect("run the turn");
+    for settlement in ["test.resettled.first", "test.resettled.after_restart"] {
+        crate::restate::record_turn_output(
+            &state,
+            &session,
+            &turn_id,
+            output.clone(),
+            Arc::new(Mutex::new(TurnStreamState::default())),
+            settlement,
+        )
+        .await
+        .expect("record the settled turn");
+    }
+    let replies = state
+        .event_tx
+        .snapshot(&session_id)
+        .events
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                &event.item,
+                StreamItem::Message { message } if matches!(
+                    &message.provenance,
+                    Some(ChatMessageProvenance::TurnOutput { turn_id: owner }) if *owner == turn_id
+                )
+            )
+        })
+        .count();
+    assert_eq!(replies, 1, "a re-settled turn publishes its reply once");
 }

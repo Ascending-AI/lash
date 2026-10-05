@@ -776,6 +776,16 @@
     }
 
     .message.user .msg-role { color: var(--sodium); }
+    /* A send the workbench has not yet answered for: shown at once, and
+       settling to full strength in place once it has. */
+    .message.user.pending .msg-body { opacity: 0.72; }
+    .message.user.failed .msg-body { opacity: 0.6; }
+    .message.user.failed .msg-role { color: var(--error); }
+
+    /* Input and work still waiting for a turn sit below the conversation,
+       not inside it: they join it when a turn takes them. */
+    .timeline-footer:empty { display: none; }
+    .timeline-footer { margin-top: var(--space-sm); }
     .message.trigger .msg-role,
     .message.error .msg-role { color: var(--error); }
 
@@ -889,8 +899,8 @@
       color: var(--chalk-mid);
       white-space: normal;
     }
-    .message.assistant .msg-body > *:first-child { margin-top: 0; }
-    .message.assistant .msg-body > *:last-child { margin-bottom: 0; }
+    .message.assistant .msg-text > *:first-child { margin-top: 0; }
+    .message.assistant .msg-text > *:last-child { margin-bottom: 0; }
     .message.assistant .msg-body h1,
     .message.assistant .msg-body h2,
     .message.assistant .msg-body h3 {
@@ -2756,6 +2766,8 @@
         <div id="timelineEmpty" class="empty pending">
           connecting to the workbench…
         </div>
+        <div id="timelineRows" class="timeline-rows"></div>
+        <div id="timelineFooter" class="timeline-footer" aria-label="Waiting for a turn"></div>
       </section>
 
       <section id="executionExplorer" class="execution-explorer" aria-label="Lashlang execution explorer" hidden>
@@ -2922,6 +2934,7 @@
     </section>
   </div>
 
+  <script src="/assets/timeline.js"></script>
   <script>
     let scopedSessionId = new URLSearchParams(window.location.search).get("session_id");
     const nativeFetch = window.fetch.bind(window);
@@ -3297,7 +3310,7 @@
       const snapshotSequence = beginStateSnapshotRequest(projectionState);
       try {
         const state = await fetchStateSnapshot();
-        applyStateSnapshot(state, true, true, SNAPSHOT_TRANSCRIPT_REPLACE, snapshotSequence);
+        applyStateSnapshot(state, snapshotSequence);
         markShellChannel(shellAvailability, "state", true);
         renderShellStatus();
       } catch (error) {
@@ -3396,9 +3409,7 @@
         replayIncarnationId: null,
         recoveryGeneration: 0,
         snapshotRequestSequence: 0,
-        appliedSnapshotSequence: 0,
-        renderedProductEvents: new Set(),
-        appliedObservationEvents: new Set()
+        appliedSnapshotSequence: 0
       };
     }
 
@@ -3457,47 +3468,32 @@
         && projection.productCursor <= snapshotCursor;
     }
 
-    function applyProjectionSnapshot(projection, state, authoritative = false) {
+    /* Rows are deduplicated by the timeline, by key; the projection keeps
+       only where each stream resumes. A different session starts over; the
+       same session never moves a cursor backwards. */
+    function applyProjectionSnapshot(projection, state) {
       const snapshotSession = state?.settings?.session_id || null;
       const snapshotProductCursor = Number(state?.product_events?.cursor) || 0;
       const snapshotObservationCursor = state?.observation?.cursor || null;
-      const sessionChanged = projection.sessionId !== null
-        && projection.sessionId !== snapshotSession;
-      if (authoritative || sessionChanged) {
-        projection.renderedProductEvents.clear();
-        projection.appliedObservationEvents.clear();
+      if (projection.sessionId !== snapshotSession) {
         projection.productCursor = snapshotProductCursor;
         projection.observationCursor = snapshotObservationCursor;
         projection.replayIncarnationId = null;
       } else {
-        projection.productCursor = Math.max(
-          projection.productCursor,
-          snapshotProductCursor
-        );
-        projection.observationCursor =
-          snapshotObservationCursor || projection.observationCursor;
+        projection.productCursor = Math.max(projection.productCursor, snapshotProductCursor);
+        projection.observationCursor = projection.observationCursor || snapshotObservationCursor;
       }
       projection.sessionId = snapshotSession;
-      for (const event of state?.product_events?.events || []) {
-        projection.renderedProductEvents.add(event.event_id);
-      }
     }
 
-    function busyAfterStateSnapshot(state) {
-      /* Pending inputs and queued-work rows are editable waiting state, not an
-         executing turn. A queued-work drain enters `active_turns` while it is
-         running, so that one authoritative lane covers foreground and
-         background turns without latching on pending work. */
-      return (state?.active_turns || []).length > 0;
-    }
-
-    function applySequencedBusySnapshot(projection, state, snapshotSequence, currentBusy) {
+    /* Only the newest request may apply, and only once. */
+    function admitSnapshotSequence(projection, snapshotSequence) {
       if (snapshotSequence !== projection.snapshotRequestSequence
           || snapshotSequence <= projection.appliedSnapshotSequence) {
-        return { applied: false, busy: currentBusy };
+        return false;
       }
       projection.appliedSnapshotSequence = snapshotSequence;
-      return { applied: true, busy: busyAfterStateSnapshot(state) };
+      return true;
     }
     // END WORKBENCH_PROJECTION_STATE
 
@@ -3881,30 +3877,36 @@
     }
 
     const projectionState = createWorkbenchProjectionState();
-    const renderedProductEvents = projectionState.renderedProductEvents;
-    const appliedObservationEvents = projectionState.appliedObservationEvents;
-    const renderedIngressInputs = new Set();
-    const appliedTurnInputs = new Map();
-    let assistantDraft = null;
-    let assistantDraftTurnId = null;
-    let assistantDraftText = "";
-    let assistantDraftChunks = [];
-    let reasoning = null;
-    let reasoningChunks = [];
-    let pendingCodeBlock = null;
-    let pendingTools = [];
-    const retryStatuses = new Map();
-    // BEGIN WORKBENCH_TERMINAL_TURN_TOMBSTONES
-    const terminalTurnIds = new Set();
-
-    function markTurnTerminal(turnId) {
-      if (turnId) terminalTurnIds.add(turnId);
-    }
-
-    function clearTerminalTurnTombstones() {
-      terminalTurnIds.clear();
-    }
-    // END WORKBENCH_TERMINAL_TURN_TOMBSTONES
+    const timelineRows = document.getElementById("timelineRows");
+    const timelineFooter = document.getElementById("timelineFooter");
+    /* A send in flight: the composer's send stays disabled until it resolves. */
+    let sendInFlight = false;
+    const conversation = createWorkbenchTimeline({
+      list: timelineRows,
+      footer: timelineFooter,
+      empty: timelineEmpty,
+      hooks: {
+        busyChanged: next => setBusy(next, next ? (sendInFlight ? "sending" : "turn running") : "ready"),
+        turnActivity(event, turnId) {
+          if (event.type === "usage") renderStreamingUsage(event.cumulative, turnId);
+        },
+        executionStarted: () => refreshWork(),
+        openExecutionGraph: graphKey => openExecutionGraph(graphKey),
+        async decideApproval(approval, decision) {
+          const response = await fetch(
+            "/api/approvals/" + encodeURIComponent(approval.key) + "/" + decision,
+            { method: "POST" }
+          );
+          if (!response.ok) throw new Error("approval decision failed");
+          refreshApprovals();
+        },
+        async cancelQueuedBatch(batchId) {
+          const response = await fetch("/api/queued-work/" + encodeURIComponent(batchId), { method: "DELETE" });
+          if (!response.ok) throw new Error("queued-work action failed");
+          await refreshQueuedWork();
+        }
+      }
+    });
     let busy = false;
     let resetInFlight = false;
     let controller = null;
@@ -3939,11 +3941,6 @@
     let turnTimer = 0;
     let turnStart = 0;
 
-    function clearEmpty() {
-      const e = document.getElementById("timelineEmpty");
-      if (e) e.remove();
-    }
-
     function modelEmpty() { return !modelInput.value.trim(); }
 
     function setBusy(next, label) {
@@ -3956,7 +3953,7 @@
       syncCommandAvailability();
       stopButton.hidden = !next;
       document.getElementById("abort").hidden = !next;
-      if (!next && typeof clearStopEscalation === "function") clearStopEscalation();
+      if (!next) clearStopEscalation();
       timeline.setAttribute("aria-busy", String(next));
       clearInterval(turnTimer);
       turnTimer = 0;
@@ -3972,41 +3969,6 @@
         busyLabel = label || "ready";
       }
       renderShellStatus();
-    }
-
-    function scrollToEnd() {
-      // Automatic transcript updates should not steal the reader's scroll position.
-    }
-
-    function roleLabel(role) {
-      if (role === "user") return "you";
-      if (role === "assistant") return "agent";
-      if (role === "trigger") return "trigger";
-      if (role === "event") return "event";
-      return role;
-    }
-
-    function escapeHtml(value) {
-      return String(value || "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#39;");
-    }
-
-    /* ── truncation with recourse ──────────────────────────────────────────
-       Every abbreviated identity in this console keeps its full value in the
-       DOM: the title carries it, a copy control puts it on the clipboard, and
-       the visible form elides the middle so two ids sharing a prefix (or a
-       suffix) stay distinguishable. Nothing is shortened destructively. */
-
-    function middleEllipsis(value, max = 30) {
-      const text = String(value ?? "");
-      if (text.length <= max) return text;
-      const head = Math.ceil((max - 1) / 2);
-      const tail = max - 1 - head;
-      return text.slice(0, head) + "…" + text.slice(text.length - tail);
     }
 
     function copyValueToClipboard(text) {
@@ -4054,481 +4016,8 @@
       );
     }, true);
 
-    function copyButton(value, label = "copy") {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "copy-btn";
-      button.textContent = label;
-      button.dataset.copyValue = String(value ?? "");
-      button.title = "Copy the full value";
-      button.setAttribute("aria-label", "Copy the full value to the clipboard");
-      return button;
-    }
-
-    function valueRow(key, value, opts = {}) {
-      const row = document.createElement("div");
-      row.className = "value-row";
-      const name = document.createElement("span");
-      name.className = "value-key";
-      name.textContent = key;
-      const text = String(value ?? "");
-      const shown = document.createElement("span");
-      shown.className = "value-text";
-      shown.textContent = opts.max === 0 ? text : middleEllipsis(text, opts.max || 30);
-      shown.title = text;
-      row.append(name, shown);
-      if (text) row.appendChild(copyButton(text));
-      return row;
-    }
-
-    function looksLikeJson(text) {
-      const trimmed = String(text || "").trim();
-      return (trimmed.startsWith("{") && trimmed.endsWith("}"))
-        || (trimmed.startsWith("[") && trimmed.endsWith("]"));
-    }
-
-    function prettyJson(text) {
-      try {
-        return JSON.stringify(JSON.parse(text), null, 2);
-      } catch (_) {
-        return String(text ?? "");
-      }
-    }
-
-    function payloadSummaryLabel(kind, body) {
-      const lines = body ? body.split("\n").length : 0;
-      return kind
-        + " · " + (looksLikeJson(body) ? "json" : "text")
-        + " · " + body.length + " chars"
-        + (lines > 1 ? " · " + lines + " lines" : "");
-    }
-
-    /* Long payloads — wake inputs, event bodies, raw errors — collapse to one
-       summary line. The body is a real, selectable, copyable block. */
-    function payloadDisclosure(kind, text, opts = {}) {
-      const body = looksLikeJson(text) ? prettyJson(text) : String(text ?? "");
-      const details = document.createElement("details");
-      details.className = "payload";
-      details.open = Boolean(opts.open);
-      const summary = document.createElement("summary");
-      summary.textContent = payloadSummaryLabel(kind, body);
-      summary.append(copyButton(body));
-      const pre = document.createElement("pre");
-      pre.textContent = body;
-      details.append(summary, pre);
-      return details;
-    }
-
-    function formatClockTime(value) {
-      if (!value) return "";
-      const parsed = new Date(value);
-      if (Number.isNaN(parsed.getTime())) return "";
-      /* 24h, zero-padded: a runtime console reads clocks in columns, and
-         "12:40:39 PM" is three characters of furniture per row. */
-      return parsed.toLocaleTimeString([], {
-        hour12: false,
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-      });
-    }
-
-    function timeStamp(value) {
-      const shown = formatClockTime(value);
-      if (!shown) return null;
-      const stamp = document.createElement("time");
-      stamp.className = "msg-time";
-      stamp.dateTime = String(value);
-      stamp.textContent = shown;
-      stamp.title = String(value);
-      return stamp;
-    }
-
-    /* A process wake reaches the transcript as one opaque blob:
-         Background process wake / Process: <id> / Event: <type> #<n> /
-         Wake input: / <payload>
-       Verbatim, that buries a 100-char process id and a JSON payload in prose.
-       Parsed, it becomes a labelled header, a copyable id and a collapsed
-       payload. */
-    // BEGIN WORKBENCH_PROCESS_WAKE_PARSE
-    function parseProcessWake(text) {
-      const lines = String(text || "").split("\n");
-      if (lines[0]?.trim() !== "Background process wake") return null;
-      const wake = { processId: "", event: "", input: "" };
-      let index = 1;
-      while (index < lines.length) {
-        const line = lines[index];
-        if (line.startsWith("Process: ")) { wake.processId = line.slice(9).trim(); index += 1; continue; }
-        if (line.startsWith("Event: ")) { wake.event = line.slice(7).trim(); index += 1; continue; }
-        if (line.startsWith("Wake input:")) { index += 1; }
-        break;
-      }
-      wake.input = lines.slice(index).join("\n");
-      return wake;
-    }
-    // END WORKBENCH_PROCESS_WAKE_PARSE
-
-    /* The one renderer for the system/process lane: a boxed, left-aligned,
-       mono row that can never be mistaken for an agent reply. */
-    function fillEventLane(node, body, kind, text, at) {
-      const wake = parseProcessWake(text);
-      const head = document.createElement("div");
-      head.className = "event-head";
-      const kindLabelNode = document.createElement("span");
-      kindLabelNode.className = "event-kind";
-      const title = document.createElement("span");
-      title.className = "event-title";
-      const raw = String(text ?? "");
-      if (wake) {
-        node.classList.add("wake");
-        kindLabelNode.textContent = "process wake";
-        title.textContent = wake.event || "process.wake";
-      } else {
-        kindLabelNode.textContent = kind || "event";
-        title.textContent = raw.split("\n")[0] || "";
-      }
-      head.append(kindLabelNode, title);
-      const stamp = timeStamp(at);
-      if (stamp) head.appendChild(stamp);
-      body.appendChild(head);
-      if (wake) {
-        if (wake.processId) body.appendChild(valueRow("process", wake.processId, { max: 34 }));
-        if (wake.input.trim()) body.appendChild(payloadDisclosure("wake input", wake.input));
-        return;
-      }
-      const rest = raw.split("\n").slice(1).join("\n");
-      if (rest.trim()) body.appendChild(payloadDisclosure("detail", rest));
-    }
-
-    function renderInlineMarkdown(value) {
-      return escapeHtml(value)
-        .replace(/`([^`]+)`/g, "<code>$1</code>")
-        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/\*([^*]+)\*/g, "<em>$1</em>");
-    }
-
-    function renderMarkdownBlocks(markdown) {
-      const lines = String(markdown || "").replace(/\r\n?/g, "\n").split("\n");
-      const blocks = [];
-      let paragraph = [];
-      let list = null;
-      let code = null;
-
-      function flushParagraph() {
-        if (!paragraph.length) return;
-        blocks.push(`<p>${renderInlineMarkdown(paragraph.join(" ").trim())}</p>`);
-        paragraph = [];
-      }
-
-      function flushList() {
-        if (!list) return;
-        const items = list.items.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("");
-        blocks.push(`<${list.tag}>${items}</${list.tag}>`);
-        list = null;
-      }
-
-      for (const line of lines) {
-        const fence = line.match(/^```(\w+)?\s*$/);
-        if (code) {
-          if (fence) {
-            blocks.push(`<pre><code>${escapeHtml(code.lines.join("\n"))}</code></pre>`);
-            code = null;
-          } else {
-            code.lines.push(line);
-          }
-          continue;
-        }
-        if (fence) {
-          flushParagraph();
-          flushList();
-          code = { lines: [] };
-          continue;
-        }
-        if (!line.trim()) {
-          flushParagraph();
-          flushList();
-          continue;
-        }
-
-        const heading = line.match(/^(#{1,3})\s+(.+)$/);
-        if (heading) {
-          flushParagraph();
-          flushList();
-          const level = heading[1].length;
-          blocks.push(`<h${level}>${renderInlineMarkdown(heading[2].trim())}</h${level}>`);
-          continue;
-        }
-
-        const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
-        const unordered = line.match(/^\s*[-*]\s+(.+)$/);
-        if (ordered || unordered) {
-          flushParagraph();
-          const tag = ordered ? "ol" : "ul";
-          if (!list || list.tag !== tag) flushList();
-          if (!list) list = { tag, items: [] };
-          list.items.push((ordered || unordered)[1].trim());
-          continue;
-        }
-
-        flushList();
-        paragraph.push(line.trim());
-      }
-
-      if (code) blocks.push(`<pre><code>${escapeHtml(code.lines.join("\n"))}</code></pre>`);
-      flushParagraph();
-      flushList();
-      return blocks.join("");
-    }
-
-    function setMessageBody(body, role, text) {
-      if (role === "assistant") {
-        body.innerHTML = renderMarkdownBlocks(text);
-      } else {
-        body.textContent = text;
-      }
-    }
-
-    // BEGIN WORKBENCH_MESSAGE_ATTACHMENTS
-    function renderMessageAttachments(body, attachments) {
-      if (!Array.isArray(attachments) || attachments.length === 0) return;
-      // The server derives every retrieval URL from its stored attachment id;
-      // browser clients only render that projection and never supply a URL.
-      const gallery = document.createElement("div");
-      gallery.className = "message-attachments";
-      for (const [index, attachment] of attachments.entries()) {
-        const retrieveUrl = String(attachment?.retrieve_url || "").trim();
-        if (!retrieveUrl) continue;
-        const link = document.createElement("a");
-        link.className = "message-attachment";
-        link.href = retrieveUrl;
-        link.target = "_blank";
-        link.rel = "noopener";
-        link.dataset.attachmentId = String(attachment?.attachment_id || "");
-
-        const image = document.createElement("img");
-        image.src = retrieveUrl;
-        image.alt = attachments.length === 1
-          ? "Uploaded image attachment"
-          : `Uploaded image attachment ${index + 1}`;
-        const broken = document.createElement("span");
-        broken.className = "attachment-broken";
-        broken.hidden = true;
-        broken.textContent = "Image unavailable · open original";
-        image.addEventListener("error", () => {
-          image.hidden = true;
-          broken.hidden = false;
-        }, { once: true });
-        link.append(image, broken);
-        gallery.appendChild(link);
-      }
-      if (gallery.children.length > 0) body.appendChild(gallery);
-    }
-    // END WORKBENCH_MESSAGE_ATTACHMENTS
-
-    // BEGIN WORKBENCH_MESSAGE_RENDER
-    function renderMessage(message) {
-      clearEmpty();
-      if (message.provenance?.kind === "trigger_occurrence" && typeof renderOccurrenceRow === "function") {
-        return renderOccurrenceRow(message);
-      }
-      if (message.role === "assistant" && assistantDraft && assistantDraftTurnId && message.provenance?.turn_id === assistantDraftTurnId) {
-        const parent = assistantDraft.closest(".message");
-        if (parent) parent.remove();
-        assistantDraft = null;
-        assistantDraftTurnId = null;
-        assistantDraftText = "";
-        assistantDraftChunks = [];
-      }
-      const node = document.createElement("div");
-      node.className = "message " + message.role;
-      const role = document.createElement("div");
-      role.className = "msg-role";
-      role.textContent = roleLabel(message.role);
-      const body = document.createElement("div");
-      body.className = "msg-body";
-      if (message.role === "event" && typeof fillEventLane === "function") {
-        fillEventLane(node, body, "event", message.text, message.at);
-      } else {
-        setMessageBody(body, message.role, message.text);
-        if (typeof renderMessageAttachments === "function") {
-          renderMessageAttachments(body, message.attachments);
-        }
-        const stamp = typeof timeStamp === "function" ? timeStamp(message.at) : null;
-        if (stamp) role.appendChild(stamp);
-      }
-      node.append(role, body);
-      const inputTurnId = message.role === "user" && message.provenance?.kind === "turn_input"
-        ? message.provenance.turn_id
-        : null;
-      if (inputTurnId) node.dataset.turnId = inputTurnId;
-      /* A queued input whose run started was shown as that run's user row
-         before the run committed it; the committed row takes its place. */
-      const promoted = inputTurnId
-        ? timeline.querySelector(`.message.user[data-promoted-input][data-turn-id="${CSS.escape(inputTurnId)}"]`)
-        : null;
-      if (promoted) promoted.replaceWith(node);
-      else timeline.appendChild(node);
-      scrollToEnd();
-      return node;
-    }
-    // END WORKBENCH_MESSAGE_RENDER
-
-    function cleanErrorText(message) {
-      let text = String(message || "request failed").trim();
-      if (/<!doctype|<html/i.test(text)) text = "the server returned an error page (not a normal response)";
-      return text.length > 280 ? text.slice(0, 280) + "…" : text;
-    }
-
-    // BEGIN WORKBENCH_CLIENT_ERROR_RENDER
-    function renderError(message, opts) {
-      clearEmpty();
-      const node = document.createElement("div");
-      node.className = "message error";
-      const role = document.createElement("div");
-      role.className = "msg-role";
-      role.textContent = "error";
-      const body = document.createElement("div");
-      body.className = "msg-body";
-      const rawError = String(message || "request failed").trim();
-      const shownError = cleanErrorText(message);
-      body.textContent = shownError;
-      if (rawError && rawError !== shownError && typeof payloadDisclosure === "function") {
-        body.appendChild(payloadDisclosure("full error", rawError));
-      }
-      if (opts && opts.retry && lastRequest) {
-        const retry = document.createElement("button");
-        retry.className = "retry";
-        retry.type = "button";
-        retry.textContent = "retry turn";
-        retry.addEventListener("click", () => postCommand(lastRequest.url, lastRequest.payload));
-        body.append(document.createElement("br"), retry);
-      }
-      node.append(role, body);
-      timeline.appendChild(node);
-      scrollToEnd();
-    }
-    // END WORKBENCH_CLIENT_ERROR_RENDER
-
-    function renderNote(text) {
-      clearEmpty();
-      const node = document.createElement("div");
-      node.className = "note";
-      node.textContent = text;
-      timeline.appendChild(node);
-      scrollToEnd();
-    }
-
-    // BEGIN WORKBENCH_INGRESS_RECEIPTS
-    function ingressScope(ingress) {
-      return ingress?.scope || ingress || "next_turn";
-    }
-
-    function renderIngressReceipt(receipt) {
-      if (!receipt?.input_id || renderedIngressInputs.has(receipt.input_id)) return;
-      renderedIngressInputs.add(receipt.input_id);
-      clearEmpty();
-      const scope = ingressScope(receipt.ingress);
-      const node = document.createElement("div");
-      node.className = "ingress-receipt " + (scope === "active_turn" ? "active-turn" : "next-turn");
-      node.dataset.inputId = receipt.input_id;
-      node.dataset.ingress = scope;
-      if (receipt.status?.kind) node.dataset.status = receipt.status.kind;
-      const kind = document.createElement("div");
-      kind.className = "ingress-kind";
-      kind.textContent = scope === "active_turn" ? "injected now" : "queued next";
-      if (receipt.status?.kind === "held" && receipt.status.shift_epoch != null) {
-        const shiftEpoch = String(receipt.status.shift_epoch);
-        node.dataset.shiftEpoch = shiftEpoch;
-        kind.textContent += ` · held under epoch ${shiftEpoch}`;
-      }
-      const body = document.createElement("div");
-      body.className = "ingress-text";
-      body.textContent = receipt.text || "input accepted";
-      node.append(kind, body);
-      timeline.appendChild(node);
-      scrollToEnd();
-    }
-
-    /* A receipt stands for input that is still waiting for a turn. The
-       pending list also carries input a run has already admitted: a send to
-       an idle session is admitted to the turn it starts at once, and a queued
-       input is admitted to the run that drains it. Either way that input is
-       now its run's user row, never a "queued next" card (FIG-5036). */
-    function reconcilePendingTurnInputs(pendingInputs) {
-      for (const pending of pendingInputs || []) {
-        const admission = pending?.input;
-        if (!admission?.input_id) continue;
-        const textItem = (admission.input?.items || []).find(item => item?.type === "text" && typeof item.text === "string");
-        const text = textItem?.text || "pending input";
-        if (pending.status?.kind === "admitted") {
-          admitIngressReceipt(admission.input_id, pending.status.run, text);
-          continue;
-        }
-        renderIngressReceipt({ input_id: admission.input_id, ingress: admission.ingress, state: admission.state, status: pending.status, text });
-      }
-    }
-
-    function admitIngressReceipt(inputId, runId, text) {
-      renderedIngressInputs.add(inputId);
-      const receipt = timeline.querySelector(`.ingress-receipt[data-input-id="${CSS.escape(inputId)}"]`);
-      if (!runId || timeline.querySelector(`.message.user[data-turn-id="${CSS.escape(runId)}"]`)) {
-        receipt?.remove();
-        return;
-      }
-      const node = document.createElement("div");
-      node.className = "message user";
-      node.dataset.turnId = runId;
-      node.dataset.promotedInput = inputId;
-      const role = document.createElement("div");
-      role.className = "msg-role";
-      role.textContent = roleLabel("user");
-      const body = document.createElement("div");
-      body.className = "msg-body";
-      setMessageBody(body, "user", text);
-      node.append(role, body);
-      if (receipt) receipt.replaceWith(node);
-      else {
-        clearEmpty();
-        timeline.appendChild(node);
-      }
-    }
-
-    function recordTurnInputApplications(applications) {
-      for (const application of applications || []) {
-        if (!application?.input_id || !application.committed_message_id) continue;
-        appliedTurnInputs.set(application.input_id, application);
-        const receipt = timeline.querySelector(
-          `.ingress-receipt[data-input-id="${CSS.escape(application.input_id)}"]`
-        );
-        if (receipt) {
-          receipt.dataset.committedMessageId = application.committed_message_id;
-          const kind = receipt.querySelector(".ingress-kind");
-          if (kind) kind.textContent = "applied to turn";
-        }
-      }
-    }
-    // END WORKBENCH_INGRESS_RECEIPTS
-
-    function ensureAssistantDraft(turnId) {
-      if (assistantDraft && assistantDraftTurnId === turnId) return assistantDraft;
-      clearEmpty();
-      const node = document.createElement("div");
-      node.className = "message assistant";
-      const role = document.createElement("div");
-      role.className = "msg-role";
-      role.textContent = "agent";
-      assistantDraft = document.createElement("div");
-      assistantDraftTurnId = turnId || null;
-      assistantDraft.className = "msg-body";
-      assistantDraftText = "";
-      assistantDraftChunks = [];
-      node.append(role, assistantDraft);
-      timeline.appendChild(node);
-      return assistantDraft;
-    }
-
     function syncCommandAvailability() {
-      const unavailable = busy || modelEmpty() || attachmentUploadInFlight;
+      const unavailable = busy || sendInFlight || modelEmpty() || attachmentUploadInFlight;
       sendButton.disabled = unavailable;
       attachButton.disabled = busy || attachmentUploadInFlight;
       injectNowButton.disabled = !busy || modelEmpty();
@@ -4592,639 +4081,76 @@
       return humanize(kind);
     }
 
-    function renderTerminalValue(value) {
-      if (value === null || value === undefined) return "";
-      if (typeof value === "string") return value;
-      return "```json\n" + JSON.stringify(value, null, 2) + "\n```";
+
+    function renderNote(text) {
+      conversation.note(text);
     }
 
-    function appendAssistantText(delta, correlationId = null, turnId = null) {
-      if (!delta) return;
-      const draft = ensureAssistantDraft(turnId);
-      assistantDraftChunks.push({ turnId, correlationId, text: delta });
-      assistantDraftText = assistantDraftChunks.map(chunk => chunk.text).join("");
-      draft.innerHTML = renderMarkdownBlocks(assistantDraftText);
-      scrollToEnd();
+    function renderError(message, opts) {
+      const retry = opts?.retry && lastRequest
+        ? () => sendTurn(lastRequest.payload, lastRequest.attachments)
+        : null;
+      conversation.error(message, { retry });
     }
 
-    // BEGIN WORKBENCH_ASSISTANT_RETRACTION
-    function retractAssistantText(correlationIds) {
-      const targets = new Set(correlationIds || []);
-      if (!targets.size) return;
-      assistantDraftChunks = assistantDraftChunks.filter(
-        chunk => !targets.has(chunk.correlationId)
-      );
-      assistantDraftText = assistantDraftChunks.map(chunk => chunk.text).join("");
-      if (!assistantDraftText && assistantDraft) {
-        assistantDraft.closest(".message")?.remove();
-        assistantDraft = null;
-        assistantDraftTurnId = null;
-      } else if (assistantDraft) {
-        assistantDraft.innerHTML = renderMarkdownBlocks(assistantDraftText);
-      }
-    }
-    // END WORKBENCH_ASSISTANT_RETRACTION
-
-    // BEGIN WORKBENCH_TOOL_CODE_PROJECTION
-    function toolOutcome(event) {
-      if (event?.kind === "durable_summary") return { status: event.status };
-      return event?.output?.outcome || {};
-    }
-
-    function toolResult(event) {
-      const outcome = toolOutcome(event);
-      return outcome.payload ?? event?.output?.value ?? event?.result ?? null;
-    }
-
-    function toolSucceeded(event) {
-      return toolOutcome(event).status === "success";
-    }
-
-    function toolRunning(event) {
-      return event?.type === "tool_call_started" || event?.phase === "running";
-    }
-
-    function cleanArgs(args) {
-      const out = { ...(args || {}) };
-      delete out.__session_id__;
-      return out;
-    }
-
-    function compactToolPayload(event) {
-      if (event?.kind === "durable_summary") return { status: event.status };
-      const succeeded = toolSucceeded(event);
-      const running = toolRunning(event);
-      return {
-        args: cleanArgs(event.args),
-        status: toolOutcome(event).status || (running ? "running" : (succeeded ? "success" : "unknown")),
-        ...(succeeded ? { result: toolResult(event) } : {})
-      };
-    }
-
-    function displayToolName(name) {
-      if (typeof name === "string" && name.startsWith("mcp__parallel__web_search_")) return "web.search";
-      if (typeof name === "string" && name.startsWith("mcp__parallel__web_fetch_")) return "web.fetch";
-      if (name === "spawn_agent") return "agents.spawn";
-      return name || "tool";
-    }
-
-    function appendTool(event, parent = timeline) {
-      if (parent === timeline) clearEmpty();
-      const el = document.createElement("div");
-      el.className = "tool";
-      el.innerHTML = `<div class="tool-head"><strong></strong><span class="badge"></span><span></span></div><div class="tool-summary"></div><details><summary>JSON payload</summary><pre></pre></details>`;
-      updateTool(el, event);
-      parent.appendChild(el);
-      scrollToEnd();
-      return el;
-    }
-
-    function appendOmittedTools(event, parent) {
-      const el = document.createElement("div");
-      el.className = "tool omitted";
-      el.textContent = `${event.count} earlier tool call${event.count === 1 ? "" : "s"} omitted from durable history`;
-      parent.appendChild(el);
-      return el;
-    }
-
-    function appendProjectedTool(event, parent) {
-      return event?.kind === "omitted"
-        ? appendOmittedTools(event, parent)
-        : appendTool(event, parent);
-    }
-
-    function updateTool(el, event) {
-      const durable = event?.kind === "durable_summary";
-      const running = toolRunning(event);
-      const ok = toolSucceeded(event);
-      el.className = "tool" + (running ? " pending" : (ok ? "" : " fail"));
-      el.querySelector("strong").textContent = durable
-        ? event.operation
-        : displayToolName(event.name);
-      el.querySelector(".badge").textContent = running ? "running" : (ok ? "completed" : "failed");
-      el.querySelector(".tool-head span:last-child").textContent = durable
-        ? "durable outcome only"
-        : running
-        ? "in progress"
-        : `${ok ? "ok" : "failed"} in ${event.duration_ms || 0}ms`;
-      const result = toolResult(event);
-      el.querySelector(".tool-summary").textContent = durable
-        ? `Tool ${ok ? "completed" : "failed"} · arguments, result, duration, and call identity unavailable after reload`
-        : running
-        ? "Tool running"
-        : (ok ? summarizeToolResult(event.name, result) : summarizeToolFailure(result));
-      const payloadText = JSON.stringify(compactToolPayload(event), null, 2);
-      if (typeof payloadDisclosure === "function") {
-        const oldPayload = el.querySelector("details, .payload");
-        const nextPayload = payloadDisclosure(
-          "JSON payload",
-          payloadText,
-          { open: oldPayload ? oldPayload.open : false }
-        );
-        if (oldPayload) {
-          oldPayload.replaceWith(nextPayload);
-        } else {
-          el.appendChild(nextPayload);
-        }
-      }
-      const pre = el.querySelector("pre");
-      if (pre) pre.textContent = payloadText;
-    }
-
-    function summarizeToolResult(name, result) {
-      if (typeof name === "string" && name.startsWith("mcp__parallel__web_search_")) {
-        const count = Array.isArray(result?.results) ? result.results.length : 0;
-        return `Search completed · ${count} result${count === 1 ? "" : "s"}`;
-      }
-      if (typeof name === "string" && name.startsWith("mcp__parallel__web_fetch_")) {
-        const chars = typeof result?.content === "string" ? result.content.length : 0;
-        return `Fetched ${result?.url || "URL"} · ${chars} chars`;
-      }
-      if (name === "spawn_agent") {
-        return result?.summary || result?.session_id || "Subagent completed";
-      }
-      return "Tool completed";
-    }
-
-    function summarizeToolFailure(result) {
-      return "Tool failed";
-    }
-
-    function codeBlockStateLabel(event) {
-      if (event.phase === "running" || event.type === "code_block_started") return "running";
-      return event.error ? "failed" : "completed";
-    }
-
-    function renderCodeBlockSummary(el, event, linkedTools = []) {
-      const projectedTools = linkedTools.map(tool => tool.event || tool);
-      const omittedCount = projectedTools
-        .filter(tool => tool?.kind === "omitted")
-        .reduce((total, tool) => total + (Number(tool.count) || 0), 0);
-      const retainedCount = projectedTools.filter(tool => tool?.kind !== "omitted").length;
-      const toolCount = projectedTools.length
-        ? retainedCount + omittedCount
-        : (event.tool_call_ids || []).length;
-      const toolLabel = toolCount ? ` · ${toolCount} tool${toolCount === 1 ? "" : "s"}` : "";
-      const omittedLabel = omittedCount ? ` · ${omittedCount} omitted` : "";
-      const durationLabel = event.duration_ms === undefined ? "" : ` in ${event.duration_ms || 0}ms`;
-      const summary = el.querySelector("summary");
-      summary.textContent = `${event.language || "code"} ${codeBlockStateLabel(event)}${durationLabel}${toolLabel}${omittedLabel}`;
-      if (!event.graph_key) return;
-      const graphButton = document.createElement("button");
-      graphButton.className = "work-diagram-button";
-      graphButton.type = "button";
-      graphButton.title = "open execution graph";
-      graphButton.setAttribute("aria-label", "Open execution graph for this code block");
-      graphButton.innerHTML = `<span class="diagram-button-icon" aria-hidden="true"><span></span><span></span><span></span></span>`;
-      graphButton.addEventListener("click", click => {
-        click.preventDefault();
-        click.stopPropagation();
-        openExecutionGraph(event.graph_key);
-      });
-      summary.append(" ", graphButton);
-    }
-
-    function createCodeBlockElement(event, linkedTools = []) {
-      const el = document.createElement("details");
-      el.className = "code-block" + (Boolean(event.error) ? " fail" : "");
-      el.open = false;
-      el.innerHTML = '<summary></summary><pre class="code-source"></pre><pre class="code-output" hidden></pre>';
-      renderCodeBlockSummary(el, event, linkedTools);
-      el.querySelector(".code-source").textContent = event.code || "";
-      const output = [event.output, typeof event.error === "string" ? event.error : event.error?.message].filter(Boolean).join("\n");
-      const outputNode = el.querySelector(".code-output");
-      outputNode.hidden = !output;
-      outputNode.textContent = output;
-      if (event.attachments?.length && typeof renderMessageAttachments === "function") {
-        renderMessageAttachments(el, event.attachments.map(attachment => ({ attachment_id: attachment.id, retrieve_url: `/api/attachments/${encodeURIComponent(attachment.id)}` })));
-      }
-      for (const tool of linkedTools) appendProjectedTool(tool, el);
-      return el;
-    }
-
-    function appendCodeBlock(event, linkedTools = []) {
-      clearEmpty();
-      const el = createCodeBlockElement(event, linkedTools);
-      timeline.appendChild(el);
-      scrollToEnd();
-      return el;
-    }
-
-    function startCodeBlock(event, turnId) {
-      clearEmpty();
-      const runningEvent = { ...event, phase: "running" };
-      const el = appendCodeBlock(runningEvent);
-      if (turnId) el.dataset.turnId = turnId;
-      pendingCodeBlock = { event: runningEvent, el, turnId };
-      if (event.graph_key) refreshWork();
-    }
-
-    function updateCodeBlock(el, event, linkedTools = []) {
-      el.classList.toggle("fail", Boolean(event.error));
-      renderCodeBlockSummary(el, event, linkedTools);
-      const pre = el.querySelector(".code-source");
-      pre.textContent = event.code || pre.textContent || "";
-      const output = [event.output, typeof event.error === "string" ? event.error : event.error?.message].filter(Boolean).join("\n");
-      const outputNode = el.querySelector(".code-output");
-      outputNode.hidden = !output;
-      outputNode.textContent = output;
-      for (const tool of linkedTools) {
-        if (tool.el) {
-          if (tool.el.parentNode !== el) el.appendChild(tool.el);
-        } else {
-          tool.el = appendTool(tool.event, el);
-        }
-      }
-    }
-
-    function appendStartedTool(event, turnId) {
-      const parent = pendingCodeBlock?.turnId === turnId ? pendingCodeBlock.el : timeline;
-      const pending = {
-        event: { ...event, phase: "running" },
-        matchKey: toolMatchKey(event),
-        observationTurnId: turnId,
-        el: appendTool({ ...event, phase: "running" }, parent)
-      };
-      pendingTools.push(pending);
-      if (pendingCodeBlock?.turnId === turnId) {
-        const sameTurnTools = pendingTools.filter(tool => tool.observationTurnId === turnId);
-        renderCodeBlockSummary(pendingCodeBlock.el, pendingCodeBlock.event, sameTurnTools);
-      }
-    }
-
-    function toolMatchKey(event) {
-      return `call:${event.call_id}`;
-    }
-
-    function appendCompletedTool(event, turnId) {
-      const pending = pendingTools.find(tool =>
-        tool.observationTurnId === turnId &&
-        toolRunning(tool.event) &&
-        tool.matchKey === toolMatchKey(event)
-      );
-      if (pending) {
-        pending.event = event;
-        updateTool(pending.el, event);
-      } else if (pendingCodeBlock?.turnId === turnId) {
-        pendingTools.push({
-          event,
-          matchKey: toolMatchKey(event),
-          observationTurnId: turnId,
-          el: null
-        });
-      } else {
-        appendTool(event);
-      }
-    }
-
-    function completeCodeBlock(event, turnId) {
-      const linkedIds = new Set(event.tool_call_ids || []);
-      const sameTurnTools = pendingTools.filter(tool => tool.observationTurnId === turnId);
-      const sameTurnBlock = pendingCodeBlock?.turnId === turnId ? pendingCodeBlock : null;
-      const linkedTools = sameTurnTools.filter(tool => linkedIds.has(tool.event.call_id));
-      const linkedToolSet = new Set(linkedTools);
-      const unlinkedTools = sameTurnTools.filter(tool => !linkedToolSet.has(tool));
-      const completedEvent = { ...event, code: event.code || sameTurnBlock?.event?.code || "" };
-      if (sameTurnBlock?.el) {
-        updateCodeBlock(sameTurnBlock.el, completedEvent, linkedTools);
-      } else {
-        appendCodeBlock(completedEvent, linkedTools.map(tool => tool.event));
-      }
-      if (sameTurnBlock) pendingCodeBlock = null;
-      for (const tool of unlinkedTools) {
-        if (!tool.el) tool.el = appendTool(tool.event);
-      }
-      pendingTools = pendingTools.filter(tool => tool.observationTurnId !== turnId);
-    }
-    // END WORKBENCH_TOOL_CODE_PROJECTION
-
-    function thinkingPanel(label) {
-      const el = document.createElement("details");
-      el.className = "reasoning";
-      el.open = true;
-      el.innerHTML = "<summary></summary><pre></pre>";
-      el.querySelector("summary").textContent = label;
-      return el;
-    }
-
-    function isCurrentTimelineHead(node) {
-      return node && node.parentNode === timeline && timeline.lastElementChild === node;
-    }
-
-    function appendReasoning(delta, correlationId = null, turnId = null) {
-      if (!isCurrentTimelineHead(reasoning)) {
-        clearEmpty();
-        reasoning = thinkingPanel("thinking");
-        timeline.appendChild(reasoning);
-      }
-      reasoningChunks.push({ turnId, correlationId, text: delta, node: reasoning });
-      reasoning.querySelector("pre").textContent += delta;
-      scrollToEnd();
-    }
-
-    // BEGIN WORKBENCH_REASONING_RETRACTION
-    function retractReasoning(correlationIds) {
-      const targets = new Set(correlationIds || []);
-      if (!targets.size) return;
-      const affected = new Set(
-        reasoningChunks
-          .filter(chunk => targets.has(chunk.correlationId))
-          .map(chunk => chunk.node)
-      );
-      reasoningChunks = reasoningChunks.filter(chunk => !targets.has(chunk.correlationId));
-      for (const node of affected) {
-        const text = reasoningChunks
-          .filter(chunk => chunk.node === node)
-          .map(chunk => chunk.text)
-          .join("");
-        if (text) node.querySelector("pre").textContent = text;
-        else node.remove();
-      }
-      if (!reasoning?.isConnected) reasoning = null;
-    }
-    // END WORKBENCH_REASONING_RETRACTION
-
-    // BEGIN WORKBENCH_ATTEMPT_RESET
-    function resetModelAttempt(event) {
-      retractAssistantText(event.assistant_prose_correlation_ids);
-      retractReasoning(event.reasoning_correlation_ids);
-      scrollToEnd();
-    }
-    // END WORKBENCH_ATTEMPT_RESET
-
-    // BEGIN WORKBENCH_RETRY_STATUS
-    function renderEventRow(label, detail) {
-      clearEmpty();
-      const node = document.createElement("div");
-      node.className = "message event";
-      const role = document.createElement("div");
-      role.className = "msg-role";
-      role.textContent = "event";
-      const body = document.createElement("div");
-      body.className = "msg-body";
-      if (typeof fillEventLane === "function") {
-        fillEventLane(node, body, label, detail || "", Date.now());
-      } else {
-        body.textContent = detail ? `${label} · ${detail}` : label;
-      }
-      node.append(role, body);
-      timeline.appendChild(node);
-      scrollToEnd();
-      return node;
-    }
-
-    function clearRetryStatus(turnId = null) {
-      if (turnId) {
-        retryStatuses.get(turnId)?.remove();
-        retryStatuses.delete(turnId);
-        return;
-      }
-      for (const node of retryStatuses.values()) node.remove();
-      retryStatuses.clear();
-    }
-
-    function renderRetryStatus(event, turnId) {
-      if (turnId && terminalTurnIds.has(turnId)) return;
-      clearRetryStatus(turnId);
-      const wait = event.wait_seconds ? ` · waiting ${event.wait_seconds}s` : "";
-      const node = renderEventRow(
-        `provider retry ${event.attempt} of ${event.max_attempts}`,
-        `${event.reason || "provider request failed"}${wait}`
-      );
-      node.classList.add("retry-status");
-      retryStatuses.set(turnId, node);
-    }
-    // END WORKBENCH_RETRY_STATUS
-
-    // BEGIN WORKBENCH_OCCURRENCE_ROWS
-    /* One host trigger occurrence (a button press, a mail delivery) is one
-       compact row. The processes it started wake the agent, and that wake and
-       the turn it starts fold into the occurrence's row as "→ turn started",
-       with the raw details in a disclosure, instead of arriving as rows of
-       their own (FIG-5036). The live fold reads the turn's queued-work causes;
-       the settled fold reads the durable wake row's process. */
-    const occurrenceStarts = new Map();
-
-    function occurrenceRowFor(occurrenceId) {
-      if (!occurrenceId) return null;
-      return timeline.querySelector(`.occurrence[data-occurrence-id="${CSS.escape(occurrenceId)}"]`);
-    }
-
-    function occurrenceDetail(node) {
-      const lines = [["occurrence", node.dataset.occurrenceId]];
-      for (const processId of (node.dataset.processIds || "").split(" ").filter(Boolean)) {
-        lines.push(["process", processId]);
-      }
-      if (node.dataset.wakeInput) lines.push(["wake input", node.dataset.wakeInput]);
-      return lines.map(([key, value]) => key + ": " + value).join("\n");
-    }
-
-    function paintOccurrenceRow(node) {
-      const outcome = node.querySelector(".occurrence-outcome");
-      const started = node.dataset.turnStarted === "true";
-      const processes = (node.dataset.processIds || "").split(" ").filter(Boolean);
-      outcome.textContent = started
-        ? "→ turn started"
-        : processes.length ? "" : "· nothing registered";
-      node.querySelector("pre").textContent = occurrenceDetail(node);
-    }
-
-    function markOccurrenceStarted(node, wakeInput) {
-      node.dataset.turnStarted = "true";
-      if (wakeInput) node.dataset.wakeInput = wakeInput;
-      paintOccurrenceRow(node);
-    }
-
-    function renderOccurrenceRow(message) {
-      const provenance = message.provenance || {};
-      const existing = occurrenceRowFor(provenance.occurrence_id);
-      if (existing) return existing;
-      const node = document.createElement("div");
-      node.className = "message event occurrence";
-      node.dataset.occurrenceId = provenance.occurrence_id || message.id;
-      node.dataset.processIds = (provenance.process_ids || []).join(" ");
-      const body = document.createElement("div");
-      body.className = "msg-body occurrence-body";
-      const head = document.createElement("div");
-      head.className = "event-head";
-      const dot = document.createElement("span");
-      dot.className = "occurrence-dot";
-      const tone = /^(red|blue)\b/.exec(message.text || "");
-      if (tone) dot.dataset.tone = tone[1];
-      const title = document.createElement("span");
-      title.className = "event-title";
-      title.textContent = message.text || "trigger occurrence";
-      const outcome = document.createElement("span");
-      outcome.className = "occurrence-outcome";
-      const detail = document.createElement("details");
-      detail.className = "occurrence-detail";
-      const summary = document.createElement("summary");
-      summary.textContent = "details";
-      detail.append(summary, document.createElement("pre"));
-      head.append(dot, title, outcome);
-      const stamp = timeStamp(message.at);
-      if (stamp) head.appendChild(stamp);
-      head.appendChild(detail);
-      body.appendChild(head);
-      node.appendChild(body);
-      clearEmpty();
-      timeline.appendChild(node);
-      const pendingStart = occurrenceStarts.get(node.dataset.occurrenceId);
-      if (pendingStart) {
-        occurrenceStarts.delete(node.dataset.occurrenceId);
-        markOccurrenceStarted(node, pendingStart.wakeInput);
-      } else {
-        paintOccurrenceRow(node);
-      }
-      scrollToEnd();
-      return node;
-    }
-
-    function wakeInputOf(cause) {
-      return parseProcessWake(cause?.text)?.input?.trim() || "";
-    }
-
-    function renderQueuedWorkStarted(event) {
-      const causes = event.causes || [];
-      let unclaimed = [];
-      for (const cause of causes) {
-        const occurrenceId = cause?.origin?.caused_by?.type === "trigger_occurrence"
-          ? cause.origin.caused_by.occurrence_id
-          : null;
-        if (!occurrenceId) {
-          unclaimed.push(cause);
-          continue;
-        }
-        const row = occurrenceRowFor(occurrenceId);
-        if (row) markOccurrenceStarted(row, wakeInputOf(cause));
-        else occurrenceStarts.set(occurrenceId, { wakeInput: wakeInputOf(cause) });
-      }
-      /* A wake no occurrence row owns is still one row: who woke the agent. */
-      const wake = unclaimed.find(cause => cause?.origin?.kind === "process");
-      if (wake) renderEventRow("agent woken", wake.text || wake.event_type || "process wake");
-      refreshBusyState();
-    }
-    // END WORKBENCH_OCCURRENCE_ROWS
-
-    // BEGIN WORKBENCH_TRANSIENT_SETTLEMENT
-    function finishTransientRows(turnId) {
-      if (!turnId) return;
-      markTurnTerminal(turnId);
-      clearRetryStatus(turnId);
-      const finishedTools = pendingTools.filter(tool => tool.observationTurnId === turnId);
-      for (const tool of finishedTools) {
-        if (!tool.el) tool.el = appendTool(tool.event);
-      }
-      pendingTools = pendingTools.filter(tool => tool.observationTurnId !== turnId);
-      if (assistantDraftTurnId === turnId) {
-        assistantDraft?.closest(".message")?.remove();
-        assistantDraft = null;
-        assistantDraftTurnId = null;
-        assistantDraftText = "";
-        assistantDraftChunks = [];
-      }
-      const affectedReasoning = new Set(
-        reasoningChunks
-          .filter(chunk => chunk.turnId === turnId)
-          .map(chunk => chunk.node)
-      );
-      reasoningChunks = reasoningChunks.filter(chunk => chunk.turnId !== turnId);
-      for (const node of affectedReasoning) {
-        const text = reasoningChunks
-          .filter(chunk => chunk.node === node)
-          .map(chunk => chunk.text)
-          .join("");
-        if (text) node.querySelector("pre").textContent = text;
-        else node.remove();
-      }
-      if (pendingCodeBlock?.turnId === turnId) {
-        pendingCodeBlock.el.remove();
-        pendingCodeBlock = null;
-      }
-      if (!reasoning?.isConnected) reasoning = null;
-    }
-    // END WORKBENCH_TRANSIENT_SETTLEMENT
-
-    // BEGIN WORKBENCH_TURN_EVENT_DISPATCH
-    // BEGIN WORKBENCH_TURN_EVENT_REDUCER
-    function handleTurnEvent(event, turnId) {
-      globalThis.__LASH_WORKBENCH_TURN_EVENT_HOOK__?.(event, turnId);
-      if (event.type === "model_request_started") {
-        clearRetryStatus(turnId);
-        globalThis.refreshBusyState?.();
-      }
-      if (event.type === "queued_work_started") renderQueuedWorkStarted(event);
-      if (event.type === "turn_input_applied") recordTurnInputApplications(event.applications);
-      if (event.type === "assistant_prose_delta") appendAssistantText(event.text, event.correlation_id, turnId);
-      if (event.type === "reasoning_delta") appendReasoning(event.text, event.correlation_id, turnId);
-      if (event.type === "model_attempt_reset") resetModelAttempt(event);
-      if (event.type === "retry_status") renderRetryStatus(event, turnId);
-      if (event.type === "code_block_started") startCodeBlock(event, turnId);
-      if (event.type === "code_block_completed") completeCodeBlock(event, turnId);
-      if (event.type === "tool_call_started") appendStartedTool(event, turnId);
-      if (event.type === "tool_call_completed") appendCompletedTool(event, turnId);
-      if (event.type === "final_value") appendAssistantText(renderTerminalValue(event.value), null, turnId);
-      if (event.type === "tool_value") appendAssistantText(renderTerminalValue(event.value), null, turnId);
-      if (event.type === "usage") renderStreamingUsage(event.cumulative, turnId);
-    }
-    // END WORKBENCH_TURN_EVENT_REDUCER
-    // END WORKBENCH_TURN_EVENT_DISPATCH
-
-    // BEGIN WORKBENCH_POST_COMMAND
-    async function postCommand(url, payload) {
+    // BEGIN WORKBENCH_SEND_TURN
+    /* A send shows its row and the running state at once, before the request
+       leaves (FIG-5086). The request carries the row's nonce; the workbench
+       echoes it on the row it publishes and answers with the turn the send
+       runs as, and either one re-keys the row to that turn in place. Send
+       stays disabled until the request resolves; input for a running turn
+       keeps its own path. */
+    async function sendTurn(payload, attachments = []) {
       if (busy) {
         renderNote("turn already running");
-        return false;
+        return null;
       }
-      lastRequest = { url, payload };
+      const nonce = crypto.randomUUID();
+      lastRequest = { payload, attachments };
+      sendInFlight = true;
+      syncCommandAvailability();
+      conversation.beginSend({ nonce, text: payload.text, attachments });
       const commandController = new AbortController();
       controller = commandController;
-      assistantDraft = null;
-      assistantDraftTurnId = null;
-      assistantDraftText = "";
-      assistantDraftChunks = [];
-      reasoning = null;
-      reasoningChunks = [];
-      pendingCodeBlock = null;
-      pendingTools = [];
-      clearRetryStatus();
       try {
-        const response = await fetch(url, {
+        const response = await fetch("/api/turn", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: payload ? JSON.stringify(payload) : "{}",
+          body: JSON.stringify({ ...payload, client_nonce: nonce }),
           signal: commandController.signal
         });
         if (!response.ok) {
           await response.text();
+          conversation.sendFailed(nonce);
           renderError("request could not be completed", { retry: true });
-          return false;
+          return null;
         }
-        /* The body is the command's outcome, not decoration: /api/turn reports
-           whether the send started a turn or was queued behind a running one
-           (FIG-1000). A command whose body is not JSON still counts as
-           accepted — its acceptance is the status, and it has nothing to say. */
+        /* The body is the send's outcome: it started a turn (and names it) or
+           was queued behind a running one (FIG-1000). */
+        let accepted = {};
         try {
-          return (await response.json()) || {};
-        } catch (_) {
-          return {};
-        }
+          accepted = (await response.json()) || {};
+        } catch (_) { /* acceptance is the status */ }
+        sendInFlight = false;
+        conversation.sendAccepted(nonce, accepted);
+        return accepted;
       } catch (error) {
+        sendInFlight = false;
+        conversation.sendFailed(nonce);
         if (error.name === "AbortError") {
           if (!resetInFlight) renderNote("turn stopped");
         } else {
           renderError("request could not be completed", { retry: true });
         }
-        return false;
+        return null;
       } finally {
+        sendInFlight = false;
         if (controller === commandController) controller = null;
-        if (!resetInFlight) {
-          refreshBusyState();
-          refreshWork();
-        }
+        syncCommandAvailability();
+        if (!resetInFlight) refreshWork();
       }
     }
-    // END WORKBENCH_POST_COMMAND
+    // END WORKBENCH_SEND_TURN
 
     /* Ends both streams without starting new ones: the only caller is the page
        giving up on a session id for good. */
@@ -5243,8 +4169,6 @@
       if (resetCursors) {
         projectionState.productCursor = 0;
         projectionState.observationCursor = null;
-        renderedProductEvents.clear();
-        appliedObservationEvents.clear();
         projectionState.recoveryGeneration += 1;
       }
       streamGeneration += 1;
@@ -5369,7 +4293,7 @@
       const item = parseStreamLine(line);
       if (!item) return;
       if (item.type === "resync") {
-        recoverProductLag(item.snapshot);
+        recoverFromSnapshot("transcript updates paused; reload to restore the conversation");
         return;
       }
       if (item.type !== "event") return;
@@ -5378,87 +4302,62 @@
 
     // BEGIN WORKBENCH_PRODUCT_EVENT_REDUCER
     function applyProductEvent(event) {
-      if (!event || renderedProductEvents.has(event.event_id)) return;
-      renderedProductEvents.add(event.event_id);
+      if (!event) return;
       projectionState.productCursor = Math.max(
         projectionState.productCursor,
         Number(event.sequence) || 0
       );
-      if (event.type === "message") renderMessage(event.message);
-      if (event.type === "turn_input") renderIngressReceipt(event.receipt);
-      if (event.type === "done") {
-        finishTransientRows(event.turn_id);
-        refreshTerminalState(event.turn_id);
-        /* A turn that failed committed nothing its optimistic rows can stand
-           for, and the server has already retired them from the lane
-           (FIG-1000). This tab may still be rendering them, and rows are only
-           removed by re-deriving from the authoritative snapshot — which also
-           restores the pill if another turn is still running. */
-        if (event.outcome === "failed") {
-          recoverFromState("a turn failed; reload to restore the conversation");
-        }
-      }
-      if (event.type === "message" || event.type === "turn_input") {
-        globalThis.refreshBusyState?.();
-      }
+      conversation.applyProductEvent(event);
     }
     // END WORKBENCH_PRODUCT_EVENT_REDUCER
 
+    /* A turn's commit arrives on this stream with the rows it committed
+       (`terminal_replacement`), and the timeline upserts them into the rows
+       already shown. Only a replay gap needs a read of its own. */
     function handleObservationStreamLine(line) {
       const item = parseStreamLine(line);
       if (!item) return;
       if (item.type === "cursor") projectionState.observationCursor = item.cursor;
       if (item.type === "replay_gap") recoverReplayGap(item.gap);
       if (item.type === "observation") handleObservation(item.event);
-      if (item.type === "terminal_replacement") {
+      if (item.type === "terminal_replacement" || item.type === "resident_replacement") {
+        handleObservation(item.event);
         projectionState.observationCursor =
           item.cursor || item.event?.cursor || projectionState.observationCursor;
-        handleObservation(item.event);
-        finishTransientRows(item.event?.turn_id);
-        recoverTerminalReplacement();
       }
+      /* Resident state outside the transcript (the model, its variants)
+         changed: read it again. The timeline upserts the same read, so the
+         rows a running turn shows stay where they are. */
       if (item.type === "resident_replacement") {
-        projectionState.observationCursor =
-          item.cursor || item.event?.cursor || projectionState.observationCursor;
-        handleObservation(item.event);
-        recoverResidentReplacement();
+        recoverFromSnapshot("resident state changed; reload to refresh the conversation");
       }
     }
 
     function handleObservation(event) {
-      const identity = `${event.session_id || ""}:${event.replay_incarnation_id || ""}:${event.cursor || ""}`;
-      if (appliedObservationEvents.has(identity)) return;
-      appliedObservationEvents.add(identity);
+      if (!event) return;
       projectionState.observationCursor =
         event.cursor || projectionState.observationCursor;
       projectionState.replayIncarnationId =
         event.replay_incarnation_id || projectionState.replayIncarnationId;
-      if (event.type === "turn_activity") handleTurnEvent(event.activity, event.turn_id);
+      conversation.applyObservation(event);
     }
 
-    async function recoverFromState(
-      failureMessage,
-      transcriptApplication = SNAPSHOT_TRANSCRIPT_REPLACE
-    ) {
+    /* The authoritative read for a replay gap or a lagged product lane. The
+       timeline retires only what was last said before the read began, so a
+       read the streams overtook while it was in flight is still safe to
+       apply, and the streams carry on from where they are. */
+    async function recoverFromSnapshot(failureMessage) {
       const token = beginStateRecovery(projectionState);
+      const since = conversation.epoch();
       try {
         const state = await fetchStateSnapshot();
         markShellChannel(shellAvailability, "state", true);
-        if (!recoveryResponseIsCurrent(projectionState, token, state)) {
-          /* Same law as loadState's overtaken branch: the server answered, so
-             the channel is reachable. Only the bounded ladder runs. */
-          markShellChannel(shellAvailability, "state", true);
+        if (token.generation !== projectionState.recoveryGeneration
+            || state?.settings?.session_id !== projectionState.sessionId) {
           renderShellStatus();
-          scheduleStateRetry();
           return;
         }
-        applyStateSnapshot(
-          state,
-          true,
-          true,
-          transcriptApplication,
-          token.snapshotSequence
-        );
+        applyStateSnapshot(state, token.snapshotSequence, since);
       } catch (error) {
         if (handleSessionRetirementFailure(error)) return;
         if (handleTerminalStateFailure(error)) {
@@ -5476,27 +4375,7 @@
     async function recoverReplayGap(gap) {
       projectionState.observationCursor =
         gap?.latest_cursor || projectionState.observationCursor;
-      appliedObservationEvents.clear();
-      await recoverFromState("live updates paused; reload to restore the conversation");
-    }
-
-    async function recoverProductLag(snapshot) {
-      await recoverFromState(
-        "transcript updates paused; reload to restore the conversation"
-      );
-    }
-
-    async function recoverTerminalReplacement() {
-      await recoverFromState(
-        "the turn settled; reload to restore the final transcript"
-      );
-    }
-
-    async function recoverResidentReplacement() {
-      await recoverFromState(
-        "resident state changed; reload to refresh the conversation",
-        SNAPSHOT_TRANSCRIPT_PRESERVE_TRANSIENT
-      );
+      await recoverFromSnapshot("live updates paused; reload to restore the conversation");
     }
     // END WORKBENCH_REMOTE_STREAM_RECOVERY
 
@@ -5548,10 +4427,7 @@
           else if (unresolved) renderNote(mode === "stop" ? "stop recorded · waiting for the step boundary" : "turn route cleared · terminal outcome unknown");
           else if (!receipt.accepted) renderNote("turn already finished");
         })
-        .catch(() => renderError("the turn could not be stopped"))
-        .finally(() => {
-          if (!resetInFlight) refreshBusyState();
-        });
+        .catch(() => renderError("the turn could not be stopped"));
     }
     // END WORKBENCH_STOP_TURN
     stopButton.addEventListener("click", () => stopTurn("stop"));
@@ -5581,108 +4457,13 @@
       if (!resetInFlight) resetButton.textContent = "reset";
     }
 
-    // BEGIN WORKBENCH_TRANSCRIPT_CLEAR
+    /* The only clear of the timeline: a different session, or a cold boot. */
     function clearTranscript() {
-      clearRetryStatus();
-      timeline.innerHTML = "";
-      renderedIngressInputs.clear();
-      occurrenceStarts.clear();
-      assistantDraft = null;
-      assistantDraftTurnId = null;
-      assistantDraftText = "";
-      assistantDraftChunks = [];
-      reasoning = null;
-      reasoningChunks = [];
-      pendingCodeBlock = null;
-      pendingTools = [];
+      conversation.reset();
       clearStreamingUsage();
       lastUserText = "";
-      const empty = document.createElement("div");
-      empty.id = "timelineEmpty";
-      empty.className = "empty";
-      timeline.appendChild(empty);
       renderShellStatus();
     }
-    // END WORKBENCH_TRANSCRIPT_CLEAR
-
-    // BEGIN WORKBENCH_SETTLED_TRANSCRIPT
-    function renderStateTranscript(state) {
-      const ownedInputs = new Map();
-      const occurrenceByProcess = new Map();
-      for (const event of state.product_events?.events || []) {
-        const message = event.message;
-        if (message?.provenance?.kind === "turn_input") {
-          ownedInputs.set(message.provenance.turn_id, message);
-        }
-        if (message?.provenance?.kind === "trigger_occurrence") {
-          for (const processId of message.provenance.process_ids || []) {
-            occurrenceByProcess.set(processId, message);
-          }
-        }
-      }
-      const foldedOccurrences = new Set();
-      const coveredInputs = new Set();
-      const turnAnchors = new Map();
-      for (const row of state.transcript) {
-        if (row.suppressed) continue;
-        clearEmpty();
-        const start = timeline.children.length;
-        const content = row.content;
-        const provenance = row.provenance;
-        for (const text of content.reasoning) {
-          appendReasoning(text, row.row_id, null);
-        }
-        if (row.kind === "code_block") {
-          const tools = content.tools.map(tool => ({ kind: "durable_summary", ...tool }));
-          if (content.tools_omitted) tools.push({ kind: "omitted", count: content.tools_omitted });
-          appendCodeBlock({ id: row.row_id, ...content }, tools);
-        } else if (
-          row.kind === "event" &&
-          occurrenceByProcess.size &&
-          occurrenceByProcess.has(parseProcessWake(content.text)?.processId)
-        ) {
-          const wake = parseProcessWake(content.text);
-          const occurrence = occurrenceByProcess.get(wake.processId);
-          const node = renderOccurrenceRow(occurrence);
-          foldedOccurrences.add(occurrence.id);
-          markOccurrenceStarted(node, wake.input.trim());
-        } else if (["user", "assistant_reply", "event", "tool_call", "attachment"].includes(row.kind)) {
-          let message = {
-            id: row.row_id,
-            role: row.kind === "user" ? "user" : row.kind === "assistant_reply" ? "assistant" : "event",
-            text: content.text,
-            at: row.timestamp,
-            provenance: provenance.turn_id ? { kind: row.kind === "user" ? "turn_input" : "turn_output", turn_id: provenance.turn_id } : null,
-            attachments: content.attachments.map(attachment => ({ attachment_id: attachment.id, retrieve_url: `/api/attachments/${encodeURIComponent(attachment.id)}` }))
-          };
-          if (row.kind === "user" && provenance.turn_id && !coveredInputs.has(provenance.turn_id)) {
-            coveredInputs.add(provenance.turn_id);
-            message = ownedInputs.get(provenance.turn_id) || message;
-          }
-          renderMessage(message);
-        }
-        for (const node of Array.from(timeline.children).slice(start)) {
-          node.dataset.transcriptRowId = row.row_id;
-          node.dataset.turnId = provenance.turn_id || "";
-          if (provenance.turn_id) turnAnchors.set(provenance.turn_id, node);
-        }
-      }
-      for (const [turnId, message] of ownedInputs) {
-        if (!coveredInputs.has(turnId)) renderMessage(message);
-      }
-      for (const event of state.product_events?.events || []) {
-        if (event.message?.role === "event" && !foldedOccurrences.has(event.message.id)) {
-          renderMessage(event.message);
-        }
-      }
-      for (const terminal of state.unknown_turn_terminals || []) {
-        renderNote(terminal.note);
-        const anchor = turnAnchors.get(terminal.turn_id);
-        if (anchor) anchor.insertAdjacentElement("afterend", timeline.lastElementChild);
-      }
-      if (state.pending_turn_inputs?.length) reconcilePendingTurnInputs(state.pending_turn_inputs);
-    }
-    // END WORKBENCH_SETTLED_TRANSCRIPT
 
     async function doReset() {
       if (resetInFlight) return;
@@ -5730,13 +4511,7 @@
         if (!state?.settings?.session_id) {
           throw new Error("the reset response did not identify the replacement session");
         }
-        const applied = applyStateSnapshot(
-          state,
-          true,
-          true,
-          SNAPSHOT_TRANSCRIPT_REPLACE,
-          snapshotSequence
-        );
+        const applied = applyStateSnapshot(state, snapshotSequence);
         if (!applied) return;
         scopedSessionId = state.settings.session_id;
         const replacementUrl = new URL(window.location.href);
@@ -5761,7 +4536,6 @@
         );
       } finally {
         releaseResetButton();
-        refreshBusyState();
         refreshWork();
       }
     }
@@ -5812,24 +4586,22 @@
     composer.addEventListener("submit", async event => {
       event.preventDefault();
       const text = promptInput.value.trim();
-      if (!text) return;
+      if (!text || sendInFlight) return;
       if (modelEmpty()) { validateModel(); openModelMenu(); return; }
       lastUserText = text;
       promptInput.value = "";
       const attachment = selectedAttachment;
-      const accepted = await postCommand("/api/turn", {
-        text,
-        attachment_id: attachment?.id || null,
-        ...selectedModelPayload()
-      });
-      /* The session already had a turn running, so this send is the next turn's
-         input rather than a second concurrent turn (FIG-1000). It renders as the
-         same ingress receipt `queue next` produces — the row the drained turn's
-         committed message later reconciles against — and the pill keeps saying
-         running, because one is. */
-      if (accepted?.queued) {
-        if (accepted.queued_input) renderIngressReceipt(accepted.queued_input);
-      }
+      /* A send while a turn runs is that turn's successor's input, not a
+         second concurrent turn (FIG-1000); the timeline shows it as the same
+         waiting receipt `queue next` produces. */
+      const accepted = await sendTurn(
+        {
+          text,
+          attachment_id: attachment?.id || null,
+          ...selectedModelPayload()
+        },
+        attachment ? [{ attachment_id: attachment.id, retrieve_url: attachment.retrieve_url }] : []
+      );
       if (accepted && selectedAttachment?.id === attachment?.id) clearAttachment();
       if (accepted) loadSessions();
     });
@@ -5882,7 +4654,7 @@
         });
         if (!response.ok) throw new Error("attachment upload failed");
         const uploaded = await response.json();
-        selectedAttachment = uploaded.attachment;
+        selectedAttachment = { ...uploaded.attachment, retrieve_url: uploaded.retrieve_url };
         attachButton.classList.remove("uploading");
         attachButton.classList.add("ready");
         attachButton.textContent = "attached · " + file.name;
@@ -5915,8 +4687,7 @@
           renderError("the input could not be submitted");
           return;
         }
-        const receipt = await response.json();
-        renderIngressReceipt(receipt);
+        conversation.showReceipt(await response.json());
         lastUserText = text;
         promptInput.value = "";
       } catch (_) {
@@ -6709,45 +5480,17 @@
     }
 
     // BEGIN WORKBENCH_STATE_SNAPSHOT
-    const SNAPSHOT_TRANSCRIPT_APPEND = "append";
-    const SNAPSHOT_TRANSCRIPT_REPLACE = "replace";
-    const SNAPSHOT_TRANSCRIPT_PRESERVE_TRANSIENT = "preserve_transient";
-
-    function applyBusySnapshot(state, snapshotSequence) {
-      const busySnapshot = applySequencedBusySnapshot(
-        projectionState,
-        state,
-        snapshotSequence,
-        busy
-      );
-      if (!busySnapshot.applied) return false;
-      if (busySnapshot.busy !== busy) {
-        setBusy(
-          busySnapshot.busy,
-          busySnapshot.busy ? "turn running · restored" : "ready"
-        );
-      }
-      return true;
-    }
-
-    function applyStateSnapshot(
-      state,
-      replaceTranscript = false,
-      authoritative = replaceTranscript,
-      transcriptApplication = replaceTranscript
-        ? SNAPSHOT_TRANSCRIPT_REPLACE
-        : SNAPSHOT_TRANSCRIPT_APPEND,
-      snapshotSequence = beginStateSnapshotRequest(projectionState)
-    ) {
-      if (!applyBusySnapshot(state, snapshotSequence)) return false;
+    /* Applies one `/api/state` read: settings and the model picker, the
+       stream cursors, and the timeline, which upserts the read into the rows
+       it already shows. `since` is the timeline epoch the read began at; a
+       boot read retires nothing it did not see coming. */
+    function applyStateSnapshot(state, snapshotSequence, since = Infinity) {
+      if (!admitSnapshotSequence(projectionState, snapshotSequence)) return false;
       const snapshotSessionId = state?.settings?.session_id || null;
       if (projectionState.sessionId !== null && projectionState.sessionId !== snapshotSessionId) {
-        clearTerminalTurnTombstones();
+        clearTranscript();
       }
-      const preserveTransientTranscript =
-        transcriptApplication === SNAPSHOT_TRANSCRIPT_PRESERVE_TRANSIENT;
-      if (replaceTranscript && !preserveTransientTranscript) clearTranscript();
-      applyProjectionSnapshot(projectionState, state, authoritative);
+      applyProjectionSnapshot(projectionState, state);
       applyProjectedModel(state.settings.model);
       const modelList = document.getElementById("modelList");
       modelList.innerHTML = "";
@@ -6759,7 +5502,7 @@
         option.value = slug;
         modelList.appendChild(option);
       }
-      if (typeof renderModelChoices === "function") renderModelChoices(known);
+      renderModelChoices(known);
       variantSelect.innerHTML = "";
       const selectedVariant = state.settings.model_variant || "";
       for (const variant of state.settings.model_variants || ["", "low", "medium", "high"]) {
@@ -6778,14 +5521,10 @@
       knownSessionLabel = state.settings.session_id;
       markShellHydrated(shellAvailability);
       renderShellStatus();
-      if (!preserveTransientTranscript) {
-        renderStateTranscript(state);
-        restoreDecidedApprovals();
-      }
+      conversation.applySnapshot(state, since);
       lastQueuedWorkSignature = JSON.stringify(state.queued_work || []);
-      renderQueuedWork(state.queued_work || []);
+      conversation.setQueuedWork(state.queued_work || []);
       renderApprovals(state.pending_approvals || []);
-      recordTurnInputApplications(state.turn_input_applications);
       return true;
     }
     // END WORKBENCH_STATE_SNAPSHOT
@@ -6864,7 +5603,7 @@
     }
 
     function renderStreamingUsage(usage = {}, turnId = null) {
-      if (turnId && terminalTurnIds.has(turnId)) return;
+      if (conversation.isTerminal(turnId)) return;
       if (turnId) streamingUsageByTurn.set(turnId, normalizedUsage(usage));
       renderUsageCounters(projectedUsage());
       renderUsageTitle();
@@ -6878,79 +5617,6 @@
     // END WORKBENCH_USAGE_PROJECTION
 
     // BEGIN WORKBENCH_STATE_RECOVERY
-    const SETTLEMENT_STATE_REFRESH_DELAY_MS = 100;
-    const SETTLEMENT_STATE_REFRESH_ATTEMPTS = 50;
-
-    async function refreshTerminalState(
-      settlingTurnId = null,
-      attemptsRemaining = SETTLEMENT_STATE_REFRESH_ATTEMPTS
-    ) {
-      const snapshotSequence = beginStateSnapshotRequest(projectionState);
-      let retrySettlement = false;
-      try {
-        const state = await fetchStateSnapshot();
-        // Once every turn has settled, replace live activity with the canonical
-        // transcript, including its source row IDs and typed turn provenance.
-        const applied = busyAfterStateSnapshot(state)
-          ? applyBusySnapshot(state, snapshotSequence)
-          : applyStateSnapshot(
-              state,
-              true,
-              true,
-              SNAPSHOT_TRANSCRIPT_REPLACE,
-              snapshotSequence
-            );
-        retrySettlement = Boolean(settlingTurnId) && (
-          !applied || (state.active_turns || []).some(turn => turn.turn_id === settlingTurnId)
-        );
-        if (!applied) return;
-        markShellChannel(shellAvailability, "state", true);
-        renderShellStatus();
-      } catch (error) {
-        if (handleSessionRetirementFailure(error)) return;
-        if (handleTerminalStateFailure(error)) {
-          renderError(error.message, { retry: false });
-          return;
-        }
-        if (handleRetryableStateFailure(error)) {
-          retrySettlement = Boolean(settlingTurnId);
-          return;
-        }
-        markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
-        renderShellStatus();
-        scheduleStateRetry();
-        retrySettlement = Boolean(settlingTurnId);
-      } finally {
-        if (retrySettlement && attemptsRemaining > 0) {
-          setTimeout(
-            () => refreshTerminalState(settlingTurnId, attemptsRemaining - 1),
-            SETTLEMENT_STATE_REFRESH_DELAY_MS
-          );
-        }
-      }
-    }
-
-    async function refreshBusyState() {
-      const snapshotSequence = beginStateSnapshotRequest(projectionState);
-      try {
-        const state = await fetchStateSnapshot();
-        if (!applyBusySnapshot(state, snapshotSequence)) return;
-        reconcilePendingTurnInputs(state.pending_turn_inputs);
-        markShellChannel(shellAvailability, "state", true);
-        renderShellStatus();
-      } catch (error) {
-        if (handleSessionRetirementFailure(error)) return;
-        if (handleTerminalStateFailure(error)) {
-          renderError(error.message, { retry: false });
-          return;
-        }
-        if (handleRetryableStateFailure(error)) return;
-        markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
-        renderShellStatus();
-        scheduleStateRetry();
-      }
-    }
-
     function snapshotFailureReason(error) {
       if (error?.name === "TimeoutError") {
         return "the workbench did not answer within " + (STATE_REQUEST_TIMEOUT_MS / 1000) + "s";
@@ -7043,6 +5709,7 @@
 
     async function loadState() {
       const token = beginStateRecovery(projectionState);
+      const since = conversation.epoch();
       try {
         const state = await fetchStateSnapshot();
         const isLatestRequest = token.generation === projectionState.recoveryGeneration;
@@ -7069,22 +5736,10 @@
         markShellChannel(shellAvailability, "state", true);
         cancelStateRetry();
         if (application === "initial") {
-          applyStateSnapshot(
-            state,
-            false,
-            false,
-            SNAPSHOT_TRANSCRIPT_APPEND,
-            token.snapshotSequence
-          );
+          applyStateSnapshot(state, token.snapshotSequence, since);
           return;
         }
-        applyStateSnapshot(
-          state,
-          true,
-          true,
-          SNAPSHOT_TRANSCRIPT_REPLACE,
-          token.snapshotSequence
-        );
+        applyStateSnapshot(state, token.snapshotSequence, since);
         /* re-attach the streams at the snapshot's cursors */
         restartEventStreams();
       } catch (error) {
@@ -7184,166 +5839,16 @@
       return middleEllipsis(text, 16);
     }
 
-    // BEGIN WORKBENCH_INLINE_QUEUED_WORK
-    /* Pending queued-work batches wait for the session's next turn boundary,
-       so they sit at the foot of the conversation they will join, one compact
-       row each, and leave it when the engine takes them. */
-    function renderQueuedWork(batches) {
-      const pending = new Set(batches.map(batch => batch.batch_id));
-      for (const row of timeline.querySelectorAll(".queued-batch")) {
-        if (!pending.has(row.dataset.batchId)) row.remove();
-      }
-      for (const batch of batches) {
-        if (timeline.querySelector(`.queued-batch[data-batch-id="${CSS.escape(batch.batch_id)}"]`)) continue;
-        const row = document.createElement("div");
-        row.className = "message event queued-batch";
-        row.dataset.batchId = batch.batch_id;
-        const body = document.createElement("div");
-        body.className = "msg-body";
-        const head = document.createElement("div");
-        head.className = "event-head";
-        const kind = document.createElement("span");
-        kind.className = "event-kind";
-        kind.textContent = "queued";
-        const title = document.createElement("span");
-        title.className = "event-title";
-        const payloadKind = batch.items?.[0]?.payload?.type || "queued_work";
-        title.textContent = payloadKind.replaceAll("_", " ") + " · waits for the next turn";
-        title.title = batch.batch_id;
-        const cancel = document.createElement("button");
-        cancel.className = "inline-action";
-        cancel.type = "button";
-        cancel.textContent = "cancel";
-        cancel.title = "Cancel this pending queued-work batch";
-        cancel.setAttribute("aria-label", "Cancel queued-work batch " + batch.batch_id);
-        cancel.addEventListener("click", async () => {
-          cancel.disabled = true;
-          cancel.textContent = "cancelling";
-          try {
-            const path = "/api/queued-work/" + encodeURIComponent(batch.batch_id);
-            const response = await fetch(path, { method: "DELETE" });
-            if (!response.ok) throw new Error("queued-work action failed");
-            await refreshQueuedWork();
-          } catch (_) {
-            cancel.disabled = false;
-            cancel.textContent = "retry cancel";
-          }
-        });
-        head.append(kind, title, cancel);
-        body.appendChild(head);
-        row.appendChild(body);
-        clearEmpty();
-        timeline.appendChild(row);
-      }
-    }
-    // END WORKBENCH_INLINE_QUEUED_WORK
-
     /* The rails poll every 1.4s. Rebuilding their DOM on every tick cancels
        an in-progress text selection and resets a copy control mid-flash, so an
        unchanged payload is not re-rendered. */
     let lastQueuedWorkSignature = "";
 
-    function formatApprovalAge(ageMs) {
-      const seconds = Math.max(0, Math.floor((Number(ageMs) || 0) / 1000));
-      if (seconds < 60) return seconds + "s";
-      const minutes = Math.floor(seconds / 60);
-      if (minutes < 60) return minutes + "m";
-      return Math.floor(minutes / 60) + "h";
-    }
-
     // BEGIN WORKBENCH_INLINE_APPROVALS
-    /* A pending approval is part of the conversation: it renders where its
-       tool call is waiting, as one compact card, and once decided it collapses
-       to one line. Approvals other chats are waiting on mark those chats in the
-       sidebar instead. */
-    const approvalDecisions = new Map();
+    /* A pending approval is part of the conversation: the timeline anchors
+       its card to the tool call waiting on it. Approvals other chats are
+       waiting on mark those chats in the sidebar instead. */
     let approvalSessions = new Set();
-
-    function approvalAnchor(tool) {
-      const rows = Array.from(timeline.querySelectorAll(".tool"))
-        .filter(row => row.querySelector("strong")?.textContent === tool);
-      const row = rows[rows.length - 1];
-      return row ? (row.closest(".code-block") || row) : null;
-    }
-
-    function placeApprovalRow(node, tool, turnId = null) {
-      clearEmpty();
-      const turnBlocks = turnId
-        ? Array.from(timeline.querySelectorAll(".code-block"))
-          .filter(block => block.dataset.turnId === turnId)
-        : [];
-      const anchor = turnBlocks[turnBlocks.length - 1] || approvalAnchor(tool);
-      if (anchor?.dataset.turnId) node.dataset.turnId = anchor.dataset.turnId;
-      if (anchor) anchor.insertAdjacentElement("afterend", node);
-      else timeline.appendChild(node);
-    }
-
-    function collapseApproval(card, decision, tool) {
-      card.dataset.decided = decision;
-      card.replaceChildren();
-      const line = document.createElement("span");
-      line.className = "approval-line";
-      line.textContent = decision + ": " + tool;
-      card.appendChild(line);
-    }
-
-    function approvalCard(approval) {
-      const card = document.createElement("div");
-      card.className = "approval-card";
-      card.dataset.approvalKey = approval.key;
-      card.dataset.tool = approval.tool;
-      const head = document.createElement("div");
-      head.className = "approval-head";
-      const label = document.createElement("span");
-      label.className = "approval-label";
-      label.textContent = "approval needed";
-      const tool = document.createElement("strong");
-      tool.className = "approval-tool";
-      tool.textContent = approval.tool;
-      const age = document.createElement("span");
-      age.className = "approval-age";
-      age.textContent = "waiting " + formatApprovalAge(approval.age_ms);
-      const approve = document.createElement("button");
-      approve.className = "approval-approve";
-      approve.type = "button";
-      approve.textContent = "approve";
-      approve.setAttribute("aria-label", "Approve " + approval.tool);
-      const deny = document.createElement("button");
-      deny.className = "approval-deny";
-      deny.type = "button";
-      deny.textContent = "deny";
-      deny.setAttribute("aria-label", "Deny " + approval.tool);
-      async function decide(decision, button) {
-        approve.disabled = true;
-        deny.disabled = true;
-        button.textContent = decision === "approve" ? "approving" : "denying";
-        try {
-          const response = await fetch(
-            "/api/approvals/" + encodeURIComponent(approval.key) + "/" + decision,
-            { method: "POST" }
-          );
-          if (!response.ok) throw new Error("approval decision failed");
-          const decided = decision === "approve" ? "approved" : "denied";
-          approvalDecisions.set(approval.key, {
-            decision: decided,
-            tool: approval.tool,
-            sessionId: approval.requesting_session,
-            turnId: card.dataset.turnId || null
-          });
-          collapseApproval(card, decided, approval.tool);
-          refreshApprovals();
-        } catch (_) {
-          approve.disabled = false;
-          deny.disabled = false;
-          button.textContent = "retry " + decision;
-        }
-      }
-      approve.addEventListener("click", () => decide("approve", approve));
-      deny.addEventListener("click", () => decide("deny", deny));
-      head.append(label, tool, age, approve, deny);
-      card.append(head, payloadDisclosure("arguments", JSON.stringify(approval.arguments, null, 2)));
-      return card;
-    }
 
     function renderApprovals(approvals) {
       const flagged = new Set(approvals.map(approval => approval.requesting_session));
@@ -7351,38 +5856,7 @@
         [...flagged].some(id => !approvalSessions.has(id));
       approvalSessions = flagged;
       if (flagsChanged && lastSessionListing) renderSessions(lastSessionListing);
-      const shown = shownSessionId();
-      const pending = approvals.filter(approval => approval.requesting_session === shown);
-      const keys = new Set(pending.map(approval => approval.key));
-      for (const card of timeline.querySelectorAll(".approval-card:not([data-decided])")) {
-        if (keys.has(card.dataset.approvalKey)) continue;
-        const decided = approvalDecisions.get(card.dataset.approvalKey);
-        collapseApproval(card, decided?.decision || "resolved", card.dataset.tool);
-      }
-      for (const approval of pending) {
-        const card = timeline.querySelector(`.approval-card[data-approval-key="${CSS.escape(approval.key)}"]`);
-        if (card) {
-          const age = card.querySelector(".approval-age");
-          if (age) age.textContent = "waiting " + formatApprovalAge(approval.age_ms);
-          continue;
-        }
-        placeApprovalRow(approvalCard(approval), approval.tool);
-      }
-    }
-
-    /* A transcript re-render rebuilds the timeline; the decisions this tab
-       made stay on it as their one-line record. */
-    function restoreDecidedApprovals() {
-      const shown = shownSessionId();
-      for (const [key, decided] of approvalDecisions) {
-        if (decided.sessionId !== shown) continue;
-        if (timeline.querySelector(`.approval-card[data-approval-key="${CSS.escape(key)}"]`)) continue;
-        const card = document.createElement("div");
-        card.className = "approval-card";
-        card.dataset.approvalKey = key;
-        collapseApproval(card, decided.decision, decided.tool);
-        placeApprovalRow(card, decided.tool, decided.turnId);
-      }
+      conversation.setApprovals(approvals, shownSessionId());
     }
     // END WORKBENCH_INLINE_APPROVALS
 
@@ -7402,7 +5876,7 @@
         const signature = JSON.stringify(batches);
         if (signature === lastQueuedWorkSignature) return;
         lastQueuedWorkSignature = signature;
-        renderQueuedWork(batches);
+        conversation.setQueuedWork(batches);
       } catch (_) {
         lastQueuedWorkSignature = "";
       }

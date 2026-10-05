@@ -83,7 +83,6 @@ impl LlmProfileSelection {
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct StateSnapshot {
     pub(crate) settings: Settings,
-    pub(crate) messages: Vec<ChatMessage>,
     pub(crate) observation: RemoteSessionObservation,
     pub(crate) product_events: ProductEventSnapshot,
     pub(crate) active_turns: Vec<lash::TurnAddress>,
@@ -223,6 +222,10 @@ pub(crate) struct ChatMessage {
     pub(crate) attachments: Vec<ChatAttachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) provenance: Option<ChatMessageProvenance>,
+    /// The sending page's own name for a UI input, echoed so that page can
+    /// put the committed row in the place of the row it showed on send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) client_nonce: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -254,6 +257,10 @@ pub(crate) struct TurnRequest {
     pub(crate) model_variant: Option<String>,
     #[serde(default)]
     pub(crate) attachment_id: Option<String>,
+    /// The page's name for the row it shows on send; see
+    /// [`ChatMessage::client_nonce`].
+    #[serde(default)]
+    pub(crate) client_nonce: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

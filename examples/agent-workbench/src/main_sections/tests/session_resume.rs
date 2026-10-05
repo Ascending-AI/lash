@@ -120,9 +120,10 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
             },
             lash::persistence::ChronologicalPayload::ProtocolEvent(event) => {
                 assert_eq!(event.plugin_id, "rlm_protocol");
-                if event.payload.get("RlmDiagnostic").is_some() {
+                let versioned = &event.payload["event"];
+                if versioned.get("RlmDiagnostic").is_some() {
                     "rlm_diagnostic"
-                } else if event.payload.get("RlmTrajectoryEntry").is_some() {
+                } else if versioned.get("RlmTrajectoryEntry").is_some() {
                     "rlm_trajectory"
                 } else {
                     panic!("unexpected RLM protocol payload: {:?}", event.payload);
@@ -251,8 +252,12 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     ))
     .await
     .expect("project committed transcript after restart");
-    let before_rows = before
-        .messages
+    let before_messages = before
+        .transcript
+        .iter()
+        .filter_map(transcript_message)
+        .collect::<Vec<_>>();
+    let before_rows = before_messages
         .iter()
         .map(|message| (message.role.as_str(), message.text.as_str()))
         .collect::<Vec<_>>();
@@ -308,8 +313,13 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     ))
     .await
     .expect("project transcript after resumed turn");
-    assert_eq!(after.messages.len(), 6);
-    assert_eq!(after.messages[4].text, "resume question three");
-    assert_eq!(after.messages[5].text, "resume answer three");
+    let after_messages = after
+        .transcript
+        .iter()
+        .filter_map(transcript_message)
+        .collect::<Vec<_>>();
+    assert_eq!(after_messages.len(), 6);
+    assert_eq!(after_messages[4].text, "resume question three");
+    assert_eq!(after_messages[5].text, "resume answer three");
     let _ = std::fs::remove_dir_all(data_dir);
 }

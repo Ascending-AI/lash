@@ -437,6 +437,7 @@ fn retired_session_admission_precedes_attachment_reads_and_submission() {
                 model: Some("test-model".to_string()),
                 model_variant: None,
                 attachment_id: Some("missing-retired-attachment".to_string()),
+                client_nonce: None,
             }),
         )
         .await
@@ -518,6 +519,7 @@ fn retired_session_http_refusals_record_structured_admission_evidence() {
                 model: Some("test-model".to_string()),
                 model_variant: None,
                 attachment_id: None,
+                client_nonce: None,
             }),
         )
         .await
@@ -780,6 +782,8 @@ async fn canonical_rows_survive_every_registered_production_renderer() {
 async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors() {
     let script =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/browser_projection.mjs");
+    let timeline_script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/timeline_projection.mjs");
     let trigger_identities = browser_projection_trigger_identities();
     let to_event_value = |event: lash::TurnEvent| {
         serde_json::to_value(
@@ -930,6 +934,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     let output = std::process::Command::new(node)
         .arg("--test")
         .arg(&script)
+        .arg(&timeline_script)
         .env(
             "LASH_WORKBENCH_TRIGGER_IDENTITIES",
             trigger_identities.to_string(),
@@ -1046,6 +1051,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 provenance: Some(ChatMessageProvenance::TurnInput {
                     turn_id: TurnId::from("reconciled-turn"),
                 }),
+                client_nonce: None,
             },
         },
     );
@@ -1164,6 +1170,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 at: String::new(),
                 attachments: Vec::new(),
                 provenance: None,
+                client_nonce: None,
             },
         },
     );
@@ -1202,6 +1209,7 @@ async fn product_event_route_lag_emits_durable_ordered_resync() {
                     at: String::new(),
                     attachments: Vec::new(),
                     provenance: None,
+                    client_nonce: None,
                 },
             },
         );
@@ -1234,180 +1242,6 @@ async fn product_event_route_lag_emits_durable_ordered_resync() {
             .map(|event| (event.sequence, event.event_id.as_str()))
             .collect::<Vec<_>>(),
         vec![(1, "event-1"), (2, "event-2"), (3, "event-3")]
-    );
-}
-
-#[tokio::test]
-async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_log() {
-    let double = crate::tests::test_double_backend(0).await;
-    let state = recoverable_chat_test_state(&double, 16).await;
-    let session_id = state.current_session_id();
-    let session = crate::created_session(&state.core, session_id.clone())
-        .await
-        .open()
-        .await
-        .expect("open canonical session");
-    session
-        .send(lash::TurnInput::text("canonical question"))
-        .id(lash::TurnId::parse("canonical-turn").expect("nonblank host identity"))
-        .output()
-        .await
-        .expect("commit real reply");
-    session.close().await.expect("close canonical session");
-
-    state.push_message_with_id_for_session(
-        &session_id,
-        "canonical-assistant",
-        "assistant",
-        "stale mirrored answer",
-    );
-    state.push_message_with_id_for_session(
-        &session_id,
-        "host-only-event",
-        "event",
-        "host-only row",
-    );
-
-    let Json(snapshot) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
-        .await
-        .expect("materialize merged state");
-    assert_eq!(
-        snapshot
-            .messages
-            .iter()
-            .map(|message| (message.role.as_str(), message.text.as_str()))
-            .collect::<Vec<_>>(),
-        vec![
-            ("user", "canonical question"),
-            ("assistant", "canonical answer"),
-            ("event", "host-only row")
-        ]
-    );
-    assert_eq!(
-        snapshot
-            .transcript
-            .iter()
-            .filter(|row| row.suppressed.is_none() && row.provenance.is_turn_reply)
-            .count(),
-        1
-    );
-}
-
-#[tokio::test]
-async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_reconciled() {
-    let double = crate::tests::test_double_backend(0).await;
-    let state = recoverable_chat_test_state(&double, 16).await;
-    let session_id = state.current_session_id();
-    let turn_id = "workbench-turn-fig972";
-
-    // What `send_turn` publishes: the workbench's own optimistic row for a turn
-    // it just submitted, in the workbench's id namespace.
-    state.track_turn_prompt(
-        &session_id,
-        &TurnId::from(turn_id),
-        "one send".to_string(),
-        None,
-    );
-    state.push_user_message_for_turn(&session_id, &TurnId::from(turn_id), "one send");
-    // What the runtime commits for the same send: a runtime-minted id — here the
-    // queued-ingress spelling, which no host can predict — carrying the turn
-    // provenance the runtime stamps.
-    let session = crate::created_session(&state.core, session_id.clone())
-        .await
-        .open()
-        .await
-        .expect("open session for the committed turn input");
-    session
-        .admin()
-        .state()
-        .append_messages(vec![
-            lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "one send")
-                .with_id("m_ingress_workbench-input-1")
-                .with_origin(lash::messages::MessageOrigin::TurnInput {
-                    turn_id: TurnId::from(turn_id),
-                    input_id: Some(lash::InputId::from("workbench-input-1")),
-                }),
-        ])
-        .await
-        .expect("commit the runtime's copy of the turn input");
-    session.close().await.expect("close session");
-    // The workbench also mirrors committed ingress messages into its product log
-    // so the live page replaces ingress receipts; that mirror must not become a
-    // second row either.
-    state.push_message_with_id_for_session(
-        &session_id,
-        "m_ingress_workbench-input-1",
-        "user",
-        "one send",
-    );
-
-    let ui_row = (
-        format!("fixture-user:{}", TurnId::from(turn_id)),
-        "one send".to_string(),
-    );
-    let canonical = state
-        .core
-        .session(session_id.clone())
-        .durable()
-        .await
-        .expect("durable")
-        .transcript()
-        .await
-        .expect("rows");
-    let committed_row = (
-        serde_json::to_value(
-            &canonical
-                .visible()
-                .find(|row| row.content.text == "one send")
-                .expect("committed input")
-                .row_id,
-        )
-        .expect("row id")
-        .as_str()
-        .expect("token")
-        .to_owned(),
-        "one send".to_owned(),
-    );
-
-    let Json(running) = Box::pin(app_state(
-        State(state.clone()),
-        Query(SessionQuery::default()),
-    ))
-    .await
-    .expect("materialize the running snapshot");
-    assert_eq!(
-        user_rows(&running),
-        vec![ui_row.clone()],
-        "the UI-owned row renders once and the committed copy stays provenance"
-    );
-    assert_eq!(
-        transcript_user_rows(&running),
-        vec![committed_row.clone()],
-        "the transcript projection suppresses the same committed copy"
-    );
-
-    // Settlement leaves the session-scoped UI-owned row in place. The runtime
-    // copy remains typed provenance, not rendering authority.
-    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(turn_id))
-        .await
-        .expect("settle the turn");
-    let Json(settled) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
-        .await
-        .expect("materialize the settled snapshot");
-    assert_eq!(
-        user_rows(&settled),
-        vec![ui_row.clone()],
-        "the settled projection keeps the UI-owned send"
-    );
-    assert_eq!(
-        transcript_user_rows(&settled),
-        vec![committed_row.clone()],
-        "the settled transcript keeps the UI-owned send"
-    );
-    assert_ne!(
-        user_rows(&settled),
-        vec![committed_row],
-        "the model-facing graph must not become the user-row authority"
     );
 }
 
@@ -1502,6 +1336,7 @@ async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: Some(attachment.id.to_string()),
+            client_nonce: None,
         }),
     )
     .await
@@ -1511,9 +1346,6 @@ async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
         .await
         .expect("project the refused send");
     assert!(settled.active_turns.is_empty());
-    assert!(settled.messages.iter().all(|message| {
-        message.text != never_committed && !message.id.starts_with("workbench-user:")
-    }));
     assert!(settled.transcript.iter().all(|row| {
         transcript_message(row)
             .is_none_or(|m| m.text != never_committed && !m.id.starts_with("workbench-user:"))
@@ -1662,21 +1494,6 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
         ("user", "finish in the follow frame"),
         ("assistant", "follow frame answer"),
     ];
-    assert_eq!(
-        boundary
-            .messages
-            .iter()
-            .map(|message| (message.role.as_str(), message.text.as_str()))
-            .collect::<Vec<_>>(),
-        expected_rows
-    );
-    assert!(
-        boundary
-            .messages
-            .iter()
-            .all(|message| message.text != "old frame answer"
-                && message.text != "protocol-only-seed")
-    );
     let canonical = boundary
         .transcript
         .iter()
@@ -1689,17 +1506,6 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
             .collect::<Vec<_>>(),
         expected_rows
     );
-    let boundary_rows = boundary
-        .messages
-        .iter()
-        .map(|message| {
-            (
-                message.id.clone(),
-                message.role.clone(),
-                message.text.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
     let boundary_transcript = serde_json::to_value(&boundary.transcript).expect("canonical rows");
 
     drop(state);
@@ -1724,134 +1530,9 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
     .await
     .expect("rebuild continue_as projection after reload");
     assert_eq!(
-        reloaded
-            .state
-            .messages
-            .iter()
-            .map(|message| (
-                message.id.clone(),
-                message.role.clone(),
-                message.text.clone()
-            ))
-            .collect::<Vec<_>>(),
-        boundary_rows,
-        "reload must reproduce the same session-scoped projection"
-    );
-    assert_eq!(
         serde_json::to_value(&reloaded.transcript).expect("reload rows"),
-        boundary_transcript
-    );
-}
-
-#[tokio::test]
-async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill() {
-    let double = crate::tests::test_double_backend(0).await;
-    let state = recoverable_chat_test_state(&double, 16).await;
-    let session_id = state.current_session_id();
-    let turn_id = "workbench-turn-fig994";
-    let attachment = lash::attachments::AttachmentRef {
-        id: lash::attachments::AttachmentId::parse("sha256:fig994-backfill")
-            .expect("valid attachment id"),
-        media_type: lash::attachments::MediaType::parse("image/png")
-            .expect("valid test media type"),
-        byte_len: 68,
-        type_metadata: Some(lash::attachments::AttachmentTypeMetadata::image(
-            Some(1),
-            Some(1),
-        )),
-        label: Some("backfill.png".to_string()),
-    };
-    let expected_attachment = (
-        attachment.id.to_string(),
-        attachment_retrieve_url(&attachment.id.to_string()),
-    );
-
-    state.track_turn_prompt(
-        &session_id,
-        &TurnId::from(turn_id),
-        "one attached send".to_string(),
-        Some(attachment.id.to_string()),
-    );
-    state.push_message_with_id_and_attachments_and_provenance_for_session(
-        &session_id,
-        format!("fixture-user:{turn_id}"),
-        "user",
-        "one attached send",
-        vec![ChatAttachment::from_id(attachment.id.to_string())],
-        Some(ChatMessageProvenance::TurnInput {
-            turn_id: TurnId::from(turn_id),
-        }),
-    );
-
-    let Json(optimistic) = Box::pin(app_state(
-        State(state.clone()),
-        Query(SessionQuery::default()),
-    ))
-    .await
-    .expect("materialize optimistic attachment snapshot");
-    assert_eq!(
-        user_row_attachments(&optimistic),
-        vec![(
-            format!("fixture-user:{}", TurnId::from(turn_id)),
-            vec![expected_attachment.clone()],
-        )],
-        "the live UI-owned row carries the uploaded attachment reference once"
-    );
-
-    let mut committed =
-        lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "one attached send")
-            .with_id("m_ingress_workbench-input-fig994")
-            .with_origin(lash::messages::MessageOrigin::TurnInput {
-                turn_id: TurnId::from(turn_id),
-                input_id: Some(lash::InputId::from("workbench-input-fig994")),
-            });
-    committed.parts.push(injected_attachment_part(
-        lash::direct::AttachmentSource::stored(attachment),
-    ));
-    let session = crate::created_session(&state.core, session_id.clone())
-        .await
-        .open()
-        .await
-        .expect("open attachment backfill session");
-    session
-        .admin()
-        .state()
-        .append_messages(vec![committed])
-        .await
-        .expect("commit attached turn input");
-    session
-        .close()
-        .await
-        .expect("close attachment backfill session");
-
-    let Json(running) = Box::pin(app_state(
-        State(state.clone()),
-        Query(SessionQuery::default()),
-    ))
-    .await
-    .expect("materialize running attachment snapshot");
-    assert_eq!(
-        user_row_attachments(&running),
-        vec![(
-            format!("fixture-user:{}", TurnId::from(turn_id)),
-            vec![expected_attachment.clone()],
-        )],
-        "the committed copy stays suppressed while the attached UI row survives"
-    );
-
-    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(turn_id))
-        .await
-        .expect("settle attached workbench turn");
-    let Json(settled) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
-        .await
-        .expect("materialize settled attachment snapshot");
-    assert_eq!(
-        user_row_attachments(&settled),
-        vec![(
-            format!("fixture-user:{}", TurnId::from(turn_id)),
-            vec![expected_attachment],
-        )],
-        "the UI-owned attachment row remains session-scoped after settlement"
+        boundary_transcript,
+        "reload must reproduce the same session-scoped projection"
     );
 }
 
@@ -1898,24 +1579,46 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
         .await
         .expect("read committed attachment snapshot");
     let wire = serde_json::to_value(snapshot).expect("serialize workbench snapshot");
+    let committed_user = wire["transcript"]
+        .as_array()
+        .expect("the snapshot carries the committed transcript")
+        .iter()
+        .find(|row| row["kind"] == "user" && row["suppressed"].is_null())
+        .expect("the committed user row is visible");
     assert_eq!(
-        wire["messages"][0]["attachments"],
-        json!([{
-            "attachment_id": attachment.id,
-            "retrieve_url": attachment_retrieve_url(&attachment.id.to_string()),
-        }]),
-        "the committed message must expose the stored attachment reference"
+        committed_user["content"]["attachments"][0]["id"],
+        json!(attachment.id),
+        "the committed row must expose the stored attachment reference"
     );
 }
 
-pub(crate) fn user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
-    snapshot
-        .state
-        .messages
+/// The agent replies a page shows for `snapshot`: one per turn, keyed as the
+/// page keys them (`reply:<turn>`). A committed reply stands for its turn;
+/// a live product reply shows only for a turn that has not committed one.
+pub(crate) fn shown_replies(snapshot: &StateReadSnapshot) -> Vec<String> {
+    let mut turns = BTreeSet::new();
+    let mut replies = Vec::new();
+    for row in snapshot
+        .transcript
         .iter()
-        .filter(|message| message.role == "user")
-        .map(|message| (message.id.clone(), message.text.clone()))
-        .collect()
+        .filter(|row| row.suppressed.is_none())
+    {
+        if row.provenance.is_turn_reply {
+            if let Some(turn_id) = &row.provenance.turn_id {
+                turns.insert(turn_id.clone());
+            }
+            replies.push(row.content.text.clone());
+        }
+    }
+    for event in &snapshot.product_events.events {
+        if let StreamItem::Message { message } = &event.item
+            && let Some(ChatMessageProvenance::TurnOutput { turn_id }) = &message.provenance
+            && turns.insert(turn_id.clone())
+        {
+            replies.push(message.text.clone());
+        }
+    }
+    replies
 }
 
 /// The chat message a transcript row carries, if it carries one.
@@ -1923,42 +1626,6 @@ pub(crate) fn transcript_message(
     row: &lash::transcript::TranscriptRowRecord,
 ) -> Option<ChatMessage> {
     chat_message_from_row(row).expect("project canonical row")
-}
-
-pub(crate) fn transcript_user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
-    snapshot
-        .transcript
-        .iter()
-        .filter_map(|row| {
-            transcript_message(row)
-                .filter(|m| m.role == "user")
-                .map(|m| (m.id.clone(), m.text.clone()))
-        })
-        .collect()
-}
-
-fn user_row_attachments(snapshot: &StateReadSnapshot) -> Vec<(String, Vec<(String, String)>)> {
-    snapshot
-        .state
-        .messages
-        .iter()
-        .filter(|message| message.role == "user")
-        .map(|message| {
-            (
-                message.id.clone(),
-                message
-                    .attachments
-                    .iter()
-                    .map(|attachment| {
-                        (
-                            attachment.attachment_id.clone(),
-                            attachment.retrieve_url.clone(),
-                        )
-                    })
-                    .collect(),
-            )
-        })
-        .collect()
 }
 
 #[tokio::test]
@@ -2014,6 +1681,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await
@@ -2037,9 +1705,22 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         .await
         .expect("/api/state must remain readable while the turn lease is held");
     assert_eq!(running.active_turns.len(), 1);
-    let original_input_id = running.messages.iter().find(|message| {
-        matches!(&message.provenance, Some(ChatMessageProvenance::TurnInput { turn_id: owner }) if owner == turn_id)
-    }).expect("UI input exists before the commit").id.clone();
+    let original_input_id = running
+        .product_events
+        .events
+        .iter()
+        .find_map(|event| match &event.item {
+            StreamItem::Message { message }
+                if matches!(
+                    &message.provenance,
+                    Some(ChatMessageProvenance::TurnInput { turn_id: owner }) if owner == turn_id
+                ) =>
+            {
+                Some(message.id.clone())
+            }
+            _ => None,
+        })
+        .expect("UI input exists before the commit");
     let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
         state.session_store_factory.clone();
     let in_flight_store =
@@ -2078,15 +1759,6 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
     let Json(settled) = app_state(State(state), Query(SessionQuery::default()))
         .await
         .expect("materialize settled state");
-    assert_eq!(
-        settled
-            .messages
-            .iter()
-            .map(|message| (message.role.as_str(), message.text.as_str()))
-            .collect::<Vec<_>>(),
-        vec![("user", turn_text), ("assistant", "settled answer")],
-        "settlement must contain exactly the committed transcript rows"
-    );
     assert_eq!(
         settled
             .transcript

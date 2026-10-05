@@ -66,7 +66,9 @@ pub(crate) async fn assert_typed_turn_input_application(
             .is_empty(),
         "application evidence must remain available without a pending-input snapshot"
     );
-    assert!(ui::INDEX_HTML.contains("turn_input_applied"));
-    assert!(!ui::INDEX_HTML.contains("queued_input_accepted"));
-    assert!(!ui::INDEX_HTML.contains("runtime_diagnostic"));
+    assert!(ui::TIMELINE_JS.contains("turn_input_applied"));
+    for page in [ui::INDEX_HTML, ui::TIMELINE_JS] {
+        assert!(!page.contains("queued_input_accepted"));
+        assert!(!page.contains("runtime_diagnostic"));
+    }
 }

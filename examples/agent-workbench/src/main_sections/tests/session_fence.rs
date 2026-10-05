@@ -214,6 +214,7 @@ async fn a_delete_that_lands_between_admission_and_claim_refuses_the_send_inner(
                     model: Some("test-model".to_string()),
                     model_variant: None,
                     attachment_id: None,
+                    client_nonce: None,
                 }),
             )
             .await
@@ -394,6 +395,7 @@ finish(await handle);
             model: Some("test-model".to_string()),
             model_variant: None,
             attachment_id: None,
+            client_nonce: None,
         }),
     )
     .await
@@ -461,6 +463,7 @@ fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
                             model: Some("test-model".to_string()),
                             model_variant: None,
                             attachment_id: None,
+                            client_nonce: None,
                         }),
                     )
                     .map_ok(drop),

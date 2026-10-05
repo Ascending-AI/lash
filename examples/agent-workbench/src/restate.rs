@@ -657,6 +657,7 @@ async fn run_button_trigger(
         &request.session_id,
         format!("{} pressed", request.button.lower()),
         &receipt,
+        request.pressed_at.clone(),
     );
     // Clear the UI's busy state when this request owns it, but do not clear a foreground
     // turn's busy state during a mid-turn occurrence.
@@ -714,6 +715,7 @@ async fn run_mail_received(
             request.delivery.account, request.delivery.title
         ),
         &receipt,
+        Utc::now().to_rfc3339(),
     );
     // Clear the UI's busy state when this request owns it, but do not clear a foreground
     // turn's busy state during a mid-turn occurrence.
@@ -974,7 +976,7 @@ pub(crate) async fn settle_workbench_turn(
         .collect::<Vec<_>>();
     if targets.is_empty() {
         state.active_turns.remove(session_id, turn_id);
-        return Ok(());
+        return retire_settled_turn_rows(state, &session);
     }
     let cancellations = session
         .durable()
@@ -991,7 +993,19 @@ pub(crate) async fn settle_workbench_turn(
         }),
     );
     state.active_turns.remove(session_id, turn_id);
-    Ok(())
+    retire_settled_turn_rows(state, &session)
+}
+
+/// With the claim released, the product rows the settled turn published
+/// for its live view retire: the committed transcript carries them now.
+fn retire_settled_turn_rows(state: &AppState, session: &lash::LashSession) -> Result<(), AppError> {
+    let rows = session
+        .read_view()
+        .transcript()
+        .map_err(AppError::internal)?
+        .into_records();
+    crate::retire_settled_product_rows(state, &session.session_id(), &rows)
+        .map_err(AppError::internal)
 }
 
 fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
@@ -1071,7 +1085,6 @@ pub(crate) async fn record_turn_output_for_profile(
             }),
         }),
     );
-    crate::republish_committed_ingress_messages(state, session).map_err(AppError::internal)?;
     for record in output.llm_calls.iter().cloned() {
         let call_id = record.call_id.0.clone();
         let remote_record: lash::remote::llm::RemoteLlmCallRecord = record.into();
@@ -1105,10 +1118,12 @@ pub(crate) async fn record_turn_output_for_profile(
         _ => {
             // The runtime committed this turn's reply, marked with the
             // durable turn, whatever finished it (FIG-1493 §5.5): the live
-            // row carries that turn so the committed copy supersedes it.
+            // row carries that turn so the committed copy supersedes it. Its
+            // id is the turn's, so a re-settle (a host restart re-following
+            // the turn) republishes nothing.
             state.push_assistant_message_for_turn(
                 &session.session_id(),
-                uuid::Uuid::new_v4().to_string(),
+                format!("reply:{}", identity.durable_turn_id),
                 identity.durable_turn_id,
                 assistant_text,
             );

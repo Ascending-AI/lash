@@ -15,6 +15,16 @@ pub(crate) async fn index() -> Html<&'static str> {
     Html(ui::INDEX_HTML)
 }
 
+pub(crate) async fn timeline_script() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        ui::TIMELINE_JS,
+    )
+}
+
 pub(crate) async fn app_state(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
@@ -36,7 +46,6 @@ async fn read_state_snapshot(
     state: &AppState,
     session_id: &SessionId,
 ) -> Result<StateReadSnapshot, AppError> {
-    let active_turn = state.active_turns.for_session(session_id);
     let StateProjectionReads {
         read_view,
         durable,
@@ -46,45 +55,18 @@ async fn read_state_snapshot(
         turn_input_applications,
         turn_failure_settlements,
     } = read_state_projection(state, session_id).await?;
-    let active_turn_ids = active_turn
-        .iter()
-        .map(|active_turn| active_turn.address.turn_id.clone())
-        .collect::<BTreeSet<_>>();
+    // Each cursor is read before the data it covers, so a stream attached at
+    // these cursors can only re-deliver what the snapshot already holds; the
+    // page upserts by row identity, which makes that redelivery idempotent.
     let transcript = durable
         .transcript()
         .await
         .map_err(AppError::internal)?
         .into_records();
-    let mut committed_message_ids = BTreeSet::new();
-    for row in &transcript {
-        if let Some(message) = chat_message_from_row(row).map_err(AppError::internal)? {
-            committed_message_ids.insert(message.id);
-        }
-    }
-    let committed_input_turn_ids = transcript
-        .iter()
-        .filter(|row| row.kind == lash::transcript::TranscriptRowKind::User)
-        .filter_map(|row| row.provenance.turn_id.clone())
-        .collect::<BTreeSet<_>>();
-    state.event_tx.reconcile_settled(
-        session_id,
-        &committed_message_ids,
-        &committed_input_turn_ids,
-        &active_turn_ids,
-    );
     let product_events = state.event_tx.snapshot(session_id);
-    let mut product_messages = product_chat_messages(state, session_id);
-    if let Some(active) = &active_turn
-        && let Some(input) = ui_input_message_from_active_turn(active)
-        && !product_messages.iter().any(|message| matches!(
-            &message.provenance,
-            Some(ChatMessageProvenance::TurnInput { turn_id }) if turn_id == active.address.turn_id
-        ))
-    {
-        product_messages.push(input);
-    }
-    let messages =
-        displayed_messages(&transcript, &product_messages).map_err(AppError::internal)?;
+    // Read after the product lane: a turn this reports as running has not
+    // settled yet, so its `done` is still in (or after) the lane snapshot.
+    let active_turn = state.active_turns.for_session(session_id);
     let unknown_turn_terminals = state.unknown_turn_terminals.for_session(session_id);
     let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
     let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
@@ -96,7 +78,6 @@ async fn read_state_snapshot(
         transcript,
         state: StateSnapshot {
             settings: state.settings_for_session(session_id.clone()),
-            messages,
             observation,
             product_events,
             // The page reads `active_turns` as a list and asks it for a
@@ -242,6 +223,7 @@ pub(crate) async fn commit_and_start_user_turn(
     cleanup: ActiveTurnSubmissionGuard,
     request: restate::UserTurnRequest,
     chat_attachments: Vec<ChatAttachment>,
+    client_nonce: Option<String>,
 ) -> Result<tokio::task::JoinHandle<restate::TurnSettlement>, AppError> {
     let active = state
         .active_turns
@@ -251,6 +233,7 @@ pub(crate) async fn commit_and_start_user_turn(
     let mut input = ui_input_message_from_active_turn(&active)
         .ok_or_else(|| AppError::conflict("the UI input claim has no prompt row"))?;
     input.attachments = chat_attachments;
+    input.client_nonce = client_nonce;
     state.push_prepared_message_for_session(&request.session_id, input);
     state.trace_for_session(
         &request.session_id,
@@ -270,6 +253,18 @@ pub(crate) async fn send_turn(
     let text = request.text.trim().to_string();
     if text.is_empty() {
         return Err(AppError::bad_request("message text is required"));
+    }
+    let client_nonce = request.client_nonce.clone();
+    if client_nonce.as_deref().is_some_and(|nonce| {
+        nonce.is_empty()
+            || nonce.len() > 64
+            || !nonce
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+    }) {
+        return Err(AppError::bad_request(
+            "client_nonce must be 1-64 ASCII letters, digits or '-'",
+        ));
     }
     let attachment_id = request
         .attachment_id
@@ -399,6 +394,7 @@ pub(crate) async fn send_turn(
                 attachment_id,
             },
             chat_attachments,
+            client_nonce,
         ))
         .await
         .map_err(|error| AppError::internal(format!("turn admission task failed: {error}")))??,

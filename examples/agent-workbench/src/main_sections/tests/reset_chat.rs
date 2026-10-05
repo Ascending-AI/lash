@@ -38,6 +38,7 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
             at: "2026-05-27T00:00:00Z".to_string(),
             attachments: Vec::new(),
             provenance: None,
+            client_nonce: None,
         }])),
         selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
@@ -122,7 +123,7 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
 
     assert_ne!(snapshot.settings.session_id, old_session_id);
     assert!(!state.event_tx.contains(&old_session_id));
-    assert!(snapshot.messages.is_empty());
+    assert!(snapshot.transcript.is_empty());
     assert!(state.messages_snapshot().is_empty());
     assert!(
         state.mail_world.account_summaries().is_empty(),
@@ -528,20 +529,17 @@ fn reset_response_carries_the_replacement_sessions_durable_transcript() {
                 "reset and GET must project the same state"
             );
 
-            // Exercise the page's actual renderer with the HTTP response,
+            // Exercise the page's actual timeline with the HTTP response,
             // including the iteration that threw on the missing transcript.
-            let renderer = ui::INDEX_HTML
-                .split("// BEGIN WORKBENCH_SETTLED_TRANSCRIPT")
-                .nth(1)
-                .unwrap()
-                .split("// END WORKBENCH_SETTLED_TRANSCRIPT")
-                .next()
-                .unwrap();
             let node =
                 std::env::var_os("LASH_WORKBENCH_TEST_NODE").unwrap_or_else(|| "node".into());
             let output = std::process::Command::new(node)
                 .arg("-e")
-                .arg(format!("{renderer}\nrenderStateTranscript({response});"))
+                .arg(format!(
+                    "{}\nconst host = {{ firstChild: null, insertBefore() {{}}, replaceChildren() {{}} }};\n\
+                     createWorkbenchTimeline({{ list: host, footer: host, empty: {{}} }}).applySnapshot({response});",
+                    ui::TIMELINE_JS
+                ))
                 .output()
                 .expect("Node.js is required for the reset renderer regression");
             assert!(

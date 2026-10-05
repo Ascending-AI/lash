@@ -278,21 +278,6 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     ))
     .await
     .expect("load state snapshot");
-    assert_eq!(
-        snapshot
-            .messages
-            .iter()
-            .filter(|message| {
-                matches!(
-                    &message.provenance,
-                    Some(ChatMessageProvenance::TurnInput { turn_id: owner }) if owner == turn_id
-                ) && message.role == "user"
-                    && message.text == "restored active prompt"
-            })
-            .count(),
-        1,
-        "typed turn provenance must restore exactly one UI-owned prompt row"
-    );
     assert_eq!(snapshot.pending_turn_inputs.len(), 3);
     assert_eq!(
         snapshot.pending_turn_inputs[0].input.input_id,
@@ -640,8 +625,8 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
         "the timeline receives the typed host disclosure alongside canonical rows"
     );
     assert!(
-        ui::INDEX_HTML.contains("for (const terminal of state.unknown_turn_terminals || [])")
-            && ui::INDEX_HTML.contains("renderNote(terminal.note)"),
+        ui::TIMELINE_JS.contains("for (const terminal of state.unknown_turn_terminals || [])")
+            && ui::TIMELINE_JS.contains("{ text: terminal.note }"),
         "the timeline must render the disclosed host note"
     );
 

@@ -1729,10 +1729,12 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     );
     assert_eq!(
         snapshot
-            .messages
+            .transcript
             .iter()
-            .filter(|message| {
-                message.role == "user" && message.text == "active injection marker"
+            .filter(|row| {
+                row.suppressed.is_none()
+                    && row.kind == lash::transcript::TranscriptRowKind::User
+                    && row.content.text == "active injection marker"
             })
             .count(),
         1,

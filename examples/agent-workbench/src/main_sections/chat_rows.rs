@@ -21,20 +21,8 @@ pub(crate) fn ui_input_message_from_active_turn(active: &ActiveTurn) -> Option<C
         provenance: Some(ChatMessageProvenance::TurnInput {
             turn_id: active.address.turn_id.clone(),
         }),
+        client_nonce: None,
     })
-}
-
-pub(crate) fn product_chat_messages(state: &AppState, session_id: &SessionId) -> Vec<ChatMessage> {
-    state
-        .event_tx
-        .snapshot(session_id)
-        .events
-        .iter()
-        .filter_map(|event| match &event.item {
-            StreamItem::Message { message } => Some(message.clone()),
-            _ => None,
-        })
-        .collect()
 }
 
 /// Style a canonical row without inspecting committed messages or protocol data.
@@ -73,65 +61,40 @@ pub(crate) fn chat_message_from_row(
                 }
             }
         }),
+        client_nonce: None,
     }))
 }
 
-/// The UI owns its input copy and correlates only on the row's typed provenance.
-pub(crate) fn displayed_messages(
-    rows: &[TranscriptRowRecord],
-    product: &[ChatMessage],
-) -> Result<Vec<ChatMessage>, serde_json::Error> {
-    let mut covered = BTreeSet::new();
-    let mut messages = Vec::new();
-    for row in rows {
-        let Some(canonical) = chat_message_from_row(row)? else {
-            continue;
-        };
-        if row.kind == TranscriptRowKind::User && let Some(turn_id) = &row.provenance.turn_id
-            && covered.insert(turn_id.clone()) && let Some(owned) = product.iter().find(|message| matches!(&message.provenance, Some(ChatMessageProvenance::TurnInput { turn_id: owner }) if owner == turn_id)) {
-            messages.push(owned.clone());
-            continue;
-        }
-        messages.push(canonical);
-    }
-    for message in product {
-        if message.role == "event" {
-            messages.push(message.clone());
-        }
-        if let Some(ChatMessageProvenance::TurnInput { turn_id }) = &message.provenance
-            && !covered.contains(turn_id)
-        {
-            messages.push(message.clone());
-        }
-    }
-    Ok(messages)
-}
-
-pub(crate) fn republish_committed_ingress_messages(
+/// Retire the product rows a settled turn no longer needs (its live reply
+/// and `done`, and mirrors of committed rows), once its claim is released.
+/// Settlement runs this, never a read: `/api/state` only reads.
+pub(crate) fn retire_settled_product_rows(
     state: &AppState,
-    session: &lash::LashSession,
-) -> Result<(), crate::AppError> {
-    let session_id = session.session_id();
-    let product = product_chat_messages(state, &session_id);
-    let mut covered = BTreeSet::new();
-    for row in session
-        .read_view()
-        .transcript()
-        .map_err(crate::AppError::internal)?
-        .visible()
-    {
-        if row.kind != TranscriptRowKind::User {
-            continue;
-        }
-        if let Some(turn_id) = &row.provenance.turn_id && covered.insert(turn_id.clone())
-            && product.iter().any(|message| matches!(&message.provenance, Some(ChatMessageProvenance::TurnInput { turn_id: owner }) if owner == turn_id)) { continue; }
-        if let Some(message) = chat_message_from_row(row).map_err(crate::AppError::internal)? {
-            state.publish_for_session_identified(
-                &session_id,
-                format!("message:{}", message.id),
-                StreamItem::Message { message },
-            );
+    session_id: &SessionId,
+    rows: &[TranscriptRowRecord],
+) -> Result<(), serde_json::Error> {
+    let mut committed_message_ids = BTreeSet::new();
+    for row in rows {
+        if let Some(message) = chat_message_from_row(row)? {
+            committed_message_ids.insert(message.id);
         }
     }
+    let committed_input_turn_ids = rows
+        .iter()
+        .filter(|row| row.kind == TranscriptRowKind::User)
+        .filter_map(|row| row.provenance.turn_id.clone())
+        .collect::<BTreeSet<_>>();
+    let active_turn_ids = state
+        .active_turns
+        .for_session(session_id)
+        .map(|active| active.address.turn_id)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    state.event_tx.reconcile_settled(
+        session_id,
+        &committed_message_ids,
+        &committed_input_turn_ids,
+        &active_turn_ids,
+    );
     Ok(())
 }

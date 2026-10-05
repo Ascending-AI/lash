@@ -614,24 +614,31 @@ impl AppState {
     /// Publish the one row a host trigger occurrence shows (FIG-5036).
     ///
     /// The occurrence id is the row's id, so a workflow replay republishes
-    /// the same row instead of adding a second one, and the processes the
-    /// occurrence started let the page fold the turn they wake into it.
+    /// the same row instead of adding a second one. The row is stamped `at`
+    /// the moment the occurrence happened (a button's press), not when the
+    /// workflow got round to publishing it, so the page places it where it
+    /// happened.
     pub(crate) fn push_trigger_occurrence_for_session(
         &self,
         session_id: &SessionId,
         label: impl Into<String>,
         report: &lash::triggers::TriggerEmitReport,
+        at: impl Into<String>,
     ) -> ChatMessage {
-        self.push_message_with_id_and_attachments_and_provenance_for_session(
+        self.push_prepared_message_for_session(
             session_id,
-            report.occurrence_id.clone(),
-            "event",
-            label,
-            Vec::new(),
-            Some(ChatMessageProvenance::TriggerOccurrence {
-                occurrence_id: report.occurrence_id.clone(),
-                process_ids: report.started_process_ids(),
-            }),
+            ChatMessage {
+                id: report.occurrence_id.clone(),
+                role: "event".into(),
+                text: label.into(),
+                at: at.into(),
+                attachments: Vec::new(),
+                provenance: Some(ChatMessageProvenance::TriggerOccurrence {
+                    occurrence_id: report.occurrence_id.clone(),
+                    process_ids: report.started_process_ids(),
+                }),
+                client_nonce: None,
+            },
         )
     }
 
@@ -651,6 +658,7 @@ impl AppState {
             at: Utc::now().to_rfc3339(),
             attachments,
             provenance,
+            client_nonce: None,
         };
         self.push_prepared_message_for_session(session_id, message)
     }

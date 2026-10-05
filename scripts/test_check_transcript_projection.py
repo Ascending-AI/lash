@@ -46,6 +46,10 @@ row_kinds = {kinds!r}
         self.write("examples/another/assets/index.html", "node.dataset.transcriptRowId = row.row_id;")
         self.assertIn("unregistered rendered surface", self.errors())
 
+    def test_a_script_asset_that_renders_rows_is_a_rendered_surface(self):
+        self.write("examples/another/assets/timeline.js", "node.dataset.transcriptRowId = row.row_id;")
+        self.assertIn("unregistered rendered surface", self.errors())
+
     def test_a_registered_surface_must_be_in_the_shared_harness(self):
         self.write("examples/agent-workbench/tests/transcript_projection_harness.mjs", "export const SURFACES = [];\n")
         self.assertIn("registry and shared harness surfaces differ", self.errors())

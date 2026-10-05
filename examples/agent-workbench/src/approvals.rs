@@ -28,6 +28,9 @@ pub(crate) struct WorkbenchApprovals {
 pub(crate) struct PendingApproval {
     pub key: String,
     pub tool: String,
+    /// The tool call that waits on this approval, so the page anchors the
+    /// card to that call rather than to whatever row shares its name.
+    pub call_id: Option<String>,
     pub arguments: Value,
     pub requesting_session: String,
     pub requested_at_ms: i64,
@@ -160,7 +163,8 @@ impl WorkbenchApprovals {
             .lock()
             .map_err(|_| ApprovalError::Poisoned)?;
         let mut statement = connection.prepare(
-            "SELECT key_id, tool_name, arguments_json, session_id, requested_at_ms
+            "SELECT key_id, tool_name, arguments_json, session_id, requested_at_ms,
+                    completion_key_json
              FROM approval_waits
              WHERE decision IS NULL
              ORDER BY requested_at_ms, key_id",
@@ -168,16 +172,28 @@ impl WorkbenchApprovals {
         let rows = statement.query_map([], |row| {
             let requested_at_ms: i64 = row.get(4)?;
             let arguments_json: String = row.get(2)?;
+            let completion_key_json: String = row.get(5)?;
+            let corrupt = |len: usize, error: serde_json::Error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    len,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            };
+            let completion_key: lash::AwaitEventKey = serde_json::from_str(&completion_key_json)
+                .map_err(|error| corrupt(completion_key_json.len(), error))?;
+            let call_id = match completion_key.wait {
+                lash::AwaitEventWaitIdentity::ToolCompletion { tool_call_id } => {
+                    Some(tool_call_id.to_string())
+                }
+                _ => None,
+            };
             Ok(PendingApproval {
                 key: row.get(0)?,
                 tool: row.get(1)?,
-                arguments: serde_json::from_str(&arguments_json).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        arguments_json.len(),
-                        rusqlite::types::Type::Text,
-                        Box::new(error),
-                    )
-                })?,
+                call_id,
+                arguments: serde_json::from_str(&arguments_json)
+                    .map_err(|error| corrupt(arguments_json.len(), error))?,
                 requesting_session: row.get(3)?,
                 requested_at_ms,
                 age_ms: now_ms.saturating_sub(requested_at_ms),

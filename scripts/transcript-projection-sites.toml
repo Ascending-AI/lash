@@ -2,7 +2,7 @@ row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", 
 
 [[surfaces]]
 name = "workbench"
-asset = "examples/agent-workbench/assets/index.html"
+asset = "examples/agent-workbench/assets/timeline.js"
 sources = ["examples/agent-workbench/src/main_sections/active_turns.rs", "examples/agent-workbench/src/main_sections/chat_rows.rs", "examples/agent-workbench/src/main_sections/app_state.rs", "examples/agent-workbench/src/main_sections/state.rs", "examples/agent-workbench/src/restate.rs"]
 begin = "// BEGIN WORKBENCH_SETTLED_TRANSCRIPT"
 end = "// END WORKBENCH_SETTLED_TRANSCRIPT"

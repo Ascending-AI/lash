@@ -718,6 +718,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         let observation_stream_shutdown = host_shutdown.clone();
         let app = Router::new()
         .route("/", get(index))
+        .route("/assets/timeline.js", get(timeline_script))
         .route("/healthz", get(healthz))
         .route("/api/state", get(app_state))
         .route("/api/sessions/{session_id}/waits", get(list_session_waits))

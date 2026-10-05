@@ -47,6 +47,15 @@ class Journey:
     def state(self):
         return self.api("/api/state?" + urllib.parse.urlencode({"session_id": self.session}))
 
+    CHAT_ROLES = {"user": "user", "assistant_reply": "assistant", "event": "event", "tool_call": "event"}
+
+    def messages(self):
+        """The committed transcript rows the page shows as chat messages."""
+        return [{"role": self.CHAT_ROLES[row["kind"]], "text": row["content"]["text"],
+                 "provenance": {"turn_id": row["provenance"]["turn_id"],
+                                "kind": "turn_output" if row["provenance"]["is_turn_reply"] else "turn_input"}}
+                for row in self.state()["transcript"] if not row["suppressed"] and row["kind"] in self.CHAT_ROLES]
+
     def controller(self, request):
         print("H6_CONTROL " + json.dumps(request), flush=True)
         receipt = json.loads(sys.stdin.readline())
@@ -95,7 +104,7 @@ class Journey:
             # actual canonical reply, using the API projection rather than a
             # fixture-authored answer as the browser's completion signal.
             def rendered():
-                expected = [{"role": m["role"], "text": m["text"]} for m in self.state()["messages"]
+                expected = [{"role": m["role"], "text": m["text"]} for m in self.messages()
                             if m["role"] in ("user", "assistant")]
                 return len(expected) == 2 * (before + 1) and all(self.dom(page) == expected for page in self.pages)
             self.poll(rendered)
@@ -111,7 +120,7 @@ class Journey:
         return [row for row in store["runtime_turn_commits"] if json.loads(row["turn_id"])["key"] == "final"]
 
     def attributed_pair(self, turn):
-        messages = [message for message in self.state()["messages"]
+        messages = [message for message in self.messages()
                     if message.get("provenance", {}).get("turn_id") == turn]
         return sorted((message["role"], message["provenance"]["kind"]) for message in messages) == [
             ("assistant", "turn_output"), ("user", "turn_input")]
@@ -220,7 +229,7 @@ class Journey:
                     expect(page.locator("#sessionId")).to_have_text(self.session, timeout=30000)
                     self.pages.append(page)
                 before = self.state()
-                assert not before["messages"] and not self.turns(), before
+                assert not [row for row in before["transcript"] if not row["suppressed"]] and not self.turns(), before
                 peers = {peer["name"]: peer for peer in self.api("/api/mcp/servers")["servers"]}
                 assert peers["workspace_stdio"]["connected"] is True, peers
                 assert peers["parallel"]["connected"] is False, peers
@@ -233,7 +242,7 @@ class Journey:
                     and self.dom(self.pages[0]) == self.dom(self.pages[1]))
                 store = self.store()
                 self.gate("depth", "api/store", "one accepted input and one attributed answer persist",
-                    len(self.state()["messages"]) == 2 and len(self.final_commits(store)) == 1
+                    len(self.messages()) == 2 and len(self.final_commits(store)) == 1
                     and len(store["pending_turn_inputs"]) == 1 and depth["turn_id"] in json.dumps(store)
                     and self.attributed_pair(depth["turn_id"]))
                 # Presentation material is committed under its canonical Run owner;
@@ -284,7 +293,7 @@ class Journey:
                     len(interrupted_results) == 1 and self.receipt_tool_name(interrupted_results[0]) == BADGE_TOOL and typed)
                 self.detach()
                 self.capture("restart")
-                before = len(self.state()["messages"])
+                before = len(self.messages())
                 attached = self.attach()
                 badge = self.send("MCP-ATTACH")
                 results = self.tool_receipts_for_turn(badge["turn_id"], terminal=True)
@@ -295,7 +304,7 @@ class Journey:
                     all(len(self.dom(p)) == before + 4 and "workspace badge came back" in json.dumps(self.dom(p)) for p in self.pages))
                 store = self.store()
                 self.gate("attach", "api/store", "both requests and attributed answers persist once",
-                    len(self.state()["messages"]) == before + 4 and len(self.final_commits(store)) == 4
+                    len(self.messages()) == before + 4 and len(self.final_commits(store)) == 4
                     and len(store["pending_turn_inputs"]) == 4
                     and all(self.attributed_pair(turn["turn_id"]) for turn in (badge, detached_turn)))
                 refs = [v["source"] for r in results for v in r["output"].get("view", {}).get("blocks", [])
@@ -341,7 +350,7 @@ class Journey:
                     expect(page.locator(MESSAGE_ROWS)).to_have_count(8, timeout=30000)
                 self.gate("reload", "dom/api/store/trace", "session survives reload after peer restart with no duplicate result delivery",
                     [self.dom(page) for page in self.pages] == before_reload and before_reload[0] == before_reload[1]
-                    and len(self.state()["messages"]) == 8 and len(self.turns()) == 4
+                    and len(self.messages()) == 8 and len(self.turns()) == 4
                     and len(self.tool_receipts_for_turn(badge["turn_id"], terminal=True)) == 1)
                 self.capture("reload")
                 self.save("scorecard.json", {"scenario": "S28", "selected": 1, "executed": 1,

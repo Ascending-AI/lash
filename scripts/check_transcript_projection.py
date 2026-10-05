@@ -129,7 +129,7 @@ def check(root: Path) -> list[str]:
         errors.append("render registry and shared harness surfaces differ")
     assets = {surface["asset"] for surface in registry["surfaces"]}
     for path in sorted((root / "examples").rglob("*")):
-        if path.is_file() and (path.suffix == ".html" or path.name == "ui.rs"):
+        if path.is_file() and (path.suffix in {".html", ".js"} or path.name == "ui.rs"):
             if "transcriptRowId" in path.read_text() and path.relative_to(root).as_posix() not in assets:
                 errors.append(f"unregistered rendered surface: {path.relative_to(root)}")
     for surface in registry["surfaces"]:

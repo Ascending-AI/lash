@@ -209,7 +209,7 @@ def browser(args):
     initial = initial_state(args.base_url, time.monotonic() + args.remaining_case_seconds)
     session = initial["settings"]["session_id"]
     cursor = initial["observation"]["cursor"]
-    assert not initial["active_turns"] and not initial["messages"], "session must be fresh"
+    assert not initial["active_turns"] and not [row for row in initial["transcript"] if not row["suppressed"]], "session must be fresh"
 
     with sync_playwright() as playwright:
         chrome = playwright.chromium.launch()

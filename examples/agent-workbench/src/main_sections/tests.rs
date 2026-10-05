@@ -136,14 +136,10 @@ pub(crate) use recoverable_chat_tests::{
     recoverable_chat_test_state, recoverable_chat_test_state_with_dependencies,
     recoverable_chat_test_state_with_dependencies_and_context,
     recoverable_chat_test_state_with_provider, recoverable_chat_test_state_with_trigger_store,
-    user_rows,
+    shown_replies, transcript_message,
 };
 #[cfg(test)]
-#[path = "tests/chat_projection_boundaries.rs"]
-mod chat_projection_boundaries_tests;
 #[cfg(test)]
-#[path = "tests/live_stream_user_rows.rs"]
-mod live_stream_user_rows_tests;
 #[cfg(test)]
 #[path = "tests/recoverable_chat_bare_prose.rs"]
 mod recoverable_chat_bare_prose_tests;
@@ -1300,6 +1296,7 @@ fn a_button_press_is_one_row_published_by_its_workflow() {
                 &state.current_session_id(),
                 "red pressed",
                 &report,
+                "2026-06-02T12:00:00Z",
             );
         }
         let rows = state
@@ -1309,6 +1306,10 @@ fn a_button_press_is_one_row_published_by_its_workflow() {
             .collect::<Vec<_>>();
         assert_eq!(rows.len(), 1, "one occurrence is one row: {rows:?}");
         assert_eq!(rows[0].text, "red pressed");
+        assert_eq!(
+            rows[0].at, "2026-06-02T12:00:00Z",
+            "the row is stamped when the press happened, not when it was published"
+        );
         assert!(matches!(
             &rows[0].provenance,
             Some(ChatMessageProvenance::TriggerOccurrence { occurrence_id, process_ids })
@@ -2245,7 +2246,7 @@ mod concurrent_send_tests;
 #[cfg(test)]
 #[path = "tests/tool_control.rs"]
 mod tool_control_tests;
-pub(crate) use concurrent_send_tests::{product_user_rows, queued_send_test_state};
+pub(crate) use concurrent_send_tests::queued_send_test_state;
 #[cfg(test)]
 #[path = "tests/no_progress_budget.rs"]
 mod no_progress_budget_tests;
@@ -2275,9 +2276,10 @@ let missingModel = false, validations = 0, focuses = 0;
 const context = vm.createContext({
   promptInput: {value: ''}, selectedAttachment: {id: 'image'}, lastUserText: '',
   modelEmpty: () => missingModel,
-  validateModel: () => validations++, modelInput: {focus: () => focuses++},
+  validateModel: () => validations++, openModelMenu: () => focuses++,
   selectedModelPayload: () => ({model: 'selected-model'}),
-  postCommand: async (url, payload) => {sends.push({url, payload}); return {accepted: true};},
+  sendInFlight: false,
+  sendTurn: async payload => {sends.push({url: '/api/turn', payload}); return {accepted: true};},
   clearAttachment: () => {context.selectedAttachment = null;}, loadSessions: () => {},
 });
 vm.runInContext('async function submit(event) {' + submit + '\n}', context);

@@ -94,6 +94,17 @@ finish(result);
         assert_eq!(approval.tool, approvals::APPROVAL_TOOL_NAME);
         assert_eq!(approval.requesting_session, "approval-approve");
         assert_eq!(key.key_id, approval.key);
+        // The page anchors the approval card to the tool call it waits on by
+        // this id, never by the tool's display name.
+        assert!(
+            matches!(
+                &key.wait,
+                lash::AwaitEventWaitIdentity::ToolCompletion { tool_call_id }
+                    if approval.call_id.as_deref() == Some(tool_call_id.to_string().as_str())
+            ),
+            "a pending approval names the tool call it waits on: {:?}",
+            approval.call_id
+        );
         let discovered = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 let waits = core
