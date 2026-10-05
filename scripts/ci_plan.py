@@ -575,7 +575,6 @@ CI_GLOBAL_PATHS = frozenset({CI_WORKFLOW})
 # `test_ci_plan.py` fails when an entry gains a consumer or is removed.
 UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     ".github/actionlint.yaml": "actionlint finds it by name in `lint`, which runs on every event",
-    ".github/dependabot.yml": "GitHub's Dependabot reads it; no CI job does",
     "scripts/restate-sdk-acceptance.py": "run by hand as documented in crates/lash-restate/SDK_ACCEPTANCE.md for the locked SDK acceptance receipt",
     "scripts/ci_ensure_run.sh": "run by hand to recover a CI run GitHub dropped",
     "scripts/perf_baseline.py": "run by hand to compare two lash-perf ledgers",
