@@ -483,6 +483,8 @@ jobs:
           # The feature checker requires this literal witness. Discovery
           # also finds it; the runner executes each command only once.
           python3 scripts/test_check_feature_coverage.py
+          # Pin CI planning beside the discovered repository self-tests.
+          python3 scripts/test_ci_plan.py
           python3 scripts/check_conformance_mounts.py
           python3 scripts/check_retired_terms.py
           python3 scripts/check_outcome_suffixes.py

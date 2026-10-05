@@ -2812,54 +2812,25 @@ class WorkbenchClosureContractTests(unittest.TestCase):
     """
 
     def cargo_workbench_closure(self) -> set[str]:
-        """The closure read off Cargo's own resolution.
+        """Cargo's package-scoped build tree, including the owner's dev edges.
 
-        This walks `resolve`, not the raw manifest dependency lists, because
-        an optional dependency is only compiled when a feature enables it and
-        the resolve graph is where Cargo records that decision.
+        Workspace metadata unifies features requested by unrelated members,
+        so it includes optional stores the workbench never requests. Cargo
+        tree resolves the selected package's features and visits dev edges
+        only for that package, matching the partition's selection contract.
         """
-
-        metadata = json.loads(
-            subprocess.run(
-                ["cargo", "metadata", "--format-version", "1", "--locked"],
-                cwd=ROOT, text=True, capture_output=True, check=True,
-            ).stdout
-        )
-        workspace_root = Path(metadata["workspace_root"])
-
-        def relative(path: str) -> str:
-            return Path(path).relative_to(workspace_root).as_posix()
-
-        directory = {
-            package["id"]: relative(str(Path(package["manifest_path"]).parent))
-            for package in metadata["packages"]
-            if package.get("source") is None
+        tree = subprocess.run(
+            ["cargo", "tree", "--locked", "-p", "agent-workbench",
+             "--edges", "normal,build,dev", "--prefix", "none", "--format", "{p}"],
+            cwd=ROOT, text=True, capture_output=True, check=True,
+        ).stdout
+        return {
+            Path(path).relative_to(ROOT).as_posix()
+            for path in re.findall(r"\((/[^)]+)\)", tree)
+            if Path(path).is_relative_to(ROOT)
         }
-        first_party = set(directory)
-        nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
-        root = next(
-            identifier
-            for identifier, path in directory.items()
-            if path == ci_plan.WORKBENCH_MANIFEST_DIR
-        )
 
-        closure: set[str] = set()
-        pending = [(root, True)]
-        while pending:
-            identifier, include_dev = pending.pop()
-            if directory[identifier] in closure:
-                continue
-            closure.add(directory[identifier])
-            for dependency in nodes[identifier]["deps"]:
-                if dependency["pkg"] not in first_party:
-                    continue
-                kinds = {kind.get("kind") for kind in dependency.get("dep_kinds", [])}
-                if kinds == {"dev"} and not include_dev:
-                    continue
-                pending.append((dependency["pkg"], False))
-        return closure
-
-    def test_the_plan_closure_matches_cargo_metadata(self) -> None:
+    def test_the_plan_closure_matches_cargos_package_tree(self) -> None:
         if shutil.which("cargo") is None:
             if os.environ.get("CI") == "true":
                 self.fail("CI must run this contract with a Rust toolchain on PATH")

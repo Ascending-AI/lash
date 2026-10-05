@@ -185,7 +185,7 @@ def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
     change reaches its transitive dependency closure or its dev-dependencies.
     The closure is read out of the workspace manifests rather
     than kept as a hand list: `scripts/test_ci_plan.py` cross-checks it against
-    `cargo metadata` so the two can never drift apart.
+    `cargo tree -p agent-workbench` so the two cannot drift apart.
 
     The walk is feature-aware, because Cargo's is: an optional dependency is
     compiled only when the feature set the workbench actually requests enables
@@ -526,7 +526,6 @@ RUST_RUNTIME_DOC_INPUTS = frozenset(
     {
         "crates/lash/docs/instrumentation-contract.md",
         "docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md",
-        "crates/lashlang/docs/ir-specification.md",
     }
 )
 
@@ -577,6 +576,7 @@ CI_GLOBAL_PATHS = frozenset({CI_WORKFLOW})
 UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     ".github/actionlint.yaml": "actionlint finds it by name in `lint`, which runs on every event",
     ".github/dependabot.yml": "GitHub's Dependabot reads it; no CI job does",
+    "scripts/restate-sdk-acceptance.py": "run by hand as documented in crates/lash-restate/SDK_ACCEPTANCE.md for the locked SDK acceptance receipt",
     "scripts/ci_ensure_run.sh": "run by hand to recover a CI run GitHub dropped",
     "scripts/perf_baseline.py": "run by hand to compare two lash-perf ledgers",
     "scripts/test-mcp-catalog.sh": "run by hand through kiln gate to repeat the MCP catalog turn-path and native Restate witnesses",
