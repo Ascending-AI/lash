@@ -445,7 +445,7 @@ async fn hold_declared_execution_environments(
                 .filter(|intent| match intent {
                     crate::ToolIntent::RegisterTrigger(registration) => {
                         super::intent_executor::validate_trigger_registration_authority(
-                            &super::intent_executor::IntentRealizationContext::from(context),
+                            &context.intent_realization_context(),
                             registration,
                         )
                         .is_none()

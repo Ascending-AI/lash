@@ -8,7 +8,7 @@ async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_prot
     let context = dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await;
     for recorded in [0, 1, 2, 4] {
         let outcomes = execute_final_tool_intents(
-            &context,
+            &context.intent_realization_context(),
             &crate::ToolCallId::fixture("empty-version-call"),
             &crate::ToolIntents {
                 protocol_version: recorded,

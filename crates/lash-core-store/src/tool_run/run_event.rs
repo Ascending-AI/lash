@@ -342,11 +342,12 @@ pub enum RunEvent {
         call_id: ToolCallId,
         key: RealizationKey,
     },
-    /// The realization's receipt, selected by the Run's schedule.
+    /// The durable invocation admitted by the realization send.
     RealizationIssued {
         call_id: ToolCallId,
         invocation_id: String,
     },
+    /// The realization's receipt, selected by the Run's schedule.
     Realized {
         call_id: ToolCallId,
         receipt: MaterialRef,

@@ -18,9 +18,11 @@ pub struct IntentRealizationContext<'run> {
     pub process_originator: Option<crate::ProcessOriginator>,
 }
 
-impl<'run> From<&ToolDispatchContext<'run>> for IntentRealizationContext<'run> {
-    fn from(context: &ToolDispatchContext<'run>) -> Self {
-        Self {
+impl<'run> ToolDispatchContext<'run> {
+    /// The admitted owner and services an intent batch executes under.
+    pub fn intent_realization_context(&self) -> IntentRealizationContext<'run> {
+        let context = self;
+        IntentRealizationContext {
             effect_controller: context.effect_controller.clone(),
             owner: context.owner.clone(),
             processes: Arc::clone(&context.processes),

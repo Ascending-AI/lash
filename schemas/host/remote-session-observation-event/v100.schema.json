@@ -3539,6 +3539,11 @@
           "const": "presentation",
           "description": "Presentation bytes distinct from the output (V).",
           "type": "string"
+        },
+        {
+          "const": "realization_receipt",
+          "description": "A final's intent-realization receipt, owned by the Run's schedule\nrecord that selected it (ADR 0130).",
+          "type": "string"
         }
       ]
     },
@@ -11240,6 +11245,40 @@
             "refusal",
             "call_id",
             "start_key"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "realization_order",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "realization_owed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
           ],
           "type": "object"
         },

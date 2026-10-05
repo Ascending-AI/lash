@@ -289,12 +289,9 @@ fn host_invocation_id(server: &lash_restate_test::RestateTestServer) -> String {
         .expect("the test handler invocation exists")
 }
 
-/// FIG-4987 (a): rank 1's realization issues one journaled command and a
-/// higher-ranked call's decision lands after it; the invocation crashes
-/// while that command is still unresolved — a later schedule command is
-/// already journaled past it, so the replayed program must reach a position
-/// it cannot get to. Today the shared core faults the replay; the external
-/// mutation must never run twice.
+/// L18: a held command in the realization journal does not block a higher
+/// decision in the Run journal. Crashing the Run at that boundary replays
+/// without meeting the held command, and the mutation remains exactly once.
 #[tokio::test]
 async fn l18_a_realization_command_in_flight_at_a_crash_replays_after_a_higher_decision() {
     const NESTED: &str = "fig4987a:external-intent";
@@ -434,11 +431,9 @@ async fn l18_a_realization_command_in_flight_at_a_crash_replays_after_a_higher_d
     assert!(drain_violations(finished.last().unwrap(), &BTreeSet::new(), None).is_empty());
 }
 
-/// FIG-4987 (b): rank 1's realization issues two journaled commands, and a
-/// higher call's X wins the schedule window between them. On a full replay
-/// the realization's second command races the recorded schedule position:
-/// the program order and the journal disagree, or the unresolved command
-/// faults the replay first.
+/// L18: realization commands span two windows while higher decisions keep
+/// progressing. A lost Run output replays the receipt without repeating either
+/// mutation or interleaving either command into the Run's journal.
 #[tokio::test]
 async fn l18_a_realization_spanning_two_windows_replays() {
     const FIRST: &str = "fig4987b:intent-one";

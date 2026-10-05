@@ -233,7 +233,13 @@ impl Driven {
     /// order.
     fn journal(&self) -> Vec<String> {
         let mut names = Vec::new();
-        for view in self.backend.server().invocations() {
+        for view in self
+            .backend
+            .server()
+            .invocations()
+            .into_iter()
+            .filter(|view| view.target.starts_with("LashTestHandlerHost/"))
+        {
             for entry in self.backend.server().journal(&view.id).unwrap() {
                 if entry.ty == MessageType::RunCommand {
                     names.push(entry.name.unwrap_or_default());
@@ -749,15 +755,15 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
             schedule(7),
             UNRELATED.to_owned(),
             name(&ids[0], "declare"),
-            // Every V is the schedule record selected through
-            // progress_with_presentation, named by its first event's
-            // ordinal: a declaring rank's V carries DeclarationsSettled
-            // before its presentation events, so each V's ordinal follows
-            // the records admitted before it.
-            schedule(10),
-            schedule(14),
+            name(&ids[0], "realization:issued"),
+            // Each child receipt is accepted before V settles its declarations.
+            schedule(12),
+            schedule(13),
+            schedule(17),
             name(&ids[2], "declare"),
-            schedule(18),
+            name(&ids[2], "realization:issued"),
+            schedule(23),
+            schedule(24),
         ];
         if cancel_after_rank_3 {
             program.push(Step::Cancel);
@@ -768,8 +774,8 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
             steps.extend([
                 name(&ids[3], "admit"),
                 name(&ids[3], "attempt:1"),
-                schedule(23),
-                schedule(25),
+                schedule(29),
+                schedule(31),
             ]);
         }
         let program = Arc::new(program);

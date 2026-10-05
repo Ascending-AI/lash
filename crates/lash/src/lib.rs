@@ -1396,13 +1396,13 @@ pub mod runtime {
     /// terminal closing with tool execution. Timers need no tool registry.
     pub use lash_core::tool_dispatch::{
         BeforeCheckReply, DecidedCall, DeclaredStartObligation, DeclaredStartObligationRefusal,
-        IsolatedProcessDescriptor, IsolatedStartRefusal, IsolatedToolStart, IssuedRealization,
-        RealizationDispatch, RealizationPayload, RealizationReceipt, RealizationRequest,
-        RecordedIsolatedStart, RunAggregateOutcome, RunBodies, RunCoordinator, RunCutRefusal,
-        RunSelectKey, RunSelectValue, RunSelectable, SelectKey, SingletonAttempt,
-        SingletonBodyOutcome, SingletonCapture, SingletonDrift, SingletonPreparedRequest,
-        SingletonPresentationError, SingletonRunError, SingletonStart, SingletonTerminal,
-        SingletonToolCall, SingletonToolHandlers, ToolRealizer,
+        IntentRealizationContext, IsolatedProcessDescriptor, IsolatedStartRefusal,
+        IsolatedToolStart, IssuedRealization, RealizationDispatch, RealizationPayload,
+        RealizationReceipt, RealizationRequest, RecordedIsolatedStart, RunAggregateOutcome,
+        RunBodies, RunCoordinator, RunCutRefusal, RunSelectKey, RunSelectValue, RunSelectable,
+        SelectKey, SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
+        SingletonPreparedRequest, SingletonPresentationError, SingletonRunError, SingletonStart,
+        SingletonTerminal, SingletonToolCall, SingletonToolHandlers, ToolRealizer,
     };
     pub use lash_core::tool_run::{
         AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AggregateConsumer, AggregateLeaf,

@@ -65,9 +65,16 @@ impl LashToolRealization for LashToolRealizationImpl {
             .await
             .map(|receipt| Reply::at(wire, receipt))
             .map_err(|error| {
-                crate::process::handler_error_from_plugin(
-                    lash_core::PluginError::RuntimeEffectController(error),
-                )
+                let error = lash_core::PluginError::RuntimeEffectController(error);
+                match error.class() {
+                    lash_core::PluginErrorClass::Terminal => {
+                        crate::process::handler_error_from_plugin(error)
+                    }
+                    lash_core::PluginErrorClass::Retryable
+                    | lash_core::PluginErrorClass::Redrivable => {
+                        crate::turn_handler::retried_attempt_failure(error.attempt_failure_text())
+                    }
+                }
             })
     }
 }

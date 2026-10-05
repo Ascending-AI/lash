@@ -87,7 +87,8 @@ cancellation of the Run invocation does not propagate to it.
 An admitted realization is independently owned work. The Run records
 `RealizationIssued { call_id, invocation_id }` after the idempotent send.
 A physical cut waits for local X acknowledgements and transfers that record
-alongside the rest of the Run. It does not wait for an independent realization.
+and its `RealizationKey` alongside the rest of the Run (ruling #55). The
+predecessor detaches its invocation-local selectable. It does not wait for an independent realization.
 The successor attaches to exactly that invocation id, selects its receipt once,
 and records `Realized` before V. It never sends another request or executes the
 realization body. If the predecessor already selected the receipt, its material

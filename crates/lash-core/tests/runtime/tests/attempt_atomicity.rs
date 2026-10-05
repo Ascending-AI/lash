@@ -857,7 +857,7 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
             }),
         ]);
         let outcomes = lash_core::tool_dispatch::execute_final_tool_intents(
-            &dispatch,
+            &dispatch.intent_realization_context(),
             &lash_core::ToolCallId::fixture(CALL_ID),
             &intents,
             None,
@@ -933,7 +933,7 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
                 .collect(),
         );
         let outcomes = lash_core::tool_dispatch::execute_final_tool_intents(
-            &dispatch,
+            &dispatch.intent_realization_context(),
             &lash_core::ToolCallId::fixture(CALL_ID),
             &intents,
             None,
@@ -1112,7 +1112,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
         )]);
 
         let first = lash_core::tool_dispatch::execute_final_tool_intents(
-            &dispatch,
+            &dispatch.intent_realization_context(),
             &lash_core::ToolCallId::fixture(CALL_ID),
             &intents,
             None,
@@ -1148,7 +1148,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
             .expect("mutate live target to terminal");
 
         let redriven = lash_core::tool_dispatch::execute_final_tool_intents(
-            &dispatch,
+            &dispatch.intent_realization_context(),
             &lash_core::ToolCallId::fixture(CALL_ID),
             &intents,
             None,
