@@ -1,7 +1,7 @@
 //! S22/L20: parked Runs redrive and cancel through their owner's own park,
 //! on real hosts, with no group catalog, RunChild or ProcessAttach route.
 use lash_upgrade_harness::e2e::{
-    case::{ArtifactIdentity, CaseSpec, Channel, StoreKind},
+    case::{ArtifactIdentity, CaseSpec, Channel, Leg, Permutation, StoreKind},
     host::HostKind,
     provider::ProviderKind,
 };
@@ -96,14 +96,25 @@ fn terminal(
 #[test]
 #[ignore = "needs exact candidate/synthetic-next binaries and private live Restate"]
 fn s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes() -> anyhow::Result<()> {
+    s22(Permutation::provisioned(StoreKind::SqliteFile, Leg::Live)?)
+}
+
+/// S22 with N and N+1 serving over the case's own PostgreSQL database.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries, private live Restate and PostgreSQL"]
+fn s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_postgresql()
+-> anyhow::Result<()> {
+    s22(Permutation::provisioned(StoreKind::PostgreSql, Leg::Live)?)
+}
+
+pub fn s22(permutation: Permutation) -> anyhow::Result<()> {
     use anyhow::{Context, ensure};
     use lash_upgrade_harness::harness::block_on;
     use lash_upgrade_harness::identity::BuildLabel;
     use lash_upgrade_harness::node::h3::{H3Command, SourceSubscribeReply, live::SourceOp};
     use lash_upgrade_harness::node::served_by;
     use serde_json::json;
-    let mut live =
-        crate::h3_live::Live::setup("s22", |artifacts| spec(StoreKind::SqliteFile, artifacts))?;
+    let mut live = crate::h3_live::Live::setup("s22", permutation, spec)?;
     let (n, next) = (live.builds.n.clone(), live.builds.next.clone());
     let view = live.case.view()?;
 

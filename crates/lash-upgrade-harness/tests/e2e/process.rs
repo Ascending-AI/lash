@@ -477,6 +477,19 @@ fn reply<T: serde::de::DeserializeOwned>(answer: serde_json::Value) -> Result<T>
 #[test]
 #[ignore = "needs exact candidate/synthetic-next binaries and private live Restate"]
 fn s21_source_seal_stays_immutable_on_the_upgrade_node() -> Result<()> {
+    use lash_upgrade_harness::e2e::case::{Leg, Permutation, StoreKind};
+    s21(Permutation::provisioned(StoreKind::SqliteFile, Leg::Live)?)
+}
+
+/// S21 with the upgrade node serving over the case's own PostgreSQL database.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries, private live Restate and PostgreSQL"]
+fn s21_source_seal_stays_immutable_on_the_upgrade_node_postgresql() -> Result<()> {
+    use lash_upgrade_harness::e2e::case::{Leg, Permutation, StoreKind};
+    s21(Permutation::provisioned(StoreKind::PostgreSql, Leg::Live)?)
+}
+
+pub fn s21(permutation: lash_upgrade_harness::e2e::case::Permutation) -> Result<()> {
     use lash_core::tool_run::{
         SealOutcome, SealRefusal, SealWriter, SegmentOrdinal, SourceRefusal, SourceSeal,
     };
@@ -486,12 +499,7 @@ fn s21_source_seal_stays_immutable_on_the_upgrade_node() -> Result<()> {
         H3Command, SourceArmReply, SourceSealReply, SourceSubscribeReply,
     };
     use serde_json::json;
-    let mut live = crate::h3_live::Live::setup("s21", |artifacts| {
-        s21_spec(
-            lash_upgrade_harness::e2e::case::StoreKind::SqliteFile,
-            artifacts,
-        )
-    })?;
+    let mut live = crate::h3_live::Live::setup("s21", permutation, s21_spec)?;
     let n = live.builds.n.clone();
     let n_host = live.serve(&n, "candidate")?;
     let opener = |session: &str, operation: &str| {
@@ -785,14 +793,9 @@ fn s21_source_seal_stays_immutable_on_the_upgrade_node() -> Result<()> {
     // Operation Runs end CommandsApplied; cancellation is the task's
     // command outcome in the same durable settling commit (ADR 0101).
     let completion = block_on(async {
-        use lash_core::store::QueuedWorkStore as _;
-        let directory = live
-            .case
-            .sqlite_dir()
-            .ok_or_else(|| anyhow::anyhow!("S21 requires its SQLite store"))?;
-        let stores = lash::sqlite::SqliteStoreSet::open(directory).await?;
-        let store = stores.open_store().await?;
-        store
+        live.stores()
+            .await?
+            .session_store_factory()
             .queued_work_batch_completion(&lash::SessionId::fixture(session.clone()), &operation)
             .await?
             .ok_or_else(|| anyhow::anyhow!("cancelled operation has no command settlement"))

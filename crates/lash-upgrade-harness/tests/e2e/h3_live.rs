@@ -1,10 +1,11 @@
 //! Live upgrade-node plumbing shared by H3's S13/S21/S22 cases: the leased
-//! file-SQLite case, the separately materialized candidate/synthetic-next
+//! case over its permutation's store (file SQLite or the case's own
+//! PostgreSQL database), the separately materialized candidate/synthetic-next
 //! pair, owned host processes and the retained case receipt.
 use anyhow::{Context, Result, ensure};
 use lash_core::tool_run::{SealOutcome, SourceSeal};
 use lash_upgrade_harness::e2e::{
-    case::{ArtifactIdentity, CaseLease, CaseSpec},
+    case::{ArtifactIdentity, CaseLease, CaseSpec, Permutation, StoreKind},
     control::{CleanupReceipt, ProcessReceipt, WorkIdentity},
     evidence::{CaseReceipt, Evidence, Verdict},
 };
@@ -17,6 +18,7 @@ use lash_upgrade_harness::restate_view::Invocation;
 use serde_json::{Value, json};
 
 pub struct Live {
+    pub permutation: Permutation,
     pub case: Case,
     pub lease: CaseLease,
     pub builds: NodeBuilds,
@@ -28,7 +30,7 @@ pub struct Live {
 /// The H3 receipt must carry journal provenance that the runner can certify.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn journal_collection_retains_typed_v7_evidence() -> Result<()> {
-    use lash_upgrade_harness::e2e::case::StoreKind;
+    use lash_upgrade_harness::e2e::case::Leg;
     use lash_upgrade_harness::identity::BuildLabel;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -102,6 +104,10 @@ async fn journal_collection_retains_typed_v7_evidence() -> Result<()> {
     let server = tokio::spawn(serve_queries(listener));
     let spec = super::process::s21_spec(StoreKind::SqliteFile, Vec::new());
     let mut live = Live {
+        permutation: Permutation {
+            store: StoreKind::SqliteFile,
+            leg: Leg::Live,
+        },
         case,
         lease,
         builds: NodeBuilds {
@@ -197,22 +203,37 @@ fn sql(value: &str) -> String {
 }
 
 impl Live {
-    /// Lease the case, expand the successor's store shape before any host
-    /// holds the file store open, and validate the catalogue spec over the
-    /// two separately materialized builds.
-    pub fn setup(id: &str, spec: impl FnOnce(Vec<ArtifactIdentity>) -> CaseSpec) -> Result<Self> {
+    /// Lease the case over `permutation`'s store, expand the successor's
+    /// store shape before any host holds it open, and validate the catalogue
+    /// spec over the two separately materialized builds.
+    pub fn setup(
+        id: &str,
+        permutation: Permutation,
+        spec: impl FnOnce(StoreKind, Vec<ArtifactIdentity>) -> CaseSpec,
+    ) -> Result<Self> {
         let root = std::path::PathBuf::from(
             std::env::var_os("LASH_PHASE_A_ARTIFACT_DIR")
                 .context("persistent scenario artifacts")?,
         )
         .join(format!("{id}-{}", std::process::id()));
         std::fs::create_dir_all(&root)?;
-        let lease = CaseLease::new(
+        let mut lease = CaseLease::new(
             id,
             root.join("lease"),
             std::time::Instant::now() + std::time::Duration::from_secs(600),
         )?;
-        let case = Case::leased_sqlite(id, &services()?, &lease)?;
+        let services = services()?;
+        let case = match permutation.store {
+            StoreKind::SqliteFile => Case::leased_sqlite(id, &services, &lease)?,
+            StoreKind::PostgreSql => {
+                let url = block_on(permutation.postgres_url(&mut lease))?
+                    .context("PostgreSQL permutation provisioned no database")?;
+                Case::leased_postgres(id, &services, &lease, &url)?
+            }
+            StoreKind::SqliteMemory => {
+                anyhow::bail!("upgrade-node hosts share a durable store across processes")
+            }
+        };
         let builds = NodeBuilds::from_env()?;
         let mut artifacts = Vec::new();
         for (role, variable) in [
@@ -237,10 +258,11 @@ impl Live {
             artifacts[0].sha256 != artifacts[1].sha256,
             "candidate and successor must be separately materialized builds"
         );
-        let spec = spec(artifacts);
+        let spec = spec(permutation.store, artifacts);
         spec.validate()?;
         let evidence = Evidence::empty(spec.id.clone());
         let live = Self {
+            permutation,
             case,
             lease,
             builds,
@@ -254,6 +276,26 @@ impl Live {
             &serde_json::to_value(live.builds.next.probe(&live.case, None)?)?,
         )?;
         Ok(live)
+    }
+
+    /// The case's store set, opened beside its hosts for an oracle read.
+    pub async fn stores(&self) -> Result<std::sync::Arc<dyn lash::StoreSet>> {
+        Ok(match self.permutation.store {
+            StoreKind::PostgreSql => {
+                let url = self.case.postgres_url().context("the case's database")?;
+                let storage = lash_postgres_store::PostgresStorage::connect(url).await?;
+                std::sync::Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                    &storage,
+                    std::sync::Arc::new(lash::persistence::FileAttachmentStore::new(
+                        self.lease.directory.join("oracle-attachments"),
+                    )),
+                ))
+            }
+            StoreKind::SqliteFile | StoreKind::SqliteMemory => {
+                let directory = self.case.sqlite_dir().context("the case's SQLite store")?;
+                std::sync::Arc::new(lash::sqlite::SqliteStoreSet::open(directory).await?)
+            }
+        })
     }
 
     pub fn record(&self, name: &str, value: &Value) -> Result<()> {

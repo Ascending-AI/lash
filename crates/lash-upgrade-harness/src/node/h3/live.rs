@@ -3,8 +3,7 @@
 //! the exact variant a real deployment returned.
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
-use lash::StoreSet as _;
+use anyhow::Result;
 use lash_core::ClockWallTime as _;
 use lash_core::engine::BuildGeneration;
 use lash_core::store::generation_drain::GenerationDrainStatus;
@@ -122,16 +121,60 @@ fn status(status: &GenerationDrainStatus) -> Value {
     })
 }
 
+/// The owner of a drained generation's finalize on the case's backend.
+enum Finalizer {
+    Sqlite(Arc<lash::sqlite::SqliteStoreSet>),
+    Postgres(String),
+}
+
+impl Finalizer {
+    /// The host rollout's own last drain step; a refusal is an answer.
+    async fn finalize(
+        &self,
+        generation: &BuildGeneration,
+        registry: &lash_restate::RestateDeploymentRegistry,
+        now: u64,
+    ) -> Result<
+        Result<
+            lash_core_store::store::fleet_finalize::FleetEpochFlip,
+            lash_core_store::store::fleet_finalize::FinalizeError,
+        >,
+    > {
+        Ok(match self {
+            Self::Sqlite(stores) => stores.finalize(generation, registry, &[], now).await,
+            Self::Postgres(url) => lash_postgres_store::PostgresStorage::connect(url)
+                .await?
+                .finalize(
+                    generation,
+                    registry,
+                    lash_core_store::store::fleet_finalize::FinalizeMode::Automatic,
+                    &[],
+                    now,
+                )
+                .await
+                .map(|report| report.flip),
+        })
+    }
+}
+
 pub(super) async fn drain(
     args: &H3Args,
     generation: &BuildGeneration,
     op: DrainOp,
     severed_admin_url: Option<String>,
 ) -> Result<Value> {
-    let super::super::StoreSpec::Sqlite(dir) = &args.store.store else {
-        bail!("H3 drain controls require a SQLite store");
+    // Each backend finalizes through its own owner: SQLite's store set,
+    // PostgreSQL's storage under the fleet-format row.
+    let (stores, finalizer): (Arc<dyn lash::StoreSet>, Finalizer) = match &args.store.store {
+        super::super::StoreSpec::Sqlite(dir) => {
+            let sqlite = Arc::new(super::super::open_sqlite(dir).await?);
+            (sqlite.clone(), Finalizer::Sqlite(sqlite))
+        }
+        super::super::StoreSpec::Postgres(url) => (
+            super::super::open_stores(&args.store).await?,
+            Finalizer::Postgres(url.clone()),
+        ),
     };
-    let stores = Arc::new(super::super::open_sqlite(dir).await?);
     let now = lash_core::facade_support::SystemClock.timestamp_ms();
     let admin_url = severed_admin_url.unwrap_or_else(|| args.restate.admin_url.clone());
     let registry = lash_restate::RestateDeploymentRegistry::new(
@@ -164,8 +207,7 @@ pub(super) async fn drain(
                 admin_url: admin_url.clone(),
                 ..args.restate.clone()
             };
-            let set: Arc<dyn lash::StoreSet> = stores.clone();
-            let engine = super::super::engine(set, &restate)?;
+            let engine = super::super::engine(stores.clone(), &restate)?;
             let core = super::super::core(
                 lash::Backend::new(engine),
                 &super::super::ProviderArgs::default(),
@@ -188,7 +230,7 @@ pub(super) async fn drain(
                 }
             }
         }
-        DrainOp::Finalize => match stores.finalize(generation, &registry, &[], now).await {
+        DrainOp::Finalize => match finalizer.finalize(generation, &registry, now).await? {
             Ok(flip) => json!({"finalized": flip}),
             Err(lash_core_store::store::fleet_finalize::FinalizeError::Refused(refusal)) => {
                 json!({"refused": variant(&refusal), "detail": refusal.to_string()})

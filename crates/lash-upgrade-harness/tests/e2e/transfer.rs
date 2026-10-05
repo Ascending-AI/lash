@@ -2,15 +2,15 @@
 //! workbench product host (`e2e` handover rows).
 use anyhow::{Result, ensure};
 use lash_upgrade_harness::e2e::{
-    case::{ArtifactIdentity, CaseSpec, Channel, StoreKind},
+    case::{ArtifactIdentity, CaseSpec, Channel, Leg, Permutation, StoreKind},
     host::HostKind,
     provider::ProviderKind,
 };
 
 /// The catalogue is shared with H8. Final-routing claims are explicitly held
 /// by the deletion units, rather than inferred from a successful business reply.
-pub fn specs(store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Vec<CaseSpec> {
-    vec![CaseSpec {
+pub fn spec(store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> CaseSpec {
+    CaseSpec {
         id: "S13".into(),
         rules: vec!["L11".into(), "L21".into()],
         host: HostKind::UpgradeNode,
@@ -23,7 +23,7 @@ pub fn specs(store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Vec<CaseSpec
         expected_terminal: "settled".into(),
         // FIG-4900's landing commit is the manifest's S13 arc guard.
         requires: Vec::new(),
-    }]
+    }
 }
 
 /// S13/L11: a real pinned timer keeps its generation undrained. The operator
@@ -165,17 +165,23 @@ async fn s13_unreadable_registry_fails_closed_sqlite_memory() -> Result<()> {
 #[test]
 #[ignore = "needs exact candidate/synthetic-next binaries and private live Restate"]
 fn s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes() -> Result<()> {
+    s13(Permutation::provisioned(StoreKind::SqliteFile, Leg::Live)?)
+}
+
+/// S13 with N and N+1 serving over the case's own PostgreSQL database.
+#[test]
+#[ignore = "needs exact candidate/synthetic-next binaries, private live Restate and PostgreSQL"]
+fn s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes_postgresql() -> Result<()> {
+    s13(Permutation::provisioned(StoreKind::PostgreSql, Leg::Live)?)
+}
+
+pub fn s13(permutation: Permutation) -> Result<()> {
     use crate::h3_live::{Live, command};
     use lash_upgrade_harness::harness::block_on;
     use lash_upgrade_harness::node::h3::H3Command;
     use serde_json::json;
     const SEVERED: &str = "http://127.0.0.1:1";
-    let mut live = Live::setup("s13", |artifacts| {
-        specs(StoreKind::SqliteFile, artifacts)
-            .into_iter()
-            .find(|spec| spec.id == "S13")
-            .expect("S13 is catalogued")
-    })?;
+    let mut live = Live::setup("s13", permutation, spec)?;
     let (n, next) = (live.builds.n.clone(), live.builds.next.clone());
     let session = live.case.session_id("s13");
     let view = live.case.view()?;
