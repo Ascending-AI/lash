@@ -261,6 +261,32 @@ fn export_observation_state(runtime: &LashRuntime) -> (crate::SessionReadView, V
     (read_view, authority_fingerprint(&runtime.state))
 }
 
+/// The session's durable head as an observer reads it: the observation
+/// revision it carries and the read view of its current frame, the view
+/// [`load_session_read_view`](crate::store::load_session_read_view)
+/// answers. The revision and the view come from one window read, so they
+/// always agree. `Ok(None)` means the session has no head.
+pub async fn load_durable_observation_head(
+    store: &crate::store::SessionStore,
+) -> Result<Option<(SessionRevision, crate::SessionReadView)>, crate::StoreError> {
+    let Some(loaded) =
+        crate::store::load_session_window_state(store, crate::store::WindowSelector::Current)
+            .await?
+    else {
+        return Ok(None);
+    };
+    let meta = store.load_session_meta().await?.ok_or_else(|| {
+        crate::StoreError::Backend(format!(
+            "session `{}` has durable head state but no session metadata",
+            loaded.state.session_id
+        ))
+    })?;
+    Ok(Some((
+        observation_revision(&loaded.state),
+        crate::SessionReadView::from_persisted_state_with_relation(&loaded.state, meta.relation),
+    )))
+}
+
 async fn list_scope_process_handles(
     executor: &Arc<dyn crate::ProcessRegistry>,
     scope: &crate::SessionScope,
@@ -555,10 +581,6 @@ impl RuntimeHandle {
         );
     }
 
-    pub fn current_session_observation(&self) -> SessionObservation {
-        self.observe().session_observation()
-    }
-
     pub fn resume_session_observation(
         &self,
         cursor: &SessionCursor,
@@ -600,8 +622,7 @@ impl RuntimeHandle {
             LiveReplaySubscribeOutcome::Subscribed(subscription)
                 if requested.revision == observation.session_revision()
                     || (requested.revision < observation.session_revision()
-                        && subscription
-                            .contains_committed_at_or_after(observation.session_revision())) =>
+                        && subscription.bridges_to(observation.session_revision())) =>
             {
                 Ok(SessionObservationSubscription::Subscribed(subscription))
             }

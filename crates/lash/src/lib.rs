@@ -85,6 +85,7 @@ pub use change_page::ChangePage;
 mod durable_session;
 mod error;
 pub mod formats;
+mod observation_feed;
 mod parked_work;
 mod parked_work_verbs;
 pub use parked_work_verbs::{
@@ -357,6 +358,11 @@ pub mod prelude {
 /// [`ObservableSession`].
 pub mod observe {
     // The vocabulary this module's signatures name (the facade-completeness rule).
+    /// The stream trait a live replay subscription's tail and the session
+    /// feed implement: a custom [`LiveReplayStore`] builds its
+    /// [`LiveReplaySubscription`](crate::persistence::LiveReplaySubscription)
+    /// from one.
+    pub use futures_util::Stream;
     pub use lash_core::runtime::ParsedSessionCursor;
 
     pub use crate::session::{

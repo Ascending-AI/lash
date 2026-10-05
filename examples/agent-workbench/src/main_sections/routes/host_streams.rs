@@ -153,7 +153,16 @@ pub(crate) async fn session_observations_with_shutdown(
     {
         Some(cursor) => serde_json::from_value::<SessionCursor>(json!(cursor))
             .map_err(|err| AppError::bad_request(format!("invalid session cursor: {err}")))?,
-        None => session.observe().recoverable_chat_snapshot().cursor,
+        None => {
+            session
+                .observe()
+                .recoverable_chat_snapshot()
+                .await
+                .map_err(|error| {
+                    state.session_admission_error(&session_id, "api.observations", error)
+                })?
+                .cursor
+        }
     };
     let (tx, rx) = mpsc::channel::<ObservationStreamItem>(64);
     tokio::spawn(async move {

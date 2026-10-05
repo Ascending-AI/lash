@@ -1342,7 +1342,12 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
         .await
         .open()
         .await?;
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
 
     let output = session
         .send(TurnInput::text("switch frames"))

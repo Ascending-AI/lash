@@ -4,10 +4,12 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use crate::durable_session::DurableSession;
+pub use crate::observation_feed::SessionObservationStream;
+use crate::observation_feed::live_replay_error;
 use crate::session_binding::BoundSession;
 use crate::support::{
     Arc, EffectHost, EmbedError, LashCore, LashRuntime, PluginOperations, ProcessHandleView,
-    Result, RuntimeErrorCode, RuntimeHandle, RuntimeObservation, RuntimeSessionState, SessionAdmin,
+    Result, RuntimeHandle, RuntimeObservation, RuntimeSessionState, SessionAdmin,
     SessionCreationHead, SessionCursor, SessionError, SessionObservation,
     SessionObservationSubscription, SessionPolicy, SessionReadView, SessionResume, SessionScope,
     SessionSpec, SessionStoreCreateRequest, ToolManifest, ToolState, TurnInput, build_plugin_host,
@@ -896,6 +898,7 @@ impl LashSession {
     pub fn observe(&self) -> ObservableSession {
         ObservableSession {
             runtime: self.runtime.clone(),
+            store: self.binding.store(),
         }
     }
 
@@ -1120,21 +1123,43 @@ impl LashSession {
 
 #[derive(Clone)]
 /// Exposes read models and replayable observations for an active session.
+///
+/// The session feed is durable-anchored: [`snapshot`](Self::snapshot) is the
+/// durable head with a cursor bound to its revision, and
+/// [`subscribe_and_recover`](Self::subscribe_and_recover) tails every
+/// durable commit past a cursor, whichever process made it. The synchronous
+/// reads ([`read_view`](Self::read_view), [`tool_state`](Self::tool_state))
+/// and the raw cursor reads ([`resume_from_cursor`](Self::resume_from_cursor),
+/// [`subscribe_from_cursor`](Self::subscribe_from_cursor)) answer from this
+/// process's resident runtime and live replay, which trail a commit another
+/// process made until the resident adopts the durable head.
 pub struct ObservableSession {
     pub(crate) runtime: RuntimeHandle,
+    store: lash_core::store::SessionStore,
 }
 
 impl ObservableSession {
-    fn snapshot(&self) -> Arc<RuntimeObservation> {
+    fn resident(&self) -> Arc<RuntimeObservation> {
         self.runtime.observe()
     }
 
-    pub fn current_observation(&self) -> SessionObservation {
-        self.runtime.current_session_observation()
+    fn feed_source(&self) -> crate::observation_feed::FeedSource {
+        crate::observation_feed::FeedSource::new(self.runtime.clone(), self.store.clone())
     }
 
-    pub fn current_remote_observation(&self) -> RemoteSessionObservation {
-        RemoteSessionObservation::from_core(self.current_observation())
+    /// The session's durable head and the cursor bound to its revision:
+    /// the snapshot a feed from [`subscribe_and_recover`](Self::subscribe_and_recover)
+    /// continues.
+    ///
+    /// It reads the store's head, so a commit any process made is in it.
+    /// The resident runtime adopts the head first unless a run holds it.
+    pub async fn snapshot(&self) -> Result<SessionObservation> {
+        self.feed_source().snapshot().await
+    }
+
+    /// [`snapshot`](Self::snapshot) as remote DTOs.
+    pub async fn remote_snapshot(&self) -> Result<RemoteSessionObservation> {
+        Ok(RemoteSessionObservation::from_core(self.snapshot().await?))
     }
 
     /// Resumes local observations from the supplied replay cursor.
@@ -1175,21 +1200,18 @@ impl ObservableSession {
         }
     }
 
-    /// Subscribe to session observation events and keep the subscription alive
-    /// across recoverable live-replay gaps.
+    /// The session feed from `cursor`: every durable commit past its
+    /// revision, in order and once, whichever process made it, with the
+    /// provisional events this process's live replay holds.
     ///
     /// The returned stream yields [`SessionObservationStreamItem::Gap`] when
-    /// the cursor missed the bounded replay window. Callers should replace
-    /// their UI/projection from the included fresh observation, persist
-    /// `gap.latest_cursor`, and keep polling the same stream; it resubscribes
-    /// from that cursor internally.
+    /// the cursor cannot be continued: it fell outside the bounded replay
+    /// window, another replay store minted it, or it is past the durable
+    /// head. Callers should replace their UI/projection from the included
+    /// observation, which is the durable head, persist `gap.latest_cursor`,
+    /// and keep polling the same stream; it continues from that cursor.
     pub fn subscribe_and_recover(&self, cursor: SessionCursor) -> SessionObservationStream {
-        SessionObservationStream {
-            observable: self.clone(),
-            cursor,
-            subscription: None,
-            done: false,
-        }
+        SessionObservationStream::new(self.feed_source(), cursor)
     }
 
     /// Subscribe to remote DTO session observation events and keep the
@@ -1207,25 +1229,25 @@ impl ObservableSession {
     }
 
     pub fn session_id(&self) -> SessionId {
-        SessionId::from(self.snapshot().session_id())
+        SessionId::from(self.resident().session_id())
     }
 
     /// Returns a snapshot of the session's recorded policy, as
     /// [`LashSession::policy_snapshot`] does.
     pub fn policy_snapshot(&self) -> SessionPolicy {
-        self.snapshot().read_view.policy().clone()
+        self.resident().read_view.policy().clone()
     }
 
     pub fn read_view(&self) -> SessionReadView {
-        self.snapshot().read_view.clone()
+        self.resident().read_view.clone()
     }
 
     pub fn tool_state(&self) -> Option<ToolState> {
-        self.snapshot().tool_state.clone()
+        self.resident().tool_state.clone()
     }
 
     pub fn active_tool_manifests(&self) -> Vec<ToolManifest> {
-        self.snapshot()
+        self.resident()
             .tool_state
             .as_ref()
             .map(ToolState::tool_manifests)
@@ -1234,16 +1256,16 @@ impl ObservableSession {
 
     /// Lists process handles.
     pub async fn list_process_handles(&self) -> Vec<ProcessHandleView> {
-        self.snapshot().list_process_handles().await
+        self.resident().list_process_handles().await
     }
 
     /// Lists all process handles.
     pub async fn list_all_process_handles(&self) -> Vec<ProcessHandleView> {
-        self.snapshot().list_all_process_handles().await
+        self.resident().list_all_process_handles().await
     }
 
     pub fn process_scope(&self) -> SessionScope {
-        self.snapshot().process_scope()
+        self.resident().process_scope()
     }
 }
 
@@ -1376,88 +1398,6 @@ impl Stream for RemoteSessionObservationStream {
             Poll::Ready(None) => Poll::Ready(None),
         }
     }
-}
-
-/// Stream returned by [`ObservableSession::subscribe_and_recover`].
-pub struct SessionObservationStream {
-    observable: ObservableSession,
-    cursor: SessionCursor,
-    subscription: Option<lash_core::LiveReplaySubscription>,
-    done: bool,
-}
-
-impl SessionObservationStream {
-    #[cfg(test)]
-    pub(crate) fn live_receiver_installed(&self) -> bool {
-        self.subscription.is_some()
-    }
-
-    /// Returns the stream's current replay cursor.
-    pub fn cursor(&self) -> &SessionCursor {
-        &self.cursor
-    }
-}
-
-impl Stream for SessionObservationStream {
-    type Item = Result<SessionObservationStreamItem>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            if self.done {
-                return Poll::Ready(None);
-            }
-            if self.subscription.is_none() {
-                match self.observable.subscribe_from_cursor(&self.cursor) {
-                    Ok(SessionObservationSubscription::Subscribed(subscription)) => {
-                        self.subscription = Some(subscription);
-                    }
-                    Ok(SessionObservationSubscription::Gap { observation, gap }) => {
-                        self.cursor = gap.latest_cursor.clone();
-                        return Poll::Ready(Some(Ok(SessionObservationStreamItem::Gap {
-                            observation,
-                            gap,
-                        })));
-                    }
-                    Err(err) => {
-                        self.done = true;
-                        return Poll::Ready(Some(Err(err)));
-                    }
-                }
-            }
-
-            let Some(subscription) = self.subscription.as_mut() else {
-                continue;
-            };
-            match Pin::new(subscription).poll_next(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Some(Ok(event))) => {
-                    self.cursor = event.cursor.clone();
-                    return Poll::Ready(Some(Ok(SessionObservationStreamItem::Event(event))));
-                }
-                Poll::Ready(Some(Err(
-                    LiveReplayStoreError::SubscriberLagged(_) | LiveReplayStoreError::Closed,
-                ))) => {
-                    self.subscription = None;
-                    continue;
-                }
-                Poll::Ready(Some(Err(err))) => {
-                    self.done = true;
-                    return Poll::Ready(Some(Err(live_replay_error(err))));
-                }
-                Poll::Ready(None) => {
-                    self.done = true;
-                    return Poll::Ready(None);
-                }
-            }
-        }
-    }
-}
-
-fn live_replay_error(err: lash_core::LiveReplayStoreError) -> EmbedError {
-    EmbedError::Runtime(lash_core::RuntimeError::new(
-        RuntimeErrorCode::LiveReplay,
-        err.to_string(),
-    ))
 }
 
 #[cfg(test)]

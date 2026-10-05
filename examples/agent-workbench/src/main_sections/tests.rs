@@ -524,7 +524,12 @@ finish("observed through live replay");
         .open()
         .await
         .expect("open session");
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let (tx, mut rx) = mpsc::channel(64);
     let forwarder = tokio::spawn(forward_session_observations(session.clone(), cursor, tx));
 
@@ -618,7 +623,12 @@ finish("gap source");
         .open()
         .await
         .expect("open session");
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let requested_cursor = cursor.to_string();
 
     session

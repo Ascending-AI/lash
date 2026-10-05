@@ -425,7 +425,7 @@ async fn subscribe_session_runs(
     session_id: &SessionId,
 ) -> Result<SessionRunSubscription, lash::EmbedError> {
     let session = state.open_session_for_observation(session_id).await?;
-    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    let cursor = session.observe().recoverable_chat_snapshot().await?.cursor;
     let updates = session.observe().subscribe_recoverable_chat(cursor);
     Ok((session, updates))
 }

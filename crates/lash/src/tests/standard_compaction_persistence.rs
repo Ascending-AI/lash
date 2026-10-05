@@ -1595,7 +1595,9 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
     assert!(
         session
             .observe()
-            .current_observation()
+            .snapshot()
+            .await
+            .expect("durable snapshot")
             .read_view
             .messages()
             .iter()

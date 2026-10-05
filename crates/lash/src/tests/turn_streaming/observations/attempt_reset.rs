@@ -15,7 +15,7 @@ pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()>
         })
         .await?;
     let session = core.session(crate::SessionId::parse("retry-visible-observation").expect("nonblank host identity")).open().await?;
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session.observe().snapshot().await.expect("durable snapshot").cursor;
     let lash_core::facade_support::SessionObservationSubscription::Subscribed(mut subscription) =
         session.observe().subscribe_from_cursor(&cursor)?
     else {

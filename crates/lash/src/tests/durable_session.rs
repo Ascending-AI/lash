@@ -725,7 +725,12 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
         .await
         .open()
         .await?;
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     // The enqueue must publish `Enqueued` yet stay pending for the cancel:
     // the engine claims admitted input on its own schedule, so the session's
     // shift is held while the input is queued and cancelled.
@@ -794,7 +799,12 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
         .await?;
     // A cursor minted while the session was live, at its committed head: the
     // runtime-free publication that follows must be reachable from it.
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     Box::pin(session.close()).await?;
     // The engine lane's writer claim frees when the closed lane settles;
     // both admits below race that release under the double.
@@ -1802,7 +1812,12 @@ async fn committed_row_deltas_transport_each_new_node_once() -> Result<()> {
         .map(|row| row.row_id)
         .collect::<std::collections::HashSet<_>>();
     for input in ["first delta question", "second delta question"] {
-        let cursor = session.observe().current_observation().cursor;
+        let cursor = session
+            .observe()
+            .snapshot()
+            .await
+            .expect("durable snapshot")
+            .cursor;
         session.send(TurnInput::text(input)).output().await?;
         let crate::observe::SessionResume::Replayed { events } =
             session.observe().resume_from_cursor(&cursor)?

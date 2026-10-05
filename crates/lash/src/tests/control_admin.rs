@@ -205,7 +205,12 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         .await?;
     let before = session.admin().state().persist_current().await?;
     let previous_frame_node_id = before.current_frame_node_id.clone();
-    let observation_cursor = session.observe().current_observation().cursor;
+    let observation_cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     assert!(
         before.session_graph.nodes.iter().any(|node| {
             before
@@ -464,7 +469,12 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
         .await
         .open()
         .await?;
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let _hold = held_double(&core)
         .expect("the core runs on its held double")
         .hold_session_shift(&SessionId::from("pending-input-facade-cancel"))
@@ -562,7 +572,12 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         .await
         .open()
         .await?;
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     // Keyed, so the replay below presents the same start (ADR 0107).
     let request = lash_core::ProcessStartRequest::new(
         // Externally owned: the engine's worker never runs it, so the test
@@ -736,7 +751,12 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         observed, lifecycle,
         "the session stream carries exactly the durable lifecycle, in order, with its sequences"
     );
-    let terminal_cursor = session.observe().current_observation().cursor;
+    let terminal_cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let external_registration = || {
         lash_core::ProcessRegistration::new(
             lash_core::ProcessInput::External {

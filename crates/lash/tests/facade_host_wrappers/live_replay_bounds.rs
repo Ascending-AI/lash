@@ -61,14 +61,23 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         .open()
         .await
         .expect("open");
-    let old = session.observe().current_observation().cursor;
+    let old = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let output = session
         .send(TurnInput::text("publish before eviction"))
         .output()
         .await
         .expect("turn");
     assert!(output.is_success(), "{output:?}");
-    let committed = session.observe().current_observation();
+    let committed = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot");
     assert!(
         matches!(session.observe().resume_from_cursor(&old).expect("retained replay"), SessionResume::Replayed { events } if !events.is_empty())
     );

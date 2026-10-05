@@ -3,6 +3,12 @@
 //! Lash owns the observation cursor, replay-gap, redelivery identity, and
 //! terminal-replacement contract. Hosts own authorization, product events,
 //! transcript presentation, and cancellation controls.
+//!
+//! The feed is durable-anchored (FIG-5090): its snapshot is the session's
+//! durable head, its terminal replacements are the durable commits past the
+//! snapshot, and a replay gap rebuilds from the durable head. Any process
+//! that shares the session's store therefore serves a consistent feed; this
+//! process's live replay adds only the provisional events published here.
 
 use lash_sansio::SessionId;
 use std::collections::{BTreeSet, VecDeque};
@@ -90,17 +96,6 @@ pub struct RecoverableChatSnapshot {
     pub cursor: SessionCursor,
 }
 
-impl RecoverableChatSnapshot {
-    /// Captures a recoverable snapshot from the observable session.
-    pub fn capture(observable: &ObservableSession) -> Self {
-        let observation = observable.current_observation();
-        Self {
-            read_view: observation.read_view,
-            cursor: observation.cursor,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum RecoverableChatUpdate {
     /// A provisional or lifecycle observation with stable redelivery identity.
@@ -110,9 +105,10 @@ pub enum RecoverableChatUpdate {
         /// Observation event delivered by this update.
         event: std::sync::Arc<SessionObservationEvent>,
     },
-    /// The requested cursor fell outside bounded replay. Replace the
-    /// projection from `snapshot`, persist `gap.latest_cursor`, and continue
-    /// consuming this same stream.
+    /// The requested cursor could not be continued: it fell outside bounded
+    /// replay, another replay store minted it, or it is past the durable
+    /// head. `snapshot` is the durable head: replace the projection from it,
+    /// persist `gap.latest_cursor`, and continue consuming this same stream.
     ReplayGap {
         /// Authoritative session snapshot for recovering the read model.
         snapshot: RecoverableChatSnapshot,
@@ -121,7 +117,10 @@ pub enum RecoverableChatUpdate {
     },
     /// A terminal commit replaces provisional state with this authoritative
     /// snapshot. The committed event is retained for remote encoding and
-    /// tracing, but the snapshot is the transcript authority.
+    /// tracing, but the snapshot is the transcript authority. A commit the
+    /// feed read from the store, rather than from this process's live
+    /// replay, names no turn, and commits the store showed together arrive
+    /// as one replacement at the newest revision.
     TerminalReplacement {
         /// Stable replay identity for this observation event.
         id: RecoverableChatEventId,
@@ -244,13 +243,21 @@ impl Stream for RecoverableChatSubscription {
 }
 
 impl ObservableSession {
-    /// Capture one authoritative snapshot before attaching live observation.
-    pub fn recoverable_chat_snapshot(&self) -> RecoverableChatSnapshot {
-        RecoverableChatSnapshot::capture(self)
+    /// Capture one authoritative snapshot before attaching live observation:
+    /// the session's durable head and the cursor bound to its revision
+    /// ([`ObservableSession::snapshot`]).
+    pub async fn recoverable_chat_snapshot(&self) -> Result<RecoverableChatSnapshot> {
+        let observation = self.snapshot().await?;
+        Ok(RecoverableChatSnapshot {
+            read_view: observation.read_view,
+            cursor: observation.cursor,
+        })
     }
 
     /// Resume a recoverable chat observation from an authoritative snapshot's
-    /// cursor.
+    /// cursor. Every durable commit past the cursor's revision arrives once,
+    /// in order, as a [`RecoverableChatUpdate::TerminalReplacement`],
+    /// whichever process made it.
     pub fn subscribe_recoverable_chat(&self, cursor: SessionCursor) -> RecoverableChatSubscription {
         RecoverableChatSubscription::new(self.subscribe_and_recover(cursor))
     }

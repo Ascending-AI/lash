@@ -912,7 +912,12 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
         .await
         .open()
         .await?;
-    let lifecycle_cursor = session.observe().current_observation().cursor;
+    let lifecycle_cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
 
     let report = core
         .triggers()

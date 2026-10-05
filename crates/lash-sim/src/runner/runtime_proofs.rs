@@ -264,13 +264,17 @@ pub(super) async fn run_live_turn_facts(
 /// Whether the session's COMMITTED transcript contains `needle` — used to detect
 /// partial prose leaked into durable state on a terminal failure.
 fn committed_transcript_contains(session: &lash::LashSession, needle: &str) -> bool {
-    let observation = session.observe().current_observation();
-    observation.read_view.messages().iter().any(|message| {
-        message
-            .parts
-            .iter()
-            .any(|part| part.content().contains(needle))
-    })
+    session
+        .observe()
+        .read_view()
+        .messages()
+        .iter()
+        .any(|message| {
+            message
+                .parts
+                .iter()
+                .any(|part| part.content().contains(needle))
+        })
 }
 
 /// The proof's input prompt.

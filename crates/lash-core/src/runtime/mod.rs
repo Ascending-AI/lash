@@ -262,6 +262,7 @@ pub use observation::{
     SessionCursor, SessionCursorError, SessionObservation, SessionObservationEvent,
     SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
     SessionQueueEventKind, SessionResume, SessionRevision, WeakRuntimeHandle,
+    load_durable_observation_head,
 };
 pub use observation_publisher::{ObservationSource, work_with_observations};
 pub use process::ProcessChangeSubscription;

@@ -600,6 +600,20 @@ impl AttachmentStore for Integrator {
     }
 }
 
+/// A live tail an external store builds its subscription from.
+struct ExternalLiveTail;
+
+impl Stream for ExternalLiveTail {
+    type Item = Result<Arc<SessionObservationEvent>, LiveReplayStoreError>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::task::Poll::Ready(None)
+    }
+}
+
 #[lash::async_trait]
 impl LiveReplayStore for Integrator {
     fn prepare_publication(
@@ -626,7 +640,9 @@ impl LiveReplayStore for Integrator {
         &self,
         cursor: &SessionCursor,
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
-        unreachable!("external signature witness")
+        Ok(LiveReplaySubscribeOutcome::Subscribed(
+            LiveReplaySubscription::new(Vec::new(), ExternalLiveTail),
+        ))
     }
     fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor {
         unreachable!("external signature witness")

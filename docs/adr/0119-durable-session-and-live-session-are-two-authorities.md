@@ -111,7 +111,10 @@ revision zero. A failed head read invalidates replay continuity instead of
 inventing a revision. Existing cursors then recover through their gap path.
 
 The default Live Replay store is process-local. Cross-process visibility
-depends on the host's configured replay store.
+depends on the host's configured replay store. Whichever store is
+configured, a session feed's snapshot and every gap replacement are the
+durable head (ADR 0002, FIG-5090), so a store decides only which processes'
+events reach a feed.
 
 Source: `crates/lash-core/src/runtime/durable_queue.rs:104`.
 

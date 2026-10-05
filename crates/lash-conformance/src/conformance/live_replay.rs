@@ -34,6 +34,131 @@ where
     replay_cut_and_live_registration_are_linearizable(&make).await;
 }
 
+/// Sessions [`live_replay_store_burst`] publishes to at once.
+const BURST_SESSIONS: usize = 6;
+/// Deltas each burst session publishes: within the default per-session
+/// retention, so every subscriber can hold the whole burst.
+const BURST_DELTAS: usize = 600;
+
+/// A burst of deltas across several sessions reaches every subscriber with
+/// no loss, no reordering, no duplicate and no other session's event: one
+/// subscribed before the burst, one subscribed from the same cursor while it
+/// runs, and a replay after it ends (FIG-5090).
+///
+/// `make` must return a fresh store whose per-session retention and
+/// subscriber buffer hold [`BURST_DELTAS`] events.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn live_replay_store_burst<F>(make: F)
+where
+    F: Fn() -> Arc<dyn LiveReplayStore>,
+{
+    let store = make();
+    let revision = SessionRevision::new(4);
+    let sessions = (0..BURST_SESSIONS)
+        .map(|index| SessionId::fixture(format!("burst-session-{index}")))
+        .collect::<Vec<_>>();
+    let expected = |index: usize| {
+        (0..BURST_DELTAS)
+            .map(|delta| format!("text:burst {index}:{delta}"))
+            .collect::<Vec<_>>()
+    };
+    let starts = sessions
+        .iter()
+        .map(|session_id| store.current_cursor(session_id, revision))
+        .collect::<Vec<_>>();
+    let drain = |subscription: crate::LiveReplaySubscription| {
+        tokio::spawn(async move {
+            let mut subscription = subscription;
+            let mut labels = Vec::with_capacity(BURST_DELTAS);
+            while labels.len() < BURST_DELTAS {
+                let event = next_live_replay_event(&mut subscription, "burst delta").await;
+                labels.push(live_replay_event_label(&event));
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), subscription.next())
+                    .await
+                    .is_err(),
+                "a burst subscriber receives no event past the burst"
+            );
+            labels
+        })
+    };
+    let early = starts
+        .iter()
+        .map(|start| {
+            drain(expect_live_replay_subscribed(
+                store.subscribe_after_cursor(start),
+                "subscribe before the burst",
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    let publishers = sessions
+        .iter()
+        .enumerate()
+        .map(|(index, session_id)| {
+            let store = Arc::clone(&store);
+            let session_id = session_id.clone();
+            tokio::spawn(async move {
+                for delta in 0..BURST_DELTAS {
+                    publish_one(
+                        &store,
+                        &session_id,
+                        revision,
+                        Some(&TurnId::from("burst-turn")),
+                        live_replay_text_payload(&format!("burst {index}:{delta}")),
+                    )
+                    .expect("publish a burst delta");
+                    if delta % 64 == 0 {
+                        tokio::task::yield_now().await;
+                    }
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    tokio::task::yield_now().await;
+    let late = starts
+        .iter()
+        .map(|start| {
+            drain(expect_live_replay_subscribed(
+                store.subscribe_after_cursor(start),
+                "subscribe during the burst",
+            ))
+        })
+        .collect::<Vec<_>>();
+    for publisher in publishers {
+        publisher.await.expect("join a burst publisher");
+    }
+
+    for (index, (early, late)) in early.into_iter().zip(late).enumerate() {
+        assert_eq!(
+            early.await.expect("join an early burst subscriber"),
+            expected(index),
+            "a subscriber from before the burst sees every delta once, in order"
+        );
+        assert_eq!(
+            late.await.expect("join a late burst subscriber"),
+            expected(index),
+            "a subscriber joining mid-burst sees every delta once, in order"
+        );
+        let replayed = expect_live_replay_replayed(
+            store.replay_after_cursor(&starts[index]),
+            "replay after the burst",
+        )
+        .iter()
+        .map(|event| live_replay_event_label(event))
+        .collect::<Vec<_>>();
+        assert_eq!(
+            replayed,
+            expected(index),
+            "a replay after the burst holds every delta once, in order"
+        );
+    }
+}
+
 /// Together with [`live_replay_store_ttl_trim`], this states the store-owned
 /// portion of `capacity_and_age_trim_force_snapshot`.
 ///

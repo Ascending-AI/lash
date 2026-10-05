@@ -6,6 +6,15 @@ Keep the cursor and use the bounded live replay described in
 when reconnecting. A replay gap means the missing activities cannot be
 reconstructed from the durable session view.
 
+Start a feed from `session.observe().snapshot().await` (or
+`recoverable_chat_snapshot().await`): the session's durable head with a
+cursor bound to its revision. A feed judges its cursor against the durable
+head, and a gap's replacement snapshot is the durable head too, so an
+observer whose own handle never adopted a commit another process made still
+gets a current snapshot. Which processes' activities reach the feed is the
+configured live replay store's property: the in-memory default holds one
+process's, and a shared store holds every process's.
+
 `CheckpointRecorded { protocol_iteration }` marks an accepted checkpoint on the
 turn's lane. Every non-retracted delta before the marker belongs to the
 checkpointed state. A cancelled tool batch can itself be checkpointed, so the

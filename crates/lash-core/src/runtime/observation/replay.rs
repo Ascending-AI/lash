@@ -51,6 +51,18 @@ impl SessionRevision {
     pub(super) fn from_runtime(runtime: &LashRuntime) -> Self {
         observation_revision(&runtime.state)
     }
+
+    /// The observation revision of the durable head `head` names: what a
+    /// runtime that adopts that head projects (see [`observation_revision`]).
+    /// A head without a checkpoint has committed no turn, so its revision
+    /// is zero.
+    pub fn of_durable_head(head: &crate::store::SessionHeadMeta) -> Self {
+        Self(if head.checkpoint_ref.is_some() {
+            head.head_revision
+        } else {
+            0
+        })
+    }
 }
 
 /// The observation revision a session state projects: the committed head
@@ -472,28 +484,43 @@ fn clone_event(event: &Arc<SessionObservationEvent>) -> Arc<SessionObservationEv
     Arc::clone(event)
 }
 
+/// A live replay subscription: the retained events after the subscribed
+/// cursor, then the store's live tail.
+///
+/// Any [`LiveReplayStore`] builds one with [`Self::new`] from the events it
+/// replays and a stream of the events it publishes afterwards. Lash reads the
+/// replayed prefix to judge whether it bridges a stale cursor to the
+/// authoritative revision, so a store hands every retained event it replays
+/// in `replay`, not in `live`. The live tail ends a lagging subscriber with
+/// [`LiveReplayStoreError::SubscriberLagged`] and a closed one with
+/// [`LiveReplayStoreError::Closed`]; observers then resubscribe from their
+/// cursor.
+///
+/// Integrator class (ADR 0051): **custom live-replay store implementors**.
 pub struct LiveReplaySubscription {
     replay: VecDeque<Arc<SessionObservationEvent>>,
-    receiver: ReusableBoxFuture<'static, LiveReplayRecvResult>,
-    after_position: u64,
-    closed: bool,
+    live: Pin<Box<dyn Stream<Item = LiveReplayItem> + Send>>,
 }
 
+/// One item of a live replay subscription's tail.
+type LiveReplayItem = Result<Arc<SessionObservationEvent>, LiveReplayStoreError>;
+
 impl LiveReplaySubscription {
-    fn new(
+    /// A subscription that yields `replay` in order, then `live`.
+    pub fn new(
         replay: Vec<Arc<SessionObservationEvent>>,
-        receiver: broadcast::Receiver<ReplayNotification>,
-        after_position: u64,
+        live: impl Stream<Item = LiveReplayItem> + Send + 'static,
     ) -> Self {
         Self {
             replay: replay.into(),
-            receiver: ReusableBoxFuture::new(live_replay_recv(receiver)),
-            after_position,
-            closed: false,
+            live: Box::pin(live),
         }
     }
 
-    pub(super) fn contains_committed_at_or_after(&self, revision: SessionRevision) -> bool {
+    /// Whether the replayed prefix holds a `Committed` event at or after
+    /// `revision`: the evidence that a subscription from a cursor behind
+    /// `revision` bridges to it.
+    pub fn bridges_to(&self, revision: SessionRevision) -> bool {
         self.replay.iter().any(|event| {
             event.revision() >= revision
                 && matches!(
@@ -504,6 +531,43 @@ impl LiveReplaySubscription {
     }
 }
 
+impl fmt::Debug for LiveReplaySubscription {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LiveReplaySubscription")
+            .field("replayed", &self.replay.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Stream for LiveReplaySubscription {
+    type Item = LiveReplayItem;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(event) = self.replay.pop_front() {
+            return Poll::Ready(Some(Ok(event)));
+        }
+        self.live.as_mut().poll_next(cx)
+    }
+}
+
+/// The in-memory store's live tail: its broadcast channel's notifications
+/// past the subscribed position.
+struct BroadcastTail {
+    receiver: ReusableBoxFuture<'static, LiveReplayRecvResult>,
+    after_position: u64,
+    closed: bool,
+}
+
+impl BroadcastTail {
+    fn new(receiver: broadcast::Receiver<ReplayNotification>, after_position: u64) -> Self {
+        Self {
+            receiver: ReusableBoxFuture::new(live_replay_recv(receiver)),
+            after_position,
+            closed: false,
+        }
+    }
+}
+
 async fn live_replay_recv(
     mut receiver: broadcast::Receiver<ReplayNotification>,
 ) -> LiveReplayRecvResult {
@@ -511,13 +575,10 @@ async fn live_replay_recv(
     (result, receiver)
 }
 
-impl Stream for LiveReplaySubscription {
-    type Item = Result<Arc<SessionObservationEvent>, LiveReplayStoreError>;
+impl Stream for BroadcastTail {
+    type Item = LiveReplayItem;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(event) = self.replay.pop_front() {
-            return Poll::Ready(Some(Ok(event)));
-        }
         if self.closed {
             return Poll::Ready(None);
         }
@@ -568,13 +629,51 @@ pub enum SessionObservationSubscription {
     },
 }
 
-/// Bounded, best-effort live replay for host reconnects.
+/// Bounded, best-effort live replay for host reconnects: the tail of every
+/// session feed.
+///
+/// [`InMemoryLiveReplayStore`] is the default and holds one process's
+/// publications. A host whose sessions run on several processes plugs in one
+/// shared implementation (`LashCoreBuilder::live_replay_store`), and every
+/// process's feed then carries every process's events. A feed's snapshot is
+/// the session's durable head either way, so the store decides freshness,
+/// never the snapshot's consistency.
+///
+/// # The cursor contract
+///
+/// A [`SessionCursor`] names an incarnation, a session, a revision and a
+/// live position. An implementation keeps these rules; the conformance laws
+/// in `lash-conformance` (`live_replay_tests!`) certify them.
+///
+/// - **Incarnation is the publisher epoch.** Positions are ordered and
+///   comparable only within one incarnation. A cursor naming another
+///   incarnation answers [`LiveReplayGapReason::Unavailable`], never an
+///   empty replay. An implementation keeps an incarnation across a restart
+///   only when it keeps the history behind it.
+/// - **Ordered and exclusive.** Replay and subscription after a cursor yield
+///   exactly the session's retained events past its position, in
+///   publication order, each once, and never another session's events.
+///   A subscription yields its replayed prefix before any live event, with
+///   no event lost or repeated across that boundary.
+/// - **Gap-detectable.** A position that is trimmed answers
+///   [`LiveReplayGapReason::Trimmed`]; one past the tail, inside an
+///   abandoned reservation, or before an [`invalidate_session`](Self::invalidate_session)
+///   answers [`LiveReplayGapReason::Unavailable`]. A lagging or closed
+///   subscription ends with [`LiveReplayStoreError::SubscriberLagged`] or
+///   [`LiveReplayStoreError::Closed`], after which the observer resubscribes
+///   from its cursor.
+/// - **Current cursors stay behind newer revisions.**
+///   [`current_cursor`](Self::current_cursor) at revision `N` sits before
+///   every event at a revision past `N` that the store holds or will hold,
+///   so a feed whose snapshot raced a newer commit replays that commit.
 ///
 /// Runtime turn execution calls this trait from synchronous boundary code. All
 /// methods must therefore be fast and nonblocking from the runtime's point of
 /// view. A custom external store should expose local or buffered behavior here,
 /// or offload blocking transport and durability work internally. Runtime turn
 /// execution must not wait for slow network or storage durability in this path.
+/// A subscription's tail is any stream ([`LiveReplaySubscription::new`]), so
+/// its waiting happens there, off the runtime's path.
 pub trait LiveReplayStore: Send + Sync {
     /// Reserve an ordered cursor batch without making it replay-visible.
     ///
@@ -1283,8 +1382,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                 let receiver = buffer.subscribe(self.config.max_events_per_session, channel_bytes);
                 LiveReplaySubscribeOutcome::Subscribed(LiveReplaySubscription::new(
                     replay,
-                    receiver,
-                    parsed.live_position,
+                    BroadcastTail::new(receiver, parsed.live_position),
                 ))
             })
             .unwrap_or(LiveReplaySubscribeOutcome::Gap(

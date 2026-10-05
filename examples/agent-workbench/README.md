@@ -172,6 +172,10 @@ Configuration is read from `.env` or the process environment:
   to every independent Restate state.
 - `AGENT_WORKBENCH_DATA_DIR`: persistence directory, default
   `.agent-workbench`.
+- `AGENT_WORKBENCH_LIVE_REPLAY_STORE`: the live replay store session feeds
+  tail. `memory` (the default when unset) keeps one process's observation
+  events in process; a feed's snapshot is the session's durable head either
+  way.
 - `AGENT_WORKBENCH_DATABASE_URL`: use the `lash-postgres-store` session, process,
   trigger, artifact, and process-environment stores at this URL. Unset defaults to
   SQLite.

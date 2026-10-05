@@ -704,7 +704,12 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() -
         .open()
         .await
         .expect("open observer session");
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let lash::observe::SessionObservationSubscription::Subscribed(mut subscription) = session
         .observe()
         .subscribe_from_cursor(&cursor)

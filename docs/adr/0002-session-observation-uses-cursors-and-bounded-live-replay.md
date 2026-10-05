@@ -20,6 +20,12 @@ Publication reserves a batch through `prepare_publication`, installs the authori
 
 At the runtime subscription boundary, a revision behind the authoritative observation requires a replayed `Committed` event bridging to that revision. Auxiliary events are insufficient evidence. Without the bridge the result is `Gap(Unavailable)`.
 
+### The session feed is anchored on the durable head (FIG-5090)
+
+The facade's feed (`ObservableSession::snapshot`, `subscribe_and_recover`, and the recoverable-chat verbs over them) takes its authority from the session's durable head, not from the observing handle's resident runtime. `snapshot().await` reads the head, adopts it into the resident runtime unless a run holds it, and returns the head's read view with a cursor bound to its revision; when a run holds the resident, the read view comes from the store. The sync resident snapshot is retired from the host API. A feed judges its cursor against the head read at subscribe time: a cursor past the head, or behind it without a replayed bridging `Committed`, is a gap, and every gap's replacement snapshot is the durable head. A feed drops a `Committed` at or below the revision its consumer already holds. An observer that never sends, or whose handle trails a commit another runtime published, therefore never regresses to an older snapshot. The raw cursor reads (`resume_from_cursor`, `subscribe_from_cursor`) still judge against the resident handle.
+
+`LiveReplayStore` is implementable outside lash: `LiveReplaySubscription::new(replay, live)` builds a subscription from the replayed prefix and any stream of later events, and the trait documents the cursor contract (incarnation as publisher epoch, ordered and exclusive replay, typed gaps, current cursors behind newer revisions). The `live_replay_tests!` conformance catalogue certifies an implementation, including a multi-session burst with no loss, reordering or duplicate. The in-memory store stays the default and holds one process's publications; a host whose sessions run on several processes supplies one shared store, and the snapshot is the durable head either way.
+
 ## Consequences
 
 Turn streams and `TurnOutput.activities` are convenience APIs. Reconnect uses session observation. The remote protocol carries its observation DTOs and opaque cursor rather than a full read view; per-stream activity sequence numbers provide ordering only. Custom live replay stores implement reservation, abandonment and ordered publication themselves.

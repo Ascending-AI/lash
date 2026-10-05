@@ -1562,6 +1562,7 @@ macro_rules! live_replay_tests {
     ($fixture:block) => {
         $crate::live_replay_tests!(@catalogue $fixture; [
             (live_replay_store, "live-replay", plain),
+            (live_replay_store_burst, "live-replay-burst", plain),
             (live_replay_store_capacity_trim, "live-replay-capacity", capacity),
             (live_replay_store_ttl_trim, "live-replay-ttl", ttl),
             (incarnation_change_invalidates_cursor, "live-replay-incarnation", incarnation),

@@ -235,7 +235,10 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
             .expect("configure provider-specific model");
 
         let observable = session.observe();
-        let initial = observable.recoverable_chat_snapshot();
+        let initial = observable
+            .recoverable_chat_snapshot()
+            .await
+            .expect("durable snapshot");
         let remote_cursor =
             lash::remote::observations::RemoteSessionCursor::new(initial.cursor.to_string());
         let mut observation_recovery = observable

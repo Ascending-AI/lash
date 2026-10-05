@@ -71,7 +71,12 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         // The engine admits none of the batches while the test lists and
         // controls them.
         let _hold = double.hold_session_shift(&session_id).await;
-        let cursor = session.observe().current_observation().cursor;
+        let cursor = session
+            .observe()
+            .snapshot()
+            .await
+            .expect("durable snapshot")
+            .cursor;
         store_factory
             .admit_session(&lash::persistence::SessionStoreCreateRequest {
                 owning_process_id: None,

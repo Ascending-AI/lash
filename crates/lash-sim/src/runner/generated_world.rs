@@ -948,8 +948,7 @@ impl GeneratedRuntimeWorld {
             .get("turn_index")
             .and_then(Value::as_u64)
             .unwrap_or(1) as usize;
-        let observation = runtime_session.session.observe().current_observation();
-        let read_view = observation.read_view;
+        let read_view = runtime_session.session.observe().read_view();
         let graph_node_count = read_view.session_graph().nodes.len();
         let transcript_message_count = read_view.messages().len();
         let graph_non_empty = graph_node_count > 0;

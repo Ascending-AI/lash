@@ -8,6 +8,43 @@ fn workbench_restate_namespace() -> AnyhowResult<lash::restate::RestateNamespace
         .unwrap_or_default())
 }
 
+/// The environment variable naming the live replay store the workbench's
+/// core publishes observation events to and its session feeds tail.
+pub(crate) const LIVE_REPLAY_STORE_ENV: &str = "AGENT_WORKBENCH_LIVE_REPLAY_STORE";
+
+/// The live replay store a workbench core runs on (FIG-5090). The feed's
+/// snapshot is the durable head whichever is selected; the store decides
+/// which processes' events reach a feed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorkbenchLiveReplay {
+    /// The process-local in-memory store, the default: one workbench
+    /// process serves its own sessions' events.
+    Memory,
+}
+
+impl WorkbenchLiveReplay {
+    /// The selection [`LIVE_REPLAY_STORE_ENV`] names; unset or blank is
+    /// [`Self::Memory`].
+    pub(crate) fn from_environment() -> AnyhowResult<Self> {
+        Self::named(std::env::var(LIVE_REPLAY_STORE_ENV).ok().as_deref())
+    }
+
+    fn named(name: Option<&str>) -> AnyhowResult<Self> {
+        match name.map(str::trim).filter(|name| !name.is_empty()) {
+            None | Some("memory") => Ok(Self::Memory),
+            Some(other) => Err(anyhow!(
+                "{LIVE_REPLAY_STORE_ENV}=`{other}` names no live replay store; expected `memory`"
+            )),
+        }
+    }
+
+    fn store(self) -> Arc<dyn lash::observe::LiveReplayStore> {
+        match self {
+            Self::Memory => Arc::new(lash::observe::InMemoryLiveReplayStore::default()),
+        }
+    }
+}
+
 /// Outer bound on one workbench turn: how many model calls a single send may
 /// spend. Generous, because a real workbench task legitimately takes many
 /// steps; finite, because no send should be able to run forever.
@@ -157,7 +194,8 @@ async fn workbench_core_builder(
         }
     }
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024));
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .live_replay_store(WorkbenchLiveReplay::from_environment()?.store());
     if let Some(tool_provider) = tool_provider {
         builder = builder.tools(tool_provider);
     }

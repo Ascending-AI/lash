@@ -80,7 +80,12 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
         .await
         .open()
         .await?;
-    let cursor = session.observe().current_remote_observation().cursor;
+    let cursor = session
+        .observe()
+        .remote_snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let empty_admission = session
         .durable()
         .send(TurnInput::text(""))
@@ -175,7 +180,12 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         .await
         .open()
         .await?;
-    let stale_cursor = session.observe().current_remote_observation().cursor;
+    let stale_cursor = session
+        .observe()
+        .remote_snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let admission = session
         .durable()
         .send(TurnInput::text("survives replay gap"))

@@ -295,5 +295,6 @@ impl ToolProvider for BlockingAppTools {
 mod builders_and_queue;
 mod control_and_cancel;
 mod observations;
+mod replica_feed;
 mod rlm_processes;
 mod rlm_streaming;

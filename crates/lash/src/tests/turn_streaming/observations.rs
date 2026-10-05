@@ -771,7 +771,12 @@ pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_t
         .await
         .open()
         .await?;
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
 
     session
         .send(TurnInput::text("identify this turn"))
@@ -841,7 +846,12 @@ pub(super) async fn session_observation_recovery_stream_replays_buffered_events_
         .await
         .open()
         .await?;
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
 
     session
         .send(TurnInput::text("first recovered"))
@@ -902,13 +912,22 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
         .await
         .open()
         .await?;
-    let stale_cursor = session.observe().current_observation().cursor;
+    let stale_cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
 
     session
         .send(TurnInput::text("install replacement projection"))
         .output()
         .await?;
-    let installed_projection = session.observe().current_observation();
+    let installed_projection = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot");
     session.observe().runtime.record_queue_changed(
         lash_core::SessionQueueEventKind::Enqueued,
         vec!["unseen-batch".to_string()],
@@ -1063,7 +1082,11 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
         .await
         .open()
         .await?;
-    let before = session.observe().current_observation();
+    let before = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot");
 
     let output = session
         .send(TurnInput::text("commit despite replay failure"))
@@ -1121,7 +1144,12 @@ pub(super) async fn idle_session_reconnect_after_failed_append_yields_gap_withou
         .await
         .open()
         .await?;
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
 
     session
         .send(TurnInput::text("commit before becoming idle"))
@@ -1161,7 +1189,11 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
             .build(crate::testing::runtime_lease_owner())?;
         let session_id = SessionId::fixture(format!("two-histories-{boundary:?}"));
         let session = core.session(session_id).created().await.open().await?;
-        let before = session.observe().recoverable_chat_snapshot();
+        let before = session
+            .observe()
+            .recoverable_chat_snapshot()
+            .await
+            .expect("durable snapshot");
         let turn_session = session.clone();
         let turn = tokio::spawn(async move {
             turn_session
@@ -1192,18 +1224,18 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
             boundary == PublicationBoundary::BeforeNotification,
             "{boundary:?}: only the pre-notification cut may expose the batch to replay"
         );
-        let snapshot = session.observe().recoverable_chat_snapshot();
+        let snapshot = session
+            .observe()
+            .recoverable_chat_snapshot()
+            .await
+            .expect("durable snapshot");
         let snapshot_is_new =
             snapshot.read_view.messages().iter().any(|message| {
                 crate::message_text(message).contains("exactly once across the cut")
             });
-        assert_eq!(
+        assert!(
             snapshot_is_new,
-            matches!(
-                boundary,
-                PublicationBoundary::AfterInstall | PublicationBoundary::BeforeNotification
-            ),
-            "{boundary:?}: projection installation must divide the two allowed histories"
+            "{boundary:?}: the snapshot is the durable head, which commits before it publishes"
         );
         let mut stream = session
             .observe()
@@ -1211,34 +1243,12 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
         replay_store.release_commit_install();
         turn.await.expect("join publishing turn")?;
 
-        if snapshot_is_new {
-            assert!(
-                tokio::time::timeout(std::time::Duration::from_millis(50), stream.next())
-                    .await
-                    .is_err(),
-                "{boundary:?}: a new snapshot must not redeliver its reserved publication"
-            );
-        } else {
-            let mut replacements = 0;
-            tokio::time::timeout(std::time::Duration::from_secs(2), async {
-                while let Some(update) = stream.next().await {
-                    if matches!(
-                        update?,
-                        crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { .. }
-                    ) {
-                        replacements += 1;
-                        break;
-                    }
-                }
-                Ok::<_, crate::EmbedError>(())
-            })
-            .await
-            .expect("old snapshot did not receive its complete publication")?;
-            assert_eq!(
-                replacements, 1,
-                "{boundary:?}: an old snapshot must receive the batch exactly once"
-            );
-        }
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), stream.next())
+                .await
+                .is_err(),
+            "{boundary:?}: a snapshot of the durable head must not redeliver its publication"
+        );
     }
     Ok(())
 }
@@ -1271,7 +1281,12 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
         .await
         .open()
         .await?;
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let SessionObservationSubscription::Subscribed(mut subscription) =
         session.observe().subscribe_from_cursor(&cursor)?
     else {
@@ -1286,7 +1301,11 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
             .await
     });
     replay_store.wait_for_commit_append().await;
-    let installed_before_notification = session.observe().current_observation();
+    let installed_before_notification = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot");
     let committed_escaped = tokio::time::timeout(std::time::Duration::from_millis(25), async {
         loop {
             let event = subscription
@@ -1318,7 +1337,11 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
             break event;
         }
     };
-    let projection_at_notification = session.observe().current_observation();
+    let projection_at_notification = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot");
     turn.await.expect("join publishing turn")?;
 
     assert_eq!(installed_before_notification.read_view.turn_index(), 1);
@@ -1353,7 +1376,11 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
             .await;
     });
     replay_store.wait_for_commit_append().await;
-    let installed_resident = session.observe().current_observation();
+    let installed_resident = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot");
     assert_eq!(
         installed_resident.read_view.turn_index(),
         projection_at_notification.read_view.turn_index(),
@@ -1383,7 +1410,12 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
         lash_core::SessionObservationEventPayload::ResidentChanged { .. }
     ));
     assert_eq!(
-        session.observe().current_observation().cursor,
+        session
+            .observe()
+            .snapshot()
+            .await
+            .expect("durable snapshot")
+            .cursor,
         resident_event.cursor,
         "a resident notification must observe its installed projection"
     );
@@ -1402,7 +1434,11 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
         .await
         .open()
         .await?;
-    let initial = session.observe().current_observation();
+    let initial = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot");
 
     session
         .send(TurnInput::text("durable transition"))
@@ -1640,7 +1676,12 @@ pub(super) async fn recoverable_chat_conformance_deduplicates_redelivery_identit
         .await
         .open()
         .await?;
-    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    let cursor = session
+        .observe()
+        .recoverable_chat_snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     session
         .send(TurnInput::text("redelivery identity"))
         .id(crate::TurnId::parse("recoverable-redelivery-turn").expect("nonblank host identity"))
@@ -1707,7 +1748,12 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         .await
         .open()
         .await?;
-    let initial_cursor = first_session.observe().recoverable_chat_snapshot().cursor;
+    let initial_cursor = first_session
+        .observe()
+        .recoverable_chat_snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     first_session.observe().runtime.record_turn_activity(
         Some(&TurnId::from("before-restart-turn")),
         TurnActivity::independent(TurnEvent::AssistantProseDelta {
@@ -1739,7 +1785,12 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         .await
         .open()
         .await?;
-    let restarted_at = second_session.observe().recoverable_chat_snapshot().cursor;
+    let restarted_at = second_session
+        .observe()
+        .recoverable_chat_snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let mut retained_applied_ids = second_session
         .observe()
         .subscribe_recoverable_chat(restarted_at)
@@ -1828,7 +1879,12 @@ pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() ->
         .await
         .open()
         .await?;
-    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    let cursor = session
+        .observe()
+        .recoverable_chat_snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     session
         .send(TurnInput::text("trim the initial cursor"))
         .output()
@@ -1895,16 +1951,24 @@ pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues
         .await
         .open()
         .await?;
-    let cursor = session.observe().current_observation().cursor;
+    let cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let mut stream = session.observe().subscribe_and_recover(cursor);
-    assert!(
-        futures_util::poll!(stream.next()).is_pending(),
-        "the initial poll must wait for a live event"
-    );
-    assert!(
-        stream.live_receiver_installed(),
-        "live receiver installation acknowledged"
-    );
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while !stream.live_receiver_installed() {
+            assert!(
+                futures_util::poll!(stream.next()).is_pending(),
+                "the initial poll must wait for a live event"
+            );
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("live receiver installation acknowledged");
 
     for text in ["lag one", "lag two", "lag three"] {
         session.observe().runtime.record_turn_activity(
@@ -1988,7 +2052,12 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
         .await
         .open()
         .await?;
-    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    let cursor = session
+        .observe()
+        .recoverable_chat_snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let stream = session.observe().subscribe_recoverable_chat(cursor);
     let run_session = session.clone();
     let mut turn = tokio::spawn(async move {

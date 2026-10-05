@@ -28,15 +28,31 @@ async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_re
         .await
         .expect("open remote recovery facade session");
     let observable = session.observe();
-    let current = observable.current_remote_observation();
+    let current = observable
+        .remote_snapshot()
+        .await
+        .expect("durable snapshot");
     assert_eq!(current.session_id, "workbench-remote-recovery-facades");
     // Core observations stay bare; only standalone wire messages are enveloped.
-    assert_eq!(observable.current_remote_observation(), current);
+    assert_eq!(
+        observable
+            .remote_snapshot()
+            .await
+            .expect("durable snapshot"),
+        current
+    );
 
-    let snapshot = observable.recoverable_chat_snapshot();
+    let snapshot = observable
+        .recoverable_chat_snapshot()
+        .await
+        .expect("durable snapshot");
     assert_eq!(snapshot.read_view.session_id(), current.session_id);
     assert_eq!(
-        observable.recoverable_chat_snapshot().cursor,
+        observable
+            .recoverable_chat_snapshot()
+            .await
+            .expect("durable snapshot")
+            .cursor,
         snapshot.cursor
     );
     let remote_cursor =

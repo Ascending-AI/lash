@@ -34,7 +34,11 @@ async fn invalidated_live_observation_recovers_with_an_authoritative_snapshot() 
         .send(TurnInput::text("durable before the gap"))
         .output()
         .await?;
-    let before = session.observe().current_observation();
+    let before = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot");
     let mut stream = session
         .observe()
         .subscribe_and_recover(before.cursor.clone());
@@ -115,7 +119,12 @@ async fn a_disconnected_host_reconciles_a_failed_turn_after_live_replay_trims() 
         .await
         .open()
         .await?;
-    let live_cursor = session.observe().current_observation().cursor;
+    let live_cursor = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot")
+        .cursor;
     let result = session
         .send(TurnInput::text("fail unattended"))
         .output()

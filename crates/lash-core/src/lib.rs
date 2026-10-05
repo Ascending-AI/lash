@@ -314,6 +314,7 @@ pub mod facade_support {
     pub use crate::runtime::SessionObservationSubscription;
     pub use crate::runtime::SessionResume;
     pub use crate::runtime::SessionScopeId;
+    pub use crate::runtime::load_durable_observation_head;
 
     pub use crate::runtime::SystemClock;
     pub use crate::runtime::TerminationPolicy;
