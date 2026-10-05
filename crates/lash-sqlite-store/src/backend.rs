@@ -256,7 +256,7 @@ impl SqliteStoreSet {
         .with_wake_delivery_config(options.wake_delivery)
         .with_process_id_mint_for_testing(options.process_id_mint.clone());
         crate::lifecycle::attach_process_registry(
-            &process_env_store.conn,
+            &mut process_env_store.conn,
             registry.target(),
             options.store.connection_policy,
         )

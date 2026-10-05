@@ -191,11 +191,11 @@ impl SqliteStore {
         #[cfg(feature = "testing")] pauses: Option<crate::testing::SqlitePauses>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
-        let conn =
+        let mut conn =
             SqliteConnection::open_with_pauses(core.target(), options.connection_policy, pauses)
                 .await?;
         #[cfg(not(feature = "testing"))]
-        let conn =
+        let mut conn =
             SqliteConnection::open_with_policy(core.target(), options.connection_policy).await?;
         crate::schema::ensure_versioned_schema_with_writable(
             &conn,
@@ -204,7 +204,7 @@ impl SqliteStore {
         )
         .await?;
         if let Some(process_registry) = process_registry {
-            attach_process_registry(&conn, process_registry, options.connection_policy).await?;
+            attach_process_registry(&mut conn, process_registry, options.connection_policy).await?;
         }
         let mut readers = Vec::with_capacity(options.connection_policy.read_connections.get());
         for _ in 0..options.connection_policy.read_connections.get() {
@@ -341,7 +341,7 @@ impl SqliteStore {
 /// being created (version 0, no tables) is waited for up to the connection's
 /// busy timeout.
 pub(crate) async fn attach_process_registry(
-    conn: &SqliteConnection,
+    conn: &mut SqliteConnection,
     process_registry: &DatabaseTarget,
     policy: SqliteConnectionPolicy,
 ) -> rusqlite::Result<()> {
@@ -353,13 +353,12 @@ pub(crate) async fn attach_process_registry(
             )),
         ));
     }
-    let name = process_registry.open_name();
+    conn.attach(
+        crate::connection_sql::ATTACH_PROCESS_REGISTRY,
+        process_registry,
+    )
+    .await?;
     conn.call(move |conn| {
-        crate::conn::cached_execute(
-            conn,
-            crate::connection_sql::ATTACH_PROCESS_REGISTRY,
-            params![name],
-        )?;
         let deadline = std::time::Instant::now() + policy.busy_timeout;
         loop {
             let has_processes = conn

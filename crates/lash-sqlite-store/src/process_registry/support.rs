@@ -384,19 +384,11 @@ impl SqliteProcessRegistry {
 
     /// Attach the durable core so pruning arms its referrer fence atomically.
     pub(crate) async fn with_attached_durable_core(
-        self,
+        mut self,
         core: &DatabaseLocation,
     ) -> tokio_rusqlite::Result<Self> {
-        let name = core.target().open_name();
         self.conn
-            .call(move |conn| {
-                crate::conn::cached_execute(
-                    conn,
-                    crate::connection_sql::ATTACH_DURABLE_CORE,
-                    params![name],
-                )
-                .map(|_| ())
-            })
+            .attach(crate::connection_sql::ATTACH_DURABLE_CORE, core.target())
             .await?;
         Ok(self)
     }
@@ -408,16 +400,11 @@ impl SqliteProcessRegistry {
         mut self,
         triggers: &DatabaseLocation,
     ) -> tokio_rusqlite::Result<Self> {
-        let name = triggers.target().open_name();
         self.conn
-            .call(move |conn| {
-                crate::conn::cached_execute(
-                    conn,
-                    crate::connection_sql::ATTACH_TRIGGER_STORE,
-                    params![name],
-                )
-                .map(|_| ())
-            })
+            .attach(
+                crate::connection_sql::ATTACH_TRIGGER_STORE,
+                triggers.target(),
+            )
             .await?;
         self.trigger_delivery_bindings = super::TriggerDeliveryBindings::Attached;
         Ok(self)
