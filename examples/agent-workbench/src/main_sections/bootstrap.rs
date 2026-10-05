@@ -348,6 +348,19 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .ok()
         .filter(|value| !value.trim().is_empty());
     let stores = WorkbenchStores::open(&data_dir, database_url.as_deref()).await?;
+    #[cfg(feature = "e2e-tools")]
+    let stores = match tool_fixture
+        .as_ref()
+        .map(|fixture| fixture.receiver_hold())
+        .transpose()?
+        .flatten()
+    {
+        Some(hold) => WorkbenchStores {
+            backend: stores.backend,
+            stores: crate::e2e_receiver_hold::hold_stores(stores.stores, hold),
+        },
+        None => stores,
+    };
     eprintln!("agent-workbench durable store: {}", stores.backend);
     let core_store_factory = stores.stores.session_store_factory();
     let trigger_store = stores.stores.trigger_store();

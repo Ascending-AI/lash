@@ -895,7 +895,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending product fix and rerun: FIG-4983 reruns cancel::s09_after_intent after FIG-4977 (nested intent replay).",
+          "hold_reason": "Product red on rerun (FIG-4983): after cancel and kill at the intent-to-V cut, cold replay hits RT0016 at the V schedule await before the nested process-emit-event Run; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1022,7 +1022,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending fixture fix and rerun: FIG-4983 owns cancel::s10_empty_middle_rank (hold placement) after FIG-4977.",
+          "hold_reason": "Red on rerun (FIG-4983): the receiver-append hold and rank2 D seat engage, but the unrelated-progress oracle finds no durable_wait_resolved timer trace; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1049,7 +1049,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending fixture fix and rerun: FIG-4983 owns cancel::s10_empty_middle_rank (hold placement) after FIG-4977.",
+          "hold_reason": "Missing replay oracle: cancel::s10_empty_middle_rank exercises the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1076,7 +1076,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending fixture fix and rerun: FIG-4983 owns cancel::s10_empty_middle_rank (hold placement) after FIG-4977.",
+          "hold_reason": "Missing PostgreSQL oracle: cancel::s10_empty_middle_rank exercises the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1103,7 +1103,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending fixture fix and rerun: FIG-4983 owns cancel::s10_empty_middle_rank (hold placement) after FIG-4977.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: cancel::s10_empty_middle_rank exercises the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -1149,7 +1149,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending rerun: FIG-4983 reruns cancel::s11_inline_loser and cancel::s11_deferred_loser after FIG-4976.",
+          "hold_reason": "Product red on rerun (FIG-4983): the predecessor Run never observes the accepted generation drain (no CutChecked), so finish closes it and cancels the live loser; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1176,7 +1176,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending rerun: FIG-4983 reruns cancel::s11_inline_loser and cancel::s11_deferred_loser after FIG-4976.",
+          "hold_reason": "Missing replay oracle: cancel::s11_inline_loser and cancel::s11_deferred_loser exercise the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1203,7 +1203,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending rerun: FIG-4983 reruns cancel::s11_inline_loser and cancel::s11_deferred_loser after FIG-4976.",
+          "hold_reason": "Missing PostgreSQL oracle: cancel::s11_inline_loser and cancel::s11_deferred_loser exercise the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1230,7 +1230,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Pending rerun: FIG-4983 reruns cancel::s11_inline_loser and cancel::s11_deferred_loser after FIG-4976.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: cancel::s11_inline_loser and cancel::s11_deferred_loser exercise the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         }
       ],

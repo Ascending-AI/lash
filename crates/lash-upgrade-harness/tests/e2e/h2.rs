@@ -112,6 +112,12 @@ impl Row {
             Self::PreFinal | Self::BeforeIntent | Self::AfterIntent | Self::Ranks
         )
     }
+    // S10 holds rank1's declaration at the receiver's event append instead of
+    // on the wire: a proxy hold would head-of-line block the shared
+    // invocation stream, so no later Run record of rank2 could be journaled.
+    fn receiver_holds_declarations(self) -> bool {
+        matches!(self, Self::Ranks)
+    }
 }
 
 pub(super) struct Shared {
@@ -960,10 +966,9 @@ impl Control for Controller {
                         })?;
                 }
                 if let ToolControl::Hold(barrier) = &command
-                    && matches!(
-                        barrier.kind,
-                        BarrierKind::DeclarationIssued | BarrierKind::VProposed
-                    )
+                    && (barrier.kind == BarrierKind::VProposed
+                        || (barrier.kind == BarrierKind::DeclarationIssued
+                            && !self.shared.row.receiver_holds_declarations()))
                 {
                     self.shared.proxy.lock().await.arm_cut(TransportCut {
                         proposal: barrier.clone(),
@@ -1020,7 +1025,8 @@ pub async fn run(row: Row) -> Result<()> {
     let delivery = lease.directory.join("tool-deliveries.jsonl");
     let fixture = json!({"scenario":row.id(), "delivery_ledger":delivery,
         "provider_ledger":lease.directory.join("provider.jsonl"), "body_callback_url":callbacks.endpoint,
-        "deferred_loser":matches!(row,Row::DeferredLoser | Row::PublicationCrash)});
+        "deferred_loser":matches!(row,Row::DeferredLoser | Row::PublicationCrash),
+        "receiver_hold":row.receiver_holds_declarations()});
     let protocol =
         if matches!(row, Row::Ranks | Row::InlineLoser | Row::DeferredLoser) || row.transfers() {
             "rlm"

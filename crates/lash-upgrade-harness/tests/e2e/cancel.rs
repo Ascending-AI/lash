@@ -3,7 +3,7 @@ use super::tools::{
     Scenario, assert_body_identity, assert_call, assert_durable_prefix, attempts, calls,
     deliveries, events,
 };
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{Context, Result, anyhow, ensure};
 use lash_core::ToolCallId;
 use lash_core::tool_run::{AttemptResult, CallDecision, LogicalTerminal, RunEvent, RunLifecycle};
 use lash_remote_protocol::RemoteTurnStatus;
@@ -293,8 +293,9 @@ pub async fn empty_middle_rank(scenario: &mut Scenario<'_>, spec: &CaseSpec) -> 
     scenario
         .release(scenario.barrier(two, BarrierKind::BodyEntered)?)
         .await?;
+    // K3/L18: an intent-free final seats at its D; its V follows rank order.
     let cut = scenario
-        .wait(scenario.barrier(two, BarrierKind::VDurable)?)
+        .wait(scenario.barrier(two, BarrierKind::DDurable)?)
         .await?;
     let before = scenario.read().await?;
     ensure!(
@@ -306,6 +307,8 @@ pub async fn empty_middle_rank(scenario: &mut Scenario<'_>, spec: &CaseSpec) -> 
         RunEvent::DeclarationsSettled {call_id} if call_id==one)),
         "rank1 already seated at cut"
     );
+    phase_position(&before, one, "issued")
+        .context("rank1's declarations were not durable while its receiver held")?;
     ensure!(
         before.effects.iter().any(|effect| {
             effect["kind"] == "h2_trace_record"

@@ -3,6 +3,8 @@ mod e2e_operation;
 #[cfg(feature = "e2e-tools")]
 mod e2e_receiver;
 #[cfg(feature = "e2e-tools")]
+mod e2e_receiver_hold;
+#[cfg(feature = "e2e-tools")]
 #[path = "../../shared/h2_fixture.rs"]
 mod e2e_tools;
 #[path = "../../shared/ndjson.rs"]
