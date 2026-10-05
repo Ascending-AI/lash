@@ -239,31 +239,32 @@ impl<'run> RuntimeExecutionContext<'run> {
                 materials.clone(),
                 environment.clone(),
             ));
-            let mut run = state
-                .adopt_run(
-                    &scoped,
-                    owner,
-                    segment,
-                    available,
-                    handlers.clone(),
-                    self.dispatch.clock.as_ref(),
-                )
-                .await
-                .map_err(SingletonRunError::into_controller_error)?
-                .with_admitted_environment(environment)
-                .with_generation_cuts(
-                    scoped.controller().hands_over_turns()
-                        && (self.turn_hands_over() || self.process_id().is_some()),
-                );
+            let mut run = Box::pin(state.adopt_run(
+                &scoped,
+                owner,
+                segment,
+                available,
+                handlers.clone(),
+                self.dispatch.clock.as_ref(),
+            ))
+            .await
+            .map_err(SingletonRunError::into_controller_error)?
+            .with_admitted_environment(environment)
+            .with_generation_cuts(
+                scoped.controller().hands_over_turns()
+                    && (self.turn_hands_over() || self.process_id().is_some()),
+            );
             let bodies = run.bodies();
             let (send, mut receive) = channel();
             let mut context = self.clone();
             context.tool_run = Some(ToolRunChannel(send));
-            let future = program(context);
-            tokio::pin!(future);
+            // Scoped controllers keep this owner and its program on one task.
+            // Heap the program and coordinator futures so nested child turns
+            // do not retain their largest polling states in the owner's frame.
+            let mut future = Box::pin(program(context));
             let mut closed = false;
             bodies
-                .beside(async {
+                .beside(Box::pin(async {
                     loop {
                         // Bodies of issued X progress beside the program and
                         // every request; their results are awaited only inside
@@ -282,15 +283,14 @@ impl<'run> RuntimeExecutionContext<'run> {
                                 }),
                                 _,
                             )) => {
-                                let result = handlers
-                                    .admit_aggregate(
-                                        &mut run,
-                                        request,
-                                        parent.map(|parent| *parent),
-                                        *environment,
-                                        *attribution,
-                                    )
-                                    .await;
+                                let result = Box::pin(handlers.admit_aggregate(
+                                    &mut run,
+                                    request,
+                                    parent.map(|parent| *parent),
+                                    *environment,
+                                    *attribution,
+                                ))
+                                .await;
                                 let _ = reply.send(cut_reply(result));
                             }
                             Either::Right((
@@ -303,28 +303,32 @@ impl<'run> RuntimeExecutionContext<'run> {
                                 }),
                                 _,
                             )) => {
-                                let result = handlers
-                                    .consume_aggregate(
-                                        &mut run,
-                                        cursor,
-                                        consumer,
-                                        wait,
-                                        host_control,
-                                    )
-                                    .await;
+                                let result = Box::pin(handlers.consume_aggregate(
+                                    &mut run,
+                                    cursor,
+                                    consumer,
+                                    wait,
+                                    host_control,
+                                ))
+                                .await;
                                 let _ = reply.send(cut_reply(result));
                             }
                             Either::Right((Some(Request::Capture { reason, reply }), _)) => {
                                 let result = match materials.as_deref() {
                                     Some(materials) => {
-                                        state.capture_run(&mut run, reason, materials).await
+                                        Box::pin(state.capture_run(&mut run, reason, materials))
+                                            .await
                                     }
                                     None => Err(ContinuationRefusal::UnretainedMaterial.into()),
                                 };
                                 let _ = reply.send(cut_reply(result));
                             }
                             Either::Right((Some(Request::Close(reply)), _)) => {
-                                let result = if closed { Ok(()) } else { run.close().await };
+                                let result = if closed {
+                                    Ok(())
+                                } else {
+                                    Box::pin(run.close()).await
+                                };
                                 closed = result.is_ok();
                                 if result.is_ok() {
                                     state.finish_run();
@@ -334,7 +338,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                             Either::Right((None, _)) => break Err(owner_gone()),
                         }
                     }
-                })
+                }))
                 .await
         })
     }

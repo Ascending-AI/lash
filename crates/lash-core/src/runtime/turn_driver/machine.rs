@@ -129,6 +129,9 @@ impl RuntimeTurnDriver<'_> {
         event_tx: TurnObserver,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
+        // A scoped child turn polls on its workflow handler's stack. Keep
+        // effect-handler futures on the heap so this dispatch loop does not
+        // reserve the largest handler in every nested polling frame.
         self.resume_suspended_cell(&mut machine)?;
         loop {
             let Some(effect) = machine.poll_effect() else {
@@ -156,8 +159,12 @@ impl RuntimeTurnDriver<'_> {
                     event_delta,
                     protocol_iteration,
                 } => {
-                    self.apply_progress_boundary(messages, event_delta, protocol_iteration)
-                        .await?
+                    Box::pin(self.apply_progress_boundary(
+                        messages,
+                        event_delta,
+                        protocol_iteration,
+                    ))
+                    .await?
                 }
                 Effect::Done {
                     messages,
@@ -179,50 +186,65 @@ impl RuntimeTurnDriver<'_> {
                     }
                     self.protocol_reply
                         .mark_model_call(machine.messages().iter());
-                    self.handle_llm_call_effect(&mut machine, id, request, &event_tx)
+                    Box::pin(self.handle_llm_call_effect(&mut machine, id, request, &event_tx))
                         .await?;
                 }
                 Effect::Checkpoint { id, checkpoint } => {
-                    self.handle_checkpoint_effect(&mut machine, id, checkpoint, &event_tx)
-                        .await?;
+                    Box::pin(self.handle_checkpoint_effect(
+                        &mut machine,
+                        id,
+                        checkpoint,
+                        &event_tx,
+                    ))
+                    .await?;
                 }
                 Effect::SyncExecutionEnvironment { id } => {
-                    self.handle_execution_environment_sync_effect(&mut machine, id, &event_tx)
-                        .await?;
+                    Box::pin(self.handle_execution_environment_sync_effect(
+                        &mut machine,
+                        id,
+                        &event_tx,
+                    ))
+                    .await?;
                 }
                 Effect::ToolCalls { id, calls, .. } => {
-                    self.handle_tool_calls_effect(&mut machine, id, calls, &event_tx, run_offset)
-                        .await?;
+                    Box::pin(self.handle_tool_calls_effect(
+                        &mut machine,
+                        id,
+                        calls,
+                        &event_tx,
+                        run_offset,
+                    ))
+                    .await?;
                 }
                 Effect::AwaitToolResults { id, state } => {
-                    self.handle_await_tool_results_effect(
+                    Box::pin(self.handle_await_tool_results_effect(
                         &mut machine,
                         id,
                         state,
                         run_offset,
                         &event_tx,
-                    )
+                    ))
                     .await?;
                 }
                 Effect::ReportToolCalls { completed } => {
-                    self.report_undispatched_turn_tool_calls(
+                    Box::pin(self.report_undispatched_turn_tool_calls(
                         completed,
                         machine.protocol_iteration(),
                         &event_tx,
-                    )
+                    ))
                     .await?;
                 }
                 Effect::Log { event } => self.handle_log_event(event),
                 Effect::ExecCode { id, language, code } => {
                     self.recorded_assembly.note_code_execution();
-                    self.handle_exec_code_effect(
+                    Box::pin(self.handle_exec_code_effect(
                         &mut machine,
                         id,
                         language,
                         code,
                         run_offset,
                         &event_tx,
-                    )
+                    ))
                     .await?;
                 }
             }
