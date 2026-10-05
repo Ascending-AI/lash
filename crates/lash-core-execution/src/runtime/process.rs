@@ -31,6 +31,7 @@ mod testing;
 mod tests;
 mod validation;
 mod wake;
+mod worker_engine;
 
 pub use awaiter::{
     ProcessChangeHub, ProcessChangeSubscription, ProcessEventSink, ProcessEventSinkRegistration,
@@ -157,3 +158,4 @@ pub use wake::{
     ProcessWakeDeliveryRequest, process_wake_delivery, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text,
 };
+pub use worker_engine::{WorkerCommand, WorkerProcessEngine};

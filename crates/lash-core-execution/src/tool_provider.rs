@@ -15,11 +15,13 @@ use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome};
 mod attachments;
 mod completion_support;
 mod direct_completion;
+mod isolation;
 pub mod process_events;
 mod session;
 
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
+pub use isolation::{IsolatedProcessBinding, IsolatedProcessRequest};
 pub use session::ToolSessionLlmProfile;
 
 /// Integrator class 3 session reads available inside a recorded leaf attempt.
@@ -1387,9 +1389,10 @@ impl<'a> ToolCall<'a> {
 /// capabilities it was admitted with, whatever the provider answers now. An
 /// outcome the declaration does not admit — Deferred without `may_defer`, an
 /// undeclared intent kind — is refused before anything it declares is
-/// realized. No isolated declaration is supported until a process
-/// implementation is bound to it; one refuses at admission, before any body
-/// runs.
+/// realized. An isolated call is bound by its provider's
+/// [`isolated_process`](Self::isolated_process) to a registered process
+/// engine; one the provider does not bind refuses at admission, before any
+/// body runs.
 ///
 /// Lash contains an `execute` panic as a typed call failure. Containment does
 /// not establish that the host object's own interior-mutability state still
@@ -1450,6 +1453,17 @@ pub trait ToolProvider: Send + Sync + 'static {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome;
+    /// Bind an isolated call (its manifest declares `isolated`) to the
+    /// registered process engine that runs it. Admission asks once, before
+    /// any preparation, check or body, and records the answer; a replay or
+    /// recovery never asks again. `None`, the default, refuses the call at
+    /// admission: an isolated call never falls back to `execute`.
+    fn isolated_process(
+        &self,
+        _call: IsolatedProcessRequest<'_>,
+    ) -> Option<IsolatedProcessBinding> {
+        None
+    }
 }
 
 #[cfg(test)]

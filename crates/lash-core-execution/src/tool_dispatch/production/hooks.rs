@@ -121,6 +121,11 @@ impl ProductionToolHandlers<'_> {
         call_id: &crate::ToolCallId,
         capture: &SingletonCapture,
     ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
+        // An isolated call has no result candidate at D: its process has not
+        // launched yet, so no after-check sees it.
+        if matches!(capture, SingletonCapture::Isolated { .. }) {
+            return Ok(Vec::new());
+        }
         let captured: Captured = decode(capture.output().ok_or("final has no output")?)?;
         let prepared = self
             .prepared

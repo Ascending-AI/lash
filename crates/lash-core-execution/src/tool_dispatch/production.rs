@@ -27,6 +27,8 @@ pub(crate) struct ProductionToolHandlers<'run> {
     inline_stops: Mutex<BTreeMap<crate::ToolCallId, InlineStop>>,
     contributions: Mutex<BTreeMap<crate::ToolCallId, Vec<CheckContribution>>>,
     declarations: Mutex<BTreeMap<crate::ToolCallId, Vec<crate::ToolIntentExecutionOutcome>>>,
+    /// The process each admitted isolated call's provider bound it to.
+    isolated: Mutex<BTreeMap<crate::ToolCallId, IsolatedToolStart>>,
 }
 
 #[derive(Default)]
@@ -134,7 +136,53 @@ impl<'run> ProductionToolHandlers<'run> {
             inline_stops: Mutex::default(),
             contributions: Mutex::default(),
             declarations: Mutex::default(),
+            isolated: Mutex::default(),
         }
+    }
+    /// Ask an isolated call's executable provider which registered engine
+    /// runs it (D04). This selects data only: no preparation, hook or body
+    /// runs. The start is keyed by the call's Run owner and id.
+    pub(super) fn bind_isolated(
+        &self,
+        owner: &crate::EffectOpener,
+        call_id: &crate::ToolCallId,
+        tool_id: &crate::ToolId,
+        args: &serde_json::Value,
+        executable: &crate::plugin::PluginCallbackIdentity,
+    ) -> Option<IsolatedToolStart> {
+        let provider = self
+            .context
+            .dispatch()
+            .plugins
+            .resolve_context_tool_bindings(std::slice::from_ref(executable))
+            .ok()?
+            .pop()?;
+        let binding = provider.isolated_process(crate::IsolatedProcessRequest {
+            tool_id,
+            call_id,
+            args,
+        })?;
+        let provenance =
+            owner
+                .session_id()
+                .map_or_else(crate::ProcessProvenance::host, |session_id| {
+                    crate::ProcessProvenance::session(crate::SessionScope::new(session_id.clone()))
+                });
+        let registration = crate::ProcessStartRegistration::of_target(
+            crate::ProcessInput::Engine {
+                kind: binding.engine,
+                payload: binding.payload,
+            },
+            provenance,
+            crate::Lifetime::Detached,
+        )
+        .with_start_key(Some(
+            crate::StartKeyDerivation::LASH_START_PATHS.for_isolated_call(owner, call_id),
+        ));
+        Some(IsolatedToolStart {
+            boundary: binding.boundary,
+            registration,
+        })
     }
     fn cancel_inline_stop(&self, call_id: &crate::ToolCallId, accepted: bool) {
         let mut stops = self.inline_stops.lock_recover();
@@ -356,6 +404,9 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     }
     fn process_engines(&self) -> Option<&crate::ProcessEngineRegistry> {
         Some(&self.context.dispatch().process_engines)
+    }
+    fn isolated_start(&self, call: &SingletonToolCall) -> Option<IsolatedToolStart> {
+        self.isolated.lock_recover().get(&call.call_id).cloned()
     }
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
         let mut input = self

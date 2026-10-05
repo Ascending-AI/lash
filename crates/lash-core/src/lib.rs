@@ -779,9 +779,10 @@ pub use runtime::{
     TurnLaneAdmissionPolicy, TurnPrelude, WaitKind, WaitState, WakeDelivery,
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle,
     WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry,
-    WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, WorkerTerminationReceipt,
-    admit_session_state_generation, artifact_store_plugin_error, lifetime, mint_process_id,
-    park_turn_refused_by_generation, retry_cancel_watch, tool_failure_code,
+    WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, WorkerCommand,
+    WorkerProcessEngine, WorkerTerminationReceipt, admit_session_state_generation,
+    artifact_store_plugin_error, lifetime, mint_process_id, park_turn_refused_by_generation,
+    retry_cancel_watch, tool_failure_code,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
@@ -856,9 +857,10 @@ pub use tool_intent::{
 };
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
-    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolChildExecutionTraceHook,
-    ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, IsolatedProcessBinding,
+    IsolatedProcessRequest, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ToolCall,
+    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
+    ToolPrepareContext, ToolProvider,
 };
 #[doc(hidden)]
 pub mod core_internal {

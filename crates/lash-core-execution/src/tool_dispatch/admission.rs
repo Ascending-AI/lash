@@ -14,21 +14,19 @@
 
 use crate::{ToolAdmissionRefusal, ToolFailure, ToolFailureCause, ToolFailureClass, ToolManifest};
 
-/// Whether a process implementation is bound to run `manifest`'s tool
-/// isolated on this ordinary-body route. Process bindings are admitted by the
-/// Run coordinator; this route refuses them before an inline body can run.
-fn supports_isolation(_manifest: &ToolManifest) -> bool {
-    false
-}
-
-/// Admit one call under the manifest it is admitted under.
+/// Admit one call under the manifest it is admitted under. `isolation_bound`
+/// says whether its provider bound the call to a registered process engine
+/// (D04); an ordinary inline route never has one.
 ///
 /// # Errors
 ///
 /// An invalid declaration, or an isolated one no process implementation
 /// runs.
-pub(crate) fn admit_tool(manifest: &ToolManifest) -> Result<(), ToolAdmissionRefusal> {
-    manifest.declaration.admit(supports_isolation(manifest))
+pub(crate) fn admit_tool(
+    manifest: &ToolManifest,
+    isolation_bound: bool,
+) -> Result<(), ToolAdmissionRefusal> {
+    manifest.declaration.admit(isolation_bound)
 }
 
 /// The failure a call refused at admission answers with.
@@ -77,19 +75,21 @@ impl ToolRoundRefusal {
 }
 
 /// Admit a round's calls together, before any of them prepares or starts.
-/// `manifests` are the members' admitted manifests in source order; `None`
-/// is a member the catalog does not hold, which settles as its own failure
-/// and refuses nothing else.
+/// `members` are the members' admitted manifests in source order, each with
+/// whether its provider bound it to a process engine; `None` is a member the
+/// catalog does not hold, which settles as its own failure and refuses
+/// nothing else.
 ///
 /// # Errors
 ///
 /// The first refused member, which refuses the whole round.
 pub fn admit_tool_round<'a>(
-    manifests: impl IntoIterator<Item = Option<&'a ToolManifest>>,
+    members: impl IntoIterator<Item = Option<(&'a ToolManifest, bool)>>,
 ) -> Result<(), ToolRoundRefusal> {
-    for (member, manifest) in (0_u32..).zip(manifests) {
-        if let Some(manifest) = manifest {
-            admit_tool(manifest).map_err(|refusal| ToolRoundRefusal { member, refusal })?;
+    for (member, admitted) in (0_u32..).zip(members) {
+        if let Some((manifest, isolation_bound)) = admitted {
+            admit_tool(manifest, isolation_bound)
+                .map_err(|refusal| ToolRoundRefusal { member, refusal })?;
         }
     }
     Ok(())
@@ -122,7 +122,7 @@ mod tests {
                 ..ToolDeclaration::default()
             },
         );
-        let refused = admit_tool_round([Some(&plain), None, Some(&isolated)])
+        let refused = admit_tool_round([Some((&plain, false)), None, Some((&isolated, false))])
             .expect_err("an unsupported isolated member refuses its round");
         assert_eq!(
             refused.refusal_for(2),
@@ -144,7 +144,9 @@ mod tests {
                 refusal: ToolAdmissionRefusal::Sibling { member: 2 }
             })
         );
-        admit_tool_round([Some(&plain), None]).expect("a valid round is admitted");
+        admit_tool_round([Some((&plain, false)), None]).expect("a valid round is admitted");
+        admit_tool_round([Some((&plain, false)), Some((&isolated, true))])
+            .expect("a bound isolated member is admitted");
     }
 
     #[test]
@@ -158,7 +160,7 @@ mod tests {
             },
         );
         assert_eq!(
-            admit_tool(&invalid),
+            admit_tool(&invalid, true),
             Err(ToolAdmissionRefusal::Declaration {
                 cause: crate::DeclarationRefusal::IsolatedInlineCapability
             })

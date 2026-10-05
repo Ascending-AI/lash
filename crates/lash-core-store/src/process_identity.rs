@@ -131,7 +131,7 @@ const START_KEY_PREFIX: &str = "process-start-key";
 ///     roots(StartKeyNamespace),
 ///     items(
 ///         START_KEY_DOMAIN, START_KEY_PREFIX, derive, for_tool_intent, for_trigger_delivery,
-///         for_host, for_keyless_host, write_scope,
+///         for_host, for_keyless_host, for_isolated_call, write_scope,
 ///     ),
 /// )
 /// version_surface = "coexist"
@@ -153,14 +153,17 @@ enum StartKeyNamespace {
     Host,
     /// The nth keyless host start of one admitted scope.
     KeylessHost,
+    /// The one process start of an isolated tool call.
+    IsolatedCall,
 }
 
 impl StartKeyNamespace {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::ToolIntent,
         Self::TriggerDelivery,
         Self::Host,
         Self::KeylessHost,
+        Self::IsolatedCall,
     ];
 
     fn tag(self) -> u8 {
@@ -169,6 +172,7 @@ impl StartKeyNamespace {
             Self::TriggerDelivery => 3,
             Self::Host => 4,
             Self::KeylessHost => 5,
+            Self::IsolatedCall => 6,
         }
     }
 
@@ -178,6 +182,7 @@ impl StartKeyNamespace {
             Self::TriggerDelivery => "trigger",
             Self::Host => "host",
             Self::KeylessHost => "keyless",
+            Self::IsolatedCall => "isolated",
         }
     }
 }
@@ -236,6 +241,20 @@ impl StartKeyDerivation {
         StartKey::derive(StartKeyNamespace::KeylessHost, |encoder| {
             write_scope(encoder, scope);
             encoder.u32(ordinal);
+        })
+    }
+
+    /// The key of an isolated tool call's one process start (D04): the
+    /// call's logical Run owner and its lash-minted call id, so every
+    /// redelivery and replay of the call starts the same process.
+    pub fn for_isolated_call(
+        self,
+        owner: &crate::effect_opener::EffectOpener,
+        call_id: &lash_sansio::ToolCallId,
+    ) -> StartKey {
+        StartKey::derive(StartKeyNamespace::IsolatedCall, |encoder| {
+            encoder.string(&owner.identity_encoding());
+            encoder.string(call_id.as_str());
         })
     }
 

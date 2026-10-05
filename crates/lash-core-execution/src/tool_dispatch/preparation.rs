@@ -188,8 +188,9 @@ async fn prepare_authorized_tool_call_with_context(
     let tool_name = manifest.name.clone();
     let ids = ToolCallIds::of_pending(&pending);
     // Admission precedes every hook and the provider's own preparation: a
-    // refused call runs no callback of any kind.
-    if let Err(refusal) = super::admission::admit_tool(&manifest) {
+    // refused call runs no callback of any kind. This inline route binds no
+    // process, so an isolated call refuses here.
+    if let Err(refusal) = super::admission::admit_tool(&manifest, false) {
         let failure = super::admission::admission_failure(&tool_name, refusal);
         return completed_preparation(
             normalized_outcome(

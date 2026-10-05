@@ -843,11 +843,11 @@ pub use runtime::{
     TurnInputState, TurnLaneAdmissionPolicy, TurnPrelude, WaitKind, WaitState, WakeDelivery,
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle,
     WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry,
-    WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, WorkerTerminationReceipt,
-    admit_session_state_generation, admit_session_view, apply_parent_end_plan,
-    artifact_referrer_ended, end_parent_scope, end_session_runs, lifetime, live_session_view,
-    mint_process_id, parent_end_delivery_key, parent_end_requester,
-    park_turn_refused_by_generation, session_is_live,
+    WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, WorkerCommand,
+    WorkerProcessEngine, WorkerTerminationReceipt, admit_session_state_generation,
+    admit_session_view, apply_parent_end_plan, artifact_referrer_ended, end_parent_scope,
+    end_session_runs, lifetime, live_session_view, mint_process_id, parent_end_delivery_key,
+    parent_end_requester, park_turn_refused_by_generation, session_is_live,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
@@ -920,9 +920,10 @@ pub use tool_intent::{
 pub use tool_provider::ProcessToolCallWiring;
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
-    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolChildExecutionTraceHook,
-    ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, IsolatedProcessBinding,
+    IsolatedProcessRequest, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ToolCall,
+    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
+    ToolPrepareContext, ToolProvider,
 };
 
 pub(crate) use lash_core_store::process_identity::StartKeyDerivation;

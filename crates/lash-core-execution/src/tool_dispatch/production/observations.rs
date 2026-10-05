@@ -61,7 +61,9 @@ impl ProductionToolHandlers<'_> {
             .get(call_id)
             .cloned()
             .ok_or("a terminal observation has no admitted preparation")?;
-        let mut output = if matches!(capture, Some(SingletonCapture::Isolated { .. })) {
+        let mut output = if matches!(capture, Some(SingletonCapture::Isolated { .. }))
+            && matches!(decision, CallDecision::Final { .. })
+        {
             ToolCallOutput::success(
                 serde_json::from_str::<serde_json::Value>(
                     presentation.ok_or("isolated final has no descriptor")?,

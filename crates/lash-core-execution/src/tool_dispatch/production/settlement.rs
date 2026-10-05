@@ -20,7 +20,19 @@ impl ProductionToolHandlers<'_> {
             .map(decode)
             .transpose()
             .map_err(fault)?;
-        let presented: Option<Presented> = presentation.map(decode).transpose().map_err(fault)?;
+        // An isolated final's presentation is the descriptor of the process
+        // it started, which the session now possesses.
+        let isolated = matches!(capture, Some(SingletonCapture::Isolated { .. }));
+        let started: Option<super::IsolatedProcessDescriptor> = presentation
+            .filter(|_| isolated)
+            .map(decode)
+            .transpose()
+            .map_err(fault)?;
+        let presented: Option<Presented> = presentation
+            .filter(|_| !isolated)
+            .map(decode)
+            .transpose()
+            .map_err(fault)?;
         self.prepared
             .lock_recover()
             .get(call_id)
@@ -50,6 +62,7 @@ impl ProductionToolHandlers<'_> {
                 } => Some(handle.process_id.clone()),
                 _ => None,
             })
+            .chain(started.map(|descriptor| descriptor.process_id))
             .collect::<Vec<_>>();
         let messages = captured
             .as_ref()
