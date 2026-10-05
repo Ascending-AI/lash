@@ -60,6 +60,7 @@ impl RlmProtocolSession {
                     channel: self.config.channel,
                     prompt_features: self.config.prompt_features,
                     discovery: self.config.discovery.as_ref(),
+                    execution_policy: self.config.execution_policy,
                 },
                 &prompt,
                 tool_catalog,
@@ -79,7 +80,9 @@ impl RlmProtocolSession {
         &self,
         ctx: CheckpointHookContext,
     ) -> Result<TurnContributions, PluginError> {
-        if ctx.checkpoint != CheckpointKind::AfterWork {
+        // A relay session's context is its own to keep within budget, and
+        // it has no frame switch to suggest (FIG-4441).
+        if ctx.checkpoint != CheckpointKind::AfterWork || self.config.execution_policy.is_relay() {
             return Ok(TurnContributions::default());
         }
         // The threshold the running run was admitted under; a session that

@@ -13,8 +13,8 @@ pub(crate) mod runtime_state;
 pub(crate) mod tool_args;
 
 pub use config::{
-    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmRecordedBehaviour, UnsetBound,
-    UnsetChannel,
+    RlmExecutionPolicy, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
+    RlmRecordedBehaviour, UnsetBound, UnsetChannel,
 };
 pub use config_owner::{
     RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig, RlmRenderRefusal,

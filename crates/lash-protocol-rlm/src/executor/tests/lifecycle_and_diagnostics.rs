@@ -799,6 +799,7 @@ pub(super) async fn execute_continue_as_with_trace_sink(
                 vocabulary: crate::dialect::Dialect::prompt_vocabulary(
                     &crate::dialect::TypescriptDialect,
                 ),
+                relay: None,
             }),
             catalog,
             invocation,

@@ -832,6 +832,31 @@ impl DialectSession {
         self.state.patch_globals(patch, protected_names).await
     }
 
+    /// Whether a cell a segment boundary stopped inside waits to be resumed:
+    /// its state is the cell's, not a step boundary's.
+    pub(crate) fn has_suspended_cell(&self) -> bool {
+        self.state.suspended_cell().is_some()
+    }
+
+    /// The variables the session holds, by name and a value-free summary
+    /// (kind and size), for a relay harness message (FIG-4441).
+    pub(crate) fn relay_left_variables(&self, exclude: &BTreeSet<String>) -> Vec<(String, String)> {
+        let mut out = self
+            .state
+            .bound_variable_values(exclude)
+            .into_iter()
+            .map(|(name, value)| (name, flow_value_summary(&value)))
+            .collect::<Vec<_>>();
+        out.extend(
+            self.state
+                .opaque_bound_variables(exclude)
+                .into_iter()
+                .map(|(name, _)| (name, "opaque value".to_string())),
+        );
+        out.sort();
+        out
+    }
+
     /// The bound-variable prompt: the session's globals, including the ones
     /// with no host view, by summary. A front end's private
     /// slots never reach them (the VM drops every private binding at the end
@@ -859,6 +884,25 @@ impl DialectSession {
                 &params,
             )
         }))
+    }
+}
+
+/// A value's kind and size without its contents.
+fn flow_value_summary(value: &lashlang::Value) -> String {
+    use lashlang::Value;
+    match value {
+        Value::Null | Value::Undefined => "null".to_string(),
+        Value::Bool(_) => "boolean".to_string(),
+        Value::Number(_) => "number".to_string(),
+        Value::String(text) => format!("string ({} chars)", text.to_string().chars().count()),
+        Value::Image(_) => "image".to_string(),
+        Value::Resource(_) => "resource".to_string(),
+        Value::Tuple(items) | Value::List(items) => {
+            format!("array ({} items)", items.iter().count())
+        }
+        Value::Record(record) => format!("record ({} keys)", record.len()),
+        Value::Projected(_) => "read-only value".to_string(),
+        Value::Ref(_) => "value".to_string(),
     }
 }
 

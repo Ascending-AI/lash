@@ -45,6 +45,7 @@ impl ProtocolDriverPlugin for RlmProtocolDriver {
                 max_output_chars: self.config.max_output_chars,
                 max_budget_tokens: self.config.continue_as_soft_warn_tokens,
                 prompt_features: self.config.prompt_features,
+                relay: crate::relay::RelaySettings::of(&self.config),
             },
             Arc::clone(&self.dialect),
         )

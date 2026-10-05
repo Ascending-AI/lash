@@ -3,7 +3,8 @@ pub(crate) mod history;
 use std::sync::Arc;
 
 #[cfg(any(test, feature = "testing"))]
-use lash_core::llm::types::{LlmContentBlock, LlmMessage};
+use lash_core::llm::types::LlmContentBlock;
+use lash_core::llm::types::LlmMessage;
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
@@ -37,6 +38,8 @@ pub(crate) struct RlmPreambleConfig {
     pub(crate) max_output_chars: usize,
     pub(crate) max_budget_tokens: Option<usize>,
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
+    /// A relay session's settings (FIG-4441); `None` for chronological.
+    pub(crate) relay: Option<crate::relay::RelaySettings>,
 }
 
 impl RlmProjectorConfig {
@@ -67,6 +70,7 @@ pub fn build_rlm_preamble(
             max_output_chars: config.max_output_chars,
             max_budget_tokens: config.max_budget_tokens,
             prompt_features: config.prompt_features,
+            relay: None,
         },
         dialect,
     )
@@ -81,14 +85,16 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let tool_names = tool_catalog.tool_names();
     TurnDriverPreamble {
         config: TurnDriverConfig {
-            protocol: Arc::new(crate::protocol::RlmDriver::with_dialect(Arc::clone(
-                &dialect,
-            ))),
+            protocol: Arc::new(crate::protocol::RlmDriver::with_dialect(
+                Arc::clone(&dialect),
+                config.relay,
+            )),
             projector: Arc::new(RlmContextProjector {
                 prompt_features: config.prompt_features,
                 max_output_chars: config.max_output_chars,
                 max_budget_tokens: config.max_budget_tokens,
                 dialect: Arc::clone(&dialect),
+                relay: config.relay,
             }),
         },
         tool_specs: Arc::new(Vec::new()),
@@ -102,6 +108,7 @@ struct RlmContextProjector {
     max_output_chars: usize,
     max_budget_tokens: Option<usize>,
     dialect: Arc<SessionDialect>,
+    relay: Option<crate::relay::RelaySettings>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
@@ -113,6 +120,9 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         &self,
         ctx: ProjectorContext<'_>,
     ) -> Result<Arc<LlmRequest>, lash_core::StoredDataCorruption> {
+        if let Some(relay) = self.relay {
+            return self.project_relay(ctx, relay);
+        }
         let options = decode_rlm_options(&ctx.config.termination)
             .expect("RLM turn options are validated before prompt projection");
         let termination = options.effective_termination();
@@ -158,6 +168,44 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             },
         )?);
 
+        Ok(rlm_request(&ctx, messages))
+    }
+}
+
+impl RlmContextProjector {
+    /// A relay step's request (FIG-4441): the committed context and the
+    /// harness message, read from the turn view alone.
+    fn project_relay(
+        &self,
+        ctx: ProjectorContext<'_>,
+        relay: crate::relay::RelaySettings,
+    ) -> Result<Arc<LlmRequest>, lash_core::StoredDataCorruption> {
+        let projection = lash_core::facade_support::ChronologicalProjection::from_turn_view(
+            ctx.events,
+            ctx.messages,
+        );
+        let view = crate::relay::RelayView::read(&projection, &ctx.config.turn_id.to_string())?;
+        let messages = crate::relay::build_relay_messages(crate::relay::RelayHarnessInput {
+            view: &view,
+            settings: relay,
+            step: ctx.protocol_iteration + 1,
+            cell_noun: self.dialect.prompt_vocabulary().cell_noun,
+            turn_causes: ctx.turn_causes,
+            left_variables: ctx
+                .environment
+                .projector_turn_inputs
+                .bound_variables_prompt
+                .as_deref(),
+            prompt_usage: ctx.environment.projector_turn_inputs.prompt_usage.as_ref(),
+        });
+        Ok(rlm_request(&ctx, messages))
+    }
+}
+
+/// The request one RLM iteration sends: `messages` under the synced system
+/// prompt, with no provider tools and no wire stops.
+fn rlm_request(ctx: &ProjectorContext<'_>, messages: Vec<LlmMessage>) -> Arc<LlmRequest> {
+    {
         let mut generation = ctx.config.generation.clone();
         // The paired-tag grammar is RLM's response boundary. Provider wire
         // stops, including caller-supplied ones, could withhold that literal
@@ -165,7 +213,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         // the dialect's, but no dialect hands it to the provider as a stop.
         generation.suppress_stop_sequences_for_protocol();
 
-        Ok(Arc::new(LlmRequest {
+        Arc::new(LlmRequest {
             instructions: (!ctx.environment.system_prompt.trim().is_empty())
                 .then(|| Arc::from(ctx.environment.system_prompt.trim())),
             model: ctx.config.model.clone(),
@@ -186,7 +234,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             stream_events: None,
             generation,
             provider_trace: None,
-        }))
+        })
     }
 }
 

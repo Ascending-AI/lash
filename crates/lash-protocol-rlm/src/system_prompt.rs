@@ -66,6 +66,9 @@ pub(crate) struct RlmSystemPromptBehaviour<'a> {
     pub(crate) channel: RlmChannel,
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
     pub(crate) discovery: Option<&'a lash_core::ToolDiscovery>,
+    /// A relay session's prompt teaches relay's step contract in place of the
+    /// chronological execution prose (FIG-4441).
+    pub(crate) execution_policy: crate::RlmExecutionPolicy,
 }
 
 /// The execution section a session on `behaviour.channel` renders over
@@ -180,7 +183,14 @@ pub(crate) fn render_system_prompt(
         let vocabulary = dialect.prompt_vocabulary();
         let mut execution = Vec::new();
         if !prompt.omit_builtin_execution {
-            push_text(&mut execution, &prose);
+            if behaviour.execution_policy.is_relay() {
+                push_text(
+                    &mut execution,
+                    &crate::relay::relay_execution_prose(dialect.cell_tags()),
+                );
+            } else {
+                push_text(&mut execution, &prose);
+            }
         }
         push_text(&mut execution, &declarations);
         if let Some(variables) = dialect.read_only_variables_prompt(bindings) {
@@ -223,6 +233,7 @@ pub fn render_rlm_system_prompt(
             channel: RlmChannel::Cell,
             prompt_features: config.prompt_features,
             discovery: config.discovery.as_ref(),
+            execution_policy: crate::RlmExecutionPolicy::Chronological,
         },
         input,
         RlmSystemPromptScope::Turn,

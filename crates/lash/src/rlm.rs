@@ -185,7 +185,9 @@ pub use lash_protocol_rlm::{
 };
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.
-pub use lash_protocol_rlm::{RlmAbilities, RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};
+pub use lash_protocol_rlm::{
+    RlmAbilities, RlmExecutionPolicy, RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel,
+};
 /// The RLM protocol's config owner and its commands (FIG-4379, FIG-4588).
 pub use lash_protocol_rlm::{
     RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedBehaviour, RlmRecordedConfig,

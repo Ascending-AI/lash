@@ -411,6 +411,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
             services,
         ));
         if config.channel == super::RlmChannel::NativeTool {
+            if config.execution_policy.is_relay() {
+                return Err(PluginError::Registration(
+                    "the relay execution policy runs on the cell channel only".to_string(),
+                ));
+            }
             return Ok(Arc::new(crate::native::RlmNativeToolPlugin {
                 config,
                 dialect,

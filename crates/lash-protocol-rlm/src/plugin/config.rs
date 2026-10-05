@@ -39,6 +39,36 @@ pub struct RlmProtocolPluginConfig {
     pub max_output_chars: usize,
     #[serde(default = "default_continue_as_soft_warn_tokens")]
     pub continue_as_soft_warn_tokens: Option<usize>,
+    /// How each step's prompt and state are built: the chronological policy,
+    /// or relay (FIG-4441), where each step hands the next only the context
+    /// and vars it passes to `control.next`.
+    #[serde(default)]
+    pub execution_policy: RlmExecutionPolicy,
+}
+
+/// An RLM session's execution policy, recorded at creation.
+///
+/// `Chronological` renders every prior cell and its output as history and
+/// keeps the REPL across steps. `Relay` (FIG-4441) keeps nothing between steps
+/// but the arguments of the last committed `control.next` call: its `context`
+/// is the next prompt's working memory and its `vars` rebuild the REPL, which
+/// is otherwise wiped every step.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RlmExecutionPolicy {
+    #[default]
+    Chronological,
+    Relay,
+}
+
+impl RlmExecutionPolicy {
+    pub fn is_relay(self) -> bool {
+        matches!(self, Self::Relay)
+    }
+
+    fn is_chronological(&self) -> bool {
+        matches!(self, Self::Chronological)
+    }
 }
 
 fn default_max_output_chars() -> usize {
@@ -81,6 +111,9 @@ pub struct RlmRecordedBehaviour {
     /// render is resolved over, under the session's own render preferences
     /// (FIG-4527).
     pub render: lash_rlm_types::RlmRenderPatch,
+    /// The session's execution policy. Absent means chronological.
+    #[serde(default, skip_serializing_if = "RlmExecutionPolicy::is_chronological")]
+    pub execution_policy: RlmExecutionPolicy,
 }
 
 /// A builder slot that has not been filled in yet. [`RlmProtocolPluginConfigBuilder::build`]
@@ -154,6 +187,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             lashlang_language_features: default_lashlang_language_features(),
             max_output_chars: default_max_output_chars(),
             continue_as_soft_warn_tokens: default_continue_as_soft_warn_tokens(),
+            execution_policy: RlmExecutionPolicy::default(),
         }
     }
 }
@@ -200,6 +234,7 @@ impl RlmProtocolPluginConfig {
                 .as_ref()
                 .map(|discovery| discovery.operation.clone()),
             render: self.render.clone(),
+            execution_policy: self.execution_policy,
         }
     }
 
@@ -218,6 +253,13 @@ impl RlmProtocolPluginConfig {
             .clone()
             .map(|operation| lash_core::ToolDiscovery { operation });
         self.render = behaviour.render.clone();
+        self.execution_policy = behaviour.execution_policy;
+        self
+    }
+
+    /// The same configuration under `policy` (FIG-4441).
+    pub fn with_execution_policy(mut self, policy: RlmExecutionPolicy) -> Self {
+        self.execution_policy = policy;
         self
     }
 

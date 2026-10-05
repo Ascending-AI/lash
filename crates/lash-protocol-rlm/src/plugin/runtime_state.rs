@@ -12,6 +12,9 @@ pub(crate) struct RlmRuntimeState {
     dialect: Arc<SessionDialect>,
     session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
     execution: tokio::sync::Mutex<DialectSession>,
+    /// A relay session (FIG-4441) starts every cell on a fresh REPL rebuilt
+    /// from its last committed baton.
+    relay: bool,
 }
 
 impl RlmRuntimeState {
@@ -20,7 +23,14 @@ impl RlmRuntimeState {
             execution: tokio::sync::Mutex::new(dialect.create_session()),
             dialect,
             session_projected_bindings: tokio::sync::Mutex::new(RlmProjectedBindings::new()),
+            relay: false,
         })
+    }
+
+    /// This state under the relay policy when `relay` holds.
+    pub(crate) fn with_relay(mut self, relay: bool) -> Self {
+        self.relay = relay;
+        self
     }
 
     #[cfg(test)]
@@ -96,6 +106,9 @@ impl RlmRuntimeState {
         &self,
         recorded: Option<&lash_core::RecordedRender>,
     ) -> Result<Arc<str>, SessionError> {
+        if self.relay {
+            return self.relay_left_variables().await;
+        }
         let renderer = self.dialect.renderer();
         let recorded = lash_core::RecordedRender::require_available(recorded, renderer.0.id())
             .map_err(|code| SessionError::Protocol(code.to_string()))?;
@@ -195,9 +208,56 @@ impl RlmRuntimeState {
         // the cell to finish instead of being told the state is busy, and a
         // cell cancelled mid-flight leaves the state where it was.
         let mut guard = self.execution.lock().await;
+        if self.relay && !guard.has_suspended_cell() {
+            self.rebuild_relay_step(&mut guard, &ctx).await?;
+        }
         guard
             .execute(ctx, request, session_projected_bindings)
             .await
+    }
+
+    /// Start a relay step (FIG-4441): a fresh REPL holding only the last
+    /// committed baton's vars, its `context` and the `transcript`, all read
+    /// from the turn view the cell runs over. Whatever an earlier cell left —
+    /// a committed step's scratch or a failed step's mutations — is gone, and
+    /// a re-execution of the same cell starts from the same globals.
+    async fn rebuild_relay_step(
+        &self,
+        execution: &mut DialectSession,
+        ctx: &lash_core::RuntimeExecutionContext<'_>,
+    ) -> Result<(), SessionError> {
+        let view = crate::relay::RelayView::read(ctx.chronological_projection().as_ref(), "")
+            .map_err(history_corruption)?;
+        let protected_names = self.protected_projected_binding_names().await;
+        let mut globals = view.step_globals();
+        globals.retain(|name, _| !protected_names.contains(name));
+        *execution = self.dialect.create_session();
+        execution
+            .patch_globals(
+                &RlmGlobalsPatchPluginBody {
+                    set_default: globals,
+                },
+                &protected_names,
+            )
+            .await
+    }
+
+    /// The relay bound-variables render: the variables the last cell left,
+    /// by name and summary, which the relay harness compares with the vars
+    /// the last commit kept.
+    async fn relay_left_variables(&self) -> Result<Arc<str>, SessionError> {
+        let mut exclude = self.protected_projected_binding_names().await;
+        exclude.insert(crate::relay::CONTEXT_VAR.to_string());
+        exclude.insert(crate::relay::TRANSCRIPT_VAR.to_string());
+        let variables = self.execution.lock().await.relay_left_variables(&exclude);
+        serde_json::to_string(&crate::relay::LeftVariables {
+            relay_left_variables: variables
+                .into_iter()
+                .map(|(name, summary)| crate::relay::LeftVariable { name, summary })
+                .collect(),
+        })
+        .map(Arc::from)
+        .map_err(|error| SessionError::Protocol(error.to_string()))
     }
 
     pub(crate) fn execution_state_dirty(&self) -> bool {

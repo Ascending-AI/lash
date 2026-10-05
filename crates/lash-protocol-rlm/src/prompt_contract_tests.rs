@@ -91,6 +91,7 @@ fn system_with(
             },
             prompt_features: features,
             discovery: None,
+            execution_policy: crate::RlmExecutionPolicy::Chronological,
         },
         crate::system_prompt::RlmSystemPromptInput {
             prompt: &lash_rlm_types::RlmPrompt::default(),

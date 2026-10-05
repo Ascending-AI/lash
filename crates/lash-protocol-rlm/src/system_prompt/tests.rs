@@ -292,6 +292,7 @@ fn the_native_channel_renders_the_same_declarations_without_cells() {
             channel: RlmChannel::NativeTool,
             prompt_features: config.prompt_features,
             discovery: None,
+            execution_policy: crate::RlmExecutionPolicy::Chronological,
         },
         RlmSystemPromptInput {
             prompt: &RlmPrompt::default(),

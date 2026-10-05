@@ -38,6 +38,7 @@ pub(super) fn register_native_plugin(
     reg.tools()
         .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
             vocabulary: dialect.prompt_vocabulary(),
+            relay: None,
         }))?;
     reg.tools().provider(Arc::new(
         lash_lashlang_runtime::register_trigger_tool_provider(
@@ -175,6 +176,7 @@ impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
                 max_output_chars: self.config.max_output_chars,
                 max_budget_tokens: self.config.continue_as_soft_warn_tokens,
                 prompt_features: self.config.prompt_features,
+                relay: None,
             },
             Arc::clone(&self.dialect),
         )
