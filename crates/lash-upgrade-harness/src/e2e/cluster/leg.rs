@@ -13,6 +13,32 @@ pub async fn observe_leg(
     metrics_urls: &[String],
     directory: &Path,
 ) -> Result<serde_json::Value> {
+    let (bodies, tasks) = scrape(metrics_urls).await?;
+    std::fs::write(directory.join("restate-metrics.txt"), &bodies)?;
+    let receipt = serde_json::json!({
+        "leg": leg.manifest(),
+        "invocation_tasks": tasks,
+        "metrics": "restate-metrics.txt",
+    });
+    if leg == Leg::Replay {
+        ensure!(
+            tasks.get("suspended").copied().unwrap_or_default() > 0,
+            "replay leg observed no suspended invocation task; the server did not run always-suspending"
+        );
+    }
+    Ok(receipt)
+}
+
+/// The invocation tasks the servers behind `metrics_urls` have parked so far.
+/// Two reads around one Run bound the suspensions that Run's window caused.
+pub async fn suspended_tasks(metrics_urls: &[String]) -> Result<u64> {
+    let (_, tasks) = scrape(metrics_urls).await?;
+    Ok(tasks.get("suspended").copied().unwrap_or_default())
+}
+
+/// Every metrics body, and `restate_invoker_invocation_tasks_total` summed
+/// per `status` label across them.
+async fn scrape(metrics_urls: &[String]) -> Result<(String, BTreeMap<String, u64>)> {
     let http = reqwest::Client::builder().no_proxy().build()?;
     let mut bodies = String::new();
     for url in metrics_urls {
@@ -25,7 +51,6 @@ pub async fn observe_leg(
             .await?;
         bodies.push_str(&format!("# {url}\n{body}\n"));
     }
-    std::fs::write(directory.join("restate-metrics.txt"), &bodies)?;
     let mut tasks: BTreeMap<String, u64> = BTreeMap::new();
     for line in bodies.lines() {
         let Some(rest) = line.strip_prefix("restate_invoker_invocation_tasks_total{") else {
@@ -49,16 +74,5 @@ pub async fn observe_leg(
             *tasks.entry(status).or_insert(0) += value as u64;
         }
     }
-    let receipt = serde_json::json!({
-        "leg": leg.manifest(),
-        "invocation_tasks": tasks,
-        "metrics": "restate-metrics.txt",
-    });
-    if leg == Leg::Replay {
-        ensure!(
-            tasks.get("suspended").copied().unwrap_or_default() > 0,
-            "replay leg observed no suspended invocation task; the server did not run always-suspending"
-        );
-    }
-    Ok(receipt)
+    Ok((bodies, tasks))
 }

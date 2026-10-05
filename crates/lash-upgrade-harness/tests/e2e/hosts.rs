@@ -504,16 +504,32 @@ macro_rules! s28_case {
     };
 }
 s28_case!(s28_workbench_mcp_peer_restart, SqliteFile, Live);
+s28_case!(s28_workbench_mcp_peer_restart_replay, SqliteFile, Replay);
 s28_case!(s28_workbench_mcp_peer_restart_postgresql, PostgreSql, Live);
+s28_case!(
+    s28_workbench_mcp_peer_restart_postgresql_replay,
+    PostgreSql,
+    Replay
+);
+
+/// On the replay leg the always-suspending server parks the MCP Runs at
+/// every await: the case proves it suspended invocation tasks, that every
+/// Run invocation it journaled completed (so each resumption replayed its
+/// journal), and the oracle's admitted-call and detach verdicts still hold.
 async fn s28_workbench(permutation: lash_upgrade_harness::e2e::case::Permutation) -> Result<()> {
     use lash_upgrade_harness::e2e::{
+        case::Leg,
         cluster::{ClusterControl as _, LocalCluster},
         host_adapters::workbench::WorkbenchHost,
     };
     use std::collections::BTreeMap;
     let root = PathBuf::from(required("LASH_E2E_HOST_ARTIFACTS")?);
     let deadline = Instant::now() + Duration::from_secs(360);
-    let mut lease = CaseLease::new("s28", root.join("s28"), deadline)?;
+    let slug = match permutation.leg {
+        Leg::Live => "s28",
+        Leg::Replay => "s28-replay",
+    };
+    let mut lease = CaseLease::new(slug, root.join(slug), deadline)?;
     let port: u16 = required("LASH_E2E_PORT_BASE")?.parse()?;
     lease.ports.extend([port + 20, port + 21, port + 22]);
     let candidate = required("LASH_E2E_CANDIDATE_SHA")?;
@@ -531,7 +547,7 @@ async fn s28_workbench(permutation: lash_upgrade_harness::e2e::case::Permutation
         "restate-server",
         required("LASH_RESTATE_SERVER_BIN")?.into(),
     )?;
-    let mut cluster = LocalCluster::new(port, deadline);
+    let mut cluster = LocalCluster::new(port, deadline).with_leg(permutation.leg);
     let postgres_url = permutation.postgres_url(&mut lease).await?;
     let mut environment = BTreeMap::from([
         (
@@ -588,26 +604,63 @@ async fn s28_workbench(permutation: lash_upgrade_harness::e2e::case::Permutation
         )
         .await?;
         evidence.journals = turn_journals(&view).await?;
+        if permutation.leg == Leg::Replay {
+            // A suspended invocation completes only by resuming, and a
+            // resumption replays the journal it suspended with.
+            let open: Vec<serde_json::Value> = view
+                .query(
+                    "SELECT id, status FROM sys_invocation \
+                     WHERE target_handler_name='run' AND status <> 'completed'",
+                )
+                .await?;
+            let prefix = view.service_name("LashTurn");
+            let segments: std::collections::BTreeSet<&str> = evidence
+                .journals
+                .iter()
+                .map(|fact| fact.invocation.as_str())
+                .collect();
+            let open: Vec<_> = open
+                .into_iter()
+                .filter(|row| row["id"].as_str().is_some_and(|id| segments.contains(id)))
+                .collect();
+            ensure!(
+                open.is_empty(),
+                "replay leg left {prefix} Run invocations unfinished: {open:?}"
+            );
+            evidence.stores.push(json!({
+                "kind":"s28_replayed_runs",
+                "invocations":segments,
+            }));
+        }
         anyhow::Ok(())
     }
     .await;
     let host_cleanup = host.stop().await;
+    let leg_observation = cluster.observe_leg(&lease.directory).await;
     let cluster_cleanup = cluster.finish().await;
     let mut errors = Vec::new();
     if let Err(error) = &result {
         errors.push(format!("{error:#}"));
     }
+    match leg_observation {
+        Ok(receipt) => evidence.stores.push(receipt),
+        Err(error) => errors.push(format!("leg observation: {error:#}")),
+    }
     match host.transcript() {
         Ok(observations) => evidence.outputs = observations,
         Err(error) => errors.push(format!("transcript: {error:#}")),
     }
-    write_case_receipt(
+    let errors = write_case_receipt(
         &lease.directory,
         evidence,
         errors,
         &[("host", &host_cleanup), ("cluster", &cluster_cleanup)],
     )?;
     result?;
+    ensure!(
+        errors.is_empty(),
+        "S28 case receipt recorded a failure: {errors:?}"
+    );
     let host_cleanup = host_cleanup?;
     let cluster_cleanup = cluster_cleanup?;
     ensure!(

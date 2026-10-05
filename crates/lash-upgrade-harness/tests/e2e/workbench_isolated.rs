@@ -8,6 +8,10 @@
 //! cuts are holds on that invocation's own proposals and ACKs, and
 //! durability is read from its decoded journal. No sleep establishes
 //! readiness or completion.
+//!
+//! The replay leg runs the same oracles on an always-suspending server: each
+//! leg's Run must be parked by it at least once and still settle, so every
+//! resumption replays the Run's journal through the same cuts.
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -74,6 +78,22 @@ workbench_isolated_case!(
     Live
 );
 workbench_isolated_case!(
+    s19_isolated_start_cuts_recover_one_process_on_the_workbench_replay,
+    s19,
+    "s19-workbench-isolated-replay",
+    "S19",
+    SqliteFile,
+    Replay
+);
+workbench_isolated_case!(
+    s19_isolated_start_cuts_recover_one_process_on_the_workbench_postgresql_replay,
+    s19,
+    "s19-workbench-isolated-replay",
+    "S19",
+    PostgreSql,
+    Replay
+);
+workbench_isolated_case!(
     s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench,
     s20,
     "s20-workbench-isolated",
@@ -88,6 +108,22 @@ workbench_isolated_case!(
     "S20",
     PostgreSql,
     Live
+);
+workbench_isolated_case!(
+    s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_replay,
+    s20,
+    "s20-workbench-isolated-replay",
+    "S20",
+    SqliteFile,
+    Replay
+);
+workbench_isolated_case!(
+    s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_postgresql_replay,
+    s20,
+    "s20-workbench-isolated-replay",
+    "S20",
+    PostgreSql,
+    Replay
 );
 
 /// L08: an unbound isolated tool refuses typed before any body; host SIGKILL
@@ -458,6 +494,8 @@ struct Run {
     work: WorkIdentity,
     /// Worker markers written before this leg's Run started.
     spawned_before: usize,
+    /// Invocation tasks the server had suspended before this leg's Run.
+    suspended_before: u64,
 }
 
 struct Case {
@@ -650,6 +688,7 @@ impl Case {
             .to_owned();
         let input = format!("{} {leg}", self.scenario);
         let spawned_before = self.pids()?.len();
+        let suspended_before = self.cluster.suspended_tasks().await?;
         let submitted = self
             .host
             .command(HostCommand::Submit {
@@ -687,6 +726,7 @@ impl Case {
             session,
             work,
             spawned_before,
+            suspended_before,
         };
         for kind in cuts {
             let proposal = Self::barrier(&leg, kind.clone());
@@ -889,6 +929,28 @@ impl Case {
             report.turn_id.as_str() == leg.work.run,
             "the follow answered another Run"
         );
+        if self.permutation.leg == Leg::Replay {
+            // Legs run one at a time, so the suspensions counted since the
+            // leg's submit are its own Run's; a suspended invocation reaches
+            // a terminal only by resuming, which replays its journal.
+            let suspended = self.cluster.suspended_tasks().await?;
+            ensure!(
+                suspended > leg.suspended_before,
+                "{}'s Run settled without the always-suspending server parking it",
+                leg.work.run
+            );
+            let journal = self.journal(leg).await?;
+            ensure!(
+                !journal.is_empty(),
+                "{}'s replayed Run journaled no commands",
+                leg.work.run
+            );
+            self.evidence
+                .stores
+                .push(json!({"kind":"replay_window","leg":leg.work,
+                "suspended_before":leg.suspended_before,"suspended_after":suspended,
+                "journal_entries":journal.len()}));
+        }
         self.evidence.outputs.push(outcome);
         Ok(*report)
     }
@@ -1237,6 +1299,10 @@ impl Case {
                     ),
                 },
             });
+        }
+        match self.cluster.observe_leg(&self.lease.directory).await {
+            Ok(receipt) => self.evidence.stores.push(receipt),
+            Err(error) => errors.push(format!("leg observation: {error:#}")),
         }
         match self.cluster.finish().await {
             Ok(receipts) => self.evidence.cleanup.extend(receipts),

@@ -2249,9 +2249,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing forced-suspension replay oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "workbench_isolated::s19_isolated_start_cuts_recover_one_process_on_the_workbench_replay"
+          }
         },
         {
           "variant": "default",
@@ -2306,9 +2309,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Held on FIG-4998: replay legs wait until a cold-reopened Run follows its recorded selection order. The PostgreSQL/live workbench route is registered (FIG-5048); FIG-5057 adds the workbench forced-suspension replay oracle.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "workbench_isolated::s19_isolated_start_cuts_recover_one_process_on_the_workbench_postgresql_replay"
+          }
         }
       ],
       "setup": "Isolated tool bound to physical worker; external PID marker.",
@@ -2412,7 +2418,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing forced-suspension replay oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
+          "hold_reason": "Product red on both stores (FIG-5057 run, SQLite file and PostgreSQL): workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_replay exceeds its deadline in the cancel leg. With a cancel requested, the declared start's start:prepare discharge calls processes.cancel (crates/lash-core-execution/src/tool_dispatch/production.rs:1172), journaling lash:process:cancel inside the open start:prepare owner step; the Run never proposes the prepare result, so the VProposed cut is never reached. Register workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_replay once that is fixed.",
           "registration": null
         },
         {
@@ -2466,7 +2472,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Held on FIG-4998: replay legs wait until a cold-reopened Run follows its recorded selection order. The PostgreSQL/live workbench route is registered (FIG-5048); FIG-5057 adds the workbench forced-suspension replay oracle.",
+          "hold_reason": "Product red on both stores (FIG-5057 run, SQLite file and PostgreSQL): workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_postgresql_replay exceeds its deadline in the cancel leg. With a cancel requested, the declared start's start:prepare discharge calls processes.cancel (crates/lash-core-execution/src/tool_dispatch/production.rs:1172), journaling lash:process:cancel inside the open start:prepare owner step; the Run never proposes the prepare result, so the VProposed cut is never reached. Register workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_postgresql_replay once that is fixed.",
           "registration": null
         }
       ],
@@ -3892,9 +3898,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay workbench MCP oracle; FIG-4968 registers SQLite-file/live/RLM only.",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s28_workbench_mcp_peer_restart_replay"
+          },
           "host": "workbench"
         },
         {
@@ -3951,13 +3960,16 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Replay leg gated by FIG-4998 (cold-reopen replay order); FIG-5057 registers the S28 replay oracle and s28_workbench_mcp_peer_restart_postgresql proves the PostgreSQL live leg.",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s28_workbench_mcp_peer_restart_postgresql_replay"
+          },
           "host": "workbench"
         }
       ],
-      "setup": "Workbench-owned HTTP/stdio MCP fixtures and binary attachment; SQLite-file and PostgreSQL live legs on RLM. Replay oracles remain held.",
+      "setup": "Workbench-owned HTTP/stdio MCP fixtures and binary attachment; SQLite-file and PostgreSQL live and replay legs on RLM.",
       "fault": "Kill/reconnect peer during admitted call, detach after catalog refresh.",
       "observable": "Admitted revision completes or typed-refuses; subsequent catalog stops offering detached tool; exact attachment bytes/reference retained once; host sampling/elicitation results agree.",
       "arc_guards": []

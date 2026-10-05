@@ -1,6 +1,9 @@
 //! Transparent HTTP/2 plumbing for the real V7 service stream. The final DATA
 //! fragment of a proposal can be held before Restate receives a whole result;
-//! an ACK cut instead holds the actual matching V7 ACK sent by Restate.
+//! an ACK cut instead holds the actual matching V7 ACK sent by Restate. When
+//! the host suspends before that ACK arrives (an always-suspending server),
+//! the host learns the completion only from the replayed journal of the
+//! invocation's next Start, so the ACK cut holds that Start instead.
 use super::{Barrier, BarrierKind, FileBarriers, WorkIdentity};
 use anyhow::{Context, Result, ensure};
 use lash_restate_test::protocol::{
@@ -42,6 +45,8 @@ struct Registry {
     dynamic_cuts: Vec<TransportCut>,
     starts: Vec<StartHold>,
     commands: Vec<CommandHold>,
+    /// ACK cuts whose stream suspended before its ACK, by invocation.
+    resumptions: BTreeMap<String, Vec<Barrier>>,
 }
 #[derive(Default)]
 struct Connection {
@@ -426,11 +431,46 @@ async fn relay(
                             artifact.display().to_string(),
                         ));
                     }
+                    let resumed = registry
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("transport registry poisoned"))?
+                        .resumptions
+                        .remove(&message.debug_id)
+                        .unwrap_or_default();
+                    for barrier in resumed {
+                        holds.push(Hold::Enter(barrier, artifact.display().to_string()));
+                    }
                     connection_state
                         .lock()
                         .map_err(|_| anyhow::anyhow!("connection state poisoned"))?
                         .invocations
                         .insert(stream, message.debug_id);
+                }
+                if !to_host && frame.ty == MessageType::Suspension {
+                    let mut state = connection_state
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("connection state poisoned"))?;
+                    let pending: Vec<(u32, u32)> = state
+                        .completions
+                        .keys()
+                        .filter(|(owner, _)| *owner == stream)
+                        .copied()
+                        .collect();
+                    let barriers: Vec<Barrier> = pending
+                        .iter()
+                        .filter_map(|key| state.completions.remove(key))
+                        .collect();
+                    if let (false, Some(invocation)) =
+                        (barriers.is_empty(), state.invocations.get(&stream).cloned())
+                    {
+                        registry
+                            .lock()
+                            .map_err(|_| anyhow::anyhow!("transport registry poisoned"))?
+                            .resumptions
+                            .entry(invocation)
+                            .or_default()
+                            .extend(barriers);
+                    }
                 }
                 if !to_host {
                     let invocation = connection_state
@@ -605,8 +645,7 @@ async fn relay(
                         .lock()
                         .map_err(|_| anyhow::anyhow!("completion registry poisoned"))?
                         .completions
-                        .get(&(stream, message.completion_id))
-                        .cloned();
+                        .remove(&(stream, message.completion_id));
                     if let Some(barrier) = barrier {
                         holds.push(Hold::Enter(barrier, artifact.display().to_string()));
                     }

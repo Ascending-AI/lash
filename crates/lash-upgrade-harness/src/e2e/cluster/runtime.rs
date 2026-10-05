@@ -342,6 +342,16 @@ impl LocalCluster {
     /// Scrape every running node's metrics port and prove the leg this
     /// cluster runs; node ports follow boot's four-per-node reservation.
     pub async fn observe_leg(&self, directory: &std::path::Path) -> Result<serde_json::Value> {
+        super::leg::observe_leg(self.leg, &self.metrics_urls()?, directory).await
+    }
+    /// The invocation tasks every running node has suspended so far.
+    pub async fn suspended_tasks(&self) -> Result<u64> {
+        super::leg::suspended_tasks(&self.metrics_urls()?).await
+    }
+    pub fn leg(&self) -> Leg {
+        self.leg
+    }
+    fn metrics_urls(&self) -> Result<Vec<String>> {
         let mut urls = Vec::new();
         for node in &self.nodes {
             if node.process.is_some() {
@@ -349,7 +359,7 @@ impl LocalCluster {
             }
         }
         ensure!(!urls.is_empty(), "cluster has no running node to observe");
-        super::leg::observe_leg(self.leg, &urls, directory).await
+        Ok(urls)
     }
 }
 impl ClusterControl for LocalCluster {
