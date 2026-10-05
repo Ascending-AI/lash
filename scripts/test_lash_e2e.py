@@ -40,7 +40,6 @@ class ReceiptLaws(unittest.TestCase):
             scenario["arc_guards"] = []
             for row in scenario["cases"]:
                 row.update(state="ready", hold_reason=None, registration={
-                    "commit": SOURCE,
                     "label": "//crates/lash-upgrade-harness:e2e__test",
                     "test": f"{scenario['owner'].lower()}::{scenario['id'].lower()}::{row['variant'].replace('-', '_')}",
                 })
@@ -206,8 +205,7 @@ class ReceiptLaws(unittest.TestCase):
             })
             return 32
 
-        with patch.object(e2e, "ancestor", return_value=True), \
-             patch.object(e2e.subprocess, "check_output", side_effect=[SOURCE + "\n", ""]), \
+        with patch.object(e2e.subprocess, "check_output", side_effect=[SOURCE + "\n", ""]), \
              patch.object(e2e.subprocess, "call", side_effect=runner_call):
             result = e2e.run_cases(expected, self.root)
         self.assertEqual(result["counts"], {"selected": 1, "executed": 1, "passed": 0, "failed": 1, "not_run": 0})

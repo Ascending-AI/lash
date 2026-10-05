@@ -41,7 +41,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "5dc9d368425fcd6b5318eec8b5fa75ae2ee87289",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "tools::s01_workbench_singleton"
           }
@@ -119,7 +118,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "1c71f4dd569411f702be63d5c1722e4e5009bbe3",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "tools::s02_cold_partial"
           }
@@ -250,7 +248,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "c7c1c70de9e6977fffbc535782f82f615b8c0590",
             "label": "//crates/lash-upgrade-harness:h1_recovery__test",
             "test": "s03_ambiguous_acceptance_survives_host_sigkill"
           }
@@ -456,7 +453,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "1c71f4dd569411f702be63d5c1722e4e5009bbe3",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "tools::s05_opposite_batch_order"
           }
@@ -586,7 +582,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "c7c1c70de9e6977fffbc535782f82f615b8c0590",
             "label": "//crates/lash-upgrade-harness:h1_recovery__test",
             "test": "s06_reported_retries_preserve_backoff_and_reverse_ready_order"
           }
@@ -664,7 +659,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "c7c1c70de9e6977fffbc535782f82f615b8c0590",
             "label": "//crates/lash-upgrade-harness:h1_recovery__test",
             "test": "s07_cancellation_during_backoff_survives_cold_restart"
           }
@@ -741,7 +735,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "1c71f4dd569411f702be63d5c1722e4e5009bbe3",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "cancel::s08_pre_final"
           }
@@ -871,7 +864,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "1c71f4dd569411f702be63d5c1722e4e5009bbe3",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "cancel::s09_before_intent"
           }
@@ -1545,7 +1537,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "cc1fd26cd2b11e16997211e4a18e8291029e75a8",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "fleet::s14_leader_loss_reuses_durable_x_and_original_run"
           }
@@ -1596,7 +1587,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "cc1fd26cd2b11e16997211e4a18e8291029e75a8",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "fleet::s15_minority_tool_cancel_race_has_one_winner_after_heal"
           }
@@ -1647,7 +1637,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "cc1fd26cd2b11e16997211e4a18e8291029e75a8",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "fleet::s16_in_flight_terminal_blocks_drain_and_disconnect_keeps_fence"
           }
@@ -1678,7 +1667,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "cc1fd26cd2b11e16997211e4a18e8291029e75a8",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "fleet::s16_sigkill_redrives_same_invocation_without_a_second_seal"
           }
@@ -1862,7 +1850,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "e2ef3c73e61fe90eaed87c2408318f5d44a13b30",
             "label": "//crates/lash-upgrade-harness:e2e_h3__test",
             "test": "process::s17_operation_drop_and_follow_sqlite_memory"
           }
@@ -2626,7 +2613,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "be1f9a7e7b1214a2567c07e408a5e54c59681976",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work"
           }
@@ -2773,7 +2759,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "a5ef59ce555ac1d61735a4c6f599f6cde8caa4f7",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling"
           }
@@ -2808,7 +2793,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "a5ef59ce555ac1d61735a4c6f599f6cde8caa4f7",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling"
           }
@@ -2843,7 +2827,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "a5ef59ce555ac1d61735a4c6f599f6cde8caa4f7",
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling"
           }
@@ -3243,7 +3226,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "701146c054b6a4345de747db539d999076389e2e",
             "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
             "test": "s28_workbench_mcp_peer_restart"
           },
@@ -3378,7 +3360,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "f3eda494c9528a2ae176853495970ec0a7e0c041",
             "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
             "test": "s29_workbench_kill_after_acceptance"
           }
@@ -3458,7 +3439,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "85c0dd46e29360dc7ad10fa89e8f78dbc22b8b40",
             "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
             "test": "s30_external_consumer_accept_follow_cancel"
           }
@@ -3934,7 +3914,6 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "fb4bf54cc57ff1c713e2d48ca348c1e980b8f253",
             "label": "//crates/lash-upgrade-harness:e2e_telemetry__test",
             "test": "s34_otlp_retry_transfer_and_shutdown"
           }

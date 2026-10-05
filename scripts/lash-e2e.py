@@ -81,8 +81,7 @@ def load_manifest(path: Path = MANIFEST) -> dict:
                 require(bool(case["hold_reason"]) and registration is None, f"{key}: held row needs reason and no registration")
             else:
                 require(not case["hold_reason"] and isinstance(registration, dict), f"{key}: ready row needs registration")
-                require(set(registration) == {"commit", "label", "test"}, f"{key}: invalid registration fields")
-                require(SHA.fullmatch(registration["commit"]) is not None, f"{key}: invalid registration commit")
+                require(set(registration) == {"label", "test"}, f"{key}: invalid registration fields")
                 require(registration["label"] in GATE.LABELS, f"{key}: unknown runner label")
                 require(bool(registration["test"]) and not registration["test"].startswith("-") and not any(c.isspace() for c in registration["test"]), f"{key}: need full test path")
             require({"journal", "store", "host", "trace", "cleanup", "junit", "provenance"} <= set(case["artifacts"]), f"{key}: incomplete required artifacts")
@@ -225,8 +224,6 @@ def run_cases(expected: dict, artifacts: Path) -> dict:
     require(not expected["guarded"], f"unlanded arc guards: {', '.join(expected['guarded'])}")
     require(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() == expected["source_sha"], "checkout differs from exact source SHA")
     require(not subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True).strip(), "execution requires a clean source checkout")
-    for row in expected["cases"]:
-        require(ancestor(row["registration"]["commit"], expected["source_sha"]), f"{case_key(row)}: registration not landed")
     rows = []
     for index, row in enumerate(expected["cases"]):
         directory = artifacts / f"case-{index}"

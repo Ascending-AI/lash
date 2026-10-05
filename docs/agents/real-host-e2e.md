@@ -41,8 +41,10 @@ python3 scripts/lash-e2e.py run --tier smoke \
   --sha "$(git rev-parse HEAD)" --artifacts target/e2e-smoke
 ```
 
-Every ready registration names an ancestor commit, one of the runner's labels
-and a full test path. Execution requires a clean checkout at the exact SHA.
+Every ready registration names one of the runner's labels and a full test
+path that must exist in this tree; there is no registration commit, and the
+runner's exact-one-JUnit check refuses a stale or zero selection. Execution
+requires a clean checkout at the exact SHA.
 For each case the planner calls
 `python3 scripts/e2e-gate.py <label> <test> --artifacts <dir>/case-<i>`. The
 runner enters the fork's private Kiln gate, materializes the union of
