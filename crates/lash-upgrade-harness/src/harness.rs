@@ -1236,6 +1236,26 @@ impl Case {
         Ok(case)
     }
 
+    /// The same private identity over the case's own provisioned PostgreSQL
+    /// database, created on the runner's server with this build's schema.
+    pub fn leased_postgres(
+        name: &str,
+        services: &Services,
+        lease: &crate::e2e::case::CaseLease,
+        url: &str,
+    ) -> Result<Self> {
+        let mut case = Self::new(
+            name,
+            StoreSpec::Postgres(url.to_owned()),
+            services,
+            &lease.directory,
+        )?;
+        case.authority = lease.authority.clone();
+        case.namespace = lease.namespace.clone();
+        case.token = lease.namespace.clone();
+        Ok(case)
+    }
+
     fn new(name: &str, store: StoreSpec, services: &Services, scratch: &Path) -> Result<Self> {
         let scratch = scratch.join(name);
         std::fs::create_dir_all(scratch.join("gates"))

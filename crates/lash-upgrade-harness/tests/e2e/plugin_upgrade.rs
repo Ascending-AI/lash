@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result, ensure};
 use lash_upgrade_harness::e2e::{
-    case::{ArtifactIdentity, CaseLease, CaseSpec, Channel, StoreKind},
+    case::{ArtifactIdentity, CaseLease, CaseSpec, Channel, Leg, Permutation, StoreKind},
     control::{
         Barrier, BarrierKind, BarrierProof, Control, CoreControl, Fault, FileBarriers, WorkIdentity,
     },
@@ -15,29 +15,50 @@ use lash_upgrade_harness::node::plugin_upgrade::{Entry, OTHER, PLUGIN};
 use serde_json::{Value, json};
 
 pub(super) fn services() -> Result<Services> {
-    Ok(Services {
-        ingress_url: std::env::var("RESTATE_INGRESS_URL")
-            .context("private live Restate ingress")?,
-        admin_url: std::env::var("RESTATE_ADMIN_URL").context("private live Restate admin")?,
-        postgres_url: String::new(),
-    })
+    Services::from_env()
 }
 
-fn setup(id: &str, terminal: &str, builds: &NodeBuilds) -> Result<(Case, CaseLease, CaseSpec)> {
+/// The leg the runner's served Restate runs, proven from its own metrics
+/// port; the receipt is recorded into the case's evidence.
+fn observe_served_leg(leg: Leg, directory: &std::path::Path) -> Result<Value> {
+    let base: u16 = std::env::var("LASH_E2E_PORT_BASE")?.parse()?;
+    let metrics = format!("http://127.0.0.1:{}/metrics", base + 47);
+    block_on(lash_upgrade_harness::e2e::cluster::observe_leg(
+        leg,
+        &[metrics],
+        directory,
+    ))
+}
+
+fn setup(
+    id: &str,
+    terminal: &str,
+    builds: &NodeBuilds,
+    permutation: Permutation,
+) -> Result<(Case, CaseLease, CaseSpec)> {
     let root = std::path::PathBuf::from(
         std::env::var_os("LASH_PHASE_A_ARTIFACT_DIR").context("persistent scenario artifacts")?,
     )
     .join(format!("{id}-{}", std::process::id()));
     std::fs::create_dir_all(&root)?;
-    let lease = CaseLease::new(
+    let mut lease = CaseLease::new(
         id,
         root.join("lease"),
         std::time::Instant::now() + std::time::Duration::from_secs(120),
     )?;
-    let case = Case::leased_sqlite(id, &services()?, &lease)?;
+    let services = services()?;
+    let case = match permutation.store {
+        StoreKind::PostgreSql => {
+            let url = block_on(permutation.postgres_url(&mut lease))?
+                .context("PostgreSQL permutation provisioned no database")?;
+            Case::leased_postgres(id, &services, &lease, &url)?
+        }
+        _ => Case::leased_sqlite(id, &services, &lease)?,
+    };
     // Expand the successor's additive store shape before either serving host
-    // holds it open. SQLite migration requires exclusive ownership; admission
-    // and plugin publication remain at the predecessor's rollback floor.
+    // holds it open. On SQLite this is the exclusive-ownership migration; on
+    // PostgreSQL the probe's open only admits the provisioned schema, because
+    // workers never run DDL there.
     record(
         &case,
         "store-expand.json",
@@ -69,7 +90,7 @@ fn setup(id: &str, terminal: &str, builds: &NodeBuilds) -> Result<(Case, CaseLea
         id: id.into(),
         rules: vec!["L12".into(), "L19".into(), "L21".into()],
         host: lash_upgrade_harness::e2e::host::HostKind::UpgradeNode,
-        store: StoreKind::SqliteFile,
+        store: permutation.store,
         channel: Channel::Standard,
         provider: lash_upgrade_harness::e2e::provider::ProviderKind::Scripted,
         restate_nodes: 1,
@@ -116,7 +137,7 @@ pub(super) fn stopped(lease: &mut CaseLease, role: &str) {
         });
 }
 
-fn finish(case: &Case, lease: &CaseLease, spec: &CaseSpec) -> Result<()> {
+fn finish(case: &Case, lease: &CaseLease, spec: &CaseSpec, leg: Leg) -> Result<()> {
     record(case, "case-spec.json", &serde_json::to_value(spec)?)?;
     record(
         case,
@@ -126,7 +147,10 @@ fn finish(case: &Case, lease: &CaseLease, spec: &CaseSpec) -> Result<()> {
     let mut evidence = Evidence::empty(spec.id.clone());
     evidence.artifacts = spec.artifacts.clone();
     evidence.cleanup = lease.cleanup.clone();
-    let (cut, checkpoint) = if spec.id == "s24" {
+    evidence
+        .stores
+        .push(observe_served_leg(leg, &case.gate_dir())?);
+    let (cut, checkpoint) = if spec.id.starts_with("s24") {
         ("s24-b-durable.json", "s24-frontiers.json")
     } else {
         ("s25-cut.json", "s25-final.json")
@@ -143,7 +167,7 @@ fn finish(case: &Case, lease: &CaseLease, spec: &CaseSpec) -> Result<()> {
         .into_iter()
         .map(serde_json::to_value)
         .collect::<std::result::Result<_, _>>()?;
-    if spec.id != "s24" {
+    if spec.id.starts_with("s25") {
         evidence.faults.push(serde_json::from_slice(&std::fs::read(
             case.gate_dir().join("s25-kill.json"),
         )?)?);
@@ -154,6 +178,31 @@ fn finish(case: &Case, lease: &CaseLease, spec: &CaseSpec) -> Result<()> {
     }
     .write(&case.gate_dir())?
     .reconcile()
+}
+
+/// A failed body still proves the served leg before teardown: the receipt is
+/// recorded beside the case's other artifacts and the original error stands
+/// unless the observation itself failed.
+fn finish_legged(
+    case: &Case,
+    lease: &CaseLease,
+    spec: &CaseSpec,
+    leg: Leg,
+    outcome: Result<()>,
+) -> Result<()> {
+    if outcome.is_ok() {
+        return finish(case, lease, spec, leg);
+    }
+    match observe_served_leg(leg, &case.gate_dir()) {
+        Ok(receipt) => {
+            record(case, "leg-observation.json", &receipt)?;
+            outcome
+        }
+        Err(observed) => match outcome {
+            Err(error) => Err(error.context(format!("leg observation: {observed:#}"))),
+            Ok(()) => Err(observed.context("leg observation failed")),
+        },
+    }
 }
 
 pub(super) fn entries(case: &Case) -> Result<Vec<Entry>> {
@@ -376,30 +425,53 @@ fn one_turn(node: &NodeBinary, case: &Case, session: &str) -> Result<Value> {
     Ok(first)
 }
 
-#[test]
-#[ignore = "needs exact candidate/synthetic-next binaries and private live Restate"]
-fn s24_plugin_revision_rolls_back_without_reentering_completed_work() -> Result<()> {
+/// Permutation slugs keep each case's lease, namespace and artifacts unique.
+fn suffix(permutation: Permutation) -> &'static str {
+    match (permutation.store, permutation.leg) {
+        (StoreKind::PostgreSql, Leg::Live) => "-postgresql",
+        (StoreKind::PostgreSql, Leg::Replay) => "-postgresql-replay",
+        (_, Leg::Replay) => "-replay",
+        (_, Leg::Live) => "",
+    }
+}
+
+fn s24(permutation: Permutation) -> Result<()> {
     let builds = NodeBuilds::from_env()?;
-    let (case, mut lease, mut spec) = setup("s24", "Answered", &builds)?;
+    let (case, mut lease, mut spec) = setup(
+        &format!("s24{}", suffix(permutation)),
+        "Answered",
+        &builds,
+        permutation,
+    )?;
+    let outcome = s24_body(&builds, &case, &mut lease, &mut spec);
+    finish_legged(&case, &lease, &spec, permutation.leg, outcome)
+}
+
+fn s24_body(
+    builds: &NodeBuilds,
+    case: &Case,
+    lease: &mut CaseLease,
+    spec: &mut CaseSpec,
+) -> Result<()> {
     let session = case.session_id("plugin");
-    let n = builds.n.serve_plugin_upgrade(&case, None, None)?;
-    note_process(&mut lease, &n, "candidate", 1)?;
+    let n = builds.n.serve_plugin_upgrade(case, None, None)?;
+    note_process(lease, &n, "candidate", 1)?;
     spec.artifacts[0].generation = n.generation()?.into();
     let n_generation = n.generation()?.to_owned();
-    let first = one_turn(&builds.n, &case, &session)?;
+    let first = one_turn(&builds.n, case, &session)?;
     ensure!(
         state_value(&first, PLUGIN, "value").as_deref() == Some("N")
             && state_value(&first, PLUGIN, "hooks").as_deref() == Some("H"),
         "candidate state: {first}"
     );
     ensure!(
-        counts(&case, BuildLabel::N, "body")? == 1
-            && counts(&case, BuildLabel::N, "reducer")? == 2
-            && counts(&case, BuildLabel::N, "hook")? == 1
+        counts(case, BuildLabel::N, "body")? == 1
+            && counts(case, BuildLabel::N, "reducer")? == 2
+            && counts(case, BuildLabel::N, "hook")? == 1
     );
 
     // A's body has entered under N's recorded binding before redeployment.
-    let pending = control(&builds.n, &case, "send", &session, &["--variant", "same"])?;
+    let pending = control(&builds.n, case, "send", &session, &["--variant", "same"])?;
     let a_body = wait_for(
         "the admitted predecessor tool body",
         || match std::fs::read(case.gate_dir().join("A.entered")) {
@@ -408,38 +480,38 @@ fn s24_plugin_revision_rolls_back_without_reentering_completed_work() -> Result<
             Err(error) => Err(error.into()),
         },
     )?;
-    let a_barrier = bind_held_body(&case, &pending, &a_body)?;
-    let (_, b_durable) = b_controller(&case, &pending)?;
+    let a_barrier = bind_held_body(case, &pending, &a_body)?;
+    let (_, b_durable) = b_controller(case, &pending)?;
     spec.cuts
         .extend([a_barrier.clone(), b_durable.barrier.clone()]);
     record(
-        &case,
+        case,
         "s24-b-durable.json",
         &serde_json::to_value(b_durable)?,
     )?;
     // Keep the predecessor deployment while the successor becomes newest.
-    let next = builds.next.serve_plugin_upgrade(&case, None, None)?;
-    note_process(&mut lease, &next, "successor", 1)?;
+    let next = builds.next.serve_plugin_upgrade(case, None, None)?;
+    note_process(lease, &next, "successor", 1)?;
     spec.artifacts[1].generation = next.generation()?.into();
-    barriers(&case)?.release(&a_barrier)?;
+    barriers(case)?.release(&a_barrier)?;
     let input = pending["input_id"].as_str().context("pending input")?;
-    let pending_terminal = control(&builds.next, &case, "follow", &session, &["--input", input])?;
+    let pending_terminal = control(&builds.next, case, "follow", &session, &["--input", input])?;
     ensure!(
         serde_json::from_value::<lash::SendOutcome>(pending_terminal.clone())?.status()
             == lash::TurnStatus::Answered,
         "old callback did not drain on N: {pending_terminal}"
     );
-    quiesce(&case)?;
-    let drained = control(&builds.next, &case, "read", &session, &[])?;
+    quiesce(case)?;
+    let drained = control(&builds.next, case, "read", &session, &[])?;
     ensure!(
         state_value(&drained, PLUGIN, "value").as_deref() == Some("NBA")
             && state_value(&drained, PLUGIN, "hooks").as_deref() == Some("HH"),
         "pending callbacks substituted the successor reducer: {drained}"
     );
     ensure!(
-        counts(&case, BuildLabel::Next, "body")? == 0
-            && counts(&case, BuildLabel::Next, "reducer")? == 0
-            && counts(&case, BuildLabel::Next, "hook")? == 0,
+        counts(case, BuildLabel::Next, "body")? == 0
+            && counts(case, BuildLabel::Next, "reducer")? == 0
+            && counts(case, BuildLabel::Next, "hook")? == 0,
         "new revision executed predecessor work"
     );
     // Next prepends S; rollback appends N. These operations do not commute.
@@ -447,7 +519,7 @@ fn s24_plugin_revision_rolls_back_without_reentering_completed_work() -> Result<
         next.generation()? != n_generation,
         "revision changed without changing the executable lane"
     );
-    let rolled = one_turn(&builds.next, &case, &session)?;
+    let rolled = one_turn(&builds.next, case, &session)?;
     ensure!(
         state_value(&rolled, PLUGIN, "value").as_deref() == Some("SNBA")
             && state_value(&rolled, PLUGIN, "hooks").as_deref() == Some("JHH"),
@@ -458,62 +530,83 @@ fn s24_plugin_revision_rolls_back_without_reentering_completed_work() -> Result<
         "redeploy changed recorded configuration"
     );
     ensure!(
-        counts(&case, BuildLabel::Next, "body")? == 1
-            && counts(&case, BuildLabel::Next, "reducer")? == 2
-            && counts(&case, BuildLabel::Next, "hook")? == 1
+        counts(case, BuildLabel::Next, "body")? == 1
+            && counts(case, BuildLabel::Next, "reducer")? == 2
+            && counts(case, BuildLabel::Next, "hook")? == 1
     );
     ensure!(
-        entries(&case)?
+        entries(case)?
             .iter()
             .filter(|entry| entry.build == BuildLabel::Next && entry.plugin == PLUGIN)
             .all(|entry| entry.converter_calls == 2),
         "successor must convert state and config once before completed work"
     );
     ensure!(
-        entries(&case)?
+        entries(case)?
             .iter()
             .filter(|entry| entry.build == BuildLabel::N)
             .all(|entry| entry.converter_calls == 0),
         "candidate unexpectedly converted its native format"
     );
     ensure!(
-        counts(&case, BuildLabel::N, "body")? == 3 && counts(&case, BuildLabel::N, "hook")? == 2,
+        counts(case, BuildLabel::N, "body")? == 3 && counts(case, BuildLabel::N, "hook")? == 2,
         "redeploy reentered predecessor callbacks"
     );
 
-    let rollback = builds.n.serve_plugin_upgrade(&case, None, None)?;
-    note_process(&mut lease, &rollback, "candidate", 2)?;
+    let rollback = builds.n.serve_plugin_upgrade(case, None, None)?;
+    note_process(lease, &rollback, "candidate", 2)?;
     ensure!(
         rollback.generation()? == n_generation
             && rollback.uri()? != n.uri()?
             && rollback.uri()? != next.uri()?,
         "rollback lost the predecessor lane or reused a URI"
     );
-    let onward = one_turn(&builds.n, &case, &session)?;
+    let onward = one_turn(&builds.n, case, &session)?;
     ensure!(
         state_value(&onward, PLUGIN, "value").as_deref() == Some("SNBAN")
             && state_value(&onward, PLUGIN, "hooks").as_deref() == Some("JHHH"),
         "rollback reducer/order: {onward}"
     );
     ensure!(
-        counts(&case, BuildLabel::N, "body")? == 4
-            && counts(&case, BuildLabel::N, "reducer")? == 7
-            && counts(&case, BuildLabel::N, "hook")? == 3
+        counts(case, BuildLabel::N, "body")? == 4
+            && counts(case, BuildLabel::N, "reducer")? == 7
+            && counts(case, BuildLabel::N, "hook")? == 3
     );
     record(
-        &case,
+        case,
         "s24-frontiers.json",
         &json!({"candidate":first,"successor":rolled,"rollback":onward}),
     )?;
     rollback.stop()?;
-    stopped(&mut lease, "rollback");
+    stopped(lease, "rollback");
     next.stop()?;
-    stopped(&mut lease, "successor");
+    stopped(lease, "successor");
     n.stop()?;
-    stopped(&mut lease, "candidate");
-    finish(&case, &lease, &spec)?;
+    stopped(lease, "candidate");
     Ok(())
 }
+
+/// Every store/leg permutation is one test function on the same oracle.
+macro_rules! s24_case {
+    ($name:ident, $store:ident, $leg:ident) => {
+        #[test]
+        #[ignore = "needs exact candidate/synthetic-next binaries and private live Restate"]
+        fn $name() -> Result<()> {
+            s24(Permutation::provisioned(StoreKind::$store, Leg::$leg)?)
+        }
+    };
+}
+
+s24_case!(
+    s24_plugin_revision_rolls_back_without_reentering_completed_work,
+    SqliteFile,
+    Live
+);
+s24_case!(
+    s24_plugin_revision_rolls_back_without_reentering_completed_work_postgresql,
+    PostgreSql,
+    Live
+);
 
 /// S25 uses the controller's decoded D-durable barrier and owned SIGKILL.
 fn s25_cold_reopen(
@@ -670,30 +763,68 @@ fn s25_cold_reopen(
         "s25-composition.json",
         &json!({"leg":"D-durable/SIGKILL/cancel/cold-reopen", "held_terminal":"separate H4 invariant helper: pending drain, one terminal on release, SIGKILL redrive on the same seal without a fence raise or second segment", "refusal_laws":["a_stale_fence_writes_nothing", "a_checkpoint_refuses_a_stale_fence_whatever_its_caps"], "note":"Per ruling 14379, this composes recovery, held-terminal invariants and the store-tier refusal oracle instead of the plan's single-run wording. SIGKILL cannot deliver a stale store request, and a held terminal is not a quiet point admitting a higher fence. No live stale-refusal claim."}),
     )?;
-    finish(case, lease, spec)?;
     Ok(())
 }
 
-fn cold_reopen(variant: &str) -> Result<()> {
+fn cold_reopen(variant: &str, permutation: Permutation) -> Result<()> {
     let builds = NodeBuilds::from_env()?;
-    let (case, mut lease, mut spec) = setup(&format!("s25-{variant}"), "Cancelled", &builds)?;
-    s25_cold_reopen(&case, &builds, variant, &mut lease, &mut spec)
+    let (case, mut lease, mut spec) = setup(
+        &format!("s25-{variant}{}", suffix(permutation)),
+        "Cancelled",
+        &builds,
+        permutation,
+    )?;
+    let outcome = s25_cold_reopen(&case, &builds, variant, &mut lease, &mut spec);
+    finish_legged(&case, &lease, &spec, permutation.leg, outcome)
 }
 
-#[test]
-#[ignore = "needs actual binary pair and private live Restate"]
-fn s25_same_key_cold_reopen_preserves_the_durable_sibling() -> Result<()> {
-    cold_reopen("same")
+/// Each S25 variant is one test function per declared store/leg permutation.
+macro_rules! s25_case {
+    ($name:ident, $variant:literal, $store:ident, $leg:ident) => {
+        #[test]
+        #[ignore = "needs actual binary pair and private live Restate"]
+        fn $name() -> Result<()> {
+            cold_reopen(
+                $variant,
+                Permutation::provisioned(StoreKind::$store, Leg::$leg)?,
+            )
+        }
+    };
 }
 
-#[test]
-#[ignore = "needs actual binary pair and private live Restate"]
-fn s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling() -> Result<()> {
-    cold_reopen("disjoint")
-}
-
-#[test]
-#[ignore = "needs actual binary pair and private live Restate"]
-fn s25_namespaces_cold_reopen_preserves_the_durable_sibling() -> Result<()> {
-    cold_reopen("namespace")
-}
+s25_case!(
+    s25_same_key_cold_reopen_preserves_the_durable_sibling,
+    "same",
+    SqliteFile,
+    Live
+);
+s25_case!(
+    s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling,
+    "disjoint",
+    SqliteFile,
+    Live
+);
+s25_case!(
+    s25_namespaces_cold_reopen_preserves_the_durable_sibling,
+    "namespace",
+    SqliteFile,
+    Live
+);
+s25_case!(
+    s25_same_key_cold_reopen_preserves_the_durable_sibling_postgresql,
+    "same",
+    PostgreSql,
+    Live
+);
+s25_case!(
+    s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling_postgresql,
+    "disjoint",
+    PostgreSql,
+    Live
+);
+s25_case!(
+    s25_namespaces_cold_reopen_preserves_the_durable_sibling_postgresql,
+    "namespace",
+    PostgreSql,
+    Live
+);

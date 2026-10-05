@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use lash_upgrade_harness::e2e::{
-    case::{ArtifactIdentity, CaseLease},
+    case::{ArtifactIdentity, CaseLease, Leg, Permutation, StoreKind},
     cluster::{ClusterControl, LocalCluster},
     control::{
         Barrier, BarrierKind, BarrierProof, Control, CoreControl, FileBarriers, WorkIdentity,
@@ -102,8 +102,12 @@ async fn durable(
     .await
 }
 
-async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
-    let slug = scenario.id().to_ascii_lowercase();
+async fn recovery(scenario: ProviderScenario, transcript: &[u8], leg: Leg) -> Result<()> {
+    let slug = format!(
+        "{}{}",
+        scenario.id().to_ascii_lowercase(),
+        if leg == Leg::Replay { "-replay" } else { "" }
+    );
     let root = PathBuf::from(std::env::var("LASH_E2E_ARTIFACT_DIR")?);
     std::fs::create_dir_all(&root)?;
     let deadline = Instant::now() + TIMEOUT;
@@ -114,7 +118,7 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
     scenario
         .spec(vec![server.clone(), node.clone()])
         .validate()?;
-    let mut cluster = LocalCluster::new(port, deadline);
+    let mut cluster = LocalCluster::new(port, deadline).with_leg(leg);
     let boot = cluster.boot(&server, 1, &mut lease).await?;
     write(&lease.directory.join("boot.json"), &boot)?;
     let fixture = RecordedHttpFixture::start(
@@ -177,8 +181,9 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
     evidence.artifacts = vec![server, node.clone()];
     let proof: Result<ProviderCaseEvidence> = async {
         host.boot(&node,&mut lease).await?;
-        let session = format!("h1-{slug}-session"); let input = format!("{slug}-input");
-        let submitted = host.command(HostCommand::Submit { session:session.clone(),idempotency_key:input,input:serde_json::json!(format!("{slug} input")) }).await?;
+        let id = scenario.id().to_ascii_lowercase();
+        let session = format!("h1-{id}-session"); let input = format!("{id}-input");
+        let submitted = host.command(HostCommand::Submit { session:session.clone(),idempotency_key:input,input:serde_json::json!(format!("{id} input")) }).await?;
         let base = submitted.work;
         let first = await_bodies(&body_path,if matches!(scenario,ProviderScenario::S06|ProviderScenario::S07) {2} else {1},deadline).await?;
         let work = call(&base,&first[0])?;
@@ -257,7 +262,7 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
         write(&lease.directory.join("terminal.json"),&output)?;
         let terminal:lash::TurnOutput=serde_json::from_value(output.output.clone())?;
         if scenario==ProviderScenario::S07 { ensure!(terminal.result.outcome.cancellation().is_some(),"cancelled backoff did not terminate Cancelled"); }
-        else { ensure!(terminal.assistant_message()==Some(format!("{slug} answer").as_str()),"wrong settled answer"); }
+        else { ensure!(terminal.assistant_message()==Some(format!("{id} answer").as_str()),"wrong settled answer"); }
         let after=snapshot(&mut host,&session).await?;
         evidence.journals=view.journal(&base,&base.segment,7).await?;
         evidence.outputs=host.transcript()?;
@@ -275,6 +280,7 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
     };
     let callback_cleanup = callbacks.finish().await;
     let http = fixture.finish().await;
+    let leg_observation = cluster.observe_leg(&lease.directory).await;
     let cluster_cleanup = cluster.finish().await;
     write(
         &lease.directory.join("cleanup.json"),
@@ -285,11 +291,13 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
     let mut proof = match proof {
         Ok(proof) => proof,
         Err(error) => {
+            let reason = match &leg_observation {
+                Ok(_) => format!("{error:#}"),
+                Err(observe) => format!("{error:#}; leg observation: {observe:#}"),
+            };
             CaseReceipt {
                 evidence,
-                verdict: Verdict::Failed {
-                    reason: format!("{error:#}"),
-                },
+                verdict: Verdict::Failed { reason },
             }
             .write(&lease.directory)?;
             return Err(error);
@@ -348,8 +356,14 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
                 "deployment owner reaped; actual private admin and ingress listeners probed closed"
                     .into(),
         });
+    let verification = match leg_observation {
+        Ok(receipt) => {
+            proof.evidence.stores.push(receipt);
+            proof.verify()
+        }
+        Err(error) => Err(error),
+    };
     write(&lease.directory.join("evidence.json"), &proof)?;
-    let verification = proof.verify();
     let verdict = match &verification {
         Ok(()) => Verdict::Passed,
         Err(error) => Verdict::Failed {
@@ -370,28 +384,55 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s03_ambiguous_acceptance_survives_host_sigkill() -> Result<()> {
-    recovery(
-        ProviderScenario::S03,
-        include_bytes!("../../testdata/e2e/providers/s03-tools.json"),
-    )
-    .await
+/// Every recovery row is one test function per declared store/leg permutation.
+macro_rules! recovery_case {
+    ($name:ident, $scenario:ident, $transcript:literal, $leg:ident) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() -> Result<()> {
+            let permutation = Permutation::provisioned(StoreKind::SqliteFile, Leg::$leg)?;
+            recovery(
+                ProviderScenario::$scenario,
+                include_bytes!($transcript),
+                permutation.leg,
+            )
+            .await
+        }
+    };
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s06_reported_retries_preserve_backoff_and_reverse_ready_order() -> Result<()> {
-    recovery(
-        ProviderScenario::S06,
-        include_bytes!("../../testdata/e2e/providers/s06-tools.json"),
-    )
-    .await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s07_cancellation_during_backoff_survives_cold_restart() -> Result<()> {
-    recovery(
-        ProviderScenario::S07,
-        include_bytes!("../../testdata/e2e/providers/s07-tools.json"),
-    )
-    .await
-}
+recovery_case!(
+    s03_ambiguous_acceptance_survives_host_sigkill,
+    S03,
+    "../../testdata/e2e/providers/s03-tools.json",
+    Live
+);
+recovery_case!(
+    s03_ambiguous_acceptance_survives_host_sigkill_replay,
+    S03,
+    "../../testdata/e2e/providers/s03-tools.json",
+    Replay
+);
+recovery_case!(
+    s06_reported_retries_preserve_backoff_and_reverse_ready_order,
+    S06,
+    "../../testdata/e2e/providers/s06-tools.json",
+    Live
+);
+recovery_case!(
+    s06_reported_retries_preserve_backoff_and_reverse_ready_order_replay,
+    S06,
+    "../../testdata/e2e/providers/s06-tools.json",
+    Replay
+);
+recovery_case!(
+    s07_cancellation_during_backoff_survives_cold_restart,
+    S07,
+    "../../testdata/e2e/providers/s07-tools.json",
+    Live
+);
+recovery_case!(
+    s07_cancellation_during_backoff_survives_cold_restart_replay,
+    S07,
+    "../../testdata/e2e/providers/s07-tools.json",
+    Replay
+);

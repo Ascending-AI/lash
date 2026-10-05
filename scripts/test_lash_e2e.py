@@ -202,6 +202,8 @@ class ReceiptLaws(unittest.TestCase):
             self.assertEqual(command[2], "//crates/lash-upgrade-harness:e2e_hosts__test")
             self.assertEqual(command[3], "s28_workbench_mcp_peer_restart")
             self.assertEqual(command[command.index("--case") + 1], key)
+            self.assertEqual(command[command.index("--store") + 1], "sqlite_file")
+            self.assertEqual(command[command.index("--leg") + 1], "live")
             directory = Path(command[command.index("--artifacts") + 1])
             directory.mkdir()
             e2e.write(directory / "execution.json", {
@@ -234,7 +236,8 @@ class ReceiptLaws(unittest.TestCase):
         test_name = "s30_external_consumer_accept_follow_cancel"
         outputs = {
             name: self.root / f"built-{name}"
-            for name in ("workbench", "workbench_e2e", "node", "consumer", "node_next", "vm_worker", "server")
+            for name in ("workbench", "workbench_e2e", "node", "consumer", "node_next",
+                         "lashctl_n", "lashctl_next", "vm_worker", "vm_worker_next", "server")
         }
         for name, path in outputs.items():
             path.write_text(f"built {name}")
@@ -295,6 +298,23 @@ class ReceiptLaws(unittest.TestCase):
                    "audits": {}, "gates": {}}
         self.assertEqual(e2e.reconcile(expected, receipt, case_dir, manifest)["status"], "passed")
 
+        # The upgrade-node pair case also certifies the operator binaries.
+        upgrade = self.root / "case-upgrade"
+        (upgrade / "case").mkdir(parents=True)
+        upgrade_receipt = json.loads((case_dir / "case" / "receipt.json").read_text())
+        upgrade_receipt["case"]["evidence"]["artifacts"].append({
+            "role": "synthetic-next", "path": str(outputs["node_next"]),
+            "sha256": e2e.digest(outputs["node_next"]),
+            "candidate_sha": SOURCE, "generation": "synthetic-next",
+        })
+        (upgrade / "case" / "receipt.json").write_text(json.dumps(upgrade_receipt))
+        provenance = gate.certify_case(upgrade, junit_source, outputs, SOURCE, key, admin, dict(base))
+        self.assertIsNone(provenance["evidence_error"])
+        self.assertEqual(set(provenance["binaries"]), {
+            "host", "vm_worker", "synthetic_next_host",
+            "operator", "synthetic_next_operator", "synthetic_next_vm_worker",
+        })
+
         missing = self.root / "case-1"
         (missing / "case").mkdir(parents=True)
         provenance = gate.certify_case(missing, junit_source, outputs, SOURCE, key, admin, dict(base))
@@ -327,6 +347,14 @@ class ReceiptLaws(unittest.TestCase):
         manifest = copy.deepcopy(self.manifest)
         for scenario in manifest["scenarios"]:
             scenario["arc_guards"] = []
+        # This law needs one ready row and explicit held siblings, independent
+        # of which S17 permutations the real catalogue has implemented.
+        for scenario in manifest["scenarios"]:
+            if scenario["id"] == "S17":
+                for case in scenario["cases"]:
+                    if (case["store"], case["leg"]) != ("sqlite_file", "live"):
+                        case.update(state="held", hold_reason="R8 fixture: missing sibling oracle",
+                                    registration=None)
         server_file = self.root / "server-bin"
         server_file.write_text("synthetic server")
         manifest["server"]["executable_sha256"] = e2e.digest(server_file)

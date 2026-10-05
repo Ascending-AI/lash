@@ -11,7 +11,9 @@ use lash_core::tool_run::{
     AttemptOrdinal, BusinessReceipt, CallDecision, LogicalTerminal, RunEvent, RunJournalEntry,
 };
 use lash_upgrade_harness::e2e::Step;
-use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease, CaseSpec, Channel, StoreKind};
+use lash_upgrade_harness::e2e::case::{
+    ArtifactIdentity, CaseLease, CaseSpec, Channel, Leg, Permutation, StoreKind,
+};
 use lash_upgrade_harness::e2e::control::{
     Barrier, BarrierKind, BarrierProof, Control, Fault, ToolControl, WorkIdentity,
 };
@@ -26,18 +28,31 @@ use lash_upgrade_harness::node::tools::ToolDelivery;
 /// its cloned clients; it does not borrow an adapter while an effect is held.
 pub type Snapshot = Arc<dyn Fn(WorkIdentity) -> Step<'static, Evidence> + Send + Sync>;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s01_workbench_singleton() -> Result<()> {
-    super::h2::run(super::h2::Row::Singleton).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s02_cold_partial() -> Result<()> {
-    super::h2::run(super::h2::Row::Partial).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s05_opposite_batch_order() -> Result<()> {
-    super::h2::run(super::h2::Row::Batch).await
-}
+h2_case!(s01_workbench_singleton, Singleton, SqliteFile, Live);
+h2_case!(
+    s01_workbench_singleton_replay,
+    Singleton,
+    SqliteFile,
+    Replay
+);
+h2_case!(s02_cold_partial, Partial, SqliteFile, Live);
+h2_case!(s02_cold_partial_replay, Partial, SqliteFile, Replay);
+h2_case!(s02_cold_partial_postgresql, Partial, PostgreSql, Live);
+h2_case!(
+    s02_cold_partial_postgresql_replay,
+    Partial,
+    PostgreSql,
+    Replay
+);
+h2_case!(s05_opposite_batch_order, Batch, SqliteFile, Live);
+h2_case!(s05_opposite_batch_order_replay, Batch, SqliteFile, Replay);
+h2_case!(s05_opposite_batch_order_postgresql, Batch, PostgreSql, Live);
+h2_case!(
+    s05_opposite_batch_order_postgresql_replay,
+    Batch,
+    PostgreSql,
+    Replay
+);
 
 pub struct Scenario<'a> {
     pub host: &'a mut dyn HostAdapter,

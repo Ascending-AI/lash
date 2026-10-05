@@ -5,6 +5,7 @@ use super::{
     control::{BarrierProof, CleanupReceipt, FaultReceipt},
 };
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NodeReceipt {
     pub node: u32,
@@ -40,10 +41,13 @@ pub trait ClusterControl {
     fn partition(&mut self, from: u32, to: u32) -> Step<'_, ()>;
     fn heal(&mut self, from: u32, to: u32) -> Step<'_, ()>;
     fn converge(&mut self) -> Step<'_, ClusterReceipt>;
+    fn observe_leg<'a>(&'a mut self, directory: &'a Path) -> Step<'a, serde_json::Value>;
     fn finish(&mut self) -> Step<'_, Vec<CleanupReceipt>>;
 }
 
+mod leg;
 pub mod links;
+pub use leg::observe_leg;
 mod runtime;
 pub use runtime::LocalCluster;
 

@@ -267,6 +267,7 @@ def run_cases(expected: dict, artifacts: Path, manifest: dict) -> dict:
         subprocess.call([
             "python3", str(ROOT / RUNNER), row["registration"]["label"], row["registration"]["test"],
             "--artifacts", str(directory), "--case", case_key(row),
+            "--store", row["store"], "--leg", row["leg"],
         ], cwd=ROOT)
         execution_path = directory / "execution.json"
         if execution_path.is_file():

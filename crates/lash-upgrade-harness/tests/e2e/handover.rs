@@ -10,7 +10,9 @@ use anyhow::{Context, Result, anyhow, ensure};
 use lash_core::ToolCallId;
 use lash_core::tool_run::{AttemptResult, LogicalTerminal, RunEvent, RunJournalEntry, RunTransfer};
 use lash_remote_protocol::RemoteTurnStatus;
-use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseSpec, Channel, StoreKind};
+use lash_upgrade_harness::e2e::case::{
+    ArtifactIdentity, CaseSpec, Channel, Leg, Permutation, StoreKind,
+};
 use lash_upgrade_harness::e2e::control::{
     Barrier, BarrierKind, BarrierProof, Fault, ToolControl, WorkIdentity,
 };
@@ -19,26 +21,36 @@ use lash_upgrade_harness::e2e::host::{HostAdapter as _, HostCommand, HostKind};
 use lash_upgrade_harness::e2e::provider::ProviderKind;
 use serde_json::json;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s12_deferred_survives_removal_of_n() -> Result<()> {
-    super::h2::run(super::h2::Row::RetirePending).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s23_cancel_between_capture_and_adoption() -> Result<()> {
-    super::h2::run(super::h2::Row::CancelAtCapture).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s23_cancel_after_adoption() -> Result<()> {
-    super::h2::run(super::h2::Row::CancelAfterAdoption).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s31_publication_crash_hands_over_once() -> Result<()> {
-    super::h2::run(super::h2::Row::PublicationCrash).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s32_missing_retained_material_refuses_without_body_replay() -> Result<()> {
-    super::h2::run(super::h2::Row::RetainedRemoval).await
-}
+h2_case!(
+    s12_deferred_survives_removal_of_n,
+    RetirePending,
+    SqliteFile,
+    Live
+);
+h2_case!(
+    s23_cancel_between_capture_and_adoption,
+    CancelAtCapture,
+    SqliteFile,
+    Live
+);
+h2_case!(
+    s23_cancel_after_adoption,
+    CancelAfterAdoption,
+    SqliteFile,
+    Live
+);
+h2_case!(
+    s31_publication_crash_hands_over_once,
+    PublicationCrash,
+    SqliteFile,
+    Live
+);
+h2_case!(
+    s32_missing_retained_material_refuses_without_body_replay,
+    RetainedRemoval,
+    SqliteFile,
+    Live
+);
 
 pub fn spec(id: &str, store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Result<CaseSpec> {
     let rules = match id {

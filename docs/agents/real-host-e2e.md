@@ -12,8 +12,8 @@ S22 guards FIG-4896–4900, S13's final drain path guards FIG-4900, and S18's
 final wait contract guards FIG-4897; all are landed. F02/FIG-1863 was already
 landed at intake; S35/S36 have no F02 guard.
 
-Smoke selects exactly S01/S02/S17/S18/S26/S30 on the live leg. S01/S02/S18/S26
-use file SQLite; S17/S30 use memory SQLite. Full and release select the same
+Smoke selects exactly S01/S02/S17/S18/S26/S30 on the live leg. S01/S02/S17/S18/S26
+use file SQLite; S30 uses memory SQLite. Full and release select the same
 deterministic catalogue; live-provider cases S35/S36 are separate. Counts cover
 each permutation. Held rows keep their variant hold until the named owner
 lands its implementation. S33 reuses the existing Phase A operator
@@ -46,13 +46,23 @@ path that must exist in this tree; there is no registration commit, and the
 runner's exact-one-JUnit check refuses a stale or zero selection. Execution
 requires a clean checkout at the exact SHA.
 For each case the planner calls
-`python3 scripts/e2e-gate.py <label> <test> --artifacts <dir>/case-<i>`. The
+`python3 scripts/e2e-gate.py <label> <test> --store <store> --leg <leg>
+--artifacts <dir>/case-<i>`. The
 runner enters the fork's private Kiln gate, materializes the union of
 binaries the registered selectors need in one `kiln build`, serves pinned
 Restate, and runs an exact uncached `kiln test` under
 `scripts/ci/restate_suite.py`. Its JUnit must contain exactly the registered
 test. Stale case or test selectors refuse before boot. This script owns no
 service processes and inserts no journal commands.
+
+Each row declares its store and leg, and every permutation is its own test
+function named `<test>[_postgresql][_replay]`. For `--store postgresql` the
+runner supplies PostgreSQL through `scripts/ci/with-service.sh pg16`, and the
+case creates a fresh database and applies the committed schema itself. For
+`--leg replay` the runner serves the always-suspending Restate
+(`RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s`), and the scenario's leg
+oracle must observe at least one suspended invocation task in the server's
+Prometheus metrics; a live leg only retains the same scrape.
 
 The producer writes `receipt.json` using
 `scripts/lash-e2e-receipt.schema.json`. It carries the source SHA, manifest
@@ -101,6 +111,6 @@ Event barriers and deadline-bound predicate probes belong in the
 case and its evidence; sleeps cannot establish readiness, completion or
 cleanup.
 
-The seven laws in `scripts/test_lash_e2e.py` pin R8 selection, counts, artifact and
+The nine laws in `scripts/test_lash_e2e.py` pin R8 selection, counts, artifact and
 release-evidence rules using synthetic envelopes. They execute no host cases
 and provide no live-substrate, upgrade or release proof.

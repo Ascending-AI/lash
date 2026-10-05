@@ -3,7 +3,7 @@ use super::links::{LinkState, PeerLinks};
 use super::{ClusterControl, ClusterReceipt, LeaderReceipt, NodeReceipt};
 use crate::e2e::{
     Step,
-    case::{ArtifactIdentity, CaseLease},
+    case::{ArtifactIdentity, CaseLease, Leg},
     control::{BarrierProof, CleanupReceipt, Fault, FaultReceipt, ProcessReceipt},
 };
 use crate::harness::ServingNode;
@@ -28,6 +28,7 @@ pub struct LocalCluster {
     links: PeerLinks,
     binary: Option<ArtifactIdentity>,
     deadline: Instant,
+    leg: Leg,
     provisioning: serde_json::Value,
     namespace: String,
     server_version: String,
@@ -40,10 +41,16 @@ impl LocalCluster {
             links: Default::default(),
             binary: None,
             deadline,
+            leg: Leg::Live,
             provisioning: serde_json::Value::Null,
             namespace: String::new(),
             server_version: String::new(),
         }
+    }
+    /// Every node this cluster ever starts runs this leg's server env.
+    pub fn with_leg(mut self, leg: Leg) -> Self {
+        self.leg = leg;
+        self
     }
     pub fn nodes(&self) -> Vec<NodeReceipt> {
         self.nodes.iter().map(|node| node.receipt.clone()).collect()
@@ -64,6 +71,7 @@ impl LocalCluster {
             .context("cluster binary was not materialized")?
             .path
             .clone();
+        let leg = self.leg;
         let node = self.node_mut(id)?;
         ensure!(node.process.is_none(), "node already running");
         let mut command = Command::new(binary);
@@ -88,6 +96,9 @@ impl LocalCluster {
             }
         }
         command.env("RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7", "true");
+        for (key, value) in leg.server_env() {
+            command.env(key, value);
+        }
         let process = ServingNode::spawn(&mut command, &node.log)?;
         let pid = process.pid()?;
         node.receipt.incarnation += 1;
@@ -289,7 +300,7 @@ impl LocalCluster {
                     ensure!(health.pointer("/metadata_cluster_health/members").and_then(serde_json::Value::as_array).is_some_and(|members| members.len()==self.nodes.len()),"metadata quorum has not joined every node");
                     views.push(json!({"identity":ident,"configuration":config,"state":state,"health":health}));
                 }
-                Ok((expected.context("leaders absent")?,json!({"node_views":views,"peer_identity":"/proc/net/tcp + /proc/<owned-pid>/fd","server_version":self.server_version}),scanner_peers))
+                Ok((expected.context("leaders absent")?,json!({"node_views":views,"peer_identity":"/proc/net/tcp + /proc/<owned-pid>/fd","server_version":self.server_version,"leg":self.leg.manifest(),"server_env":self.leg.server_env().iter().map(|(key,value)| (*key,*value)).collect::<std::collections::BTreeMap<_,_>>()}),scanner_peers))
             }.await;
             match observed {
                 Ok((leaders, mut provisioning, scanner_peers)) => {
@@ -327,6 +338,18 @@ impl LocalCluster {
     }
     fn namespace(&self) -> &str {
         self.namespace.as_str()
+    }
+    /// Scrape every running node's metrics port and prove the leg this
+    /// cluster runs; node ports follow boot's four-per-node reservation.
+    pub async fn observe_leg(&self, directory: &std::path::Path) -> Result<serde_json::Value> {
+        let mut urls = Vec::new();
+        for node in &self.nodes {
+            if node.process.is_some() {
+                urls.push(format!("{}/metrics", self.control_peer(&node.receipt)?));
+            }
+        }
+        ensure!(!urls.is_empty(), "cluster has no running node to observe");
+        super::leg::observe_leg(self.leg, &urls, directory).await
     }
 }
 impl ClusterControl for LocalCluster {
@@ -529,6 +552,12 @@ default-provider = "replicated"
     }
     fn converge(&mut self) -> Step<'_, ClusterReceipt> {
         Box::pin(self.converge_inner())
+    }
+    fn observe_leg<'a>(
+        &'a mut self,
+        directory: &'a std::path::Path,
+    ) -> Step<'a, serde_json::Value> {
+        Box::pin(async move { LocalCluster::observe_leg(self, directory).await })
     }
     fn finish(&mut self) -> Step<'_, Vec<CleanupReceipt>> {
         Box::pin(async move {

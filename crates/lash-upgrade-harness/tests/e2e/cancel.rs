@@ -7,36 +7,36 @@ use anyhow::{Context, Result, anyhow, ensure};
 use lash_core::ToolCallId;
 use lash_core::tool_run::{AttemptResult, CallDecision, LogicalTerminal, RunEvent, RunLifecycle};
 use lash_remote_protocol::RemoteTurnStatus;
-use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseSpec, Channel, StoreKind};
+use lash_upgrade_harness::e2e::case::{
+    ArtifactIdentity, CaseSpec, Channel, Leg, Permutation, StoreKind,
+};
 use lash_upgrade_harness::e2e::control::{Barrier, BarrierKind, ToolControl};
 use lash_upgrade_harness::e2e::evidence::Evidence;
 use lash_upgrade_harness::e2e::host::{HostCommand, HostKind};
 use lash_upgrade_harness::e2e::provider::ProviderKind;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s08_pre_final() -> Result<()> {
-    super::h2::run(super::h2::Row::PreFinal).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s09_before_intent() -> Result<()> {
-    super::h2::run(super::h2::Row::BeforeIntent).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s09_after_intent() -> Result<()> {
-    super::h2::run(super::h2::Row::AfterIntent).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s10_empty_middle_rank() -> Result<()> {
-    super::h2::run(super::h2::Row::Ranks).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s11_inline_loser() -> Result<()> {
-    super::h2::run(super::h2::Row::InlineLoser).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s11_deferred_loser() -> Result<()> {
-    super::h2::run(super::h2::Row::DeferredLoser).await
-}
+h2_case!(s08_pre_final, PreFinal, SqliteFile, Live);
+h2_case!(s08_pre_final_replay, PreFinal, SqliteFile, Replay);
+h2_case!(s08_pre_final_postgresql, PreFinal, PostgreSql, Live);
+h2_case!(
+    s08_pre_final_postgresql_replay,
+    PreFinal,
+    PostgreSql,
+    Replay
+);
+h2_case!(s09_before_intent, BeforeIntent, SqliteFile, Live);
+h2_case!(s09_before_intent_replay, BeforeIntent, SqliteFile, Replay);
+h2_case!(s09_before_intent_postgresql, BeforeIntent, PostgreSql, Live);
+h2_case!(
+    s09_before_intent_postgresql_replay,
+    BeforeIntent,
+    PostgreSql,
+    Replay
+);
+h2_case!(s09_after_intent, AfterIntent, SqliteFile, Live);
+h2_case!(s10_empty_middle_rank, Ranks, SqliteFile, Live);
+h2_case!(s11_inline_loser, InlineLoser, SqliteFile, Live);
+h2_case!(s11_deferred_loser, DeferredLoser, SqliteFile, Live);
 
 pub fn spec(id: &str, store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Result<CaseSpec> {
     let (rules, channel) = match id {

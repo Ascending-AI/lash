@@ -7,7 +7,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::e2e::Step;
-use crate::e2e::case::{ArtifactIdentity, CaseLease, CaseSpec, Channel, StoreKind};
+use crate::e2e::case::{
+    ArtifactIdentity, CaseLease, CaseSpec, Channel, Leg, Permutation, StoreKind,
+};
 use crate::e2e::cluster::{ClusterControl, ClusterReceipt, LeaderReceipt};
 use crate::e2e::control::{
     Barrier, BarrierKind, BarrierProof, Control, Fault, ToolControl, WorkIdentity,
@@ -159,9 +161,13 @@ pub async fn execute(
     } else {
         Ok(())
     };
+    let leg_observation = cluster.observe_leg(&lease.directory).await;
     let fixture_cleanup = fixture.finish().await;
     let cluster_cleanup = cluster.finish().await;
     let mut cleanup_errors = Vec::new();
+    if let Err(error) = &leg_observation {
+        cleanup_errors.push(format!("leg observation: {error:#}"));
+    }
     for receipts in [fixture_cleanup, cluster_cleanup] {
         match receipts {
             Ok(receipts) => {
@@ -176,6 +182,9 @@ pub async fn execute(
         }
     }
     if let Ok(proof) = &mut result {
+        if let Ok(receipt) = leg_observation {
+            proof.after.stores.push(receipt);
+        }
         proof.after.cleanup.extend(lease.cleanup.clone());
     }
     let cleanup_artifact = serde_json::to_vec_pretty(&serde_json::json!({

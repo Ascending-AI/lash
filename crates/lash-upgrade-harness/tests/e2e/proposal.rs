@@ -9,7 +9,9 @@ use lash_restate_test::protocol::generated::{
     ProposeRunCompletionAckMessage, ProposeRunCompletionMessage, propose_run_completion_message,
 };
 use lash_restate_test::protocol::{Frame, MessageType};
-use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease, CaseSpec, Channel, StoreKind};
+use lash_upgrade_harness::e2e::case::{
+    ArtifactIdentity, CaseLease, CaseSpec, Channel, Leg, Permutation, StoreKind,
+};
 use lash_upgrade_harness::e2e::control::transport::{TransportCut, V7Proxy};
 use lash_upgrade_harness::e2e::control::{
     Barrier, BarrierKind, BarrierProof, CleanupReceipt, Control, CoreControl, Fault, FaultReceipt,
@@ -29,18 +31,23 @@ use super::plugin_upgrade::{
     same_terminal, services, state_value, stopped, work_of,
 };
 
-fn setup() -> Result<(Case, CaseLease, CaseSpec)> {
+fn setup(permutation: Permutation) -> Result<(Case, CaseLease, CaseSpec)> {
     let root = std::path::PathBuf::from(
         std::env::var_os("LASH_PHASE_A_ARTIFACT_DIR").context("persistent scenario artifacts")?,
     )
     .join(format!("s04-{}", std::process::id()));
     std::fs::create_dir_all(&root)?;
-    let lease = CaseLease::new(
+    let mut lease = CaseLease::new(
         "s04",
         root.join("lease"),
         std::time::Instant::now() + std::time::Duration::from_secs(180),
     )?;
-    let case = Case::leased_sqlite("s04", &services()?, &lease)?;
+    let services = services()?;
+    let case = match lash_upgrade_harness::harness::block_on(permutation.postgres_url(&mut lease))?
+    {
+        Some(url) => Case::leased_postgres("s04", &services, &lease, &url)?,
+        None => Case::leased_sqlite("s04", &services, &lease)?,
+    };
     let path = std::path::PathBuf::from(
         std::env::var_os(lash_upgrade_harness::harness::NODE_N_ENV)
             .context("materialized candidate binary")?,
@@ -49,7 +56,7 @@ fn setup() -> Result<(Case, CaseLease, CaseSpec)> {
         id: "s04".into(),
         rules: vec!["L02".into(), "L19".into()],
         host: HostKind::UpgradeNode,
-        store: StoreKind::SqliteFile,
+        store: permutation.store,
         channel: Channel::Standard,
         provider: ProviderKind::Scripted,
         restate_nodes: 1,
@@ -171,11 +178,27 @@ fn finish(
     .reconcile()
 }
 
-#[test]
-#[ignore = "needs the candidate binary and private live Restate"]
-fn s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery() -> Result<()> {
+macro_rules! proposal_case {
+    ($name:ident, $store:ident) => {
+        #[test]
+        #[ignore = "needs the candidate binary and private live Restate"]
+        fn $name() -> Result<()> {
+            s04(Permutation::provisioned(StoreKind::$store, Leg::Live)?)
+        }
+    };
+}
+proposal_case!(
+    s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery,
+    SqliteFile
+);
+proposal_case!(
+    s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery_postgresql,
+    PostgreSql
+);
+
+fn s04(permutation: Permutation) -> Result<()> {
     let builds = NodeBuilds::from_env()?;
-    let (case, mut lease, mut spec) = setup()?;
+    let (case, mut lease, mut spec) = setup(permutation)?;
     let session = case.session_id("plugin");
     let deadline = lease.deadline;
     // The proxy spawns its accept/relay tasks where it starts; keep one
@@ -612,6 +635,12 @@ fn s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery() -> Resu
         "kind":"s04_wire_proposals",
         "d_a":proposals[0],"d_b":proposals[1],"x_a":proposals[2],"x_b":proposals[3],
     }));
+    let base: u16 = std::env::var("LASH_E2E_PORT_BASE")?.parse()?;
+    let leg_observation = rt.block_on(lash_upgrade_harness::e2e::cluster::observe_leg(
+        permutation.leg,
+        &[format!("http://127.0.0.1:{}/metrics", base + 47)],
+        &case.gate_dir(),
+    ))?;
     finish(
         &case,
         &lease,
@@ -619,7 +648,7 @@ fn s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery() -> Resu
         journal.journals,
         vec![proposed_proof, ack_proof, durable_proof],
         controller.receipts.clone(),
-        vec![cut_read, final_read],
+        vec![cut_read, final_read, leg_observation],
         effects,
     )?;
     Ok(())

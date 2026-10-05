@@ -1,5 +1,20 @@
 //! H0 witnesses: R1 faults need actual work/journal provenance; R3 requires
 //! real process and peer loss, retained data, observed leaders and cleanup.
+
+/// Every H2 row is one test function per declared store/leg permutation.
+macro_rules! h2_case {
+    ($name:ident, $row:ident, $store:ident, $leg:ident) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() -> anyhow::Result<()> {
+            super::h2::run(
+                super::h2::Row::$row,
+                Permutation::provisioned(StoreKind::$store, Leg::$leg)?,
+            )
+            .await
+        }
+    };
+}
+
 mod cancel;
 mod fleet;
 mod h2;

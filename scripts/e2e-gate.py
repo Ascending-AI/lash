@@ -31,6 +31,7 @@ WORKBENCH = "//examples/agent-workbench:agent-workbench"
 WORKER = "//crates/lash-vm-worker:lash-vm-worker__bin"
 SERVER = "native//:restate"
 NODE = "//crates/lash-upgrade-harness:lash-upgrade-node__bin"
+LASHCTL = "//crates/lashctl:lashctl"
 CONSUMER = "//examples/e2e-consumer:e2e-consumer"
 RESTATE = ROOT / "scripts/ci/restate_suite.py"
 INVENTORY = ROOT / "tools/buck2/target-inventory.json"
@@ -48,11 +49,11 @@ def output(report: Path, label: str) -> str:
 
 
 def feature_variant(units: list[dict], package: str, base: str, features: list[str]) -> str:
-    matches = [
+    matches = sorted({
         unit["label"] for unit in units
         if unit["package"] == package and unit["kind"] == "bin"
         and unit["features"] == features and unit["label"].startswith(base + "__fv_")
-    ]
+    })
     if len(matches) != 1:
         raise ValueError(f"{base} feature variant {features}: expected one match, got {matches}")
     return matches[0]
@@ -157,6 +158,11 @@ def certify_case(artifacts: Path, junit: Path, outputs: dict[str, Path], source:
             errors.append(f"expected one host artifact match, found {len({hosts[name] for name in matched})}")
         if hashlib.sha256(outputs["node_next"].read_bytes()).hexdigest() in artifact_shas:
             binaries["synthetic_next_host"] = descriptor("synthetic_next_host", outputs["node_next"])
+            binaries["operator"] = descriptor("operator", outputs["lashctl_n"])
+            binaries["synthetic_next_operator"] = descriptor(
+                "synthetic_next_operator", outputs["lashctl_next"])
+            binaries["synthetic_next_vm_worker"] = descriptor(
+                "synthetic_next_vm_worker", outputs["vm_worker_next"])
     binaries["vm_worker"] = descriptor("vm_worker", outputs["vm_worker"])
     server = descriptor("restate-server", outputs["server"])
     lock = json.loads((ROOT / "tools/buck2/native-tools-lock.json").read_text())["tools"]["restate"]
@@ -199,7 +205,8 @@ def scratch_dir(artifacts: Path) -> Path:
     return Path("/tmp") / f"lash-e2e-{hashlib.sha256(str(artifacts).encode()).hexdigest()[:8]}"
 
 
-def run(label: str, name: str, artifacts: Path, case: str | None) -> int:
+def run(label: str, name: str, artifacts: Path, case: str | None,
+        store: str, leg: str) -> int:
     gate = os.environ["KILN_GATE_ID"]
     # S28 owns a second cluster in this block and fleet PostgreSQL owns
     # offset 40; serve owns offsets 45–47.
@@ -234,10 +241,14 @@ def run(label: str, name: str, artifacts: Path, case: str | None) -> int:
         units = json.loads(INVENTORY.read_text())["feature_lane_units"]
         workbench_e2e = feature_variant(units, "agent-workbench", WORKBENCH, ["e2e-tools"])
         node_next = feature_variant(units, "lash-upgrade-harness", NODE, ["synthetic-next"])
+        worker_next = feature_variant(
+            units, "lash-internal-vm-worker", WORKER, ["synthetic-next", "testing"])
+        lashctl_n = feature_variant(units, "lashctl", LASHCTL, [])
+        lashctl_next = feature_variant(units, "lashctl", LASHCTL, ["synthetic-next"])
         build = artifacts / "build.json"
         subprocess.run([
             "kiln", "build", WORKBENCH, workbench_e2e, WORKER, SERVER, NODE, node_next,
-            CONSUMER, label, "--materializations", "final",
+            lashctl_n, lashctl_next, worker_next, CONSUMER, label, "--materializations", "final",
             "--target-platforms", "prelude//platforms:default",
             "--build-report", str(build),
         ], cwd=ROOT, env=env, check=True)
@@ -246,8 +257,11 @@ def run(label: str, name: str, artifacts: Path, case: str | None) -> int:
             "workbench_e2e": Path(output(build, workbench_e2e)),
             "node": Path(output(build, NODE)),
             "node_next": Path(output(build, node_next)),
+            "lashctl_n": Path(output(build, lashctl_n)),
+            "lashctl_next": Path(output(build, lashctl_next)),
             "consumer": Path(output(build, CONSUMER)),
             "vm_worker": Path(output(build, WORKER)),
+            "vm_worker_next": Path(output(build, worker_next)),
             "server": Path(output(build, SERVER)),
         }
         workbench = str(outputs["workbench"])
@@ -281,6 +295,8 @@ def run(label: str, name: str, artifacts: Path, case: str | None) -> int:
             "LASH_E2E_PORT_BASE": str(base),
             "LASH_E2E_HOST_PORT": str(base + 20),
             "LASH_E2E_CANDIDATE_SHA": source,
+            "LASH_E2E_STORE": store,
+            "LASH_E2E_LEG": leg,
             "LASH_E2E_HOST_GENERATION": generation,
             "LASH_E2E_REPO": str(ROOT),
             "LASH_E2E_PYTHON": str(python),
@@ -289,6 +305,8 @@ def run(label: str, name: str, artifacts: Path, case: str | None) -> int:
             "LASH_WORKBENCH_E2E_BIN": str(outputs["workbench_e2e"]),
             "LASH_UPGRADE_NODE_N": str(outputs["node"]),
             "LASH_UPGRADE_NODE_NEXT": str(outputs["node_next"]),
+            "LASH_UPGRADE_LASHCTL_N": str(outputs["lashctl_n"]),
+            "LASH_UPGRADE_LASHCTL_NEXT": str(outputs["lashctl_next"]),
             "LASH_E2E_CONSUMER_BIN": str(outputs["consumer"]),
             "LASH_E2E_CONSUMER_SHA256": hashlib.sha256(outputs["consumer"].read_bytes()).hexdigest(),
             "LASH_E2E_CONSUMER_GENERATION": generation,
@@ -308,15 +326,27 @@ def run(label: str, name: str, artifacts: Path, case: str | None) -> int:
         keys = [key for key in env if key.startswith("LASH_E2E_")]
         keys += ["KILN_GATE_ID", "LASH_RESTATE_SERVER_BIN", "LASH_VM_WORKER",
                  "LASH_WORKBENCH_E2E_BIN", "LASH_UPGRADE_NODE_N", "LASH_UPGRADE_NODE_NEXT",
+                 "LASH_UPGRADE_LASHCTL_N", "LASH_UPGRADE_LASHCTL_NEXT",
                  "LASH_PHASE_A_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH", "TMPDIR",
                  "RESTATE_INGRESS_URL", "RESTATE_ADMIN_URL"]
+        if store == "postgresql":
+            # with-service.sh exports the server address into serve's environment;
+            # Kiln resolves this --test_env key against that environment like it
+            # does serve's own RESTATE_* endpoints.
+            keys.append("LASH_POSTGRES_DATABASE_URL")
         command.extend(f"--test_env={key}" for key in sorted(keys))
-        code = subprocess.call([
+        serve = [
             "python3", str(RESTATE), "serve", "--name", f"e2e-{gate}",
+            "--leg", leg,
             "--server-env", "RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true",
             "--port-base", str(base + 45), "--keep-log", str(artifacts / "restate.log"),
             "--", *command,
-        ], cwd=ROOT, env=env)
+        ]
+        if store == "postgresql":
+            serve = [
+                str(ROOT / "scripts/ci/with-service.sh"), "pg16", "--", *serve,
+            ]
+        code = subprocess.call(serve, cwd=ROOT, env=env)
         counts = test_counts(report, label, name)
         junit = Path(counts.pop("junit_xml"))
         # serve's port roles are ingress/admin/node, so the runner-served admin URL
@@ -325,12 +355,14 @@ def run(label: str, name: str, artifacts: Path, case: str | None) -> int:
                                   f"http://127.0.0.1:{base + 46}", {
                                       "scenario": name, "label": label, "source_sha": source,
                                       "gate": gate, "port_base": base, "generation": generation,
+                                      "store": store, "leg": leg,
                                       "playwright": "1.62.0",
                                       "workbench": {"path": workbench,
                                                     "sha256": env["LASH_E2E_WORKBENCH_SHA256"]},
                                   })
         write(artifacts / "execution.json", {
             "scenario": name, "label": label, "source_sha": source, "counts": counts,
+            "store": store, "leg": leg,
             "exit_code": code, "evidence_error": provenance["evidence_error"],
             "artifacts": str(artifacts),
         })
@@ -345,6 +377,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("label", choices=sorted(LABELS), help="registered test target label")
     parser.add_argument("test", help="full exact test path inside the label")
+    parser.add_argument("--store", choices=("sqlite_memory", "sqlite_file", "postgresql"), required=True,
+                        help="store the case runs its host over")
+    parser.add_argument("--leg", choices=("live", "replay"), required=True,
+                        help="invocation leg the served Restate runs")
     parser.add_argument("--artifacts", type=Path, help="fresh directory inside this fork")
     parser.add_argument("--case", help="manifest scenario/variant/store/leg/channel key")
     args = parser.parse_args()
@@ -357,7 +393,8 @@ def main() -> int:
     if not os.environ.get("KILN_GATE_ID"):
         command = [
             "kiln", "gate", "lash", ROOT.name, "--", "python3", str(Path(__file__).resolve()),
-            args.label, args.test, "--artifacts", str(artifacts),
+            args.label, args.test, "--store", args.store, "--leg", args.leg,
+            "--artifacts", str(artifacts),
         ]
         if args.case is not None:
             command += ["--case", args.case]
@@ -371,7 +408,8 @@ def main() -> int:
         artifacts.mkdir(parents=True, exist_ok=False)
         print(f"e2e artifacts: {artifacts}", flush=True)
         try:
-            return run(args.label, args.test, artifacts, args.case)
+            return run(args.label, args.test, artifacts, args.case,
+                       args.store, args.leg)
         except (OSError, ValueError, KeyError, ET.ParseError, subprocess.CalledProcessError) as error:
             write(artifacts / "execution.json", {
                 "scenario": args.test, "label": args.label,

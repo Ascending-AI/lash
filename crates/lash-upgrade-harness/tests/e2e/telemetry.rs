@@ -16,16 +16,36 @@ const DEADLINE: Duration = Duration::from_secs(30);
 #[test]
 #[ignore = "prebuilt external consumer and private real Restate supplied by the E2E controller"]
 fn s34_otlp_retry_transfer_and_shutdown() -> Result<()> {
+    use lash_upgrade_harness::e2e::case::{Leg, Permutation, StoreKind};
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(8 * 1024 * 1024)
         .build()?
-        .block_on(s34())
+        .block_on(s34(Permutation::provisioned(
+            StoreKind::SqliteFile,
+            Leg::Live,
+        )?
+        .leg))
 }
 
-async fn s34() -> Result<()> {
+#[test]
+#[ignore = "prebuilt external consumer and private real Restate supplied by the E2E controller"]
+fn s34_otlp_retry_transfer_and_shutdown_replay() -> Result<()> {
+    use lash_upgrade_harness::e2e::case::{Leg, Permutation, StoreKind};
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(s34(Permutation::provisioned(
+            StoreKind::SqliteFile,
+            Leg::Replay,
+        )?
+        .leg))
+}
+
+async fn s34(leg: lash_upgrade_harness::e2e::case::Leg) -> Result<()> {
     use lash_upgrade_harness::e2e::{
-        case::{ArtifactIdentity, CaseLease},
+        case::{ArtifactIdentity, CaseLease, Leg},
         cluster::{ClusterControl as _, LocalCluster},
         control::WorkIdentity,
         evidence::{CaseReceipt, DecodedRecord, Evidence, Verdict},
@@ -47,7 +67,12 @@ async fn s34() -> Result<()> {
     let root = PathBuf::from(required("LASH_E2E_ARTIFACT_DIR")?);
     std::fs::create_dir_all(&root)?;
     let deadline = Instant::now() + Duration::from_secs(180);
-    let mut lease = CaseLease::new("s34", root.join("s34"), deadline)?;
+    let slug = if leg == Leg::Replay {
+        "s34-replay"
+    } else {
+        "s34"
+    };
+    let mut lease = CaseLease::new(slug, root.join(slug), deadline)?;
     let artifact = |role: &str, path: PathBuf, generation: String| -> Result<ArtifactIdentity> {
         Ok(ArtifactIdentity {
             role: role.into(),
@@ -78,7 +103,7 @@ async fn s34() -> Result<()> {
     consumer.verify()?;
     let port: u16 = required("LASH_E2E_PORT_BASE")?.parse()?;
     lease.ports.extend([port + 22, port + 23, port + 24]);
-    let mut cluster = LocalCluster::new(port, deadline);
+    let mut cluster = LocalCluster::new(port, deadline).with_leg(leg);
     let receiver = OtlpReceiver::bind(format!("127.0.0.1:{}", port + 24).parse()?).await?;
     let trace = lease.directory.join("trace.jsonl");
     let mut host = ConsumerHost::new(
@@ -423,6 +448,7 @@ async fn s34() -> Result<()> {
     let host_cleanup = host.stop().await;
     let shutdown = host.shutdown_receipt();
     let collector = receiver.finish().await;
+    let leg_observation = cluster.observe_leg(&lease.directory).await;
     let cluster_cleanup = cluster.finish().await;
     if let Ok(receipts) = &host_cleanup {
         evidence.cleanup.extend(receipts.clone());
@@ -432,6 +458,9 @@ async fn s34() -> Result<()> {
     }
     if let Ok((_, cleanup)) = &collector {
         evidence.cleanup.push(cleanup.clone());
+    }
+    if let Ok(receipt) = &leg_observation {
+        evidence.stores.push(receipt.clone());
     }
     let mut detail = json!({
         "scenario":"S34","rules":["R8","L14"],"selected":1,"executed":usize::from(execution),
@@ -444,6 +473,9 @@ async fn s34() -> Result<()> {
     });
     let verified = (|| -> Result<()> {
         let (call, original, invocations, dropped) = result?;
+        if let Err(error) = &leg_observation {
+            anyhow::bail!("leg observation: {error:#}");
+        }
         ensure!(
             host_cleanup?.iter().all(|receipt| receipt.closed),
             "consumer cleanup incomplete"

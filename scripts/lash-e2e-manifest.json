@@ -68,9 +68,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: tools::s01_workbench_singleton proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s01_workbench_singleton_replay"
+          }
         }
       ],
       "setup": "Workbench Standard, one echo tool, real Restate/file SQLite.",
@@ -145,9 +148,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: tools::s02_cold_partial proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s02_cold_partial_replay"
+          }
         },
         {
           "variant": "default",
@@ -172,9 +178,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: tools::s02_cold_partial proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s02_cold_partial_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -199,9 +208,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: tools::s02_cold_partial proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s02_cold_partial_postgresql_replay"
+          }
         }
       ],
       "setup": "File SQLite/PG host; two tools A/B, A durable, B held.",
@@ -275,9 +287,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: s03_ambiguous_acceptance_survives_host_sigkill proves the sqlite_file/live leg only; FIG-4932 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:h1_recovery__test",
+            "test": "s03_ambiguous_acceptance_survives_host_sigkill_replay"
+          }
         }
       ],
       "setup": "Tool sends a keyed write to persistent HTTP effect fixture.",
@@ -353,7 +368,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: proposal::s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery proves the sqlite_file/live leg only; FIG-4993 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Live-only fixture shape under REVISIT #53: A is held executing inside its X until B's D proposal and ACK are observed. Under INACTIVITY_TIMEOUT=0 the executing A prevents suspension while B needs its X ACK, so the DProposed/BeforeAck cut cannot be reached. Preserve the held-body and dropped-ACK oracles; replay requires a different setup oracle.",
           "registration": null
         },
         {
@@ -379,9 +394,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing postgresql/live leg: proposal::s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery proves the sqlite_file/live leg only; FIG-4993 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "proposal::s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -407,7 +425,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing postgresql/replay oracle: proposal::s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery proves the sqlite_file/live leg only; FIG-4993 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Live-only fixture shape under REVISIT #53: A is held executing inside its X until B's D proposal and ACK are observed. Under INACTIVITY_TIMEOUT=0 the executing A prevents suspension while B needs its X ACK, so the DProposed/BeforeAck cut cannot be reached. Preserve the held-body and dropped-ACK oracles; replay requires a different setup oracle.",
           "registration": null
         }
       ],
@@ -483,9 +501,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: tools::s05_opposite_batch_order proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s05_opposite_batch_order_replay"
+          }
         },
         {
           "variant": "default",
@@ -510,9 +531,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: tools::s05_opposite_batch_order proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s05_opposite_batch_order_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -537,9 +561,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: tools::s05_opposite_batch_order proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s05_opposite_batch_order_postgresql_replay"
+          }
         }
       ],
       "setup": "Standard batch A/B/C; each body reaches barrier.",
@@ -613,7 +640,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: s06_reported_retries_preserve_backoff_and_reverse_ready_order proves the sqlite_file/live leg only; FIG-4932 deferred this leg; no owner ticket filed.",
+          "hold_reason": "REVISIT #53: B held executing inside its X while A's ACK is needed under INACTIVITY_TIMEOUT=0; FIG-5002 wire capture .kiln/FIG-5002/s6-wire.txt. Live-only fixture shape; executing B prevents suspension and A's RetryScheduleDurable barrier cannot be reached.",
           "registration": null
         }
       ],
@@ -690,7 +717,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: s07_cancellation_during_backoff_survives_cold_restart proves the sqlite_file/live leg only; FIG-4932 deferred this leg; no owner ticket filed.",
+          "hold_reason": "REVISIT #53: B held executing inside its X while A's ACK is needed under INACTIVITY_TIMEOUT=0; FIG-5002 wire capture .kiln/FIG-5002/s6-wire.txt. Live-only fixture shape; executing B prevents suspension and A's RetryScheduleDurable barrier cannot be reached.",
           "registration": null
         }
       ],
@@ -765,9 +792,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: cancel::s08_pre_final proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s08_pre_final_replay"
+          }
         },
         {
           "variant": "default",
@@ -792,9 +822,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: cancel::s08_pre_final proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s08_pre_final_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -819,9 +852,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: cancel::s08_pre_final proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s08_pre_final_postgresql_replay"
+          }
         }
       ],
       "setup": "Tool held before D; declared keyed external intent.",
@@ -899,7 +935,37 @@
           "registration": null
         },
         {
-          "variant": "default",
+          "variant": "before-intent",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s09_before_intent_replay"
+          }
+        },
+        {
+          "variant": "after-intent",
           "store": "sqlite_file",
           "leg": "replay",
           "channel": "standard",
@@ -922,11 +988,41 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: cancel::s09_before_intent proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Pending product fix and rerun: FIG-4983 owns cancel::s09_after_intent after FIG-4977 (nested intent replay); this leg follows its live row.",
           "registration": null
         },
         {
-          "variant": "default",
+          "variant": "before-intent",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s09_before_intent_postgresql"
+          }
+        },
+        {
+          "variant": "after-intent",
           "store": "postgresql",
           "leg": "live",
           "channel": "standard",
@@ -949,11 +1045,41 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: cancel::s09_before_intent proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Pending product fix and rerun: FIG-4983 owns cancel::s09_after_intent after FIG-4977 (nested intent replay); this leg follows its live row.",
           "registration": null
         },
         {
-          "variant": "default",
+          "variant": "before-intent",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s09_before_intent_postgresql_replay"
+          }
+        },
+        {
+          "variant": "after-intent",
           "store": "postgresql",
           "leg": "replay",
           "channel": "standard",
@@ -976,7 +1102,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: cancel::s09_before_intent proves the sqlite_file/live leg only; FIG-4933 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Pending product fix and rerun: FIG-4983 owns cancel::s09_after_intent after FIG-4977 (nested intent replay); this leg follows its live row.",
           "registration": null
         }
       ],
@@ -1715,7 +1841,7 @@
           }
         },
         {
-          "variant": "default",
+          "variant": "terminal-publication",
           "store": "postgresql",
           "leg": "replay",
           "channel": "standard",
@@ -1737,9 +1863,42 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay oracle: fleet::s16_in_flight_terminal_blocks_drain_and_disconnect_keeps_fence and fleet::s16_sigkill_redrives_same_invocation_without_a_second_seal prove the postgresql/live leg only; FIG-4935 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "fleet::s16_in_flight_terminal_blocks_drain_and_disconnect_keeps_fence_replay"
+          }
+        },
+        {
+          "variant": "sigkill-redrive",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "fleet::s16_sigkill_redrives_same_invocation_without_a_second_seal_replay"
+          }
         }
       ],
       "setup": "Two hosts share session/store; old execution held at publication.",
@@ -1814,9 +1973,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the workbench case operation::s17_workbench_operation_drop_and_follow exists and FIG-4994 threads the permutation into it.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "operation::s17_workbench_operation_drop_and_follow_replay"
+          }
         },
         {
           "variant": "default",
@@ -1841,9 +2003,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the workbench case operation::s17_workbench_operation_drop_and_follow exists and FIG-4994 threads the permutation into it.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "operation::s17_workbench_operation_drop_and_follow_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -1868,9 +2033,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the workbench case operation::s17_workbench_operation_drop_and_follow exists and FIG-4994 threads the permutation into it.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "operation::s17_workbench_operation_drop_and_follow_postgresql_replay"
+          }
         }
       ],
       "setup": "Workbench e2e-tools plugin task issues a native tool and returns completion; node::h3::double_fixture proves admission and follow on the server double.",
@@ -2803,9 +2971,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work proves the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -2960,7 +3131,7 @@
           }
         },
         {
-          "variant": "default",
+          "variant": "same-key",
           "store": "sqlite_file",
           "leg": "replay",
           "channel": "standard",
@@ -2991,7 +3162,69 @@
           "registration": null
         },
         {
-          "variant": "default",
+          "variant": "disjoint-keys",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "registration": null
+        },
+        {
+          "variant": "namespaces",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "registration": null
+        },
+        {
+          "variant": "same-key",
           "store": "postgresql",
           "leg": "live",
           "channel": "standard",
@@ -3017,12 +3250,145 @@
             "junit",
             "provenance"
           ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling_postgresql"
+          }
+        },
+        {
+          "variant": "disjoint-keys",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling_postgresql"
+          }
+        },
+        {
+          "variant": "namespaces",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling_postgresql"
+          }
+        },
+        {
+          "variant": "same-key",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling prove the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
           "registration": null
         },
         {
-          "variant": "default",
+          "variant": "disjoint-keys",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "registration": null
+        },
+        {
+          "variant": "namespaces",
           "store": "postgresql",
           "leg": "replay",
           "channel": "standard",
@@ -3607,7 +3973,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: s30_external_consumer_accept_follow_cancel proves the sqlite_memory/live leg only; FIG-4937 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Product red on the always-suspending replay leg: explicit operation attach never answers after its body is released; the request exceeds the 60 s client bound. FIG-5002 owns the fix; the replay selector exists.",
           "registration": null
         }
       ],
@@ -4090,7 +4456,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: s34_otlp_retry_transfer_and_shutdown proves the sqlite_file/live leg only; FIG-4938 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Product red on the always-suspending replay leg: next segment never starts after the first agent-frame completes with effect budget 1; the request exceeds the 60 s client bound. FIG-5002 owns the fix; the replay selector exists.",
           "registration": null
         }
       ],

@@ -11,7 +11,7 @@ use crate::node::fleet::host::FleetReady;
 use crate::node::tools::ToolDelivery;
 use crate::restate_view::RestateView;
 use std::net::{SocketAddr, TcpListener};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -130,6 +130,9 @@ impl ClusterControl for RuntimeCluster {
             write(&self.directory.join("cluster-convergence.json"), &receipt)?;
             Ok(receipt)
         })
+    }
+    fn observe_leg<'a>(&'a mut self, directory: &'a Path) -> Step<'a, serde_json::Value> {
+        Box::pin(async move { self.cluster.lock().await.observe_leg(directory).await })
     }
     fn finish(&mut self) -> Step<'_, Vec<CleanupReceipt>> {
         Box::pin(async move { self.cluster.lock().await.finish().await })
@@ -1148,20 +1151,24 @@ impl FleetFixture for RuntimeFixture {
     }
 }
 
-pub async fn run(scenario: Scenario) -> Result<()> {
+pub async fn run(scenario: Scenario, permutation: Permutation) -> Result<()> {
     let name = match scenario {
         Scenario::LeaderLoss => "s14",
         Scenario::MinorityPartition => "s15",
         Scenario::TerminalPublication => "s16",
         Scenario::TerminalRedrive => "s16-sigkill",
     };
-    run_named(scenario, name).await
+    let name = match permutation.leg {
+        Leg::Live => name.to_owned(),
+        Leg::Replay => format!("{name}-replay"),
+    };
+    run_named(scenario, &name, permutation.leg).await
 }
 
 /// Compose an existing fleet subcase under the caller's unique case slug.
 /// The subcase still owns its services, barriers, receipts and cleanup.
-pub async fn run_named(scenario: Scenario, name: &str) -> Result<()> {
-    let (mut lease, cluster, binary) = setup(name)?;
+pub async fn run_named(scenario: Scenario, name: &str, leg: Leg) -> Result<()> {
+    let (mut lease, cluster, binary) = setup(name, leg)?;
     lease.deadline = Instant::now() + Duration::from_secs(240);
     let host = artifact(
         "upgrade-node",
@@ -1262,7 +1269,7 @@ fn artifact(role: &str, path: PathBuf) -> Result<ArtifactIdentity> {
         generation: "candidate".into(),
     })
 }
-fn setup(name: &str) -> Result<(CaseLease, LocalCluster, ArtifactIdentity)> {
+fn setup(name: &str, leg: Leg) -> Result<(CaseLease, LocalCluster, ArtifactIdentity)> {
     let root = PathBuf::from(std::env::var("LASH_E2E_ARTIFACT_DIR")?);
     std::fs::create_dir_all(&root)?;
     let deadline = Instant::now() + Duration::from_secs(240);
@@ -1272,5 +1279,9 @@ fn setup(name: &str) -> Result<(CaseLease, LocalCluster, ArtifactIdentity)> {
         "restate-server",
         PathBuf::from(std::env::var("LASH_RESTATE_SERVER_BIN")?),
     )?;
-    Ok((lease, LocalCluster::new(base, deadline), binary))
+    Ok((
+        lease,
+        LocalCluster::new(base, deadline).with_leg(leg),
+        binary,
+    ))
 }

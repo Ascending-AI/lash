@@ -192,14 +192,34 @@ pub(crate) async fn turn_journals(view: &RestateView) -> Result<Vec<JournalFact>
 #[test]
 #[ignore = "prebuilt external consumer and private real Restate supplied by the E2E controller"]
 fn s30_external_consumer_accept_follow_cancel() -> Result<()> {
+    use lash_upgrade_harness::e2e::case::{Leg, Permutation, StoreKind};
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(8 * 1024 * 1024)
         .build()?
-        .block_on(s30())
+        .block_on(s30(Permutation::provisioned(
+            StoreKind::SqliteMemory,
+            Leg::Live,
+        )?
+        .leg))
 }
 
-async fn s30() -> Result<()> {
+#[test]
+#[ignore = "prebuilt external consumer and private real Restate supplied by the E2E controller"]
+fn s30_external_consumer_accept_follow_cancel_replay() -> Result<()> {
+    use lash_upgrade_harness::e2e::case::{Leg, Permutation, StoreKind};
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(s30(Permutation::provisioned(
+            StoreKind::SqliteMemory,
+            Leg::Replay,
+        )?
+        .leg))
+}
+
+async fn s30(leg: lash_upgrade_harness::e2e::case::Leg) -> Result<()> {
     let gate = required("KILN_GATE_ID")?;
     let root = PathBuf::from(required("LASH_E2E_HOST_ARTIFACTS")?);
     let artifact = ArtifactIdentity {
@@ -315,6 +335,20 @@ async fn s30() -> Result<()> {
         evidence.journals = journals;
         anyhow::Ok(())
     }.await;
+    // Prove the leg on the served Restate's own metrics before teardown.
+    let base: u16 = required("LASH_E2E_PORT_BASE")?.parse()?;
+    let leg_observation = lash_upgrade_harness::e2e::cluster::observe_leg(
+        leg,
+        &[format!("http://127.0.0.1:{}/metrics", base + 47)],
+        &root,
+    )
+    .await;
+    if let Ok(receipt) = &leg_observation {
+        std::fs::write(
+            root.join("s30-leg-observation.json"),
+            serde_json::to_vec_pretty(receipt)?,
+        )?;
+    }
     // Cleanup runs before propagating any oracle error, preserving the
     // first failure alongside cleanup evidence.
     let cleanup = host.stop().await;
@@ -333,6 +367,7 @@ async fn s30() -> Result<()> {
         &[("consumer", &cleanup)],
     )?;
     scenario?;
+    leg_observation?;
     cleanup?;
     ensure!(errors.is_empty(), "S30 case receipt recorded a failure");
     Ok(())

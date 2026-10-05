@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail, ensure};
 use lash_upgrade_harness::e2e::{
     Step,
-    case::{ArtifactIdentity, CaseLease, Channel, StoreKind},
+    case::{ArtifactIdentity, CaseLease, Channel, Leg, Permutation, StoreKind},
     cluster::{ClusterControl, LocalCluster},
     control::{
         Barrier, BarrierKind, BarrierProof, CleanupReceipt, Control, CoreControl, Fault,
@@ -136,6 +136,8 @@ pub(super) struct Shared {
     proxy: Mutex<V7Proxy>,
     admin: String,
     namespace: String,
+    stores: Arc<dyn lash::StoreSet>,
+    postgres: Option<lash_postgres_store::PostgresStorage>,
     pub(super) store_root: PathBuf,
     pub(super) chat: Mutex<Option<String>>,
     artifacts: Vec<ArtifactIdentity>,
@@ -226,8 +228,15 @@ impl Shared {
         }
         Ok(evidence)
     }
+    /// The store evidence names: the SQLite database file, or the case
+    /// database's PostgreSQL catalog identity.
+    fn store_identity(&self) -> serde_json::Value {
+        match &self.postgres {
+            Some(storage) => json!(format!("postgres:{}", storage.catalog_id())),
+            None => json!(self.store_root.join("durable-core.db")),
+        }
+    }
     async fn retained_cancel(&self, work: &WorkIdentity, evidence: &mut Evidence) -> Result<()> {
-        use lash_core::store::TurnInputStore as _;
         let chat = self
             .chat
             .lock()
@@ -236,14 +245,15 @@ impl Shared {
             .context("no bound native session")?;
         let session = lash::SessionId::parse(chat)?;
         let run = lash::TurnId::parse(&work.run)?;
-        let stores = lash::sqlite::SqliteStoreSet::open(&self.store_root).await?;
-        let store = stores.open_store().await?;
+        let store = self.stores.session_store_factory();
         let address = lash::TurnAddress::new(session, run);
         if let Some(record) = store.turn_cancel_request(&address).await? {
             let artifact = self.directory.join("native-cancel-request.json");
             super::write(&artifact, &record)?;
-            evidence.stores.push(json!({"kind":"h2_native_cancel_request",
-                "artifact":artifact,"store":self.store_root.join("durable-core.db"),"record":record}));
+            evidence
+                .stores
+                .push(json!({"kind":"h2_native_cancel_request",
+                "artifact":artifact,"store":self.store_identity(),"record":record}));
         }
         Ok(())
     }
@@ -255,12 +265,24 @@ impl Shared {
             .clone()
             .context("no bound native session")?;
         let session = lash::SessionId::parse(&chat)?;
-        let path = self.store_root.join("durable-core.db");
-        let rows = tokio::task::spawn_blocking(move || -> Result<Vec<(String,String)>> {
-            let db = rusqlite::Connection::open_with_flags(path,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-            let mut query = db.prepare("SELECT turn_id,result_json FROM runtime_turn_commits WHERE session_id=?1 ORDER BY change_seq")?;
-            Ok(query.query_map([chat], |row| Ok((row.get(0)?,row.get(1)?)))?.collect::<std::result::Result<_,_>>()?)
-        }).await??;
+        let rows: Vec<(String, String)> = match &self.postgres {
+            Some(storage) => {
+                sqlx::query_as::<_, (String, String)>(
+                    "SELECT turn_id,result_json FROM lash_runtime_turn_commits WHERE session_id=$1 ORDER BY change_seq",
+                )
+                .bind(chat)
+                .fetch_all(storage.pool())
+                .await?
+            }
+            None => {
+                let path = self.store_root.join("durable-core.db");
+                tokio::task::spawn_blocking(move || -> Result<Vec<(String,String)>> {
+                    let db = rusqlite::Connection::open_with_flags(path,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+                    let mut query = db.prepare("SELECT turn_id,result_json FROM runtime_turn_commits WHERE session_id=?1 ORDER BY change_seq")?;
+                    Ok(query.query_map([chat], |row| Ok((row.get(0)?,row.get(1)?)))?.collect::<std::result::Result<_,_>>()?)
+                }).await??
+            }
+        };
         if self.row.transfers() {
             // Which logical turns committed, for a missed-publication diagnosis.
             let turns: Vec<_> = rows.iter().map(|(turn, _)| turn.clone()).collect();
@@ -322,11 +344,9 @@ impl Shared {
         Ok(())
     }
     async fn bind(&self, work: WorkIdentity, chat: &str) -> Result<WorkIdentity> {
-        use lash_core::store::RunStore as _;
-        let stores = lash::sqlite::SqliteStoreSet::open(&self.store_root).await?;
-        let store = stores.open_store().await?;
         let session = lash::SessionId::parse(chat)?;
         let run = lash::TurnId::parse(&work.run)?;
+        let store = self.stores.session_store_factory();
         while store.run_executor(&session, &run).await?.is_none() {
             ensure!(
                 Instant::now() < self.deadline,
@@ -973,11 +993,25 @@ impl Control for Controller {
     }
 }
 
-pub async fn run(row: Row) -> Result<()> {
+pub async fn run(row: Row, permutation: Permutation) -> Result<()> {
     let root = PathBuf::from(std::env::var("LASH_E2E_ARTIFACT_DIR")?);
     std::fs::create_dir_all(&root)?;
     let deadline = Instant::now() + Duration::from_secs(180);
-    let mut lease = CaseLease::new(row.slug(), root.join(row.slug()), deadline)?;
+    let slug = format!(
+        "{}{}{}",
+        row.slug(),
+        if permutation.store == StoreKind::PostgreSql {
+            "-postgresql"
+        } else {
+            ""
+        },
+        if permutation.leg == Leg::Replay {
+            "-replay"
+        } else {
+            ""
+        }
+    );
+    let mut lease = CaseLease::new(&slug, root.join(&slug), deadline)?;
     let base: u16 = std::env::var("LASH_E2E_PORT_BASE")?.parse()?;
     ensure!(base <= u16::MAX - 50, "private port range overflow");
     lease.ports = (base + 10..base + 14).collect();
@@ -996,7 +1030,8 @@ pub async fn run(row: Row) -> Result<()> {
         "agent-workbench",
         std::env::var("LASH_WORKBENCH_E2E_BIN")?.into(),
     )?;
-    let mut cluster = LocalCluster::new(base, deadline);
+    let postgres_url = permutation.postgres_url(&mut lease).await?;
+    let mut cluster = LocalCluster::new(base, deadline).with_leg(permutation.leg);
     let boot = cluster.boot(&server, 1, &mut lease).await?;
     let callback_dir = lease.directory.join("barriers");
     std::fs::create_dir_all(&callback_dir)?;
@@ -1049,6 +1084,9 @@ pub async fn run(row: Row) -> Result<()> {
         None
     };
     let successor_uri = successor_proxy.as_ref().map(|proxy| proxy.endpoint.clone());
+    if let Some(url) = &postgres_url {
+        environment.insert("AGENT_WORKBENCH_DATABASE_URL".into(), url.clone());
+    }
     let successor = if needs_successor {
         // The existing opt-in shutdown factory adds a real composition
         // declaration. Normal core construction computes and binds a distinct
@@ -1095,6 +1133,31 @@ pub async fn run(row: Row) -> Result<()> {
         base + 11,
     )?
     .configure(environment)?;
+    let store_root = lease.directory.join("workbench-data/lash-sessions");
+    let (stores, postgres): (Arc<dyn lash::StoreSet>, _) = match permutation.store {
+        StoreKind::PostgreSql => {
+            let storage = lash_postgres_store::PostgresStorage::connect(
+                postgres_url
+                    .as_deref()
+                    .context("PostgreSQL permutation provisioned no database")?,
+            )
+            .await?;
+            (
+                Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                    &storage,
+                    Arc::new(lash::persistence::FileAttachmentStore::new(
+                        lease.directory.join("workbench-data/attachments"),
+                    )),
+                )),
+                Some(storage),
+            )
+        }
+        StoreKind::SqliteFile => (
+            Arc::new(lash::sqlite::SqliteStoreSet::open(&store_root).await?),
+            None,
+        ),
+        StoreKind::SqliteMemory => bail!("H2 workbench rows need a persistent store"),
+    };
     let shared = Arc::new(Shared {
         host: Mutex::new(host),
         successor: Mutex::new(successor),
@@ -1111,7 +1174,9 @@ pub async fn run(row: Row) -> Result<()> {
         proxy: Mutex::new(proxy),
         admin: boot.nodes[0].admin_url.clone(),
         namespace: lease.namespace.clone(),
-        store_root: lease.directory.join("workbench-data/lash-sessions"),
+        stores,
+        postgres,
+        store_root,
         chat: Mutex::new(None),
         artifacts: vec![server.clone(), artifact.clone()],
         successor_proxy: Mutex::new(successor_proxy),
@@ -1136,23 +1201,11 @@ pub async fn run(row: Row) -> Result<()> {
         observed: Vec::new(),
     };
     let spec = if row.transfers() {
-        super::handover::spec(
-            row.id(),
-            StoreKind::SqliteFile,
-            vec![server, artifact.clone()],
-        )?
+        super::handover::spec(row.id(), permutation.store, vec![server, artifact.clone()])?
     } else if matches!(row, Row::Singleton | Row::Partial | Row::Batch) {
-        super::tools::spec(
-            row.id(),
-            StoreKind::SqliteFile,
-            vec![server, artifact.clone()],
-        )?
+        super::tools::spec(row.id(), permutation.store, vec![server, artifact.clone()])?
     } else {
-        super::cancel::spec(
-            row.id(),
-            StoreKind::SqliteFile,
-            vec![server, artifact.clone()],
-        )?
+        super::cancel::spec(row.id(), permutation.store, vec![server, artifact.clone()])?
     };
     ensure!(
         (spec.channel == Channel::Rlm) == (protocol == "rlm"),
@@ -1252,6 +1305,7 @@ pub async fn run(row: Row) -> Result<()> {
         }),
         None => Ok(Vec::new()),
     };
+    let leg_observation = cluster.observe_leg(&lease.directory).await;
     let cluster_cleanup = cluster.finish().await;
     for (resource, cleanup) in [
         ("host", host_cleanup),
@@ -1289,6 +1343,10 @@ pub async fn run(row: Row) -> Result<()> {
                 });
             }
         }
+    }
+    match leg_observation {
+        Ok(receipt) => evidence.stores.push(receipt),
+        Err(error) => errors.push(format!("leg observation: {error:#}")),
     }
     if evidence.cleanup.is_empty() || evidence.cleanup.iter().any(|r| !r.closed) {
         errors.push("case leaked owned resources".into());

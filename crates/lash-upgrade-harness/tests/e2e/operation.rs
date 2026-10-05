@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use lash_upgrade_harness::e2e::case::CaseLease;
+use lash_upgrade_harness::e2e::case::{CaseLease, Leg, Permutation, StoreKind};
 use lash_upgrade_harness::e2e::cluster::{ClusterControl, LocalCluster};
 use lash_upgrade_harness::e2e::control::{CleanupReceipt, ProcessReceipt, WorkIdentity};
 use lash_upgrade_harness::e2e::evidence::{CaseReceipt, DecodedRecord, Evidence, Verdict};
@@ -17,8 +17,32 @@ use tokio::process::Command;
 
 const OUTPUT: &str = "s17-exact-result";
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s17_workbench_operation_drop_and_follow() -> Result<()> {
+macro_rules! operation_case {
+    ($name:ident, $store:ident, $leg:ident) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() -> Result<()> {
+            s17(Permutation::provisioned(StoreKind::$store, Leg::$leg)?).await
+        }
+    };
+}
+operation_case!(s17_workbench_operation_drop_and_follow, SqliteFile, Live);
+operation_case!(
+    s17_workbench_operation_drop_and_follow_replay,
+    SqliteFile,
+    Replay
+);
+operation_case!(
+    s17_workbench_operation_drop_and_follow_postgresql,
+    PostgreSql,
+    Live
+);
+operation_case!(
+    s17_workbench_operation_drop_and_follow_postgresql_replay,
+    PostgreSql,
+    Replay
+);
+
+async fn s17(permutation: Permutation) -> Result<()> {
     let root = PathBuf::from(std::env::var("LASH_E2E_ARTIFACT_DIR")?);
     std::fs::create_dir_all(&root)?;
     let deadline = Instant::now() + Duration::from_secs(180);
@@ -34,21 +58,26 @@ async fn s17_workbench_operation_drop_and_follow() -> Result<()> {
         "agent-workbench",
         std::env::var("LASH_WORKBENCH_E2E_BIN")?.into(),
     )?;
-    let mut cluster = LocalCluster::new(base, deadline);
-    let mut host = WorkbenchHost::new(
-        format!("http://127.0.0.1:{base}"),
-        format!("http://127.0.0.1:{}", base + 1),
-        base + 10,
-        base + 11,
-    )?
-    .configure(BTreeMap::from([
+    let mut cluster = LocalCluster::new(base, deadline).with_leg(permutation.leg);
+    let postgres_url = permutation.postgres_url(&mut lease).await?;
+    let mut environment = BTreeMap::from([
         ("OPENROUTER_API_KEY".into(), "case-owned-fixture".into()),
         ("AGENT_WORKBENCH_PROTOCOL".into(), "standard".into()),
         (
             "AGENT_WORKBENCH_SEARCH_MCP_URL".into(),
             "http://127.0.0.1:1/mcp".into(),
         ),
-    ]))?;
+    ]);
+    if let Some(url) = &postgres_url {
+        environment.insert("AGENT_WORKBENCH_DATABASE_URL".into(), url.clone());
+    }
+    let mut host = WorkbenchHost::new(
+        format!("http://127.0.0.1:{base}"),
+        format!("http://127.0.0.1:{}", base + 1),
+        base + 10,
+        base + 11,
+    )?
+    .configure(environment)?;
     let result: Result<Evidence> = async {
         let boot = cluster.boot(&server, 1, &mut lease).await?;
         super::write(&lease.directory.join("cluster-boot.json"), &boot)?;
@@ -59,8 +88,18 @@ async fn s17_workbench_operation_drop_and_follow() -> Result<()> {
         );
         let store_root = lease.directory.join("workbench-data/lash-sessions");
         // One store set answers every store read of this case.
-        let stores: Arc<dyn lash::StoreSet> =
-            Arc::new(lash::sqlite::SqliteStoreSet::open(&store_root).await?);
+        let stores: Arc<dyn lash::StoreSet> = match &postgres_url {
+            Some(url) => {
+                let storage = lash::postgres::PostgresStorage::connect(url).await?;
+                Arc::new(lash::postgres::PostgresStoreSet::new(
+                    &storage,
+                    Arc::new(lash::persistence::FileAttachmentStore::new(
+                        lease.directory.join("workbench-data/attachments"),
+                    )),
+                ))
+            },
+            None => Arc::new(lash::sqlite::SqliteStoreSet::open(&store_root).await?),
+        };
         let created = host
             .command(HostCommand::Process {
                 action: "create-session".into(),
@@ -339,7 +378,7 @@ async fn s17_workbench_operation_drop_and_follow() -> Result<()> {
         evidence.journals = journals;
         evidence.stores.push(json!({
             "kind":"s17_run_terminal",
-            "store":store_root.join("durable-core.db"),
+            "store":permutation.store.manifest(),
             "record":terminal,
         }));
         evidence.effects.push(json!({"kind":"s17_body_receipts","receipts":bodies}));
@@ -363,6 +402,10 @@ async fn s17_workbench_operation_drop_and_follow() -> Result<()> {
     };
     evidence.artifacts = vec![server.clone(), artifact.clone()];
     let host_cleanup = host.stop().await;
+    match cluster.observe_leg(&lease.directory).await {
+        Ok(receipt) => evidence.stores.push(receipt),
+        Err(error) => errors.push(format!("leg observation: {error:#}")),
+    }
     let cluster_cleanup = cluster.finish().await;
     for (resource, cleanup) in [("host", host_cleanup), ("cluster", cluster_cleanup)] {
         match cleanup {
