@@ -644,7 +644,7 @@ pub(super) async fn prove_final_value_semantic_channel()
     };
     require(
         reply.role == lash_core::MessageRole::Assistant
-            && marker.turn_id() == lash::TurnId::from("sim-final-value-turn")
+            && marker.turn_id().as_str() == "sim-final-value-turn"
             && reply
                 .parts
                 .iter()

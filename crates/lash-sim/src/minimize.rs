@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -645,7 +645,7 @@ fn retain_causally_supported_checkpoint_writes(trace: &mut SimulationTrace) {
         .iter()
         .map(|event| event.boundary_id.as_str())
         .collect::<BTreeSet<_>>();
-    let retained_runtime_turns = trace
+    let last_retained_runtime_turn = trace
         .events
         .iter()
         .filter(|event| {
@@ -665,17 +665,25 @@ fn retain_causally_supported_checkpoint_writes(trace: &mut SimulationTrace) {
                 .unwrap_or(1) as usize;
             (event.actor_alias.as_str(), turn_index)
         })
-        .collect::<BTreeSet<_>>();
+        .fold(
+            BTreeMap::<&str, usize>::new(),
+            |mut turns, (session, index)| {
+                let last = turns.entry(session).or_default();
+                *last = (*last).max(index);
+                turns
+            },
+        );
     trace.durable_writes.retain(|write| {
         admitted_sessions.contains(write.attributed_session())
             && write.attribution.as_ref().map_or_else(
                 || {
-                    // Ingress creates the session's initial checkpoint before
-                    // any provider turn. Later graph appends depend on those
-                    // rows, so retaining ingress must retain that causal root.
-                    write.turn_index == 0
-                        || retained_runtime_turns
-                            .contains(&(write.attributed_session(), write.turn_index))
+                    // Retained checkpoints append to the session's earlier
+                    // graph, including its turn-zero creation commit. Keep
+                    // that causal prefix, but no checkpoint evidence for a
+                    // session whose entire runtime-turn family was removed.
+                    last_retained_runtime_turn
+                        .get(write.attributed_session())
+                        .is_some_and(|last| write.turn_index <= *last)
                 },
                 |attribution| {
                     retained_boundary_ids.contains(attribution.cause_boundary_id.as_str())
