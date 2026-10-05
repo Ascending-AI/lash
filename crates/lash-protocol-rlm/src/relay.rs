@@ -262,20 +262,25 @@ pub(crate) struct RelayView {
 
 impl RelayView {
     /// Read `projection` for the turn `turn_id`.
+    ///
+    /// The turn's input is the last run of user input messages (origin
+    /// `TurnInput`, or none for input a host executes in hand). Only the
+    /// protocol records of an earlier turn end a run: this turn's own steps,
+    /// seeds, outputs and notes interleave with its input in the view, and a
+    /// user-role message another plugin wrote is not user input.
     pub(crate) fn read(
         projection: &ChronologicalProjection,
         turn_id: &str,
     ) -> Result<Self, lash_core::StoredDataCorruption> {
         let step_prefix = format!("lashlang_step_{turn_id}_");
         let feedback_prefix = format!("m_rlm_{turn_id}_");
+        let output_prefix = format!("{turn_id}.");
         let mut view = Self::default();
         let mut input_open = false;
         for entry in projection.entries() {
             match &entry.payload {
                 ChronologicalPayload::Message(message) => match message.role {
-                    lash_core::MessageRole::User
-                        if !crate::projection::is_rlm_protocol_output(message.origin.as_ref()) =>
-                    {
+                    lash_core::MessageRole::User if is_user_input(message.origin.as_ref()) => {
                         if !input_open {
                             view.turn_input.clear();
                             input_open = true;
@@ -290,7 +295,9 @@ impl RelayView {
                     lash_core::MessageRole::Assistant
                         if crate::projection::is_rlm_protocol_output(message.origin.as_ref()) =>
                     {
-                        input_open = false;
+                        if turn_id.is_empty() || !message.id.starts_with(&output_prefix) {
+                            input_open = false;
+                        }
                         view.transcript.push(TranscriptEntry {
                             role: "assistant",
                             id: message.id.clone(),
@@ -301,7 +308,6 @@ impl RelayView {
                         if crate::projection::is_rlm_protocol_output(message.origin.as_ref())
                             && message.id.starts_with(&feedback_prefix) =>
                     {
-                        input_open = false;
                         view.feedback.push(message_text(&message.parts));
                     }
                     _ => {}
@@ -309,7 +315,6 @@ impl RelayView {
                 ChronologicalPayload::ProtocolEvent(event) => {
                     match decode_rlm_protocol_event(event)? {
                         Some(RlmProtocolEvent::RlmSeed(seed)) => {
-                            input_open = false;
                             view.previous = view.committed.take();
                             view.committed = Some(RelayBaton::from_seed(&seed));
                             view.uncommitted.clear();
@@ -318,12 +323,13 @@ impl RelayView {
                             }
                         }
                         Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                            input_open = false;
                             if step.id.starts_with(&step_prefix) {
                                 view.feedback.clear();
                                 view.last_step_committed = false;
                                 view.uncommitted.push(step.clone());
                                 view.last_step = Some(step);
+                            } else {
+                                input_open = false;
                             }
                         }
                         _ => {}
@@ -343,6 +349,15 @@ impl RelayView {
             .unwrap_or_default()
             .step_globals(&self.transcript)
     }
+}
+
+/// Whether a user-role message is user input rather than another plugin's
+/// message on the user channel.
+fn is_user_input(origin: Option<&lash_core::MessageOrigin>) -> bool {
+    matches!(
+        origin,
+        None | Some(lash_core::MessageOrigin::TurnInput { .. })
+    )
 }
 
 fn message_text(parts: &[lash_core::Part]) -> String {

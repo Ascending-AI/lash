@@ -83,6 +83,8 @@ const AGENT_WORKBENCH_CONTINUE_AS_WARN_TOKENS_ENV: &str = "AGENT_WORKBENCH_CONTI
 const AGENT_WORKBENCH_DELTA_FRAME_MS_ENV: &str = "AGENT_WORKBENCH_DELTA_FRAME_MS";
 const AGENT_WORKBENCH_DELTA_FRAME_MAX_BYTES_ENV: &str = "AGENT_WORKBENCH_DELTA_FRAME_MAX_BYTES";
 const AGENT_WORKBENCH_DELTA_FIRST_IMMEDIATE_ENV: &str = "AGENT_WORKBENCH_DELTA_FIRST_IMMEDIATE";
+/// Selects the RLM execution policy: `chronological` (default) or `relay`.
+const AGENT_WORKBENCH_RLM_POLICY_ENV: &str = "AGENT_WORKBENCH_RLM_POLICY";
 /// The smallest context window the workbench accepts. The workbench is an
 /// RLM host: its sessions switch frames through the model-driven
 /// `continue_as` below this window, never through standard compaction.

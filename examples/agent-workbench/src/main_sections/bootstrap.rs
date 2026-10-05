@@ -273,6 +273,8 @@ async fn workbench_core_builder(
             {
                 rlm_config.continue_as_soft_warn_tokens = Some(warn_tokens);
             }
+            rlm_config =
+                rlm_config.with_execution_policy(rlm_policy_from(|name| std::env::var(name))?);
             let factory = lash::rlm::RlmProtocolPluginFactory::new(
                 rlm_config,
                 std::sync::Arc::new(lash::rlm::TypescriptDialect),
@@ -970,6 +972,26 @@ pub(crate) fn delta_coalescing_from(
 
 pub(crate) fn context_window_tokens_from_environment() -> AnyhowResult<usize> {
     context_window_tokens_from(|name| std::env::var(name))
+}
+
+/// The RLM execution policy new sessions record: `relay` (FIG-4441) or the
+/// default chronological policy.
+pub(crate) fn rlm_policy_from(
+    read_env: impl FnOnce(&str) -> Result<String, std::env::VarError>,
+) -> AnyhowResult<lash::rlm::RlmExecutionPolicy> {
+    match read_env(AGENT_WORKBENCH_RLM_POLICY_ENV) {
+        Err(std::env::VarError::NotPresent) => Ok(lash::rlm::RlmExecutionPolicy::Chronological),
+        Ok(raw) => match raw.trim() {
+            "" | "chronological" => Ok(lash::rlm::RlmExecutionPolicy::Chronological),
+            "relay" => Ok(lash::rlm::RlmExecutionPolicy::Relay),
+            other => Err(anyhow!(
+                "agent-workbench: {AGENT_WORKBENCH_RLM_POLICY_ENV} must be `chronological` or `relay`, got `{other}`"
+            )),
+        },
+        Err(std::env::VarError::NotUnicode(_)) => Err(anyhow!(
+            "agent-workbench: {AGENT_WORKBENCH_RLM_POLICY_ENV} is not valid Unicode"
+        )),
+    }
 }
 
 pub(crate) fn continue_as_warn_tokens_from_environment(
