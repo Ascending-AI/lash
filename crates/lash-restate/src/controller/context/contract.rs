@@ -81,14 +81,11 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     /// One engine first-completed await over the notification handles `keys`
     /// name: the index of the first the journal completes. Non-consuming:
-    /// every other source stays awaitable. A context without engine
-    /// notifications refuses.
-    fn select_run_sources<'run>(&'run self, _keys: Vec<u32>) -> crate::JournaledFuture<'run, usize>
+    /// every other source stays awaitable. Every context that hands out a
+    /// select key from `run_json_eager_or_retry_send` selects over it.
+    fn select_run_sources<'run>(&'run self, keys: Vec<u32>) -> crate::JournaledFuture<'run, usize>
     where
-        'ctx: 'run,
-    {
-        Box::pin(async { Err(TerminalError::new("this context selects no Run sources")) })
-    }
+        'ctx: 'run;
 
     fn run_json_or_retry_send<'run, S, Fut>(
         &'run self,

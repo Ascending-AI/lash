@@ -961,6 +961,7 @@ impl<'a> RunCoordinator<'a> {
                     .position(|pending| pending.timer && pending.work.call.call_id == *call_id)
             {
                 let pending = self.pending.remove(position);
+                self.journal.selection.disown(&pending.select_key);
                 self.owed.insert(
                     *rank,
                     Owed {
@@ -1075,7 +1076,16 @@ pub(super) struct Selection<'a> {
     acknowledged: std::collections::VecDeque<SelectKey>,
 }
 
-impl Selection<'_> {
+impl<'a> Selection<'a> {
+    /// Drop a source the Run disowned without selecting it, so later record
+    /// waits no longer arm on it and its acknowledgement leaves the queue.
+    pub(super) fn disown(&mut self, source: &KeyHandle<'a>) {
+        if let Some(Ok(key)) = source.peek() {
+            self.acknowledged.retain(|found| found != key);
+        }
+        self.pending.retain(|held| !held.ptr_eq(source));
+    }
+
     fn forget(&mut self, key: SelectKey) {
         self.pending
             .retain(|source| !matches!(source.peek(), Some(Ok(found)) if *found == key));

@@ -371,7 +371,8 @@ fi
 # a recorded step body. The runner call is pinned for the same reason.
 # `dyn Future` whose `+ Send` bound spills onto a following line is caught by
 # the second alternative, which flags any `dyn Future` the line leaves
-# unterminated (no `;` or `+` after it).
+# unterminated (no `;` or `+` after it). Both alternatives also match a
+# path-qualified `dyn std::future::Future`.
 #
 # Every current hit is pinned in scripts/shift-determinism-allowlist.txt as
 # `path  |  <normalized line text>  |  <occurrence count>  # <tag>`,
@@ -410,7 +411,7 @@ shift_paths=(
   crates/lash-restate/src/session_shifts.rs
 )
 
-shift_forbidden='tokio::(spawn|select|join|sync::|time::|task::|task_local!)|use[[:space:]]+tokio::\{[^}]*\b(spawn|select|join|sync|time|task)|futures::(future::)?join_all|(futures(_util)?::)?select_biased!|futures(_util)?::select!|(^|[^[:alnum:]_])(Instant::now|SystemTime|SystemClock|Uuid::new_v4|block_on)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])rand::|dyn[[:space:]]+Future[^;]{0,160}\+[[:space:]]*Send|dyn[[:space:]]+Future[^;+]*$|(^|[^[:alnum:]_])(HashMap|HashSet)([^[:alnum:]_]|$)|shift_sync[[:space:]]*\(|system_clock[[:space:]]*\(|journaled_nonce[[:space:]]*\(|restate_now_ms[[:space:]]*\(|ProfileMark::now|llm_stream_channel[[:space:]]*\(|(^|[^[:alnum:]_])(SendBoxFuture|JournaledStepFuture|LlmStreamEventRx)([^[:alnum:]_]|$)|task::(spawn|JoinHandle|AbortHandle|JoinError)|retry_cancel_watch[[:space:]]*\(|run_step_body_until_cancelled[[:space:]]*\('
+shift_forbidden='tokio::(spawn|select|join|sync::|time::|task::|task_local!)|use[[:space:]]+tokio::\{[^}]*\b(spawn|select|join|sync|time|task)|futures::(future::)?join_all|(futures(_util)?::)?select_biased!|futures(_util)?::select!|(^|[^[:alnum:]_])(Instant::now|SystemTime|SystemClock|Uuid::new_v4|block_on)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])rand::|dyn[[:space:]]+([[:alnum:]_]+::)*Future[^;]{0,160}\+[[:space:]]*Send|dyn[[:space:]]+([[:alnum:]_]+::)*Future[^;+]*$|(^|[^[:alnum:]_])(HashMap|HashSet)([^[:alnum:]_]|$)|shift_sync[[:space:]]*\(|system_clock[[:space:]]*\(|journaled_nonce[[:space:]]*\(|restate_now_ms[[:space:]]*\(|ProfileMark::now|llm_stream_channel[[:space:]]*\(|(^|[^[:alnum:]_])(SendBoxFuture|JournaledStepFuture|LlmStreamEventRx)([^[:alnum:]_]|$)|task::(spawn|JoinHandle|AbortHandle|JoinError)|retry_cancel_watch[[:space:]]*\(|run_step_body_until_cancelled[[:space:]]*\('
 shift_forbidden="${shift_forbidden}|[.]before_llm_call[[:space:]]*\(|[.]run_before_llm_call[[:space:]]*\("
 shift_allowlist=scripts/shift-determinism-allowlist.txt
 

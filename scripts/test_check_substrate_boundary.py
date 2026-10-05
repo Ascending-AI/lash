@@ -389,6 +389,33 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("rule 5 failed", result.stderr)
 
+    def test_path_qualified_dyn_future_is_caught(self) -> None:
+        # A path-qualified `dyn std::future::Future` names the same trait as
+        # the bare spelling, on one line or with its `+ Send` spilled over.
+        shapes = [
+            [
+                "type Body<'a> =",
+                "    std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;",
+            ],
+            [
+                "type Key<'a> = std::pin::Pin<",
+                "    Box<",
+                "        dyn core::future::Future<Output = Result<u32, Error>>",
+                "            + Send",
+                "            + 'a,",
+                "    >,",
+                ">;",
+            ],
+        ]
+        for lines in shapes:
+            with self.subTest(line=lines[1]):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    self.build_fixture(root, lines, [])
+                    result = self.run_check(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("rule 5 failed", result.stderr)
+
     def test_recorded_pin_with_a_reason_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

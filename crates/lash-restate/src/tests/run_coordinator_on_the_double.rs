@@ -223,6 +223,8 @@ struct Probe {
     held_after_realization: BTreeSet<ToolCallId>,
     unrelated: AtomicBool,
     unrelated_ran: tokio::sync::Notify,
+    /// Holds the unrelated effect's step until a law's script releases it.
+    unrelated_gate: Option<Arc<Gate>>,
     /// A fault the first realization of a call takes after its first
     /// intent: the step is not journaled and runs again.
     fault_after_first_intent: Option<ToolCallId>,
@@ -236,6 +238,9 @@ struct Probe {
     always_replay: bool,
     /// Per-call body gates: a gated body waits on every delivery.
     gates: BTreeMap<ToolCallId, Arc<Gate>>,
+    /// Per-call after-check gates: a gated call's D step waits on every
+    /// delivery.
+    after_gates: BTreeMap<ToolCallId, Arc<Gate>>,
     /// A law's out-of-handler driver, spawned beside the backend.
     script: Option<Arc<Script>>,
 }
@@ -249,6 +254,9 @@ enum Step {
     Drain,
     /// Register the unrelated effect, then drain while it progresses.
     DrainBesideUnrelated,
+    /// Register the unrelated effect, then decide the whole round while it
+    /// progresses.
+    ConcurrentBesideUnrelated,
 }
 
 type Finished = Result<Vec<RunRecord>, SingletonRunError>;
@@ -295,6 +303,9 @@ impl Driven {
 /// The unrelated effect: a record of another logical Run, which closes it.
 fn unrelated_record(probe: Arc<Probe>) -> lash_core::RunRecordStep<'static> {
     Box::pin(async move {
+        if let Some(gate) = &probe.unrelated_gate {
+            gate.wait().await;
+        }
         probe.run_unrelated();
         Ok(RunJournalEntry {
             state: Vec::new(),
@@ -337,6 +348,35 @@ async fn drain_beside_unrelated(
     unrelated?;
     terminals.lock().unwrap().extend(drained?);
     Ok(())
+}
+
+/// Decide the whole round while the unrelated effect, issued first,
+/// progresses beside it. Its await is a non-Run await: whatever it pops stays
+/// outside the owner's acknowledgement queue.
+async fn decide_beside_unrelated(
+    scoped: &ScopedEffectController<'_>,
+    run: &mut RunCoordinator<'_>,
+    round: &[SingletonToolCall],
+    probe: &Arc<Probe>,
+) -> Result<(), SingletonRunError> {
+    let mut unrelated = scoped
+        .controller()
+        .record_run_record(UNRELATED.to_owned(), unrelated_record(Arc::clone(probe)));
+    let issued = std::future::poll_fn(|context| {
+        Poll::Ready(match unrelated.as_mut().poll(context) {
+            Poll::Ready(entry) => Some(entry),
+            Poll::Pending => None,
+        })
+    })
+    .await;
+    let handlers = Arc::clone(probe) as Arc<dyn SingletonToolHandlers>;
+    let decide = super::decide_round(run, round, handlers, probe.retry.clone());
+    let (decided, unrelated) = match issued {
+        Some(entry) => (decide.await, entry),
+        None => tokio::join!(decide, unrelated),
+    };
+    unrelated?;
+    decided.map(drop)
 }
 
 /// Run the program in a handler, crashing at `crashes`.
@@ -635,6 +675,9 @@ async fn drive(
                             .map(|drained| terminals.lock().unwrap().extend(drained)),
                         Step::DrainBesideUnrelated => {
                             drain_beside_unrelated(&scoped, &mut run, &probe, &terminals).await
+                        }
+                        Step::ConcurrentBesideUnrelated => {
+                            decide_beside_unrelated(&scoped, &mut run, &round, &probe).await
                         }
                     };
                     if outcome.is_err() {

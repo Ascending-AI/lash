@@ -393,6 +393,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     run_json_or_retry_send_ends_the_attempt!();
 
+    fn select_run_sources<'run>(&'run self, keys: Vec<u32>) -> crate::JournaledFuture<'run, usize>
+    where
+        'ctx: 'run,
+    {
+        select_first_offered(keys)
+    }
+
     fn start_process_workflow<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
@@ -983,6 +990,17 @@ impl ReplayableRecordingContext {
 /// engine's cancellation, ADR 0107, or a command's
 /// recorded store work, FIG-3827), or the frontier marker a process start or
 /// a sleep journals before it acts (FIG-3779).
+/// A recording context runs a source's step only when its value is awaited,
+/// so the first offered source is the one it completes first.
+fn select_first_offered<'run>(keys: Vec<u32>) -> crate::JournaledFuture<'run, usize> {
+    Box::pin(async move {
+        if keys.is_empty() {
+            return Err(TerminalError::new("a Run selection names no source"));
+        }
+        Ok(0)
+    })
+}
+
 pub(super) fn is_process_command_journal_fact(effect_name: &str) -> bool {
     [
         ".process-cancel-admission:v1",
@@ -1204,6 +1222,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     }
 
     run_json_or_retry_send_ends_the_attempt!();
+
+    fn select_run_sources<'run>(&'run self, keys: Vec<u32>) -> crate::JournaledFuture<'run, usize>
+    where
+        'ctx: 'run,
+    {
+        select_first_offered(keys)
+    }
 
     fn start_process_workflow<'run>(
         &'run self,

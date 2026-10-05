@@ -429,7 +429,9 @@ impl<'a> RunCoordinator<'a> {
 
     async fn close_inner(&mut self) -> Result<(), SingletonRunError> {
         self.lifecycle_record(RunLifecycle::Closing).await?;
-        self.timers.clear();
+        for timer in std::mem::take(&mut self.timers) {
+            self.journal.selection.disown(&timer.select_key);
+        }
         for call_id in self.journal.ledger.eligible_cancellations() {
             let handlers = self
                 .handlers

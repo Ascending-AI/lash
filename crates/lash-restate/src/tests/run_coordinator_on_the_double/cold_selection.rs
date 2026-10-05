@@ -207,3 +207,125 @@ async fn k9_cold_reopen_decides_durable_attempts_in_acknowledgment_order() {
     assert_eq!(probe.executions_of(&d), 1, "d's durable X never repeats");
     assert_eq!(probe.executions_of(&b), 2, "b's unfinished X redelivers");
 }
+
+/// Whether a durable record of the turn journal decides `call_id`.
+fn decision_landed(server: &RestateTestServer, call_id: &ToolCallId) -> bool {
+    turn_journal(server).is_some_and(|journal| {
+        journal.iter().any(|entry| {
+            let Some(Ok(bytes)) = entry.run_completion() else {
+                return false;
+            };
+            serde_json::from_slice::<serde_json::Value>(&bytes)
+                .ok()
+                .and_then(|value| serde_json::from_value::<RunRecord>(value.get("record")?.clone()).ok())
+                .is_some_and(|record| {
+                    record.events.iter().any(|event| {
+                        matches!(event, RunEvent::Decided { call_id: decided, .. } if decided == call_id)
+                    })
+                })
+        })
+    })
+}
+
+/// R4 (FIG-5065): D1 recorded B while A was unfinished. A's X and then the
+/// unrelated effect U completed before the crash, with A's D still running.
+/// On the cold reopen U's await pops A's acknowledgment outside the owner's
+/// queue, so the fresh selection for D1's window picks A. The served D1 is
+/// authoritative: B is decided first and the popped A is decided next.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r4_a_served_d_wins_over_a_fresh_choice_and_the_popped_source_decides_next() {
+    let calls: Arc<Vec<_>> = Arc::new(
+        ["a", "b"]
+            .iter()
+            .map(|label| (call(label, &Kind::IntentFree), Kind::IntentFree))
+            .collect(),
+    );
+    let [a, b]: [ToolCallId; 2] = calls
+        .iter()
+        .map(|(call, _)| call.call_id.clone())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+    let mut probe = Probe::new(&calls);
+    for id in [&a, &b] {
+        probe.gates.insert(id.clone(), Arc::new(Gate::default()));
+    }
+    probe
+        .after_gates
+        .insert(a.clone(), Arc::new(Gate::default()));
+    probe.unrelated_gate = Some(Arc::new(Gate::default()));
+    let (script_a, script_b) = (a.clone(), b.clone());
+    probe.script = Some(Arc::new(move |server, probe| {
+        let (a, b) = (script_a.clone(), script_b.clone());
+        Box::pin(async move {
+            wait_until(BUDGET, "both gated bodies to enter", || {
+                let entered = probe.executions.lock().unwrap();
+                [&a, &b]
+                    .iter()
+                    .all(|id| entered.iter().any(|(executed, _)| executed == *id))
+            })
+            .await;
+            probe.gates[&b].release();
+            wait_until(BUDGET, "B's durable decision", || {
+                decision_landed(&server, &b)
+            })
+            .await;
+            probe.gates[&a].release();
+            wait_until(BUDGET, "A's attempt:1 completion", || {
+                run_completion_landed(&server, &name(&a, "attempt:1"))
+            })
+            .await;
+            probe.unrelated_gate.as_ref().unwrap().release();
+            wait_until(BUDGET, "the unrelated effect's completion", || {
+                run_completion_landed(&server, UNRELATED)
+            })
+            .await;
+            assert!(
+                !decision_landed(&server, &a),
+                "A's D is still running at the cut"
+            );
+            let view = turn_view(&server).expect("the turn invocation exists");
+            assert!(
+                server.crash(&view.id),
+                "the turn attempt crashed (status {})",
+                view.status
+            );
+            probe.after_gates[&a].release();
+        })
+    }));
+    let probe = Arc::new(probe);
+    let driven = drive(
+        0x5065,
+        Vec::new(),
+        Arc::clone(&calls),
+        Arc::new(vec![Step::ConcurrentBesideUnrelated]),
+        Arc::clone(&probe),
+    )
+    .await;
+
+    for line in journal_listing(driven.backend.server()) {
+        eprintln!("{line}");
+    }
+
+    let decided: Vec<ToolCallId> = driven
+        .records()
+        .iter()
+        .flat_map(|record| record.events.iter())
+        .filter_map(|event| match event {
+            RunEvent::Decided { call_id, .. } => Some(call_id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        decided,
+        vec![b.clone(), a.clone()],
+        "the served D decides B; the popped A decides next"
+    );
+    assert_eq!(probe.executions_of(&a), 1, "a's durable X never repeats");
+    assert_eq!(probe.executions_of(&b), 1, "b's durable X never repeats");
+    assert_eq!(
+        probe.handler_attempts.load(Ordering::SeqCst),
+        2,
+        "one cold reopen"
+    );
+}

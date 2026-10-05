@@ -292,9 +292,12 @@ token. A concurrent registration refuses at its live site with
 that token; deployment gate watches use a non-journaling ingress resolver.
 
 Exact acknowledgement pop order is retained across Run journal schedule and
-record waits; this is the scope of the S05 selection-order oracle. An unrelated
-program-effect await or the invocation-ID await during realization issuance
-can drain notifications outside that queue. Realization issuance keeps its
+record waits, including a deferred start's `start:launch` and
+`start:discharge`; this is the scope of the S05 selection-order oracle. An
+unrelated program-effect await, the invocation-ID await during realization
+issuance, or the Run's own source-service calls (arm, attach, subscribe,
+cancel and the Deferred source wait, none a Run record) can drain
+notifications outside that queue. Realization issuance keeps its
 VM-visible send and deterministic invocation-ID notification. If the owner
 reopens before D recorded a choice, selection after either await is a fresh
 decision. Every recorded D remains authoritative on replay.

@@ -4,7 +4,6 @@ use crate::runtime::process::{
     DeclaredStartPhase, StartCancelDecision, StartKey, WorkerTerminationReceipt,
 };
 use crate::tool_dispatch::{RunStartPrepared, RunStepHandle};
-use std::future::Future;
 
 /// The hold key of a call's declared start: the call's own id, so a call
 /// holds at most one process.
@@ -85,37 +84,37 @@ pub(super) fn served_launch(
 
 /// Register a deferred start inside its VM run. A served launch does not
 /// invoke the registrar; crash-before-ACK remains idempotent by StartKey.
+/// The launch is a Run record wait, so it keeps the acknowledgement queue.
 pub(super) async fn launch_start(
-    scoped: &ScopedEffectController<'_>,
-    template: RunRecord,
+    journal: &mut RunJournal<'_>,
     call_id: &ToolCallId,
     obligation: &DeclaredStartObligation,
     handlers: &dyn SingletonToolHandlers,
 ) -> Result<RunJournalEntry, SingletonRunError> {
-    scoped.admit_journal_write()?;
+    let template = journal.record(Vec::new());
     let start_key = obligation.start_key().clone();
     let launched_call = call_id.clone();
     let key = start_key.clone();
-    let name = record_name(call_id, "start:launch");
-    let record = scoped.controller().record_run_record(
-        name.clone(),
-        Box::pin(async move {
-            let process_id = handlers.launch_start(obligation).await?;
-            Ok(RunJournalEntry {
-                state: Vec::new(),
-                record: RunRecord {
-                    events: vec![RunEvent::StartLaunched {
-                        call_id: launched_call,
-                        start_key: key,
-                        process_id,
-                    }],
-                    ..template
-                },
-                materials: Vec::new(),
-            })
-        }),
-    );
-    let entry = scoped.await_owner_step(name, record).await?;
+    let entry = journal
+        .wait_record(
+            record_name(call_id, "start:launch"),
+            Box::pin(async move {
+                let process_id = handlers.launch_start(obligation).await?;
+                Ok(RunJournalEntry {
+                    state: Vec::new(),
+                    record: RunRecord {
+                        events: vec![RunEvent::StartLaunched {
+                            call_id: launched_call,
+                            start_key: key,
+                            process_id,
+                        }],
+                        ..template
+                    },
+                    materials: Vec::new(),
+                })
+            }),
+        )
+        .await?;
     served_launch(&entry, call_id, &start_key)?;
     Ok(entry)
 }
@@ -200,47 +199,6 @@ async fn decide_on_policy(
         ))
 }
 
-/// The discharge's `start:discharge` carrier: proposed at its first poll,
-/// its step asks the gate and journals the decision. A replay serves the
-/// decision. Only the deferred path owns one; a declared start records
-/// its decision together with launch in start:prepare.
-pub(super) fn discharge_carrier<'a>(
-    scoped: &'a ScopedEffectController<'a>,
-    template: RunRecord,
-    call_id: &ToolCallId,
-    obligation: &DeclaredStartObligation,
-    handlers: Handlers<'a>,
-    closing: bool,
-) -> Result<
-    impl Future<Output = Result<RunJournalEntry, SingletonRunError>> + Send + 'a,
-    SingletonRunError,
-> {
-    scoped.admit_journal_write()?;
-    let discharged_call = call_id.clone();
-    let discharged_key = obligation.start_key().clone();
-    let on_cancel = obligation.on_cancel(DeclaredStartPhase::Launched);
-    let name = record_name(call_id, "start:discharge");
-    let carrier = scoped.controller().record_run_record(
-        name.clone(),
-        Box::pin(async move {
-            let cancel = decide_on_policy(on_cancel, handlers.get(), closing).await?;
-            Ok(RunJournalEntry {
-                state: Vec::new(),
-                record: RunRecord {
-                    events: vec![RunEvent::StartDischarged {
-                        call_id: discharged_call,
-                        start_key: discharged_key,
-                        cancelled: cancel,
-                    }],
-                    ..template
-                },
-                materials: Vec::new(),
-            })
-        }),
-    );
-    Ok(async move { Ok(scoped.await_owner_step(name, carrier).await?) })
-}
-
 /// The served or produced discharge carrier, checked to be exactly this
 /// call's `StartDischarged`; the answer is the journaled `cancelled`.
 pub(super) fn discharged(
@@ -319,27 +277,44 @@ pub(super) async fn discharge_effects(
 
 /// Journal a deferred start's cancel decision as its `start:discharge`
 /// carrier, then follow the recorded decision — release the hold —
-/// outside the carrier, on every replay. A deferred start is never
-/// isolated, so no worker is terminated here.
+/// outside the carrier, on every replay. The carrier's step asks the gate;
+/// a replay serves the decision. Only the deferred path owns one; a declared
+/// start records its decision together with launch in start:prepare. A
+/// deferred start is never isolated, so no worker is terminated here.
 pub(super) async fn discharge_start<'a>(
-    scoped: &'a ScopedEffectController<'a>,
-    template: RunRecord,
+    journal: &mut RunJournal<'a>,
     call_id: &ToolCallId,
     obligation: &DeclaredStartObligation,
     handlers: Handlers<'a>,
     process_id: ProcessId,
     closing: bool,
 ) -> Result<RunJournalEntry, SingletonRunError> {
+    let template = journal.record(Vec::new());
     let start_key = obligation.start_key().clone();
-    let carrier = discharge_carrier(
-        scoped,
-        template,
-        call_id,
-        obligation,
-        handlers.clone(),
-        closing,
-    )?;
-    let entry = carrier.await?;
+    let discharged_call = call_id.clone();
+    let discharged_key = start_key.clone();
+    let on_cancel = obligation.on_cancel(DeclaredStartPhase::Launched);
+    let gate = handlers.clone();
+    let entry = journal
+        .wait_record(
+            record_name(call_id, "start:discharge"),
+            Box::pin(async move {
+                let cancel = decide_on_policy(on_cancel, gate.get(), closing).await?;
+                Ok(RunJournalEntry {
+                    state: Vec::new(),
+                    record: RunRecord {
+                        events: vec![RunEvent::StartDischarged {
+                            call_id: discharged_call,
+                            start_key: discharged_key,
+                            cancelled: cancel,
+                        }],
+                        ..template
+                    },
+                    materials: Vec::new(),
+                })
+            }),
+        )
+        .await?;
     let cancelled = discharged(&entry, call_id, &start_key)?;
     discharge_effects(
         call_id,

@@ -44,6 +44,7 @@ impl Probe {
             held_after_realization: BTreeSet::new(),
             unrelated: AtomicBool::new(false),
             unrelated_ran: tokio::sync::Notify::new(),
+            unrelated_gate: None,
             fault_after_first_intent: None,
             faulted: AtomicBool::new(false),
             seen: Mutex::new(Vec::new()),
@@ -53,6 +54,7 @@ impl Probe {
             emitted: Mutex::new(Vec::new()),
             always_replay: false,
             gates: BTreeMap::new(),
+            after_gates: BTreeMap::new(),
             script: None,
         }
     }
@@ -274,6 +276,9 @@ impl SingletonToolHandlers for Probe {
         call_id: &ToolCallId,
         _capture: &SingletonCapture,
     ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
+        if let Some(gate) = self.after_gates.get(call_id) {
+            gate.wait().await;
+        }
         if self
             .program_release
             .as_ref()

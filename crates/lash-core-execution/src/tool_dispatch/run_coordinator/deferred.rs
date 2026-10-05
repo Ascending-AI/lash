@@ -190,15 +190,7 @@ impl<'a> RunCoordinator<'a> {
                 decision: CallDecision::Cancelled,
             });
         }
-        let template = self.journal.record(Vec::new());
-        let launch = launch_start(
-            self.journal.scoped,
-            template,
-            &call.call_id,
-            &obligation,
-            binding,
-        )
-        .await?;
+        let launch = launch_start(&mut self.journal, &call.call_id, &obligation, binding).await?;
         let Some(RunEvent::StartLaunched { process_id, .. }) = launch.record.events.first() else {
             return Err(boundary(&call.call_id));
         };
@@ -346,15 +338,14 @@ impl<'a> RunCoordinator<'a> {
                 }
                 _ => return Err(boundary(id)),
             };
-            let template = self.journal.record(Vec::new());
+            let closing = self.journal.ledger.lifecycle() == crate::tool_run::RunLifecycle::Closing;
             let discharge = discharge_start(
-                self.journal.scoped,
-                template,
+                &mut self.journal,
                 id,
                 &obligation,
                 waiting.handlers.clone(),
                 process_id,
-                self.journal.ledger.lifecycle() == crate::tool_run::RunLifecycle::Closing,
+                closing,
             )
             .await?;
             self.journal.accept(discharge)?;
