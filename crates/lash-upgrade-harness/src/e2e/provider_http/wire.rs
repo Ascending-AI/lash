@@ -1,6 +1,6 @@
 //! Bounded HTTP/1 fixture plumbing, with real chunk framing and disconnects.
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, anyhow, ensure};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
@@ -11,10 +11,23 @@ const MAX_BODY: usize = 1024 * 1024;
 pub(crate) struct Request {
     pub method: String,
     pub path: String,
+    /// Routing diagnostics only: never matched, never recorded as evidence.
+    pub host: Option<String>,
+    pub user_agent: Option<String>,
     pub body: Value,
 }
 
-pub(crate) async fn read(stream: &mut TcpStream) -> Result<Request> {
+/// Reads one request. `tolerate_incomplete` belongs to the product-host
+/// binding: gate infrastructure opens and drops listening sockets, so a bound
+/// fixture treats a connection that ends before a complete head as no request
+/// (`Ok(None)`). Literal callers pass `false`: an early EOF stays
+/// "HTTP request ended before headers" and a mid-head read error propagates.
+/// Once a head completes, malformed headers or a truncated body are real
+/// errors either way.
+pub(crate) async fn read(
+    stream: &mut TcpStream,
+    tolerate_incomplete: bool,
+) -> Result<Option<Request>> {
     let mut bytes = Vec::new();
     let mut buffer = [0; 4096];
     let head_end = loop {
@@ -23,9 +36,17 @@ pub(crate) async fn read(stream: &mut TcpStream) -> Result<Request> {
             break end + 4;
         }
         ensure!(bytes.len() <= MAX_HEADER, "HTTP header too large");
-        let count = stream.read(&mut buffer).await?;
-        ensure!(count != 0, "HTTP request ended before headers");
-        bytes.extend_from_slice(&buffer[..count]);
+        match stream.read(&mut buffer).await {
+            Ok(0) if tolerate_incomplete => return Ok(None),
+            Ok(0) => return Err(anyhow!("HTTP request ended before headers")),
+            Err(error) => {
+                if tolerate_incomplete {
+                    return Ok(None);
+                }
+                return Err(error.into());
+            }
+            Ok(count) => bytes.extend_from_slice(&buffer[..count]),
+        }
     };
     let head = std::str::from_utf8(&bytes[..head_end])?;
     let mut lines = head.split("\r\n");
@@ -37,6 +58,8 @@ pub(crate) async fn read(stream: &mut TcpStream) -> Result<Request> {
         "invalid HTTP request line"
     );
     let mut length = None;
+    let mut host = None;
+    let mut user_agent = None;
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
@@ -48,6 +71,10 @@ pub(crate) async fn read(stream: &mut TcpStream) -> Result<Request> {
         if name.eq_ignore_ascii_case("content-length") {
             ensure!(length.is_none(), "duplicate Content-Length");
             length = Some(value.trim().parse::<usize>()?);
+        } else if name.eq_ignore_ascii_case("host") {
+            host = Some(value.trim().to_owned());
+        } else if name.eq_ignore_ascii_case("user-agent") {
+            user_agent = Some(value.trim().to_owned());
         }
     }
     let length = length.unwrap_or(0);
@@ -66,9 +93,15 @@ pub(crate) async fn read(stream: &mut TcpStream) -> Result<Request> {
     } else {
         serde_json::from_slice(&bytes[head_end..])?
     };
-    // Deliberately discard all request headers. Neither credentials nor
-    // unrelated host headers enter fixture evidence.
-    Ok(Request { method, path, body })
+    // All other request headers stay out: neither credentials nor unrelated
+    // host headers enter fixture evidence.
+    Ok(Some(Request {
+        method,
+        path,
+        host,
+        user_agent,
+        body,
+    }))
 }
 
 pub(crate) async fn head(

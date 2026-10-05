@@ -1902,9 +1902,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witness is e2e_h3 process::s18_cancel_suspended_application_timer_sqlite_memory (in-process double).",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s18_workbench_cancel_suspended_application_timer"
+          }
         }
       ],
       "setup": "Workbench process await or durable sleep; wait for actual Restate suspended status.",
@@ -1915,7 +1918,8 @@
           "ticket": "FIG-4897",
           "commit": "33c244ec8f04d51e798b1855623e611d5d67a41a"
         }
-      ]
+      ],
+      "host": "workbench"
     },
     {
       "id": "S19",
@@ -3031,9 +3035,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer"
+          }
         },
         {
           "variant": "recorded-429-retry",
@@ -3059,7 +3066,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
+          "hold_reason": "Missing replay oracle: s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer proves the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3085,9 +3092,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s26_workbench_partial_stream_disconnect_refuses_unsafe_regeneration"
+          }
         },
         {
           "variant": "partial-stream-reset",
@@ -3113,7 +3123,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
+          "hold_reason": "Missing replay oracle: s26_workbench_partial_stream_disconnect_refuses_unsafe_regeneration proves the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3139,9 +3149,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer"
+          }
         },
         {
           "variant": "observer-reconnect",
@@ -3167,7 +3180,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s26_rate_limit_and_observer_reconnect_commit_one_answer and h1_providers::s26_partial_stream_disconnect_refuses_unsafe_regeneration.",
+          "hold_reason": "Missing replay oracle: s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer proves the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         }
       ],
@@ -3211,9 +3224,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s27_authentication_failure_permits_the_next_run.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s27_workbench_authentication_failure_permits_the_next_run"
+          }
         },
         {
           "variant": "default",
@@ -3239,7 +3255,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No workbench product-host implementation: FIG-4988 owns it; component witnesses are h1_providers::s27_authentication_failure_permits_the_next_run.",
+          "hold_reason": "Missing replay oracle: s27_workbench_authentication_failure_permits_the_next_run proves the sqlite_file/live leg only; no owner ticket filed.",
           "registration": null
         }
       ],

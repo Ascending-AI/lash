@@ -79,10 +79,7 @@ class ReceiptLaws(unittest.TestCase):
     def test_r8_smoke_is_six_rows_and_held_rows_never_certify(self):
         planned = e2e.plan(self.manifest, "b" * 64, "smoke", [], SOURCE)
         self.assertEqual(planned["selected"], 6)
-        self.assertEqual(planned["held"], [
-            "S18/process-await-cancel/sqlite_file/live/rlm",
-            "S26/recorded-429-retry/sqlite_file/live/standard",
-        ])
+        self.assertEqual(planned["held"], [])
         self.assertEqual({r["scenario"] for r in planned["cases"]}, e2e.SMOKE)
         live = e2e.plan(self.manifest, "b" * 64, "live", [], SOURCE)
         self.assertEqual(live["guarded"], [])
@@ -90,8 +87,14 @@ class ReceiptLaws(unittest.TestCase):
             final = e2e.plan(self.manifest, "b" * 64, "full", ["S22"], SOURCE)
         self.assertEqual(final["guarded"], [])
         self.assertEqual({g["ticket"] for r in final["cases"] for g in r["arc_guards"]}, {f"FIG-{i}" for i in range(4896, 4901)})
+        held = e2e.plan(self.manifest, "b" * 64, "full", ["S26"], SOURCE)
+        self.assertEqual(held["held"], [
+            "S26/observer-reconnect/sqlite_file/replay/standard",
+            "S26/partial-stream-reset/sqlite_file/replay/standard",
+            "S26/recorded-429-retry/sqlite_file/replay/standard",
+        ])
         with self.assertRaisesRegex(ValueError, "held cases"):
-            e2e.reconcile(planned, {}, self.root, self.manifest)
+            e2e.reconcile(held, {}, self.root, self.manifest)
         manifest, expected, receipt = self.fixture()
         expected["guarded"] = [e2e.case_key(expected["cases"][0])]
         with self.assertRaisesRegex(ValueError, "arc guards"):

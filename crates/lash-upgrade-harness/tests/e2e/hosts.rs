@@ -1,6 +1,7 @@
 //! H6: R7/L03/L08/L21 through a separate external consumer process and
 //! its real HTTP contract, with the controller owning its lifetime.
 mod workbench_browser;
+mod workbench_provider;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -250,6 +251,52 @@ fn s29_workbench_kill_after_acceptance() -> Result<()> {
         .thread_stack_size(8 * 1024 * 1024)
         .build()?
         .block_on(workbench_browser::run())
+}
+
+#[test]
+#[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
+fn s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(workbench_provider::run(&workbench_provider::S26_RATE_LIMIT))
+}
+
+#[test]
+#[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
+fn s26_workbench_partial_stream_disconnect_refuses_unsafe_regeneration() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(workbench_provider::run(
+            &workbench_provider::S26_PARTIAL_DISCONNECT,
+        ))
+}
+
+#[test]
+#[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
+fn s27_workbench_authentication_failure_permits_the_next_run() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(workbench_provider::run(
+            &workbench_provider::S27_AUTH_NEXT_RUN,
+        ))
+}
+
+#[test]
+#[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
+fn s18_workbench_cancel_suspended_application_timer() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(workbench_provider::run(
+            &workbench_provider::S18_APPLICATION_TIMER,
+        ))
 }
 
 #[test]

@@ -1,0 +1,44 @@
+{
+  "name": "workbench-s18-application-timer",
+  "occurrences": [
+    {
+      "identity": "timer-0",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "openai/gpt-5.4",
+        "stream": true
+      },
+      "response": {
+        "status": 200,
+        "headers": [
+          [
+            "content-type",
+            "text/event-stream"
+          ]
+        ],
+        "chunks": [
+          {
+            "bytes": "data: {\"id\":\"s18-timer\",\"model\":\"openai/gpt-5.4\",\"choices\":[{\"delta\":{\"content\":\"<typescript>\\nawait sleep(86400000);\\nfinish(\\\"timer-elapsed\\\");\\n</typescript>\"}}]}\n\n",
+            "hold_after": null
+          },
+          {
+            "bytes": "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":2,\"total_tokens\":13}}\n\n",
+            "hold_after": null
+          },
+          {
+            "bytes": "data: [DONE]\n\n",
+            "hold_after": null
+          }
+        ],
+        "termination": "complete",
+        "usage": {
+          "prompt_tokens": 11,
+          "completion_tokens": 2,
+          "total_tokens": 13
+        },
+        "typed_failure": null
+      }
+    }
+  ]
+}

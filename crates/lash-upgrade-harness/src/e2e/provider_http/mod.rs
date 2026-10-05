@@ -16,14 +16,21 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{Context as _, Result, anyhow, ensure};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, watch};
 use tokio::task::{JoinHandle, JoinSet};
 
 use ledger::{EffectAcceptance, EffectDelivery, EffectLedger};
-use transcript::{HttpTranscript, RecordedResponse, StreamEnd};
+use transcript::{HttpOccurrence, HttpTranscript, RecordedResponse, StreamEnd};
+
+/// How a scenario binds each request body before boot. `start` keeps H1's
+/// literal equality; a product host whose prompt and tool catalog the
+/// fixture does not own relates each body to the scenario's facts and to
+/// the bodies already matched. Method, path and order stay literal.
+pub type BodyBinding = Arc<dyn Fn(&HttpOccurrence, &Value, &[Value]) -> Result<()> + Send + Sync>;
 
 /// These phases describe the fixture's transport. Durable A/X/D/V facts
 /// must come from the controller's independently decoded journal evidence.
@@ -64,8 +71,15 @@ pub struct HttpReceipt {
 
 struct State {
     transcript: HttpTranscript,
+    binding: BodyBinding,
+    /// `start_bound` fixtures serve a product host inside the Kiln gate,
+    /// where infrastructure probes listening sockets with `GET /` and dead
+    /// connections; those are tolerated. Literal `start` fixtures keep every
+    /// request and headless connection a violation.
+    tolerate_probes: bool,
     next: usize,
     ended: usize,
+    bodies: Vec<Value>,
     events: Vec<TransportEvent>,
     released: BTreeSet<String>,
     effect_gates: BTreeMap<(String, u32), (String, StreamEnd)>,
@@ -114,14 +128,60 @@ impl RecordedHttpFixture {
         transcript: HttpTranscript,
         ledger: &Path,
     ) -> Result<Self> {
+        Self::start_inner(
+            bind,
+            transcript,
+            ledger,
+            Arc::new(
+                |occurrence: &HttpOccurrence, body: &Value, prior: &[Value]| {
+                    ensure!(
+                        body == &occurrence.body,
+                        "HTTP request {} differs from occurrence {}",
+                        prior.len(),
+                        occurrence.identity
+                    );
+                    Ok(())
+                },
+            ),
+            false,
+        )
+        .await
+    }
+
+    /// The scenario's binding relates each request body to its authored
+    /// occurrence and to the bodies already matched; method, path and order
+    /// stay literal either way. A bound fixture serves the product host
+    /// inside the Kiln gate, whose infrastructure probes listening sockets:
+    /// it answers `GET /` benignly and ignores connections that end before a
+    /// complete request head. A literal `start` fixture treats both as
+    /// violations.
+    pub async fn start_bound(
+        bind: SocketAddr,
+        transcript: HttpTranscript,
+        ledger: &Path,
+        binding: BodyBinding,
+    ) -> Result<Self> {
+        Self::start_inner(bind, transcript, ledger, binding, true).await
+    }
+
+    async fn start_inner(
+        bind: SocketAddr,
+        transcript: HttpTranscript,
+        ledger: &Path,
+        binding: BodyBinding,
+        tolerate_probes: bool,
+    ) -> Result<Self> {
         transcript.validate()?;
         let listener = TcpListener::bind(bind).await?;
         let address = listener.local_addr()?;
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 transcript,
+                binding,
+                tolerate_probes,
                 next: 0,
                 ended: 0,
+                bodies: Vec::new(),
                 events: Vec::new(),
                 released: BTreeSet::new(),
                 effect_gates: BTreeMap::new(),
@@ -193,6 +253,11 @@ impl RecordedHttpFixture {
             .effect_gates
             .insert((call.to_owned(), attempt), (barrier.to_owned(), reply));
         Ok(())
+    }
+
+    /// Matched request bodies in order.
+    pub fn requests(&self) -> Result<Vec<Value>> {
+        Ok(self.shared.state()?.bodies.clone())
     }
 
     pub fn receipt(&self) -> Result<HttpReceipt> {
@@ -336,7 +401,28 @@ async fn serve(
 }
 
 async fn respond(mut stream: TcpStream, shared: Arc<Shared>) -> Result<()> {
-    let request = wire::read(&mut stream).await?;
+    let tolerate_probes = shared.state()?.tolerate_probes;
+    // `None` only exists for a bound fixture; `wire::read` errors strict.
+    let Some(request) = wire::read(&mut stream, tolerate_probes).await? else {
+        return Ok(());
+    };
+    // Gate infrastructure probes each listening socket with `GET /`, the way
+    // the recorded providers under scripts/ answer their own do_GET. For a
+    // product-host (bound) fixture it is not provider traffic: it consumes no
+    // transcript occurrence and records no violation, and a probe that resets
+    // before reading the reply is ignored. Any other path or method — and
+    // every request a literal fixture sees — still matches the transcript.
+    if tolerate_probes && request.method == "GET" && request.path == "/" {
+        let _ = wire::json(
+            &mut stream,
+            200,
+            &serde_json::json!({
+                "service": "lash-recorded-provider-fixture"
+            }),
+        )
+        .await;
+        return Ok(());
+    }
     if request.method == "POST" && request.path == "/effects" {
         let delivery: EffectDelivery = serde_json::from_value(request.body)?;
         let (acceptance, gate) = {
@@ -431,14 +517,25 @@ fn match_request(shared: &Shared, request: &wire::Request) -> Result<(String, Re
         .get(state.next)
         .ok_or_else(|| anyhow!("extra HTTP request after transcript exhausted"))?;
     ensure!(
-        request.method == expected.method
-            && request.path == expected.path
-            && request.body == expected.body,
-        "HTTP request {} differs from occurrence {}",
+        request.method == expected.method && request.path == expected.path,
+        "HTTP request {} ({} {}) differs from occurrence {} ({} {}); host={:?} agent={:?}",
         state.next,
-        expected.identity
+        request.method,
+        request.path,
+        expected.identity,
+        expected.method,
+        expected.path,
+        request.host,
+        request.user_agent
     );
+    (state.binding)(expected, &request.body, &state.bodies).with_context(|| {
+        format!(
+            "occurrence {} binding refused the request body",
+            expected.identity
+        )
+    })?;
     let matched = (expected.identity.clone(), expected.response.clone());
+    state.bodies.push(request.body.clone());
     state.next += 1;
     Ok(matched)
 }

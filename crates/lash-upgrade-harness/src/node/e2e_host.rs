@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{Context as _, Result, anyhow, ensure};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinSet;
@@ -136,7 +136,9 @@ pub async fn serve(args: ProviderHostArgs) -> Result<()> {
                     let shutdown = shutdown.clone();
                     commands.spawn(async move {
                         let outcome = tokio::time::timeout(timeout, async {
-                            let request = wire::read(&mut stream).await?;
+                            let request = wire::read(&mut stream, false)
+                                .await?
+                                .context("HTTP request ended before headers")?;
                             ensure!(request.method == "POST" && request.path == "/command", "unknown H1 host transport");
                             let request: ProviderHostCommand = serde_json::from_value(request.body)?;
                             if matches!(request, ProviderHostCommand::Shutdown) {

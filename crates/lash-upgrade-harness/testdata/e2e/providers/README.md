@@ -32,6 +32,30 @@ misordering, missing occurrences and zero matches fail reconciliation.
   session, a successful answer and usage. The fresh request includes the
   earlier committed user message; it is a separate Run, not a retry of 401.
 
+## Product-host transcripts (`workbench/`)
+
+The files under `workbench/` serve the real agent-workbench's production
+OpenAI-compatible client. Their `response` objects are byte-for-byte copies of
+the H1 occurrences above; their `body` objects are not literal requests. The
+workbench owns the system prompt, conversation history and tool catalog, so
+each `body` is a pinned-facts pattern: every top-level key it names must equal
+the same key in the request (`{"model": "openai/gpt-5.4", "stream": true}`),
+and the scenario's `BodyBinding` relates the remainder to the session's facts
+(user message texts, and identity-or-difference against the bodies already
+matched). Method, path and occurrence order stay literal.
+
+- `workbench/s26-rate-limit.json`: the same 429 then identical retry and
+  `answer-started` hold as `s26-rate-limit.json`; the second request must be
+  byte-identical to the first.
+- `workbench/s26-partial-disconnect.json`: the same partial output and socket
+  disconnect as `s26-partial-disconnect.json`.
+- `workbench/s27-auth-next-run.json`: the same 401 then fresh two-message
+  request and answer as `s27-auth-next-run.json`; the second request must
+  differ from the first.
+- `workbench/s18-application-timer.json`: one SSE response carrying a
+  `<typescript>` block whose `await sleep(86400000)` registers a durable
+  application timer the scenario cancels before it fires.
+
 HTTP write/acceptance events describe the outside transport only. Journal
 proposal and durable ACK cuts, tool attempt identities, Run terminals and
 namespace publication must be collected independently from actual Restate
