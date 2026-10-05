@@ -491,3 +491,34 @@ async fn apply_prompt_command(
         }
     ));
 }
+
+/// Compaction retains the recorded host prompt and behavioural guidance,
+/// while omitting execution guidance for the summarizer's tool-free request.
+#[test]
+fn compaction_prompt_retains_host_sections_without_execution() {
+    let recorded = creation(Some(configured_prompt()), None)
+        .decode::<StandardRecordedConfig>(STANDARD_PROTOCOL_PLUGIN_ID)
+        .expect("decode recorded prompt")
+        .expect("standard namespace");
+    insta::assert_snapshot!(recorded.render_compaction_prompt(), @r"
+    You help maintain this project.
+
+    ## Guidance
+
+    - Be concise; no filler, hedging, or performative tone.
+    - Act as soon as the next step is clear; do not restate conclusions.
+    - Prefer the simplest correct solution.
+
+    Use the project's conventions.
+
+    ## Context
+
+    Working directory: /project
+    ");
+    let mut without_guidance = recorded;
+    without_guidance.prompt.omit_builtin_guidance = true;
+    assert_eq!(
+        without_guidance.render_compaction_prompt(),
+        "You help maintain this project.\n\n## Guidance\n\nUse the project's conventions.\n\n## Context\n\nWorking directory: /project"
+    );
+}

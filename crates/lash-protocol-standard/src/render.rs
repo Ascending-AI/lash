@@ -85,6 +85,8 @@ pub struct StandardRenderConfig {
 impl StandardRenderConfig {
     /// The builtin layer under a host's and a turn's patches: the render
     /// defaults, with no per-tool overrides.
+    // Equivalent body-replacement mutant: the builtin layer is exactly Default.
+    #[cfg_attr(test, mutants::skip)]
     pub fn builtin() -> Self {
         Self::default()
     }
@@ -703,6 +705,66 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// The head share is a closed percentage range for defaults and overrides.
+    #[test]
+    fn head_share_accepts_both_endpoints_and_refuses_above_one_hundred() {
+        let id = ToolId::new("tool:head-share");
+        for percent in [0, 100, 101] {
+            for per_tool in [false, true] {
+                let patch = ToolRenderPatch {
+                    head_share_percent: Some(percent),
+                    ..ToolRenderPatch::default()
+                };
+                let mut host = StandardRenderConfig::default();
+                if per_tool {
+                    host.per_tool.insert(id.clone(), patch);
+                } else {
+                    host.defaults = patch;
+                }
+                let result = resolve(
+                    &StandardRenderConfig::builtin(),
+                    &host,
+                    &StandardRenderConfig::default(),
+                );
+                if percent <= 100 {
+                    assert_eq!(
+                        result
+                            .expect("inclusive percentage range")
+                            .for_tool(&id)
+                            .head_share_percent,
+                        percent
+                    );
+                } else {
+                    assert_eq!(
+                        result,
+                        Err(crate::StandardRenderRefusal::HeadShareOutOfRange {
+                            head_share_percent: percent,
+                        })
+                    );
+                }
+            }
+        }
+    }
+
+    /// Renderer slots compare by the renderer's stable identity, which is also
+    /// available in diagnostics even when the renderer has no Debug bound.
+    #[test]
+    fn renderer_slot_equality_and_diagnostics_use_renderer_identity() {
+        struct NamedRenderer(&'static str);
+        impl ToolOutputRenderer for NamedRenderer {
+            fn id(&self) -> &str {
+                self.0
+            }
+        }
+        let first = ToolOutputRendererSlot(Arc::new(NamedRenderer("law.first")));
+        let same = ToolOutputRendererSlot(Arc::new(NamedRenderer("law.first")));
+        let other = ToolOutputRendererSlot(Arc::new(NamedRenderer("law.other")));
+        assert_eq!(first, same);
+        assert_ne!(first, other);
+        assert!(format!("{first:?}").contains("law.first"));
+        assert!(format!("{other:?}").contains("law.other"));
     }
 
     #[test]
