@@ -1970,7 +1970,11 @@ async fn live_restate_shift_continuation_crash_redrives_one_successor() {
                 )) && invocation.target.ends_with("/run")
             })
             .collect();
-        assert_eq!(runs.len(), 65, "one invocation per run: {cut:?}");
+        assert_eq!(
+            runs.len(),
+            66,
+            "65 selected runs and the final idle admission: {cut:?}"
+        );
         assert!(
             runs.iter()
                 .all(|invocation| invocation.status == "completed")

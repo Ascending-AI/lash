@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn an_incompatible_refusal_reads_back_typed() {
         let refusal = CompatRefusal::Unstamped {
-            component: "restate-effect-group-state".to_owned(),
+            component: "restate-durable-wait-registry".to_owned(),
             writing_release: None,
         };
         let terminal = incompatible(refusal.clone());

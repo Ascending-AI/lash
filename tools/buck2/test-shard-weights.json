@@ -1062,7 +1062,7 @@
     "tests::effect_execution::restate_object_empty_url_encodes_reserved_key": 1,
     "tests::effect_execution::restate_object_json_url_encodes_reserved_key": 1,
     "tests::effect_execution::restate_object_send_url_encodes_reserved_key": 1,
-    "tests::effect_execution::restate_process_attach_reattaches_after_timeout_until_terminal": 209,
+    "tests::effect_execution::restate_process_terminal_wait_reenters_after_a_bounded_timeout_until_terminal": 209,
     "tests::effect_execution::restate_success_and_error_body_reads_share_the_request_deadline": 139,
     "tests::effect_execution::restate_turn_attach_preserves_re_attach_code_on_ceiling": 68,
     "tests::effect_execution::restate_turn_control_owner_is_stable_per_configured_authority": 171,

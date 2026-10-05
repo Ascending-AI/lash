@@ -1160,12 +1160,7 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(
     let runs: std::collections::BTreeSet<_> = runs
         .iter()
         .filter_map(|row| row.target_service_key.as_ref())
-        .filter(|key| {
-            double
-                .server()
-                .object_state("LashTurn", key)
-                .contains_key("admission")
-        })
+        .filter(|key| double.server().turn_admission("LashTurn", key).is_some())
         .cloned()
         .collect();
     // Each round adds a durable restored-material read on its successor.

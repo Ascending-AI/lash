@@ -58,6 +58,27 @@ S1–S3 passed on SQLite memory (3 executed), and P1 passed (1 executed, all thr
 
 Final source rebased onto `51c65ba204d41cc8f2934b60bae394f34e3ecb94` (including FIG-4950 and the PostgreSQL fixture/attachment fixes). Workspace `kiln clippy` and `kiln build //crates/lash-conformance:lash-conformance` passed; logs are `.buck2/f04/clippy-land-base.log` and `.buck2/f04/build-land-base.log`. The UI gate passed both targets (75 XML fixture cases); facade completeness passed (1 case). Receipts: `.buck2/test-invocations/20261004T160739-2uo941q9/test-report.json` and `.buck2/test-invocations/20261004T162301-dg87is7z/test-report.json`. `//:schema_checks`, `kiln sync`, and `tools/buck2/sync.py --check` passed. Repository gates ran once: 94/113 commands passed and 19 failed. The F04 prose finding was removed; its targeted recheck shows only untouched `durable_session.rs:350`. Inherited repository failures remain assigned to FIG-4942. No test oracle, surviving budget or timing was changed. No remote memory exit-9 retry was needed.
 
+## Service-tier receipts (FIG-4905)
+
+The Z07 closure ran the ledger's PostgreSQL and live Restate counterparts once each on main `7ed8632203` (FIG-4998 included). Receipts are under the FIG-4905 fork's `.buck2/test-invocations/`.
+
+| Laws | Tier | Exact selection | Result |
+| --- | --- | --- | --- |
+| S1–S3 (L12, L13) | Hermetic PostgreSQL | `artifact_retention::{handover_leases_hold_material_until_the_last_dependency_ends, early_release_retires_material_before_an_unacquired_successor, source_material_reads_refuse_typed_without_a_fresh_body}` on `//crates/lash-postgres-store:conformance__test` | 3/3 (`20261005T190232-830v7l04`) |
+| L1 (L10), L03, L09, L16, L22 | pg16 service, double | `tests::drain_hand_over::cell_segment::native_run::{cancelled_cell_starts_identical_source_fresh, sleep_cancellation_stays_terminal, sleep_deadline_and_locals_resume, process_await_and_locals_resume}_postgres`, `tests::drain_hand_over::{hands_over, replay_hands_over}_postgres`, `tests::drain_hand_over::run_segment::run_cancel_before_postgres` | 7/7 |
+| L09, L16 (run segment) | pg16 service, double | `tests::drain_hand_over::run_segment::{run_hands_over, run_crash_continuation_after_commit, run_cancel_after}_postgres` | red on every store since `34b2018d08`; fixed by FIG-5075 (`8266381c3b`) |
+| L09 (journal budget) | SQLite memory, double | `tests::drain_hand_over::run_segment::run_journal_budget_sqlite_memory` | red at 0 of 7 boundaries (stale `admission` state key since `850a361d36`), 1/1 after reading `turn_admission` |
+| L20 (park stamp) | pg16 service, double | `tests::drain_hand_over::stamp_park_postgres` | red, parked count 0 for the admitting generation; fixed by FIG-5076 (`bde9820041`) |
+| L09, L16 live handover | Live Restate (`drain-hand-over`, `drain-hand-over-postgres`) | `tests::drain_hand_over::{live_restate, postgres_live_restate}_{hands_over, replay_hands_over}` | 2/2, 2/2 |
+| L09 live transfer | Live Restate (`session-shifts`) | `live_restate_shift_continuation_crash_redrives_one_successor` | red at 66 of 65 runs (oracle missed `a742da7797`'s idle admission), 1/1 at 66 |
+| L16 live process handover | Live Restate (`crash-windows`) | `live_restate_a_crash_in_the_process_handover_redrives_exactly_one_successor` | 1/1 |
+| L11, L21 old-generation drain | Live Restate (`refused-successor-drain`, `server-double`) | `..::live_restate_a_refused_successor_completes_recovers_and_the_generation_drains`, `live_restate_routes_new_invocations_to_the_newest_deployment_and_keeps_pins` | 1/1, 1/1 |
+| L01, L02, L17 V7 | Live Restate (`run-wake`) | `live_restate_v7_completed_runs_wake_their_handler_without_another_input_frame` | 1/1 |
+| L03 live cancellation | Live Restate (`remote-cancellation`) | `tests::remote_turn_cancel::live_remote_after_step_waits_for_committed_boundary` | 1/1 |
+| L11 non-forced removal | E2E `S13/default/postgresql/live/standard` | `transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes_postgresql` | 1/1, certified |
+
+The protected-intent replay law `tests::singleton_tool_run_on_the_double::l04_a_journaled_intent_replays_before_its_protected_presentation` passed 1/1 on the double after FIG-4977 (`20261005T185724-31kzobi2`). L15's cost contract is FIG-4989's (`5a11e798f9`).
+
 ## Deleted cases in this landing
 
 Conformance rows name the law template; its removed registration mounts are listed below. Test-only routing builders, record observers and dead exports are deleted with their consumers. A dispatcher/proxy/rank-read assertion describes the retired API itself; the linked native law covers its observable semantics, without recreating that API.

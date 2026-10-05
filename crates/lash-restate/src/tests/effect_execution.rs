@@ -896,11 +896,12 @@ pub(super) async fn restate_ingress_client_pins_effect_replay_with_idempotency_k
 }
 
 #[tokio::test]
-pub(super) async fn restate_process_attach_reattaches_after_timeout_until_terminal() {
+pub(super) async fn restate_process_terminal_wait_reenters_after_a_bounded_timeout_until_terminal()
+{
     let expected = legacy_process_success(serde_json::json!({"reattached": true}));
     let (base_url, captured, server) = spawn_restate_http_timeout_then_capture(MockHttpResponse {
         status: "200 OK",
-        body: r#"{"wire":1,"body":{"type":"success","value":{"reattached":true}}}"#,
+        body: Box::leak(crate::wire::reply_json(&expected).into_boxed_str()),
     })
     .await;
     let registry = process_registry();

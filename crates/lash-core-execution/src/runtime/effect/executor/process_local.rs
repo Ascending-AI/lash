@@ -400,7 +400,7 @@ impl ProcessLocalExecution {
                 // `AlreadyResolved`.
                 let effect_controller = effect_controller.clone().ok_or_else(|| {
                     RuntimeEffectControllerError::foreign(
-                        "process_attach_resolver_unavailable",
+                        "process_terminal_resolver_unavailable",
                         crate::TurnFailureCause::Outcome,
                         "arming a process terminal needs the effect controller that owns the wait",
                     )
