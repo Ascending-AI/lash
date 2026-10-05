@@ -93,8 +93,12 @@
       min-height: 0;
       overflow: hidden;
       display: grid;
+      grid-template-areas: "left main";
+      grid-template-columns: 264px minmax(0, 1fr);
+    }
+    .shell.work-open {
       grid-template-areas: "left main right";
-      grid-template-columns: minmax(280px, 320px) minmax(360px, 1fr) minmax(280px, 360px);
+      grid-template-columns: 264px minmax(360px, 1fr) minmax(300px, 360px);
     }
 
     /* ─── left rail ─── */
@@ -105,19 +109,20 @@
       min-height: 0;
       border-right: 1px solid var(--line);
       background: var(--form);
-      display: grid;
-      grid-template-rows: auto auto auto auto 1fr;
+      display: flex;
+      flex-direction: column;
       gap: var(--space-lg);
-      padding: var(--space-lg);
-      overflow: auto;
+      padding: var(--space-lg) var(--space-md) var(--space-md);
+      overflow: hidden;
     }
 
     .left > * { min-width: 0; }
 
     .brand {
+      padding: 0 var(--space-2xs);
       font-family: var(--font-display);
       font-weight: 700;
-      font-size: 1.4rem;
+      font-size: var(--text-lg);
       line-height: 1.05;
       letter-spacing: 0;
       min-width: 0;
@@ -130,278 +135,20 @@
       margin-top: var(--space-2xs);
       font-family: var(--font-ui);
       font-weight: 400;
-      font-size: 0.75rem;
+      font-size: var(--text-2xs);
       letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--ash-text);
     }
 
-    .trigger-bay {
-      display: grid;
-      justify-items: center;
-      gap: var(--space-sm);
-    }
-
-    .trigger-buttons {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: var(--space-xs);
-      width: 100%;
-      max-width: 13rem;
-    }
-
-    .host-trigger {
-      --trigger-color: var(--error);
-      --trigger-line: var(--line-danger);
-      position: relative;
-      width: min(100%, 7rem);
-      aspect-ratio: 1;
-      border: 0;
-      padding: 0;
-      background: none;
-      cursor: pointer;
-      display: grid;
-      place-items: center;
-      justify-self: center;
-      touch-action: manipulation;
-      -webkit-user-select: none;
-      user-select: none;
-    }
-
-    .host-trigger[data-button="Blue"] {
-      --trigger-color: var(--info);
-      --trigger-line: oklch(0.68 0.040 245 / 0.58);
-    }
-
-    .trigger-face {
-      position: absolute;
-      inset: 0.625rem;
-      border-radius: 50%;
-      background: var(--form-raised);
-      border: 1px solid var(--trigger-line);
-      display: grid;
-      place-items: center;
-      gap: var(--space-3xs);
-      font-family: var(--font-ui);
-      transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease-out;
-    }
-
-    .trigger-face strong {
-      font-size: 0.98rem;
-      font-weight: 500;
-      letter-spacing: 0.16em;
-      color: var(--trigger-color);
-    }
-
-    .trigger-face span {
-      font-size: 0.75rem;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--ash-text);
-    }
-
-    .host-trigger:active .trigger-face { transform: scale(0.97); border-color: var(--sodium); }
-    .host-trigger:focus-visible .trigger-face { border-color: var(--sodium); }
-    .host-trigger[aria-disabled="true"] { cursor: not-allowed; filter: saturate(0.4) brightness(0.7); }
-
-    .trigger-caption {
-      margin: 0;
-      max-width: 22ch;
-      text-align: center;
-      font-family: var(--font-ui);
-      font-size: 0.75rem;
-      line-height: 1.5;
-      color: var(--ash-text);
-    }
-
-    .trigger-registry {
-      width: 100%;
-      display: grid;
-      gap: var(--space-2xs);
-    }
-
-    .trigger-registry-head,
-    .trigger-registration {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: center;
-      gap: var(--space-xs);
-    }
-
-    .trigger-registry-head {
-      font-family: var(--font-ui);
-      font-size: 0.72rem;
-      color: var(--ash-text);
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-    }
-
-    .trigger-registration {
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: baseline;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: var(--space-xs);
-      background: var(--form-raised);
-      font-family: var(--font-ui);
-      font-size: 0.72rem;
-      row-gap: var(--space-2xs);
-    }
-
-    .trigger-registration[data-enabled="false"] { opacity: 0.58; }
-    .trigger-registration-name,
-    .trigger-registration-detail {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .trigger-registration-name {
-      grid-column: 1 / -1;
-      grid-row: 1;
-      min-width: 0;
-      color: var(--chalk-mid);
-      line-height: 1.4;
-    }
-    .trigger-registration-detail {
-      grid-column: 1;
-      grid-row: 2;
-      color: var(--ash-text);
-      font-size: 0.64rem;
-    }
-    /* Expanded, the row stops hiding anything: the name wraps and the
-       truncated summary line is replaced by the full copyable identities. */
-    .trigger-registration[data-expanded="true"] .trigger-registration-name {
-      overflow: visible;
-      white-space: normal;
-    }
-    .trigger-registration[data-expanded="true"] .trigger-registration-detail { display: none; }
-    .trigger-registration:not([data-expanded="true"]) .trigger-registration-full { display: none; }
-
-    .trigger-registration-full {
-      grid-column: 1 / -1;
-      grid-row: 3;
-      display: grid;
-      gap: var(--space-2xs);
-      padding-top: var(--space-2xs);
-      border-top: 1px solid var(--line);
-    }
-
-    .trigger-registration-actions {
-      display: flex;
-      grid-column: 2;
-      grid-row: 2;
-      gap: var(--space-3xs);
-      justify-content: flex-end;
-    }
-    .trigger-registration-actions button {
-      min-height: 1.5rem;
-      display: inline-grid;
-      place-items: center;
-      border: 1px solid var(--line);
-      border-radius: 5px;
-      background: transparent;
-      color: var(--ash-text);
-      font: inherit;
-      font-size: 0.66rem;
-      letter-spacing: 0.04em;
-      padding: 0 var(--space-2xs);
-      cursor: pointer;
-    }
-    .trigger-registration-actions button:hover { color: var(--sodium); border-color: var(--sodium); }
-    .trigger-registry-empty { margin: 0; color: var(--ash-text); font-size: 0.72rem; }
-
-    .schedule-card {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background:
-        linear-gradient(135deg, var(--sodium-tint), transparent 58%),
-        var(--form-raised);
-      padding: var(--space-sm);
-      display: grid;
-      gap: var(--space-2xs);
-    }
-
-    .schedule-card-label,
-    .schedule-card-code {
-      font-family: var(--font-ui);
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-    }
-
-    .schedule-card-label {
-      color: var(--sodium-soft);
-      font-size: 0.68rem;
-    }
-
-    .schedule-card-code {
-      color: var(--chalk);
-      font-size: 0.82rem;
-      letter-spacing: 0.04em;
-      text-transform: none;
-      overflow-wrap: anywhere;
-    }
-
-    .schedule-card p {
-      margin: 0;
-      color: var(--chalk-dim);
-      font-size: 0.88rem;
-      line-height: 1.45;
-    }
-
-    /* ─── view tabs ─── */
-
-    .view-tabs { display: flex; gap: var(--space-2xs); }
-    /* Two tablists exist, one per view, and the accounts view is a fixed
-       overlay above the chat topbar. Only the active view's tablist may be
-       in the layout: the covered one is still a click target that the
-       overlay intercepts, which is a click that never lands. */
-    .view-tabs[hidden] { display: none; }
-
-    .view-tab {
-      border: 0;
-      background: none;
-      cursor: pointer;
-      padding: var(--space-3xs) 0;
-      font-family: var(--font-display);
-      font-weight: 700;
-      font-size: 1.5rem;
-      line-height: 1;
-      color: var(--ash-text);
-      border-bottom: 2px solid transparent;
-      transition: color 140ms ease-out, border-color 140ms ease-out;
-    }
-    .view-tab:hover { color: var(--chalk-dim); }
-    .view-tab.active { color: var(--chalk); border-bottom-color: var(--sodium); }
-
     /* ─── mock email accounts (accounts tab) ─── */
 
-    .accounts-view {
-      position: fixed;
-      inset: 0;
-      z-index: 40;
-      background:
-        linear-gradient(180deg, oklch(0.20 0.005 75 / 0.36), transparent 38vh),
-        var(--form-deep);
-      display: grid;
-      grid-template-rows: auto auto 1fr;
-      min-height: 0;
-    }
-    .accounts-view[hidden] { display: none; }
 
-    .accounts-view-head {
-      display: flex;
-      align-items: center;
-      gap: var(--space-lg);
-      padding: var(--space-md) var(--space-xl);
-      border-bottom: 1px solid var(--line);
-      flex-wrap: wrap;
-    }
 
     .accounts-count {
       margin-left: auto;
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.1em;
       text-transform: uppercase;
       color: var(--ash-text);
@@ -428,7 +175,7 @@
       background: var(--form-deep);
       color: var(--chalk);
       font-family: var(--font-ui);
-      font-size: 0.8rem;
+      font-size: var(--text-sm);
       padding: 0 var(--space-sm);
       outline: none;
     }
@@ -445,7 +192,7 @@
       background: var(--form-raised);
       color: var(--chalk);
       font-family: var(--font-ui);
-      font-size: 0.76rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.04em;
       cursor: pointer;
     }
@@ -457,7 +204,7 @@
       margin: 0;
       padding: var(--space-2xs) var(--space-xl) 0;
       font-family: var(--font-ui);
-      font-size: 0.78rem;
+      font-size: var(--text-sm);
       color: var(--error);
       line-height: 1.4;
     }
@@ -467,7 +214,7 @@
       grid-column: 1 / -1;
       margin: 0;
       font-family: var(--font-ui);
-      font-size: 0.85rem;
+      font-size: var(--text-sm);
       line-height: 1.5;
       color: var(--ash-text);
     }
@@ -479,7 +226,7 @@
       cursor: pointer;
       color: var(--ash-text);
       font-family: var(--font-ui);
-      font-size: 0.72rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.06em;
       text-transform: uppercase;
       padding: 2px var(--space-2xs);
@@ -511,7 +258,7 @@
 
     .account-name {
       font-family: var(--font-ui);
-      font-size: 0.86rem;
+      font-size: var(--text-sm);
       font-weight: 500;
       color: var(--chalk);
       min-width: 0;
@@ -522,7 +269,7 @@
       margin-left: auto;
       flex: none;
       font-family: var(--font-ui);
-      font-size: 0.66rem;
+      font-size: var(--text-2xs);
       letter-spacing: 0.04em;
       color: var(--form-deep);
       background: var(--sodium);
@@ -537,7 +284,7 @@
 
     .account-authority {
       font-family: var(--font-ui);
-      font-size: 0.72rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.04em;
       color: var(--sodium-soft);
       overflow-wrap: anywhere;
@@ -556,7 +303,7 @@
       background: var(--form-deep);
       color: var(--chalk);
       font-family: var(--font-ui);
-      font-size: 0.78rem;
+      font-size: var(--text-sm);
       padding: var(--space-2xs) var(--space-sm);
       outline: none;
       resize: vertical;
@@ -569,8 +316,8 @@
 
     .inbox-msg { border-top: 1px solid var(--line); padding-top: var(--space-2xs); display: grid; gap: 1px; }
     .inbox-msg-head { display: flex; align-items: baseline; gap: var(--space-2xs); }
-    .inbox-msg .subject { flex: 1 1 auto; min-width: 0; font-family: var(--font-ui); font-size: 0.78rem; color: var(--chalk); overflow-wrap: anywhere; }
-    .inbox-msg .meta { font-family: var(--font-ui); font-size: 0.7rem; color: var(--ash-text); overflow-wrap: anywhere; }
+    .inbox-msg .subject { flex: 1 1 auto; min-width: 0; font-family: var(--font-ui); font-size: var(--text-sm); color: var(--chalk); overflow-wrap: anywhere; }
+    .inbox-msg .meta { font-family: var(--font-ui); font-size: var(--text-xs); color: var(--ash-text); overflow-wrap: anywhere; }
     .msg-delete {
       flex: none;
       display: grid;
@@ -587,7 +334,7 @@
       padding: 0;
     }
     .msg-delete:hover { color: var(--error); }
-    .inbox-empty { font-family: var(--font-ui); font-size: 0.74rem; color: var(--ash-text); }
+    .inbox-empty { font-family: var(--font-ui); font-size: var(--text-xs); color: var(--ash-text); }
 
     .model-config { display: grid; gap: var(--space-md); }
 
@@ -595,7 +342,7 @@
 
     .field span {
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--ash-text);
@@ -610,7 +357,7 @@
       background: var(--form-deep);
       color: var(--chalk);
       font-family: var(--font-ui);
-      font-size: 0.82rem;
+      font-size: var(--text-sm);
       padding: 0 var(--space-sm);
       outline: none;
     }
@@ -622,7 +369,7 @@
 
     .field-hint {
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       line-height: 1.4;
       color: var(--error);
     }
@@ -630,44 +377,14 @@
     .field-hint.pending { color: var(--sodium); }
     .field input.pending { border-color: var(--line-strong); }
 
-    .status-stack {
-      align-self: end;
-      display: grid;
-      gap: var(--space-xs);
-      font-family: var(--font-ui);
-      font-size: 0.75rem;
-    }
-
-    .status-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: var(--space-xs);
-      padding-top: var(--space-xs);
-      border-top: 1px solid var(--line);
-    }
-
-    .status-row span:first-child {
-      color: var(--ash-text);
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      flex: none;
-    }
-    .status-row span:nth-child(2) {
-      flex: 1 1 auto;
-      min-width: 0;
-      color: var(--chalk-dim);
-      text-align: right;
-      overflow-wrap: anywhere;
-    }
-    .status-row .copy-btn[hidden] { display: none; }
-
     /* ─── chats: the session sidebar ─── */
 
     .chats {
-      display: grid;
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
       gap: var(--space-xs);
-      margin-top: calc(-1 * var(--space-xs));
     }
 
     .new-chat {
@@ -682,7 +399,7 @@
       background: var(--sodium-tint);
       color: var(--chalk);
       font-family: var(--font-ui);
-      font-size: 0.8rem;
+      font-size: var(--text-sm);
       letter-spacing: 0.06em;
       text-align: left;
       cursor: pointer;
@@ -710,25 +427,11 @@
       gap: var(--space-xs);
       padding: var(--space-xs) var(--space-3xs) 0;
       font-family: var(--font-ui);
-      font-size: 0.68rem;
+      font-size: var(--text-2xs);
       color: var(--ash-text);
       text-transform: uppercase;
       letter-spacing: 0.12em;
     }
-    .chats-toggle {
-      display: none;
-      padding: 0;
-      border: 0;
-      background: none;
-      color: var(--ash-text);
-      font: inherit;
-      letter-spacing: inherit;
-      text-transform: inherit;
-      cursor: pointer;
-    }
-    .chats-toggle:hover { color: var(--chalk); }
-    .chats-toggle::after { content: " ▾"; }
-    .chats-toggle[aria-expanded="true"]::after { content: " ▴"; }
 
     .chat-list {
       position: relative;
@@ -737,7 +440,9 @@
       padding: 0;
       display: grid;
       gap: 1px;
-      max-height: min(40dvh, 20rem);
+      flex: 1 1 auto;
+      min-height: 0;
+      align-content: start;
       overflow-y: auto;
       overscroll-behavior: contain;
     }
@@ -766,14 +471,14 @@
       white-space: nowrap;
       text-overflow: ellipsis;
       font-family: var(--font-body);
-      font-size: 0.92rem;
+      font-size: var(--text-md);
       line-height: 1.3;
     }
     .chat-title.untitled { font-style: italic; color: var(--ash-text); }
     .chat-row[aria-current="page"] .chat-title.untitled { color: var(--chalk-dim); }
     .chat-meta {
       font-family: var(--font-ui);
-      font-size: 0.65rem;
+      font-size: var(--text-2xs);
       color: var(--ash-text);
       letter-spacing: 0.04em;
       white-space: nowrap;
@@ -782,14 +487,14 @@
       margin: 0;
       padding: var(--space-2xs) var(--space-sm);
       font-family: var(--font-ui);
-      font-size: 0.72rem;
+      font-size: var(--text-xs);
       color: var(--ash-text);
     }
 
     .session-error {
       margin: 0;
       font-family: var(--font-ui);
-      font-size: 0.72rem;
+      font-size: var(--text-xs);
       color: var(--error);
     }
     .session-error[hidden] { display: none; }
@@ -802,12 +507,22 @@
       min-width: 0;
       min-height: 0;
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       grid-template-rows: auto 1fr auto;
       background: var(--form-deep);
     }
 
     .main.explorer-open {
       grid-template-rows: auto minmax(120px, 0.78fr) minmax(360px, 1.22fr) auto;
+    }
+
+    /* The connection banner is a row of its own while it shows; without one
+       it would take the timeline's share of the height. */
+    .main:has(> .shell-status:not([hidden])) {
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+    }
+    .main.explorer-open:has(> .shell-status:not([hidden])) {
+      grid-template-rows: auto auto minmax(120px, 0.78fr) minmax(360px, 1.22fr) auto;
     }
 
     .topbar {
@@ -821,20 +536,27 @@
       border-bottom: 1px solid var(--line);
     }
 
-    .title-block { min-width: 0; }
+    .title-block { flex: 1 1 auto; min-width: 0; }
 
     .title {
       margin: 0;
       font-family: var(--font-display);
       font-weight: 700;
-      font-size: 1.6rem;
-      line-height: 1;
+      font-size: var(--text-xl);
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
+
+    .accounts-view .account-add { padding: var(--space-md) var(--space-lg) 0; max-width: 560px; }
+    .accounts-view .accounts-count { margin-left: auto; }
+    .accounts-view .accounts-count + .page-back { margin-left: 0; }
 
     .subtitle {
       margin-top: var(--space-2xs);
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       color: var(--ash-text);
       white-space: nowrap;
       overflow: hidden;
@@ -859,7 +581,7 @@
       border: 1px solid var(--line);
       border-radius: 999px;
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       color: var(--ash-text);
       white-space: nowrap;
     }
@@ -876,7 +598,7 @@
       border-radius: 50%;
       background: transparent;
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       color: var(--ash-text);
       cursor: pointer;
     }
@@ -901,7 +623,7 @@
     .help-panel h2 {
       margin: 0 0 var(--space-xs);
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--sodium);
@@ -916,13 +638,13 @@
     }
     .help-panel dt {
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       color: var(--chalk);
       white-space: nowrap;
     }
     .help-panel dd {
       margin: 0;
-      font-size: 0.78rem;
+      font-size: var(--text-sm);
       color: var(--chalk-dim);
     }
 
@@ -954,7 +676,7 @@
       border-bottom: 1px solid var(--line-danger);
       background: var(--error-tint);
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       color: var(--chalk-dim);
     }
     .shell-status[hidden] { display: none; }
@@ -966,8 +688,9 @@
       background: var(--error);
       animation: pulse 1.6s ease-in-out infinite;
     }
-    .shell-status-text { min-width: 0; }
+    .shell-status-text { flex: none; white-space: nowrap; }
     .shell-status-detail {
+      flex: 1 1 0;
       min-width: 0;
       color: var(--ash-text);
       overflow: hidden;
@@ -984,7 +707,7 @@
       background: transparent;
       color: var(--chalk-dim);
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       padding: var(--space-2xs) var(--space-sm);
       cursor: pointer;
     }
@@ -998,7 +721,7 @@
       background: transparent;
       color: var(--error);
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.06em;
       cursor: pointer;
     }
@@ -1014,7 +737,7 @@
       background: transparent;
       color: var(--ash-text);
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.06em;
       cursor: pointer;
       touch-action: manipulation;
@@ -1024,11 +747,12 @@
     .ghost-btn.loading { color: var(--sodium); border-color: var(--line-strong); }
     .ghost-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+    /* The conversation reads as one centred column, the composer's width. */
     .timeline {
       min-height: 0;
       overflow: auto;
       overscroll-behavior: contain;
-      padding: var(--space-md) var(--space-lg) var(--space-lg);
+      padding: var(--space-md) max(var(--space-lg), calc((100% - 860px) / 2)) var(--space-lg);
       scroll-behavior: smooth;
     }
 
@@ -1044,7 +768,7 @@
 
     .msg-role {
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--ash-text);
@@ -1073,7 +797,7 @@
       text-align: left;
       white-space: normal;
       font-family: var(--font-ui);
-      font-size: 0.74rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.02em;
       color: var(--ash-text);
     }
@@ -1090,7 +814,7 @@
     .event-kind {
       flex: none;
       color: var(--ash-text);
-      font-size: 0.64rem;
+      font-size: var(--text-2xs);
       font-weight: 500;
       letter-spacing: 0.16em;
       text-transform: uppercase;
@@ -1107,7 +831,7 @@
       flex: none;
       color: var(--ash-mid);
       font-family: var(--font-ui);
-      font-size: 0.66rem;
+      font-size: var(--text-2xs);
       font-variant-numeric: tabular-nums;
       letter-spacing: 0.04em;
     }
@@ -1156,7 +880,7 @@
       border: 1px dashed var(--line-strong);
       border-radius: 6px;
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
     }
 
     .attachment-broken[hidden] { display: none; }
@@ -1211,7 +935,7 @@
       padding: 0;
       border: 0;
       background: transparent;
-      font-size: 0.82rem;
+      font-size: var(--text-sm);
     }
 
     .retry {
@@ -1222,7 +946,7 @@
       background: transparent;
       color: var(--sodium);
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       padding: var(--space-2xs) var(--space-sm);
       cursor: pointer;
     }
@@ -1232,7 +956,7 @@
       padding: var(--space-sm) 0;
       border-bottom: 1px solid var(--line);
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       color: var(--ash-text);
       text-align: center;
     }
@@ -1255,7 +979,7 @@
 
     .ingress-kind {
       font-family: var(--font-ui);
-      font-size: 0.72rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--ash-text);
@@ -1279,7 +1003,7 @@
       border-radius: 4px;
       background: var(--form);
       font-family: var(--font-ui);
-      font-size: 0.78rem;
+      font-size: var(--text-sm);
       color: var(--chalk-dim);
     }
 
@@ -1309,7 +1033,7 @@
       background: var(--form-deep);
       color: var(--chalk-mid);
       padding: var(--space-sm);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
@@ -1333,64 +1057,45 @@
       padding: var(--space-3xs) var(--space-xs);
       color: var(--ash-text);
       background: var(--form-deep);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.06em;
     }
 
-    .tool-head span:last-child { color: var(--ash-text); font-size: 0.75rem; }
+    .tool-head span:last-child { color: var(--ash-text); font-size: var(--text-xs); }
     .tool-summary { color: var(--chalk); overflow-wrap: anywhere; }
 
     .composer {
-      border-top: 1px solid var(--line);
-      padding: var(--space-md) var(--space-lg) var(--space-lg);
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: var(--space-sm);
+      padding: var(--space-sm) var(--space-lg) var(--space-lg);
     }
 
-    .composer-actions {
-      align-self: end;
-      display: grid;
-      gap: var(--space-2xs);
-      min-width: 132px;
-    }
-
-    .composer-actions[hidden] { display: none; }
-
-    .attach {
-      min-width: 132px;
-      min-height: 40px;
-      padding: 0 var(--space-sm);
+    /* One box, the way a chat composer reads: the draft on top, the controls
+       that shape the next turn (attachment, model) and the send underneath. */
+    .composer-box {
+      position: relative;
+      max-width: 860px;
+      margin: 0 auto;
       border: 1px solid var(--line);
-      border-radius: 4px;
-      background: transparent;
-      color: var(--ash-text);
-      font-family: var(--font-ui);
-      font-size: 0.7rem;
-      letter-spacing: 0.04em;
-      cursor: pointer;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      border-radius: 10px;
+      background: var(--form);
+      transition: border-color 120ms ease-out;
     }
-    .attach:hover { color: var(--chalk); border-color: var(--line-strong); }
-    .attach.ready { color: var(--lichen); border-color: var(--lichen); }
-    .attach.uploading { color: var(--sodium-soft); border-color: var(--line-strong); }
-    .attach:disabled { opacity: 0.45; cursor: not-allowed; }
+    .composer-box:focus-within { border-color: var(--line-strong); }
 
     .composer textarea {
+      display: block;
       width: 100%;
       min-height: 56px;
-      max-height: 180px;
-      resize: vertical;
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      background: var(--form);
+      max-height: 220px;
+      resize: none;
+      border: 0;
+      border-radius: 10px 10px 0 0;
+      background: transparent;
       color: var(--chalk);
       font-family: var(--font-body);
-      padding: var(--space-sm) var(--space-md);
+      font-size: 1rem;
+      padding: var(--space-sm) var(--space-md) var(--space-2xs);
       outline: none;
-      line-height: 1.45;
+      line-height: 1.5;
     }
 
     .composer textarea::placeholder {
@@ -1398,17 +1103,124 @@
       opacity: 1;
     }
 
-    .composer textarea:focus-visible { box-shadow: var(--focus-ring); border-color: var(--line-strong); }
+    .composer textarea:focus-visible { box-shadow: none; }
+
+    .composer-bar {
+      display: flex;
+      align-items: center;
+      gap: var(--space-xs);
+      padding: var(--space-2xs) var(--space-xs) var(--space-xs);
+    }
+
+    .composer-tools {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: var(--space-2xs);
+    }
+
+    .composer-actions {
+      flex: none;
+      display: flex;
+      gap: var(--space-2xs);
+    }
+
+    .composer-actions[hidden] { display: none; }
+
+    .attach,
+    .model-button {
+      min-height: 30px;
+      padding: 0 var(--space-xs);
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ash-text);
+      font-family: var(--font-ui);
+      font-size: var(--text-xs);
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .attach { overflow: hidden; text-overflow: ellipsis; max-width: 12rem; }
+    .attach:hover,
+    .model-button:hover,
+    .model-button[aria-expanded="true"] { color: var(--chalk); background: var(--surface-hover); }
+    .attach.ready { color: var(--lichen); border-color: oklch(0.66 0.060 130 / 0.42); }
+    .attach.uploading { color: var(--sodium-soft); }
+    .attach:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .model-picker { position: relative; min-width: 0; }
+    .model-button {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2xs);
+      max-width: 100%;
+    }
+    .model-button-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--chalk-dim); }
+    .model-button-variant { color: var(--ash-text); }
+    .model-button-variant:empty { display: none; }
+    .model-button-caret { font-size: var(--text-2xs); }
+    .model-button.unknown .model-button-label { color: var(--error); }
+
+    .model-menu {
+      position: absolute;
+      left: 0;
+      bottom: calc(100% + var(--space-xs));
+      z-index: 30;
+      width: min(340px, calc(100vw - 2 * var(--space-md)));
+      padding: var(--space-sm);
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--form-raised);
+      box-shadow: 0 10px 24px oklch(0.06 0.002 75 / 0.55);
+    }
+    .model-menu[hidden] { display: none; }
+
+    .model-choices {
+      display: grid;
+      gap: 1px;
+      max-height: 12rem;
+      overflow: auto;
+      border-top: 1px solid var(--line);
+      padding-top: var(--space-xs);
+    }
+    .model-choices[hidden] { display: none; }
+    .model-choice {
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--chalk-dim);
+      font-family: var(--font-ui);
+      font-size: var(--text-xs);
+      text-align: left;
+      padding: var(--space-2xs) var(--space-xs);
+      cursor: pointer;
+      overflow-wrap: anywhere;
+    }
+    .model-choice:hover { background: var(--surface-hover); color: var(--chalk); }
+    .model-choice[aria-selected="true"] { color: var(--sodium-soft); }
+    .model-choice[aria-selected="true"]::before { content: "● "; }
+
+    .usage-total {
+      margin-left: auto;
+      padding: 0 var(--space-2xs);
+      font-family: var(--font-ui);
+      font-size: var(--text-2xs);
+      color: var(--ash-mid);
+      white-space: nowrap;
+    }
 
     .send {
-      min-width: 132px;
-      align-self: end;
-      min-height: 40px;
+      min-width: 84px;
+      min-height: 32px;
+      padding: 0 var(--space-sm);
       border: 0;
-      border-radius: 4px;
+      border-radius: 6px;
       background: var(--sodium);
       color: var(--form-deep);
       font-family: var(--font-ui);
+      font-size: var(--text-xs);
       font-weight: 500;
       letter-spacing: 0.06em;
       cursor: pointer;
@@ -1417,13 +1229,14 @@
     .send:disabled { background: var(--ash); color: var(--ash-text); cursor: not-allowed; }
 
     .ingress-action {
-      min-height: 40px;
+      min-height: 32px;
+      padding: 0 var(--space-sm);
       border: 1px solid var(--line-strong);
-      border-radius: 4px;
+      border-radius: 6px;
       background: transparent;
       color: var(--chalk-mid);
       font-family: var(--font-ui);
-      font-size: 0.74rem;
+      font-size: var(--text-xs);
       letter-spacing: 0.03em;
       cursor: pointer;
     }
@@ -1444,10 +1257,11 @@
       min-width: 0;
       border-left: 1px solid var(--line);
       background: var(--form);
-      display: grid;
+      display: none;
       grid-template-rows: auto auto minmax(0, 1fr);
       min-height: 0;
     }
+    .shell.work-open .right { display: grid; }
 
     .right > * { min-width: 0; }
 
@@ -1456,15 +1270,14 @@
       min-height: 64px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: var(--space-sm);
-      flex-wrap: wrap;
-      padding: var(--space-md) var(--space-lg);
+      padding: var(--space-md) var(--space-md) var(--space-md) var(--space-lg);
       border-bottom: 1px solid var(--line);
     }
+    .rail-head .rail-count { margin-left: auto; }
 
-    .rail-title { font-family: var(--font-display); font-weight: 700; font-size: 1.25rem; }
-    .rail-count { font-family: var(--font-ui); font-size: 0.75rem; color: var(--ash-text); white-space: nowrap; }
+    .rail-title { font-family: var(--font-display); font-weight: 700; font-size: var(--text-lg); }
+    .rail-count { font-family: var(--font-ui); font-size: var(--text-xs); color: var(--ash-text); white-space: nowrap; }
     .rail-count.stale { color: var(--error); cursor: pointer; }
 
     .work-filters {
@@ -1479,7 +1292,7 @@
       align-items: center;
       gap: var(--space-3xs);
       font-family: var(--font-ui);
-      font-size: 0.72rem;
+      font-size: var(--text-xs);
       color: var(--ash-text);
       border: 1px solid var(--line);
       border-radius: 999px;
@@ -1537,7 +1350,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       color: var(--chalk);
-      font-size: 0.92rem;
+      font-size: var(--text-md);
     }
 
     /* Status is the one thing the rail must answer at a glance, so it is a
@@ -1549,7 +1362,7 @@
       border-radius: 999px;
       background: var(--form-deep);
       font-family: var(--font-ui);
-      font-size: 0.66rem;
+      font-size: var(--text-2xs);
       font-weight: 500;
       letter-spacing: 0.12em;
       text-transform: uppercase;
@@ -1586,7 +1399,7 @@
       background: transparent;
       color: var(--error);
       font-family: var(--font-ui);
-      font-size: 0.68rem;
+      font-size: var(--text-2xs);
       letter-spacing: 0.06em;
       text-transform: uppercase;
       cursor: pointer;
@@ -1651,7 +1464,7 @@
     .work-meta,
     .work-events {
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       line-height: 1.5;
       color: var(--ash-text);
       overflow-wrap: anywhere;
@@ -1726,7 +1539,7 @@
 
     .execution-status {
       font-family: var(--font-ui);
-      font-size: 0.68rem;
+      font-size: var(--text-2xs);
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--ash-text);
@@ -1740,7 +1553,7 @@
       white-space: nowrap;
       color: var(--ash-text);
       font-family: var(--font-ui);
-      font-size: 0.72rem;
+      font-size: var(--text-xs);
     }
 
     .execution-lineage {
@@ -1762,7 +1575,7 @@
       background: var(--raise);
       color: var(--ash-text);
       font-family: var(--font-ui);
-      font-size: 0.68rem;
+      font-size: var(--text-2xs);
       line-height: 1;
       display: inline-flex;
       align-items: center;
@@ -1789,7 +1602,7 @@
       flex: none;
       color: var(--ash-mid);
       font-family: var(--font-ui);
-      font-size: 0.7rem;
+      font-size: var(--text-xs);
     }
 
     .execution-actions {
@@ -1813,7 +1626,7 @@
       place-items: center;
       padding: 0 var(--space-xs);
       font-family: var(--font-ui);
-      font-size: 0.68rem;
+      font-size: var(--text-2xs);
       letter-spacing: 0.08em;
       line-height: 1;
       text-transform: uppercase;
@@ -1899,7 +1712,7 @@
       background: var(--form);
       color: var(--ash-text);
       font-family: var(--font-ui);
-      font-size: 0.64rem;
+      font-size: var(--text-2xs);
       line-height: 1;
       padding: 0.25rem 0.45rem;
       overflow: hidden;
@@ -1975,7 +1788,7 @@
 
     .diagram-node-kind {
       font-family: var(--font-ui);
-      font-size: 0.64rem;
+      font-size: var(--text-2xs);
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--ash-text);
@@ -2003,14 +1816,14 @@
       -webkit-line-clamp: 2;
       white-space: normal;
       color: var(--chalk-dim);
-      font-size: 0.74rem;
+      font-size: var(--text-xs);
       line-height: 1.25;
     }
 
     .diagram-node-meta {
       color: var(--ash-text);
       font-family: var(--font-ui);
-      font-size: 0.68rem;
+      font-size: var(--text-2xs);
       line-height: 1.35;
       min-width: 0;
       overflow: hidden;
@@ -2025,21 +1838,20 @@
       place-items: center;
       color: var(--ash-text);
       font-family: var(--font-ui);
-      font-size: 0.78rem;
+      font-size: var(--text-sm);
       text-align: center;
       padding: var(--space-lg);
     }
 
+    /* Nothing-here is a quiet line of text, never a box. */
     .empty {
       min-width: 0;
-      margin: var(--space-md) 0;
-      border: 1px dashed var(--line);
-      border-radius: 4px;
+      margin: 18vh auto 0;
+      max-width: 42ch;
       color: var(--ash-text);
-      padding: var(--space-lg);
       text-align: center;
       font-family: var(--font-ui);
-      font-size: 0.78rem;
+      font-size: var(--text-sm);
       line-height: 1.6;
       overflow-wrap: anywhere;
     }
@@ -2047,21 +1859,15 @@
     /* The rails are narrow; a full-size empty box there reads as a broken
        card rather than as "nothing here yet". */
     .work-list .empty {
-      margin: 0;
-      padding: var(--space-sm);
+      margin: var(--space-md) 0;
       text-align: left;
-      font-size: 0.74rem;
+      font-size: var(--text-xs);
     }
-    .work-list .empty { margin: var(--space-md) 0; }
 
     /* A placeholder that reports the connection, not the session, must not read
-       as the settled "nothing here" box. */
-    .empty.pending { border-style: solid; color: var(--chalk-dim); }
-    .empty.degraded {
-      border-style: solid;
-      border-color: var(--line-danger);
-      color: var(--chalk-dim);
-    }
+       as the settled "nothing here" line. */
+    .empty.pending { color: var(--chalk-dim); }
+    .empty.degraded { color: var(--error); }
 
     .node-inspector {
       min-width: 0;
@@ -2078,7 +1884,7 @@
     .inspector-empty {
       color: var(--ash-text);
       font-family: var(--font-ui);
-      font-size: 0.75rem;
+      font-size: var(--text-xs);
       line-height: 1.5;
     }
 
@@ -2094,7 +1900,7 @@
     .inspector-description {
       margin: 0;
       color: var(--chalk-dim);
-      font-size: 0.82rem;
+      font-size: var(--text-sm);
       line-height: 1.45;
       overflow-wrap: anywhere;
     }
@@ -2103,7 +1909,7 @@
       display: grid;
       gap: var(--space-xs);
       font-family: var(--font-ui);
-      font-size: 0.72rem;
+      font-size: var(--text-xs);
       line-height: 1.45;
     }
 
@@ -2144,7 +1950,7 @@
       background: var(--raise);
       color: var(--sodium-soft);
       font-family: var(--font-ui);
-      font-size: 0.7rem;
+      font-size: var(--text-xs);
       padding: 0 var(--space-xs);
       cursor: pointer;
     }
@@ -2154,7 +1960,7 @@
       background: var(--sodium-tint);
     }
 
-    /* ─── sidebar chat rows: delete ─── */
+    /* ─── sidebar: chat rows, delete, view links ─── */
 
     .chat-item {
       position: relative;
@@ -2235,6 +2041,241 @@
     .chat-row { display: flex; align-items: baseline; }
     .chat-row .chat-title { flex: 1 1 auto; }
 
+    .view-links {
+      flex: none;
+      display: grid;
+      gap: 1px;
+      padding-top: var(--space-sm);
+      border-top: 1px solid var(--line);
+    }
+    .view-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-xs);
+      min-height: 34px;
+      padding: 0 var(--space-xs) 0 var(--space-sm);
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--chalk-dim);
+      font-family: var(--font-ui);
+      font-size: var(--text-sm);
+      letter-spacing: 0.02em;
+      text-align: left;
+      cursor: pointer;
+    }
+    .view-link:hover { background: var(--surface-hover); color: var(--chalk); }
+    .view-link.active { background: var(--form-raised); box-shadow: inset 2px 0 0 var(--sodium); color: var(--chalk); }
+    .view-count {
+      padding: 0 0.45rem;
+      border-radius: 999px;
+      background: var(--form-deep);
+      font-size: var(--text-2xs);
+      line-height: 1.6;
+      color: var(--ash-text);
+    }
+    .view-count[hidden] { display: none; }
+    .view-count.live { color: var(--sodium); }
+
+    .icon-btn {
+      flex: none;
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ash-text);
+      font-family: var(--font-ui);
+      font-size: var(--text-md);
+      cursor: pointer;
+    }
+    .icon-btn:hover { color: var(--chalk); background: var(--surface-hover); }
+    .icon-btn svg { width: 16px; height: 16px; }
+    .sidebar-toggle { display: none; }
+
+    .scrim {
+      position: fixed;
+      inset: 0;
+      z-index: 45;
+      border: 0;
+      padding: 0;
+      background: oklch(0.06 0.002 75 / 0.6);
+    }
+    .scrim[hidden] { display: none; }
+
+    /* ─── secondary pages: triggers, accounts ─── */
+
+    .view-page {
+      grid-area: main;
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto auto 1fr;
+      background: var(--form-deep);
+    }
+    .view-page[hidden] { display: none; }
+    .shell:not([data-view="chat"]) .main { display: none; }
+    .shell:not([data-view="chat"]) .right { display: none; }
+
+    .page-head {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      padding: var(--space-md) var(--space-lg);
+      border-bottom: 1px solid var(--line);
+    }
+    .page-back { margin-left: auto; }
+
+    .page-body {
+      min-height: 0;
+      overflow: auto;
+      padding: var(--space-lg);
+      display: grid;
+      align-content: start;
+      gap: var(--space-xl);
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .view-page:has(.page-body) { grid-template-rows: auto 1fr; }
+
+    .page-section { display: grid; gap: var(--space-sm); }
+    .section-title {
+      margin: 0;
+      font-family: var(--font-ui);
+      font-size: var(--text-xs);
+      font-weight: 400;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ash-text);
+    }
+    .page-note { margin: 0; color: var(--ash-text); font-size: var(--text-md); }
+
+    .source-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-xs); }
+    .source {
+      display: grid;
+      gap: var(--space-2xs);
+      padding: var(--space-sm) var(--space-md);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--form);
+    }
+    .source p { margin: 0; color: var(--chalk-dim); font-size: var(--text-md); line-height: 1.5; }
+    .source code,
+    .source-head code {
+      font-family: var(--font-ui);
+      font-size: var(--text-sm);
+      color: var(--sodium-soft);
+    }
+    .source p code { font-size: var(--text-xs); color: var(--chalk-mid); }
+
+    .trigger-buttons {
+      display: flex;
+      gap: var(--space-sm);
+      margin-top: var(--space-xs);
+    }
+    .host-trigger {
+      --trigger-color: var(--error);
+      --trigger-line: var(--line-danger);
+      position: relative;
+      width: 5.5rem;
+      aspect-ratio: 1;
+      border: 0;
+      padding: 0;
+      background: none;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      touch-action: manipulation;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .host-trigger[data-button="Blue"] {
+      --trigger-color: var(--info);
+      --trigger-line: oklch(0.68 0.040 245 / 0.58);
+    }
+    .trigger-face {
+      position: absolute;
+      inset: 0.375rem;
+      border-radius: 50%;
+      background: var(--form-raised);
+      border: 1px solid var(--trigger-line);
+      display: grid;
+      place-content: center;
+      gap: var(--space-3xs);
+      font-family: var(--font-ui);
+      text-align: center;
+      transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease-out;
+    }
+    .trigger-face strong {
+      font-size: var(--text-sm);
+      font-weight: 500;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--trigger-color);
+    }
+    .trigger-face span {
+      font-size: var(--text-2xs);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ash-text);
+    }
+    .host-trigger:hover .trigger-face { border-color: var(--trigger-color); }
+    .host-trigger:active .trigger-face { transform: scale(0.96); border-color: var(--sodium); }
+    .host-trigger:focus-visible .trigger-face { border-color: var(--sodium); }
+    .host-trigger[aria-disabled="true"] { cursor: not-allowed; filter: saturate(0.4) brightness(0.7); }
+
+    .registration-list { display: grid; gap: var(--space-xs); }
+    .trigger-registration {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: baseline;
+      gap: var(--space-2xs) var(--space-sm);
+      padding: var(--space-sm) var(--space-md);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--form);
+      font-family: var(--font-ui);
+    }
+    .trigger-registration[data-enabled="false"] { opacity: 0.6; }
+    .trigger-registration-name {
+      grid-column: 1;
+      grid-row: 1;
+      min-width: 0;
+      color: var(--chalk);
+      font-size: var(--text-sm);
+      overflow-wrap: anywhere;
+    }
+    .trigger-registration-fired {
+      grid-column: 2;
+      grid-row: 1;
+      color: var(--ash-text);
+      font-size: var(--text-xs);
+      white-space: nowrap;
+    }
+    .trigger-registration-detail {
+      grid-column: 1;
+      grid-row: 2;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--ash-mid);
+      font-size: var(--text-2xs);
+    }
+    .trigger-registration-actions {
+      grid-column: 2;
+      grid-row: 2;
+      display: flex;
+      gap: var(--space-2xs);
+      justify-content: flex-end;
+    }
+    .trigger-registration-actions button,
     .inline-action {
       min-height: 24px;
       padding: 0 var(--space-xs);
@@ -2247,7 +2288,19 @@
       letter-spacing: 0.04em;
       cursor: pointer;
     }
+    .trigger-registration-actions button:hover,
     .inline-action:hover { color: var(--chalk); border-color: var(--line-strong); }
+    .trigger-registration-actions button.danger:hover,
+    .trigger-registration-actions button[data-armed="true"] { color: var(--error); border-color: var(--line-danger); }
+    .trigger-registration[data-expanded="true"] .trigger-registration-detail { display: none; }
+    .trigger-registration:not([data-expanded="true"]) .trigger-registration-full { display: none; }
+    .trigger-registration-full {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: var(--space-2xs);
+      padding-top: var(--space-xs);
+      border-top: 1px solid var(--line);
+    }
 
     /* ─── compact timeline rows: occurrences, queued batches, approvals ─── */
 
@@ -2363,7 +2416,7 @@
       align-items: baseline;
       gap: var(--space-2xs) var(--space-xs);
       font-family: var(--font-ui);
-      font-size: 0.68rem;
+      font-size: var(--text-2xs);
       line-height: 1.5;
     }
 
@@ -2406,13 +2459,16 @@
       background: transparent;
       color: var(--ash-text);
       font-family: var(--font-ui);
-      font-size: 0.6rem;
+      font-size: var(--text-2xs);
       letter-spacing: 0.1em;
       text-transform: uppercase;
       cursor: pointer;
       transition: color 120ms ease-out, border-color 120ms ease-out;
     }
+    .copy-btn[hidden] { display: none; }
     .copy-btn:hover { color: var(--sodium); border-color: var(--line-strong); }
+    .session-line { display: flex; align-items: center; gap: var(--space-xs); min-width: 0; }
+    .session-line #sessionId { min-width: 0; overflow-wrap: anywhere; font-family: var(--font-ui); font-size: var(--text-xs); }
     .copy-btn[data-copied="true"] { color: var(--lichen); border-color: var(--lichen); }
     .copy-btn[data-copied="failed"] { color: var(--error); border-color: var(--line-danger); }
 
@@ -2422,7 +2478,7 @@
       border-radius: 4px;
       background: var(--form-deep);
       font-family: var(--font-ui);
-      font-size: 0.7rem;
+      font-size: var(--text-xs);
     }
 
     .payload > summary {
@@ -2440,7 +2496,7 @@
       content: "▸";
       flex: none;
       color: var(--sodium);
-      font-size: 0.62rem;
+      font-size: var(--text-2xs);
     }
     .payload[open] > summary::before { content: "▾"; }
     .payload > summary:hover { color: var(--chalk); }
@@ -2453,7 +2509,7 @@
       padding: var(--space-xs) var(--space-sm);
       border-top: 1px solid var(--line);
       color: var(--chalk-mid);
-      font-size: 0.72rem;
+      font-size: var(--text-xs);
       line-height: 1.5;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
@@ -2468,6 +2524,8 @@
     .work-list,
     .left,
     .accounts-grid,
+    .chat-list,
+    .page-body,
     .node-inspector,
     .execution-lineage,
     .payload pre,
@@ -2491,33 +2549,26 @@
     ::-webkit-scrollbar-corner { background: transparent; }
 
     @media (max-width: 1180px) {
-      .shell {
-        min-height: 100dvh;
-        height: auto;
-        overflow: visible;
-        grid-template-areas:
-          "left main"
-          "right right";
-        grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
-        grid-template-rows: auto auto;
+      /* The work pane overlays the chat instead of squeezing it. */
+      .shell.work-open {
+        grid-template-areas: "left main";
+        grid-template-columns: 240px minmax(0, 1fr);
       }
-      .brand { font-size: 1.2rem; }
-      .left {
-        overflow: visible;
-      }
-      .main {
-        min-height: 78dvh;
-      }
-      .right {
-        min-height: 360px;
-        border-left: 0;
-        border-top: 1px solid var(--line);
-      }
-      .work-list {
-        overflow: visible;
+      .shell { grid-template-columns: 240px minmax(0, 1fr); }
+      .shell.work-open .right {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 35;
+        width: min(380px, 92vw);
+        box-shadow: -12px 0 28px oklch(0.06 0.002 75 / 0.5);
       }
       .main.explorer-open {
         grid-template-rows: auto minmax(180px, auto) minmax(420px, 62dvh) auto;
+      }
+      .main.explorer-open:has(> .shell-status:not([hidden])) {
+        grid-template-rows: auto auto minmax(180px, auto) minmax(420px, 62dvh) auto;
       }
       .execution-body {
         grid-template-columns: minmax(0, 1fr);
@@ -2530,50 +2581,59 @@
     }
 
     @media (max-width: 720px) {
-      .shell {
-        grid-template-areas:
-          "left"
-          "main"
-          "right";
+      /* The sidebar becomes a drawer behind the menu button, so the chat owns
+         the first screen. */
+      .shell,
+      .shell.work-open {
+        grid-template-areas: "main";
         grid-template-columns: minmax(0, 1fr);
       }
       .left {
-        grid-template-rows: auto;
-        gap: var(--space-lg);
-        overflow: visible;
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 50;
+        width: min(300px, 86vw);
+        transform: translateX(-100%);
+        transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+        box-shadow: 12px 0 28px oklch(0.06 0.002 75 / 0.5);
       }
-      /* stacked above the transcript, the full list would push the chat off
-         the first screen: show the open chat and let the operator expand */
-      .chats-toggle { display: inline; }
-      .chats:not(.expanded) .chat-list > li:not(.current) { display: none; }
+      .shell.sidebar-open .left { transform: none; }
+      .sidebar-toggle { display: grid; }
       .chat-row { min-height: 40px; align-items: center; }
-      .trigger-bay {
-        justify-items: stretch;
-      }
-      /* stretched, the pad must fill its row too, or the buttons hug the left
-         edge while the caption underneath centres on the full width */
-      .trigger-buttons { max-width: none; }
-      .trigger-caption { justify-self: center; }
-      .status-stack { align-self: stretch; }
+      .view-link { min-height: 40px; }
       .topbar {
-        align-items: flex-start;
-        flex-direction: column;
+        gap: var(--space-xs);
+        padding: var(--space-xs) var(--space-sm);
+        min-height: 56px;
       }
-      .topbar-right {
-        width: 100%;
-        flex-wrap: wrap;
-        justify-content: flex-start;
-      }
-      .main { min-height: 70dvh; }
+      .title { font-size: var(--text-lg); }
+      .subtitle { margin-top: 0; }
+      .topbar-right { flex: none; gap: var(--space-2xs); flex-wrap: nowrap; }
+      .ghost-btn { min-width: 0; padding: 0 var(--space-xs); }
+      .pill { padding: 0 var(--space-xs); }
+      .timeline { padding: var(--space-sm) var(--space-md) var(--space-md); }
+      .shell-status { padding: var(--space-xs) var(--space-sm); }
       .message {
         grid-template-columns: 1fr;
-        gap: var(--space-xs);
+        gap: var(--space-2xs);
       }
-      .composer { grid-template-columns: 1fr; }
-      .send {
-        width: 100%;
-        min-height: 48px;
-      }
+      .composer { padding: var(--space-xs) var(--space-sm) var(--space-sm); }
+      .usage-total { display: none; }
+      /* On a phone the menu spans the composer instead of hanging off the
+         button past the screen edge. */
+      .model-picker { position: static; }
+      .model-menu { left: var(--space-xs); right: var(--space-xs); width: auto; }
+      .trigger-registration { grid-template-columns: minmax(0, 1fr); }
+      .trigger-registration-fired,
+      .trigger-registration-detail,
+      .trigger-registration-actions { grid-column: 1; grid-row: auto; }
+      .trigger-registration-actions { justify-content: flex-start; }
+      .attach { max-width: 7rem; }
+      .page-head { padding: var(--space-xs) var(--space-sm); gap: var(--space-xs); flex-wrap: wrap; }
+      .page-body { padding: var(--space-md); }
+      .account-add { padding: var(--space-xs) var(--space-md) 0; }
       .shell.execution-fullscreen .execution-explorer {
         inset: var(--space-xs);
       }
@@ -2596,8 +2656,8 @@
   </style>
 </head>
 <body>
-  <div class="shell">
-    <aside class="left">
+  <div class="shell" data-view="chat">
+    <aside class="left" id="sidebar" aria-label="Workbench navigation">
       <div class="brand">
         <span class="brand-name">agent<span class="slash">/</span>workbench</span>
         <small>rlm runtime console</small>
@@ -2610,77 +2670,33 @@
         </button>
         <div class="chats-head">
           <span>chats</span>
-          <button id="chatsToggle" class="chats-toggle" type="button"
-                  aria-expanded="false" aria-controls="chatList">all · <span id="chatCount">0</span></button>
         </div>
         <ol class="chat-list" id="chatList"></ol>
         <p class="session-error" id="sessionError" hidden></p>
       </nav>
 
-      <div class="trigger-bay">
-        <div class="trigger-buttons">
-          <button class="host-trigger" type="button" data-trigger-button data-button="Red"
-                  aria-label="Emit the red button trigger occurrence"
-                  title="Emit a red button trigger occurrence.">
-            <span class="trigger-face">
-              <strong>RED</strong>
-              <span>fire</span>
-            </span>
-          </button>
-          <button class="host-trigger" type="button" data-trigger-button data-button="Blue"
-                  aria-label="Emit the blue button trigger occurrence"
-                  title="Emit a blue button trigger occurrence.">
-            <span class="trigger-face">
-              <strong>BLUE</strong>
-              <span>fire</span>
-            </span>
-          </button>
-        </div>
-        <p class="trigger-caption">red and blue emit triggers</p>
-        <section class="trigger-registry" aria-label="Trigger registrations">
-          <div class="trigger-registry-head"><span>registrations</span><span id="triggerCount">0</span></div>
-          <div id="triggerRegistrations"><p class="trigger-registry-empty">none in this session</p></div>
-        </section>
-        <section class="schedule-card" aria-label="Cron schedule example">
-          <div class="schedule-card-label">try scheduling</div>
-          <div class="schedule-card-code">cron.Schedule(...)</div>
-          <p>Ask the agent to schedule something; Restate runs the registered cron trigger.</p>
-        </section>
-      </div>
-
-      <form class="model-config" id="modelConfig">
-        <label class="field">
-          <span>model</span>
-          <input id="modelInput" list="modelList" autocomplete="off" spellcheck="false"
-                 title="Provider model slug, e.g. z-ai/glm-5.3-flash. Applies to chat sends and button trigger occurrences." />
-          <datalist id="modelList"></datalist>
-          <small id="modelHint" class="field-hint" hidden></small>
-          <small id="modelPending" class="field-hint pending" hidden>edited · sends with the next turn</small>
-        </label>
-        <label class="field">
-          <span>thinking</span>
-          <select id="variantSelect" title="Optional reasoning effort. Use provider default for models without configurable thinking."></select>
-        </label>
-      </form>
-
-      <div class="status-stack">
-        <div class="status-row"><span>session</span><span id="sessionId">connecting…</span><button
-                id="sessionCopy" class="copy-btn" type="button" hidden
-                title="Copy the full session id">copy</button></div>
-        <div class="status-row"><span>usage</span><span id="usageTotal">0 total</span></div>
-        <div class="status-row"><span>tokens</span><span id="usageBreakdown">0 in · 0 out</span></div>
-      </div>
+      <nav class="view-links" aria-label="Workbench views">
+        <button class="view-link" type="button" data-view="triggers">
+          <span>triggers</span><span id="triggerCount" class="view-count" hidden></span>
+        </button>
+        <button class="view-link" type="button" data-view="accounts">
+          <span>accounts</span><span id="accountsLinkCount" class="view-count" hidden></span>
+        </button>
+        <button id="workToggle" class="view-link" type="button" aria-expanded="false" aria-controls="workPane">
+          <span>work</span><span id="workLinkCount" class="view-count" hidden></span>
+        </button>
+      </nav>
     </aside>
+    <button id="sidebarScrim" class="scrim" type="button" tabindex="-1" aria-label="Close the sidebar" hidden></button>
 
     <main id="mainPanel" class="main">
       <header class="topbar">
+        <button id="sidebarToggle" class="icon-btn sidebar-toggle" type="button"
+                aria-label="Open the sidebar" aria-controls="sidebar" aria-expanded="false">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
         <div class="title-block">
-          <div class="view-tabs" id="chatViewTabs" role="tablist" aria-label="Workbench views">
-            <button class="view-tab active" type="button" data-view="chat" role="tab"
-                    aria-selected="true">chat</button>
-            <button class="view-tab" type="button" data-view="accounts" role="tab"
-                    aria-selected="false">accounts</button>
-          </div>
+          <h1 class="title" id="viewTitle">chat</h1>
           <div class="subtitle" id="streamState">connecting…</div>
         </div>
         <div class="topbar-right">
@@ -2691,19 +2707,25 @@
           <button id="helpBtn" class="help" type="button" aria-expanded="false" aria-controls="helpPanel"
                   aria-label="Help and keyboard shortcuts">?</button>
           <div id="helpPanel" class="help-panel" role="region" aria-label="Workbench help" tabindex="-1" hidden>
+            <h2>session</h2>
+            <dl>
+              <dt>id</dt><dd class="session-line"><span id="sessionId">connecting…</span><button
+                id="sessionCopy" class="copy-btn" type="button" hidden
+                title="Copy the full session id">copy</button></dd>
+              <dt>tokens</dt><dd id="usageBreakdown">0 in · 0 out</dd>
+            </dl>
             <h2>keyboard</h2>
             <dl>
               <dt>enter</dt><dd>send the turn</dd>
               <dt>shift + enter</dt><dd>insert a newline</dd>
               <dt>esc</dt><dd>stop the running turn</dd>
               <dt>↑ (empty composer)</dt><dd>recall your last prompt</dd>
-              <dt>click red or blue</dt><dd>emit a trigger occurrence</dd>
             </dl>
             <h2>what's what</h2>
             <dl>
-              <dt>trigger</dt><dd>starts background work from a registered source</dd>
+              <dt>triggers</dt><dd>sources that start background work, and this chat's registrations</dd>
               <dt>work</dt><dd>background processes (sub-agents and tools) the turn spawned</dd>
-              <dt>model · thinking</dt><dd>apply to the next turn you send</dd>
+              <dt>model</dt><dd>applies to the next turn you send</dd>
             </dl>
           </div>
         </div>
@@ -2757,26 +2779,59 @@
       </section>
 
       <form id="composer" class="composer">
-        <textarea id="prompt" rows="2" placeholder="ask the agent — enter to send, shift + enter for a newline"></textarea>
-        <div id="idleActions" class="composer-actions">
-          <input id="attachmentInput" type="file" accept="image/png" hidden />
-          <button id="attach" class="attach" type="button"
-                  title="Upload one PNG and reference it in the next turn">attach png</button>
-          <button id="send" class="send" type="submit">send</button>
-        </div>
-        <div id="runningActions" class="composer-actions" hidden aria-label="Running turn input actions">
-          <button id="injectNow" class="ingress-action inject" type="button"
-                  title="Inject this input once at the running turn's next checkpoint">inject now</button>
-          <button id="queueNext" class="ingress-action" type="button"
-                  title="Commit this draft as a separate turn after the running turn settles">queue next</button>
+        <div class="composer-box">
+          <textarea id="prompt" rows="2" placeholder="ask the agent — enter to send, shift + enter for a newline"></textarea>
+          <div class="composer-bar">
+            <div class="composer-tools">
+              <input id="attachmentInput" type="file" accept="image/png" hidden />
+              <button id="attach" class="attach" type="button"
+                      title="Upload one PNG and reference it in the next turn">attach png</button>
+              <div class="model-picker" id="modelPicker">
+                <button id="modelButton" class="model-button" type="button" aria-haspopup="dialog"
+                        aria-expanded="false" aria-controls="modelMenu" title="Model and thinking for the next turn">
+                  <span id="modelButtonLabel" class="model-button-label">model</span>
+                  <span id="modelButtonVariant" class="model-button-variant"></span>
+                  <span class="model-button-caret" aria-hidden="true">▾</span>
+                </button>
+                <div id="modelMenu" class="model-menu" role="dialog" aria-label="Model for the next turn" hidden>
+                  <div class="model-config" id="modelConfig">
+                    <label class="field">
+                      <span>model</span>
+                      <input id="modelInput" list="modelList" autocomplete="off" spellcheck="false"
+                             title="Provider model slug, e.g. z-ai/glm-5.3-flash. Applies to chat sends and button trigger occurrences." />
+                      <datalist id="modelList"></datalist>
+                      <small id="modelHint" class="field-hint" hidden></small>
+                      <small id="modelPending" class="field-hint pending" hidden>edited · sends with the next turn</small>
+                    </label>
+                    <label class="field">
+                      <span>thinking</span>
+                      <select id="variantSelect" title="Optional reasoning effort. Use provider default for models without configurable thinking."></select>
+                    </label>
+                    <div id="modelChoices" class="model-choices" role="listbox" aria-label="Known models"></div>
+                  </div>
+                </div>
+              </div>
+              <span id="usageTotal" class="usage-total">0 tokens</span>
+            </div>
+            <div id="idleActions" class="composer-actions">
+              <button id="send" class="send" type="submit">send</button>
+            </div>
+            <div id="runningActions" class="composer-actions" hidden aria-label="Running turn input actions">
+              <button id="injectNow" class="ingress-action inject" type="button"
+                      title="Inject this input once at the running turn's next checkpoint">inject now</button>
+              <button id="queueNext" class="ingress-action" type="button"
+                      title="Commit this draft as a separate turn after the running turn settles">queue next</button>
+            </div>
+          </div>
         </div>
       </form>
     </main>
 
-    <aside class="right">
+    <aside class="right" id="workPane" aria-label="Background work">
       <div class="rail-head">
         <div class="rail-title">work</div>
         <div id="workCount" class="rail-count">0 executions</div>
+        <button id="workClose" class="icon-btn" type="button" aria-label="Close the work pane">×</button>
       </div>
       <div class="work-filters" role="group" aria-label="Filter work by kind">
         <label class="work-filter">
@@ -2789,22 +2844,66 @@
       <div id="workList" class="work-list"></div>
     </aside>
 
-    <section id="accountsView" class="accounts-view" aria-label="Mock email accounts" hidden>
-      <header class="accounts-view-head">
-        <div class="view-tabs" id="accountsViewTabs" role="tablist" aria-label="Workbench views">
-          <button class="view-tab" type="button" data-view="chat" role="tab"
-                  aria-selected="false">chat</button>
-          <button class="view-tab active" type="button" data-view="accounts" role="tab"
-                  aria-selected="true">accounts</button>
-        </div>
-        <form class="account-add" id="accountAddForm">
-          <input id="accountNameInput" placeholder="add account, e.g. Work" autocomplete="off"
-                 spellcheck="false" aria-label="New mock email account name"
-                 title="Connect a mock account; the agent sees it as inbox.<name>." />
-          <button type="submit" title="Connect a mock email account">add account</button>
-        </form>
-        <span class="accounts-count" id="accountsCount">0 accounts</span>
+    <section id="triggersView" class="view-page" aria-labelledby="triggersTitle" hidden>
+      <header class="page-head">
+        <button class="icon-btn sidebar-toggle" type="button" data-sidebar-toggle aria-label="Open the sidebar">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <h1 class="title" id="triggersTitle">triggers</h1>
+        <button class="ghost-btn page-back" type="button" data-view-back>back to chat</button>
       </header>
+      <div class="page-body">
+        <section class="page-section" aria-labelledby="sourcesTitle">
+          <h2 class="section-title" id="sourcesTitle">sources</h2>
+          <ul class="source-list">
+            <li class="source">
+              <div class="source-head"><code>ui.button.pressed</code></div>
+              <p>The red and blue buttons. A press emits one occurrence; a registration watching this source starts its process.</p>
+              <div class="trigger-buttons">
+                <button class="host-trigger" type="button" data-trigger-button data-button="Red"
+                        aria-label="Emit the red button trigger occurrence"
+                        title="Emit a red button trigger occurrence.">
+                  <span class="trigger-face"><strong>red</strong><span>fire</span></span>
+                </button>
+                <button class="host-trigger" type="button" data-trigger-button data-button="Blue"
+                        aria-label="Emit the blue button trigger occurrence"
+                        title="Emit a blue button trigger occurrence.">
+                  <span class="trigger-face"><strong>blue</strong><span>fire</span></span>
+                </button>
+              </div>
+            </li>
+            <li class="source">
+              <div class="source-head"><code>cron.Schedule(...)</code></div>
+              <p>Ask the agent to schedule something. Restate runs the registered cron trigger and emits <code>cron.Tick { fired_at }</code> on every tick.</p>
+            </li>
+            <li class="source">
+              <div class="source-head"><code>mail.received</code></div>
+              <p>A message lands in a mock inbox, from the accounts view or <code>inbox.&lt;account&gt;.send</code>.</p>
+            </li>
+          </ul>
+        </section>
+        <section class="page-section" aria-labelledby="registrationsTitle">
+          <h2 class="section-title" id="registrationsTitle">registrations in this chat</h2>
+          <div id="triggerRegistrations" class="registration-list"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="accountsView" class="view-page accounts-view" aria-labelledby="accountsTitle" hidden>
+      <header class="page-head">
+        <button class="icon-btn sidebar-toggle" type="button" data-sidebar-toggle aria-label="Open the sidebar">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <h1 class="title" id="accountsTitle">accounts</h1>
+        <span class="accounts-count" id="accountsCount">0 accounts</span>
+        <button class="ghost-btn page-back" type="button" data-view-back>back to chat</button>
+      </header>
+      <form class="account-add" id="accountAddForm">
+        <input id="accountNameInput" placeholder="add account, e.g. Work" autocomplete="off"
+               spellcheck="false" aria-label="New mock email account name"
+               title="Connect a mock account; the agent sees it as inbox.<name>." />
+        <button type="submit" title="Connect a mock email account">add account</button>
+      </form>
       <p class="accounts-error" id="accountsError" hidden></p>
       <div id="accountsGrid" class="accounts-grid"></div>
     </section>
@@ -2936,8 +3035,6 @@
     const triggerCount = document.getElementById("triggerCount");
     const chats = document.getElementById("chats");
     const newChatButton = document.getElementById("newChat");
-    const chatsToggle = document.getElementById("chatsToggle");
-    const chatCount = document.getElementById("chatCount");
     const chatList = document.getElementById("chatList");
     const sessionError = document.getElementById("sessionError");
 
@@ -3086,7 +3183,9 @@
         empty.textContent = "no chats yet";
         chatList.appendChild(empty);
       }
-      chatCount.textContent = String(rows.length);
+      const currentRow = rows.find(row => row.current);
+      viewTitle.textContent = currentRow ? currentRow.title.text : "chat";
+      viewTitle.title = viewTitle.textContent;
       /* reveal the open chat once per switch, inside the list only, so the
          poll never scrolls the page under the operator */
       const current = chatList.querySelector('[aria-current="page"]');
@@ -3248,14 +3347,9 @@
       /* a modified click keeps the link's own meaning: the session in a new tab */
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
-      chats.classList.remove("expanded");
-      chatsToggle.setAttribute("aria-expanded", "false");
+      setSidebarOpen(false);
+      setView("chat");
       switchToSession(link.dataset.sessionId);
-    });
-
-    chatsToggle.addEventListener("click", () => {
-      const expanded = chats.classList.toggle("expanded");
-      chatsToggle.setAttribute("aria-expanded", String(expanded));
     });
 
     newChatButton.addEventListener("click", async () => {
@@ -5694,7 +5788,7 @@
       event.preventDefault();
       const text = promptInput.value.trim();
       if (!text) return;
-      if (modelEmpty()) { validateModel(); modelInput.focus(); return; }
+      if (modelEmpty()) { validateModel(); openModelMenu(); return; }
       lastUserText = text;
       promptInput.value = "";
       const attachment = selectedAttachment;
@@ -5784,7 +5878,7 @@
     async function submitRunningInput(ingress) {
       const text = promptInput.value.trim();
       if (!text) { promptInput.focus(); return; }
-      if (modelEmpty()) { validateModel(); modelInput.focus(); return; }
+      if (modelEmpty()) { validateModel(); openModelMenu(); return; }
       try {
         const response = await fetch("/api/turn/input", {
           method: "POST",
@@ -5824,7 +5918,7 @@
     function fireButtonTrigger(event) {
       const button = event.currentTarget;
       if (button.getAttribute("aria-disabled") === "true") return;
-      if (modelEmpty()) { validateModel(); modelInput.focus(); return; }
+      if (modelEmpty()) { validateModel(); openModelMenu(); return; }
       postTriggerCommand({ button: button.dataset.button, ...selectedModelPayload() });
     }
 
@@ -5862,7 +5956,7 @@
         row.dataset.expanded = "true";
         const button = row.querySelector("[data-trigger-expand]");
         if (!button) continue;
-        button.textContent = "collapse";
+        button.textContent = "hide identity";
         button.setAttribute("aria-expanded", "true");
       }
     }
@@ -6016,11 +6110,12 @@
     // BEGIN WORKBENCH_TRIGGER_REGISTRATION_RENDERING
     function renderTriggers(registrations) {
       triggerCount.textContent = String(registrations.length);
+      triggerCount.hidden = !registrations.length;
       triggerRegistrations.innerHTML = "";
       if (!registrations.length) {
         const empty = document.createElement("p");
-        empty.className = "trigger-registry-empty";
-        empty.textContent = "none in this session";
+        empty.className = "page-note";
+        empty.textContent = "Nothing is registered yet. Ask the agent to watch a source above.";
         triggerRegistrations.appendChild(empty);
         return;
       }
@@ -6032,19 +6127,31 @@
         row.dataset.enabled = String(registration.enabled);
         row.dataset.triggerSubscriptionKey = subscriptionKey;
         row.dataset.expanded = "false";
+        /* A registration reads by the name it was given; what fires it and
+           what it starts follow on the line under it. */
+        const alias = String(registration.name || "").trim();
         const name = document.createElement("span");
         name.className = "trigger-registration-name";
-        name.textContent = model.name;
+        name.textContent = alias || model.name;
         name.title = model.name;
         const detail = document.createElement("span");
         detail.className = "trigger-registration-detail";
         detail.textContent = model.detail;
         detail.title = model.title;
+        const fired = document.createElement("span");
+        fired.className = "trigger-registration-fired";
+        const sourceSummary = triggerRegistrationSourceSummary(registration);
+        const firedBy = registration.source_type + (sourceSummary ? " (" + sourceSummary + ")" : "");
+        fired.textContent = (alias ? "on " + firedBy + " · " : "")
+          + (registration.enabled ? "" : "disabled · ")
+          + (registration.last_fired_at_ms
+            ? "last fired " + formatClockTime(registration.last_fired_at_ms)
+            : "never fired");
         const actions = document.createElement("span");
         actions.className = "trigger-registration-actions";
         const expand = document.createElement("button");
         expand.type = "button";
-        expand.textContent = "expand";
+        expand.textContent = "identity";
         expand.title = "Show the full, copyable registration identity";
         expand.dataset.triggerExpand = "1";
         const toggle = document.createElement("button");
@@ -6053,8 +6160,10 @@
         toggle.addEventListener("click", () => setTriggerEnabled(subscriptionKey, !registration.enabled));
         const remove = document.createElement("button");
         remove.type = "button";
-        remove.textContent = "delete";
-        remove.addEventListener("click", () => deleteTrigger(subscriptionKey));
+        remove.className = "danger";
+        remove.textContent = "cancel";
+        remove.title = "Delete this registration: it starts no more work";
+        remove.addEventListener("click", () => deleteTrigger(subscriptionKey, remove));
         actions.append(expand, toggle, remove);
         /* The expanded panel is the whole truth about this registration: each
            identity in full, selectable, with a copy control. The collapsed
@@ -6083,12 +6192,12 @@
         expand.addEventListener("click", () => {
           const next = row.dataset.expanded !== "true";
           row.dataset.expanded = String(next);
-          expand.textContent = next ? "collapse" : "expand";
+          expand.textContent = next ? "hide identity" : "identity";
           expand.setAttribute("aria-expanded", String(next));
           if (next) expandedTriggerRows.add(subscriptionKey);
           else expandedTriggerRows.delete(subscriptionKey);
         });
-        row.append(name, detail, actions, full);
+        row.append(name, detail, fired, actions, full);
         triggerRegistrations.appendChild(row);
       }
     }
@@ -6107,51 +6216,98 @@
       await loadTriggers();
     }
 
-    async function deleteTrigger(subscriptionKey) {
-      if (!window.confirm("Delete trigger " + subscriptionKey + "?")) return;
+    /* The first click arms the cancel in place; a second one deletes. */
+    async function deleteTrigger(subscriptionKey, button) {
+      if (button && button.dataset.armed !== "true") {
+        button.dataset.armed = "true";
+        button.textContent = "cancel? confirm";
+        setTimeout(() => {
+          if (!button.isConnected) return;
+          button.dataset.armed = "false";
+          button.textContent = "cancel";
+        }, 4000);
+        return;
+      }
       const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionKey), { method: "DELETE" });
       if (!response.ok) {
         await response.text();
         renderError("the trigger could not be deleted");
       }
+      lastTriggerSignature = "";
       await loadTriggers();
     }
 
-    /* ── mock email accounts (accounts tab) ── */
+    /* ── views: the chat, and the secondary pages the sidebar links to ── */
     const accountsView = document.getElementById("accountsView");
-    const chatViewTabs = document.getElementById("chatViewTabs");
-    const accountsViewTabs = document.getElementById("accountsViewTabs");
+    const triggersView = document.getElementById("triggersView");
+    const viewTitle = document.getElementById("viewTitle");
     const accountsGrid = document.getElementById("accountsGrid");
     const accountsCount = document.getElementById("accountsCount");
+    const accountsLinkCount = document.getElementById("accountsLinkCount");
     const accountsError = document.getElementById("accountsError");
     const accountAddForm = document.getElementById("accountAddForm");
     const accountNameInput = document.getElementById("accountNameInput");
+    const sidebar = document.getElementById("sidebar");
+    const sidebarToggle = document.getElementById("sidebarToggle");
+    const sidebarScrim = document.getElementById("sidebarScrim");
+    const workToggle = document.getElementById("workToggle");
+    const workClose = document.getElementById("workClose");
+    const workLinkCount = document.getElementById("workLinkCount");
     let lastAccountsSignature = "";
 
-    function setView(view) {
-      const accountsActive = view === "accounts";
-      accountsView.hidden = !accountsActive;
-      /* The accounts view is a fixed overlay over the chat topbar, so the
-         topbar's tablist stays clickable-looking while the overlay eats every
-         click on it. Retiring the inactive tablist from the layout leaves
-         exactly one rendered `.view-tab` per view, so a click on a named tab
-         lands on the tab a reader sees. */
-      chatViewTabs.hidden = accountsActive;
-      accountsViewTabs.hidden = !accountsActive;
-      for (const tab of document.querySelectorAll(".view-tab")) {
-        const active = tab.dataset.view === view;
-        tab.classList.toggle("active", active);
-        tab.setAttribute("aria-selected", String(active));
+    function setSidebarOpen(open) {
+      shell.classList.toggle("sidebar-open", open);
+      sidebarScrim.hidden = !open;
+      for (const toggle of document.querySelectorAll("#sidebarToggle, [data-sidebar-toggle]")) {
+        toggle.setAttribute("aria-expanded", String(open));
       }
-      if (accountsActive) {
+    }
+
+    function setView(view) {
+      const next = ["triggers", "accounts"].includes(view) ? view : "chat";
+      shell.dataset.view = next;
+      accountsView.hidden = next !== "accounts";
+      triggersView.hidden = next !== "triggers";
+      for (const link of document.querySelectorAll(".view-link[data-view]")) {
+        const active = link.dataset.view === next;
+        link.classList.toggle("active", active);
+        if (active) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      }
+      setSidebarOpen(false);
+      if (next === "accounts") {
         loadAccounts(true);
         accountNameInput.focus();
       }
+      if (next === "triggers") loadTriggers();
+      if (next === "chat") promptInput.focus();
     }
 
-    for (const tab of document.querySelectorAll(".view-tab")) {
-      tab.addEventListener("click", () => setView(tab.dataset.view));
+    for (const link of document.querySelectorAll(".view-link[data-view]")) {
+      link.addEventListener("click", () => setView(shell.dataset.view === link.dataset.view ? "chat" : link.dataset.view));
     }
+    for (const back of document.querySelectorAll("[data-view-back]")) {
+      back.addEventListener("click", () => setView("chat"));
+    }
+    for (const toggle of document.querySelectorAll("#sidebarToggle, [data-sidebar-toggle]")) {
+      toggle.addEventListener("click", () => setSidebarOpen(!shell.classList.contains("sidebar-open")));
+    }
+    sidebarScrim.addEventListener("click", () => setSidebarOpen(false));
+
+    /* The work pane is a drawer beside the chat, closed until asked for; the
+       choice is a per-browser convenience. */
+    function setWorkOpen(open) {
+      shell.classList.toggle("work-open", open);
+      workToggle.setAttribute("aria-expanded", String(open));
+      workToggle.classList.toggle("active", open);
+      try { localStorage.setItem("workbench.workOpen", open ? "1" : "0"); } catch (_) { /* storage is optional */ }
+    }
+    workToggle.addEventListener("click", () => {
+      setWorkOpen(!shell.classList.contains("work-open"));
+      setSidebarOpen(false);
+    });
+    workClose.addEventListener("click", () => setWorkOpen(false));
+    try { if (localStorage.getItem("workbench.workOpen") === "1") setWorkOpen(true); } catch (_) { /* storage is optional */ }
 
     function accountColor(slug) {
       let hash = 0;
@@ -6185,6 +6341,8 @@
 
     function renderAccounts(accounts) {
       accountsCount.textContent = accounts.length === 1 ? "1 account" : accounts.length + " accounts";
+      accountsLinkCount.textContent = String(accounts.length);
+      accountsLinkCount.hidden = !accounts.length;
       accountsGrid.innerHTML = "";
       if (!accounts.length) {
         const empty = document.createElement("p");
@@ -6249,7 +6407,7 @@
       form.addEventListener("submit", event => {
         event.preventDefault();
         if (!title.value.trim()) { title.focus(); return; }
-        if (modelEmpty()) { validateModel(); setView("chat"); modelInput.focus(); return; }
+        if (modelEmpty()) { validateModel(); setView("chat"); openModelMenu(); return; }
         injectMessage(account.slug, { title: title.value.trim(), text: text.value.trim() });
         form.reset();
       });
@@ -6446,12 +6604,82 @@
 
     const modelSelection = createModelSelection();
 
+    /* The model picker sits in the composer: the button names what the next
+       turn sends, and the menu holds the editable model, the known models and
+       the thinking level. */
+    const modelButton = document.getElementById("modelButton");
+    const modelButtonLabel = document.getElementById("modelButtonLabel");
+    const modelButtonVariant = document.getElementById("modelButtonVariant");
+    const modelMenu = document.getElementById("modelMenu");
+    const modelChoices = document.getElementById("modelChoices");
+
+    function renderModelButton() {
+      const model = modelInput.value.trim();
+      modelButtonLabel.textContent = model ? model.split("/").pop() : "choose a model";
+      modelButton.title = (model || "no model selected") + " · applies to the next turn";
+      modelButtonVariant.textContent = variantSelect.value || "";
+      modelButton.classList.toggle("unknown", !model);
+      for (const choice of modelChoices.querySelectorAll("[data-model]")) {
+        choice.setAttribute("aria-selected", String(choice.dataset.model === model));
+      }
+    }
+
+    function renderModelChoices(models) {
+      modelChoices.replaceChildren();
+      for (const slug of models) {
+        const choice = document.createElement("button");
+        choice.type = "button";
+        choice.className = "model-choice";
+        choice.setAttribute("role", "option");
+        choice.dataset.model = slug;
+        choice.textContent = slug;
+        choice.addEventListener("click", () => {
+          modelInput.value = slug;
+          onModelInput();
+          setModelMenuOpen(false);
+          promptInput.focus();
+        });
+        modelChoices.appendChild(choice);
+      }
+      modelChoices.hidden = !models.length;
+      renderModelButton();
+    }
+
+    function setModelMenuOpen(open) {
+      modelMenu.hidden = !open;
+      modelButton.setAttribute("aria-expanded", String(open));
+    }
+
+    function openModelMenu() {
+      setModelMenuOpen(true);
+      modelInput.focus();
+    }
+
+    modelButton.addEventListener("click", () => {
+      if (modelMenu.hidden) openModelMenu();
+      else setModelMenuOpen(false);
+    });
+    document.addEventListener("click", event => {
+      if (!modelMenu.hidden && !document.getElementById("modelPicker").contains(event.target)) {
+        setModelMenuOpen(false);
+      }
+    });
+    modelMenu.addEventListener("keydown", event => {
+      if (event.key === "Escape" || (event.key === "Enter" && event.target === modelInput)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setModelMenuOpen(false);
+        modelButton.focus();
+      }
+    });
+
     function validateModel() {
       const value = modelInput.value.trim();
       const empty = !value;
       modelInput.classList.toggle("unknown", empty);
       modelHint.hidden = !empty;
       if (empty) modelHint.textContent = "a model is required before sending a turn";
+      renderModelButton();
       syncCommandAvailability();
     }
 
@@ -6506,6 +6734,7 @@
         option.value = slug;
         modelList.appendChild(option);
       }
+      if (typeof renderModelChoices === "function") renderModelChoices(known);
       variantSelect.innerHTML = "";
       const selectedVariant = state.settings.model_variant || "";
       for (const variant of state.settings.model_variants || ["", "low", "medium", "high"]) {
@@ -6596,7 +6825,7 @@
         (Number(usage.cache_write_input_tokens) || 0);
       const output = Number(usage.output_tokens) || 0;
       const total = input + output;
-      usageTotal.textContent = formatTokenCount(total) + " total";
+      usageTotal.textContent = formatTokenCount(total) + " tokens";
       usageBreakdown.textContent = formatTokenCount(input) + " in · " +
         formatTokenCount(output) + " out";
       usageBreakdown.title = "uncached input " + formatTokenCount(usage.input_tokens) +
@@ -7165,6 +7394,10 @@
       workCount.title = hidden ? hidden + " hidden by filter" : "";
       workCount.textContent = rows.length + (rows.length === 1 ? " execution" : " executions")
         + (hidden ? " · " + hidden + " hidden" : "");
+      const running = allRows.filter(row => row.status === "running").length;
+      workLinkCount.textContent = running ? running + " running" : String(allRows.length || "");
+      workLinkCount.hidden = !allRows.length;
+      workLinkCount.classList.toggle("live", running > 0);
       if (!rows.length) {
         selectedWorkKey = null;
         const empty = document.createElement("div");

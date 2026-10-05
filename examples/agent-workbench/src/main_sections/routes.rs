@@ -465,12 +465,20 @@ pub(crate) async fn list_triggers(
         .await
         // Audited: first-party trigger-store reads have no session tombstone path or effect-controller boundary.
         .map_err(AppError::internal)?;
-    Ok(Json(
-        records
+    let mut registrations = Vec::with_capacity(records.len());
+    for record in &records {
+        let last_fired_at_ms = state
+            .trigger_store
+            .list_deliveries_by_subscription_id(&record.subscription_id)
+            .await
+            // Audited: first-party trigger-store reads have no session tombstone path or effect-controller boundary.
+            .map_err(AppError::internal)?
             .iter()
-            .map(WorkbenchTriggerRegistration::from)
-            .collect(),
-    ))
+            .map(|delivery| delivery.created_at_ms)
+            .max();
+        registrations.push(WorkbenchTriggerRegistration::new(record, last_fired_at_ms));
+    }
+    Ok(Json(registrations))
 }
 
 pub(crate) async fn set_trigger_enabled(

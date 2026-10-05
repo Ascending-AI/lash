@@ -967,14 +967,21 @@ pub(crate) struct WorkbenchTriggerRegistration {
     pub(crate) registration: lash::triggers::TriggerRegistration,
     pub(crate) subscription_id: String,
     pub(crate) registrant_scope: String,
+    /// When an occurrence last reserved a delivery for this registration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_fired_at_ms: Option<u64>,
 }
 
-impl From<&lash::triggers::TriggerSubscriptionRecord> for WorkbenchTriggerRegistration {
-    fn from(record: &lash::triggers::TriggerSubscriptionRecord) -> Self {
+impl WorkbenchTriggerRegistration {
+    pub(crate) fn new(
+        record: &lash::triggers::TriggerSubscriptionRecord,
+        last_fired_at_ms: Option<u64>,
+    ) -> Self {
         Self {
             registration: lash::triggers::TriggerRegistration::from(record),
             subscription_id: record.subscription_id.clone(),
             registrant_scope: record.registrant_scope_id(),
+            last_fired_at_ms,
         }
     }
 }
