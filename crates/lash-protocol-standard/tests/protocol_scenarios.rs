@@ -997,9 +997,10 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         "[tool intent emit_process_event #2 executed:",
         "[tool intent cancel_process #3 executed:",
     ] {
-        assert!(
-            requests[1].contains(literal),
-            "missing `{literal}` in {}",
+        assert_eq!(
+            requests[1].matches(literal).count(),
+            1,
+            "expected one `{literal}` in {}",
             requests[1]
         );
     }

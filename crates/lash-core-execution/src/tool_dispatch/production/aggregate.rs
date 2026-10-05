@@ -606,11 +606,16 @@ impl<'run> ProductionToolHandlers<'run> {
                                 &mut output,
                                 &presented.intent_outcomes,
                             );
-                            (
-                                output,
-                                presented.presentation.model_return,
-                                presented.intent_outcomes,
-                            )
+                            // V retains the realized declarations separately from
+                            // presentation. Report them after the presented value
+                            // when the consumer builds its model-facing return.
+                            let mut model_return = presented.presentation.model_return;
+                            model_return
+                                .parts
+                                .extend(presented.intent_outcomes.iter().map(|outcome| {
+                                    crate::ModelToolReturnPart::text(outcome.model_addendum())
+                                }));
+                            (output, model_return, presented.intent_outcomes)
                         };
                     let record = ToolCallRecord {
                         call_id: call_id.clone(),
