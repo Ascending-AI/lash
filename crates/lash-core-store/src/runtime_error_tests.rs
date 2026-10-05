@@ -162,6 +162,7 @@ first_party_codes! {
         Self::EngineRunSubstrateLost,
         Self::EngineControlRequest,
         Self::EngineControlUnsupported,
+        Self::JournalWriteDuringOwnerStep,
         Self::EngineHandleMismatch,
         Self::ProcessNotParked,
         Self::ProcessParkSuperseded,

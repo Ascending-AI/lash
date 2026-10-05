@@ -497,15 +497,6 @@ pub trait SingletonToolHandlers: Send + Sync {
     /// of its recorded decision (D), never from an unrecorded live flag.
     async fn run_cancel_requested(&self) -> Result<bool, String>;
 
-    /// Wake `call_id`'s registered retry when its timer finishes or a stop
-    /// cuts it, saying which. A cut is never an elapse: the subsequent
-    /// recorded D decides the call instead of scheduling its next attempt.
-    async fn wait_run_retry(
-        &self,
-        call_id: &ToolCallId,
-        timer: crate::tool_dispatch::RunRetryTimer<'_>,
-    ) -> Result<RunRetryWake, RuntimeEffectControllerError>;
-
     /// Discharge eligible external cancellation at logical Closing. The
     /// call id is the dedup key; recovery can repeat an unacknowledged call.
     /// Ignore-policy calls never invoke this callback.
@@ -666,19 +657,32 @@ pub struct RunAttemptHandle<'run> {
     pub result: RunAttemptResult<'run>,
 }
 
+/// The body and durable outcome of one eagerly registered Run step.
+pub struct RunStepHandle<'run, T> {
+    pub body: RunAttemptBody<'run>,
+    pub result: std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<T, RuntimeEffectControllerError>> + Send + 'run,
+        >,
+    >,
+}
+
+/// One acknowledged declared-start preparation. D folds these compact events
+/// at its own ordinal; a served preparation never re-reads the live gate.
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct RunStartPrepared {
+    pub events: Vec<crate::tool_run::RunEvent>,
+    pub termination: Option<crate::runtime::process::WorkerTerminationReceipt>,
+}
+
+pub type RunStartPrepareStep<'run> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<RunStartPrepared, String>> + Send + 'run>,
+>;
+
 /// A durable backoff registered before its result is awaited.
 pub type RunRetryTimer<'run> = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<(), RuntimeEffectControllerError>> + Send + 'run>,
 >;
-
-/// How a registered retry backoff ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RunRetryWake {
-    /// The durable timer fired: the call may schedule its next attempt.
-    Elapsed,
-    /// A stop cut the backoff before its timer fired.
-    Stopped,
-}
 
 impl SingletonRunError {
     pub(crate) fn into_controller_error(self) -> RuntimeEffectControllerError {

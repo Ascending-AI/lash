@@ -295,6 +295,14 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.start_run_attempt(name, step)
     }
 
+    fn start_run_prepare<'run>(
+        &'run self,
+        name: String,
+        step: crate::tool_dispatch::RunStartPrepareStep<'run>,
+    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_dispatch::RunStartPrepared> {
+        self.inner.start_run_prepare(name, step)
+    }
+
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
         self.ledger.record(format!("run_retry:{backoff_ms}"));
         self.inner.start_run_retry(backoff_ms)

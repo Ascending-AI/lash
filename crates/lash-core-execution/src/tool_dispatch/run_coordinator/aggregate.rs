@@ -493,8 +493,13 @@ impl<'a> RunCoordinator<'a> {
     }
 
     async fn lifecycle_record(&mut self, state: RunLifecycle) -> Result<(), SingletonRunError> {
-        let record = self.journal.record(vec![RunEvent::Lifecycle { state }]);
-        self.journal
+        let mut events = vec![RunEvent::Lifecycle { state }];
+        if state == RunLifecycle::Closing {
+            events.extend(self.backoff_cancellations());
+        }
+        let record = self.journal.record(events);
+        let recorded = self
+            .journal
             .append(
                 format!("lash:run:lifecycle:{state:?}"),
                 Box::pin(async move {
@@ -506,6 +511,7 @@ impl<'a> RunCoordinator<'a> {
                 }),
             )
             .await?;
+        self.accept_backoff_cancellations(&recorded.events);
         Ok(())
     }
 

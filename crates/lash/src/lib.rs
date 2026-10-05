@@ -1376,7 +1376,7 @@ pub mod durability {
     };
     pub use lash_core::tool_dispatch::{
         RunAttemptBody, RunAttemptHandle, RunAttemptResult, RunAttemptStep, RunRetryTimer,
-        RunRetryWake,
+        RunStartPrepareStep, RunStartPrepared, RunStepHandle,
     };
     pub use lash_core::{
         EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,

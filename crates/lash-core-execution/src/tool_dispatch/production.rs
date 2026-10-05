@@ -990,28 +990,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .await
             .map_err(|error| error.to_string())
     }
-    async fn wait_run_retry(
-        &self,
-        call_id: &crate::ToolCallId,
-        timer: crate::tool_dispatch::RunRetryTimer<'_>,
-    ) -> Result<RunRetryWake, crate::RuntimeEffectControllerError> {
-        self.context
-            .run_turn_step_body(|stop| {
-                // Closing cuts the backoff through the call's indexed stop.
-                self.remember_inline_stop(call_id, stop.clone());
-                async move {
-                    match stop {
-                        Some(stop) => tokio::select! {
-                            biased;
-                            result = timer => result.map(|()| RunRetryWake::Elapsed),
-                            () = stop.cancelled() => Ok(RunRetryWake::Stopped),
-                        },
-                        None => timer.await.map(|()| RunRetryWake::Elapsed),
-                    }
-                }
-            })
-            .await
-    }
+
     async fn cancel_call(
         &self,
         call_id: &crate::ToolCallId,

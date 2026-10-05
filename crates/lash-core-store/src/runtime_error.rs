@@ -429,6 +429,8 @@ pub enum RuntimeErrorCode {
     EngineControlRequest,
     /// The installed engine does not implement the control verb asked of it.
     EngineControlUnsupported,
+    /// A concurrent actor tried to register while the owner awaited a Run step.
+    JournalWriteDuringOwnerStep,
     /// A park's stored engine handle does not name an execution of the run's
     /// session, so the engine resumes or releases nothing under it.
     EngineHandleMismatch,
@@ -718,6 +720,7 @@ impl RuntimeErrorCode {
             Self::EngineRunSubstrateLost => "engine_run_substrate_lost",
             Self::EngineControlRequest => "engine_control_request",
             Self::EngineControlUnsupported => "engine_control_unsupported",
+            Self::JournalWriteDuringOwnerStep => "journal_write_during_owner_step",
             Self::EngineHandleMismatch => "engine_handle_mismatch",
             Self::ProcessNotParked => "process_not_parked",
             Self::ProcessParkSuperseded => "process_park_superseded",
@@ -987,6 +990,7 @@ impl RuntimeErrorCode {
             "engine_run_substrate_lost" => Self::EngineRunSubstrateLost,
             "engine_control_request" => Self::EngineControlRequest,
             "engine_control_unsupported" => Self::EngineControlUnsupported,
+            "journal_write_during_owner_step" => Self::JournalWriteDuringOwnerStep,
             "engine_handle_mismatch" => Self::EngineHandleMismatch,
             "process_not_parked" => Self::ProcessNotParked,
             "process_park_superseded" => Self::ProcessParkSuperseded,

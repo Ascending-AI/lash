@@ -215,11 +215,11 @@ impl RunJournal<'_> {
         step: crate::RunRecordStep<'_>,
     ) -> Result<(RunRecord, Vec<MaterialRef>), SingletonRunError> {
         self.scoped.admit_journal_write()?;
-        let entry = self
+        let record = self
             .scoped
             .controller()
-            .record_run_record(name, step)
-            .await?;
+            .record_run_record(name.clone(), step);
+        let entry = self.scoped.await_owner_step(name, record).await?;
         let references = entry
             .materials
             .iter()

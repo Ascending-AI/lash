@@ -553,16 +553,6 @@ impl SingletonToolHandlers for IsolatedHandlers {
         }
     }
 
-    async fn wait_run_retry(
-        &self,
-        _call_id: &lash_core::ToolCallId,
-        timer: lash_core::tool_dispatch::RunRetryTimer<'_>,
-    ) -> Result<lash_core::tool_dispatch::RunRetryWake, lash_core::RuntimeEffectControllerError>
-    {
-        timer.await?;
-        Ok(lash_core::tool_dispatch::RunRetryWake::Elapsed)
-    }
-
     async fn cancel_call(
         &self,
         _call_id: &lash_core::ToolCallId,

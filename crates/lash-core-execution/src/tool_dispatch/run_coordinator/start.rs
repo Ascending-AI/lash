@@ -3,6 +3,7 @@ use super::*;
 use crate::runtime::process::{
     DeclaredStartPhase, StartCancelDecision, StartKey, WorkerTerminationReceipt,
 };
+use crate::tool_dispatch::{RunStartPrepared, RunStepHandle};
 use std::future::Future;
 
 /// The hold key of a call's declared start: the call's own id, so a call
@@ -53,53 +54,6 @@ pub(super) fn recorded_obligation(
     Ok(obligation)
 }
 
-/// The owner's answer to a proposed `start:launch` carrier.
-type LaunchAnswer = tokio::sync::oneshot::Sender<Result<ProcessId, String>>;
-
-/// The launch's `start:launch` carrier: proposed at its first poll, its
-/// step answers only with the process the external launch later
-/// registered. The command's journal position is the poll position, not
-/// the launch's completion, so a replay reproduces it no matter when the
-/// registrar answers; a served carrier never runs the step, so a stale
-/// send just fails.
-pub(super) fn launch_carrier<'a>(
-    scoped: &'a ScopedEffectController<'a>,
-    template: RunRecord,
-    call_id: &ToolCallId,
-    start_key: StartKey,
-) -> Result<
-    (
-        LaunchAnswer,
-        impl Future<Output = Result<RunJournalEntry, SingletonRunError>> + Send + 'a,
-    ),
-    SingletonRunError,
-> {
-    scoped.admit_journal_write()?;
-    let (send, receive) = tokio::sync::oneshot::channel();
-    let launched_call = call_id.clone();
-    let carrier = scoped.controller().record_run_record(
-        record_name(call_id, "start:launch"),
-        Box::pin(async move {
-            let process_id = receive
-                .await
-                .map_err(|_| "the launch ended before its carrier".to_owned())??;
-            Ok(RunJournalEntry {
-                state: Vec::new(),
-                record: RunRecord {
-                    events: vec![RunEvent::StartLaunched {
-                        call_id: launched_call,
-                        start_key,
-                        process_id,
-                    }],
-                    ..template
-                },
-                materials: Vec::new(),
-            })
-        }),
-    );
-    Ok((send, async move { Ok(carrier.await?) }))
-}
-
 /// The served or produced launch carrier, checked to be exactly this
 /// call's `StartLaunched`.
 pub(super) fn served_launch(
@@ -129,10 +83,8 @@ pub(super) fn served_launch(
     Ok(process_id.clone())
 }
 
-/// Register the admitted start under its key. The launch itself runs
-/// outside any `ctx.run` body — again on every replay that reaches it, so
-/// the registrar must answer the process it registered first; only the
-/// compact `start:launch` carrier is journaled.
+/// Register a deferred start inside its VM run. A served launch does not
+/// invoke the registrar; crash-before-ACK remains idempotent by StartKey.
 pub(super) async fn launch_start(
     scoped: &ScopedEffectController<'_>,
     template: RunRecord,
@@ -140,33 +92,84 @@ pub(super) async fn launch_start(
     obligation: &DeclaredStartObligation,
     handlers: &dyn SingletonToolHandlers,
 ) -> Result<RunJournalEntry, SingletonRunError> {
+    scoped.admit_journal_write()?;
     let start_key = obligation.start_key().clone();
-    let (send, carrier) = launch_carrier(scoped, template, call_id, start_key.clone())?;
-    let (entry, launched) = futures_util::future::join(carrier, async {
-        let launched = handlers.launch_start(obligation).await;
-        let _ = send.send(launched.clone());
-        launched
-    })
-    .await;
-    let launched = launched.map_err(|message| {
-        RuntimeEffectControllerError::new(crate::RuntimeErrorCode::EngineEffectController, message)
-    })?;
-    let entry = entry?;
-    let process_id = served_launch(&entry, call_id, &start_key)?;
-    if process_id != launched {
-        return Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::EffectReplayDivergence,
-            format!("call {call_id}'s recorded launch names another process"),
-        )
-        .into());
-    }
+    let launched_call = call_id.clone();
+    let key = start_key.clone();
+    let name = record_name(call_id, "start:launch");
+    let record = scoped.controller().record_run_record(
+        name.clone(),
+        Box::pin(async move {
+            let process_id = handlers.launch_start(obligation).await?;
+            Ok(RunJournalEntry {
+                state: Vec::new(),
+                record: RunRecord {
+                    events: vec![RunEvent::StartLaunched {
+                        call_id: launched_call,
+                        start_key: key,
+                        process_id,
+                    }],
+                    ..template
+                },
+                materials: Vec::new(),
+            })
+        }),
+    );
+    let entry = scoped.await_owner_step(name, record).await?;
+    served_launch(&entry, call_id, &start_key)?;
     Ok(entry)
+}
+
+/// Issue once in the declare frame, through the same body/result bridge as X.
+/// Launch, the gate read and discharge effects all belong to this VM run.
+pub(super) fn issue_prepare<'a>(
+    scoped: &'a ScopedEffectController<'a>,
+    call_id: ToolCallId,
+    obligation: DeclaredStartObligation,
+    isolated: Option<RecordedIsolatedStart>,
+    handlers: Handlers<'a>,
+    closing: bool,
+) -> Result<RunStepHandle<'a, RunStartPrepared>, SingletonRunError> {
+    scoped.admit_journal_write()?;
+    let name = record_name(&call_id, "start:prepare");
+    Ok(scoped.controller().start_run_prepare(
+        name,
+        Box::pin(async move {
+            let handlers = handlers.get();
+            let process_id = handlers.launch_start(&obligation).await?;
+            let cancelled = decide_discharge(&obligation, handlers, closing).await?;
+            let termination = discharge_effects(
+                &call_id,
+                &obligation,
+                isolated.as_ref(),
+                handlers,
+                &process_id,
+                cancelled,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            Ok(RunStartPrepared {
+                events: vec![
+                    RunEvent::StartLaunched {
+                        call_id: call_id.clone(),
+                        start_key: obligation.start_key().clone(),
+                        process_id,
+                    },
+                    RunEvent::StartDischarged {
+                        call_id,
+                        start_key: obligation.start_key().clone(),
+                        cancelled,
+                    },
+                ],
+                termination,
+            })
+        }),
+    ))
 }
 
 /// The live discharge decision, asked of the authoritative gate: closing
 /// or a requested cancel discharges only a launch whose policy recovers.
-/// Shared by a deferred start's carrier body and a presentation's
-/// preparation.
+/// Shared by deferred discharge and the declared-start preparation body.
 pub(super) async fn decide_discharge(
     obligation: &DeclaredStartObligation,
     handlers: &dyn SingletonToolHandlers,
@@ -199,8 +202,8 @@ async fn decide_on_policy(
 
 /// The discharge's `start:discharge` carrier: proposed at its first poll,
 /// its step asks the gate and journals the decision. A replay serves the
-/// decision. Only the deferred path owns one; a presentation's
-/// preparation decides live and lets V's record carry the answer.
+/// decision. Only the deferred path owns one; a declared start records
+/// its decision together with launch in start:prepare.
 pub(super) fn discharge_carrier<'a>(
     scoped: &'a ScopedEffectController<'a>,
     template: RunRecord,
@@ -216,8 +219,9 @@ pub(super) fn discharge_carrier<'a>(
     let discharged_call = call_id.clone();
     let discharged_key = obligation.start_key().clone();
     let on_cancel = obligation.on_cancel(DeclaredStartPhase::Launched);
+    let name = record_name(call_id, "start:discharge");
     let carrier = scoped.controller().record_run_record(
-        record_name(call_id, "start:discharge"),
+        name.clone(),
         Box::pin(async move {
             let cancel = decide_on_policy(on_cancel, handlers.get(), closing).await?;
             Ok(RunJournalEntry {
@@ -234,7 +238,7 @@ pub(super) fn discharge_carrier<'a>(
             })
         }),
     );
-    Ok(async move { Ok(carrier.await?) })
+    Ok(async move { Ok(scoped.await_owner_step(name, carrier).await?) })
 }
 
 /// The served or produced discharge carrier, checked to be exactly this

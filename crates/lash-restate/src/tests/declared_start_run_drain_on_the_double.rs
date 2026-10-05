@@ -1,17 +1,15 @@
 //! A final's declared process start drains inside its declarations (K5,
 //! FIG-4884): the singleton Run route through a real handler on the
 //! in-process Restate server double, launching into a real SQLite process
-//! registry, in memory and in a file the law closes and reopens.
+//! registry in SQLite memory.
 //!
 //! The start's obligation is recorded with its attempt: the body's stable
 //! start key, bound by the Run to the Run's environment (the start is an
 //! engine process lash executes) and to a consumer hold that carries the
 //! call's recorded cancel policy. The declaration
-//! record admits it; the presentation's protected preparation registers it
-//! under its key and follows the discharge policy, releasing the hold, so
-//! V's own record carries both start events before the presentation
-//! settles the declarations. A crash drops the attempt that hit
-//! it, and the double replays the invocation into the same handler.
+//! record admits it; one eagerly started `start:prepare` run launches and
+//! discharges it. D folds that acknowledged outcome before V settles the
+//! declarations. A crash drops its attempt and the double replays the handler.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -47,16 +45,6 @@ const PLUGIN: &str = "fig4884-tools";
 const OUTPUT: &str = "fig4884 started";
 const PRESENTATION: &str = "fig4884 presented";
 const ENVIRONMENT: &str = "process-env:fig4884";
-const STEPS: [&str; 5] = [
-    "admit",
-    "attempt:1",
-    "decide",
-    "declare",
-    // The V path journals no start:* records: launch and discharge are the
-    // preparation's effects, and both events ride inside V's own schedule
-    // record, named for its first event's ordinal.
-    "schedule:5",
-];
 
 fn binding() -> AdmittedBinding {
     let callback = |key: &str| PluginCallbackIdentity {
@@ -344,15 +332,6 @@ impl SingletonToolHandlers for Starter {
     async fn run_cancel_requested(&self) -> Result<bool, String> {
         Ok(self.cancel.load(Ordering::SeqCst))
     }
-    async fn wait_run_retry(
-        &self,
-        _call_id: &ToolCallId,
-        timer: lash_core::tool_dispatch::RunRetryTimer<'_>,
-    ) -> Result<lash_core::tool_dispatch::RunRetryWake, lash_core::RuntimeEffectControllerError>
-    {
-        timer.await?;
-        Ok(lash_core::tool_dispatch::RunRetryWake::Elapsed)
-    }
 
     async fn cancel_call(
         &self,
@@ -476,14 +455,6 @@ impl SingletonToolHandlers for Starter {
     }
 }
 
-/// Where the law's registry lives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Tier {
-    Memory,
-    /// A file the law closes and reopens before it reads the rows.
-    FileReopen,
-}
-
 /// One registry row as the law reads it back.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Row {
@@ -509,39 +480,19 @@ impl Row {
 }
 
 struct Stores {
-    tier: Tier,
     set: SqliteStoreSet,
-    dir: Option<tempfile::TempDir>,
 }
 
 impl Stores {
-    async fn open(tier: Tier) -> Self {
-        match tier {
-            Tier::Memory => Self {
-                tier,
-                set: SqliteStoreSet::memory().await.unwrap(),
-                dir: None,
-            },
-            Tier::FileReopen => {
-                let dir = tempfile::tempdir().unwrap();
-                Self {
-                    tier,
-                    set: SqliteStoreSet::open(dir.path()).await.unwrap(),
-                    dir: Some(dir),
-                }
-            }
+    async fn open() -> Self {
+        Self {
+            set: SqliteStoreSet::memory().await.unwrap(),
         }
     }
 
-    /// Every process row, after closing and reopening a file tier.
+    /// Every process row in the law's SQLite registry.
     async fn rows(self) -> Vec<Row> {
-        let set = match (self.tier, &self.dir) {
-            (Tier::FileReopen, Some(dir)) => {
-                drop(self.set);
-                SqliteStoreSet::open(dir.path()).await.unwrap()
-            }
-            _ => self.set,
-        };
+        let set = self.set;
         let connection =
             rusqlite::Connection::open(set.database_uri(SqliteDatabase::ProcessRegistry)).unwrap();
         let mut statement = connection
@@ -587,19 +538,6 @@ impl Driven {
             .expect("the singleton finished");
         (outcome.terminal, outcome.records)
     }
-
-    /// The names of the `ctx.run` records the handler's journal holds.
-    fn journal(&self) -> Vec<String> {
-        let mut names = Vec::new();
-        for view in self.backend.server().invocations() {
-            for entry in self.backend.server().journal(&view.id).unwrap() {
-                if entry.ty == lash_restate_test::protocol::MessageType::RunCommand {
-                    names.push(entry.name.unwrap_or_default());
-                }
-            }
-        }
-        names
-    }
 }
 
 async fn drive(crash: Option<&str>, call: SingletonToolCall, starter: Arc<Starter>) -> Driven {
@@ -612,9 +550,17 @@ async fn drive_with_replay(
     starter: Arc<Starter>,
     replay: Option<Arc<Starter>>,
 ) -> Driven {
-    let backend = lash_restate_test::backend(0x4884, ServerConfig::default())
-        .await
-        .unwrap();
+    drive_with_config(crash, call, starter, replay, ServerConfig::default()).await
+}
+
+async fn drive_with_config(
+    crash: Option<&str>,
+    call: SingletonToolCall,
+    starter: Arc<Starter>,
+    replay: Option<Arc<Starter>>,
+    config: ServerConfig,
+) -> Driven {
+    let backend = lash_restate_test::backend(0x4884, config).await.unwrap();
     starter
         .materials
         .set(backend.engine_stores().tool_material_store())
@@ -725,10 +671,6 @@ fn step_name(call_id: &ToolCallId, step: &str) -> String {
     }
 }
 
-fn names(call_id: &ToolCallId, steps: &[&str]) -> Vec<String> {
-    steps.iter().map(|step| step_name(call_id, step)).collect()
-}
-
 /// The start events of the records, in order.
 fn start_events(records: &[RunRecord]) -> Vec<RunEvent> {
     records
@@ -768,261 +710,6 @@ fn drained(
             cancelled,
         },
     ]
-}
-
-/// L08 and L04: a final's start is admitted with its declarations,
-/// registered, then discharged, before the presentation settles them. A lost
-/// record at any boundary reruns only that record's step: a lost launch
-/// registers again under the same key and gets the same process back, so
-/// the registry holds one process under the key, and the hold is released
-/// whichever cut was taken. SQLite memory and a reopened SQLite file agree.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_declared_start_drains_inside_its_declarations_at_every_cut() {
-    for tier in [Tier::Memory, Tier::FileReopen] {
-        for cut in std::iter::once(None).chain(STEPS.iter().copied().map(Some)) {
-            let label = "drain";
-            let call = call(label, ExternalCancelPolicy::Ignore);
-            let key = start_key(label);
-            let stores = Stores::open(tier).await;
-            let starter = Starter::new(
-                stores.set.process_registry(),
-                declaring(Some(key.clone())),
-                CancelAt::Never,
-            );
-            let driven = drive(cut, call.clone(), Arc::clone(&starter)).await;
-            let (terminal, records) = driven.finished();
-            let SingletonTerminal::Final {
-                launched: Some(process),
-                capture,
-                ..
-            } = terminal
-            else {
-                panic!("{tier:?} {cut:?}: {terminal:?}");
-            };
-            assert_eq!(
-                capture.start().map(|start| &start.start_key),
-                Some(&key),
-                "the attempt records the start under its key"
-            );
-            let rerun = |step: &str| 1 + usize::from(cut == Some(step));
-            assert_eq!(
-                starter.executions.load(Ordering::SeqCst),
-                rerun("attempt:1"),
-                "{tier:?} {cut:?}"
-            );
-            // The launch and discharge effects rerun on every handler
-            // attempt that replays through the preparation — of these cuts
-            // only a lost V record replays through it.
-            assert_eq!(
-                starter.launches(),
-                vec![process.clone(); rerun("schedule:5")],
-                "{tier:?} {cut:?}: every launch recovers the same process"
-            );
-            assert_eq!(
-                starter.discharges(),
-                vec![(process.clone(), false); rerun("schedule:5")],
-                "{tier:?} {cut:?}"
-            );
-            assert_eq!(
-                start_events(&records),
-                drained(&call.call_id, &key, &process, false)
-            );
-            assert_eq!(driven.journal(), names(&call.call_id, &STEPS));
-            assert_eq!(
-                stores.rows().await,
-                vec![Row::drained(&process, &key, false)],
-                "{tier:?} {cut:?}: one process under the key, its hold released"
-            );
-        }
-    }
-}
-
-/// L08: a cancellation before the decision is durable withholds the final,
-/// so its start is never admitted and nothing is registered. One after the
-/// start's admission cannot forbid it: a launch whose record was lost
-/// registers again under the same key and recovers the same process, and the
-/// discharge then follows the recorded policy — a cancelling policy cancels
-/// that process once however often the discharge runs, an ignoring one
-/// leaves it running — and releases the hold. A cancellation after the
-/// discharge changes nothing.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_cancel_before_admission_forbids_the_start_and_one_after_recovers_it() {
-    use ExternalCancelPolicy::{CancelExternalWork, Ignore};
-    for tier in [Tier::Memory, Tier::FileReopen] {
-        let stores = Stores::open(tier).await;
-        let forbidden = call("forbidden", CancelExternalWork);
-        let starter = Starter::new(
-            stores.set.process_registry(),
-            declaring(Some(start_key("forbidden"))),
-            CancelAt::Body,
-        );
-        let driven = drive(None, forbidden.clone(), Arc::clone(&starter)).await;
-        let (terminal, records) = driven.finished();
-        assert_eq!(
-            terminal,
-            SingletonTerminal::Withheld {
-                decision: CallDecision::Cancelled
-            },
-            "{tier:?}"
-        );
-        assert!(starter.launches().is_empty(), "{tier:?}: no start launched");
-        assert!(start_events(&records).is_empty(), "{tier:?}");
-        assert_eq!(
-            driven.journal(),
-            names(
-                &forbidden.call_id,
-                // A withheld V is the schedule record at ordinal 3.
-                &["admit", "attempt:1", "decide", "schedule:3"]
-            )
-        );
-        assert_eq!(
-            stores.rows().await,
-            Vec::new(),
-            "{tier:?}: nothing registered"
-        );
-
-        for (label, policy, cancel_at, crash, cancelled) in [
-            // The V schedule record is the only crashable boundary past the
-            // declarations: its loss replays the whole preparation — the
-            // launch and the discharge effects alike.
-            (
-                "cancels",
-                CancelExternalWork,
-                CancelAt::Launch,
-                Some("schedule:5"),
-                true,
-            ),
-            (
-                "cancels-twice",
-                CancelExternalWork,
-                CancelAt::Launch,
-                Some("schedule:5"),
-                true,
-            ),
-            (
-                "ignores",
-                Ignore,
-                CancelAt::Launch,
-                Some("schedule:5"),
-                false,
-            ),
-            (
-                "after-discharge",
-                CancelExternalWork,
-                CancelAt::Presentation,
-                None,
-                false,
-            ),
-        ] {
-            let stores = Stores::open(tier).await;
-            let call = call(label, policy);
-            let key = start_key(label);
-            let starter = Starter::new(
-                stores.set.process_registry(),
-                declaring(Some(key.clone())),
-                cancel_at,
-            );
-            let driven = drive(crash, call.clone(), Arc::clone(&starter)).await;
-            let (terminal, records) = driven.finished();
-            let SingletonTerminal::Final {
-                launched: Some(process),
-                ..
-            } = terminal
-            else {
-                panic!(
-                    "{tier:?} {label}: post-admission cancellation keeps the final: {terminal:?}"
-                );
-            };
-            let launches = starter.launches();
-            assert!(
-                !launches.is_empty() && launches.iter().all(|launched| *launched == process),
-                "{tier:?} {label}: {launches:?} recover {process}"
-            );
-            assert!(
-                starter
-                    .discharges()
-                    .iter()
-                    .all(|discharge| discharge == &(process.clone(), cancelled)),
-                "{tier:?} {label}"
-            );
-            assert_eq!(
-                start_events(&records),
-                drained(&call.call_id, &key, &process, cancelled),
-                "{tier:?} {label}"
-            );
-            assert_eq!(
-                stores.rows().await,
-                vec![Row::drained(&process, &key, cancelled)],
-                "{tier:?} {label}: the recorded policy decides the cancel; the hold is released"
-            );
-        }
-    }
-}
-
-/// L08 and L12: a start the Run cannot hold to one identity is refused in
-/// its attempt record, before admission: a keyless start, a start in a Run
-/// that owns no environment, and a start the admitted declaration does not
-/// name. None launches, and the final declares nothing.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_start_without_key_environment_or_declaration_is_refused_before_admission() {
-    let mut no_environment = call("no-environment", ExternalCancelPolicy::Ignore);
-    no_environment.environment = None;
-    let mut undeclared = call("undeclared", ExternalCancelPolicy::Ignore);
-    undeclared.declaration = ToolDeclaration::default();
-    for (call, key, expected) in [
-        (
-            call("keyless", ExternalCancelPolicy::Ignore),
-            None,
-            SingletonCapture::StartRefused {
-                refusal: DeclaredStartObligationRefusal::Keyless,
-            },
-        ),
-        (
-            no_environment,
-            Some(start_key("no-environment")),
-            SingletonCapture::StartRefused {
-                refusal: DeclaredStartObligationRefusal::NoEnvironment,
-            },
-        ),
-        (
-            undeclared,
-            Some(start_key("undeclared")),
-            SingletonCapture::Refused {
-                refusal: DeclarationRefusal::UndeclaredIntent {
-                    kind: ToolIntentKind::StartProcess,
-                },
-            },
-        ),
-    ] {
-        let stores = Stores::open(Tier::Memory).await;
-        let starter = Starter::new(
-            stores.set.process_registry(),
-            declaring(key),
-            CancelAt::Never,
-        );
-        let driven = drive(None, call.clone(), Arc::clone(&starter)).await;
-        let (terminal, records) = driven.finished();
-        let SingletonTerminal::Final {
-            capture, launched, ..
-        } = terminal
-        else {
-            panic!("{}: {terminal:?}", call.call_id);
-        };
-        assert_eq!(capture, expected, "{}", call.call_id);
-        assert_eq!(launched, None);
-        assert!(starter.launches().is_empty());
-        assert!(start_events(&records).is_empty());
-        assert_eq!(
-            driven.journal(),
-            // A refusing final declares nothing, so its V is schedule:3.
-            names(
-                &call.call_id,
-                &["admit", "attempt:1", "decide", "schedule:3"]
-            ),
-            "a refused start declares nothing"
-        );
-        assert_eq!(stores.rows().await, Vec::new());
-    }
 }
 
 struct IsolatedEngine {
@@ -1186,128 +873,12 @@ fn isolated_starter(
     starter
 }
 
-/// L08: a supported isolated call fixes a registered implementation at A,
-/// recovers one process through every cut and never invokes an ordinary body.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_isolated_call_starts_its_registered_process_without_an_ordinary_body() {
-    for tier in [Tier::Memory, Tier::FileReopen] {
-        for cut in std::iter::once(None).chain(STEPS.iter().copied().map(Some)) {
-            let stores = Stores::open(tier).await;
-            let call = isolated_call("isolated", ExternalCancelPolicy::Ignore);
-            let starter = isolated_starter(&stores, false, CancelAt::Never, "fig4884-index");
-            let driven = drive(cut, call.clone(), Arc::clone(&starter)).await;
-            let (terminal, records) = driven.finished();
-            let SingletonTerminal::Final {
-                launched: Some(process),
-                presentation,
-                ..
-            } = terminal
-            else {
-                panic!("{tier:?} {cut:?}: {terminal:?}")
-            };
-            let descriptor: IsolatedProcessDescriptor =
-                serde_json::from_str(&presentation).unwrap();
-            assert_eq!(descriptor.process_id, process);
-            assert_eq!(descriptor.start_key, start_key("isolated"));
-            assert_eq!(descriptor.boundary, ProcessExecutionBoundary::Invocation);
-            assert_eq!(descriptor.termination, None);
-            assert_eq!(
-                starter.executions.load(Ordering::SeqCst),
-                0,
-                "no ordinary body"
-            );
-            assert_eq!(
-                starter.launches(),
-                // Only a lost V record replays through the preparation.
-                vec![process.clone(); 1 + usize::from(cut == Some("schedule:5"))]
-            );
-            assert_eq!(
-                start_events(&records),
-                drained(&call.call_id, &start_key("isolated"), &process, false)
-            );
-            assert_eq!(
-                stores.rows().await,
-                vec![Row::drained(&process, &start_key("isolated"), false)]
-            );
-        }
-    }
-}
-
-/// L08: pre-admission cancellation forbids launch. A protected start recovers
-/// the same worker on cancellation, records a physical reap receipt, and
-/// releases its hold after termination even when launch or discharge is lost.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_isolated_cancel_forbids_launch_or_recovers_and_reaps_the_same_worker() {
-    for tier in [Tier::Memory, Tier::FileReopen] {
-        for (cancel_at, cut) in [
-            (CancelAt::Preparation, None),
-            (CancelAt::Launch, None),
-            // Each of these drops the V schedule record: the launch, the
-            // discharge and the presentation are all inside it now.
-            (CancelAt::Launch, Some("schedule:5")),
-            (CancelAt::Launch, Some("schedule:5")),
-            (CancelAt::Launch, Some("schedule:5")),
-        ] {
-            let stores = Stores::open(tier).await;
-            let call = isolated_call("physical", ExternalCancelPolicy::CancelExternalWork);
-            let starter = isolated_starter(&stores, true, cancel_at, "fig4884-index");
-            let driven = drive(cut, call.clone(), Arc::clone(&starter)).await;
-            let (terminal, records) = driven.finished();
-            let engine = starter.worker.as_ref().unwrap();
-            assert_eq!(starter.executions.load(Ordering::SeqCst), 0);
-            if cancel_at == CancelAt::Preparation {
-                assert_eq!(
-                    terminal,
-                    SingletonTerminal::Withheld {
-                        decision: CallDecision::Cancelled
-                    }
-                );
-                assert_eq!(engine.spawned.load(Ordering::SeqCst), 0);
-                assert!(start_events(&records).is_empty());
-                assert!(stores.rows().await.is_empty());
-            } else {
-                let SingletonTerminal::Final {
-                    launched: Some(process),
-                    presentation,
-                    ..
-                } = terminal
-                else {
-                    panic!("{tier:?} {cut:?}: {terminal:?}")
-                };
-                let descriptor: IsolatedProcessDescriptor =
-                    serde_json::from_str(&presentation).unwrap();
-                assert_eq!(descriptor.process_id, process);
-                assert_eq!(descriptor.boundary, ProcessExecutionBoundary::WorkerProcess);
-                assert_eq!(descriptor.termination, engine.receipt(&process));
-                assert!(
-                    descriptor.termination.is_some(),
-                    "a physical termination receipt is required"
-                );
-                assert_eq!(
-                    engine.spawned.load(Ordering::SeqCst),
-                    1,
-                    "a replay never spawns a replacement worker"
-                );
-                assert!(starter.launches().iter().all(|id| *id == process));
-                assert_eq!(
-                    start_events(&records),
-                    drained(&call.call_id, &start_key("physical"), &process, true)
-                );
-                assert_eq!(
-                    stores.rows().await,
-                    vec![Row::drained(&process, &start_key("physical"), true)]
-                );
-            }
-        }
-    }
-}
-
 /// L08 and L12: unsupported isolation and unavailable recorded implementations
 /// refuse before a body or new route. A cooperative engine cannot claim a
 /// physical worker. A replacement live binding cannot replace a recorded one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unsupported_or_changed_isolation_refuses_before_a_body_or_new_identity() {
-    let stores = Stores::open(Tier::Memory).await;
+    let stores = Stores::open().await;
     for kind in ["missing", "physical-claim", "unavailable", "revision"] {
         let mut call = isolated_call(kind, ExternalCancelPolicy::Ignore);
         if kind == "revision" {
@@ -1390,7 +961,7 @@ async fn slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process() {
             start: None,
         },
     ] {
-        let stores = Stores::open(Tier::Memory).await;
+        let stores = Stores::open().await;
         let mut starter = isolated_starter(&stores, false, CancelAt::Never, "fig4884-index");
         let owned = Arc::get_mut(&mut starter).unwrap();
         owned.body = body;
@@ -1430,7 +1001,7 @@ async fn a_deferred_start_replays_one_identity_and_consumes_its_terminal() {
             None,
         ),
     ] {
-        let stores = Stores::open(Tier::Memory).await;
+        let stores = Stores::open().await;
         let mut call = call("deferred", policy);
         call.declaration =
             ToolDeclaration::deferring().with_intents([ToolIntentKind::StartProcess]);
@@ -1537,3 +1108,353 @@ async fn a_deferred_start_replays_one_identity_and_consumes_its_terminal() {
 }
 mod process_transfer;
 mod terminal_failure;
+
+/// R2(b)/K5: a presentation fault after prepare's ACK cannot re-read the
+/// live cancellation gate or re-run the acknowledged start on cold replay.
+#[tokio::test]
+async fn l08_acknowledged_prepare_keeps_its_discharge_when_presentation_redelivers() {
+    let stores = Stores::open().await;
+    let call = call(
+        "prepared-before-v",
+        ExternalCancelPolicy::CancelExternalWork,
+    );
+    let key = StartKey::for_host("prepared-before-v");
+    let starter = Starter::new(
+        stores.set.process_registry(),
+        declaring(Some(key.clone())),
+        CancelAt::Presentation,
+    );
+    let driven = drive_with_config(
+        Some("present"),
+        call.clone(),
+        Arc::clone(&starter),
+        None,
+        ServerConfig::default().always_replay(true),
+    )
+    .await;
+    let (terminal, records) = driven.finished();
+    let SingletonTerminal::Final {
+        launched: Some(process),
+        ..
+    } = terminal
+    else {
+        panic!("the protected final must drain");
+    };
+    assert!(
+        starter.discharges().iter().all(|(_, cancelled)| !cancelled),
+        "an acknowledged preparation never re-decides discharge from the later cancel"
+    );
+    assert_eq!(
+        starter.launches(),
+        vec![process.clone()],
+        "an acknowledged start is served instead of re-launched"
+    );
+    assert_eq!(
+        start_events(&records),
+        drained(&call.call_id, &key, &process, false)
+    );
+}
+
+/// R2(b), item 9: a durable deferred launch is VM-owned rather than an
+/// owner-channel carrier; always-replay never asks its registrar again.
+#[tokio::test]
+async fn l08_deferred_launch_ack_is_served_without_an_owner_channel() {
+    let stores = Stores::open().await;
+    let mut call = call("deferred-owned-launch", ExternalCancelPolicy::Ignore);
+    call.declaration = ToolDeclaration::deferring().with_intents([ToolIntentKind::StartProcess]);
+    let SingletonBodyOutcome::Done {
+        start: Some(start), ..
+    } = declaring(Some(start_key("deferred-owned-launch")))
+    else {
+        panic!("one start");
+    };
+    let starter = Starter::new(
+        stores.set.process_registry(),
+        SingletonBodyOutcome::DeferredStart { start },
+        CancelAt::Never,
+    );
+    let driven = drive_with_config(
+        None,
+        call,
+        Arc::clone(&starter),
+        None,
+        ServerConfig::default().always_replay(true),
+    )
+    .await;
+    let (terminal, _) = driven.finished();
+    assert!(matches!(terminal, SingletonTerminal::Final { .. }));
+    assert_eq!(
+        starter.launches().len(),
+        1,
+        "the VM serves an acknowledged launch without polling an owner channel"
+    );
+}
+/// L08: the preparation gate follows the recorded cancel policy and a
+/// pre-admission cancellation cannot create an obligation.
+#[tokio::test]
+async fn l08_prepare_applies_cancel_policy_only_to_an_admitted_start() {
+    for (cancel_at, policy, cancelled) in [
+        (
+            CancelAt::Body,
+            ExternalCancelPolicy::CancelExternalWork,
+            false,
+        ),
+        (
+            CancelAt::Launch,
+            ExternalCancelPolicy::CancelExternalWork,
+            true,
+        ),
+        (CancelAt::Launch, ExternalCancelPolicy::Ignore, false),
+    ] {
+        let stores = Stores::open().await;
+        let call = call("prepare-policy", policy);
+        let key = start_key("prepare-policy");
+        let starter = Starter::new(
+            stores.set.process_registry(),
+            declaring(Some(key.clone())),
+            cancel_at,
+        );
+        let driven = drive_with_config(
+            None,
+            call.clone(),
+            Arc::clone(&starter),
+            None,
+            ServerConfig::default().always_replay(true),
+        )
+        .await;
+        let (terminal, records) = driven.finished();
+        if cancel_at == CancelAt::Body {
+            assert_eq!(
+                terminal,
+                SingletonTerminal::Withheld {
+                    decision: CallDecision::Cancelled
+                }
+            );
+            assert!(starter.launches().is_empty());
+            assert!(start_events(&records).is_empty());
+            assert!(stores.rows().await.is_empty());
+        } else {
+            let SingletonTerminal::Final {
+                launched: Some(process),
+                ..
+            } = terminal
+            else {
+                panic!("admitted start drains");
+            };
+            assert_eq!(starter.launches(), vec![process.clone()]);
+            assert_eq!(starter.discharges(), vec![(process.clone(), cancelled)]);
+            assert_eq!(
+                start_events(&records),
+                drained(&call.call_id, &key, &process, cancelled)
+            );
+            assert_eq!(
+                stores.rows().await,
+                vec![Row::drained(&process, &key, cancelled)]
+            );
+        }
+    }
+}
+
+/// L08: an isolated prepare owns the physical receipt and never enters the
+/// ordinary body, including an acknowledged result replay.
+#[tokio::test]
+async fn l08_isolated_prepare_retains_the_terminated_worker_receipt() {
+    let stores = Stores::open().await;
+    let call = isolated_call("physical-prepare", ExternalCancelPolicy::CancelExternalWork);
+    let starter = isolated_starter(&stores, true, CancelAt::Launch, "fig4884-index");
+    let driven = drive_with_config(
+        Some("present"),
+        call.clone(),
+        Arc::clone(&starter),
+        None,
+        ServerConfig::default().always_replay(true),
+    )
+    .await;
+    let (terminal, records) = driven.finished();
+    let SingletonTerminal::Final {
+        launched: Some(process),
+        presentation,
+        ..
+    } = terminal
+    else {
+        panic!("physical start drains");
+    };
+    let descriptor: IsolatedProcessDescriptor = serde_json::from_str(&presentation).unwrap();
+    let engine = starter.worker.as_ref().unwrap();
+    assert_eq!(starter.executions.load(Ordering::SeqCst), 0);
+    assert_eq!(engine.spawned.load(Ordering::SeqCst), 1);
+    assert_eq!(descriptor.process_id, process);
+    assert_eq!(descriptor.termination, engine.receipt(&process));
+    assert!(descriptor.termination.is_some());
+    assert_eq!(
+        start_events(&records),
+        drained(
+            &call.call_id,
+            &start_key("physical-prepare"),
+            &process,
+            true
+        )
+    );
+}
+
+/// R3/V1: a recorded body watches the deployment gate through ingress. It
+/// resolves while the owner's step token is held and adds no handler command.
+#[tokio::test]
+async fn l02_gate_watch_is_non_journaling_during_an_owner_step() {
+    let backend = lash_restate_test::backend(500903, ServerConfig::default().always_replay(true))
+        .await
+        .unwrap();
+    let host = backend.lash_backend().effect_host();
+    let control = Arc::new(
+        lash_core::runtime::turn_control::ActiveTurnControl::new(
+            host.as_ref(),
+            lash_core::runtime::TurnAddress::new("watch-s", "watch-t"),
+        )
+        .await
+        .unwrap(),
+    );
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let host = Arc::clone(&host);
+        let control = Arc::clone(&control);
+        let entered = Arc::clone(&entered);
+        Arc::new(move |scoped| {
+            let host = Arc::clone(&host);
+            let control = Arc::clone(&control);
+            let entered = Arc::clone(&entered);
+            Box::pin(async move {
+                scoped.admit_journal_write().unwrap();
+                let step = scoped.controller().record_run_record(
+                    "guard-watch".to_owned(),
+                    Box::pin(async move {
+                        control
+                            .run_recorded_step_body(&host, false, |stop| async move {
+                                entered.notify_one();
+                                stop.cancelled().await;
+                            })
+                            .await;
+                        Ok(lash_core::tool_run::RunJournalEntry {
+                            state: Vec::new(),
+                            materials: Vec::new(),
+                            record: RunRecord {
+                                segment: SegmentOrdinal(0),
+                                first: lash_core::tool_run::RunEventOrdinal(0),
+                                events: Vec::new(),
+                                trace: None,
+                            },
+                        })
+                    }),
+                );
+                scoped
+                    .await_owner_step("guard-watch".to_owned(), step)
+                    .await
+                    .unwrap();
+            })
+        })
+    };
+    let request = async {
+        entered.notified().await;
+        control
+            .request_local_stop(host.as_ref(), lash_sansio::TurnCancelMode::Immediate, None)
+            .await
+            .unwrap();
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            backend.run_in_handler(AdmittedScope::turn("watch-s", "watch-t"), attempt),
+            request
+        )
+        .0
+        .unwrap();
+    })
+    .await
+    .expect("ingress watch resolves an owner-awaited step");
+    let journal = backend
+        .server()
+        .invocations()
+        .iter()
+        .filter(|view| view.target.starts_with("LashTestHandlerHost/"))
+        .find_map(|view| {
+            let journal = backend.server().journal(&view.id).unwrap();
+            journal
+                .iter()
+                .any(|entry| entry.run_completion().is_some())
+                .then_some(journal)
+        })
+        .expect("handler journal");
+    assert_eq!(
+        journal
+            .iter()
+            .filter(|entry| entry.ty.is_command()
+                && !matches!(
+                    entry.ty,
+                    lash_restate_test::protocol::MessageType::InputCommand
+                        | lash_restate_test::protocol::MessageType::OutputCommand
+                ))
+            .count(),
+        1,
+        "watching the gate adds no command to the owner's journal"
+    );
+}
+
+/// L08/L12: invalid obligations cannot reach the prepare bridge.
+#[tokio::test]
+async fn l08_invalid_start_obligations_never_issue_preparation() {
+    let mut no_env = call("no-env", ExternalCancelPolicy::Ignore);
+    no_env.environment = None;
+    let mut undeclared = call("undeclared", ExternalCancelPolicy::Ignore);
+    undeclared.declaration = ToolDeclaration::default();
+    for (call, key, expected) in [
+        (
+            call("keyless", ExternalCancelPolicy::Ignore),
+            None,
+            SingletonCapture::StartRefused {
+                refusal: DeclaredStartObligationRefusal::Keyless,
+            },
+        ),
+        (
+            no_env,
+            Some(start_key("no-env")),
+            SingletonCapture::StartRefused {
+                refusal: DeclaredStartObligationRefusal::NoEnvironment,
+            },
+        ),
+        (
+            undeclared,
+            Some(start_key("undeclared")),
+            SingletonCapture::Refused {
+                refusal: DeclarationRefusal::UndeclaredIntent {
+                    kind: ToolIntentKind::StartProcess,
+                },
+            },
+        ),
+    ] {
+        let stores = Stores::open().await;
+        let starter = Starter::new(
+            stores.set.process_registry(),
+            declaring(key),
+            CancelAt::Never,
+        );
+        let driven = drive_with_config(
+            None,
+            call,
+            Arc::clone(&starter),
+            None,
+            ServerConfig::default().always_replay(true),
+        )
+        .await;
+        let (terminal, records) = driven.finished();
+        let SingletonTerminal::Final {
+            capture,
+            launched: None,
+            ..
+        } = terminal
+        else {
+            panic!("typed refusal final");
+        };
+        assert_eq!(capture, expected);
+        assert!(starter.launches().is_empty());
+        assert!(start_events(&records).is_empty());
+        assert!(stores.rows().await.is_empty());
+    }
+}

@@ -2,7 +2,6 @@
 use super::*;
 use crate::tool_run::{RecordedRetryPolicy, RunAttemptEntry};
 use futures_util::future::{BoxFuture, FutureExt, Shared, select_all};
-use lash_sansio::sync::MutexExt;
 
 pub(super) type Handle<'a> = Shared<BoxFuture<'a, Result<Ready, RuntimeEffectControllerError>>>;
 
@@ -11,9 +10,7 @@ pub(super) enum Ready {
     Attempt(std::sync::Arc<RunAttemptEntry>),
     /// The durable timer fired.
     Timer,
-    /// A stop cut a retry backoff before its timer fired: never an elapse.
-    TimerStopped,
-    Presentation(std::sync::Arc<drain::PresentedParts>),
+    StartPrepared(std::sync::Arc<crate::tool_dispatch::RunStartPrepared>),
 }
 
 pub(super) struct AggregateTimer<'a> {
@@ -24,9 +21,8 @@ pub(super) struct AggregateTimer<'a> {
 
 #[derive(Clone)]
 enum SelectedWork<'a> {
-    Presentation {
+    StartPrepared {
         call_id: ToolCallId,
-        consume: bool,
     },
     Call {
         work: std::sync::Arc<Work<'a>>,
@@ -258,6 +254,14 @@ impl<'a> RunCoordinator<'a> {
         &mut self,
         presentation: &mut Option<drain::PendingPresentation<'a>>,
     ) -> Result<Option<(ToolCallId, DecidedCall)>, SingletonRunError> {
+        if presentation
+            .as_ref()
+            .is_some_and(|pending| pending.handle.is_none())
+        {
+            let pending = presentation.take().ok_or(RunEventRefusal::EmptyRecord)?;
+            self.present_pending(pending).await?;
+            return Ok(None);
+        }
         if self.pending.is_empty() && self.timers.is_empty() && presentation.is_none() {
             return Ok(None);
         }
@@ -295,14 +299,15 @@ impl<'a> RunCoordinator<'a> {
                     },
                 )
             }));
-            let protected = presentation.as_ref().map(|pending| {
-                (
-                    pending.handle.clone(),
-                    SelectedWork::Presentation {
-                        call_id: pending.call_id.clone(),
-                        consume: pending.consume,
-                    },
-                )
+            let protected = presentation.as_ref().and_then(|pending| {
+                pending.handle.as_ref().map(|handle| {
+                    (
+                        handle.clone(),
+                        SelectedWork::StartPrepared {
+                            call_id: pending.call_id.clone(),
+                        },
+                    )
+                })
             });
             let name = format!("lash:run:schedule:{}", record.first.0);
             let address = crate::EffectAddress::new(
@@ -332,17 +337,9 @@ impl<'a> RunCoordinator<'a> {
             let owner = self.journal.materials.owner.clone();
             let available = self.journal.materials.available.clone();
 
-            // Register a replayed D before polling an unfinished X. Only a
-            // fresh schedule requests selection; its owner waits for X ACK
-            // outside the SDK callback. V's presentation runs in the
-            // borrowed callback; its protected preparation is polled by the
-            // owner beside the schedule on live and replayed V, so its
-            // nested commands replay at their recorded positions. The
-            // borrowed D lets the invocation suspend to acknowledge
-            // outstanding X, and once no X is outstanding the owner's await
-            // of its executing borrowed D keeps the invocation live
-            // (shared-core only suspends when input is closed and no awaited
-            // handle is an executing run).
+            // D registers before any unfinished result is polled. Started
+            // preparation is an acknowledged choice alongside X and timers.
+            // FIG-4998 replaces this borrowed selection with FirstCompleted.
             let needs_selection = std::sync::Arc::new(tokio::sync::Notify::new());
             let needed = std::sync::Arc::clone(&needs_selection);
             let (send_choice, receive_choice) = tokio::sync::oneshot::channel();
@@ -375,19 +372,22 @@ impl<'a> RunCoordinator<'a> {
                 };
                 let ready = ready.map_err(|error| error.to_string())?;
                 let (work, ordinal, timer, delay) = match selected_work {
-                    SelectedWork::Presentation { call_id, consume } => {
-                        let Ready::Presentation(parts) = ready else {
-                            return Err("a presentation returned an X receipt".to_owned());
+                    SelectedWork::StartPrepared { call_id } => {
+                        let Ready::StartPrepared(parts) = ready else {
+                            return Err("a preparation returned an X receipt".to_owned());
                         };
-                        let opener = match &owner {
-                            MaterialOwner::Run { opener } => opener.clone(),
-                            _ => return Err("a Run owns its presentation".to_owned()),
-                        };
-                        let entry = parts.entry(&call_id, record, consume, &opener);
-                        if !entry.record.events.iter().any(|event| matches!(event, RunEvent::Presented { call_id: id, .. } if *id == call_id)) {
-                            return Err("a presentation returned another call".to_owned());
+                        if !matches!(parts.events.as_slice(), [RunEvent::StartLaunched { call_id: id, .. }, RunEvent::StartDischarged { call_id: discharged, .. }] if *id == call_id && *discharged == call_id)
+                        {
+                            return Err("a preparation returned another call".to_owned());
                         }
-                        return Ok(entry);
+                        return Ok(RunJournalEntry {
+                            record: RunRecord {
+                                events: parts.events.clone(),
+                                ..record
+                            },
+                            materials: Vec::new(),
+                            state: Vec::new(),
+                        });
                     }
                     SelectedWork::AggregateTimer { key, leaf } => {
                         if !matches!(ready, Ready::Timer) {
@@ -475,17 +475,14 @@ impl<'a> RunCoordinator<'a> {
                             .await
                         }
                     }
-                    Ready::Presentation(_) => Err("an X returned a presentation".to_owned()),
-                    Ready::Timer | Ready::TimerStopped => {
+                    Ready::StartPrepared(_) => Err("an X returned a preparation".to_owned()),
+                    Ready::Timer => {
                         if !timer {
                             return Err("an X handle returned a timer wake".to_owned());
                         }
-                        // A cut backoff decides the call: its next attempt
-                        // would run under the stop that cut it.
-                        let event = if matches!(ready, Ready::TimerStopped)
-                            || aborted
-                            || handlers.run_cancel_requested().await?
-                        {
+                        // A cancellation is observed at the durable timer's
+                        // wake; Closing records pending cancellations itself.
+                        let event = if aborted || handlers.run_cancel_requested().await? {
                             RunEvent::Decided {
                                 call_id,
                                 rank,
@@ -514,7 +511,7 @@ impl<'a> RunCoordinator<'a> {
                 .journal
                 .scoped
                 .controller()
-                .record_run_schedule(name, step);
+                .record_run_schedule(name.clone(), step);
             tokio::pin!(selection);
             tokio::pin!(selector);
             let schedule = async {
@@ -524,55 +521,19 @@ impl<'a> RunCoordinator<'a> {
                     () = &mut selector => selection.await,
                 }
             };
-            let selected = match presentation.as_mut() {
-                Some(pending) => {
-                    // A served V record carries the discharge decision its
-                    // preparation repeats: hand the launched process and
-                    // `cancelled` to it before its next poll.
-                    let recorded = std::sync::Arc::clone(&pending.recorded);
-                    let protected_call = pending.call_id.clone();
-                    pending
-                        .beside(schedule, move |output| {
-                            let Ok(entry) = output else {
-                                return;
-                            };
-                            if !entry.record.events.iter().any(|event| {
-                                matches!(event, RunEvent::Presented { call_id, .. } if *call_id == protected_call)
-                            }) {
-                                return;
-                            }
-                            let launched = entry.record.events.iter().find_map(|event| match event {
-                                RunEvent::StartLaunched { call_id, process_id, .. }
-                                    if *call_id == protected_call =>
-                                {
-                                    Some(process_id.clone())
-                                }
-                                _ => None,
-                            });
-                            let discharged = entry.record.events.iter().find_map(|event| match event {
-                                RunEvent::StartDischarged { call_id, cancelled, .. }
-                                    if *call_id == protected_call =>
-                                {
-                                    Some(*cancelled)
-                                }
-                                _ => None,
-                            });
-                            if let (Some(process_id), Some(cancelled)) = (launched, discharged) {
-                                *recorded.lock_recover() = Some((process_id, cancelled));
-                            }
-                        })
-                        .await?
-                }
-                None => schedule.await?,
-            };
-            if let Some(pending) = presentation.as_ref()
-                && selected.record.events.iter().any(|event| matches!(event, RunEvent::Presented { call_id, .. } if *call_id == pending.call_id))
+            let selected = self.journal.scoped.await_owner_step(name, schedule).await?;
+            if let Some(pending) = presentation.as_mut()
+                && selected.record.events.iter().any(|event| matches!(event, RunEvent::StartLaunched { call_id, .. } if *call_id == pending.call_id))
             {
-                let call_id = pending.call_id.clone();
-                let mut pending = presentation.take().ok_or_else(|| boundary(&call_id))?;
-                pending.finish_preparation().await?;
-                let record = self.journal.accept(selected)?;
-                self.finish_presentation(pending, &record)?;
+                let handle = pending.handle.take().ok_or_else(|| boundary(&pending.call_id))?;
+                let Ready::StartPrepared(prepared) = handle.await? else {
+                    return Err(boundary(&pending.call_id));
+                };
+                if prepared.events != selected.record.events {
+                    return Err(boundary(&pending.call_id));
+                }
+                self.journal.accept(selected)?;
+                pending.prepared = prepared.as_ref().clone();
                 return Ok(None);
             }
             let event = selected
@@ -764,15 +725,9 @@ impl<'a> RunCoordinator<'a> {
                     let controller = self.journal.scoped.controller();
                     self.journal.scoped.admit_journal_write()?;
                     let timer = controller.start_run_retry(delay);
-                    let waiting_handlers = std::sync::Arc::clone(&handlers);
-                    let call_id = call.call_id.clone();
                     let handle = async move {
-                        Ok(
-                            match waiting_handlers.wait_run_retry(&call_id, timer).await? {
-                                crate::tool_dispatch::RunRetryWake::Elapsed => Ready::Timer,
-                                crate::tool_dispatch::RunRetryWake::Stopped => Ready::TimerStopped,
-                            },
-                        )
+                        timer.await?;
+                        Ok(Ready::Timer)
                     }
                     .boxed()
                     .shared();
@@ -822,6 +777,49 @@ impl<'a> RunCoordinator<'a> {
             }
         }
         Ok(decision)
+    }
+
+    /// Closing owns the decision for a call whose failed X is already
+    /// durable and whose next attempt is waiting on a backoff.
+    pub(super) fn backoff_cancellations(&self) -> Vec<RunEvent> {
+        self.pending
+            .iter()
+            .filter(|pending| pending.timer)
+            .enumerate()
+            .map(|(index, pending)| RunEvent::Decided {
+                call_id: pending.work.call.call_id.clone(),
+                rank: self.journal.ledger.next_rank() + index as u64,
+                decision: CallDecision::Cancelled,
+                after: None,
+            })
+            .collect()
+    }
+
+    pub(super) fn accept_backoff_cancellations(&mut self, events: &[RunEvent]) {
+        for event in events {
+            if let RunEvent::Decided {
+                call_id,
+                rank,
+                decision: CallDecision::Cancelled,
+                ..
+            } = event
+                && let Some(position) = self
+                    .pending
+                    .iter()
+                    .position(|pending| pending.timer && pending.work.call.call_id == *call_id)
+            {
+                let pending = self.pending.remove(position);
+                self.owed.insert(
+                    *rank,
+                    Owed {
+                        call_id: call_id.clone(),
+                        handlers: Handlers(std::sync::Arc::clone(&pending.work.handlers)),
+                        decision: CallDecision::Cancelled,
+                        capture: pending.capture,
+                    },
+                );
+            }
+        }
     }
 
     fn issue_attempt(

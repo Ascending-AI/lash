@@ -31,10 +31,10 @@ The F04 baseline is F01 `736db467f449e41f58f1f715838548b90341d7c1`. Sam’s dele
 | <a id="r23"></a>R23 | L12 | `tests::singleton_tool_run_on_the_double::an_undeclared_outcome_is_refused_before_anything_it_declared_is_realized` | `//crates/lash-restate:lash-restate__unit_test` |
 | <a id="r24"></a>R24 | L14 | `tests::singleton_tool_run_on_the_double::logical_receipts_follow_recorded_admission_and_protected_presentation` | `//crates/lash-restate:lash-restate__unit_test` |
 | <a id="r25"></a>R25 | L14 | `tests::singleton_tool_run_on_the_double::cancelled_spending_calls_and_unreturned_losers_keep_recorded_provider_results` | `//crates/lash-restate:lash-restate__unit_test` |
-| <a id="r26"></a>R26 | L08,L12 | `tests::declared_start_run_drain_on_the_double::a_start_without_key_environment_or_declaration_is_refused_before_admission` | `//crates/lash-restate:lash-restate__unit_test` |
-| <a id="r27"></a>R27 | L08,L04 | `tests::declared_start_run_drain_on_the_double::a_declared_start_drains_inside_its_declarations_at_every_cut` | `//crates/lash-restate:lash-restate__unit_test` |
-| <a id="r28"></a>R28 | L03,L08 | `tests::declared_start_run_drain_on_the_double::a_cancel_before_admission_forbids_the_start_and_one_after_recovers_it` | `//crates/lash-restate:lash-restate__unit_test` |
-| <a id="r29"></a>R29 | L08 | `tests::declared_start_run_drain_on_the_double::an_isolated_call_starts_its_registered_process_without_an_ordinary_body` | `//crates/lash-restate:lash-restate__unit_test` |
+| <a id="r26"></a>R26 | L08,L12 | `tests::declared_start_run_drain_on_the_double::l08_invalid_start_obligations_never_issue_preparation` | `//crates/lash-restate:lash-restate__unit_test` |
+| <a id="r27"></a>R27 | L08,L04 | `tests::declared_start_run_drain_on_the_double::l08_acknowledged_prepare_keeps_its_discharge_when_presentation_redelivers` | `//crates/lash-restate:lash-restate__unit_test` |
+| <a id="r28"></a>R28 | L03,L08 | `tests::declared_start_run_drain_on_the_double::l08_prepare_applies_cancel_policy_only_to_an_admitted_start` | `//crates/lash-restate:lash-restate__unit_test` |
+| <a id="r29"></a>R29 | L08 | `tests::declared_start_run_drain_on_the_double::l08_isolated_prepare_retains_the_terminated_worker_receipt` | `//crates/lash-restate:lash-restate__unit_test` |
 | <a id="r30"></a>R30 | L22 | `tests::declared_start_run_drain_on_the_double::slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process` | `//crates/lash-restate:lash-restate__unit_test` |
 | <a id="r31"></a>R31 | L07 | `tests::durable_wait_source_seal::an_early_resolution_answers_the_later_subscription_and_duplicates_read_it` | `//crates/lash-restate:lash-restate__unit_test` |
 | <a id="r32"></a>R32 | L03,L07 | `tests::durable_wait_source_seal::resolve_and_cancel_race_to_one_seal_and_wake_each_subscriber_once` | `//crates/lash-restate:lash-restate__unit_test` |

@@ -25,6 +25,13 @@ pub enum EffectControllerTaskRequest {
         response:
             oneshot::Sender<Result<crate::tool_run::RunAttemptEntry, RuntimeEffectControllerError>>,
     },
+    StartRunPrepare {
+        name: String,
+        step: crate::tool_dispatch::RunStartPrepareStep<'static>,
+        response: oneshot::Sender<
+            Result<crate::tool_dispatch::RunStartPrepared, RuntimeEffectControllerError>,
+        >,
+    },
     StartRunRetry {
         backoff_ms: u64,
         response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
@@ -113,6 +120,20 @@ impl EffectControllerTaskRequest {
                 // Register in request order, before polling any response.
                 let crate::tool_dispatch::RunAttemptHandle { body, result } =
                     controller.start_run_attempt(name, step);
+                Box::pin(async move {
+                    futures_util::future::join(body, async move {
+                        let _ = response.send(result.await);
+                    })
+                    .await;
+                })
+            }
+            Self::StartRunPrepare {
+                name,
+                step,
+                response,
+            } => {
+                let crate::tool_dispatch::RunStepHandle { body, result } =
+                    controller.start_run_prepare(name, step);
                 Box::pin(async move {
                     futures_util::future::join(body, async move {
                         let _ = response.send(result.await);
@@ -507,6 +528,41 @@ impl RuntimeEffectController for EffectTaskController {
         crate::tool_dispatch::RunAttemptHandle {
             // A replay drops the remote step without asking, closing
             // `execute`, so the body ends; a served record never runs it.
+            body: Box::pin(async move {
+                if let Ok(reply) = execute.await {
+                    let _ = reply.send(step.await);
+                }
+            }),
+            result: Box::pin(native_run_response(response_rx)),
+        }
+    }
+
+    fn start_run_prepare<'run>(
+        &'run self,
+        name: String,
+        step: crate::tool_dispatch::RunStartPrepareStep<'run>,
+    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_dispatch::RunStartPrepared> {
+        let (remote, execute) = native_run_step();
+        let (response_tx, response_rx) = oneshot::channel();
+        if self
+            .requests
+            .send(EffectControllerTaskRequest::StartRunPrepare {
+                name,
+                step: remote,
+                response: response_tx,
+            })
+            .is_err()
+        {
+            return crate::tool_dispatch::RunStepHandle {
+                body: Box::pin(std::future::ready(())),
+                result: Box::pin(async {
+                    Err(native_run_task_closed(
+                        "native Run controller task is no longer running",
+                    ))
+                }),
+            };
+        }
+        crate::tool_dispatch::RunStepHandle {
             body: Box::pin(async move {
                 if let Ok(reply) = execute.await {
                     let _ = reply.send(step.await);

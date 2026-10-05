@@ -637,6 +637,15 @@ where
         self.start_journal_run_attempt(name, step)
     }
 
+    fn start_run_prepare<'run>(
+        &'run self,
+        name: String,
+        step: lash_core::tool_dispatch::RunStartPrepareStep<'run>,
+    ) -> lash_core::tool_dispatch::RunStepHandle<'run, lash_core::tool_dispatch::RunStartPrepared>
+    {
+        self.start_journal_run_prepare(name, step)
+    }
+
     fn start_run_retry(&self, backoff_ms: u64) -> lash_core::tool_dispatch::RunRetryTimer<'_> {
         let timer = self
             .context

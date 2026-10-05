@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lash::durability::{EffectOpener, RunRetryTimer, RunRetryWake};
+use lash::durability::EffectOpener;
 use lash::plugins::{
     AttemptStream, BehaviorRevision, FormatVersion, PluginCallbackIdentity, PluginDeclaration,
     PluginError, PluginFactory, PluginFailureClass, PluginOperation, PluginOperationOutcome,
@@ -269,14 +269,6 @@ impl SingletonToolHandlers for Echo {
     }
     async fn run_cancel_requested(&self) -> Result<bool, String> {
         Ok(self.token.is_cancelled())
-    }
-    async fn wait_run_retry(
-        &self,
-        _call_id: &lash::ToolCallId,
-        timer: RunRetryTimer<'_>,
-    ) -> Result<RunRetryWake, RuntimeEffectControllerError> {
-        timer.await?;
-        Ok(RunRetryWake::Elapsed)
     }
     async fn realize_declarations(
         &self,

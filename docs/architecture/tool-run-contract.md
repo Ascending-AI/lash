@@ -116,6 +116,12 @@ The aggregate owner supplies its clock. Timer admission records the original
 instant; recovery registers the remaining wait through the existing Restate
 timer facility.
 
+A retry backoff is a durable timer, never a race with an in-memory stop.
+Cancellation during backoff is observed inside D when that timer elapses;
+its latency is bounded by the recorded retry policy's `max_delay_ms`, accepted
+for 1.0. Closing records `Decided Cancelled` for backoff-pending calls in its
+existing Closing step and does not wait for their timers or start another X.
+
 Only `close` ends the logical Run: it records Closing, freezes admission,
 discharges admitted eligible cancellation, accepts every issued X through its
 durable ACK, drains accepted finals and records Settled. Ignore-policy work
@@ -271,6 +277,10 @@ recorded admission (tool name, arguments, owner, or a recorded plugin revision
 this build no longer executes) refuses typed before any body; the recorded
 declaration governs, never the live catalog. Every member of a round has its own independent X record.
 Reported retries follow the recorded dynamic schedule (K9).
+While the owner awaits a Run step, scoped-controller clones share an in-flight
+token. A concurrent registration refuses at its live site with
+`JournalWriteDuringOwnerStep`. Started concurrent runs are selected outside
+that token; deployment gate watches use a non-journaling ingress resolver.
 
 **Deferred completion (K4, FIG-4740).** The Run arms a source under the
 logical opener before starting a body admitted to defer. Its Deferred X
@@ -333,10 +343,13 @@ the call's recorded cancel policy. A keyless start, or a lash-executed one in
 a Run that owns no environment, is the attempt's typed `StartRefused`; a start the admitted
 declaration does not name is its `UndeclaredIntent` refusal. The start
 drains inside the final's declarations: `declare` admits it with them
-(`StartAdmitted`), `start:launch` registers it under its key
-(`StartLaunched`), and `start:discharge` reads the Run's cancellation once,
-cancels the process when the recorded policy says so, and releases the hold
-(`StartDischarged`), before `present` settles the declarations. A
+(`StartAdmitted`), then eagerly issues one concurrent `start:prepare` run.
+Inside that run, launch registers under the stable key (`StartLaunched`),
+the authoritative gate is read once, the recorded policy decides cancellation,
+and discharge releases the hold (`StartDischarged`). Its durable result owns
+both events and any physical termination receipt. D folds them at its current
+ordinal before `present` settles the declarations. Serving that result never
+launches, discharges or reads the live gate again. A
 cancellation before the decision is durable withholds the final, so its
 start is never admitted. One after it cannot forbid the start: a lost launch
 registers again under the same key and recovers the same process. The fold

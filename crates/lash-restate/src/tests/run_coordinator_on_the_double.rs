@@ -16,7 +16,7 @@
 //! or when a Deferred descriptor takes a rank or a presentation.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use std::time::Duration;
@@ -495,15 +495,6 @@ impl SingletonToolHandlers for Probe {
 
     async fn run_cancel_requested(&self) -> Result<bool, String> {
         Ok(self.cancel.load(Ordering::SeqCst))
-    }
-    async fn wait_run_retry(
-        &self,
-        _call_id: &ToolCallId,
-        timer: lash_core::tool_dispatch::RunRetryTimer<'_>,
-    ) -> Result<lash_core::tool_dispatch::RunRetryWake, lash_core::RuntimeEffectControllerError>
-    {
-        timer.await?;
-        Ok(lash_core::tool_dispatch::RunRetryWake::Elapsed)
     }
 
     async fn cancel_call(
@@ -2402,5 +2393,82 @@ async fn l02_a_schedule_suspends_until_its_owned_attempt_is_acknowledged() {
             .invocations()
             .iter()
             .any(|view| view.suspensions > 0)
+    );
+}
+
+/// L03/L17: Closing records a backoff cut itself; it never awaits the timer
+/// or re-derives the cut from an in-memory stop on an always-replay handler.
+#[tokio::test]
+async fn l03_closing_records_backoff_cancellation_without_waiting_for_the_timer() {
+    let kind = Kind::Retry { after_ms: 60_000 };
+    let calls = vec![(call("closing-backoff", &kind), kind)];
+    let id = calls[0].0.call_id.clone();
+    let probe = Arc::new(Probe::new(&calls));
+    let finished = Arc::new(Mutex::new(Vec::new()));
+    let backend = lash_restate_test::backend(500903, ServerConfig::default().always_replay(true))
+        .await
+        .unwrap();
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let probe = Arc::clone(&probe);
+        let finished = Arc::clone(&finished);
+        Arc::new(move |scoped| {
+            let probe = Arc::clone(&probe);
+            let finished = Arc::clone(&finished);
+            let call = calls[0].0.clone();
+            Box::pin(async move {
+                let mut run =
+                    RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                run.start_round(
+                    &[call],
+                    lash_core::tool_run::CapacityScope::Held,
+                    probe as Arc<dyn SingletonToolHandlers>,
+                    lash_core::tool_run::RecordedRetryPolicy::Reported {
+                        max_attempts: std::num::NonZeroU32::new(2).unwrap(),
+                        base_delay_ms: 60_000,
+                        max_delay_ms: 60_000,
+                    },
+                )
+                .await
+                .unwrap();
+                run.progress().await.unwrap();
+                run.close().await.unwrap();
+                finished.lock().unwrap().push(run.into_records());
+            })
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+    )
+    .await
+    .expect("Closing must not wait for a backoff timer")
+    .unwrap();
+    assert_eq!(probe.executions_of(&id), 1);
+    let finished = finished.lock().unwrap();
+    let records = finished.last().unwrap();
+    let closing = records
+        .iter()
+        .find(|record| {
+            record.events.iter().any(|event| {
+                matches!(
+                    event,
+                    RunEvent::Lifecycle {
+                        state: RunLifecycle::Closing
+                    }
+                )
+            })
+        })
+        .unwrap();
+    assert!(
+        closing.events.iter().any(|event| matches!(event,
+            RunEvent::Decided { call_id, decision: CallDecision::Cancelled, .. } if *call_id == id
+        )),
+        "the Closing record owns the backoff cut"
+    );
+    assert!(
+        !records
+            .iter()
+            .flat_map(|record| &record.events)
+            .any(|event| { matches!(event, RunEvent::RetryScheduled { .. }) })
     );
 }

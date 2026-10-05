@@ -79,7 +79,7 @@ pub struct ScopedEffectController<'run> {
     /// on every replay with a fresh controller, so the frontier starts
     /// uncrossed on every attempt and is crossed when a step body of this
     /// attempt really runs ([`Self::frontier`]).
-    pub(in crate::runtime::effect::executor) frontier: crate::trace::JournalFrontier,
+    pub(in crate::runtime::effect::executor) frontier: Arc<DriveFrontier>,
     pub(in crate::runtime::effect::executor) trace_scope:
         Option<Arc<lash_trace::DurableTraceScope>>,
 }
@@ -313,6 +313,26 @@ impl CommandJournalGuard {
     }
 }
 
+/// The invocation frontier and owner await are shared across every rescope.
+#[derive(Default)]
+pub(in crate::runtime::effect::executor) struct DriveFrontier {
+    journal: crate::trace::JournalFrontier,
+    owner_step: std::sync::Mutex<Option<String>>,
+}
+
+/// Completion and future drop both release command admission.
+struct OwnerAwaitedStep(Arc<DriveFrontier>);
+
+impl Drop for OwnerAwaitedStep {
+    fn drop(&mut self) {
+        *self
+            .0
+            .owner_step
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+}
+
 impl<'run> ScopedEffectController<'run> {
     /// This controller serving one replayed language command: every journal
     /// write made through it asks `guard` first (FIG-3586).
@@ -341,10 +361,54 @@ impl<'run> ScopedEffectController<'run> {
         &self,
         key: Option<&str>,
     ) -> Result<(), RuntimeEffectControllerError> {
+        if let Some(active) = self
+            .frontier
+            .owner_step
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::JournalWriteDuringOwnerStep,
+                format!(
+                    "cannot register {} while owner step {active} is in flight",
+                    key.unwrap_or("an unkeyed command")
+                ),
+            ));
+        }
         match &self.journal_guard {
             Some(guard) => guard.admit(key),
             None => Ok(()),
         }
+    }
+
+    /// Await one owner step. Its registration must already be admitted;
+    /// while it is awaited, no concurrent actor may register another command.
+    /// The token is released even when this future is dropped.
+    pub async fn await_owner_step<T, F>(
+        &self,
+        name: String,
+        step: F,
+    ) -> Result<T, RuntimeEffectControllerError>
+    where
+        F: std::future::Future<Output = Result<T, RuntimeEffectControllerError>>,
+    {
+        {
+            let mut held = self
+                .frontier
+                .owner_step
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(active) = held.as_ref() {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::JournalWriteDuringOwnerStep,
+                    format!("cannot await {name} while owner step {active} is in flight"),
+                ));
+            }
+            *held = Some(name);
+        }
+        let _release = OwnerAwaitedStep(Arc::clone(&self.frontier));
+        step.await
     }
 
     pub fn execution_scope(&self) -> &ExecutionScope {
@@ -406,7 +470,7 @@ impl<'run> ScopedEffectController<'run> {
             journal_guard: None,
             ordinals: Arc::default(),
             effects: Arc::default(),
-            frontier: crate::trace::JournalFrontier::new(),
+            frontier: Arc::default(),
             trace_scope: None,
         })
     }
@@ -425,7 +489,7 @@ impl<'run> ScopedEffectController<'run> {
             journal_guard: None,
             ordinals: Arc::default(),
             effects: Arc::default(),
-            frontier: crate::trace::JournalFrontier::new(),
+            frontier: Arc::default(),
             trace_scope: None,
         })
     }
@@ -445,7 +509,7 @@ impl<'run> ScopedEffectController<'run> {
             journal_guard: None,
             ordinals: Arc::default(),
             effects: Arc::default(),
-            frontier: crate::trace::JournalFrontier::new(),
+            frontier: Arc::default(),
             trace_scope: None,
         })
     }
@@ -523,7 +587,7 @@ impl<'run> ScopedEffectController<'run> {
     }
 
     pub fn frontier(&self) -> &crate::trace::JournalFrontier {
-        &self.frontier
+        &self.frontier.journal
     }
 
     /// This controller as part of `shift`'s shift: a proxy or lent controller
@@ -552,12 +616,12 @@ impl<'run> ScopedEffectController<'run> {
         local_executor: RuntimeEffectLocalExecutor<'executor>,
     ) -> Result<RuntimeEffectLocalExecutor<'executor>, RuntimeEffectControllerError> {
         let mut local_executor = local_executor.issued_under(
-            self.frontier.clone(),
+            self.frontier.journal.clone(),
             self.controller().attempt_observation(),
             self.trace_scope.as_deref().cloned(),
         );
+        self.admit_journal_write_at(Some(envelope.invocation.effect_replay_key()))?;
         if let Some(guard) = &self.journal_guard {
-            guard.admit(Some(envelope.invocation.effect_replay_key()))?;
             // A wait on an external completion dispatches nothing
             // (FIG-3587) — an await event, or the await of a process the
             // command started, or the arming of its terminal on a parked
@@ -743,5 +807,30 @@ mod admitted_scope_tests {
             error.code,
             crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused
         );
+    }
+    /// R3: P cannot register through a clone while the owner awaits D.
+    #[tokio::test]
+    async fn preparation_registration_refuses_at_the_owner_await() {
+        let scoped =
+            ScopedEffectController::shared(shared_controller(), AdmittedScope::turn("s", "t"))
+                .expect("scope");
+        let actor = scoped.clone();
+        let mut wait = Box::pin(scoped.await_owner_step(
+            "D".to_owned(),
+            std::future::pending::<Result<(), RuntimeEffectControllerError>>(),
+        ));
+        assert!(futures_util::poll!(&mut wait).is_pending());
+        let refused = actor
+            .admit_journal_write_at(Some("start:prepare"))
+            .expect_err("P registration must refuse at its live site");
+        assert_eq!(
+            refused.code,
+            crate::RuntimeErrorCode::JournalWriteDuringOwnerStep
+        );
+        assert!(refused.message.contains("D"));
+        drop(wait);
+        actor
+            .admit_journal_write_at(Some("start:prepare"))
+            .expect("dropping the await releases admission");
     }
 }

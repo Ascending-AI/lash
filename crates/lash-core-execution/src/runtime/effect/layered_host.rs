@@ -72,6 +72,15 @@ pub trait EffectLayer: Send + Sync + 'static {
         inner.start_run_attempt(name, step)
     }
 
+    fn start_run_prepare<'run>(
+        &'run self,
+        inner: &'run dyn RuntimeEffectController,
+        name: String,
+        step: crate::tool_dispatch::RunStartPrepareStep<'run>,
+    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_dispatch::RunStartPrepared> {
+        inner.start_run_prepare(name, step)
+    }
+
     /// Whether the layered controller owns commit backpressure, as an
     /// engine-backed controller does.
     fn owns_commit_backpressure(&self, inner: &dyn RuntimeEffectController) -> bool {
@@ -689,6 +698,15 @@ impl RuntimeEffectController for LayeredController<'_> {
     ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
         self.layer
             .start_run_attempt(self.inner.as_ref(), name, step)
+    }
+
+    fn start_run_prepare<'run>(
+        &'run self,
+        name: String,
+        step: crate::tool_dispatch::RunStartPrepareStep<'run>,
+    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_dispatch::RunStartPrepared> {
+        self.layer
+            .start_run_prepare(self.inner.as_ref(), name, step)
     }
 
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {

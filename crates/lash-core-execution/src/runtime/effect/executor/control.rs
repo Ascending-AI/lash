@@ -479,6 +479,24 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         }
     }
 
+    /// Eagerly register one declared-start launch and discharge as a VM run.
+    fn start_run_prepare<'run>(
+        &'run self,
+        name: String,
+        step: crate::tool_dispatch::RunStartPrepareStep<'run>,
+    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_dispatch::RunStartPrepared> {
+        drop(step);
+        crate::tool_dispatch::RunStepHandle {
+            body: Box::pin(std::future::ready(())),
+            result: Box::pin(async move {
+                Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::EngineControlUnsupported,
+                    format!("this controller records no start preparation: {name}"),
+                ))
+            }),
+        }
+    }
+
     /// Register a durable retry backoff now, preserving its deadline on replay.
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
         let _ = backoff_ms;

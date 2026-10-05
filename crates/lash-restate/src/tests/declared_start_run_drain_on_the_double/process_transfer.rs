@@ -232,16 +232,12 @@ async fn check_transfer(deferred: bool, launched_before_cut: bool) {
         .map(|process_id| (process_id, true))
         .collect::<Vec<_>>();
     assert_eq!(starter.discharges(), expected_discharges);
-    let rows: Vec<_> = Stores {
-        tier: Tier::Memory,
-        set: stores,
-        dir: None,
-    }
-    .rows()
-    .await
-    .into_iter()
-    .filter(|row| row.start_key.as_deref() == Some(key.as_str()))
-    .collect();
+    let rows: Vec<_> = Stores { set: stores }
+        .rows()
+        .await
+        .into_iter()
+        .filter(|row| row.start_key.as_deref() == Some(key.as_str()))
+        .collect();
     assert_eq!(
         rows,
         launches

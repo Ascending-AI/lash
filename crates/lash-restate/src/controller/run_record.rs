@@ -92,6 +92,28 @@ where
         decode_run_journal_entry(&name, entry)
     }
 
+    pub(super) fn start_journal_run_prepare<'run>(
+        &'run self,
+        name: String,
+        step: lash_core::tool_dispatch::RunStartPrepareStep<'run>,
+    ) -> lash_core::tool_dispatch::RunStepHandle<'run, lash_core::tool_dispatch::RunStartPrepared>
+    {
+        let (body, result) = self
+            .context
+            .run_json_eager_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
+                serde_json::to_value(stamped(&step.await?)).map_err(|error| error.to_string())
+            });
+        lash_core::tool_dispatch::RunStepHandle {
+            body: Box::pin(body),
+            result: Box::pin(async move {
+                let Json(entry) = result.await.map_err(|error| {
+                    crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
+                })?;
+                decode_entry(&name, entry)
+            }),
+        }
+    }
+
     pub(super) fn start_journal_run_attempt<'run>(
         &'run self,
         name: String,

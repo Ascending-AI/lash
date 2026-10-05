@@ -1200,15 +1200,6 @@ impl SingletonToolHandlers for Probe {
     async fn run_cancel_requested(&self) -> Result<bool, String> {
         Ok(self.cancel.load(Ordering::SeqCst))
     }
-    async fn wait_run_retry(
-        &self,
-        _call_id: &ToolCallId,
-        timer: lash_core::tool_dispatch::RunRetryTimer<'_>,
-    ) -> Result<lash_core::tool_dispatch::RunRetryWake, lash_core::RuntimeEffectControllerError>
-    {
-        timer.await?;
-        Ok(lash_core::tool_dispatch::RunRetryWake::Elapsed)
-    }
 
     async fn realize_declarations(
         &self,
@@ -1900,15 +1891,7 @@ async fn l04_a_journaled_intent_replays_before_its_protected_presentation() {
         async fn run_cancel_requested(&self) -> Result<bool, String> {
             Ok(false)
         }
-        async fn wait_run_retry(
-            &self,
-            _call_id: &ToolCallId,
-            timer: lash_core::tool_dispatch::RunRetryTimer<'_>,
-        ) -> Result<lash_core::tool_dispatch::RunRetryWake, lash_core::RuntimeEffectControllerError>
-        {
-            timer.await?;
-            Ok(lash_core::tool_dispatch::RunRetryWake::Elapsed)
-        }
+
         async fn realize_declarations(
             &self,
             call: &ToolCallId,

@@ -172,14 +172,7 @@ impl SingletonToolHandlers for Pending {
     async fn run_cancel_requested(&self) -> Result<bool, String> {
         self.0.run_cancel_requested().await
     }
-    async fn wait_run_retry(
-        &self,
-        call_id: &lash_core::ToolCallId,
-        timer: lash_core::tool_dispatch::RunRetryTimer<'_>,
-    ) -> Result<lash_core::tool_dispatch::RunRetryWake, lash_core::RuntimeEffectControllerError>
-    {
-        self.0.wait_run_retry(call_id, timer).await
-    }
+
     async fn realize_declarations(
         &self,
         call: &lash_core::ToolCallId,

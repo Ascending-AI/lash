@@ -275,6 +275,15 @@ where
         self.inner.start_run_attempt(name, step)
     }
 
+    fn start_run_prepare<'step>(
+        &'step self,
+        name: String,
+        step: lash_core::tool_dispatch::RunStartPrepareStep<'step>,
+    ) -> lash_core::tool_dispatch::RunStepHandle<'step, lash_core::tool_dispatch::RunStartPrepared>
+    {
+        self.inner.start_run_prepare(name, step)
+    }
+
     fn start_run_retry(&self, backoff_ms: u64) -> lash_core::tool_dispatch::RunRetryTimer<'_> {
         self.inner.start_run_retry(backoff_ms)
     }

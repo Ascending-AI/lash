@@ -326,6 +326,7 @@ impl RuntimeErrorCode {
             Self::EngineControlRequest => Redrivable,
             // the installed engine has no such verb; only another engine changes that.
             Self::EngineControlUnsupported => Terminal,
+            Self::JournalWriteDuringOwnerStep => Terminal,
             // the stored handle names another execution; a retry reads the same handle.
             Self::EngineHandleMismatch => Terminal,
             // the process holds no park; a redrive of it has nothing to resume.
