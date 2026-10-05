@@ -240,7 +240,7 @@ async fn delete_after_answer(stores: Stores, replay: bool) {
     assert!(
         world
             .core
-            .session(SESSION)
+            .session(lash::SessionId::parse(SESSION).expect("nonblank host identity"))
             .durable()
             .await
             .expect("durable handle")

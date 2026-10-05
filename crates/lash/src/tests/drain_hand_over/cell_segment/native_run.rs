@@ -160,7 +160,7 @@ impl CellRun {
             .open()
             .await?
             .send(TurnInput::text("retain locals and issued work"))
-            .id(RUN)
+            .id(crate::TurnId::parse(RUN).expect("nonblank host identity"))
             .await?;
         let first = parked(double.server(), &session).await;
         if matches!(cut, Cut::PredecessorParked) {
@@ -656,7 +656,7 @@ async fn cancel_cell(storage: Storage, sleep: bool) -> Result<()> {
             );
             let fresh = session
                 .send(TurnInput::text("the same source in a fresh Run"))
-                .id("native-fresh-run")
+                .id(crate::TurnId::parse("native-fresh-run").expect("nonblank host identity"))
                 .await?;
             tokio::time::timeout(WEDGE, async {
                 loop {
@@ -900,7 +900,7 @@ async fn native_cut_without_wait(
         .await
         .unwrap()
         .send(TurnInput::text("cut active native work"))
-        .id(RUN)
+        .id(crate::TurnId::parse(RUN).expect("nonblank host identity"))
         .await
         .unwrap();
     for _ in 0..2 {

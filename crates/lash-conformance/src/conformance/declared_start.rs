@@ -269,10 +269,6 @@ impl crate::facade_support::PluginFactory for FactsFactory {
         FACTS
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn register_config(
         &self,
         registrar: &mut crate::ConfigRegistrar,
@@ -294,6 +290,12 @@ impl crate::facade_support::PluginFactory for FactsFactory {
                 ctx.plugin_config.config.get(FACTS).cloned(),
             ));
         Ok(Arc::new(FactsPlugin))
+    }
+}
+
+impl crate::plugin::PluginDefinition for FactsFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(FACTS)
     }
 }
 

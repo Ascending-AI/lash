@@ -616,22 +616,12 @@ pub struct PluginComposition {
 }
 
 impl PluginComposition {
-    /// The composition of `factories`, in their order.
-    ///
-    /// # Errors
-    /// [`PluginDeclarationError`] for a declaration that names another id
-    /// than its factory or that cannot write its native format.
-    pub fn of(factories: &[Arc<dyn PluginFactory>]) -> Result<Self, PluginDeclarationError> {
-        let mut declarations = Vec::with_capacity(factories.len());
-        for factory in factories {
-            let declaration = factory.declaration();
-            let factory_id = PluginId::new(factory.id());
-            if declaration.id != factory_id {
-                return Err(PluginDeclarationError::IdMismatch {
-                    factory: factory.id().to_owned(),
-                    declared: declaration.id.as_str().to_owned(),
-                });
-            }
+    /// Validate declarations in hook order, without attaching runtime dependencies.
+    pub fn new(
+        declarations: impl IntoIterator<Item = PluginDeclaration>,
+    ) -> Result<Self, PluginDeclarationError> {
+        let declarations: Vec<_> = declarations.into_iter().collect();
+        for declaration in &declarations {
             if !declaration
                 .writable_formats
                 .contains(&declaration.format_version)
@@ -641,9 +631,25 @@ impl PluginComposition {
                     format_version: declaration.format_version,
                 });
             }
-            declarations.push(declaration);
         }
         Ok(Self { declarations })
+    }
+
+    /// A Core deployment's composition: builtins followed by the supplied
+    /// protocol and host declarations. Supplied ids replace matching builtins.
+    /// Include `embed_tools` when registering tool providers on the Core builder.
+    pub fn with_builtins(
+        declarations: impl IntoIterator<Item = PluginDeclaration>,
+    ) -> Result<Self, PluginDeclarationError> {
+        let declarations: Vec<_> = declarations.into_iter().collect();
+        let mut builtins = super::builtin_plugin_declarations();
+        builtins.retain(|builtin| {
+            !declarations
+                .iter()
+                .any(|declared| declared.id == builtin.id)
+        });
+        builtins.extend(declarations);
+        Self::new(builtins)
     }
 
     /// Every plugin's declaration, in hook order.
@@ -711,6 +717,31 @@ pub trait SessionPlugin: Send + Sync {
     }
 }
 
+/// A plugin's identity, behavior revision and formats, independent of its
+/// runtime dependencies. Production factory types implement this once; hosts
+/// can call it before opening stores, pools or connections. It must be pure,
+/// cheap and perform no I/O. Move the behavior revision whenever behavior
+/// changes; the declared native format must also be writable.
+pub trait PluginDefinition {
+    fn declaration() -> PluginDeclaration;
+}
+
+/// Object-safe access to a declaration. For statically defined plugins the
+/// blanket implementation reads [`PluginDefinition`], so boot and offline
+/// generation use exactly the same declaration. Configured spec factories
+/// return the declaration supplied separately from their runtime hooks.
+/// This access must be pure and perform no I/O; runtime dependencies must not
+/// determine the declaration. Prefer the static definition for factory types.
+pub trait PluginMetadata {
+    fn plugin_declaration(&self) -> PluginDeclaration;
+}
+
+impl<T: PluginDefinition> PluginMetadata for T {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        T::declaration()
+    }
+}
+
 /// # Cheap-build / stateful-factory contract
 ///
 /// `build(ctx)` **must be cheap**. It runs on the hot path every time
@@ -742,6 +773,12 @@ pub trait SessionPlugin: Send + Sync {
 ///     compiled: Arc<Regex>,               // expensive, built once
 /// }
 ///
+/// impl PluginDefinition for MyFactory {
+///     fn declaration() -> PluginDeclaration {
+///         PluginDeclaration::initial("my_plugin")
+///     }
+/// }
+///
 /// impl PluginFactory for MyFactory {
 ///     fn id(&self) -> &'static str { "my_plugin" }
 ///
@@ -759,7 +796,7 @@ pub trait SessionPlugin: Send + Sync {
 /// }
 /// ```
 #[async_trait::async_trait]
-pub trait PluginFactory: Send + Sync {
+pub trait PluginFactory: PluginMetadata + Send + Sync {
     /// Pure display extension. Available to durable readers without plugin
     /// materialization, state restoration, effects or a session writer.
     fn transcript_projector(&self) -> Option<Arc<dyn super::TranscriptRowProjectorPlugin>> {
@@ -768,14 +805,6 @@ pub trait PluginFactory: Send + Sync {
 
     fn id(&self) -> &'static str;
 
-    /// What this plugin declares about itself (FIG-4732): its behaviour
-    /// revision, the format it reads natively and the formats it can write,
-    /// under [`id`](Self::id). Required, with no default: the build
-    /// generation is computed from every registered factory's answer, so a
-    /// plugin that moved its behaviour and kept an inherited revision would
-    /// share a lane with the build it changed. Must be cheap and perform no
-    /// I/O; it is read before any session is built.
-    fn declaration(&self) -> PluginDeclaration;
     /// Pure initial values for a namespace absent from the recorded base.
     /// The engine records this result before any capability is constructed.
     fn initialize_state(
@@ -794,14 +823,14 @@ pub trait PluginFactory: Send + Sync {
         namespace: super::FormatNamespace,
         value: serde_json::Value,
     ) -> Result<serde_json::Value, super::FormatRefusal> {
-        if from == self.declaration().format_version {
+        if from == crate::plugin::PluginMetadata::plugin_declaration(self).format_version {
             Ok(value)
         } else {
             Err(super::FormatRefusal {
                 plugin: self.id().into(),
                 namespace,
                 stored: from,
-                readable: self.declaration().format_version,
+                readable: crate::plugin::PluginMetadata::plugin_declaration(self).format_version,
             })
         }
     }
@@ -814,14 +843,14 @@ pub trait PluginFactory: Send + Sync {
         namespace: super::FormatNamespace,
         value: &serde_json::Value,
     ) -> Result<serde_json::Value, super::FormatRefusal> {
-        if to == self.declaration().format_version {
+        if to == crate::plugin::PluginMetadata::plugin_declaration(self).format_version {
             Ok(value.clone())
         } else {
             Err(super::FormatRefusal {
                 plugin: self.id().into(),
                 namespace,
                 stored: to,
-                readable: self.declaration().format_version,
+                readable: crate::plugin::PluginMetadata::plugin_declaration(self).format_version,
             })
         }
     }
@@ -990,10 +1019,6 @@ impl PluginFactory for PluginSpecFactory {
         self.declaration.id.as_str()
     }
 
-    fn declaration(&self) -> PluginDeclaration {
-        self.declaration.clone()
-    }
-
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(SpecPlugin {
             id: self.id(),
@@ -1002,13 +1027,15 @@ impl PluginFactory for PluginSpecFactory {
     }
 }
 
+impl crate::plugin::PluginMetadata for PluginSpecFactory {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        self.declaration.clone()
+    }
+}
+
 impl PluginFactory for StaticPluginFactory {
     fn id(&self) -> &'static str {
         self.declaration.id.as_str()
-    }
-
-    fn declaration(&self) -> PluginDeclaration {
-        self.declaration.clone()
     }
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
@@ -1016,6 +1043,12 @@ impl PluginFactory for StaticPluginFactory {
             id: self.id(),
             spec: self.spec.clone(),
         }))
+    }
+}
+
+impl crate::plugin::PluginMetadata for StaticPluginFactory {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        self.declaration.clone()
     }
 }
 

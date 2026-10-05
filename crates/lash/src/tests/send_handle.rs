@@ -117,7 +117,7 @@ async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("send-durable-report")
+        .session(crate::SessionId::parse("send-durable-report").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -125,7 +125,7 @@ async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<
 
     let handle = session
         .send(TurnInput::text(HELD))
-        .id("durable-report-run")
+        .id(crate::TurnId::parse("durable-report-run").expect("nonblank host identity"))
         .await?;
     let input_id = handle.input_id().clone();
     provider_called(&fixture, 1).await;
@@ -231,7 +231,7 @@ async fn a_settled_run_no_execution_here_can_report_answers_at_once() -> Result<
     .await?;
     let session = fixture
         .core
-        .session("send-no-grace")
+        .session(crate::SessionId::parse("send-no-grace").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -239,7 +239,7 @@ async fn a_settled_run_no_execution_here_can_report_answers_at_once() -> Result<
 
     let handle = session
         .send(TurnInput::text("report me once"))
-        .id("no-grace-run")
+        .id(crate::TurnId::parse("no-grace-run").expect("nonblank host identity"))
         .await?;
     let input_id = handle.input_id().clone();
     let live = handle.output().await?;
@@ -358,7 +358,7 @@ async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_ba
     .await?;
     let session = fixture
         .core
-        .session("send-run-probe")
+        .session(crate::SessionId::parse("send-run-probe").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -526,7 +526,7 @@ async fn a_send_answers_before_its_runs_scope_closes() -> Result<()> {
     .await?;
     let session = fixture
         .core
-        .session("send-before-close")
+        .session(crate::SessionId::parse("send-before-close").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -534,7 +534,7 @@ async fn a_send_answers_before_its_runs_scope_closes() -> Result<()> {
 
     let handle = session
         .send(TurnInput::text("answer me"))
-        .id("before-close-run")
+        .id(crate::TurnId::parse("before-close-run").expect("nonblank host identity"))
         .await?;
     let output = tokio::time::timeout(std::time::Duration::from_secs(3), handle.output())
         .await
@@ -558,7 +558,7 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("send-settled-id")
+        .session(crate::SessionId::parse("send-settled-id").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -566,7 +566,7 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
 
     let first = session
         .send(TurnInput::text("only once"))
-        .id("settled-run")
+        .id(crate::TurnId::parse("settled-run").expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(first.assistant_message(), Some("echo: only once"));
@@ -583,11 +583,13 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
 
     let again = session
         .send(TurnInput::text("only once"))
-        .id("settled-run")
+        .id(crate::TurnId::parse("settled-run").expect("nonblank host identity"))
         .await?;
     assert_eq!(again.input_id(), &applied[0].input_id);
     assert_eq!(
-        session.attach_id("settled-run").input_id(),
+        session
+            .attach_id(crate::TurnId::parse("settled-run").expect("nonblank host identity"))
+            .input_id(),
         again.input_id(),
         "a retry answers the original acceptance, which its id alone addresses"
     );
@@ -598,7 +600,7 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
 
     let conflicting = session
         .send(TurnInput::text("different semantic input"))
-        .id("settled-run")
+        .id(crate::TurnId::parse("settled-run").expect("nonblank host identity"))
         .await;
     assert!(
         conflicting.is_err(),
@@ -617,17 +619,20 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("send-withdrawn")
+        .session(crate::SessionId::parse("send-withdrawn").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
 
-    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
+    let running = session
+        .send(TurnInput::text(HELD))
+        .id(crate::TurnId::parse("held-run").expect("nonblank host identity"))
+        .await?;
     provider_called(&fixture, 1).await;
     let waiting = session
         .send(TurnInput::text("withdraw me"))
-        .id("withdrawn-run")
+        .id(crate::TurnId::parse("withdrawn-run").expect("nonblank host identity"))
         .await?;
     let input_id = waiting.input_id().clone();
     let receipt = waiting.cancel().await?;
@@ -688,21 +693,24 @@ async fn an_input_answered_inside_another_run_resolves_answered_with_that_run() 
     let fixture = composing_fixture().await?;
     let session = fixture
         .core
-        .session("send-shared-run")
+        .session(crate::SessionId::parse("send-shared-run").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
 
-    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
+    let running = session
+        .send(TurnInput::text(HELD))
+        .id(crate::TurnId::parse("held-run").expect("nonblank host identity"))
+        .await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text("second"))
-        .id("second-run")
+        .id(crate::TurnId::parse("second-run").expect("nonblank host identity"))
         .await?;
     let third = session
         .send(TurnInput::text("third"))
-        .id("third-run")
+        .id(crate::TurnId::parse("third-run").expect("nonblank host identity"))
         .await?;
     let third_input = third.input_id().clone();
     fixture.release.notify_one();
@@ -759,14 +767,14 @@ async fn a_dropped_session_leaves_nothing_with_its_core() -> Result<()> {
     let residents = Arc::downgrade(&fixture.core.residents);
     let session = fixture
         .core
-        .session("dropped-unclosed")
+        .session(crate::SessionId::parse("dropped-unclosed").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
     session
         .send(TurnInput::text("one turn"))
-        .id("dropped-unclosed-run")
+        .id(crate::TurnId::parse("dropped-unclosed-run").expect("nonblank host identity"))
         .output()
         .await?;
     drop(session);
@@ -797,7 +805,7 @@ async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
         .open()
         .await?;
     host.send(TurnInput::text("first"))
-        .id("observed-first")
+        .id(crate::TurnId::parse("observed-first").expect("nonblank host identity"))
         .output()
         .await?;
 
@@ -832,7 +840,7 @@ async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
     assert_eq!(observer.read_view().turn_index(), 1);
 
     host.send(TurnInput::text("second"))
-        .id("observed-second")
+        .id(crate::TurnId::parse("observed-second").expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(
@@ -872,22 +880,26 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
         )
         .build(crate::testing::runtime_lease_owner())?;
     let durable = core
-        .session("engine-first")
+        .session(crate::SessionId::parse("engine-first").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     durable
         .send(TurnInput::text("the engine opens this session first"))
-        .id("engine-first-run")
+        .id(crate::TurnId::parse("engine-first-run").expect("nonblank host identity"))
         .output()
         .await?;
     drop(durable);
 
     // The engine lane releases the session's writer claim when the sent
     // run settles; the host's open races that release under Restate.
-    let session = retry_when_claim_frees(|| core.session("engine-first").open()).await?;
+    let session = retry_when_claim_frees(|| {
+        core.session(crate::SessionId::parse("engine-first").expect("nonblank host identity"))
+            .open()
+    })
+    .await?;
     let again = session
         .send(TurnInput::text("and a host opens it after"))
-        .id("host-after-run")
+        .id(crate::TurnId::parse("host-after-run").expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(again.status(), crate::TurnStatus::Answered);
@@ -928,14 +940,14 @@ async fn a_cancel_reaches_a_run_past_its_frame_switch() -> Result<()> {
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("cancel-past-switch")
+        .session(crate::SessionId::parse("cancel-past-switch").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
     let handle = session
         .send(TurnInput::text("switch frames, then wait"))
-        .id("cancel-past-switch-run")
+        .id(crate::TurnId::parse("cancel-past-switch-run").expect("nonblank host identity"))
         .await?;
     reaches(&calls, 2, "the follow-on turn calls the provider").await;
 
@@ -955,20 +967,23 @@ async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
     let fixture = composing_fixture().await?;
     let session = fixture
         .core
-        .session("cancel-bound-input")
+        .session(crate::SessionId::parse("cancel-bound-input").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
-    let first = session.send(TurnInput::text(HELD)).id("first-run").await?;
+    let first = session
+        .send(TurnInput::text(HELD))
+        .id(crate::TurnId::parse("first-run").expect("nonblank host identity"))
+        .await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text(HELD))
-        .id("consuming-run")
+        .id(crate::TurnId::parse("consuming-run").expect("nonblank host identity"))
         .await?;
     let third = session
         .send(TurnInput::text("batched input"))
-        .id("batched-id")
+        .id(crate::TurnId::parse("batched-id").expect("nonblank host identity"))
         .await?;
     fixture.release.notify_one();
     provider_called(&fixture, 2).await;
@@ -1011,12 +1026,15 @@ async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("send-replay-gap")
+        .session(crate::SessionId::parse("send-replay-gap").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
-    let handle = session.send(TurnInput::text(HELD)).id("gap-run").await?;
+    let handle = session
+        .send(TurnInput::text(HELD))
+        .id(crate::TurnId::parse("gap-run").expect("nonblank host identity"))
+        .await?;
     provider_called(&fixture, 1).await;
     drop(
         fixture
@@ -1083,24 +1101,32 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
     let fixture = fixture(4).await?;
     let session = fixture
         .core
-        .session("send-attach-id")
+        .session(crate::SessionId::parse("send-attach-id").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
 
-    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
+    let running = session
+        .send(TurnInput::text(HELD))
+        .id(crate::TurnId::parse("held-run").expect("nonblank host identity"))
+        .await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text("second"))
-        .id("second-run")
+        .id(crate::TurnId::parse("second-run").expect("nonblank host identity"))
         .await?;
     let third = session
         .send(TurnInput::text("third"))
-        .id("third-run")
+        .id(crate::TurnId::parse("third-run").expect("nonblank host identity"))
         .await?;
-    let durable = fixture.core.session("send-attach-id").durable().await?;
-    let attached = durable.attach_id("third-run");
+    let durable = fixture
+        .core
+        .session(crate::SessionId::parse("send-attach-id").expect("nonblank host identity"))
+        .durable()
+        .await?;
+    let attached =
+        durable.attach_id(crate::TurnId::parse("third-run").expect("nonblank host identity"));
     assert_eq!(attached.input_id(), third.input_id());
     assert_eq!(attached.id(), Some(&lash_core::TurnId::from("third-run")));
     fixture.release.notify_one();
@@ -1117,11 +1143,18 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
         "{output:?}"
     );
     assert_eq!(
-        session.attach_id("third-run").outcome().await?.status(),
+        session
+            .attach_id(crate::TurnId::parse("third-run").expect("nonblank host identity"))
+            .outcome()
+            .await?
+            .status(),
         crate::TurnStatus::Answered
     );
     // An id nothing was accepted under answers like a withdrawn input.
-    let never = durable.attach_id("never-sent").outcome().await?;
+    let never = durable
+        .attach_id(crate::TurnId::parse("never-sent").expect("nonblank host identity"))
+        .outcome()
+        .await?;
     assert_eq!(never.status(), crate::TurnStatus::Cancelled);
     assert!(never.output().is_none());
     Ok(())
@@ -1134,7 +1167,7 @@ async fn an_unobserved_run_answers_with_a_reported_gap() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("send-unobserved-run")
+        .session(crate::SessionId::parse("send-unobserved-run").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1142,7 +1175,7 @@ async fn an_unobserved_run_answers_with_a_reported_gap() -> Result<()> {
 
     let handle = session
         .send(TurnInput::text("watch me"))
-        .id("watched-run")
+        .id(crate::TurnId::parse("watched-run").expect("nonblank host identity"))
         .await?;
     let input_id = handle.input_id().clone();
     let watched = handle.outcome().await?;
@@ -1191,18 +1224,28 @@ async fn send_batch_refuses_reserved_source_keys_without_admitting_other_members
     let fixture = fixture(1).await?;
     fixture
         .core
-        .session("reserved-batch")
+        .session(crate::SessionId::parse("reserved-batch").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
-    let session = fixture.core.session("reserved-batch").open().await?;
+    let session = fixture
+        .core
+        .session(crate::SessionId::parse("reserved-batch").expect("nonblank host identity"))
+        .open()
+        .await?;
     for key in [
         "command:refresh_tool_catalog:foreign",
         "process:foreign:event:1:wake",
     ] {
         let refused = session
             .send_batch([
-                ("host:must-roll-back", TurnInput::text("valid member")),
-                (key, TurnInput::text("reserved member")),
+                (
+                    crate::TurnId::parse("host:must-roll-back").expect("nonblank host identity"),
+                    TurnInput::text("valid member"),
+                ),
+                (
+                    crate::TurnId::parse(key).expect("nonblank host identity"),
+                    TurnInput::text("reserved member"),
+                ),
             ])
             .await;
         let Err(EmbedError::Runtime(error)) = refused else {
@@ -1234,15 +1277,28 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     .await?;
     fixture
         .core
-        .session("send-batch")
+        .session(crate::SessionId::parse("send-batch").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
-    let session = fixture.core.session("send-batch").open().await?;
+    let session = fixture
+        .core
+        .session(crate::SessionId::parse("send-batch").expect("nonblank host identity"))
+        .open()
+        .await?;
     let batch = || {
         [
-            ("batch-a", TurnInput::text("first")),
-            ("batch-b", TurnInput::text("second")),
-            ("batch-c", TurnInput::text("third")),
+            (
+                crate::TurnId::parse("batch-a").expect("nonblank host identity"),
+                TurnInput::text("first"),
+            ),
+            (
+                crate::TurnId::parse("batch-b").expect("nonblank host identity"),
+                TurnInput::text("second"),
+            ),
+            (
+                crate::TurnId::parse("batch-c").expect("nonblank host identity"),
+                TurnInput::text("third"),
+            ),
         ]
     };
 
@@ -1301,21 +1357,36 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     assert_identity_conflict(
         session
             .send_batch([
-                ("batch-d", TurnInput::text("new")),
-                ("batch-b", TurnInput::text("changed")),
+                (
+                    crate::TurnId::parse("batch-d").expect("nonblank host identity"),
+                    TurnInput::text("new"),
+                ),
+                (
+                    crate::TurnId::parse("batch-b").expect("nonblank host identity"),
+                    TurnInput::text("changed"),
+                ),
             ])
             .await,
     );
     assert_identity_conflict(
         session
             .send_batch([
-                ("batch-e", TurnInput::text("once")),
-                ("batch-e", TurnInput::text("twice")),
+                (
+                    crate::TurnId::parse("batch-e").expect("nonblank host identity"),
+                    TurnInput::text("once"),
+                ),
+                (
+                    crate::TurnId::parse("batch-e").expect("nonblank host identity"),
+                    TurnInput::text("twice"),
+                ),
             ])
             .await,
     );
     for never in ["batch-d", "batch-e"] {
-        let outcome = session.attach_id(never).outcome().await?;
+        let outcome = session
+            .attach_id(crate::TurnId::parse(never).expect("nonblank host identity"))
+            .outcome()
+            .await?;
         assert_eq!(
             outcome.status(),
             crate::TurnStatus::Cancelled,
@@ -1326,24 +1397,35 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     // These are the current creating, resident, and store-only entry verbs.
     let created = fixture
         .core
-        .session("send-entry-matrix")
+        .session(crate::SessionId::parse("send-entry-matrix").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
-    let held = created.send(TurnInput::text(HELD)).id("entry-held").await?;
+    let held = created
+        .send(TurnInput::text(HELD))
+        .id(crate::TurnId::parse("entry-held").expect("nonblank host identity"))
+        .await?;
     provider_called(&fixture, calls + 1).await;
-    let live = fixture.core.session("send-entry-matrix").open().await?;
-    let durable = fixture.core.session("send-entry-matrix").durable().await?;
+    let live = fixture
+        .core
+        .session(crate::SessionId::parse("send-entry-matrix").expect("nonblank host identity"))
+        .open()
+        .await?;
+    let durable = fixture
+        .core
+        .session(crate::SessionId::parse("send-entry-matrix").expect("nonblank host identity"))
+        .durable()
+        .await?;
     let entries = vec![
         live.send(TurnInput::text("resident input"))
-            .id("entry-live")
+            .id(crate::TurnId::parse("entry-live").expect("nonblank host identity"))
             .await?,
         durable
             .send(TurnInput::text("durable input"))
-            .id("entry-durable")
+            .id(crate::TurnId::parse("entry-durable").expect("nonblank host identity"))
             .await?,
         live.durable()
             .send(TurnInput::text("resident durable input"))
-            .id("entry-live-durable")
+            .id(crate::TurnId::parse("entry-live-durable").expect("nonblank host identity"))
             .await?,
     ];
     let snapshots = entries
@@ -1352,8 +1434,14 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
         .collect::<Vec<_>>();
     let cancelled = durable
         .send_batch([
-            ("entry-cancel-a", TurnInput::text("cancel a")),
-            ("entry-cancel-b", TurnInput::text("cancel b")),
+            (
+                crate::TurnId::parse("entry-cancel-a").expect("nonblank host identity"),
+                TurnInput::text("cancel a"),
+            ),
+            (
+                crate::TurnId::parse("entry-cancel-b").expect("nonblank host identity"),
+                TurnInput::text("cancel b"),
+            ),
         ])
         .await?;
     for handle in cancelled {
@@ -1410,7 +1498,7 @@ async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance() -> 
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("send-bad-route")
+        .session(crate::SessionId::parse("send-bad-route").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1447,7 +1535,7 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("exact-host-settlement")
+        .session(crate::SessionId::parse("exact-host-settlement").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1465,7 +1553,7 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
     let durable = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         session
-            .run(lash_core::TurnId::fixture(host_id.to_string()))
+            .run(lash_core::TurnId::fixture(host_id.to_string()).into())
             .outcome(),
     )
     .await
@@ -1522,12 +1610,12 @@ async fn exact_host_run_frame_switch(host_id: &str, cancel: bool) -> Result<()> 
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("exact-host-switch")
+        .session(crate::SessionId::parse("exact-host-switch").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
-    let run_handle = session.run(lash_core::TurnId::fixture(host_id.to_string()));
+    let run_handle = session.run(lash_core::TurnId::fixture(host_id.to_string()).into());
     let handle = session
         .send(TurnInput::text("switch frames"))
         .id(lash_core::TurnId::fixture(host_id))
@@ -1650,7 +1738,7 @@ async fn exact_host_run_frame_switch(host_id: &str, cancel: bool) -> Result<()> 
     }
     let durable = tokio::time::timeout(
         std::time::Duration::from_secs(3),
-        session.run(run.clone()).outcome(),
+        session.run(run.clone().into()).outcome(),
     )
     .await
     .expect("durable resolution follows the exact run's follow-on")?;

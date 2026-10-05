@@ -121,7 +121,7 @@ async fn a_send_pinned_at_acceptance_keeps_its_turn_through_collection() -> Resu
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("pin-at-send")
+        .session(crate::SessionId::parse("pin-at-send").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -210,7 +210,7 @@ async fn current_turn_pins_the_running_turn_out_of_band() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("pin-running")
+        .session(crate::SessionId::parse("pin-running").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -219,7 +219,10 @@ async fn current_turn_pins_the_running_turn_out_of_band() -> Result<()> {
     session.send(TurnInput::text("one")).output().await?;
     let before = published(&fixture, "pin-running").await?;
 
-    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
+    let running = session
+        .send(TurnInput::text(HELD))
+        .id(crate::TurnId::parse("held-run").expect("nonblank host identity"))
+        .await?;
     provider_called(&fixture, 2).await;
     let turn = session
         .current_turn()
@@ -275,21 +278,24 @@ async fn a_merged_inputs_pin_resolves_to_the_run_that_applied_it() -> Result<()>
     let fixture = composing_fixture().await?;
     let session = fixture
         .core
-        .session("pin-merged")
+        .session(crate::SessionId::parse("pin-merged").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
 
-    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
+    let running = session
+        .send(TurnInput::text(HELD))
+        .id(crate::TurnId::parse("held-run").expect("nonblank host identity"))
+        .await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text("second"))
-        .id("second-run")
+        .id(crate::TurnId::parse("second-run").expect("nonblank host identity"))
         .await?;
     let third = session
         .send(TurnInput::text("third"))
-        .id("third-run")
+        .id(crate::TurnId::parse("third-run").expect("nonblank host identity"))
         .await?;
     assert_eq!(third.run().await?, None, "no run has taken the input yet");
     third.pin().await?;
@@ -339,7 +345,7 @@ async fn an_empty_session_forks_before_and_after_a_config_command() -> Result<()
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("fork-empty")
+        .session(crate::SessionId::parse("fork-empty").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -421,7 +427,11 @@ async fn an_empty_session_forks_before_and_after_a_config_command() -> Result<()
     .await?;
 
     // Both forks are ordinary sessions: each runs its own first turn.
-    let branch = fixture.core.session("fork-empty-configured").open().await?;
+    let branch = fixture
+        .core
+        .session(crate::SessionId::parse("fork-empty-configured").expect("nonblank host identity"))
+        .open()
+        .await?;
     assert_eq!(
         branch
             .send(TurnInput::text("hello"))
@@ -440,22 +450,25 @@ async fn a_withdrawn_or_waiting_input_refuses_typed() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("fork-refused")
+        .session(crate::SessionId::parse("fork-refused").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
-    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
+    let running = session
+        .send(TurnInput::text(HELD))
+        .id(crate::TurnId::parse("held-run").expect("nonblank host identity"))
+        .await?;
     provider_called(&fixture, 1).await;
     let waiting = session
         .send(TurnInput::text("waits"))
-        .id("waiting-run")
+        .id(crate::TurnId::parse("waiting-run").expect("nonblank host identity"))
         .pin()
         .await?;
     let waiting_target = Target::Input(waiting.input_id().clone());
     let withdrawn = session
         .send(TurnInput::text("withdraw me"))
-        .id("withdrawn-run")
+        .id(crate::TurnId::parse("withdrawn-run").expect("nonblank host identity"))
         .pin()
         .await?;
     let withdrawn_target = Target::Input(withdrawn.input_id().clone());

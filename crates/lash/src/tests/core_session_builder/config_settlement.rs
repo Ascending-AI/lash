@@ -15,7 +15,12 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
         ))
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("parked-config").created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse("parked-config").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("establish head"))
         .output()

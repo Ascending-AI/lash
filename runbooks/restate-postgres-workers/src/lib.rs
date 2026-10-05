@@ -574,10 +574,6 @@ impl PluginFactory for E2ePluginFactory {
         "restate-postgres-workers-e2e"
     }
 
-    fn declaration(&self) -> lash::plugins::PluginDeclaration {
-        lash::plugins::PluginDeclaration::initial(self.id())
-    }
-
     #[expect(
         clippy::expect_used,
         reason = "the e2e button trigger source name/types are valid by the catalog grammar, \
@@ -622,6 +618,12 @@ impl PluginFactory for E2ePluginFactory {
             witness: self.witness.clone(),
             load: self.load.clone(),
         }))
+    }
+}
+
+impl lash::plugins::PluginDefinition for E2ePluginFactory {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial("restate-postgres-workers-e2e")
     }
 }
 

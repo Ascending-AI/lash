@@ -62,7 +62,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     ] {
         first_session
             .send(lash::TurnInput::text(text))
-            .id(turn_id)
+            .id(lash::TurnId::parse(turn_id).expect("nonblank host identity"))
             .require_finish()
             .expect("require finish")
             .output()
@@ -273,7 +273,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         .expect("open resumed session");
     resumed_session
         .send(lash::TurnInput::text("resume question three"))
-        .id("resume-turn-three")
+        .id(lash::TurnId::parse("resume-turn-three").expect("nonblank host identity"))
         .require_finish()
         .expect("require resumed finish")
         .output()

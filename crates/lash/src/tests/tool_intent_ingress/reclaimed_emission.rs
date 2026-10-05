@@ -14,7 +14,10 @@ use super::*;
 use lash_core::testing::{EffectLayer, LayeredEffectHost};
 
 fn ingress_of(core: &LashCore) -> Result<crate::tools::ToolIntentIngress> {
-    core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))
+    core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )
 }
 
 /// Stops the delivery once its emission's bind has committed, as a crash
@@ -184,7 +187,12 @@ async fn a_redelivered_emission_writes_no_reclaimed_row_back(
     .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
-    let _session = redelivery.session(SESSION).created().await.open().await?;
+    let _session = redelivery
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     for attempt in ["the redelivery", "a second redelivery"] {
         let outcome = ingress_of(&redelivery)?
             .submit(key.clone(), trigger_intent(&SessionId::from(SESSION)))

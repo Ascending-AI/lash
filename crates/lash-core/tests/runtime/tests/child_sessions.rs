@@ -522,15 +522,17 @@ impl lash_core::plugin::PluginFactory for MemoryProbeFactory {
         "root_only_memory_probe"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::plugin::PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
         Ok(Arc::new(MemoryProbePlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for MemoryProbeFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("root_only_memory_probe")
     }
 }
 
@@ -885,10 +887,6 @@ impl lash_core::plugin::PluginFactory for InheritingCapOwner {
         CAP_OWNER
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::plugin::PluginSessionContext,
@@ -901,6 +899,12 @@ impl lash_core::plugin::PluginFactory for InheritingCapOwner {
         registrar: &mut lash_core::ConfigRegistrar,
     ) -> Result<(), lash_core::ConfigRegistrationError> {
         registrar.owner(InheritingCapConfigOwner)
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for InheritingCapOwner {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(CAP_OWNER)
     }
 }
 

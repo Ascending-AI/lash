@@ -146,13 +146,19 @@ async fn a_reopen_runs_the_recorded_config_and_writes_nothing() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, backend, writes) = counting_core(Arc::clone(&captures)).await?;
     create_with_creation_spec(&core, "reopen-writes-nothing").await?;
-    let session = core.session("reopen-writes-nothing").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("reopen-writes-nothing").expect("nonblank host identity"))
+        .open()
+        .await?;
     session.send(TurnInput::text("commit")).output().await?;
     Box::pin(session.close()).await?;
     let before = recorded_config(&backend, "reopen-writes-nothing").await;
 
     writes.lock_recover().clear();
-    let reopened = core.session("reopen-writes-nothing").open().await?;
+    let reopened = core
+        .session(crate::SessionId::parse("reopen-writes-nothing").expect("nonblank host identity"))
+        .open()
+        .await?;
     assert_eq!(
         *writes.lock_recover(),
         Vec::<&str>::new(),
@@ -176,7 +182,12 @@ async fn a_profile_change_keeps_the_attachment_snapshot() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, backend, _writes) = counting_core(captures).await?;
     create_with_creation_spec(&core, "patch-keeps-attachments").await?;
-    let session = core.session("patch-keeps-attachments").open().await?;
+    let session = core
+        .session(
+            crate::SessionId::parse("patch-keeps-attachments").expect("nonblank host identity"),
+        )
+        .open()
+        .await?;
     let config = session.admin().config();
     config
         .configure(crate::config::ConfigTransaction::of(
@@ -225,7 +236,7 @@ async fn a_session_created_by_create_runs_its_first_engine_driven_turn_with_the_
     let durable = create_with_creation_spec(&core, "created-then-engine-driven").await?;
     durable
         .send(TurnInput::text("the engine opens this session first"))
-        .id("engine-driven-root")
+        .id(crate::TurnId::parse("engine-driven-root").expect("nonblank host identity"))
         .output()
         .await?;
     assert_request_uses_creation_config(&captures.lock_recover()[0]);

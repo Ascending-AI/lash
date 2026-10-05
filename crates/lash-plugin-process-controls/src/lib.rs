@@ -22,9 +22,36 @@ mod declarations;
 pub use declarations::{
     execute_process_emit_tool_call, execute_process_get_tool_call,
     execute_process_signal_tool_call, execute_process_start_tool_call,
+};
+use declarations::{
     process_emit_tool_definition, process_get_tool_definition, process_signal_tool_definition,
     process_start_tool_definition,
 };
+
+/// A process capability whose tool contract a host can inspect or grant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessControlTool {
+    Start,
+    List,
+    Await,
+    Signal,
+    Emit,
+    Get,
+    Cancel,
+}
+
+/// The canonical definition of one process-control tool.
+pub fn process_tool_definition(tool: ProcessControlTool) -> ToolDefinition {
+    match tool {
+        ProcessControlTool::Start => process_start_tool_definition(),
+        ProcessControlTool::List => process_list_tool_definition(),
+        ProcessControlTool::Await => process_await_tool_definition(),
+        ProcessControlTool::Signal => process_signal_tool_definition(),
+        ProcessControlTool::Emit => process_emit_tool_definition(),
+        ProcessControlTool::Get => process_get_tool_definition(),
+        ProcessControlTool::Cancel => process_cancel_tool_definition(),
+    }
+}
 
 /// Plugin factory for process-control tools.
 ///
@@ -71,7 +98,7 @@ impl SessionProcessAdminPluginFactory {
             PluginSpec::new().with_tool_provider(Arc::new(provider) as Arc<dyn ToolProvider>);
         Self {
             inner: StaticPluginFactory::new(
-                lash_core::plugin::PluginDeclaration::initial("processes"),
+                <Self as lash_core::plugin::PluginDefinition>::declaration(),
                 spec,
             ),
         }
@@ -83,12 +110,14 @@ impl PluginFactory for SessionProcessAdminPluginFactory {
         self.inner.id()
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        self.inner.declaration()
-    }
-
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         self.inner.build(ctx)
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for SessionProcessAdminPluginFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("processes")
     }
 }
 
@@ -181,7 +210,7 @@ pub(crate) fn done_without_intents(result: ToolOutcome) -> lash_core::ToolAttemp
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub fn process_list_tool_definition() -> ToolDefinition {
+fn process_list_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:list_process_handles",
         "list_process_handles",
@@ -246,7 +275,7 @@ fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinitio
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub fn process_await_tool_definition() -> ToolDefinition {
+fn process_await_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:await_process",
         "await_process",
@@ -277,7 +306,7 @@ pub fn process_await_tool_definition() -> ToolDefinition {
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub fn process_cancel_tool_definition() -> ToolDefinition {
+fn process_cancel_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:cancel_process",
         "cancel_process",

@@ -13,16 +13,16 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
             .build(crate::testing::runtime_lease_owner())
     };
     let core = build()?;
-    core.session("materialize-run")
+    core.session(crate::SessionId::parse("materialize-run").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
-    core.session("materialize-child")
+    core.session(crate::SessionId::parse("materialize-child").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec(),
             parent: Some("materialize-run".into()),
         })
         .await?;
-    core.session("materialize-stated")
+    core.session(crate::SessionId::parse("materialize-stated").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             parent: Some("materialize-run".into()),
             spec: mock_session_spec().plugin_options(
@@ -51,7 +51,10 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
             crate::rlm::RlmFinalAnswerFormat::Markdown,
         ),
     ] {
-        let session = core.session(id).open().await?;
+        let session = core
+            .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+            .open()
+            .await?;
         assert_eq!(
             session.rlm_config().unwrap().final_answer_format,
             Some(format)
@@ -77,7 +80,10 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
             crate::rlm::RlmFinalAnswerFormat::RawFinalValue,
         ),
     ] {
-        let session = cold.session(id).open().await?;
+        let session = cold
+            .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+            .open()
+            .await?;
         assert_eq!(
             session.rlm_config().unwrap().final_answer_format,
             Some(format)
@@ -96,7 +102,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
         "two plugin-owned engines of one kind must be refused"
     );
     let bad = cold
-        .session("materialize-refused")
+        .session(crate::SessionId::parse("materialize-refused").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             parent: Some("materialize-run".into()),
             spec: mock_session_spec().plugin_options(
@@ -110,7 +116,11 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
         .await;
     assert!(bad.is_err(), "unknown creation options must be refused");
     assert!(matches!(
-        cold.session("materialize-refused").open().await,
+        cold.session(
+            crate::SessionId::parse("materialize-refused").expect("nonblank host identity")
+        )
+        .open()
+        .await,
         Err(EmbedError::UnknownSession { .. })
     ));
     Ok(())
@@ -167,14 +177,14 @@ async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<(
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("per-call-evidence")
+        .session(crate::SessionId::parse("per-call-evidence").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
     let output = session
         .send(TurnInput::text("use both served models"))
-        .id("evidence-run")
+        .id(crate::TurnId::parse("evidence-run").expect("nonblank host identity"))
         .output()
         .await?;
     let calls = &output.result.llm_calls;
@@ -298,18 +308,24 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
     let id = "owner-operation-matrix";
     let spec = session_spec_for(&llm_profile_spec("owner-model", None, 200_000));
     source
-        .session(id)
+        .session(crate::SessionId::parse(id).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(spec.clone()))
         .await?;
     receiving
-        .session(id)
+        .session(crate::SessionId::parse(id).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(spec))
         .await?;
-    let session = source.session(id).open().await?;
-    let receiving_session = receiving.session(id).open().await?;
+    let session = source
+        .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+        .open()
+        .await?;
+    let receiving_session = receiving
+        .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+        .open()
+        .await?;
     let receiving_output = receiving_session
         .send(TurnInput::text("receiving-row"))
-        .id("receiving-run")
+        .id(crate::TurnId::parse("receiving-run").expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(
@@ -472,7 +488,7 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
     let sent = resumed
         .durable()
         .send(TurnInput::text("shift the original catalog"))
-        .id("source-shift")
+        .id(crate::TurnId::parse("source-shift").expect("nonblank host identity"))
         .await?;
     let output = sent.output().await?;
     assert_eq!(output.assistant_message(), Some("receiving-answer"));

@@ -388,7 +388,7 @@ fn core(harness: &Harness) -> lash::LashCore {
 }
 
 async fn put(core: &lash::LashCore, harness: &Harness) -> lash_core::AttachmentRef {
-    core.session("attachment-upload")
+    core.session(lash::SessionId::parse("attachment-upload").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "attachment-delivery",
             lash::TurnBudget::Unbounded,

@@ -839,13 +839,6 @@ impl lash_core_execution::facade_support::PluginFactory for WindowPlugin {
         PLUGIN
     }
 
-    fn declaration(&self) -> lash_core_execution::plugin::PluginDeclaration {
-        let mut declaration = lash_core_execution::plugin::PluginDeclaration::initial(PLUGIN);
-        declaration.format_version = version(2);
-        declaration.writable_formats = vec![version(1), version(2)];
-        declaration
-    }
-
     fn migrate_format(
         &self,
         _from: FormatVersion,
@@ -870,10 +863,20 @@ impl lash_core_execution::facade_support::PluginFactory for WindowPlugin {
     ) -> Result<Arc<dyn lash_core_execution::plugin::SessionPlugin>, lash_core_execution::PluginError>
     {
         lash_core_execution::plugin::StaticPluginFactory::new(
-            self.declaration(),
+            lash_core_execution::plugin::PluginMetadata::plugin_declaration(self),
             lash_core_execution::plugin::PluginSpec::new(),
         )
         .build(ctx)
+    }
+}
+
+#[cfg(feature = "synthetic-next")]
+impl lash_core_execution::plugin::PluginDefinition for WindowPlugin {
+    fn declaration() -> lash_core_execution::plugin::PluginDeclaration {
+        let mut declaration = lash_core_execution::plugin::PluginDeclaration::initial(PLUGIN);
+        declaration.format_version = version(2);
+        declaration.writable_formats = vec![version(1), version(2)];
+        declaration
     }
 }
 

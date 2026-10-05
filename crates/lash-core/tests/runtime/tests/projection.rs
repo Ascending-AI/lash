@@ -26,10 +26,6 @@ impl lash_core::facade_support::PluginFactory for AppendRollbackProtocolFactory 
         "test_protocol"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -41,6 +37,12 @@ impl lash_core::facade_support::PluginFactory for AppendRollbackProtocolFactory 
             fail_restore: Arc::clone(&self.fail_restore),
             advance_store_head: self.advance_store_head,
         }))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for AppendRollbackProtocolFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("test_protocol")
     }
 }
 

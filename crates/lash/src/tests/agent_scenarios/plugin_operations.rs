@@ -49,7 +49,9 @@ fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
             )))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("operation-run-follow")
+            .session(
+                crate::SessionId::parse("operation-run-follow").expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -72,7 +74,7 @@ fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
         };
         let result = tokio::time::timeout(
             Duration::from_secs(2),
-            session.run(operation.run_id()).outcome(),
+            session.run(operation.run_id().into()).outcome(),
         )
         .await
         .expect("a completed operation Run must answer its follower")?;
@@ -93,7 +95,11 @@ fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
         let durable = session.durable();
         drop(session);
         assert_eq!(
-            durable.run(operation.run_id()).result().await?.output,
+            durable
+                .run(operation.run_id().into())
+                .result()
+                .await?
+                .output,
             serde_json::json!("terminal")
         );
         Ok(())
@@ -135,7 +141,9 @@ fn operation_run_cancel_does_not_infect_a_fresh_operation() -> Result<()> {
             )))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("operation-run-cancel")
+            .session(
+                crate::SessionId::parse("operation-run-cancel").expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -223,18 +231,21 @@ fn a_session_lifetime_process_survives_operation_completion() -> Result<()> {
             )))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("operation-session-process")
+            .session(
+                crate::SessionId::parse("operation-session-process")
+                    .expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
             .await?;
         let run = session
             .plugin_operations()
-            .start_task::<Task>(String::new(), "start")
+            .start_task_raw(Task::NAME, serde_json::json!(""), "start")
             .await?;
         let operation = lash_core::tool_run::OperationRun::for_run_id(
             SessionId::from("operation-session-process"),
-            run.run(),
+            run.run().stored(),
         )
         .unwrap();
         let result = run.result().await?;
@@ -444,7 +455,9 @@ fn plugin_operation_failure_reaches_the_facade_as_a_typed_settlement() -> Result
             )))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("typed-plugin-settlement")
+            .session(
+                crate::SessionId::parse("typed-plugin-settlement").expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -615,7 +628,9 @@ fn agent_scenario_plugin_reserved_source_key_refusal_is_typed() -> Result<()> {
             )))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("reserved-plugin-keys")
+            .session(
+                crate::SessionId::parse("reserved-plugin-keys").expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -686,7 +701,12 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             .build(crate::testing::runtime_lease_owner())?;
         // Queries read an already published plugin view; creation leaves it
         // cold until an engine admission publishes that view.
-        let initializing = core.session("plugin-accept").created().await.open().await?;
+        let initializing = core
+            .session(crate::SessionId::parse("plugin-accept").expect("nonblank host identity"))
+            .created()
+            .await
+            .open()
+            .await?;
         let admission = initializing
             .admin()
             .commands()
@@ -699,7 +719,10 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             .await?;
         initializing.admin().commands().settle(admission).await?;
         drop(initializing);
-        let session = core.session("plugin-accept").open().await?;
+        let session = core
+            .session(crate::SessionId::parse("plugin-accept").expect("nonblank host identity"))
+            .open()
+            .await?;
         let ops = session.plugin_operations();
         let probe = || "cobalt-583".to_string();
         let before = session.admin().state().persist_current().await?;
@@ -806,6 +829,110 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             "writer released after the cancelled settlement"
         );
         super::transcript::assert_typed_checkpoint_transcript(&writes.events());
+        Ok(())
+    })
+}
+
+/// FIG-5020 / Q2 / L03: start_task selects the host's output and error codecs;
+/// its result retains receipt evidence and the complete typed failure cause.
+#[test]
+fn task_run_result_decodes_output_and_declared_error() -> Result<()> {
+    run_async_test_on_stack_budget("typed-task-result", || async {
+        let spec = lash_core::facade_support::PluginSpec::new()
+            .with_plugin_task_typed::<Task, _, _>(|_, args| async move {
+                if args == "fail" {
+                    return Err(String::from("quota:17"));
+                }
+                Ok(outcome(args, "typed"))
+            });
+        let double = restate_double(SEED).await;
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(Arc::new(StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("accept"),
+                spec,
+            )))
+            .build(crate::testing::runtime_lease_owner())?;
+        let session = core
+            .session(crate::SessionId::parse("typed-task-result").expect("nonblank host identity"))
+            .created()
+            .await
+            .open()
+            .await?;
+        let task = session
+            .plugin_operations()
+            .start_task::<Task>("value".into(), "typed-success")
+            .await?;
+        let result: crate::plugins::PluginOperationReceipt<String> = task.result().await?;
+        assert_eq!(result.output, "value");
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(result.events[0].plugin_id, "accept");
+        assert!(
+            matches!(&result.events[0].value, PluginRuntimeEvent::Status { detail: Some(detail), .. } if detail == "value")
+        );
+        assert!(result.pending_turn_inputs.is_empty());
+        // A host with an unrecognized codec keeps the registered operation's
+        // original envelope; it never guesses at its type or version.
+        struct UnknownCodec;
+        impl PluginOperation for UnknownCodec {
+            const NAME: &'static str = Task::NAME;
+            const DESCRIPTION: &'static str = "Unknown host error codec";
+            const SESSION_PARAM: SessionParam = SessionParam::Required;
+            type Args = String;
+            type Output = String;
+            type Error = String;
+            const ERROR_TYPE: &'static str = "future.accept.task";
+            const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+            fn error_class(_: &Self::Error) -> crate::plugins::PluginFailureClass {
+                crate::plugins::PluginFailureClass::Terminal
+            }
+        }
+        impl PluginTask for UnknownCodec {}
+        let unknown = session
+            .plugin_operations()
+            .start_task::<UnknownCodec>("fail".into(), "unknown-codec")
+            .await?;
+        match unknown.result().await.unwrap_err() {
+            crate::admin::PluginTaskResultError::Host(error) => match *error {
+                EmbedError::Control(crate::plugins::PluginOperationInvokeError::Failed(
+                    failure,
+                )) => {
+                    assert_eq!(failure.error_type, Task::ERROR_TYPE);
+                    assert_eq!(failure.payload, serde_json::json!("quota:17"));
+                    assert_eq!(Task::decode_error(*failure).unwrap(), "quota:17");
+                }
+                other => panic!("unknown codecs retain the original failure: {other:?}"),
+            },
+            other => panic!("an unknown error codec cannot decode: {other:?}"),
+        }
+        let task = session
+            .plugin_operations()
+            .start_task::<Task>("fail".into(), "typed-failure")
+            .await?;
+        let run = task.run().clone();
+        match task.result().await.unwrap_err() {
+            crate::admin::PluginTaskResultError::Failed { error, failure } => {
+                assert_eq!(error, "quota:17");
+                assert_eq!(failure.class, crate::plugins::PluginFailureClass::Terminal);
+                assert_eq!(Task::decode_error(*failure.clone()).unwrap(), error);
+                assert_eq!(failure.origin.as_ref().unwrap().operation, Task::NAME);
+                let durable = session.durable();
+                drop(session);
+                // A raw reattachment retains the complete envelope and its codec
+                // identity, including after the live session has gone away.
+                match durable.run(run).result().await.unwrap_err() {
+                    crate::admin::PluginTaskResultError::Failed {
+                        error: raw,
+                        failure: retained,
+                    } => {
+                        assert_eq!(raw, *failure);
+                        assert_eq!(retained, failure);
+                    }
+                    other => panic!("raw task failure must retain its envelope: {other:?}"),
+                }
+            }
+            other => panic!("a typed task must decode its declared error: {other:?}"),
+        }
         Ok(())
     })
 }

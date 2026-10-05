@@ -169,10 +169,6 @@ impl PluginFactory for LoadSurfaceFactory {
         "load-behavior-replay"
     }
 
-    fn declaration(&self) -> lash::plugins::PluginDeclaration {
-        lash::plugins::PluginDeclaration::initial(self.id())
-    }
-
     fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
         let mut resources = lash::rlm::LashlangHostCatalog::new();
         behavior::register_source(&mut resources).unwrap();
@@ -194,6 +190,12 @@ impl PluginFactory for LoadSurfaceFactory {
         _ctx: &PluginSessionContext,
     ) -> Result<Arc<dyn SessionPlugin>, lash::plugins::PluginError> {
         Ok(Arc::new(LoadSurface))
+    }
+}
+
+impl lash::plugins::PluginDefinition for LoadSurfaceFactory {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial("load-behavior-replay")
     }
 }
 

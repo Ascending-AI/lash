@@ -189,7 +189,7 @@ pub(crate) use process::{
     LashProcessWorkflow, LashProcessWorkflowImpl, RestateCoreProcessRunner, RestateProcessRunner,
 };
 pub(crate) use services::LashService;
-pub use services::{RestateNamespace, RestateNamespaceError};
+pub use services::{RestateNamespace, RestateNamespaceError, RestateServiceNameError};
 
 /// The wall clock a journaled wait request converts its deadline on when the
 /// invoking path carries no configured clock: a host-side await API has no

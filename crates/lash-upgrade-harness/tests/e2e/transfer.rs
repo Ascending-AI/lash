@@ -43,7 +43,7 @@ async fn s13_owned_work_refuses_operator_retirement_sqlite_memory() -> Result<()
     let session = core.session(session_id.clone()).open().await?;
     let handle = session
         .send(lash::TurnInput::text("keep the old deployment pinned"))
-        .id("s13-pinned-input")
+        .id(lash::TurnId::parse("s13-pinned-input").expect("nonblank host identity"))
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(10), double.server().settle()).await?;
     let run = handle

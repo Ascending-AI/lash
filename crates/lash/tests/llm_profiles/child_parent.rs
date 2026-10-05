@@ -9,10 +9,6 @@ impl lash_core::facade_support::PluginFactory for ChildParentProbe {
         "fig4669-parent-probe"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         context: &lash_core::facade_support::PluginSessionContext,
@@ -22,10 +18,16 @@ impl lash_core::facade_support::PluginFactory for ChildParentProbe {
             .expect("observations")
             .push((context.owner.clone(), context.parent_session_id.clone()));
         lash_core::plugin::StaticPluginFactory::new(
-            self.declaration(),
+            lash_core::plugin::PluginMetadata::plugin_declaration(self),
             lash_core::facade_support::PluginSpec::new(),
         )
         .build(context)
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for ChildParentProbe {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("fig4669-parent-probe")
     }
 }
 

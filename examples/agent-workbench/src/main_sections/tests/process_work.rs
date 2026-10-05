@@ -87,7 +87,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
             )
             .with_extra_event_types([lash::process::ProcessEventType {
                 name: "progress".to_string(),
-                payload_schema: lash::triggers::JsonSchema::any(),
+                payload_schema: lash::schema::JsonSchema::any(),
                 semantics: Default::default(),
             }]),
         )
@@ -437,7 +437,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     .with_execution_env_ref(Some(execution_env_ref.clone()))
     .with_extra_event_types([ProcessEventType {
         name: "progress".to_string(),
-        payload_schema: lash::triggers::JsonSchema::any(),
+        payload_schema: lash::schema::JsonSchema::any(),
         semantics: Default::default(),
     }])
     .with_wake_session_id(Some(SessionId::from("session-finance")));

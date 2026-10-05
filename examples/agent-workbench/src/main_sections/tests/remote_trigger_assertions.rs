@@ -114,7 +114,7 @@ pub(crate) async fn assert_remote_started_process_surface(
 
     let snapshot = core
         .processes()
-        .session_snapshot(session_id)
+        .session_snapshot(session_id.clone())
         .await
         .expect("capture process work snapshot for remote DTO round trip");
     let remote_snapshot = lash::remote::processes::RemoteProcessWorkSnapshot::try_from(snapshot)

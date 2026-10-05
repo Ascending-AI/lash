@@ -25,7 +25,7 @@ pub fn turn_handler_error(err: lash::EmbedError) -> restate_sdk::errors::Handler
 pub async fn journaled_session<'ctx, C>(
     ctx: &C,
     core: &lash::LashCore,
-    session_id: impl Into<lash::SessionId>,
+    session_id: lash::SessionId,
 ) -> restate_sdk::errors::HandlerResult<lash::DurableSession>
 where
     C: lash::restate::RestateControllerContext<'ctx>,

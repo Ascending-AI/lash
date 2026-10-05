@@ -303,7 +303,7 @@ timeout_seconds = 180
 # port an earlier law's registered deployment still names from being handed
 # to the next law.
 [suites.mcp-catalog]
-label = "//crates/lash:integration__test__fv_42c78c40"
+label = "//crates/lash:integration__test__fv_396cc7df"
 cwd = "crates/lash"
 filters = [
   "mcp_catalog::catalog_storm_native_sqlite_memory_turn_witness",
@@ -321,7 +321,7 @@ MCP_CATALOG_ENDPOINTS_FILE = "{LASH_RESTATE_SUITE_ARTIFACTS}/native-endpoints-{s
 # The same witnesses over PostgreSQL (FIG-4781): the matrix runner's pg16
 # wrapper provides the database each law isolates for itself.
 [suites.mcp-catalog-postgres]
-label = "//crates/lash:integration__test__fv_42c78c40"
+label = "//crates/lash:integration__test__fv_396cc7df"
 cwd = "crates/lash"
 filters = [
   "mcp_catalog::catalog_storm_native_postgres_turn_witness",

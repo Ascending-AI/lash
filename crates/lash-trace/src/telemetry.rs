@@ -1096,6 +1096,24 @@ impl TraceRecordIdentity {
 }
 
 impl crate::TraceRecord {
+    /// Emit a host-owned live record. Each call mints an independent attempt
+    /// identity and stamps the host's current UTC time; durable facts use
+    /// [`Self::identified`] with their retained identity and timestamp.
+    pub fn host_owned(
+        context: crate::TraceContext,
+        event: crate::TraceEvent,
+    ) -> Result<Self, serde_json::Error> {
+        Self::identified(
+            &TraceRecordIdentity::UnscopedLive {
+                attempt: TraceAttemptId::new(uuid::Uuid::new_v4().to_string()),
+                ordinal: 0,
+            },
+            context,
+            event,
+            chrono::Utc::now(),
+        )
+    }
+
     /// A record whose id is its [`TraceRecordIdentity`] and whose timestamp is
     /// the retained time of the fact it reports, so reconstructing the fact
     /// rebuilds the same record.

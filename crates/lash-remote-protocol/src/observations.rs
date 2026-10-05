@@ -211,6 +211,14 @@ pub struct RemoteProcessObservationRequest {
 }
 
 impl RemoteProcessObservationRequest {
+    /// Observe one process from the start; assign `cursor` to resume.
+    pub fn new(process_id: ProcessId) -> Self {
+        Self {
+            process_id,
+            cursor: None,
+        }
+    }
+
     pub fn encode_json(
         &self,
         negotiated: &crate::Negotiated,

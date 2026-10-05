@@ -34,10 +34,10 @@ note: required by a bound in `SessionSpec::new`
    |                     ^^^^^^^^^^^^^^^^^^^ required by this bound in `SessionSpec::new`
 
 error[E0599]: no method named `provider` found for struct `SessionBuilder` in the current scope
-  --> tests/ui/llm_profiles_are_selected_by_key.rs:22:35
+  --> tests/ui/llm_profiles_are_selected_by_key.rs:22:92
    |
-22 |     let _ = core.session("keyed").provider(provider);
-   |                                   ^^^^^^^^ method not found in `SessionBuilder`
+22 |     let _ = core.session(lash::SessionId::parse("keyed").expect("nonblank host identity")).provider(provider);
+   |                                                                                            ^^^^^^^^ method not found in `SessionBuilder`
 
 error[E0599]: no method named `provider_id` found for struct `SendBuilder` in the current scope
   --> tests/ui/llm_profiles_are_selected_by_key.rs:26:21

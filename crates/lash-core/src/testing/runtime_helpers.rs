@@ -1056,15 +1056,17 @@ impl crate::PluginFactory for RuntimeTestPluginFactory {
         "runtime-test"
     }
 
-    fn declaration(&self) -> crate::plugin::PluginDeclaration {
-        crate::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         ctx: &crate::PluginSessionContext,
     ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
         (self.build)(ctx)
+    }
+}
+
+impl crate::plugin::PluginDefinition for RuntimeTestPluginFactory {
+    fn declaration() -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial("runtime-test")
     }
 }
 

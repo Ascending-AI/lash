@@ -240,11 +240,10 @@ impl crate::LashCore {
     /// and never call this front door.
     pub fn tool_intents(
         &self,
-        session_id: impl Into<SessionId>,
+        session_id: SessionId,
         scope: lash_core::ExecutionScope,
     ) -> crate::Result<ToolIntentIngress> {
         scope.validate().map_err(lash_core::RuntimeError::from)?;
-        let session_id = session_id.into();
         if let Some(scoped_session) = scope.session_id()
             && scoped_session != session_id
         {
@@ -283,16 +282,15 @@ impl ToolIntentIngress {
     /// redelivery under another context is the same submission and keeps
     /// the first one.
     pub fn trace_context(mut self, context: lash_core::TraceCarrier) -> Self {
-        self.trace = crate::send::SendTraceContext::Captured(Some(context));
+        self.trace.set_context(context);
         self
     }
 
     /// Snapshot the caller's current trace context now, through the core's
     /// telemetry adapter, instead of when each submission is made.
     pub fn capture_trace_context(mut self) -> Self {
-        self.trace = crate::send::SendTraceContext::Captured(
-            self.core.env.core.tracing.scopes().capture_current(),
-        );
+        self.trace
+            .capture(|| self.core.env.core.tracing.scopes().capture_current());
         self
     }
 

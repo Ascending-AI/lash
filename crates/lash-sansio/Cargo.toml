@@ -21,6 +21,8 @@ workspace = true
 
 [features]
 default = []
+# Validated literal identities for fixtures only.
+testing = []
 # Compile JSON Schema validators for tool inputs and process payloads.
 schema-validation = []
 # Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the

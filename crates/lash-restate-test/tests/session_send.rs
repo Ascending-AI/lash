@@ -202,7 +202,7 @@ async fn each_response_is_journaled_once_at_the_payload_buckets() {
             .expect("session");
         let handle = session
             .send(lash::TurnInput::text("answer with the payload"))
-            .id("payload-run")
+            .id(lash::TurnId::parse("payload-run").expect("nonblank host identity"))
             .await
             .expect("send");
         let receipt = handle.receipt().clone();
@@ -307,7 +307,7 @@ async fn digest_references_survive_a_cold_reopen_without_rebuying_the_completion
     let session_id = SessionId::from("cold-journal-payload");
     let handle = session
         .send(lash::TurnInput::text("answer"))
-        .id("cold-payload-run")
+        .id(lash::TurnId::parse("cold-payload-run").expect("nonblank host identity"))
         .await
         .expect("send");
     let receipt = handle.receipt().clone();
@@ -835,9 +835,9 @@ async fn a_dropped_child_turn_leaves_the_child_session_reusable() {
         .await
         .expect("open the parent");
     let first = {
-        core.session("dropped-child")
+        core.session(lash::SessionId::parse("dropped-child").expect("nonblank host identity"))
             .create(lash::SessionCreation::child_of(
-                "dropped-child-parent",
+                lash::SessionId::parse("dropped-child-parent").expect("nonblank host identity"),
                 lash::SessionSpec::new(
                     "mock-model",
                     lash::TurnBudget::Unbounded,
@@ -847,7 +847,7 @@ async fn a_dropped_child_turn_leaves_the_child_session_reusable() {
             .await
             .expect("create the child");
         let child = core
-            .session("dropped-child")
+            .session(lash::SessionId::parse("dropped-child").expect("nonblank host identity"))
             .open()
             .await
             .expect("open the child");

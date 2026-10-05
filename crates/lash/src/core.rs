@@ -385,8 +385,14 @@ impl LashCore {
         &self,
         after: lash_core::store::TurnChangeCursor,
         limit: std::num::NonZeroUsize,
-    ) -> Result<lash_core::store::TurnChangePage> {
-        Ok(self.store_factory.turns_changed_since(after, limit).await?)
+    ) -> Result<crate::ChangePage<lash_core::store::TurnChange, lash_core::store::TurnChangeCursor>>
+    {
+        let page = self.store_factory.turns_changed_since(after, limit).await?;
+        Ok(crate::ChangePage {
+            changes: page.changes,
+            next: page.next,
+            retained_after: Some(page.retained_after),
+        })
     }
 
     /// The standing session faults after session `after`, in session-id
@@ -400,8 +406,18 @@ impl LashCore {
         &self,
         after: Option<&lash_core::SessionId>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core::store::SessionFault>> {
-        Ok(self.store_factory.list_session_faults(after, limit).await?)
+    ) -> Result<crate::ChangePage<lash_core::store::SessionFault, Option<lash_core::SessionId>>>
+    {
+        let changes = self.store_factory.list_session_faults(after, limit).await?;
+        let next = changes
+            .last()
+            .map(|fault| fault.session_id.clone())
+            .or_else(|| after.cloned());
+        Ok(crate::ChangePage {
+            changes,
+            next,
+            retained_after: None,
+        })
     }
 
     /// Clear `session_id`'s fault once its stored data is repaired (ADR 0109
@@ -458,10 +474,10 @@ impl LashCore {
         LashCore::builder(backend).protocol_plugin(Arc::new(factory))
     }
 
-    pub fn session(&self, session_id: impl Into<SessionId>) -> SessionBuilder {
+    pub fn session(&self, session_id: SessionId) -> SessionBuilder {
         SessionBuilder {
             core: self.clone(),
-            session_id: session_id.into(),
+            session_id,
 
             tool_source_policy: None,
             tool_surface_open_mode: None,
@@ -846,11 +862,9 @@ pub struct LashCoreBuilder {
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     // Core fields applied over the config the backend's ports assemble.
     trace_runtime: Option<lash_core::runtime::TraceRuntime>,
-    trace_sinks: Vec<Arc<dyn lash_trace::TraceSink>>,
+    trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     #[cfg(feature = "otel-trace")]
     telemetry: Option<lash_trace::otel::OtelTelemetry>,
-    #[cfg(feature = "otel-trace")]
-    duplicate_telemetry: bool,
     trace_level: Option<lash_trace::TraceLevel>,
     trace_context: Option<lash_trace::TraceContext>,
     termination: Option<TerminationPolicy>,
@@ -881,11 +895,9 @@ impl LashCoreBuilder {
             output_retention: None,
             process_wake_delivery_policy: None,
             trace_runtime: None,
-            trace_sinks: Vec::new(),
+            trace_sink: None,
             #[cfg(feature = "otel-trace")]
             telemetry: None,
-            #[cfg(feature = "otel-trace")]
-            duplicate_telemetry: false,
             trace_level: None,
             trace_context: None,
             termination: None,
@@ -1049,23 +1061,22 @@ impl LashCoreBuilder {
     }
 
     /// Installs the runtime's single admission, projection and metrics adapter.
-    /// A second installation is refused when the core is built.
+    /// Replaces the previously configured adapter.
     #[cfg(feature = "otel-trace")]
     pub fn telemetry(mut self, telemetry: lash_trace::otel::OtelTelemetry) -> Self {
-        if self.telemetry.replace(telemetry).is_some() {
-            self.duplicate_telemetry = true;
-        }
+        self.telemetry = Some(telemetry);
         self
     }
 
+    /// Set the record sink, replacing sinks or paths configured through this builder.
     pub fn trace_sink(mut self, trace_sink: Arc<dyn lash_trace::TraceSink>) -> Self {
-        self.trace_sinks.push(trace_sink);
+        self.trace_sink = Some(trace_sink);
         self
     }
 
+    /// Set a JSONL record sink, replacing sinks or paths configured through this builder.
     pub fn trace_jsonl_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.trace_sinks
-            .push(Arc::new(lash_trace::JsonlTraceSink::new(path.into())));
+        self.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path.into())));
         self
     }
 
@@ -1153,10 +1164,6 @@ impl LashCoreBuilder {
     /// The owner id is stable for the worker or process and never scoped to a
     /// turn. The incarnation id changes once per process boot.
     pub fn build(mut self, shift_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
-        #[cfg(feature = "otel-trace")]
-        if self.duplicate_telemetry {
-            return Err(EmbedError::DuplicateTelemetry);
-        }
         let protocol_factory = self
             .protocol_factory
             .clone()

@@ -1794,7 +1794,7 @@ features = ["__rustls", "__rustls-aws-lc-rs", "__tls", "http2", "json", "query",
 package = "restate-sdk"
 version = "=0.12.1"
 git = "https://github.com/SamGalanakis/sdk-rust"
-rev = "8cf1b6982a5b0b5ed1bd1027b853e8cc0f7324f4"
+rev = "c74a7bb43b858462061237d7bb2ab88b2210a688"
 default-features = false
 features = ["http_server", "hyper"]
 
@@ -1802,7 +1802,7 @@ features = ["http_server", "hyper"]
 package = "restate-sdk-macros"
 version = "=0.12.1"
 git = "https://github.com/SamGalanakis/sdk-rust"
-rev = "8cf1b6982a5b0b5ed1bd1027b853e8cc0f7324f4"
+rev = "c74a7bb43b858462061237d7bb2ab88b2210a688"
 default-features = false
 features = []
 

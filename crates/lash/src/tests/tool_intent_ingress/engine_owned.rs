@@ -16,7 +16,10 @@ async fn recording_ingress_core() -> Result<(LashCore, Arc<dyn ProcessRegistry>,
 }
 
 fn ingress_of(core: &LashCore) -> Result<crate::tools::ToolIntentIngress> {
-    core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))
+    core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )
 }
 
 /// The outcome the durable submission ledger retains for `identity`, read by

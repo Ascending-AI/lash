@@ -132,7 +132,12 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("cancelled-config-before-ask");
-    let session = core.session(&session_id).created().await.open().await?;
+    let session = core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
     let store = lash_core::runtime::live_session_view(&core.store_factory, &session_id)
         .await?
         .expect("open session store");

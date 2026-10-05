@@ -21,7 +21,7 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
         .plugin(Arc::new(SurfacePluginFactory))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("plugin-surface")
+        .session(crate::SessionId::parse("plugin-surface").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -59,7 +59,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("persisted-tools")
+        .session(crate::SessionId::parse("persisted-tools").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -93,7 +93,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = reopened_core
-        .session("persisted-tools")
+        .session(crate::SessionId::parse("persisted-tools").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -169,7 +169,9 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
         .tools(Arc::new(LongTextTools))
         .build(crate::testing::runtime_lease_owner())?;
         let standard_session = standard_core
-            .session("standard-projection")
+            .session(
+                crate::SessionId::parse("standard-projection").expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -212,7 +214,7 @@ finish("done");"#,
                 .tools(Arc::new(LongTextTools))
                 .build(crate::testing::runtime_lease_owner())?;
             let rlm_session = rlm_core
-                .session("rlm-projection")
+                .session(crate::SessionId::parse("rlm-projection").expect("nonblank host identity"))
                 .created()
                 .await
                 .open()
@@ -305,7 +307,12 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
         .plugin(Arc::new(SurfacePluginFactory))
         .build(crate::testing::runtime_lease_owner())?;
     let id = "builder-sentinels";
-    let mut session = core.session(id).created().await.open().await?;
+    let mut session = core
+        .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     for turn in 0..3 {
         let events = RecordingEvents::default();
         session
@@ -331,7 +338,10 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
             session = core.resume(session.park().await?).await?;
         } else if turn == 1 {
             session.close().await?;
-            session = core.session(id).open().await?;
+            session = core
+                .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+                .open()
+                .await?;
         }
     }
     session.close().await?;

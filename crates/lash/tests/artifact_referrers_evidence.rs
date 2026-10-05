@@ -758,7 +758,11 @@ async fn a_pressure_seed_carries_its_module_into_the_new_frame(backend: Backend)
 
     let reopened = rlm_core_with_plugins(double, responses, vec![hook]);
     serve_processes(double, &reopened);
-    let session = reopened.session(session_id).open().await.expect("reopen");
+    let session = reopened
+        .session(lash::SessionId::parse(session_id).expect("nonblank host identity"))
+        .open()
+        .await
+        .expect("reopen");
     let result = session
         .send(TurnInput::text("run it after a reopen"))
         .output()
@@ -794,7 +798,10 @@ async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
     // The session is resident from its current frame (ADR 0112), so the
     // initial frame is read back through the history pages.
     let history = core
-        .session("artifact-referrers-first-switch")
+        .session(
+            lash::SessionId::parse("artifact-referrers-first-switch")
+                .expect("nonblank host identity"),
+        )
         .durable()
         .await
         .expect("durable session")

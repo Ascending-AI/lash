@@ -133,7 +133,7 @@ async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_
         Some(protocol.clone()),
     );
     let session = core
-        .session("direct-before-llm")
+        .session(crate::SessionId::parse("direct-before-llm").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -205,11 +205,16 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_run_is_cancelled() -> 
         counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
         Some(protocol.clone()),
     );
-    let session = core.session(SESSION).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
 
     let handle = session
         .send(TurnInput::text(STRANDED_WORDS))
-        .id("parked-turn")
+        .id(crate::TurnId::parse("parked-turn").expect("nonblank host identity"))
         .await?;
     let input_id = handle.input_id().clone();
     let first = tokio::time::timeout(std::time::Duration::from_secs(30), handle.outcome())
@@ -217,7 +222,9 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_run_is_cancelled() -> 
         .expect("the first send answers its park")?;
     let reobserved = tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        session.run("parked-turn").outcome(),
+        session
+            .run(crate::RunId::parse("parked-turn").unwrap())
+            .outcome(),
     )
     .await
     .expect("the run handle observes the same park")?;
@@ -305,7 +312,12 @@ async fn a_send_receipt_withdraws_input_before_shift() -> Result<()> {
             mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     // The engine executes a send as soon as it is accepted. Hold the session's
     // shift so nothing claims the input before the withdraw below: the
     // withdraw is never a claim race.
@@ -314,7 +326,7 @@ async fn a_send_receipt_withdraws_input_before_shift() -> Result<()> {
 
     let handle = session
         .send(TurnInput::text(STRANDED_WORDS))
-        .id("withdrawn-turn")
+        .id(crate::TurnId::parse("withdrawn-turn").expect("nonblank host identity"))
         .await?;
     let receipt = handle.receipt().clone();
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
@@ -369,7 +381,7 @@ async fn cancellation_still_settles_stopped_cancelled() -> Result<()> {
         .into_handle();
     let core = backend.core(provider, None);
     let session = core
-        .session("direct-cancelled")
+        .session(crate::SessionId::parse("direct-cancelled").expect("nonblank host identity"))
         .created()
         .await
         .open()

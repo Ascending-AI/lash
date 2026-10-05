@@ -112,15 +112,17 @@ impl crate::plugin::PluginFactory for DriftNote {
         "conformance-model-drift-note"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(crate::plugin::PluginFactory::id(self))
-    }
-
     fn build(
         &self,
         _: &crate::plugin::PluginSessionContext,
     ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, lash_core::PluginError> {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl crate::plugin::PluginDefinition for DriftNote {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("conformance-model-drift-note")
     }
 }
 

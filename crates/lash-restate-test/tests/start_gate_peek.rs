@@ -122,7 +122,7 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
     }
     let handle = session
         .send(lash::TurnInput::text("answer once"))
-        .id("turn-1")
+        .id(lash::TurnId::parse("turn-1").expect("nonblank host identity"))
         .await
         .expect("accept the turn input");
     let request = lash_core::shift::ingress_shift_request(
@@ -263,7 +263,7 @@ async fn an_answered_turn_peeks_its_gate_in_one_shared_read_and_publishes_one_wa
         .expect("open the session");
     let handle = session
         .send(lash::TurnInput::text("answer once"))
-        .id("turn-1")
+        .id(lash::TurnId::parse("turn-1").expect("nonblank host identity"))
         .await
         .expect("accept the turn input");
     let request = lash_core::shift::ingress_shift_request(

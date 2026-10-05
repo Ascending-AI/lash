@@ -173,10 +173,6 @@ impl lash_core::facade_support::PluginFactory for ProbeFactory {
         PROBE
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         ctx: &lash_core::facade_support::PluginSessionContext,
@@ -212,6 +208,12 @@ impl lash_core::facade_support::PluginFactory for ProbeFactory {
                 output: recorded.turn_cap,
             })
         })
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for ProbeFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(PROBE)
     }
 }
 
@@ -278,7 +280,7 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
     let probe = Arc::new(ProbeFactory::default());
     let core = probe_core(double_backend().await, &probe).await?;
     let Err(error) = core
-        .session("probe-unknown-create")
+        .session(crate::SessionId::parse("probe-unknown-create").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec().plugin_options(lash_core::PluginOptions::typed(
                 "no-such-plugin",
@@ -304,12 +306,17 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
     );
 
     drop(
-        core.session("probe-unknown-command")
-            .create(crate::SessionCreation::root(mock_session_spec()))
-            .await?,
+        core.session(
+            crate::SessionId::parse("probe-unknown-command").expect("nonblank host identity"),
+        )
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await?,
     );
     let before = recorded_state(&core, "probe-unknown-command").await?;
-    let session = core.session("probe-unknown-command").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("probe-unknown-command").expect("nonblank host identity"))
+        .open()
+        .await?;
     let error = apply(
         &session,
         "unknown-owner",
@@ -348,7 +355,7 @@ async fn a_command_is_owner_reduced_and_revision_checked() -> Result<()> {
     let probe = Arc::new(ProbeFactory::default());
     let core = probe_core(double_backend().await, &probe).await?;
     drop(
-        core.session("probe-command")
+        core.session(crate::SessionId::parse("probe-command").expect("nonblank host identity"))
             .create(crate::SessionCreation {
                 spec: mock_session_spec().plugin_options(stating(12)?),
                 parent: None,
@@ -356,7 +363,10 @@ async fn a_command_is_owner_reduced_and_revision_checked() -> Result<()> {
             .await?,
     );
     let created = recorded_state(&core, "probe-command").await?;
-    let session = core.session("probe-command").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("probe-command").expect("nonblank host identity"))
+        .open()
+        .await?;
     let raised_outcome = apply(&session, "raise-20", created.config_revision, raise(20)).await?;
     assert_eq!(
         raised_outcome,
@@ -399,7 +409,11 @@ async fn a_command_is_owner_reduced_and_revision_checked() -> Result<()> {
 
     drop(session);
     probe.builds.lock_recover().clear();
-    drop(core.session("probe-command").open().await?);
+    drop(
+        core.session(crate::SessionId::parse("probe-command").expect("nonblank host identity"))
+            .open()
+            .await?,
+    );
     assert_eq!(
         *probe.builds.lock_recover(),
         vec![(raised.config_revision, Some(capped(20)))],
@@ -416,7 +430,7 @@ async fn a_transaction_across_owners_is_all_or_none() -> Result<()> {
     let probe = Arc::new(ProbeFactory::default());
     let core = probe_core(double_backend().await, &probe).await?;
     drop(
-        core.session("probe-atomic")
+        core.session(crate::SessionId::parse("probe-atomic").expect("nonblank host identity"))
             .create(crate::SessionCreation {
                 spec: mock_session_spec().plugin_options(stating(12)?),
                 parent: None,
@@ -425,7 +439,10 @@ async fn a_transaction_across_owners_is_all_or_none() -> Result<()> {
     );
     let created = recorded_state(&core, "probe-atomic").await?;
     let created_budget = recorded_turn_budget(&core, "probe-atomic").await?;
-    let session = core.session("probe-atomic").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("probe-atomic").expect("nonblank host identity"))
+        .open()
+        .await?;
     let budget = |turns: usize| crate::config::SetTurnBudget {
         turn_budget: crate::TurnBudget::bounded(turns),
     };
@@ -504,14 +521,17 @@ async fn a_stale_transaction_publishes_nothing() -> Result<()> {
     let probe = Arc::new(ProbeFactory::default());
     let core = probe_core(double_backend().await, &probe).await?;
     drop(
-        core.session("probe-stale")
+        core.session(crate::SessionId::parse("probe-stale").expect("nonblank host identity"))
             .create(crate::SessionCreation {
                 spec: mock_session_spec().plugin_options(stating(12)?),
                 parent: None,
             })
             .await?,
     );
-    let session = core.session("probe-stale").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("probe-stale").expect("nonblank host identity"))
+        .open()
+        .await?;
     session.admin().config().configure(raise(20)).await?;
     let current = recorded_state(&core, "probe-stale").await?;
     let stale = apply(&session, "stale", current.config_revision - 1, raise(30)).await?;
@@ -541,14 +561,17 @@ async fn redriven_runs_see_their_admitted_revision() -> Result<()> {
     .await;
     let core = probe_core(backend, &probe).await?;
     drop(
-        core.session("probe-admitted")
+        core.session(crate::SessionId::parse("probe-admitted").expect("nonblank host identity"))
             .create(crate::SessionCreation {
                 spec: mock_session_spec().plugin_options(stating(12)?),
                 parent: None,
             })
             .await?,
     );
-    let session = core.session("probe-admitted").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("probe-admitted").expect("nonblank host identity"))
+        .open()
+        .await?;
     let admitted = recorded_state(&core, "probe-admitted")
         .await?
         .config_revision;

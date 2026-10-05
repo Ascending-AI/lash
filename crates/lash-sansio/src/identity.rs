@@ -16,8 +16,9 @@
 //! blank id. Text that arrives from outside the program (a decoded wire or
 //! stored value, a host-supplied string) goes through the fallible `parse`,
 //! which is also what deserialization runs. Text the program itself states is
-//! infallible: a `&'static str` literal converts with `From`, and a derived id
-//! is built from an existing id or a literal prefix, so neither can be blank.
+//! built from an existing id or a literal prefix cannot be blank. Session and
+//! turn identities always require validated parsing in production; literal
+//! fixture construction is available only with `testing`.
 
 /// Text that is not an identity because it is empty or whitespace-only.
 ///
@@ -45,7 +46,7 @@ fn is_blank(value: &str) -> bool {
 /// place. The encoding is the bare string, and each identity pins that
 /// byte-for-byte in its own test below.
 macro_rules! string_identity {
-    ($(#[$meta:meta])* $name:ident, $what:literal) => {
+    ($(#[$meta:meta])* $name:ident, $what:literal $(, $literal_cfg:meta)?) => {
         $(#[$meta])*
         #[repr(transparent)]
         #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
@@ -104,7 +105,7 @@ macro_rules! string_identity {
             /// # Panics
             ///
             /// When `label` is blank.
-            #[doc(hidden)]
+            $(#[$literal_cfg])*
             pub fn fixture(label: impl Into<String>) -> Self {
                 match Self::parse(label) {
                     Ok(id) => id,
@@ -120,6 +121,7 @@ macro_rules! string_identity {
         ///
         /// When the literal is blank, which is a defect in the calling code
         /// rather than in any input.
+        $(#[$literal_cfg])*
         impl From<&'static str> for $name {
             fn from(value: &'static str) -> Self {
                 assert!(
@@ -295,7 +297,8 @@ macro_rules! string_identity_surface {
 string_identity!(
     /// Host-supplied identity of one session.
     SessionId,
-    "session"
+    "session",
+    cfg(any(test, feature = "testing"))
 );
 
 /// Derives the stable owner namespace used by session-owned durable records.
@@ -491,7 +494,8 @@ string_identity!(
     /// Stable data-layer identity of one logical turn at lease, claim, and
     /// turn-registry boundaries.
     TurnId,
-    "turn"
+    "turn",
+    cfg(any(test, feature = "testing"))
 );
 
 /// The root of a shift that starts with an input the host gave no id of its

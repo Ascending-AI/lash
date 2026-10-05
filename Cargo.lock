@@ -4145,7 +4145,7 @@ dependencies = [
 [[package]]
 name = "restate-sdk"
 version = "0.12.1"
-source = "git+https://github.com/SamGalanakis/sdk-rust?rev=8cf1b6982a5b0b5ed1bd1027b853e8cc0f7324f4#8cf1b6982a5b0b5ed1bd1027b853e8cc0f7324f4"
+source = "git+https://github.com/SamGalanakis/sdk-rust?rev=c74a7bb43b858462061237d7bb2ab88b2210a688#c74a7bb43b858462061237d7bb2ab88b2210a688"
 dependencies = [
  "bytes",
  "futures",
@@ -4173,7 +4173,7 @@ dependencies = [
 [[package]]
 name = "restate-sdk-macros"
 version = "0.12.1"
-source = "git+https://github.com/SamGalanakis/sdk-rust?rev=8cf1b6982a5b0b5ed1bd1027b853e8cc0f7324f4#8cf1b6982a5b0b5ed1bd1027b853e8cc0f7324f4"
+source = "git+https://github.com/SamGalanakis/sdk-rust?rev=c74a7bb43b858462061237d7bb2ab88b2210a688#c74a7bb43b858462061237d7bb2ab88b2210a688"
 dependencies = [
  "jiff",
  "proc-macro2",

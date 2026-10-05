@@ -486,7 +486,10 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
     let store = headless_row(&core, seams.as_ref(), ID).await?;
     assert!(head_of(&store).await?.is_none(), "the row has no head");
 
-    let opened = core.session(ID).open().await;
+    let opened = core
+        .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+        .open()
+        .await;
     assert!(
         matches!(
             &opened,
@@ -550,7 +553,7 @@ async fn a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal(
     let store = headless_row(&core, seams.as_ref(), ID).await?;
 
     let sent = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        core.session(ID)
+        core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
             .durable()
             .await?
             .send(TurnInput::text("a turn the row can never run"))

@@ -6,7 +6,7 @@ pub(crate) async fn assert_typed_turn_input_application(
 ) {
     let handle = session
         .send(lash::TurnInput::text("queued workbench input"))
-        .id("workbench-queued-input")
+        .id(lash::TurnId::parse("workbench-queued-input").expect("nonblank host identity"))
         .await
         .expect("admit queued workbench input");
     let admission = handle.receipt().clone();

@@ -27,11 +27,11 @@ async fn concurrent_sessions_isolate_transcripts_triggers_and_processes_inner() 
     let (turn_a, turn_b) = tokio::join!(
         session_a
             .send(lash::TurnInput::text("isolation-marker-A"))
-            .id("isolation-turn-a")
+            .id(lash::TurnId::parse("isolation-turn-a").expect("nonblank host identity"))
             .output(),
         session_b
             .send(lash::TurnInput::text("isolation-marker-B"))
-            .id("isolation-turn-b")
+            .id(lash::TurnId::parse("isolation-turn-b").expect("nonblank host identity"))
             .output(),
     );
     assert_eq!(

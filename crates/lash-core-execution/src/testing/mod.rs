@@ -207,10 +207,6 @@ impl crate::PluginFactory for FixtureProcessEngineFactory {
         "testing-fixture-process-engine"
     }
 
-    fn declaration(&self) -> crate::plugin::PluginDeclaration {
-        crate::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn process_engine_contributions(
         &self,
         _context: &crate::ProcessEngineContributionContext<'_>,
@@ -225,6 +221,13 @@ impl crate::PluginFactory for FixtureProcessEngineFactory {
         _context: &crate::PluginSessionContext,
     ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
         Ok(Arc::new(FixtureProcessEnginePlugin))
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl crate::plugin::PluginDefinition for FixtureProcessEngineFactory {
+    fn declaration() -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial("testing-fixture-process-engine")
     }
 }
 

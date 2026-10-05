@@ -176,7 +176,7 @@ pub(crate) fn register(
     })))?;
     reg.context().compact(100, Arc::new(LoadCompaction))?;
     reg.context().pressure(100, Arc::new(LoadCompaction))?;
-    reg.triggers().declare(lash::triggers::TriggerEvent::new("Event", "load.external", "event", lash::triggers::JsonSchema::admit(json!({"type":"object","properties":{"schedule":{"type":"string"},"tick":{"type":"string"}},"required":["schedule","tick"],"additionalProperties":false})).expect("valid declared payload schema")))?;
+    reg.triggers().declare(lash::triggers::TriggerEvent::new("Event", "load.external", "event", lash::schema::JsonSchema::admit(json!({"type":"object","properties":{"schedule":{"type":"string"},"tick":{"type":"string"}},"required":["schedule","tick"],"additionalProperties":false})).expect("valid declared payload schema")))?;
     Ok(())
 }
 

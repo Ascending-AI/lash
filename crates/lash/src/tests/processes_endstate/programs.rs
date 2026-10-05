@@ -106,7 +106,10 @@ pub(super) fn child_join_process(finish: lashlang::Expr) -> lashlang::Program {
 /// `UnknownResource { path: "processes" }`, so the fixtures bind to the shipped
 /// `processes.start` tool and carry that tool's own contract.
 pub(super) fn process_control_catalog() -> lashlang::LashlangHostCatalog {
-    let contract = lash_plugin_process_controls::process_start_tool_definition().contract();
+    let contract = lash_plugin_process_controls::process_tool_definition(
+        lash_plugin_process_controls::ProcessControlTool::Start,
+    )
+    .contract();
     let mut catalog = lashlang::LashlangHostCatalog::new();
     catalog
         .add_module_operation_contract(

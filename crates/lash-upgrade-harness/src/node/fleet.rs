@@ -399,16 +399,18 @@ impl lash_core::plugin::PluginFactory for FleetFrontier {
         FRONTIER_PLUGIN
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(FRONTIER_PLUGIN)
-    }
-
     fn build(
         &self,
         _: &lash_core::plugin::PluginSessionContext,
     ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
     {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for FleetFrontier {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(FRONTIER_PLUGIN)
     }
 }
 

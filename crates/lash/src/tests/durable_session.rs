@@ -141,11 +141,19 @@ async fn catalog_failure_matrix(failure: CatalogFailure) -> Result<()> {
         .from_nth(script.calls(StoreOp::lookup_session) + 1)
         .before()
         .fail(move || failure.error());
-    let durable = core.session("catalog-failure").durable().await?;
+    let durable = core
+        .session(crate::SessionId::parse("catalog-failure").expect("nonblank host identity"))
+        .durable()
+        .await?;
     let results = [
         (
             "live open",
-            core.session("catalog-failure").open().await.map(drop),
+            core.session(
+                crate::SessionId::parse("catalog-failure").expect("nonblank host identity"),
+            )
+            .open()
+            .await
+            .map(drop),
         ),
         (
             "durable acquisition",
@@ -204,12 +212,15 @@ async fn existing_session_apis_preserve_absence_and_tombstones_without_creating(
     for (id, deleted) in [("catalog-absent", false), ("catalog-deleted", true)] {
         let session_id = SessionId::from(id);
         let open_error = core
-            .session(id)
+            .session(crate::SessionId::parse(id).expect("nonblank host identity"))
             .open()
             .await
             .err()
             .expect("open refuses the id");
-        let durable = core.session(id).durable().await?;
+        let durable = core
+            .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+            .durable()
+            .await?;
         let acquisition_error = durable
             .pending_turn_inputs()
             .await
@@ -253,10 +264,13 @@ async fn durable_acquisition_retries_contention_once_for_clones_and_reuses_bound
     );
     let core = counting_core(backend)?;
     let bound = core
-        .session("retry-acquisition")
+        .session(crate::SessionId::parse("retry-acquisition").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
-    let durable = core.session("retry-acquisition").durable().await?;
+    let durable = core
+        .session(crate::SessionId::parse("retry-acquisition").expect("nonblank host identity"))
+        .durable()
+        .await?;
     counts.admissions.store(0, Ordering::SeqCst);
     counts.by_id_opens.store(0, Ordering::SeqCst);
     script
@@ -310,7 +324,11 @@ async fn open_of_a_missing_id_is_unknown_session_and_writes_no_row() -> Result<(
         _ => false,
     };
 
-    assert!(is_unknown(core.session("never-opened").open().await));
+    assert!(is_unknown(
+        core.session(crate::SessionId::parse("never-opened").expect("nonblank host identity"))
+            .open()
+            .await
+    ));
     let state = || {
         let mut state = RuntimeSessionState::new(lash_core::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
@@ -320,10 +338,12 @@ async fn open_of_a_missing_id_is_unknown_session_and_writes_no_row() -> Result<(
         state
     };
     assert!(is_unknown(
-        core.session("never-opened").open_with_state(state()).await
+        core.session(crate::SessionId::parse("never-opened").expect("nonblank host identity"))
+            .open_with_state(state())
+            .await
     ));
     assert!(is_unknown(
-        core.session("never-opened")
+        core.session(crate::SessionId::parse("never-opened").expect("nonblank host identity"))
             .observe_with_state(state())
             .await
     ));
@@ -362,10 +382,12 @@ async fn concurrent_creates_of_one_id_give_exactly_one_ok() -> Result<()> {
             let barrier = Arc::clone(&barrier);
             tokio::spawn(async move {
                 barrier.wait().await;
-                core.session("raced-create")
-                    .create(crate::SessionCreation::root(mock_session_spec()))
-                    .await
-                    .map(drop)
+                core.session(
+                    crate::SessionId::parse("raced-create").expect("nonblank host identity"),
+                )
+                .create(crate::SessionCreation::root(mock_session_spec()))
+                .await
+                .map(drop)
             })
         })
         .collect::<Vec<_>>();
@@ -384,7 +406,11 @@ async fn concurrent_creates_of_one_id_give_exactly_one_ok() -> Result<()> {
     }
     assert_eq!((created, refused), (1, 1));
     assert_eq!(creates.load(Ordering::SeqCst), 1, "the store created once");
-    drop(core.session("raced-create").open().await?);
+    drop(
+        core.session(crate::SessionId::parse("raced-create").expect("nonblank host identity"))
+            .open()
+            .await?,
+    );
     Ok(())
 }
 
@@ -395,10 +421,13 @@ async fn durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing() -
     let creates = Arc::clone(&factory.creates);
     let core = counting_core(backend.clone())?;
 
-    let durable = core.session("never-created").durable().await?;
+    let durable = core
+        .session(crate::SessionId::parse("never-created").expect("nonblank host identity"))
+        .durable()
+        .await?;
     let error = durable
         .send(TurnInput::text("queued to a session that does not exist"))
-        .id("orphan-enqueue")
+        .id(crate::TurnId::parse("orphan-enqueue").expect("nonblank host identity"))
         .accepted()
         .await
         .expect_err("enqueue to an unknown id is refused");
@@ -436,7 +465,7 @@ async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()>
     let (backend, factory) = counting_factory(&double.lash_backend(), 0);
     let core = counting_core(backend.clone())?;
     drop(
-        core.session("deleted-durable")
+        core.session(crate::SessionId::parse("deleted-durable").expect("nonblank host identity"))
             .created()
             .await
             .open()
@@ -449,7 +478,10 @@ async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()>
     .await
     .expect("delete the session");
 
-    let durable = core.session("deleted-durable").durable().await?;
+    let durable = core
+        .session(crate::SessionId::parse("deleted-durable").expect("nonblank host identity"))
+        .durable()
+        .await?;
     let error = durable
         .send(TurnInput::text("queued after deletion"))
         .accepted()
@@ -477,7 +509,10 @@ async fn an_input_addressed_to_an_unknown_turn_is_refused_through_the_facade() -
     let (backend, _) = counting_factory(&double.lash_backend(), 0);
     let core = counting_core(backend)?;
     crate::tests::create_catalog_session(&core, "unknown-turn-address").await?;
-    let durable = core.session("unknown-turn-address").durable().await?;
+    let durable = core
+        .session(crate::SessionId::parse("unknown-turn-address").expect("nonblank host identity"))
+        .durable()
+        .await?;
     let error = durable
         .send(TurnInput::text("steer a turn that never ran"))
         .ingress(lash_core::TurnInputIngress::active_turn(
@@ -519,7 +554,10 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    let absent = core.session("sqlite-absent").durable().await?;
+    let absent = core
+        .session(crate::SessionId::parse("sqlite-absent").expect("nonblank host identity"))
+        .durable()
+        .await?;
     assert!(!absent.exists().await?);
     assert!(
         matches!(
@@ -534,7 +572,10 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     );
 
     crate::tests::create_catalog_session(&core, "sqlite-metadata-only").await?;
-    let metadata_only = core.session("sqlite-metadata-only").durable().await?;
+    let metadata_only = core
+        .session(crate::SessionId::parse("sqlite-metadata-only").expect("nonblank host identity"))
+        .durable()
+        .await?;
     assert!(metadata_only.exists().await?);
     // Acceptance does not keep an input pending: hold its engine shift for
     // the queue read, as well as the checkpointed queue read below.
@@ -543,13 +584,13 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         .await;
     metadata_only
         .send(TurnInput::text("queued on sqlite metadata"))
-        .id("sqlite-metadata-input")
+        .id(crate::TurnId::parse("sqlite-metadata-input").expect("nonblank host identity"))
         .accepted()
         .await?;
     assert_eq!(metadata_only.pending_turn_inputs().await?.len(), 1);
 
     let session = core
-        .session("sqlite-checkpointed")
+        .session(crate::SessionId::parse("sqlite-checkpointed").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -565,11 +606,14 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     let _checkpointed_shift = double
         .hold_session_shift(&SessionId::from("sqlite-checkpointed"))
         .await;
-    let checkpointed = core.session("sqlite-checkpointed").durable().await?;
+    let checkpointed = core
+        .session(crate::SessionId::parse("sqlite-checkpointed").expect("nonblank host identity"))
+        .durable()
+        .await?;
     assert!(checkpointed.exists().await?);
     checkpointed
         .send(TurnInput::text("queued on a sqlite checkpoint"))
-        .id("sqlite-checkpoint-input")
+        .id(crate::TurnId::parse("sqlite-checkpoint-input").expect("nonblank host identity"))
         .accepted()
         .await?;
     assert_eq!(checkpointed.pending_turn_inputs().await?.len(), 1);
@@ -582,7 +626,10 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     )
     .await
     .expect("delete the sqlite session");
-    let deleted = core.session("sqlite-checkpointed").durable().await?;
+    let deleted = core
+        .session(crate::SessionId::parse("sqlite-checkpointed").expect("nonblank host identity"))
+        .durable()
+        .await?;
     assert!(deleted.was_deleted().await?);
     assert!(
         matches!(
@@ -609,7 +656,10 @@ async fn a_send_links_its_input_to_the_context_its_first_acceptance_carried() ->
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     crate::tests::create_catalog_session(&core, "traced-send").await?;
-    let durable = core.session("traced-send").durable().await?;
+    let durable = core
+        .session(crate::SessionId::parse("traced-send").expect("nonblank host identity"))
+        .durable()
+        .await?;
     // Acceptance does not keep an input pending: hold its engine shift.
     let _drive = double
         .hold_session_shift(&SessionId::from("traced-send"))
@@ -621,7 +671,7 @@ async fn a_send_links_its_input_to_the_context_its_first_acceptance_carried() ->
     let send = |producer: u8| {
         durable
             .send(TurnInput::text("the same words"))
-            .id("traced-send-input")
+            .id(crate::TurnId::parse("traced-send-input").expect("nonblank host identity"))
             .trace_context(context(producer))
             .accepted()
     };
@@ -632,7 +682,7 @@ async fn a_send_links_its_input_to_the_context_its_first_acceptance_carried() ->
     // With no telemetry adapter there is no ambient context to capture.
     durable
         .send(TurnInput::text("words nobody traced"))
-        .id("untraced-send-input")
+        .id(crate::TurnId::parse("untraced-send-input").expect("nonblank host identity"))
         .accepted()
         .await?;
 
@@ -670,7 +720,7 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("durable-observation")
+        .session(crate::SessionId::parse("durable-observation").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -685,10 +735,13 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
         .await;
 
     // A handle acquired from the core, not from the open session.
-    let durable = core.session("durable-observation").durable().await?;
+    let durable = core
+        .session(crate::SessionId::parse("durable-observation").expect("nonblank host identity"))
+        .durable()
+        .await?;
     let pending = durable
         .send(TurnInput::text("queued from a separate handle"))
-        .id("separate-handle")
+        .id(crate::TurnId::parse("separate-handle").expect("nonblank host identity"))
         .accepted()
         .await?;
     let cancelled = durable.cancel_pending_turn_input(&pending.input_id).await?;
@@ -748,7 +801,7 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
     let durable = retry_when_claim_frees(|| core.session(session_id.clone()).durable()).await?;
     let pending = durable
         .send(TurnInput::text("queued with nothing live"))
-        .id("no-runtime")
+        .id(crate::TurnId::parse("no-runtime").expect("nonblank host identity"))
         .accepted()
         .await?;
 
@@ -793,12 +846,12 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
 
     let a = first
         .send(TurnInput::text("from the first durable handle"))
-        .id("beside-a")
+        .id(crate::TurnId::parse("beside-a").expect("nonblank host identity"))
         .accepted()
         .await?;
     let b = second
         .send(TurnInput::text("from the second durable handle"))
-        .id("beside-b")
+        .id(crate::TurnId::parse("beside-b").expect("nonblank host identity"))
         .accepted()
         .await?;
 
@@ -891,10 +944,6 @@ impl lash_core::facade_support::PluginFactory for RuntimeBuildProbeFactory {
         "durable-session-runtime-probe"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -908,6 +957,12 @@ impl lash_core::facade_support::PluginFactory for RuntimeBuildProbeFactory {
         Ok(Arc::new(RuntimeBuildProbePlugin {
             counters: Arc::clone(&self.counters),
         }))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for RuntimeBuildProbeFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("durable-session-runtime-probe")
     }
 }
 
@@ -1212,12 +1267,15 @@ async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_ses
     // The session exists because create wrote its catalog metadata.
     crate::tests::create_catalog_session(&core, "no-by-id-seam").await?;
 
-    let durable = core.session("no-by-id-seam").durable().await?;
+    let durable = core
+        .session(crate::SessionId::parse("no-by-id-seam").expect("nonblank host identity"))
+        .durable()
+        .await?;
     let error = durable
         .send(TurnInput::text(
             "queued through a catalog with no by-id seam",
         ))
-        .id("no-by-id-seam-input")
+        .id(crate::TurnId::parse("no-by-id-seam-input").expect("nonblank host identity"))
         .accepted()
         .await
         .expect_err("a catalog that cannot resolve by id refuses the acquisition");
@@ -1289,7 +1347,7 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
     let accepted = session
         .durable()
         .send(TurnInput::text("claimed by the drain"))
-        .id("held-input")
+        .id(crate::TurnId::parse("held-input").expect("nonblank host identity"))
         .accepted()
         .await?;
 
@@ -1366,13 +1424,15 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
 
     // Enqueue to an id nobody created is refused...
     assert!(matches!(
-        idle.session("created-then-queued")
-            .durable()
-            .await?
-            .send(TurnInput::text("too early"))
-            .accepted()
-            .await
-            .expect_err("an uncreated id is refused"),
+        idle.session(
+            crate::SessionId::parse("created-then-queued").expect("nonblank host identity")
+        )
+        .durable()
+        .await?
+        .send(TurnInput::text("too early"))
+        .accepted()
+        .await
+        .expect_err("an uncreated id is refused"),
         EmbedError::UnknownSession { .. }
     ));
 
@@ -1381,7 +1441,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     // engine to work, racing the pending read below. A store-seeded row is
     // never scheduled, so nothing claims it before the shift core below.
     let durable = idle
-        .session("created-then-queued")
+        .session(crate::SessionId::parse("created-then-queued").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let accepted = lash_core::runtime::live_session_view(
@@ -1417,8 +1477,14 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
     // `idle`'s created handle still holds a writer claim: the shift core's
     // open races its release under the double.
-    let session =
-        retry_when_claim_frees(|| shift_core.session("created-then-queued").open()).await?;
+    let session = retry_when_claim_frees(|| {
+        shift_core
+            .session(
+                crate::SessionId::parse("created-then-queued").expect("nonblank host identity"),
+            )
+            .open()
+    })
+    .await?;
     let drained = session.attach(accepted.input_id.clone()).output().await?;
     assert_eq!(
         drained.assistant_message(),
@@ -1450,7 +1516,7 @@ async fn a_retried_create_is_refused_and_preserves_the_recorded_relation() -> Re
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     drop(
-        core.session("create-parent")
+        core.session(crate::SessionId::parse("create-parent").expect("nonblank host identity"))
             .create(crate::SessionCreation::root(mock_session_spec()))
             .await?,
     );
@@ -1459,7 +1525,10 @@ async fn a_retried_create_is_refused_and_preserves_the_recorded_relation() -> Re
         parent: Some("create-parent".into()),
     };
 
-    let first = core.session("create-retried").create(creation()).await?;
+    let first = core
+        .session(crate::SessionId::parse("create-retried").expect("nonblank host identity"))
+        .create(creation())
+        .await?;
     // Seeded through the store port: a facade send would ask the engine to
     // shift, racing the pending read after the retry. A store-seeded row is
     // never scheduled, so nothing claims it.
@@ -1497,7 +1566,7 @@ async fn a_retried_create_is_refused_and_preserves_the_recorded_relation() -> Re
 
     // The retry states exactly what the first create recorded.
     let error = core
-        .session("create-retried")
+        .session(crate::SessionId::parse("create-retried").expect("nonblank host identity"))
         .create(creation())
         .await
         .err()
@@ -1516,7 +1585,7 @@ async fn a_retried_create_is_refused_and_preserves_the_recorded_relation() -> Re
     );
     // So is a retry naming no parent at all.
     assert!(matches!(
-        core.session("create-retried")
+        core.session(crate::SessionId::parse("create-retried").expect("nonblank host identity"))
             .create(crate::SessionCreation::root(mock_session_spec()))
             .await
             .err()
@@ -1541,7 +1610,11 @@ async fn a_retried_create_is_refused_and_preserves_the_recorded_relation() -> Re
     );
     // `first`'s writer claim may still be live; the open races its release
     // under the double.
-    let opened = retry_when_claim_frees(|| core.session("create-retried").open()).await?;
+    let opened = retry_when_claim_frees(|| {
+        core.session(crate::SessionId::parse("create-retried").expect("nonblank host identity"))
+            .open()
+    })
+    .await?;
     assert_eq!(
         opened.parent_session_id(),
         Some("create-parent"),
@@ -1560,7 +1633,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     drop(
-        core.session("create-deleted")
+        core.session(crate::SessionId::parse("create-deleted").expect("nonblank host identity"))
             .create(crate::SessionCreation::root(mock_session_spec()))
             .await?,
     );
@@ -1572,7 +1645,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
     .expect("delete the session");
 
     let error = core
-        .session("create-deleted")
+        .session(crate::SessionId::parse("create-deleted").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .err()
@@ -1598,23 +1671,28 @@ async fn reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict() -> 
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     crate::tests::create_catalog_session(&core, "fig3544-enqueue-conflict").await?;
-    let durable = core.session("fig3544-enqueue-conflict").durable().await?;
+    let durable = core
+        .session(
+            crate::SessionId::parse("fig3544-enqueue-conflict").expect("nonblank host identity"),
+        )
+        .durable()
+        .await?;
 
     let first = durable
         .send(TurnInput::text("original"))
-        .id("retry-me")
+        .id(crate::TurnId::parse("retry-me").expect("nonblank host identity"))
         .accepted()
         .await?;
     let replay = durable
         .send(TurnInput::text("original"))
-        .id("retry-me")
+        .id(crate::TurnId::parse("retry-me").expect("nonblank host identity"))
         .accepted()
         .await?;
     assert_eq!(replay, first, "an identical retry replays the acceptance");
 
     let conflict = durable
         .send(TurnInput::text("changed"))
-        .id("retry-me")
+        .id(crate::TurnId::parse("retry-me").expect("nonblank host identity"))
         .accepted()
         .await
         .expect_err("a changed submission under a used id is refused");
@@ -1637,7 +1715,7 @@ async fn transcript_totally_projects_really_committed_nodes_in_source_order() ->
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("transcript-totality")
+        .session(crate::SessionId::parse("transcript-totality").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1645,7 +1723,10 @@ async fn transcript_totally_projects_really_committed_nodes_in_source_order() ->
     for input in ["first question", "second question"] {
         session.send(TurnInput::text(input)).output().await?;
     }
-    let durable = core.session("transcript-totality").durable().await?;
+    let durable = core
+        .session(crate::SessionId::parse("transcript-totality").expect("nonblank host identity"))
+        .durable()
+        .await?;
     let projection = durable.transcript().await?;
     let page = durable
         .history(
@@ -1707,7 +1788,7 @@ async fn committed_row_deltas_transport_each_new_node_once() -> Result<()> {
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("transcript-deltas")
+        .session(crate::SessionId::parse("transcript-deltas").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1819,7 +1900,7 @@ async fn transcript_totally_projects_a_really_committed_rlm_trajectory() -> Resu
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("transcript-rlm-corpus")
+        .session(crate::SessionId::parse("transcript-rlm-corpus").expect("nonblank host identity"))
         .created()
         .await
         .open()

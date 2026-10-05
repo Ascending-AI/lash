@@ -12,7 +12,7 @@ async fn run_provider_evidence_turn(
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
         .send(lash::TurnInput::text("answer directly"))
-        .id(turn_id)
+        .id(turn_id.clone())
         .require_finish()
         .expect("require provider fixture finish")
         .output_into(&ChannelTurnEvents {

@@ -171,7 +171,7 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>, config: ServerConfig) -> 
     let session_id = lash_core::SessionId::from("turn-crash-replay");
     let receipt = session
         .send(lash::TurnInput::text("count once"))
-        .id("turn-1")
+        .id(lash::TurnId::parse("turn-1").expect("nonblank host identity"))
         .await
         .expect("accept the turn input")
         .receipt()

@@ -216,10 +216,6 @@ impl lash_core::facade_support::PluginFactory for Declares {
         self.id
     }
 
-    fn declaration(&self) -> PluginDeclaration {
-        self.declared.clone()
-    }
-
     fn build(
         &self,
         ctx: &lash_core::facade_support::PluginSessionContext,
@@ -228,6 +224,12 @@ impl lash_core::facade_support::PluginFactory for Declares {
         lash_core::PluginError,
     > {
         named(self.id).build(ctx)
+    }
+}
+
+impl lash_core::plugin::PluginMetadata for Declares {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        self.declared.clone()
     }
 }
 
@@ -328,7 +330,12 @@ async fn in_flight_segments_finish_on_the_old_build(storage: Storage) -> Result<
     assert_eq!(old_core.build_generation(), &old_generation);
 
     let session = "plugin-generation";
-    let handle = old_core.session(session).created().await.open().await?;
+    let handle = old_core
+        .session(crate::SessionId::parse(session).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let session_id = lash_core::SessionId::from(session);
     let store = lash_core::runtime::live_session_view(&old_core.store_factory, &session_id)
         .await?
@@ -579,7 +586,12 @@ async fn in_flight_work_keeps_its_recorded_hook_order_across_an_order_change() -
     assert_eq!(old_core.build_generation(), &old_generation);
 
     let session = "plugin-order";
-    let _handle = old_core.session(session).created().await.open().await?;
+    let _handle = old_core
+        .session(crate::SessionId::parse(session).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let session_id = lash_core::SessionId::from(session);
     let store = lash_core::runtime::live_session_view(&old_core.store_factory, &session_id)
         .await?
@@ -774,13 +786,6 @@ impl lash_core::facade_support::PluginFactory for Tallying {
         PLUGIN
     }
 
-    fn declaration(&self) -> PluginDeclaration {
-        let mut declaration = PluginDeclaration::initial(PLUGIN);
-        declaration.behavior_revision =
-            BehaviorRevision::new(self.revision).expect("a revision counts from one");
-        declaration
-    }
-
     fn build(
         &self,
         ctx: &lash_core::facade_support::PluginSessionContext,
@@ -805,6 +810,15 @@ impl lash_core::facade_support::PluginFactory for Tallying {
                 output: revision,
             })
         })
+    }
+}
+
+impl lash_core::plugin::PluginMetadata for Tallying {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        let mut declaration = PluginDeclaration::initial(PLUGIN);
+        declaration.behavior_revision =
+            BehaviorRevision::new(self.revision).expect("a revision counts from one");
+        declaration
     }
 }
 
@@ -853,7 +867,12 @@ async fn a_config_transaction_resolves_on_the_lane_that_admits_it() -> Result<()
     assert_eq!(old_core.build_generation(), &old_generation);
 
     let session = "config-owner-generation";
-    let handle = old_core.session(session).created().await.open().await?;
+    let handle = old_core
+        .session(crate::SessionId::parse(session).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let session_id = lash_core::SessionId::from(session);
     let store = lash_core::runtime::live_session_view(&old_core.store_factory, &session_id)
         .await?

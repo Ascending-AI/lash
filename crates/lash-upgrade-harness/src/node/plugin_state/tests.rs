@@ -137,7 +137,7 @@ async fn retained_history(stores: lash::sqlite::SqliteStoreSet) -> Result<()> {
     callback_on(Arc::clone(&ports), &session, probe(2)).await?;
     let retired = lash_core::engine::BuildGeneration::for_test("history-finalize");
     stores.generation_drain().mark_draining(&retired, 1).await?;
-    let declaration = probe(2).declaration();
+    let declaration = probe(2).plugin_declaration();
     stores
         .finalize(
             &retired,

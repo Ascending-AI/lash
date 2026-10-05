@@ -208,7 +208,9 @@ fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
     }
     // FIG-4177 (bf41d19ca5): create returns the immutable definition record
     // start accepts. Read that shape from the shipped start contract.
-    let start = lash::process_controls::process_start_tool_definition();
+    let start = lash::process_controls::process_tool_definition(
+        lash::process_controls::ProcessControlTool::Start,
+    );
     let definition_schema =
         start.contract().input_schema.canonical()["properties"]["definition"].clone();
     resources
@@ -242,28 +244,45 @@ fn add_process_control_operations(resources: &mut lash::rlm::lang::LashlangHostC
     for (operation, definition) in [
         (
             "start",
-            lash::process_controls::process_start_tool_definition(),
+            lash::process_controls::process_tool_definition(
+                lash::process_controls::ProcessControlTool::Start,
+            ),
         ),
         (
             "signal",
-            lash::process_controls::process_signal_tool_definition(),
+            lash::process_controls::process_tool_definition(
+                lash::process_controls::ProcessControlTool::Signal,
+            ),
         ),
         (
             "emit",
-            lash::process_controls::process_emit_tool_definition(),
+            lash::process_controls::process_tool_definition(
+                lash::process_controls::ProcessControlTool::Emit,
+            ),
         ),
-        ("get", lash::process_controls::process_get_tool_definition()),
+        (
+            "get",
+            lash::process_controls::process_tool_definition(
+                lash::process_controls::ProcessControlTool::Get,
+            ),
+        ),
         (
             "list",
-            lash::process_controls::process_list_tool_definition(),
+            lash::process_controls::process_tool_definition(
+                lash::process_controls::ProcessControlTool::List,
+            ),
         ),
         (
             "await",
-            lash::process_controls::process_await_tool_definition(),
+            lash::process_controls::process_tool_definition(
+                lash::process_controls::ProcessControlTool::Await,
+            ),
         ),
         (
             "cancel",
-            lash::process_controls::process_cancel_tool_definition(),
+            lash::process_controls::process_tool_definition(
+                lash::process_controls::ProcessControlTool::Cancel,
+            ),
         ),
     ] {
         let contract = definition.contract();
@@ -404,10 +423,12 @@ impl TutorialHost {
             receiver,
             &call.operation,
         )?;
-        let process_start = lash::process_controls::process_start_tool_definition()
-            .manifest()
-            .id
-            .to_string();
+        let process_start = lash::process_controls::process_tool_definition(
+            lash::process_controls::ProcessControlTool::Start,
+        )
+        .manifest()
+        .id
+        .to_string();
         if host_operation == lash::rlm::lang::REGISTER_TRIGGER_TOOL_ID {
             return Ok(lash::rlm::lang::from_json(tutorial_trigger_handle()));
         }

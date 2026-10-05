@@ -56,10 +56,6 @@ impl lash::plugins::PluginFactory for HostRlmFactory {
         self.inner.id()
     }
 
-    fn declaration(&self) -> lash::plugins::PluginDeclaration {
-        self.inner.declaration()
-    }
-
     async fn shutdown(&self) -> Result<(), lash::plugins::PluginError> {
         self.inner.shutdown().await
     }
@@ -87,6 +83,12 @@ impl lash::plugins::PluginFactory for HostRlmFactory {
         ctx: &lash::plugins::PluginSessionContext,
     ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError> {
         self.inner.build(ctx)
+    }
+}
+
+impl lash::plugins::PluginDefinition for HostRlmFactory {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        <lash::rlm::RlmProtocolPluginFactory as lash::plugins::PluginDefinition>::declaration()
     }
 }
 
@@ -271,7 +273,7 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier, seed: u6
     );
 
     match core
-        .session("facade-host-wrappers")
+        .session(lash::SessionId::parse("facade-host-wrappers").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "facade-host-wrappers",
             lash::TurnBudget::Unbounded,
@@ -283,7 +285,7 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier, seed: u6
         Err(error) => panic!("create the session: {error:?}"),
     }
     let session = core
-        .session("facade-host-wrappers")
+        .session(lash::SessionId::parse("facade-host-wrappers").expect("nonblank host identity"))
         .open()
         .await
         .expect("open the session");

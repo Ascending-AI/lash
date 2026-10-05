@@ -98,7 +98,7 @@ impl PluginHost {
                             .and_then(|values| {
                                 super::state::validate_namespace(&values)?;
                                 Ok(PluginNamespaceState {
-                                    format_version: factory.declaration().format_version,
+                                    format_version: factory.plugin_declaration().format_version,
                                     generation: 0,
                                     publication: Default::default(),
                                     values,

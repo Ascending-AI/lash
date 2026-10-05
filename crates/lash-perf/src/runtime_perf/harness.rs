@@ -201,7 +201,7 @@ pub(crate) struct BenchmarkRuntime {
     turn_entry: TurnEntry,
     /// The lane's deployment worker probes: the deployment's worker is not
     /// the session's runtime.
-    process_phase_probes: Option<lash::runtime::RuntimeTurnPhaseProbeSlot>,
+    process_phase_probes: Option<lash::testing::RuntimeTurnPhaseProbeSlot>,
     core: BenchmarkCore,
     session: Option<lash::LashSession>,
     store: Option<Arc<RuntimePerfStore>>,
@@ -355,7 +355,7 @@ impl BenchmarkRuntime {
     )]
     pub(crate) async fn set_turn_phase_probe(
         &self,
-        probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,
+        probe: Arc<dyn lash::testing::RuntimeTurnPhaseProbe>,
     ) {
         let session = self.session.as_ref().expect("benchmark session");
         if let Some(slot) = &self.process_phase_probes {
@@ -442,7 +442,7 @@ impl BenchmarkRuntime {
             .session
             .as_ref()
             .expect("benchmark session")
-            .turn_address(turn_id);
+            .turn_address((turn_id).clone());
         let turn = self.run_turn_with_id(input, turn_id, cancel);
         tokio::pin!(turn);
         tokio::select! {
@@ -876,8 +876,8 @@ async fn in_process_lane() -> anyhow::Result<InProcessLane> {
 fn install_process_worker(
     restate: &lash_restate_test::RestateTestBackend,
     core: &BenchmarkCore,
-) -> anyhow::Result<lash::runtime::RuntimeTurnPhaseProbeSlot> {
-    let probes = lash::runtime::RuntimeTurnPhaseProbeSlot::default();
+) -> anyhow::Result<lash::testing::RuntimeTurnPhaseProbeSlot> {
+    let probes = lash::testing::RuntimeTurnPhaseProbeSlot::default();
     let config = core
         .as_lash_core()
         .durable_process_worker_config()?
@@ -1058,10 +1058,6 @@ impl PluginFactory for BenchmarkWorkbenchTriggerPluginFactory {
         "runtime_perf_workbench_trigger"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     #[expect(
         clippy::expect_used,
         reason = "the extension id and contribution are workspace constants wired by the benchmark itself, so construction cannot fail"
@@ -1082,6 +1078,12 @@ impl PluginFactory for BenchmarkWorkbenchTriggerPluginFactory {
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(BenchmarkWorkbenchTriggerPlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for BenchmarkWorkbenchTriggerPluginFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("runtime_perf_workbench_trigger")
     }
 }
 

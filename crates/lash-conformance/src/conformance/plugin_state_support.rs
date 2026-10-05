@@ -77,7 +77,7 @@ pub(super) async fn transition(
             host.factories()
                 .iter()
                 .map(|factory| {
-                    let declaration = factory.declaration();
+                    let declaration = factory.plugin_declaration();
                     crate::store::plugin_writers::AdmittedPlugin {
                         plugin: factory.id().into(),
                         behavior_revision: declaration.behavior_revision,

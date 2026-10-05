@@ -372,16 +372,18 @@ impl lash_core::plugin::PluginFactory for StateDeriver {
         "state-replay-deriver"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _: &lash_core::plugin::PluginSessionContext,
     ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
     {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for StateDeriver {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("state-replay-deriver")
     }
 }
 

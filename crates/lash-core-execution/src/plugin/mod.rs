@@ -106,10 +106,10 @@ pub use registrar::{
 pub(crate) use registrar::{PluginContributions, RegisteredHook};
 pub use registry::{
     BehaviorRevision, FormatVersion, PluginComposition, PluginDeclaration, PluginDeclarationError,
-    PluginExecutionTrace, PluginExtensionContribution, PluginExtensions, PluginFactory, PluginId,
-    PluginSessionContext, PluginSessionMaterialization, PluginSpec, PluginSpecBuilder,
-    PluginSpecFactory, ProcessEngineContributionContext, SessionPlugin, SessionReadyContext,
-    StaticPluginFactory,
+    PluginDefinition, PluginExecutionTrace, PluginExtensionContribution, PluginExtensions,
+    PluginFactory, PluginId, PluginMetadata, PluginSessionContext, PluginSessionMaterialization,
+    PluginSpec, PluginSpecBuilder, PluginSpecFactory, ProcessEngineContributionContext,
+    SessionPlugin, SessionReadyContext, StaticPluginFactory,
 };
 pub use runtime_host::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,
@@ -154,6 +154,19 @@ pub(crate) use tool_hooks::{
     AttributedContributions, BeforeSelection, ResultChecks, after_resolution, before_selection,
     displaced_terminals, failed_check, failed_transform,
 };
+pub(crate) fn builtin_plugin_declarations() -> Vec<PluginDeclaration> {
+    let declarations = vec![trigger_registry::TriggerResourcePluginFactory::declaration()];
+    #[cfg(not(test))]
+    return declarations;
+    #[cfg(test)]
+    {
+        declarations
+            .into_iter()
+            .chain([PluginDeclaration::initial("test_protocol")])
+            .collect()
+    }
+}
+
 pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
     // Protocol plugins must be registered by the embedder before calling
     // `PluginHost::build_session`. Unit tests use an in-tree fake to avoid
@@ -424,15 +437,17 @@ mod tests {
             "mock"
         }
 
-        fn declaration(&self) -> crate::plugin::PluginDeclaration {
-            crate::plugin::PluginDeclaration::initial(self.id())
-        }
-
         fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
             let session_id = ctx.owner.session_id().cloned().ok_or_else(|| {
                 PluginError::Session("the mock plugin serves sessions".to_string())
             })?;
             Ok(Arc::new(MockPlugin { session_id }))
+        }
+    }
+
+    impl crate::plugin::PluginDefinition for MockPluginFactory {
+        fn declaration() -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial("mock")
         }
     }
 
@@ -592,15 +607,17 @@ mod tests {
                 "cross_kind"
             }
 
-            fn declaration(&self) -> crate::plugin::PluginDeclaration {
-                crate::plugin::PluginDeclaration::initial(self.id())
-            }
-
             fn build(
                 &self,
                 _ctx: &PluginSessionContext,
             ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
                 Ok(Arc::new(CrossKindPlugin))
+            }
+        }
+
+        impl crate::plugin::PluginDefinition for CrossKindFactory {
+            fn declaration() -> crate::plugin::PluginDeclaration {
+                crate::plugin::PluginDeclaration::initial("cross_kind")
             }
         }
 

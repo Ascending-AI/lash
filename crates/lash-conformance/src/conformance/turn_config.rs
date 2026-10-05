@@ -1391,6 +1391,12 @@ where
     }
 }
 
+impl<R> crate::plugin::PluginDefinition for ShapedFactory<R> {
+    fn declaration() -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(SHAPED)
+    }
+}
+
 impl<R> crate::plugin::PluginFactory for ShapedFactory<R>
 where
     R: crate::ConfigWire + Clone + Default,
@@ -1404,10 +1410,6 @@ where
         registrar: &mut crate::ConfigRegistrar,
     ) -> Result<(), crate::ConfigRegistrationError> {
         registrar.owner(ShapedOwner::<R>(std::marker::PhantomData))
-    }
-
-    fn declaration(&self) -> crate::plugin::PluginDeclaration {
-        crate::plugin::PluginDeclaration::initial(crate::plugin::PluginFactory::id(self))
     }
 
     fn build(

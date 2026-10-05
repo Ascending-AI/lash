@@ -280,7 +280,7 @@ async fn golden_tree_survives_replay_and_redrive() {
         std::time::Duration::from_secs(30),
         session
             .send(lash::TurnInput::text("count once"))
-            .id("golden-first")
+            .id(lash::TurnId::parse("golden-first").expect("nonblank host identity"))
             .trace_context(producer.clone())
             .output(),
     )
@@ -484,7 +484,7 @@ async fn golden_tree_survives_replay_and_redrive() {
         .expect("reopen with recreated adapter");
     session
         .send(lash::TurnInput::text("count once"))
-        .id("golden-first")
+        .id(lash::TurnId::parse("golden-first").expect("nonblank host identity"))
         .output()
         .await
         .expect("redrive same submission");
@@ -500,7 +500,7 @@ async fn golden_tree_survives_replay_and_redrive() {
     );
     session
         .send(lash::TurnInput::text("answer again"))
-        .id("golden-second")
+        .id(lash::TurnId::parse("golden-second").expect("nonblank host identity"))
         .output()
         .await
         .expect("second independent send");

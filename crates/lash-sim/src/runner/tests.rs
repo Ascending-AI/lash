@@ -888,7 +888,7 @@ async fn a_missing_vm_worker_parks_without_transient_retries_and_redrives_after_
         .send(lash::TurnInput::text("produce a semantic final value"))
         .require_finish()
         .expect("finish contract")
-        .id("sim-final-value-turn")
+        .id(lash::TurnId::parse("sim-final-value-turn").expect("nonblank host identity"))
         .await
         .expect("accept input");
     let paused = tokio::time::timeout(std::time::Duration::from_secs(60), async {
@@ -953,7 +953,7 @@ async fn a_missing_vm_worker_parks_without_transient_retries_and_redrives_after_
     let report = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
             let outcome = session
-                .run("sim-final-value-turn")
+                .run(lash::RunId::parse("sim-final-value-turn").expect("nonblank host identity"))
                 .outcome()
                 .await
                 .expect("redriven outcome");

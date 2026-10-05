@@ -82,7 +82,7 @@ async fn a_delete_of_a_never_created_id_leaves_the_id_creatable_and_runnable(
         "the no-op delete left no tombstone"
     );
 
-    core.session(ID)
+    core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     runs_a_turn(&double, &core, ID).await?;
@@ -92,7 +92,13 @@ async fn a_delete_of_a_never_created_id_leaves_the_id_creatable_and_runnable(
         matches!(deletion, crate::SessionDeletion::Deleted(_)),
         "the created session's own delete closes and deletes it: {deletion:?}"
     );
-    assert!(core.session(ID).durable().await?.was_deleted().await?);
+    assert!(
+        core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+            .durable()
+            .await?
+            .was_deleted()
+            .await?
+    );
     Ok(())
 }
 
@@ -166,7 +172,7 @@ async fn a_delete_racing_a_create_cleans_up_nothing_without_an_accepted_close(
     let create = async {
         closed.await.expect("the delete's close answers");
         let created = core
-            .session(ID)
+            .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
             .create(crate::SessionCreation::root(mock_session_spec()))
             .await;
         release.send(()).expect("the delete waits on its close");

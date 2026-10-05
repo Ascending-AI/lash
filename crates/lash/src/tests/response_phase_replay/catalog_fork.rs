@@ -10,10 +10,6 @@ impl lash_core::plugin::PluginFactory for ConstructionProbe {
         lash_core::plugin::PluginFactory::id(&self.inner)
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginFactory::declaration(&self.inner)
-    }
-
     fn build(
         &self,
         context: &lash_core::plugin::PluginSessionContext,
@@ -21,6 +17,12 @@ impl lash_core::plugin::PluginFactory for ConstructionProbe {
     {
         self.owners.lock_recover().push(context.owner.clone());
         lash_core::plugin::PluginFactory::build(&self.inner, context)
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for ConstructionProbe {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        <StateDeriver as lash_core::plugin::PluginDefinition>::declaration()
     }
 }
 

@@ -1249,7 +1249,7 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
         .expect("open canonical session");
     session
         .send(lash::TurnInput::text("canonical question"))
-        .id("canonical-turn")
+        .id(lash::TurnId::parse("canonical-turn").expect("nonblank host identity"))
         .output()
         .await
         .expect("commit real reply");
@@ -1605,7 +1605,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
     let switch_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let switch_output = session
         .send(lash::TurnInput::text(switch_prompt))
-        .id(switch_turn_id)
+        .id(lash::TurnId::parse(switch_turn_id).expect("nonblank host identity"))
         .require_finish()
         .expect("require follow-frame finish")
         .output_into(&ChannelTurnEvents {
@@ -2167,7 +2167,7 @@ async fn workbench_settled_turn_cancels_preserve_execution_done() {
     for turn_id in ["settled-turn-a", "settled-turn-b"] {
         session
             .send(lash::TurnInput::text(format!("complete {turn_id}")))
-            .id(turn_id)
+            .id(lash::TurnId::parse(turn_id).expect("nonblank host identity"))
             .require_finish()
             .expect("require finish")
             .output()

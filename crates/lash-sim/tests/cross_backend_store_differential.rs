@@ -1719,7 +1719,7 @@ impl BackendRunner {
                     .lifecycle_core
                     .as_ref()
                     .expect("generated sequence deletes before attempting admission");
-                let error = match core.session(&self.session_id).open().await {
+                let error = match core.session(self.session_id.clone()).open().await {
                     Ok(_) => panic!(
                         "{} admitted deleted session `{}`",
                         self.name, self.session_id

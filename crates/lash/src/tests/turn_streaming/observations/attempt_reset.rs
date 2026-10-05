@@ -3,7 +3,7 @@ pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()>
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
     .serve_test_llm_profile(retrying_visible_stream_provider(), mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    core.session("retry-visible-observation")
+    core.session(crate::SessionId::parse("retry-visible-observation").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec().charge_safety(
                 lash_core::ChargeSafetyPolicy::AcceptDuplicateBilling {
@@ -14,7 +14,7 @@ pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()>
             parent: None,
         })
         .await?;
-    let session = core.session("retry-visible-observation").open().await?;
+    let session = core.session(crate::SessionId::parse("retry-visible-observation").expect("nonblank host identity")).open().await?;
     let cursor = session.observe().current_observation().cursor;
     let lash_core::facade_support::SessionObservationSubscription::Subscribed(mut subscription) =
         session.observe().subscribe_from_cursor(&cursor)?
@@ -166,7 +166,7 @@ pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()>
     };
     assert_transcript(session.read_view().active_events());
     Box::pin(session.close()).await?;
-    let reopened = core.session("retry-visible-observation").open().await?;
+    let reopened = core.session(crate::SessionId::parse("retry-visible-observation").expect("nonblank host identity")).open().await?;
     assert_transcript(reopened.read_view().active_events());
 
     Ok(())

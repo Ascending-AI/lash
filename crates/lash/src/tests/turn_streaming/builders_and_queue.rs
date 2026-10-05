@@ -17,7 +17,9 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("turn-started-cancel-target")
+        .session(
+            crate::SessionId::parse("turn-started-cancel-target").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -25,7 +27,7 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
     let expected_turn_id = "turn-started-cancel-target-id";
     let handle = session
         .send(TurnInput::text("wait for exact cancellation"))
-        .id(expected_turn_id)
+        .id(crate::TurnId::parse(expected_turn_id).expect("nonblank host identity"))
         .await?;
     let mut stream = handle.events();
 
@@ -73,7 +75,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("idle-input-application")
+        .session(crate::SessionId::parse("idle-input-application").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -82,13 +84,13 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
     let empty_admission = session
         .durable()
         .send(TurnInput::text(""))
-        .id("idle-empty-source")
+        .id(crate::TurnId::parse("idle-empty-source").expect("nonblank host identity"))
         .accepted()
         .await?;
     let admission = session
         .durable()
         .send(TurnInput::text("queued canonical input"))
-        .id("idle-source")
+        .id(crate::TurnId::parse("idle-source").expect("nonblank host identity"))
         .accepted()
         .await?;
 
@@ -165,7 +167,10 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("durable-input-application-gap")
+        .session(
+            crate::SessionId::parse("durable-input-application-gap")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -174,7 +179,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
     let admission = session
         .durable()
         .send(TurnInput::text("survives replay gap"))
-        .id("gap-source")
+        .id(crate::TurnId::parse("gap-source").expect("nonblank host identity"))
         .accepted()
         .await?;
     let run = session
@@ -239,13 +244,13 @@ pub(super) async fn a_send_never_answers_from_a_run_another_store_ran() -> Resul
     let first = answering_core("answered by the first store").await?;
     let second = answering_core("answered by the second store").await?;
     let first_session = first
-        .session("shared-session")
+        .session(crate::SessionId::parse("shared-session").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
     let second_session = second
-        .session("shared-session")
+        .session(crate::SessionId::parse("shared-session").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -255,7 +260,7 @@ pub(super) async fn a_send_never_answers_from_a_run_another_store_ran() -> Resul
     // handle takes it, so it stays in the mailbox under the shared ids.
     let unread = first_session
         .send(TurnInput::text("ask"))
-        .id("shared-input")
+        .id(crate::TurnId::parse("shared-input").expect("nonblank host identity"))
         .await?;
     let shared_input = unread.input_id().clone();
     drop(unread);
@@ -276,7 +281,7 @@ pub(super) async fn a_send_never_answers_from_a_run_another_store_ran() -> Resul
 
     let second_handle = second_session
         .send(TurnInput::text("ask"))
-        .id("shared-input")
+        .id(crate::TurnId::parse("shared-input").expect("nonblank host identity"))
         .await?;
     assert_eq!(second_handle.input_id(), &shared_input);
     let output = second_handle.output().await?;
@@ -303,7 +308,7 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("request-digest")
+        .session(crate::SessionId::parse("request-digest").expect("nonblank host identity"))
         .created()
         .await
         .open()

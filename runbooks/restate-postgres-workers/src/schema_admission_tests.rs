@@ -533,7 +533,7 @@ async fn resolved_tool_dialect_store_law_live_restate_postgres() {
 
 #[test]
 fn schema_admission_causes_survive_plugin_host_and_remote_shapes() {
-    let source = lash::triggers::JsonSchema::admit(Value::Null).expect_err("null is not a schema");
+    let source = lash::schema::JsonSchema::admit(Value::Null).expect_err("null is not a schema");
     let plugin = lash::plugins::PluginError::UnusableSchema {
         source: Box::new(source.clone()),
     };

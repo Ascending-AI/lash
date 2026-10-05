@@ -132,7 +132,7 @@ async fn refused_terminal(
         Fixture::with_plugins(vec![failing_after_turn(Arc::clone(&finalize_calls), fault)]).await?;
     let session = fixture
         .core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -140,7 +140,7 @@ async fn refused_terminal(
 
     let refused = session
         .send(TurnInput::text("finalize refuses"))
-        .id(TURN)
+        .id(crate::TurnId::parse(TURN).expect("nonblank host identity"))
         .output()
         .await
         .expect_err("a finalize refusal ends the run terminal");
@@ -155,7 +155,7 @@ async fn refused_terminal(
 
     let redriven = session
         .send(TurnInput::text("finalize refuses"))
-        .id(TURN)
+        .id(crate::TurnId::parse(TURN).expect("nonblank host identity"))
         .output()
         .await
         .expect_err("the redrive answers the recorded refusal");

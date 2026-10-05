@@ -430,10 +430,6 @@ impl PluginFactory for StandardProtocolPluginFactory {
         STANDARD_PROTOCOL_PLUGIN_ID
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     /// The session's standard-protocol namespace and its typed commands
     /// (FIG-4379).
     fn register_config(
@@ -498,6 +494,12 @@ impl PluginFactory for StandardProtocolPluginFactory {
         Ok(Arc::new(StandardProtocolPlugin {
             config: self.config.clone().under_recorded_behaviour(&behaviour),
         }))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for StandardProtocolPluginFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(STANDARD_PROTOCOL_PLUGIN_ID)
     }
 }
 

@@ -292,7 +292,7 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
         .open()
         .await?
         .send(TurnInput::text("wait for the external result"))
-        .id("run-run")
+        .id(crate::TurnId::parse("run-run").expect("nonblank host identity"))
         .await?;
     tokio::time::timeout(WEDGE, dispatched.notified())
         .await
@@ -599,7 +599,7 @@ impl RunRoll {
             .open()
             .await?
             .send(TurnInput::text("look it up, then answer"))
-            .id("run-run")
+            .id(crate::TurnId::parse("run-run").expect("nonblank host identity"))
             .await?;
         tokio::time::timeout(WEDGE, model.reached.notified())
             .await
@@ -1058,7 +1058,7 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(
         WEDGE,
         handle
             .send(TurnInput::text("look it up three times, then answer"))
-            .id("run-run")
+            .id(crate::TurnId::parse("run-run").expect("nonblank host identity"))
             .output(),
     )
     .await
@@ -1164,7 +1164,7 @@ async fn a_runs_turn_budget_counts_across_its_boundaries(storage: Storage) -> Re
         WEDGE,
         handle
             .send(TurnInput::text("look it up three times, then answer"))
-            .id("run-run")
+            .id(crate::TurnId::parse("run-run").expect("nonblank host identity"))
             .output(),
     )
     .await

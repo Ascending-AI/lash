@@ -284,7 +284,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         .await?;
     let session = runtime
         .core
-        .session(&case.session_id)
+        .session(case.session_id.clone())
         .created_with(runtime.spec.clone())
         .await
         .open()
@@ -497,7 +497,7 @@ async fn assert_remote_process_dto_surface(
 
     let snapshot = core
         .processes()
-        .session_snapshot(session_id)
+        .session_snapshot((session_id).clone())
         .await
         .expect("capture process work snapshot for remote DTO round trip");
     let remote_snapshot = lash_remote_protocol::RemoteProcessWorkSnapshot::try_from(snapshot)
@@ -624,7 +624,10 @@ finish(await handle);"#,
     .await?;
     let session = runtime
         .core
-        .session("agent-scenario-process-llm-query")
+        .session(
+            crate::SessionId::parse("agent-scenario-process-llm-query")
+                .expect("nonblank host identity"),
+        )
         .created_with(runtime.spec.clone())
         .await
         .open()
@@ -670,7 +673,10 @@ finish(await handle);"#,
     .await?;
     let session = runtime
         .core
-        .session("agent-scenario-direct-completion-attempt-retry")
+        .session(
+            crate::SessionId::parse("agent-scenario-direct-completion-attempt-retry")
+                .expect("nonblank host identity"),
+        )
         .created_with(runtime.spec.clone())
         .await
         .open()

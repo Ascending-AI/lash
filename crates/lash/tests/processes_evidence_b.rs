@@ -808,18 +808,18 @@ fn processes_area_witnesses_b() {
     let _ = lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
     // W0608: lash_core::facade_support::registry_transitions::WakeDeliveryRow::project [function]
     let _ = lash_core::facade_support::registry_transitions::WakeDeliveryRow::project;
-    // W0609: lash::runtime::RuntimeNamedPhase [struct]
-    type_witness::<lash::runtime::RuntimeNamedPhase>();
-    // W0610: lash::runtime::RuntimeNamedPhase::begin [function]
-    let _ = lash::runtime::RuntimeNamedPhase::begin;
-    // W0611: lash::runtime::RuntimeTurnPhaseProbeSlot [struct]
-    type_witness::<lash::runtime::RuntimeTurnPhaseProbeSlot>();
-    // W0612: lash::runtime::RuntimeTurnPhaseProbeSlot::get_for_scope [function]
-    let _ = lash::runtime::RuntimeTurnPhaseProbeSlot::get_for_scope;
-    // W0613: lash::runtime::RuntimeTurnPhaseProbeSlot::set_for_scope [function]
-    let _ = lash::runtime::RuntimeTurnPhaseProbeSlot::set_for_scope;
-    // W0614: lash::runtime::RuntimeTurnPhaseProbeSlot::set_for_session [function]
-    let _ = lash::runtime::RuntimeTurnPhaseProbeSlot::set_for_session(
+    // W0609: lash::testing::RuntimeNamedPhase [struct]
+    type_witness::<lash::testing::RuntimeNamedPhase>();
+    // W0610: lash::testing::RuntimeNamedPhase::begin [function]
+    let _ = lash::testing::RuntimeNamedPhase::begin;
+    // W0611: lash::testing::RuntimeTurnPhaseProbeSlot [struct]
+    type_witness::<lash::testing::RuntimeTurnPhaseProbeSlot>();
+    // W0612: lash::testing::RuntimeTurnPhaseProbeSlot::get_for_scope [function]
+    let _ = lash::testing::RuntimeTurnPhaseProbeSlot::get_for_scope;
+    // W0613: lash::testing::RuntimeTurnPhaseProbeSlot::set_for_scope [function]
+    let _ = lash::testing::RuntimeTurnPhaseProbeSlot::set_for_scope;
+    // W0614: lash::testing::RuntimeTurnPhaseProbeSlot::set_for_session [function]
+    let _ = lash::testing::RuntimeTurnPhaseProbeSlot::set_for_session(
         todo!(),
         lash::SessionId::from("x"),
         todo!(),

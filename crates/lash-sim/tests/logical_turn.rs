@@ -365,7 +365,7 @@ async fn admitted_switch_is_seeded_atomic_ordered_and_exactly_once() {
     session.set_turn_phase_probe(pause.clone()).await;
     let first = session
         .send(TurnInput::text("first queued turn"))
-        .id("first")
+        .id(lash::TurnId::parse("first").expect("nonblank host identity"))
         .await
         .expect("send first turn");
     first_provider_started_rx
@@ -373,7 +373,7 @@ async fn admitted_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .expect("first provider call started");
     let second = session
         .send(TurnInput::text("second queued turn"))
-        .id("second")
+        .id(lash::TurnId::parse("second").expect("nonblank host identity"))
         .await
         .expect("send second turn while chain is active");
     release_first_provider_tx

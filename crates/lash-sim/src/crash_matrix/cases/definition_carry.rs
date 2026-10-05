@@ -168,10 +168,6 @@ impl PluginFactory for Factory {
         KIND
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn process_engine_contributions(
         &self,
         _context: &lash_core::ProcessEngineContributionContext<'_>,
@@ -190,6 +186,12 @@ impl PluginFactory for Factory {
             Arc::new(|_| Ok(PluginSpec::new())),
         )
         .build(context)
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for Factory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(KIND)
     }
 }
 

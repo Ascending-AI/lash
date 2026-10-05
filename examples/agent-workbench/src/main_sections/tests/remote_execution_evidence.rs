@@ -56,7 +56,7 @@ async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_re
 
     session
         .send(lash::TurnInput::text("prove remote recovery facades"))
-        .id("remote-recovery-facade-turn")
+        .id(lash::TurnId::parse("remote-recovery-facade-turn").expect("nonblank host identity"))
         .require_finish()
         .expect("require finish")
         .output()

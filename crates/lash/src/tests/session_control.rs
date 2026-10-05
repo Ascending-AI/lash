@@ -131,7 +131,12 @@ async fn a_session_close_releases_its_running_runs_execution() -> Result<()> {
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .serve_test_llm_profile(hold_provider(Arc::clone(&calls)), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("held-close").created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse("held-close").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let session_id = session.session_id().clone();
     session.send(TurnInput::text("hold this run")).await?;
 

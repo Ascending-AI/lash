@@ -137,10 +137,6 @@ impl PluginFactory for McpPluginFactory {
         "mcp"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     async fn shutdown(&self) -> Result<(), PluginError> {
         self.pool.shutdown_all().await;
         Ok(())
@@ -150,6 +146,12 @@ impl PluginFactory for McpPluginFactory {
         Ok(Arc::new(McpSessionPlugin {
             pool: Arc::clone(&self.pool),
         }))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for McpPluginFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("mcp")
     }
 }
 

@@ -47,7 +47,8 @@ async fn a_stopped_turn_runs_withheld_input_in_a_follow_on() -> Result<()> {
                         let session = durable.lock_recover().clone().unwrap();
                         session
                             .send(TurnInput::text("withheld after tool stop"))
-                            .id("withheld-input")
+                            .id(crate::TurnId::parse("withheld-input")
+                                .expect("nonblank host identity"))
                             .ingress(lash_core::TurnInputIngress::active_turn(
                                 lash_core::TurnId::from("stopped-withheld"),
                                 lash_core::TurnInputCheckpointBoundary::BeforeCompletion,
@@ -73,7 +74,7 @@ async fn a_stopped_turn_runs_withheld_input_in_a_follow_on() -> Result<()> {
         .tools(Arc::new(StopQueuedTool))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("stopped-withheld")
+        .session(crate::SessionId::parse("stopped-withheld").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -81,7 +82,7 @@ async fn a_stopped_turn_runs_withheld_input_in_a_follow_on() -> Result<()> {
     *durable.lock_recover() = Some(session.durable());
     let output = session
         .send(TurnInput::text("start tool stop"))
-        .id("stopped-withheld")
+        .id(crate::TurnId::parse("stopped-withheld").expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(

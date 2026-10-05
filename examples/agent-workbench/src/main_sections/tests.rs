@@ -888,7 +888,8 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         .open()
         .await
         .expect("open cancelled session");
-    let address = session.turn_address("turn-cancel");
+    let address =
+        session.turn_address(lash::TurnId::parse("turn-cancel").expect("nonblank host identity"));
     let (cancelled, turn) = tokio::join!(
         cancel_turn(State(state.clone()), Query(TurnCancelQuery::default())),
         async {
@@ -901,7 +902,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
             assert_eq!(recorded.request.mode, lash::TurnCancelMode::Immediate);
             session
                 .send(lash::TurnInput::text("already cancelled"))
-                .id("turn-cancel")
+                .id(lash::TurnId::parse("turn-cancel").expect("nonblank host identity"))
                 .output()
                 .await
         },
@@ -942,7 +943,8 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         .core
         .turn_work_driver()
         .request_cancel(lash::TurnCancelRequest::new(
-            session.turn_address("turn-cancel"),
+            session
+                .turn_address(lash::TurnId::parse("turn-cancel").expect("nonblank host identity")),
             "duplicate",
             Some("test-host".to_string()),
         ))

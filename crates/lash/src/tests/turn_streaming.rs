@@ -15,10 +15,6 @@ impl lash_core::facade_support::PluginFactory for QueuedWorkHydrationProbeFactor
         "queued-work-hydration-probe"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -28,6 +24,12 @@ impl lash_core::facade_support::PluginFactory for QueuedWorkHydrationProbeFactor
     > {
         self.builds.fetch_add(1, Ordering::SeqCst);
         Ok(Arc::new(QueuedWorkHydrationProbePlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for QueuedWorkHydrationProbeFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("queued-work-hydration-probe")
     }
 }
 
@@ -58,10 +60,6 @@ impl lash_core::facade_support::PluginFactory for TurnPersistedObserverFactory {
         "turn-persisted-observer"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -73,6 +71,13 @@ impl lash_core::facade_support::PluginFactory for TurnPersistedObserverFactory {
             observation_count: Arc::clone(&self.observation_count),
             max_failures: self.max_failures,
         }))
+    }
+}
+
+#[cfg(feature = "rlm")]
+impl lash_core::plugin::PluginDefinition for TurnPersistedObserverFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("turn-persisted-observer")
     }
 }
 

@@ -27,7 +27,7 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("commit-budget-surface")
+        .session(crate::SessionId::parse("commit-budget-surface").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -172,7 +172,9 @@ async fn public_append_node_budget_failure_is_typed_terminal_and_actionable() ->
         ),
     )?;
     let session = core
-        .session("append-node-budget-surface")
+        .session(
+            crate::SessionId::parse("append-node-budget-surface").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -212,7 +214,7 @@ async fn park_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<(
             crate::CommitBudgetLimit::Unbounded,
         ),
     )?
-    .session("park-byte-budget-surface")
+    .session(crate::SessionId::parse("park-byte-budget-surface").expect("nonblank host identity"))
     .create(crate::SessionCreation::root(mock_session_spec()))
     .await?;
     let core = core_over_backend_with_commit_budget(
@@ -222,7 +224,12 @@ async fn park_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<(
             crate::CommitBudgetLimit::Unbounded,
         ),
     )?;
-    let session = core.session("park-byte-budget-surface").open().await?;
+    let session = core
+        .session(
+            crate::SessionId::parse("park-byte-budget-surface").expect("nonblank host identity"),
+        )
+        .open()
+        .await?;
     session
         .admin()
         .state()
@@ -250,7 +257,9 @@ async fn park_node_budget_failure_is_typed_terminal_and_actionable() -> Result<(
     ))
     .await?;
     let session = core
-        .session("park-node-budget-surface")
+        .session(
+            crate::SessionId::parse("park-node-budget-surface").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()

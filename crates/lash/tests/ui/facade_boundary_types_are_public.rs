@@ -461,3 +461,24 @@ fn telemetry_types_are_nameable(
     let _: &str = GEN_AI_SEMCONV_SNAPSHOT;
     builder.telemetry(telemetry)
 }
+
+fn typed_host_run_surface(
+    run: lash::RunId,
+    handle: lash::RunHandle<String, String>,
+    error: lash::admin::PluginTaskResultError<String>,
+    page: lash::ChangePage<lash::SessionFault, Option<lash::SessionId>>,
+) {
+    let _: &lash::RunId = handle.run();
+    let _ = (run, error, page.next, page.changes);
+}
+
+fn runtime_host_strings_are_validated_before_binding(
+    core: &lash::LashCore,
+    session: &str,
+    input: &str,
+) -> Result<(), lash::BlankIdentity> {
+    let _builder = core.session(lash::SessionId::parse(session)?);
+    let input = lash::TurnId::try_from(input.to_owned())?;
+    let _batch_input = lash::BatchInput::new(lash::TurnInput::text("host input")).id(input);
+    Ok(())
+}

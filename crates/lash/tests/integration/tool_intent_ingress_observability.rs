@@ -121,8 +121,10 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
     let observable_call_id = tracing::subscriber::with_default(subscriber, || {
         runtime.block_on(async {
             let (core, process, other_process) = test_core().await?;
-            let ingress =
-                core.tool_intents(SESSION, lash::runtime::ExecutionScope::turn(SESSION, SCOPE))?;
+            let ingress = core.tool_intents(
+                lash::SessionId::parse(SESSION).expect("nonblank host identity"),
+                lash::runtime::ExecutionScope::turn(SESSION, SCOPE),
+            )?;
             let key = ingress
                 .key("observable", 0)
                 .expect("a host submission handle");

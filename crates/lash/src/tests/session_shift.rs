@@ -76,7 +76,7 @@ async fn a_scheduled_shift_drains_more_runs_than_one_invocation_executes() -> Re
     .await?;
     let session = fixture
         .core
-        .session("send-run-budget")
+        .session(crate::SessionId::parse("send-run-budget").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -286,7 +286,7 @@ async fn a_run_retried_on_a_held_runtime_starts_from_the_durable_session() -> Re
     );
     let session = fixture
         .core
-        .session("shift-held-retry")
+        .session(crate::SessionId::parse("shift-held-retry").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -340,7 +340,7 @@ async fn a_lost_shift_schedule_is_healed_by_the_reconcile_tick() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("send-drain-sweep")
+        .session(crate::SessionId::parse("send-drain-sweep").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -456,7 +456,7 @@ async fn a_shift_on_a_deleted_session_answers_its_retirement() -> Result<()> {
     drop(
         fixture
             .core
-            .session("send-retired")
+            .session(crate::SessionId::parse("send-retired").expect("nonblank host identity"))
             .created()
             .await
             .open()
@@ -540,7 +540,7 @@ async fn a_run_replayed_after_its_session_was_deleted_replays_its_journal() -> R
     drop(
         fixture
             .core
-            .session("send-closed-replay")
+            .session(crate::SessionId::parse("send-closed-replay").expect("nonblank host identity"))
             .created()
             .await
             .open()

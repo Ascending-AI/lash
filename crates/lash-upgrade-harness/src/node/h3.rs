@@ -342,11 +342,11 @@ pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
             }
         }
         H3Command::Follow { run } => {
-            let result = session.run(run.clone()).result().await?;
+            let result = session.run(run.clone().into()).result().await?;
             Ok(serde_json::json!({"run": run, "output": result.output}))
         }
         H3Command::Cancel { run } => {
-            let receipt = session.run(run.clone()).cancel().await?;
+            let receipt = session.run(run.clone().into()).cancel().await?;
             Ok(serde_json::json!({
                 "run": run,
                 "cancel_requested": true,

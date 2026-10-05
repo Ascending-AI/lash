@@ -744,7 +744,7 @@ async fn a_catalog_edit_reaches_a_session_only_through_a_profile_change(
         "keys-boot-2",
     );
     let session = edited
-        .session(session_id)
+        .session(lash::SessionId::parse(session_id).expect("nonblank host identity"))
         .open()
         .await
         .expect("the redeployed host opens the session");
@@ -835,7 +835,7 @@ async fn a_recorded_llm_profile_whose_key_left_the_catalog_fails_typed_and_never
         .await;
     session
         .send(TurnInput::text("ask the session's model"))
-        .id("keys-key-removed-run")
+        .id(lash::TurnId::parse("keys-key-removed-run").expect("nonblank host identity"))
         .await
         .expect("the held session accepts the input");
     drop(session);
@@ -881,12 +881,15 @@ async fn a_recorded_llm_profile_whose_key_left_the_catalog_fails_typed_and_never
         "keys-boot-3",
     );
     let session = restored
-        .session(session_id)
+        .session(lash::SessionId::parse(session_id).expect("nonblank host identity"))
         .open()
         .await
         .expect("the restored host opens the session");
     assert_eq!(
-        answer_of(session.attach_id("keys-key-removed-run")).await,
+        answer_of(session.attach_id(
+            lash::TurnId::parse("keys-key-removed-run").expect("nonblank host identity")
+        ))
+        .await,
         "restored kimi answers",
         "the retried run executes its recorded model once the key is served"
     );
@@ -931,7 +934,7 @@ async fn a_recorded_model_whose_key_serves_another_wire_model_is_refused_typed(
         .await;
     session
         .send(TurnInput::text("ask the session's model"))
-        .id("keys-wire-model-changed-run")
+        .id(lash::TurnId::parse("keys-wire-model-changed-run").expect("nonblank host identity"))
         .await
         .expect("the held session accepts the input");
     drop(session);
@@ -980,7 +983,7 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier, replay: b
     let unregistered = "unregistered@nowhere";
 
     let created = core
-        .session("keys-unknown-create")
+        .session(lash::SessionId::parse("keys-unknown-create").expect("nonblank host identity"))
         .create(lash::SessionCreation {
             spec: lash::SessionSpec::new(
                 unregistered,
@@ -995,7 +998,10 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier, replay: b
         "creation refuses the unknown key typed: {:?}",
         created.as_ref().err()
     );
-    let reopened = core.session("keys-unknown-create").open().await;
+    let reopened = core
+        .session(lash::SessionId::parse("keys-unknown-create").expect("nonblank host identity"))
+        .open()
+        .await;
     assert!(
         matches!(&reopened, Err(lash::EmbedError::UnknownSession { .. })),
         "the refused creation created nothing: {:?}",
@@ -1106,7 +1112,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(
 
     // Creation: a key with no reasoning controls cannot record an effort.
     let created = core
-        .session("keys-reasoning-refused")
+        .session(lash::SessionId::parse("keys-reasoning-refused").expect("nonblank host identity"))
         .create(lash::SessionCreation {
             spec: lash::SessionSpec::new(
                 GLM,
@@ -1127,7 +1133,10 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(
             other.as_ref().err()
         ),
     }
-    let reopened = core.session("keys-reasoning-refused").open().await;
+    let reopened = core
+        .session(lash::SessionId::parse("keys-reasoning-refused").expect("nonblank host identity"))
+        .open()
+        .await;
     assert!(
         matches!(&reopened, Err(lash::EmbedError::UnknownSession { .. })),
         "the refused creation created nothing: {:?}",
@@ -1135,7 +1144,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(
     );
 
     // Send: the session records `high` on the thinking model.
-    core.session("keys-reasoning")
+    core.session(lash::SessionId::parse("keys-reasoning").expect("nonblank host identity"))
         .create(lash::SessionCreation {
             spec: lash::SessionSpec::new(
                 THINKER,
@@ -1148,7 +1157,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(
         .await
         .expect("the advertised effort is recorded");
     let session = core
-        .session("keys-reasoning")
+        .session(lash::SessionId::parse("keys-reasoning").expect("nonblank host identity"))
         .open()
         .await
         .expect("open the session");
@@ -1341,7 +1350,7 @@ async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(
         .await;
     session
         .send(TurnInput::text("ask the session's model"))
-        .id("keys-bind-fault-park-run")
+        .id(lash::TurnId::parse("keys-bind-fault-park-run").expect("nonblank host identity"))
         .await
         .expect("the held session accepts the input");
     catalog.serve(LlmProfileRegistry::new());
@@ -1362,7 +1371,13 @@ async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(
         "the park's failure is the typed bind fault and names the recorded key: {failure}"
     );
     assert_no_recorded_bind_fault(&double, &parked);
-    let park = park_of(session.attach_id("keys-bind-fault-park-run"), &parked).await;
+    let park = park_of(
+        session.attach_id(
+            lash::TurnId::parse("keys-bind-fault-park-run").expect("nonblank host identity"),
+        ),
+        &parked,
+    )
+    .await;
     assert_eq!(
         park.reason.profile_key(),
         Some(&LlmProfileKey::new(KIMI)),
@@ -1546,7 +1561,7 @@ async fn a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion(
     let session = created_on(&core, "keys-attempt-ends-at-fault", KIMI).await;
     session
         .send(TurnInput::text("ask the model through the tool"))
-        .id("keys-attempt-ends-at-fault-run")
+        .id(lash::TurnId::parse("keys-attempt-ends-at-fault-run").expect("nonblank host identity"))
         .await
         .expect("the session accepts the input");
 
@@ -1607,7 +1622,7 @@ async fn a_completion_before_a_bind_fault_is_retried_only_while_unrecorded(
     let session = created_on(&core, session_id, KIMI).await;
     session
         .send(TurnInput::text("ask the model through the tool"))
-        .id("keys-usage-before-fault-run")
+        .id(lash::TurnId::parse("keys-usage-before-fault-run").expect("nonblank host identity"))
         .await
         .expect("the session accepts the input");
 

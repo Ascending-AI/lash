@@ -112,25 +112,55 @@ pub struct RemoteLlmRequest {
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
+/// Validate request content before resolving or recording a model profile.
+///
+/// Checks the same generation, message, attachment, tool and output contracts
+/// as [`RemoteLlmRequest::validate`]. Request identity, scope and the resolved
+/// model are validated when the complete request is submitted.
+pub fn validate_llm_request_content(
+    generation: &RemoteGenerationOptions,
+    messages: &[RemoteLlmMessage],
+    tools: &[RemoteLlmToolSpec],
+    output_spec: Option<&RemoteLlmOutputSpec>,
+) -> Result<(), RemoteProtocolError> {
+    generation.validate("RemoteLlmRequest")?;
+    for (index, message) in messages.iter().enumerate() {
+        message.validate(index)?;
+    }
+    for (index, attachment) in attachments_from_messages(messages).enumerate() {
+        attachment.validate(index)?;
+    }
+    for tool in tools {
+        tool.validate()?;
+    }
+    if let Some(output_spec) = output_spec {
+        output_spec.validate()?;
+    }
+    Ok(())
+}
+
+fn attachments_from_messages(
+    messages: &[RemoteLlmMessage],
+) -> impl Iterator<Item = &RemoteAttachmentSource> {
+    messages
+        .iter()
+        .flat_map(|message| message.content.iter())
+        .flat_map(|block| {
+            let (own, result): (Option<&RemoteAttachmentSource>, &[RemoteToolResultBlock]) =
+                match block {
+                    RemoteLlmContentBlock::Attachment { source } => (Some(source.as_ref()), &[]),
+                    RemoteLlmContentBlock::ToolResult { content, .. } => (None, content),
+                    _ => (None, &[]),
+                };
+            own.into_iter()
+                .chain(result.iter().filter_map(RemoteToolResultBlock::attachment))
+        })
+}
+
 impl RemoteLlmRequest {
     /// Attachment sources in message order, derived from their owning blocks.
     pub fn attachments(&self) -> Vec<&RemoteAttachmentSource> {
-        self.messages
-            .iter()
-            .flat_map(|message| message.content.iter())
-            .flat_map(|block| {
-                let (own, result): (Option<&RemoteAttachmentSource>, &[RemoteToolResultBlock]) =
-                    match block {
-                        RemoteLlmContentBlock::Attachment { source } => {
-                            (Some(source.as_ref()), &[])
-                        }
-                        RemoteLlmContentBlock::ToolResult { content, .. } => (None, content),
-                        _ => (None, &[]),
-                    };
-                own.into_iter()
-                    .chain(result.iter().filter_map(RemoteToolResultBlock::attachment))
-            })
-            .collect()
+        attachments_from_messages(&self.messages).collect()
     }
 
     pub fn encode_json(
@@ -153,20 +183,12 @@ impl RemoteLlmRequest {
         require_non_empty("RemoteLlmRequest", "request_id", &self.request_id)?;
         self.scope.validate()?;
         self.model.validate()?;
-        self.generation.validate("RemoteLlmRequest")?;
-        for (index, message) in self.messages.iter().enumerate() {
-            message.validate(index)?;
-        }
-        for (index, attachment) in self.attachments().iter().enumerate() {
-            attachment.validate(index)?;
-        }
-        for tool in &self.tools {
-            tool.validate()?;
-        }
-        if let Some(output_spec) = &self.output_spec {
-            output_spec.validate()?;
-        }
-        Ok(())
+        validate_llm_request_content(
+            &self.generation,
+            &self.messages,
+            &self.tools,
+            self.output_spec.as_ref(),
+        )
     }
 }
 

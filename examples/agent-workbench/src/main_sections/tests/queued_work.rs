@@ -226,7 +226,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash::triggers::JsonSchema::any(),
+                    payload_schema: lash::schema::JsonSchema::any(),
                     semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
                             when: Some(lash::process::ProcessValueSelector::Present(
@@ -350,7 +350,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash::triggers::JsonSchema::any(),
+                    payload_schema: lash::schema::JsonSchema::any(),
                     semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
                             when: Some(lash::process::ProcessValueSelector::Present(
@@ -448,7 +448,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash::triggers::JsonSchema::any(),
+                    payload_schema: lash::schema::JsonSchema::any(),
                     semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
                             when: Some(lash::process::ProcessValueSelector::Present(
@@ -549,7 +549,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash::triggers::JsonSchema::any(),
+                    payload_schema: lash::schema::JsonSchema::any(),
                     semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
                             when: Some(lash::process::ProcessValueSelector::Present(
@@ -720,7 +720,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         let send_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
         let send_output = session
             .send(lash::TurnInput::text("answer with reasoning"))
-            .id(send_turn_id)
+            .id(lash::TurnId::parse(send_turn_id).expect("nonblank host identity"))
             .output_into(&ChannelTurnEvents {
                 turn_state: Arc::clone(&send_turn_state),
             })
@@ -769,7 +769,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash::triggers::JsonSchema::any(),
+                    payload_schema: lash::schema::JsonSchema::any(),
                     semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
                             when: Some(lash::process::ProcessValueSelector::Present(

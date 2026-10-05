@@ -27,7 +27,7 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("delete-partial-report")
+        .session(crate::SessionId::parse("delete-partial-report").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -72,7 +72,9 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
     }
     assert!(
         !core
-            .session("delete-partial-report")
+            .session(
+                crate::SessionId::parse("delete-partial-report").expect("nonblank host identity")
+            )
             .durable()
             .await?
             .was_deleted()
@@ -104,11 +106,13 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
         "the physical delete removed the row its obligation lived on: {pass:?}"
     );
     assert!(
-        core.session("delete-partial-report")
-            .durable()
-            .await?
-            .was_deleted()
-            .await?
+        core.session(
+            crate::SessionId::parse("delete-partial-report").expect("nonblank host identity")
+        )
+        .durable()
+        .await?
+        .was_deleted()
+        .await?
     );
     assert_eq!(
         core.backend

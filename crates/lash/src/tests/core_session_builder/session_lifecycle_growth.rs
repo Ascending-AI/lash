@@ -98,7 +98,9 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
             .serve_test_llm_profile(queued_text_provider(programs), mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("flat-checkpoint-growth")
+            .session(
+                crate::SessionId::parse("flat-checkpoint-growth").expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()

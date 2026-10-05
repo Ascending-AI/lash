@@ -304,10 +304,6 @@ impl lash_core::facade_support::PluginFactory for ProcessEnginePlugin {
         "lash-upgrade-harness-processes"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn process_engine_contributions(
         &self,
         _context: &lash_core::ProcessEngineContributionContext<'_>,
@@ -328,6 +324,12 @@ impl lash_core::facade_support::PluginFactory for ProcessEnginePlugin {
         _context: &lash_core::facade_support::PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
         Ok(Arc::new(NoSessionPlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for ProcessEnginePlugin {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("lash-upgrade-harness-processes")
     }
 }
 

@@ -167,10 +167,6 @@ impl lash::plugins::PluginFactory for EnginePluginFactory {
         ENGINE_KIND
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn process_engine_contributions(
         &self,
         _context: &lash_core::ProcessEngineContributionContext<'_>,
@@ -185,6 +181,12 @@ impl lash::plugins::PluginFactory for EnginePluginFactory {
         _context: &lash::plugins::PluginSessionContext,
     ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash_core::PluginError> {
         Ok(Arc::new(EngineSessionPlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for EnginePluginFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(ENGINE_KIND)
     }
 }
 
@@ -291,15 +293,17 @@ impl lash::plugins::PluginFactory for CorpusToolsPlugin {
         TOOLS_PLUGIN
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _context: &lash::plugins::PluginSessionContext,
     ) -> Result<Arc<dyn lash::plugins::SessionPlugin>, lash_core::PluginError> {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for CorpusToolsPlugin {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(TOOLS_PLUGIN)
     }
 }
 
@@ -818,7 +822,7 @@ async fn run_workload() -> (RestateTestBackend, lash_core::engine::BuildGenerati
     // resolved terminal and keeps the journal deterministic.
     let turn = session
         .send(lash::TurnInput::text("count once"))
-        .id(TURN)
+        .id(lash::TurnId::parse(TURN).expect("nonblank host identity"))
         .await
         .expect("the turn is accepted");
     release.add_permits(1);

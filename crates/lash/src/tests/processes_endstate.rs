@@ -906,7 +906,12 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
         .await?
         .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
 
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let lifecycle_cursor = session.observe().current_observation().cursor;
 
     let report = core
@@ -1257,7 +1262,12 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
         "main",
     )
     .await;
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let process_id = session
         .admin()
         .processes()
@@ -1298,7 +1308,10 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
             other => panic!("expected session originator, got {other:?}"),
         }
     }
-    let snapshot = core.processes().session_snapshot(session_id).await?;
+    let snapshot = core
+        .processes()
+        .session_snapshot(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .await?;
     assert_eq!(
         snapshot.items.len(),
         2,
@@ -1342,7 +1355,12 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         "main",
     )
     .await;
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let process_id = session
         .admin()
         .processes()
@@ -1363,7 +1381,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     assert_eq!(process_report.discarded_wake_delivery_count, 0);
     assert!(
         core.processes()
-            .session_snapshot(session_id)
+            .session_snapshot(crate::SessionId::parse(session_id).expect("nonblank host identity"))
             .await?
             .items
             .is_empty()
@@ -1389,7 +1407,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     );
     assert!(
         core.processes()
-            .session_snapshot(session_id)
+            .session_snapshot(crate::SessionId::parse(session_id).expect("nonblank host identity"))
             .await?
             .items
             .is_empty()
@@ -1445,10 +1463,6 @@ impl lash_core::facade_support::PluginFactory for CalendarTriggerSurfaceFactory 
         "calendar-triggers"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn extension_contributions(&self) -> Vec<lash_core::plugin::PluginExtensionContribution> {
         let mut resources = crate::rlm::LashlangHostCatalog::new();
         resources
@@ -1487,6 +1501,12 @@ impl lash_core::facade_support::PluginFactory for CalendarTriggerSurfaceFactory 
     }
 }
 
+impl lash_core::plugin::PluginDefinition for CalendarTriggerSurfaceFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("calendar-triggers")
+    }
+}
+
 /// FIG-3116: `triggers.register` is an ordinary declaring leaf tool now.
 /// Executed only through `send()`: the cell's recorded call is
 /// `register_trigger`, it declares a `register_trigger` intent, and the
@@ -1518,7 +1538,7 @@ finish(handle.id);
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("rlm-trigger-leaf")
+        .session(crate::SessionId::parse("rlm-trigger-leaf").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1638,7 +1658,10 @@ finish(await h);
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("rlm-process-registers-trigger")
+        .session(
+            crate::SessionId::parse("rlm-process-registers-trigger")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()

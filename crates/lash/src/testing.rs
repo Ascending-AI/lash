@@ -108,3 +108,11 @@ pub use lash_core::testing::wait_until;
 
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core::triggers::{TriggerDeliveryRecoveryError, TriggerRouter};
+
+/// Make panic containment loud in a test or performance harness.
+pub use lash_core::panic_containment::{is_loud, set_loud};
+/// Turn-phase instrumentation for tests and performance harnesses. Phase names
+/// follow the runtime implementation and are not a production host contract.
+pub use lash_core::runtime::{
+    RuntimeNamedPhase, RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot,
+};

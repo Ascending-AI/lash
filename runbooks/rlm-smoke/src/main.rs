@@ -540,7 +540,7 @@ async fn main() -> Result<()> {
     // A smoke run may name a session an earlier run created: create-or-use,
     // written out, since only `create` creates (FIG-4112).
     match core
-        .session(&args.session_id)
+        .session(args.session_id.clone())
         .create(lash::SessionCreation::root(
             lash::SessionSpec::new(
                 args.model.as_str(),
@@ -567,7 +567,7 @@ async fn main() -> Result<()> {
         Err(error) => return Err(error).context("create RLM smoke session"),
     }
     let session = core
-        .session(&args.session_id)
+        .session(args.session_id.clone())
         .open()
         .await
         .context("open RLM smoke session")?;

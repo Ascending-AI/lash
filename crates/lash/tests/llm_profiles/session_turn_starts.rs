@@ -280,7 +280,9 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
         ..Default::default()
     });
     moved
-        .session("keys-start-other-session")
+        .session(
+            lash::SessionId::parse("keys-start-other-session").expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(changed.clone()))
         .await
         .expect("the host creates a session from its changed spec");

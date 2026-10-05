@@ -6,12 +6,12 @@
         {
           "directory": "",
           "vendor": "restate-sdk-0.12.1",
-          "source": "git+https://github.com/SamGalanakis/sdk-rust?rev=8cf1b6982a5b0b5ed1bd1027b853e8cc0f7324f4#8cf1b6982a5b0b5ed1bd1027b853e8cc0f7324f4"
+          "source": "git+https://github.com/SamGalanakis/sdk-rust?rev=c74a7bb43b858462061237d7bb2ab88b2210a688#c74a7bb43b858462061237d7bb2ab88b2210a688"
         },
         {
           "directory": "macros",
           "vendor": "restate-sdk-macros-0.12.1",
-          "source": "git+https://github.com/SamGalanakis/sdk-rust?rev=8cf1b6982a5b0b5ed1bd1027b853e8cc0f7324f4#8cf1b6982a5b0b5ed1bd1027b853e8cc0f7324f4"
+          "source": "git+https://github.com/SamGalanakis/sdk-rust?rev=c74a7bb43b858462061237d7bb2ab88b2210a688#c74a7bb43b858462061237d7bb2ab88b2210a688"
         }
       ]
     }

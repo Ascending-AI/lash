@@ -651,21 +651,21 @@ async fn stamped_turn_state_refuses_predecessor_before_decode_and_retains_drain(
     .await;
 }
 
-/// FIG-5020: offline deployment decisions and boot bind the same generation.
-#[cfg(all(feature = "restate", feature = "sqlite"))]
+/// FIG-5020: real production declarations need no backend and agree with boot.
+#[cfg(all(feature = "restate", feature = "sqlite", feature = "rlm"))]
 #[tokio::test]
 async fn offline_composed_generation_equals_the_booted_core() -> crate::Result<()> {
-    use std::sync::Arc;
-    let protocol: Arc<dyn PluginFactory> =
-        Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new());
-    let plugin: Arc<dyn PluginFactory> = Arc::new(StaticPluginFactory::new(
-        PluginDeclaration::initial("host-generation"),
-        PluginSpec::new(),
-    ));
-    let composition = crate::plugins::PluginHost::new(vec![protocol.clone(), plugin.clone()])
-        .with_protocol_plugin(protocol.clone())
-        .composition()?;
+    use crate::plugins::PluginDefinition;
+    use lash_llm_tools::LlmToolsPluginFactory;
+    use lash_protocol_rlm::RlmProtocolPluginFactory;
+
+    // This entire deployment decision precedes runtime dependencies.
+    let composition = PluginComposition::with_builtins([
+        RlmProtocolPluginFactory::declaration(),
+        LlmToolsPluginFactory::declaration(),
+    ])?;
     let offline = composed_generation(&composition);
+
     let connection = crate::restate::RestateConnection::new("https://restate.invalid");
     let engine = crate::restate::RestateEngine::new(
         Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap()),
@@ -675,12 +675,20 @@ async fn offline_composed_generation_equals_the_booted_core() -> crate::Result<(
             crate::restate::RestateAuthorityId::new("offline-generation").unwrap(),
         ),
     );
-    let core = crate::tests::explicit_ephemeral_facets(crate::LashCore::builder(
-        lash_core::Backend::new(Arc::new(engine)),
-    ))
-    .protocol_plugin(protocol)
-    .plugin(plugin)
-    .build(crate::testing::runtime_lease_owner())?;
+    let backend = lash_core::Backend::new(Arc::new(engine));
+    let protocol = Arc::new(RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        Arc::new(lash_protocol_rlm::TypescriptDialect),
+        &backend,
+    ));
+    let core = crate::tests::explicit_ephemeral_facets(crate::LashCore::builder(backend))
+        .protocol_plugin(protocol)
+        .plugin(Arc::new(LlmToolsPluginFactory::default()))
+        .build(crate::testing::runtime_lease_owner())?;
     assert_eq!(&offline, core.build_generation());
     assert_eq!(&offline, core.backend().build_generation()?);
     Ok(())

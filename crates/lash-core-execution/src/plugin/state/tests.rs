@@ -28,7 +28,7 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
         host.factories()
             .iter()
             .map(|factory| {
-                let declaration = factory.declaration();
+                let declaration = factory.plugin_declaration();
                 crate::store::plugin_writers::AdmittedPlugin {
                     plugin: factory.id().into(),
                     behavior_revision: crate::plugin::BehaviorRevision::ONE,
@@ -111,13 +111,6 @@ impl crate::PluginFactory for FormatProbe {
         "format-probe"
     }
 
-    fn declaration(&self) -> crate::plugin::PluginDeclaration {
-        let mut declaration = crate::plugin::PluginDeclaration::initial(self.id());
-        declaration.format_version = crate::FormatVersion::new(2).unwrap();
-        declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
-        declaration
-    }
-
     fn migrate_format(
         &self,
         from: crate::FormatVersion,
@@ -130,14 +123,14 @@ impl crate::PluginFactory for FormatProbe {
                 value.insert("native".into(), old);
             }
             Ok(Value::Object(value.clone()))
-        } else if from == self.declaration().format_version {
+        } else if from == crate::plugin::PluginMetadata::plugin_declaration(self).format_version {
             Ok(value)
         } else {
             Err(crate::FormatRefusal {
                 plugin: "format-probe".into(),
                 namespace,
                 stored: from,
-                readable: self.declaration().format_version,
+                readable: crate::plugin::PluginMetadata::plugin_declaration(self).format_version,
             })
         }
     }
@@ -155,14 +148,14 @@ impl crate::PluginFactory for FormatProbe {
                 object.insert("old".into(), native);
             }
             Ok(value)
-        } else if to == self.declaration().format_version {
+        } else if to == crate::plugin::PluginMetadata::plugin_declaration(self).format_version {
             Ok(value)
         } else {
             Err(crate::FormatRefusal {
                 plugin: "format-probe".into(),
                 namespace,
                 stored: to,
-                readable: self.declaration().format_version,
+                readable: crate::plugin::PluginMetadata::plugin_declaration(self).format_version,
             })
         }
     }
@@ -181,6 +174,15 @@ impl crate::PluginFactory for FormatProbe {
     ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl crate::plugin::PluginDefinition for FormatProbe {
+    fn declaration() -> crate::plugin::PluginDeclaration {
+        let mut declaration = crate::plugin::PluginDeclaration::initial("format-probe");
+        declaration.format_version = crate::FormatVersion::new(2).unwrap();
+        declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
+        declaration
     }
 }
 
@@ -307,16 +309,18 @@ impl crate::PluginFactory for DeclaredAs {
         "registered"
     }
 
-    fn declaration(&self) -> crate::plugin::PluginDeclaration {
-        crate::plugin::PluginDeclaration::initial(self.declared)
-    }
-
     fn build(
         &self,
         _: &crate::PluginSessionContext,
     ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl crate::plugin::PluginMetadata for DeclaredAs {
+    fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(self.declared)
     }
 }
 
@@ -349,19 +353,21 @@ impl crate::PluginFactory for NoMigrateProbe {
         "no-migrate"
     }
 
-    fn declaration(&self) -> crate::plugin::PluginDeclaration {
-        let mut declaration = crate::plugin::PluginDeclaration::initial(self.id());
-        declaration.format_version = crate::FormatVersion::new(2).unwrap();
-        declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
-        declaration
-    }
-
     fn build(
         &self,
         _: &crate::PluginSessionContext,
     ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl crate::plugin::PluginDefinition for NoMigrateProbe {
+    fn declaration() -> crate::plugin::PluginDeclaration {
+        let mut declaration = crate::plugin::PluginDeclaration::initial("no-migrate");
+        declaration.format_version = crate::FormatVersion::new(2).unwrap();
+        declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
+        declaration
     }
 }
 
@@ -983,12 +989,7 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
         fn id(&self) -> &'static str {
             self.id
         }
-        fn declaration(&self) -> crate::plugin::PluginDeclaration {
-            let mut declaration = crate::plugin::PluginDeclaration::initial(self.id);
-            declaration.format_version = crate::FormatVersion::new(2).unwrap();
-            declaration.writable_formats = vec![declaration.format_version];
-            declaration
-        }
+
         fn migrate_format(
             &self,
             from: crate::FormatVersion,
@@ -1001,7 +1002,8 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
                     plugin: self.id.into(),
                     namespace,
                     stored: from,
-                    readable: self.declaration().format_version,
+                    readable: crate::plugin::PluginMetadata::plugin_declaration(self)
+                        .format_version,
                 });
             }
             value
@@ -1015,6 +1017,15 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
             _: &crate::PluginSessionContext,
         ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
             panic!("transition cannot materialize a factory")
+        }
+    }
+
+    impl crate::plugin::PluginMetadata for Converter {
+        fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+            let mut declaration = crate::plugin::PluginDeclaration::initial(self.id);
+            declaration.format_version = crate::FormatVersion::new(2).unwrap();
+            declaration.writable_formats = vec![declaration.format_version];
+            declaration
         }
     }
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1058,8 +1069,8 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
                 .iter()
                 .map(|factory| crate::store::plugin_writers::AdmittedPlugin {
                     plugin: factory.id().into(),
-                    behavior_revision: factory.declaration().behavior_revision,
-                    writer: factory.declaration().format_version,
+                    behavior_revision: factory.plugin_declaration().behavior_revision,
+                    writer: factory.plugin_declaration().format_version,
                 })
                 .collect(),
         ),
@@ -1125,7 +1136,7 @@ fn transition_request(
             host.factories()
                 .iter()
                 .map(|factory| {
-                    let declaration = factory.declaration();
+                    let declaration = factory.plugin_declaration();
                     crate::store::plugin_writers::AdmittedPlugin {
                         plugin: factory.id().into(),
                         behavior_revision: declaration.behavior_revision,
@@ -1182,9 +1193,7 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
         fn id(&self) -> &'static str {
             "read-only"
         }
-        fn declaration(&self) -> crate::plugin::PluginDeclaration {
-            crate::plugin::PluginDeclaration::initial(crate::PluginFactory::id(self))
-        }
+
         fn initialize_state(
             &self,
             _: &crate::RuntimeOwner,
@@ -1198,6 +1207,12 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
             _: &crate::PluginSessionContext,
         ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
             Ok(Arc::new(self.clone()))
+        }
+    }
+
+    impl crate::plugin::PluginDefinition for ReadOnly {
+        fn declaration() -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial("read-only")
         }
     }
     impl crate::SessionPlugin for ReadOnly {

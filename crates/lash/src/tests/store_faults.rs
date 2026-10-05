@@ -168,10 +168,6 @@ impl lash_core::facade_support::PluginFactory for RefusingFactory {
         "fig4597-refusing-factory"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -185,6 +181,12 @@ impl lash_core::facade_support::PluginFactory for RefusingFactory {
             ));
         }
         Ok(Arc::new(InertPlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for RefusingFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("fig4597-refusing-factory")
     }
 }
 
@@ -458,14 +460,20 @@ mod sweep {
             let result = if batch {
                 durable
                     .send_batch([
-                        ("sweep-b", TurnInput::text("second")),
-                        ("sweep-c", TurnInput::text("third")),
+                        (
+                            crate::TurnId::parse("sweep-b").expect("nonblank host identity"),
+                            TurnInput::text("second"),
+                        ),
+                        (
+                            crate::TurnId::parse("sweep-c").expect("nonblank host identity"),
+                            TurnInput::text("third"),
+                        ),
                     ])
                     .await
             } else {
                 durable
                     .send(TurnInput::text("first"))
-                    .id("sweep-a")
+                    .id(crate::TurnId::parse("sweep-a").expect("nonblank host identity"))
                     .await
                     .map(|handle| vec![handle])
             };
@@ -598,7 +606,11 @@ mod sweep {
             .await
             .expect("commit the session");
         crate::tests::harness::serve_processes_on(&double, &core);
-        let durable = core.session(ID).durable().await.expect("durable handle");
+        let durable = core
+            .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+            .durable()
+            .await
+            .expect("durable handle");
         durable
             .pending_turn_inputs()
             .await
@@ -1209,14 +1221,14 @@ mod sweep {
             .expect("create the session");
         crate::tests::harness::serve_processes_on(&double, &core);
         let durable = core
-            .session(SESSION)
+            .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
             .durable()
             .await
             .expect("durable handle");
         let hold = double.hold_session_shift(&SessionId::from(SESSION)).await;
         let sent = durable
             .send(TurnInput::text("first"))
-            .id("unsupported-input")
+            .id(crate::TurnId::parse("unsupported-input").expect("nonblank host identity"))
             .await
             .expect("accept before the head changes");
         seams
@@ -1262,7 +1274,7 @@ mod sweep {
             .await
             .expect("create the session");
         let durable = core
-            .session(ID)
+            .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
             .durable()
             .await
             .expect("acquire before the corruption");
@@ -1428,7 +1440,7 @@ mod sweep {
             .expect("create the session");
         crate::tests::harness::serve_processes_on(&double, &core);
         let durable = core
-            .session(SESSION)
+            .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
             .durable()
             .await
             .expect("durable handle");
@@ -1459,7 +1471,7 @@ mod sweep {
                     .session_faults(None, FAULTS)
                     .await
                     .expect("session faults");
-                if let [fault] = faults.as_slice() {
+                if let [fault] = faults.changes.as_slice() {
                     return fault.clone();
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -1568,6 +1580,7 @@ mod sweep {
             core.session_faults(None, FAULTS)
                 .await
                 .expect("session faults")
+                .changes
                 .is_empty()
         );
         let second = tokio::time::timeout(

@@ -17,7 +17,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, ValueEnum};
 use lash_core::facade_support::PluginHost;
-use lash_core::plugin::{PluginDeclaration, PluginFactory, PluginSessionContext, SessionPlugin};
+use lash_core::plugin::{
+    PluginDeclaration, PluginFactory, PluginMetadata, PluginSessionContext, SessionPlugin,
+};
 use lash_core::store::plugin_writers::PluginWriterRegistration;
 use lash_core::store::{RuntimeCommit, RuntimeStore};
 use lash_core::{
@@ -125,7 +127,7 @@ impl ProbePlugin {
             plugin: PLUGIN.into(),
             namespace,
             stored,
-            readable: self.declaration().format_version,
+            readable: lash_core::plugin::PluginMetadata::plugin_declaration(self).format_version,
         }
     }
 }
@@ -145,25 +147,13 @@ impl PluginFactory for ProbePlugin {
         PLUGIN
     }
 
-    fn declaration(&self) -> PluginDeclaration {
-        let mut declaration = PluginDeclaration::initial(PLUGIN);
-        if self.native.get() == 2 {
-            let native = self.native;
-            declaration.behavior_revision =
-                lash_core::plugin::BehaviorRevision::from(std::num::NonZeroU32::from(native));
-            declaration.format_version = native;
-            declaration.writable_formats = vec![FormatVersion::ONE, native];
-        }
-        declaration
-    }
-
     fn migrate_format(
         &self,
         from: FormatVersion,
         namespace: FormatNamespace,
         value: serde_json::Value,
     ) -> Result<serde_json::Value, FormatRefusal> {
-        let native = self.declaration().format_version;
+        let native = lash_core::plugin::PluginMetadata::plugin_declaration(self).format_version;
         if from == native {
             Ok(value)
         } else if from == FormatVersion::ONE {
@@ -179,10 +169,14 @@ impl PluginFactory for ProbePlugin {
         namespace: FormatNamespace,
         value: &serde_json::Value,
     ) -> Result<serde_json::Value, FormatRefusal> {
-        let native = self.declaration().format_version;
+        let native = lash_core::plugin::PluginMetadata::plugin_declaration(self).format_version;
         if to == native {
             Ok(value.clone())
-        } else if to == FormatVersion::ONE && self.declaration().writable_formats.contains(&to) {
+        } else if to == FormatVersion::ONE
+            && lash_core::plugin::PluginMetadata::plugin_declaration(self)
+                .writable_formats
+                .contains(&to)
+        {
             Ok(rename(value.clone(), "total", "count"))
         } else {
             Err(self.refusal(namespace, to))
@@ -200,6 +194,20 @@ impl PluginFactory for ProbePlugin {
 
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash_core::plugin::PluginMetadata for ProbePlugin {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        let mut declaration = PluginDeclaration::initial(PLUGIN);
+        if self.native.get() == 2 {
+            let native = self.native;
+            declaration.behavior_revision =
+                lash_core::plugin::BehaviorRevision::from(std::num::NonZeroU32::from(native));
+            declaration.format_version = native;
+            declaration.writable_formats = vec![FormatVersion::ONE, native];
+        }
+        declaration
     }
 }
 
@@ -304,7 +312,7 @@ impl SessionPlugin for ProbePlugin {
 
 /// This build's registration of the probe plugin, as the store sees it.
 fn registration() -> PluginWriterRegistration {
-    let declaration = ProbePlugin::default().declaration();
+    let declaration = ProbePlugin::default().plugin_declaration();
     PluginWriterRegistration {
         plugin: PLUGIN.to_owned(),
         native: declaration.format_version,

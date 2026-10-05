@@ -11,15 +11,19 @@ async fn runtime_open_defers_capabilities_until_recorded_publication() {
         fn id(&self) -> &'static str {
             "construction-probe"
         }
-        fn declaration(&self) -> crate::plugin::PluginDeclaration {
-            crate::plugin::PluginDeclaration::initial(crate::PluginFactory::id(self))
-        }
+
         fn build(
             &self,
             _: &crate::PluginSessionContext,
         ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(Arc::new(self.clone()))
+        }
+    }
+
+    impl crate::plugin::PluginDefinition for ConstructionProbe {
+        fn declaration() -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial("construction-probe")
         }
     }
     impl crate::SessionPlugin for ConstructionProbe {
@@ -85,7 +89,7 @@ async fn runtime_open_defers_capabilities_until_recorded_publication() {
                 .factories()
                 .iter()
                 .map(|factory| {
-                    let declaration = factory.declaration();
+                    let declaration = factory.plugin_declaration();
                     crate::store::plugin_writers::AdmittedPlugin {
                         plugin: factory.id().into(),
                         behavior_revision: declaration.behavior_revision,
@@ -144,9 +148,6 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             self.id
         }
 
-        fn declaration(&self) -> crate::plugin::PluginDeclaration {
-            crate::plugin::PluginDeclaration::initial(crate::plugin::PluginFactory::id(self))
-        }
         fn initialize_state(
             &self,
             _: &crate::RuntimeOwner,
@@ -163,6 +164,12 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             _: &crate::plugin::PluginSessionContext,
         ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
             Ok(Arc::new(self.clone()))
+        }
+    }
+
+    impl crate::plugin::PluginMetadata for Fixture {
+        fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(self.id)
         }
     }
     impl crate::plugin::SessionPlugin for Fixture {
@@ -295,7 +302,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                     host.factories()
                         .iter()
                         .map(|factory| {
-                            let declaration = factory.declaration();
+                            let declaration = factory.plugin_declaration();
                             crate::store::plugin_writers::AdmittedPlugin {
                                 plugin: factory.id().into(),
                                 behavior_revision: declaration.behavior_revision,

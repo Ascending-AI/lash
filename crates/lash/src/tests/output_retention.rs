@@ -194,7 +194,12 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
                 .with_presentation_step(crate::hook_key!("presentation-step-1"), appendix_step()),
         )))
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let output = session
         .send(TurnInput::text("call the tools"))
         .output()
@@ -263,7 +268,12 @@ finish({ rows });"#,
             mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let output = session
         .send(TurnInput::text("print the rows"))
         .output()
@@ -404,7 +414,7 @@ for (let i = 0; i < 200; i++) {
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("aggregate-prints")
+        .session(crate::SessionId::parse("aggregate-prints").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -495,7 +505,7 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
         ]), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("archive-history")
+        .session(crate::SessionId::parse("archive-history").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -549,7 +559,10 @@ for (let i = 0; i < history.length; i++) {
         ]), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     sweep_without_grace(&backend).await;
-    let session = core.session("archive-history").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("archive-history").expect("nonblank host identity"))
+        .open()
+        .await?;
     let cold = session
         .send(TurnInput::text("read after cold reopen"))
         .output()
@@ -568,7 +581,10 @@ for (let i = 0; i < history.length; i++) {
         },
     )
     .await?;
-    let branch = core.session("archive-branch").open().await?;
+    let branch = core
+        .session(crate::SessionId::parse("archive-branch").expect("nonblank host identity"))
+        .open()
+        .await?;
     let branched = branch
         .send(TurnInput::text("read shared history on a branch"))
         .output()

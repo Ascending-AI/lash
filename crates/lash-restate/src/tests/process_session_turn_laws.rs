@@ -901,10 +901,6 @@ impl lash_core::facade_support::PluginFactory for DefaultsFactory {
         DEFAULTS
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn register_config(
         &self,
         registrar: &mut lash_core::ConfigRegistrar,
@@ -919,6 +915,12 @@ impl lash_core::facade_support::PluginFactory for DefaultsFactory {
         _ctx: &lash_core::plugin::PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, PluginError> {
         Ok(Arc::new(DefaultsPlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for DefaultsFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(DEFAULTS)
     }
 }
 

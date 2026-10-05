@@ -429,10 +429,13 @@ pub(super) async fn measure(
     } else {
         spec
     };
-    core.session("cost")
+    core.session(lash::SessionId::parse("cost").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(spec))
         .await?;
-    let session = core.session("cost").open().await?;
+    let session = core
+        .session(lash::SessionId::parse("cost").expect("nonblank host identity"))
+        .open()
+        .await?;
     backend.server().settle().await;
     let before: BTreeSet<String> = backend
         .server()
@@ -445,7 +448,7 @@ pub(super) async fn measure(
     let started = Instant::now();
     let handle = session
         .send(lash::TurnInput::text("execute the controlled round"))
-        .id("cost-run")
+        .id(lash::TurnId::parse("cost-run").expect("nonblank host identity"))
         .await?;
     let admitted_ms = started.elapsed().as_secs_f64() * 1000.0;
     let mut surviving_losers = 0;

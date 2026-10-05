@@ -247,7 +247,7 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         .open()
         .await
         .expect("open suspended turn session for durable address");
-    let address = session.turn_address(&routed_address.address.turn_id);
+    let address = session.turn_address(routed_address.address.turn_id.clone());
     drop(session);
     let mut events = harness.state.event_tx.subscribe(&session_id);
     let started = tokio::time::Instant::now();
@@ -396,7 +396,7 @@ finish(await handle);
         .open()
         .await
         .expect("open suspended turn session for durable address");
-    let address = session.turn_address(&routed_address.address.turn_id);
+    let address = session.turn_address(routed_address.address.turn_id.clone());
     drop(session);
     let mut events = harness.state.event_tx.subscribe(&session_id);
     let started = tokio::time::Instant::now();
@@ -660,7 +660,7 @@ async fn submit_workbench_turn_via_restate(
         .open()
         .await
         .expect("open workbench session for durable turn address");
-    let address = session.turn_address(&turn.turn_id);
+    let address = session.turn_address(turn.turn_id.clone());
     drop(session);
     (turn, address)
 }

@@ -92,7 +92,7 @@ async fn send_settled(
 ) -> lash::SendHandle {
     let handle = session
         .send(lash::TurnInput::text(text))
-        .id(id)
+        .id(lash::TurnId::parse(id).expect("nonblank host identity"))
         .await
         .expect("the turn is accepted");
     until(server, "the turn never settled", |_| {
@@ -128,7 +128,7 @@ async fn run_partial_result() -> BTreeMap<String, HandlerJournals> {
     let server = backend.server().clone();
     let turn = session
         .send(lash::TurnInput::text("pair"))
-        .id("run-partial-result")
+        .id(lash::TurnId::parse("run-partial-result").expect("nonblank host identity"))
         .await
         .expect("the turn is accepted");
 

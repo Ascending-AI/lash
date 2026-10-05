@@ -138,7 +138,9 @@ async fn typescript_is_served_on_the_production_session_path_and_survives_resume
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
-        .session("rlm-typescript-production")
+        .session(
+            crate::SessionId::parse("rlm-typescript-production").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -213,7 +215,10 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
-        .session("rlm-typescript-queued-session-command")
+        .session(
+            crate::SessionId::parse("rlm-typescript-queued-session-command")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -289,7 +294,10 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
     .expect("the queued catalog refresh drains and commits its replacement manifest");
 
     let reopened = core
-        .session("rlm-typescript-queued-session-command")
+        .session(
+            crate::SessionId::parse("rlm-typescript-queued-session-command")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -345,7 +353,9 @@ async fn a_per_turn_protocol_override_cannot_re_point_the_dialect() -> Result<()
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
-        .session("rlm-dialect-turn-override")
+        .session(
+            crate::SessionId::parse("rlm-dialect-turn-override").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -424,7 +434,9 @@ async fn a_per_turn_protocol_override_cannot_re_point_the_dialect() -> Result<()
     // And the durable bag keeps the host's selection, so the next open under
     // the same host is not refused.
     let reopened = core
-        .session("rlm-dialect-turn-override")
+        .session(
+            crate::SessionId::parse("rlm-dialect-turn-override").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -455,7 +467,7 @@ async fn create_options_naming_a_dialect_fail_during_session_creation() -> Resul
     );
 
     let error = match core
-        .session("rlm-unknown-dialect")
+        .session(crate::SessionId::parse("rlm-unknown-dialect").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec().plugin_options(options),
             parent: None,
@@ -494,7 +506,7 @@ async fn the_typed_read_reports_what_the_session_recorded_and_only_the_render_ch
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("rlm-typed-read")
+        .session(crate::SessionId::parse("rlm-typed-read").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -589,14 +601,14 @@ async fn a_render_change_written_against_a_stale_revision_settles_stale() -> Res
     let stale_core = build_core()?;
     let concurrent_core = build_core()?;
     let stale = stale_core
-        .session("rlm-stale-render")
+        .session(crate::SessionId::parse("rlm-stale-render").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
     materialize_session(&stale).await?;
     let concurrent = concurrent_core
-        .session("rlm-stale-render")
+        .session(crate::SessionId::parse("rlm-stale-render").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -659,7 +671,10 @@ async fn a_reopen_keeps_the_recorded_rlm_facts_and_writes_nothing() -> Result<()
         .build(crate::testing::runtime_lease_owner())?;
     let finish_required = crate::rlm::RlmTermination::FinishRequired { schema: None };
     create_stating_termination(&core, "rlm-reopen-ignores", finish_required.clone()).await?;
-    let session = core.session("rlm-reopen-ignores").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("rlm-reopen-ignores").expect("nonblank host identity"))
+        .open()
+        .await?;
     assert_eq!(
         session
             .rlm_config()
@@ -677,7 +692,10 @@ async fn a_reopen_keeps_the_recorded_rlm_facts_and_writes_nothing() -> Result<()
     let before = view.load_session_head_meta().await?.expect("head");
 
     writes.lock_recover().clear();
-    let reopened = core.session("rlm-reopen-ignores").open().await?;
+    let reopened = core
+        .session(crate::SessionId::parse("rlm-reopen-ignores").expect("nonblank host identity"))
+        .open()
+        .await?;
     assert_eq!(
         *writes.lock_recover(),
         Vec::<&str>::new(),
@@ -723,7 +741,7 @@ async fn the_prompt_is_recorded_config_its_owners_commands_change() -> Result<()
         context: vec!["Release 4.2 freezes on Friday.".to_string()],
         ..crate::rlm::RlmPrompt::default()
     };
-    core.session("rlm-prompt-config")
+    core.session(crate::SessionId::parse("rlm-prompt-config").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec().plugin_options(
                 lash_core::PluginOptions::typed(
@@ -738,12 +756,15 @@ async fn the_prompt_is_recorded_config_its_owners_commands_change() -> Result<()
             parent: None,
         })
         .await?;
-    let session = core.session("rlm-prompt-config").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("rlm-prompt-config").expect("nonblank host identity"))
+        .open()
+        .await?;
     let created = recorded_rlm(&session);
     assert_eq!(created.prompt, stated, "creation records the stated prompt");
 
     let defaulted = core
-        .session("rlm-prompt-default")
+        .session(crate::SessionId::parse("rlm-prompt-default").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -784,7 +805,10 @@ async fn the_prompt_is_recorded_config_its_owners_commands_change() -> Result<()
     assert_eq!(recorded_rlm(&session), expected);
     Box::pin(session.close()).await?;
 
-    let reopened = core.session("rlm-prompt-config").open().await?;
+    let reopened = core
+        .session(crate::SessionId::parse("rlm-prompt-config").expect("nonblank host identity"))
+        .open()
+        .await?;
     assert_eq!(
         recorded_rlm(&reopened),
         expected,
@@ -827,7 +851,7 @@ async fn a_render_change_survives_a_cold_reopen() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
-        .session("rlm-render-roundtrip")
+        .session(crate::SessionId::parse("rlm-render-roundtrip").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -844,7 +868,7 @@ async fn a_render_change_survives_a_cold_reopen() -> Result<()> {
     Box::pin(session.close()).await?;
 
     let reopened = core
-        .session("rlm-render-roundtrip")
+        .session(crate::SessionId::parse("rlm-render-roundtrip").expect("nonblank host identity"))
         .created()
         .await
         .open()

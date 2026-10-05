@@ -453,9 +453,6 @@ impl PluginFactory for FaultPlugin {
         "operator-fault"
     }
 
-    fn declaration(&self) -> lash::plugins::PluginDeclaration {
-        lash::plugins::PluginDeclaration::initial(PluginFactory::id(self))
-    }
     fn build(
         &self,
         _: &PluginSessionContext,
@@ -464,6 +461,12 @@ impl PluginFactory for FaultPlugin {
             repaired: self.repaired.clone(),
             pool: self.pool.clone(),
         }))
+    }
+}
+
+impl lash::plugins::PluginDefinition for FaultPlugin {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial("operator-fault")
     }
 }
 
@@ -544,7 +547,7 @@ async fn main() -> Result<()> {
     // The endpoint has not been registered: admission cannot race withdrawal.
     let sent = session
         .send(TurnInput::text("operator:withdraw"))
-        .id("withdraw")
+        .id(lash::TurnId::parse("withdraw")?)
         .await?;
     let input = sent.input_id().clone();
     ensure!(matches!(
@@ -568,7 +571,7 @@ async fn main() -> Result<()> {
     let session = h.open("running").await?;
     let sent = session
         .send(TurnInput::text("operator:running"))
-        .id("running")
+        .id(lash::TurnId::parse("running")?)
         .await?;
     let run = TurnId::from("running");
     let sid = SessionId::from("operator:running");
@@ -620,7 +623,7 @@ async fn main() -> Result<()> {
                 .session(sid.clone())
                 .open()
                 .await?
-                .run(run.clone())
+                .run((run.clone()).into())
                 .outcome()
                 .await?;
             if !matches!(output.status(), TurnStatus::Parked(_)) {
@@ -724,7 +727,7 @@ async fn main() -> Result<()> {
             .session(fork_sid.clone())
             .open()
             .await?
-            .run(successor.clone())
+            .run((successor.clone()).into())
             .outcome(),
     )
     .await??;

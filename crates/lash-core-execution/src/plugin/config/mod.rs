@@ -844,7 +844,7 @@ impl ConfigRegistry {
                 };
                 let writer = writers
                     .writer(plugin_id)
-                    .unwrap_or_else(|| factory.declaration().format_version);
+                    .unwrap_or_else(|| factory.plugin_declaration().format_version);
                 let encoded = factory
                     .encode_format(writer, super::FormatNamespace::Config, &value)
                     .map_err(|refusal| format_fault(refusal, RefusalSite::Creation))?;
@@ -1108,7 +1108,7 @@ impl ConfigRegistry {
             }
             let writer = writers
                 .writer(id)
-                .unwrap_or_else(|| factory.declaration().format_version);
+                .unwrap_or_else(|| factory.plugin_declaration().format_version);
             let value = factory
                 .encode_format(writer, super::FormatNamespace::Config, value)
                 .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;

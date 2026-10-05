@@ -155,11 +155,15 @@ impl PluginFactory for ConsumerPlugin {
     fn id(&self) -> &'static str {
         "external-consumer"
     }
-    fn declaration(&self) -> PluginDeclaration {
-        PluginDeclaration::initial(PluginFactory::id(self))
-    }
+
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(Self(self.0.clone())))
+    }
+}
+
+impl lash::plugins::PluginDefinition for ConsumerPlugin {
+    fn declaration() -> PluginDeclaration {
+        PluginDeclaration::initial("external-consumer")
     }
 }
 
@@ -289,14 +293,17 @@ mod tests {
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         "s30", "double",
                     ))?;
-                core.session("s30-double")
+                core.session(lash::SessionId::parse("s30-double").expect("nonblank host identity"))
                     .create(lash::SessionCreation::root(lash::SessionSpec::new(
                         "consumer",
                         lash::TurnBudget::Unbounded,
                         lash::MaxToolCalls::new(8),
                     )))
                     .await?;
-                let session = core.session("s30-double").open().await?;
+                let session = core
+                    .session(lash::SessionId::parse("s30-double").expect("nonblank host identity"))
+                    .open()
+                    .await?;
                 for (ordinal, id) in ["first", "second"].into_iter().enumerate() {
                     let task = session
                         .plugin_operations()

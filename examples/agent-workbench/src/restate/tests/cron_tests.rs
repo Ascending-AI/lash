@@ -58,7 +58,7 @@ async fn register_test_subscription_record(
                 },
                 lash::process::ProcessIdentity::new("cron-test-engine"),
             )
-            .with_payload_schema(lash::triggers::JsonSchema::any()),
+            .with_payload_schema(lash::schema::JsonSchema::any()),
         },
     )
     .await
@@ -241,7 +241,7 @@ async fn register_fig1067_cron_subscription(
                 )
                 .expect("encode FIG-1067 cron source"),
             )
-            .with_payload_schema(lash::triggers::JsonSchema::any()),
+            .with_payload_schema(lash::schema::JsonSchema::any()),
         },
     )
     .await
@@ -279,7 +279,7 @@ fn fig1067_cron_registration(
             serde_json::json!({ "expr": "*/10 * * * * *", "tz": "UTC" }),
         )
         .expect("encode FIG-1067 cron source"),
-        payload_schema: lash::triggers::JsonSchema::any(),
+        payload_schema: lash::schema::JsonSchema::any(),
         target: lash::process::ProcessInput::Engine {
             kind: "cron-test-engine".to_string(),
             payload: serde_json::json!({}),
@@ -325,7 +325,7 @@ async fn register_fig1067_button_subscription(
                 },
                 lash::process::ProcessIdentity::new("button-test-engine"),
             )
-            .with_payload_schema(lash::triggers::JsonSchema::any()),
+            .with_payload_schema(lash::schema::JsonSchema::any()),
         },
     )
     .await
@@ -1259,7 +1259,7 @@ async fn cron_session_state_is_unknown_when_store_meta_is_absent_without_a_tombs
     assert!(
         state
             .core
-            .session(session_id)
+            .session(lash::SessionId::parse(session_id).expect("nonblank host identity"))
             .durable()
             .await
             .expect("durable handle for the cron session")
@@ -1271,7 +1271,7 @@ async fn cron_session_state_is_unknown_when_store_meta_is_absent_without_a_tombs
     assert!(
         !state
             .core
-            .session(session_id)
+            .session(lash::SessionId::parse(session_id).expect("nonblank host identity"))
             .durable()
             .await
             .expect("durable handle for the cron session")
@@ -1282,7 +1282,7 @@ async fn cron_session_state_is_unknown_when_store_meta_is_absent_without_a_tombs
     assert!(
         !state
             .core
-            .session(session_id)
+            .session(lash::SessionId::parse(session_id).expect("nonblank host identity"))
             .durable()
             .await
             .expect("durable handle for the cron session")
@@ -1386,9 +1386,9 @@ async fn a_cron_schedule_registered_without_a_timezone_is_not_refused_for_its_so
     // The contract the registration captures is the constructor's own, not the
     // permissive `untyped()` capture the other fixtures use — that permissive
     // capture is exactly why this defect reached a live workbench.
-    let config_schema = lash::triggers::JsonSchema::admit(
-        lash::rlm::lang::type_expr_to_json_schema(&crate::cron_schedule_config_type()),
-    )
+    let config_schema = lash::schema::JsonSchema::admit(lash::rlm::lang::type_expr_to_json_schema(
+        &crate::cron_schedule_config_type(),
+    ))
     .expect("valid declared payload schema");
     let source_capture = lash::triggers::TriggerSourceCapture::resident(
         crate::CRON_SCHEDULE_SOURCE_TYPE.split('.'),
@@ -1429,7 +1429,7 @@ async fn a_cron_schedule_registered_without_a_timezone_is_not_refused_for_its_so
                 )
                 .expect("encode tz-less cron source"),
             )
-            .with_payload_schema(lash::triggers::JsonSchema::any()),
+            .with_payload_schema(lash::schema::JsonSchema::any()),
         },
     )
     .await

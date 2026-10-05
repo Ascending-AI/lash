@@ -70,10 +70,15 @@ async fn a_cancelled_cell_replays_its_timer_on_a_resident_runtime() -> Result<()
             mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let handle = session
         .send(TurnInput::text("sleep until cancelled"))
-        .id(RUN)
+        .id(crate::TurnId::parse(RUN).expect("nonblank host identity"))
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(20), async {
         while !run_is_sleeping(&double) {

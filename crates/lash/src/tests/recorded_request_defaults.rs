@@ -195,7 +195,7 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
         }
     };
     for (id, key, _) in &recorded {
-        core.session(*id)
+        core.session(crate::SessionId::parse(*id).expect("nonblank host identity"))
             .create(crate::SessionCreation {
                 spec: mock_session_spec().model(*key),
                 parent: None,
@@ -203,7 +203,7 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
             .await?;
     }
     for (id, _, _) in &recorded {
-        core.session(*id)
+        core.session(crate::SessionId::parse(*id).expect("nonblank host identity"))
             .durable()
             .await?
             .send(TurnInput::text("under the creating registry"))
@@ -216,7 +216,7 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
     // and both of the second session's attempts run under the redeployed one.
     for (redriven, (id, _, _)) in recorded.iter().enumerate() {
         dies_under_its_call.store(true, Ordering::SeqCst);
-        core.session(*id)
+        core.session(crate::SessionId::parse(*id).expect("nonblank host identity"))
             .durable()
             .await?
             .send(TurnInput::text("dies under its call and is redriven"))
@@ -235,7 +235,7 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
     }
     assert_every_call_carries_its_own(3, "across the redrive");
     for (id, _, _) in &recorded {
-        core.session(*id)
+        core.session(crate::SessionId::parse(*id).expect("nonblank host identity"))
             .durable()
             .await?
             .send(TurnInput::text("under the redeployed registry"))

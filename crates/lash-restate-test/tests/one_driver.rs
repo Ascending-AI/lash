@@ -115,7 +115,7 @@ impl OneDriverHost for Host {
         let outcome = self
             .session
             .send(lash::TurnInput::text("shift me once"))
-            .id("one-SessionShifts-run")
+            .id(lash::TurnId::parse("one-SessionShifts-run").expect("nonblank host identity"))
             .accept_restate(&ctx)
             .await?
             .outcome_restate(
@@ -262,7 +262,7 @@ async fn an_empty_commit_finishes_the_shift_without_another_admission() {
         .expect("open the session");
     let handle = session
         .send(lash::TurnInput::text("answer once"))
-        .id("empty-commit-run")
+        .id(lash::TurnId::parse("empty-commit-run").expect("nonblank host identity"))
         .await
         .expect("accept the input");
     wait_until("the model call starts", || {
@@ -307,7 +307,7 @@ async fn a_run_admission_records_its_head_verdict_without_another_step() {
         .expect("open the session");
     let handle = session
         .send(lash::TurnInput::text("answer once"))
-        .id("admitted-head-run")
+        .id(lash::TurnId::parse("admitted-head-run").expect("nonblank host identity"))
         .await
         .expect("accept the input");
     wait_until("the model call starts", || {
@@ -354,7 +354,7 @@ async fn inputs_on_both_sides_of_an_empty_commit_keep_their_shift() {
         .expect("open the session");
     let first = session
         .send(lash::TurnInput::text("first"))
-        .id("queue-first")
+        .id(lash::TurnId::parse("queue-first").expect("nonblank host identity"))
         .await
         .expect("accept the first input");
     wait_until("the first model call starts", || {
@@ -363,7 +363,7 @@ async fn inputs_on_both_sides_of_an_empty_commit_keep_their_shift() {
     .await;
     let before = session
         .send(lash::TurnInput::text("before commit"))
-        .id("queue-before")
+        .id(lash::TurnId::parse("queue-before").expect("nonblank host identity"))
         .await
         .expect("accept while the first turn is running");
     barrier.release.notify_one();
@@ -383,7 +383,7 @@ async fn inputs_on_both_sides_of_an_empty_commit_keep_their_shift() {
     backend.settle_session_shift(&session.session_id()).await;
     let after = session
         .send(lash::TurnInput::text("after empty commit"))
-        .id("queue-after")
+        .id(lash::TurnId::parse("queue-after").expect("nonblank host identity"))
         .await
         .expect("accept after the empty commit");
     wait_until("the later input starts its shift", || {

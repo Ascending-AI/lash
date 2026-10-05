@@ -146,19 +146,6 @@ impl PluginFactory for Probe {
         self.plugin
     }
 
-    fn declaration(&self) -> PluginDeclaration {
-        let mut declaration = PluginDeclaration::initial(self.plugin);
-        if cfg!(feature = "synthetic-next") {
-            declaration.format_version =
-                lash_core::FormatVersion::new(2).unwrap_or(lash_core::FormatVersion::ONE);
-            declaration.writable_formats =
-                vec![lash_core::FormatVersion::ONE, declaration.format_version];
-            declaration.behavior_revision = lash_core::plugin::BehaviorRevision::new(2)
-                .unwrap_or(lash_core::plugin::BehaviorRevision::ONE);
-        }
-        declaration
-    }
-
     fn register_config(
         &self,
         registrar: &mut lash_core::ConfigRegistrar,
@@ -172,7 +159,7 @@ impl PluginFactory for Probe {
         namespace: lash_core::FormatNamespace,
         value: Value,
     ) -> Result<Value, lash_core::FormatRefusal> {
-        let native = self.declaration().format_version;
+        let native = lash_core::plugin::PluginMetadata::plugin_declaration(self).format_version;
         if from == native {
             return Ok(value);
         }
@@ -194,7 +181,7 @@ impl PluginFactory for Probe {
         namespace: lash_core::FormatNamespace,
         value: &Value,
     ) -> Result<Value, lash_core::FormatRefusal> {
-        let native = self.declaration().format_version;
+        let native = lash_core::plugin::PluginMetadata::plugin_declaration(self).format_version;
         if to == native || to == lash_core::FormatVersion::ONE {
             return Ok(value.clone());
         }
@@ -208,6 +195,21 @@ impl PluginFactory for Probe {
 
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash_core::plugin::PluginMetadata for Probe {
+    fn plugin_declaration(&self) -> PluginDeclaration {
+        let mut declaration = PluginDeclaration::initial(self.plugin);
+        if cfg!(feature = "synthetic-next") {
+            declaration.format_version =
+                lash_core::FormatVersion::new(2).unwrap_or(lash_core::FormatVersion::ONE);
+            declaration.writable_formats =
+                vec![lash_core::FormatVersion::ONE, declaration.format_version];
+            declaration.behavior_revision = lash_core::plugin::BehaviorRevision::new(2)
+                .unwrap_or(lash_core::plugin::BehaviorRevision::ONE);
+        }
+        declaration
     }
 }
 

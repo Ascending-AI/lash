@@ -102,14 +102,18 @@ impl PluginFactory for OperationPlugin {
     fn id(&self) -> &'static str {
         PLUGIN
     }
-    fn declaration(&self) -> PluginDeclaration {
-        PluginDeclaration::initial(PluginFactory::id(self))
-    }
+
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(Self {
             controls: self.controls.clone(),
             namespace: self.namespace.clone(),
         }))
+    }
+}
+
+impl lash::plugins::PluginDefinition for OperationPlugin {
+    fn declaration() -> PluginDeclaration {
+        PluginDeclaration::initial(PLUGIN)
     }
 }
 
@@ -342,7 +346,11 @@ async fn follow(
         .durable()
         .await
         .map_err(error)?;
-    let result = session.run(run.clone()).result().await.map_err(error)?;
+    let result = session
+        .run(run.clone().into())
+        .result()
+        .await
+        .map_err(error)?;
     Ok(Json(json!({"run": run, "output": result.output})))
 }
 

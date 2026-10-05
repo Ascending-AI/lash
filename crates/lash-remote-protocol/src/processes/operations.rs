@@ -10,6 +10,14 @@ pub struct RemoteProcessCancelRequest {
 }
 
 impl RemoteProcessCancelRequest {
+    /// Cancel one process on behalf of `requester`.
+    pub fn new(process_id: ProcessId, requester: impl Into<String>) -> Self {
+        Self {
+            process_id,
+            requester: requester.into(),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteProcessCancelRequest", "requester", &self.requester)?;
         Ok(())
@@ -64,6 +72,28 @@ pub struct RemoteProcessSignalRequest {
 }
 
 impl RemoteProcessSignalRequest {
+    /// One identified signal with no trace cause. Set a cause only when one
+    /// was captured by the producer; a root cause is omitted on the wire.
+    pub fn new(
+        process_id: ProcessId,
+        signal_name: impl Into<String>,
+        signal_id: impl Into<String>,
+        payload: serde_json::Value,
+    ) -> Self {
+        Self {
+            process_id,
+            signal_name: signal_name.into(),
+            signal_id: signal_id.into(),
+            payload,
+            trace_cause: Default::default(),
+        }
+    }
+    /// Attach the producer's optional trace ancestry.
+    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
+        self.trace_cause = trace_cause;
+        self
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty(
             "RemoteProcessSignalRequest",
@@ -92,6 +122,11 @@ pub struct RemoteProcessAwaitRequest {
 }
 
 impl RemoteProcessAwaitRequest {
+    /// Await the terminal of one exact process lifetime.
+    pub fn new(process_id: ProcessId) -> Self {
+        Self { process_id }
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         Ok(())
     }
@@ -123,6 +158,21 @@ pub struct RemoteProcessEventsRequest {
 
 #[cfg(any(feature = "core-conversions", test))]
 impl RemoteProcessEventsRequest {
+    /// Read a bounded process-event page from the beginning. Assign `cursor`
+    /// to resume a previous page.
+    pub fn new(
+        process_id: ProcessId,
+        limit: std::num::NonZeroUsize,
+        mode: lash_core::ProcessEventQueryMode,
+    ) -> Self {
+        Self {
+            process_id,
+            limit,
+            mode,
+            cursor: None,
+        }
+    }
+
     pub fn encode_json(
         &self,
         negotiated: &crate::Negotiated,
@@ -240,6 +290,32 @@ pub struct RemoteProcessStartRequest {
 }
 
 impl RemoteProcessStartRequest {
+    /// A process start with the wire's defaults for optional fields. The
+    /// registrar supplies identity; set `start_key` to make retries idempotent.
+    pub fn new(
+        input: RemoteProcessStartTarget,
+        lifetime: RemoteStartLifetime,
+        originator: RemoteProcessOriginator,
+    ) -> Self {
+        Self {
+            input,
+            lifetime,
+            originator,
+            start_key: None,
+            env_ref: None,
+            identity: None,
+            wake_session_id: None,
+            observers: Vec::new(),
+            event_types: Vec::new(),
+            trace_cause: Default::default(),
+        }
+    }
+    /// Attach the caller's optional trace ancestry without changing identity.
+    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
+        self.trace_cause = trace_cause;
+        self
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         if let Some(start_key) = &self.start_key {
             require_non_empty("RemoteProcessStartRequest", "start_key", start_key)?;

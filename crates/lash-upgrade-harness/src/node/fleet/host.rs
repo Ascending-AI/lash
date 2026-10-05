@@ -484,7 +484,7 @@ async fn command_host(state: &State, command: HostCommand) -> Result<HostObserva
         HostCommand::Attach { run } => {
             let run = lash::TurnId::parse(run)?;
             let session = state.core.session(session_id.clone()).durable().await?;
-            let outcome = session.run(run.clone()).outcome().await?;
+            let outcome = session.run(run.clone().into()).outcome().await?;
             (
                 run,
                 serde_json::json!({"status":format!("{:?}",outcome.status()),

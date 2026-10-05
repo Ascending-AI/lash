@@ -90,10 +90,6 @@ impl PluginFactory for TestPluginFactory {
         TEST_PLUGIN_ID
     }
 
-    fn declaration(&self) -> lash::plugins::PluginDeclaration {
-        lash::plugins::PluginDeclaration::initial(self.id())
-    }
-
     fn register_config(
         &self,
         registrar: &mut lash::plugins::ConfigRegistrar,
@@ -113,6 +109,12 @@ impl PluginFactory for TestPluginFactory {
             hook_seen: Arc::clone(&self.hook_seen),
             tool_seen: Arc::clone(&self.tool_seen),
         }))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for TestPluginFactory {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(TEST_PLUGIN_ID)
     }
 }
 
@@ -331,7 +333,11 @@ async fn turn_hook_and_tool_provider_read_recorded_session_config() {
     )
     .await;
     created_with_label(&core, "typed-context", Some("page-a")).await;
-    let session = core.session("typed-context").open().await.expect("session");
+    let session = core
+        .session(lash::SessionId::parse("typed-context").expect("nonblank host identity"))
+        .open()
+        .await
+        .expect("session");
 
     let result = session
         .send(TurnInput::text("probe"))
@@ -352,7 +358,7 @@ async fn sessions_that_record_no_plugin_config_do_not_get_inactive_fallback_tool
     let (core, _double) = core_with_responses(vec![response_text("done")], plugin).await;
     created_with_label(&core, "without-typed-config", None).await;
     let session = core
-        .session("without-typed-config")
+        .session(lash::SessionId::parse("without-typed-config").expect("nonblank host identity"))
         .open()
         .await
         .expect("session");

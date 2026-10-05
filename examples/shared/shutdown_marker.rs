@@ -36,10 +36,6 @@ impl PluginFactory for ShutdownMarkerFactory {
         "host_shutdown_marker"
     }
 
-    fn declaration(&self) -> lash::plugins::PluginDeclaration {
-        lash::plugins::PluginDeclaration::initial(self.id())
-    }
-
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(ShutdownMarkerSession))
     }
@@ -57,6 +53,12 @@ impl PluginFactory for ShutdownMarkerFactory {
         )
         .and_then(|_| file.sync_all())
         .map_err(|error| PluginError::Session(format!("persist shutdown marker: {error}")))
+    }
+}
+
+impl lash::plugins::PluginDefinition for ShutdownMarkerFactory {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial("host_shutdown_marker")
     }
 }
 

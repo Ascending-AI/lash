@@ -50,10 +50,15 @@ async fn closing_fixture_under(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("a run that ends before the delete"))
-        .id(RUN)
+        .id(crate::TurnId::parse(RUN).expect("nonblank host identity"))
         .output()
         .await?;
     drop(session);
@@ -99,7 +104,11 @@ async fn deliver_by_hand(
 }
 
 async fn was_deleted(core: &LashCore) -> Result<bool> {
-    core.session(SESSION).durable().await?.was_deleted().await
+    core.session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .durable()
+        .await?
+        .was_deleted()
+        .await
 }
 
 /// The deployment's reconcile tick carries the session-delete relay: a
@@ -288,10 +297,15 @@ async fn an_immediate_delivery_runs_under_the_configured_attempt_budget() -> Res
         })
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("a run that ends before the delete"))
-        .id(RUN)
+        .id(crate::TurnId::parse(RUN).expect("nonblank host identity"))
         .output()
         .await?;
     drop(session);

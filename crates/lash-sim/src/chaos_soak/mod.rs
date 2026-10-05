@@ -829,7 +829,7 @@ mod tests {
             .send(lash::TurnInput::text(
                 crate::crash_matrix::invariants::input_text("held-first"),
             ))
-            .id("held-first")
+            .id(lash::TurnId::parse("held-first").expect("nonblank host identity"))
             .await
             .expect("accept held input");
         driver.record_host(
@@ -847,7 +847,7 @@ mod tests {
             .send(lash::TurnInput::text(
                 crate::crash_matrix::invariants::input_text("held-withdrawn"),
             ))
-            .id("held-withdrawn")
+            .id(lash::TurnId::parse("held-withdrawn").expect("nonblank host identity"))
             .await
             .expect("accept the input to withdraw");
         driver.record_host(
@@ -966,7 +966,7 @@ mod tests {
                 .send(lash::TurnInput::text(
                     crate::crash_matrix::invariants::input_text(input),
                 ))
-                .id(input)
+                .id(lash::TurnId::parse(input).expect("nonblank host identity"))
                 .await
                 .expect("accept held input");
             driver.record_host(

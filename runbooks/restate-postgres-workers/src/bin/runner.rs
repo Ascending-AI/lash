@@ -366,7 +366,7 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
-    lash::runtime::set_loud(true);
+    lash::testing::set_loud(true);
     let stack_bytes = e2e_tokio_thread_stack_bytes()?;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()

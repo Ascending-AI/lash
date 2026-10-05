@@ -110,7 +110,7 @@ async fn a_disconnected_host_reconciles_a_failed_turn_after_live_replay_trims() 
         .live_replay_store(replay.clone())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("disconnected-turn-feed")
+        .session(crate::SessionId::parse("disconnected-turn-feed").expect("nonblank host identity"))
         .created()
         .await
         .open()

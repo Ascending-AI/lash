@@ -819,7 +819,10 @@ pub(super) async fn assert_reopened_session_agrees(
         witness: witness.clone(),
         load: None,
     })?;
-    let session = core.session(DEFAULT_SESSION_ID).open().await?;
+    let session = core
+        .session(lash::SessionId::parse(DEFAULT_SESSION_ID)?)
+        .open()
+        .await?;
     let read = storage
         .store()
         .load_session_window(

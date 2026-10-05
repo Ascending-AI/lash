@@ -277,10 +277,10 @@ struct ProcessAwaitEntered {
     entered: tokio::sync::Notify,
 }
 
-impl lash::runtime::RuntimeTurnPhaseProbe for ProcessAwaitEntered {
-    fn begin(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
+impl lash::testing::RuntimeTurnPhaseProbe for ProcessAwaitEntered {
+    fn begin(&self, _phase: lash::testing::RuntimeTurnPhase) {}
 
-    fn end(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
+    fn end(&self, _phase: lash::testing::RuntimeTurnPhase) {}
 
     fn begin_named(&self, phase: &str) {
         if phase == "process.await_handle" {
@@ -332,7 +332,7 @@ finish(await handle);
     });
     session
         .set_turn_phase_probe(
-            Arc::clone(&await_entered) as Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>
+            Arc::clone(&await_entered) as Arc<dyn lash::testing::RuntimeTurnPhaseProbe>
         )
         .await;
     // The engine works a session's runs on the most recent open of it, so

@@ -756,7 +756,7 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
     .await
     .expect("valid refresh publication");
     let reopened = core
-        .session("catalog-storm")
+        .session(lash::SessionId::parse("catalog-storm").expect("nonblank host identity"))
         .open()
         .await
         .expect("reopen committed session");

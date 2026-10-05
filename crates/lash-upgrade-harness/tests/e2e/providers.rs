@@ -51,7 +51,7 @@ async fn l03_public_cancel_during_registered_backoff_starts_no_next_body() -> Re
         let session = e2e_provider::session(&core, "s07-cheap-cancel").await?;
         let accepted = session
             .send(lash::TurnInput::text("s07 input"))
-            .id("s07-input")
+            .id(lash::TurnId::parse("s07-input").expect("nonblank host identity"))
             .await?;
         let input = accepted.input_id().clone();
         let follower = tokio::spawn(async move { accepted.output().await });
@@ -181,7 +181,7 @@ async fn s26_rate_limit_and_observer_reconnect_commit_one_answer() -> Result<()>
     let (core, double) = core(&fixture).await?;
     let proof: Result<()> = tokio::time::timeout(WAIT, async {
         let session = e2e_provider::session(&core, "s26-rate-limit").await?;
-        let accepted = session.send(lash::TurnInput::text("answer once")).id("s26-run").await?;
+        let accepted = session.send(lash::TurnInput::text("answer once")).id(lash::TurnId::parse("s26-run").expect("nonblank host identity")).await?;
         let input = accepted.input_id().clone();
         let observer = accepted.events();
         // Keep an outcome follower while dropping the independent observer.
@@ -310,7 +310,7 @@ async fn s27_authentication_failure_permits_the_next_run() -> Result<()> {
         let session = e2e_provider::session(&core, "s27-auth").await?;
         let first = session
             .send(lash::TurnInput::text("invalid credentials"))
-            .id("auth-run-0")
+            .id(lash::TurnId::parse("auth-run-0").expect("nonblank host identity"))
             .output()
             .await?;
         ensure!(
@@ -336,7 +336,7 @@ async fn s27_authentication_failure_permits_the_next_run() -> Result<()> {
         );
         let second = session
             .send(lash::TurnInput::text("fresh valid request"))
-            .id("auth-run-1")
+            .id(lash::TurnId::parse("auth-run-1").expect("nonblank host identity"))
             .output()
             .await?;
         ensure!(

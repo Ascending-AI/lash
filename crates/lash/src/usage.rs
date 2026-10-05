@@ -5,9 +5,3 @@
 //! and turn summaries report observations, not billing evidence.
 
 pub use lash_core::{TokenUsage, TokenUsageOverflow};
-
-/// Labels for model calls made by runtime components.
-pub mod sources {
-    pub const TURN: &str = "turn";
-    pub const COMPACTION: &str = "compaction";
-}

@@ -66,12 +66,14 @@ impl PluginFactory for StatePlugin {
         "process-operations-state"
     }
 
-    fn declaration(&self) -> PluginDeclaration {
-        PluginDeclaration::initial(PluginFactory::id(self))
-    }
-
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash::plugins::PluginDefinition for StatePlugin {
+    fn declaration() -> PluginDeclaration {
+        PluginDeclaration::initial("process-operations-state")
     }
 }
 
@@ -153,7 +155,7 @@ fn start_request() -> ProcessStartRequest {
     .with_host_start_key(START_KEY)
     .with_extra_event_types([ProcessEventType {
         name: "signal.replacement".into(),
-        payload_schema: lash::triggers::JsonSchema::any(),
+        payload_schema: lash::schema::JsonSchema::any(),
         semantics: ProcessEventSemanticsSpec::default(),
     }])
 }
@@ -250,17 +252,20 @@ pub async fn prepare(
             && events[0].payload["external_ref"]["segment_ordinal"] == 0,
         "start did not record its Restate reference"
     );
-    core.session(SESSION_ID)
+    core.session(lash::SessionId::parse(SESSION_ID)?)
         .create(SessionCreation::root(SessionSpec::new(
             MODEL,
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(8),
         )))
         .await?;
-    let session = core.session(SESSION_ID).open().await?;
+    let session = core
+        .session(lash::SessionId::parse(SESSION_ID)?)
+        .open()
+        .await?;
     let output = session
         .send(TurnInput::text("write plugin state"))
-        .id("replacement-write")
+        .id(lash::TurnId::parse("replacement-write")?)
         .output()
         .await?;
     ensure!(matches!(output.result.outcome, TurnOutcome::Finished(_)));
@@ -349,7 +354,10 @@ pub async fn recover(
         })
     );
 
-    let session = core.session(SESSION_ID).open().await?;
+    let session = core
+        .session(lash::SessionId::parse(SESSION_ID)?)
+        .open()
+        .await?;
     let restored = plugin.snapshot(&session).await?;
     ensure!(
         restored == before.state,
@@ -357,7 +365,7 @@ pub async fn recover(
     );
     let output = session
         .send(TurnInput::text("advance plugin generation"))
-        .id("replacement-next-write")
+        .id(lash::TurnId::parse("replacement-next-write")?)
         .output()
         .await?;
     ensure!(matches!(output.result.outcome, TurnOutcome::Finished(_)));

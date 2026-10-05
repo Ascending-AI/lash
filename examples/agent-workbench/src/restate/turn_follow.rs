@@ -365,7 +365,7 @@ async fn follow_once(
             };
             (*handle).outcome_into(&ui_events).await
         }
-        FollowFrom::Run => session.run(turn_id.clone()).outcome().await,
+        FollowFrom::Run => session.run(turn_id.clone().into()).outcome().await,
     }
     .map_err(AppError::runtime)?;
     // Answered, Failed and Cancelled runs ran and settled: each has a report

@@ -57,14 +57,14 @@ async fn a_core_built_while_a_dropped_cores_shift_is_in_flight_works_on_its_own_
     // in-flight shift holds V1's `SessionShifts`.
     drop(
         core_v1
-            .session("first-core-session")
+            .session(crate::SessionId::parse("first-core-session").expect("nonblank host identity"))
             .created()
             .await
             .open()
             .await?,
     );
     let handle = core_v1
-        .session("first-core-session")
+        .session(crate::SessionId::parse("first-core-session").expect("nonblank host identity"))
         .durable()
         .await?
         .send(TurnInput::text("held on V1"))
@@ -85,7 +85,7 @@ async fn a_core_built_while_a_dropped_cores_shift_is_in_flight_works_on_its_own_
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core_v2
-        .session("second-core-session")
+        .session(crate::SessionId::parse("second-core-session").expect("nonblank host identity"))
         .created()
         .await
         .open()

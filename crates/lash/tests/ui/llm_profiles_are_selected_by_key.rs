@@ -19,7 +19,7 @@ fn a_spec_selects_a_key_not_metadata(model: lash::LlmProfileMetadata) {
 }
 
 fn a_session_takes_no_transport(core: lash::LashCore, provider: lash::provider::ProviderHandle) {
-    let _ = core.session("keyed").provider(provider);
+    let _ = core.session(lash::SessionId::parse("keyed").expect("nonblank host identity")).provider(provider);
 }
 
 fn a_send_names_no_provider_route(builder: lash::SendBuilder) {

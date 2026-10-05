@@ -29,7 +29,10 @@ finish({
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
         let session = core
-            .session("stack-budget-rlm-lashlang")
+            .session(
+                crate::SessionId::parse("stack-budget-rlm-lashlang")
+                    .expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()

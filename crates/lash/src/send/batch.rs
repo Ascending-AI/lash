@@ -44,8 +44,8 @@ impl BatchInput {
     }
 
     /// The host id this input is sent under.
-    pub fn id(mut self, id: impl Into<TurnId>) -> Self {
-        self.id = Some(id.into());
+    pub fn id(mut self, id: TurnId) -> Self {
+        self.id = Some(id);
         self
     }
 }
@@ -56,8 +56,8 @@ impl From<TurnInput> for BatchInput {
     }
 }
 
-impl<K: Into<TurnId>> From<(K, TurnInput)> for BatchInput {
-    fn from((id, input): (K, TurnInput)) -> Self {
+impl From<(TurnId, TurnInput)> for BatchInput {
+    fn from((id, input): (TurnId, TurnInput)) -> Self {
         Self::new(input).id(id)
     }
 }

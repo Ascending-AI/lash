@@ -1000,7 +1000,7 @@ async fn a_redriven_turn_keeps_its_output_identity() {
 
     let retried = session
         .send(lash::TurnInput::text("the question"))
-        .id("turn-one")
+        .id(lash::TurnId::parse("turn-one").expect("nonblank host identity"))
         .output()
         .await
         .expect("same-id retry observes the settled run");

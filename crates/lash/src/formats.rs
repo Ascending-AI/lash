@@ -602,10 +602,12 @@ fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
 /// registration give the same `G`, which is what makes a generation routable.
 ///
 /// Compute this before boot from the deployment's ordered plugin composition.
-/// Obtain it through [`crate::plugins::PluginHost::composition`], which includes
-/// the builtin factories and their overrides. Supply the protocol plugin first,
-/// followed by the same factories registered on the core (including any
-/// tool-provider plugin). Runtime model and tracing
+/// Use [`PluginComposition::with_builtins`] with static
+/// [`crate::plugins::PluginDefinition`] declarations; no backend, pool or
+/// factory instance is needed. Supply the protocol declaration first, then
+/// `embed_tools` if using builder tool providers, then host plugin declarations
+/// in their Core registration order. Builtin overrides use the same ids as Core.
+/// Runtime model and tracing
 /// settings are not generation inputs. [`crate::LashCore`] calls this same
 /// function and binds the result into its engine when built.
 pub fn composed_generation(composition: &PluginComposition) -> BuildGeneration {
@@ -699,9 +701,7 @@ pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::plugin::{
-        BehaviorRevision, PluginDeclaration, PluginFactory, PluginSpec, StaticPluginFactory,
-    };
+    use lash_core::plugin::{BehaviorRevision, PluginDeclaration};
 
     #[cfg(feature = "restate")]
     #[path = "plugin_transition_generation.rs"]
@@ -720,17 +720,16 @@ mod tests {
     /// The composition of `plugins`, each an id and a behaviour revision, in
     /// the order given.
     fn composition(plugins: &[(&'static str, u32)]) -> PluginComposition {
-        let factories = plugins
+        let declarations = plugins
             .iter()
             .map(|&(id, revision)| {
                 let mut declaration = PluginDeclaration::initial(id);
                 declaration.behavior_revision =
                     BehaviorRevision::new(revision).expect("a revision counts from one");
-                std::sync::Arc::new(StaticPluginFactory::new(declaration, PluginSpec::new()))
-                    as std::sync::Arc<dyn PluginFactory>
+                declaration
             })
             .collect::<Vec<_>>();
-        PluginComposition::of(&factories).expect("a valid composition")
+        PluginComposition::new(declarations).expect("a valid composition")
     }
 
     /// FIG-4744 lane routing: a plugin-only behaviour revision bump is a new
@@ -769,9 +768,9 @@ mod tests {
             let mut declaration = PluginDeclaration::initial("stateful");
             declaration.format_version = version;
             declaration.writable_formats = vec![lash_core::plugin::FormatVersion::ONE, version];
-            let factory: std::sync::Arc<dyn PluginFactory> =
-                std::sync::Arc::new(StaticPluginFactory::new(declaration, PluginSpec::new()));
-            composed_generation(&PluginComposition::of(&[factory]).expect("a valid composition"))
+            composed_generation(
+                &PluginComposition::new([declaration]).expect("a valid composition"),
+            )
         };
         assert_eq!(declared(1), declared(2));
     }

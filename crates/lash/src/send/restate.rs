@@ -295,7 +295,7 @@ impl SendHandle {
     }
 }
 
-impl RunHandle {
+impl<Output, Error> RunHandle<Output, Error> {
     /// Wait for this run on a Restate handler's journal, as
     /// [`SendHandle::outcome_restate`] waits for an input's.
     pub fn outcome_restate<'ctx: 'a, 'a, C>(
@@ -309,7 +309,7 @@ impl RunHandle {
         wait_restate(
             ctx,
             durable_target(&self.target),
-            Subject::Run(self.run.clone()),
+            Subject::Run(self.run.clone().into()),
             self.cursor.clone(),
             wait,
         )

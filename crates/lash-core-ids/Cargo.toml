@@ -23,7 +23,7 @@ otel-trace = ["lash-trace/otel"]
 # site compiled out unless an internal witness explicitly enables this feature.
 perf-witness = []
 # Test-only observation hooks shared with lash-core's unit suites.
-testing = ["dep:tracing-subscriber"]
+testing = ["dep:tracing-subscriber", "lash-sansio/testing"]
 
 [lints]
 workspace = true

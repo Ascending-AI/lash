@@ -140,7 +140,12 @@ impl lash_core::facade_support::ContextCompactor for FixedCompactor {
 #[tokio::test]
 async fn session_operations_delegate_to_runtime() -> Result<()> {
     let core = standard_core().await;
-    let session = core.session("session-ops").created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse("session-ops").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
 
     session.send(TurnInput::text("usage")).output().await?;
     Box::pin(
@@ -189,7 +194,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         )))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("compact-context")
+        .session(crate::SessionId::parse("compact-context").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -374,7 +379,7 @@ async fn compact_context_system_prompt_is_the_protocols_compaction_render() -> R
                 .with_context_compactor(100, Arc::new(PromptAssertingCompactor)),
         )))
         .build(crate::testing::runtime_lease_owner())?;
-    core.session("compact-prompt-stack")
+    core.session(crate::SessionId::parse("compact-prompt-stack").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec()
                 .plugin(
@@ -393,7 +398,10 @@ async fn compact_context_system_prompt_is_the_protocols_compaction_render() -> R
             parent: None,
         })
         .await?;
-    let session = core.session("compact-prompt-stack").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("compact-prompt-stack").expect("nonblank host identity"))
+        .open()
+        .await?;
     session
         .send(TurnInput::text("content to compact"))
         .output()
@@ -408,7 +416,7 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("command-idempotency")
+        .session(crate::SessionId::parse("command-idempotency").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -449,7 +457,9 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("pending-input-facade-cancel")
+        .session(
+            crate::SessionId::parse("pending-input-facade-cancel").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -463,19 +473,19 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     let first = session
         .durable()
         .send(TurnInput::text("first"))
-        .id("edit:1")
+        .id(crate::TurnId::parse("edit:1").expect("nonblank host identity"))
         .accepted()
         .await?;
     let second = session
         .durable()
         .send(TurnInput::text("second"))
-        .id("edit:2")
+        .id(crate::TurnId::parse("edit:2").expect("nonblank host identity"))
         .accepted()
         .await?;
     let third = session
         .durable()
         .send(TurnInput::text("third"))
-        .id("edit:3")
+        .id(crate::TurnId::parse("edit:3").expect("nonblank host identity"))
         .accepted()
         .await?;
 
@@ -545,7 +555,9 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     serve_processes(&core);
     let registry = core.process_registry();
     let session = core
-        .session("process-observation-events")
+        .session(
+            crate::SessionId::parse("process-observation-events").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -857,7 +869,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
         )))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("command-trigger")
+        .session(crate::SessionId::parse("command-trigger").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -922,7 +934,9 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
         )))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("nonblocking-observation")
+        .session(
+            crate::SessionId::parse("nonblocking-observation").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -975,7 +989,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("host-filter-bypass")
+        .session(crate::SessionId::parse("host-filter-bypass").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1086,7 +1100,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("host-cancel-all")
+        .session(crate::SessionId::parse("host-cancel-all").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1135,7 +1149,7 @@ async fn config_and_tool_mutations_publish_observation_immediately() -> Result<(
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("observation-mutations")
+        .session(crate::SessionId::parse("observation-mutations").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1178,7 +1192,9 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("config-admin-tool-access")
+        .session(
+            crate::SessionId::parse("config-admin-tool-access").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1232,19 +1248,22 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let _parent = core
-        .session("parent-control")
+        .session(crate::SessionId::parse("parent-control").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
 
-    core.session("child-control")
+    core.session(crate::SessionId::parse("child-control").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec(),
             parent: Some("parent-control".into()),
         })
         .await?;
-    let child = core.session("child-control").open().await?;
+    let child = core
+        .session(crate::SessionId::parse("child-control").expect("nonblank host identity"))
+        .open()
+        .await?;
 
     assert_eq!(child.parent_session_id(), Some("parent-control"));
     assert_eq!(
@@ -1304,7 +1323,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
             .build(crate::testing::runtime_lease_owner())?;
         let registry = core.process_registry();
         let _parent = core
-            .session(&parent_session_id)
+            .session(parent_session_id.clone())
             .created()
             .await
             .open()
@@ -1348,7 +1367,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
         )
         .await?;
 
-        let child = core.session(&child_session_id).open().await?;
+        let child = core.session(child_session_id.clone()).open().await?;
 
         assert_eq!(child.session_id(), child_session_id);
         assert!(
@@ -1391,7 +1410,7 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("direct-turn-acceptance")
+        .session(crate::SessionId::parse("direct-turn-acceptance").expect("nonblank host identity"))
         .created()
         .await
         .open()

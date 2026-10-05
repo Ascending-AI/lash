@@ -44,7 +44,7 @@ async fn submit(
     Path(session): Path<String>,
     Json(input): Json<Submit>,
 ) -> ApiResult {
-    let session_id = SessionId::fixture(session);
+    let session_id = SessionId::parse(session).map_err(api_error)?;
     let spec = SessionSpec::new(
         "consumer",
         lash::TurnBudget::Unbounded,
@@ -67,7 +67,7 @@ async fn submit(
         .map_err(api_error)?;
     let handle = session
         .send(TurnInput::text(input.text))
-        .id(TurnId::fixture(input.id))
+        .id(TurnId::parse(input.id).map_err(api_error)?)
         .await
         .map_err(api_error)?;
     let receipt = json!({"input_id": handle.input_id(), "receipt": handle.receipt()});
@@ -79,8 +79,8 @@ async fn follow(
     State(host): State<Host>,
     Path((session, input)): Path<(String, String)>,
 ) -> ApiResult {
-    let session_id = SessionId::fixture(session);
-    let input_id = InputId::fixture(input);
+    let session_id = SessionId::parse(session).map_err(api_error)?;
+    let input_id = InputId::parse(input).map_err(api_error)?;
     let session = host
         .core
         .session(session_id.clone())
@@ -101,7 +101,7 @@ async fn cancel(
     State(host): State<Host>,
     Path((session, input)): Path<(String, String)>,
 ) -> ApiResult {
-    let session_id = SessionId::fixture(session);
+    let session_id = SessionId::parse(session).map_err(api_error)?;
     let session = host
         .core
         .session(session_id.clone())
@@ -109,7 +109,7 @@ async fn cancel(
         .await
         .map_err(api_error)?;
     let receipt = session
-        .attach(InputId::fixture(input))
+        .attach(InputId::parse(input).map_err(api_error)?)
         .cancel()
         .await
         .map_err(api_error)?;
@@ -120,7 +120,7 @@ async fn binding(
     State(host): State<Host>,
     Path((session, input)): Path<(String, String)>,
 ) -> ApiResult {
-    let session_id = SessionId::fixture(session);
+    let session_id = SessionId::parse(session).map_err(api_error)?;
     let session = host
         .core
         .session(session_id.clone())
@@ -128,7 +128,7 @@ async fn binding(
         .await
         .map_err(api_error)?;
     let run = session
-        .attach(InputId::fixture(input))
+        .attach(InputId::parse(input).map_err(api_error)?)
         .run()
         .await
         .map_err(api_error)?;
@@ -152,7 +152,7 @@ async fn task(
 ) -> ApiResult {
     let session = host
         .core
-        .session(SessionId::fixture(session))
+        .session(SessionId::parse(session).map_err(api_error)?)
         .open()
         .await
         .map_err(api_error)?;
@@ -172,12 +172,12 @@ async fn task_result(
 ) -> ApiResult {
     let session = host
         .core
-        .session(SessionId::fixture(session))
+        .session(SessionId::parse(session).map_err(api_error)?)
         .durable()
         .await
         .map_err(api_error)?;
     let result = session
-        .run(TurnId::fixture(run))
+        .run(lash::RunId::parse(run).map_err(api_error)?)
         .result()
         .await
         .map_err(api_error)?;
@@ -190,12 +190,12 @@ async fn task_cancel(
 ) -> ApiResult {
     let session = host
         .core
-        .session(SessionId::fixture(session))
+        .session(SessionId::parse(session).map_err(api_error)?)
         .durable()
         .await
         .map_err(api_error)?;
     let result = session
-        .run(TurnId::fixture(run))
+        .run(lash::RunId::parse(run).map_err(api_error)?)
         .cancel()
         .await
         .map_err(api_error)?;

@@ -208,7 +208,7 @@ async fn law(kind: StorageKind, live: bool, abandon: bool) {
     let mut faults = None;
     let first = engine(&storage, kind, live, Arc::clone(&clock), &mut faults).await;
     let core = core(&first);
-    core.session("upload-session")
+    core.session(lash::SessionId::parse("upload-session").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "mock-model",
             lash::TurnBudget::Unbounded,
@@ -614,7 +614,7 @@ async fn unavailable_input_is_refused(kind: StorageKind, live: bool) {
     let clock = Arc::new(TestClock::new(10_000));
     let engine = engine(&storage, kind, live, clock.clone(), &mut None).await;
     let core = core(&engine);
-    core.session("upload-session")
+    core.session(lash::SessionId::parse("upload-session").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "mock-model",
             lash::TurnBudget::Unbounded,

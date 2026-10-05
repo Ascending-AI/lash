@@ -32,18 +32,19 @@ struct RetainedWake {
 
 impl RetainedWake {
     fn terminal(&self) -> Result<IngressTerminal> {
-        let terminal = lash::persistence::decode_ingress_terminal(
-            "QueuedWorkBatch",
-            self.terminal_cause.as_deref(),
-            self.terminal_at_ms.map(u64::try_from).transpose()?,
-        )?
-        .with_context(|| format!("runtime defect: retained batch is live work: {self:?}"))?;
         anyhow::ensure!(
-            terminal.cause == IngressTerminalCause::Delivered
+            self.terminal_cause.as_deref() == Some(IngressTerminalCause::Delivered.as_str())
                 && self.admitted_run.is_none()
                 && self.admitted_by.is_none(),
             "expected delivered wake tombstone with released admission: {self:?}"
         );
+        let at_ms = u64::try_from(self.terminal_at_ms.with_context(|| {
+            format!("runtime defect: retained batch has no terminal time: {self:?}")
+        })?)?;
+        let terminal = IngressTerminal {
+            cause: IngressTerminalCause::Delivered,
+            at_ms,
+        };
         Ok(terminal)
     }
 }

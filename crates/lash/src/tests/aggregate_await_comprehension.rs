@@ -100,7 +100,7 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
         .tools(Arc::new(RetailTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("fig2764-comprehension")
+        .session(crate::SessionId::parse("fig2764-comprehension").expect("nonblank host identity"))
         .created()
         .await
         .open()

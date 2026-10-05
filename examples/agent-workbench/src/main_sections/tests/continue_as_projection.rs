@@ -61,7 +61,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         .await
         .expect("open multi-frame session");
     let initial_output = session
-        .run(initial_turn_id.clone())
+        .run(initial_turn_id.clone().into())
         .output()
         .await
         .expect("the real send settled across two frame switches")
@@ -100,7 +100,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         .await
         .expect("reopen final follow frame");
     let ordinary_output = session
-        .run(ordinary_turn_id.clone())
+        .run(ordinary_turn_id.clone().into())
         .output()
         .await
         .expect("the ordinary follow-frame send settled")
@@ -278,7 +278,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
         .send(lash::TurnInput::text(switch_prompt))
-        .id(switch_turn_id)
+        .id(lash::TurnId::parse(switch_turn_id).expect("nonblank host identity"))
         .require_finish()
         .expect("require switched-frame finish")
         .output_into(&ChannelTurnEvents {
@@ -447,7 +447,7 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
         .send(lash::TurnInput::text(switch_prompt))
-        .id(switch_turn_id)
+        .id(lash::TurnId::parse(switch_turn_id).expect("nonblank host identity"))
         .require_finish()
         .expect("require unobserved-commit finish")
         .output_into(&ChannelTurnEvents {

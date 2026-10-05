@@ -345,9 +345,7 @@ impl lash::plugins::PluginFactory for WorkerEnginePlugin {
     fn id(&self) -> &'static str {
         WORKER_ENGINE
     }
-    fn declaration(&self) -> lash::plugins::PluginDeclaration {
-        lash::plugins::PluginDeclaration::initial(WORKER_ENGINE)
-    }
+
     fn process_engine_contributions(
         &self,
         _context: &lash::plugins::ProcessEngineContributionContext<'_>,
@@ -365,6 +363,12 @@ impl lash::plugins::PluginFactory for WorkerEnginePlugin {
     ) -> std::result::Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError>
     {
         Ok(Arc::new(WorkerEngineSession))
+    }
+}
+
+impl lash::plugins::PluginDefinition for WorkerEnginePlugin {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(WORKER_ENGINE)
     }
 }
 

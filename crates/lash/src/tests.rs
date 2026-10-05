@@ -567,10 +567,6 @@ impl lash_core::facade_support::PluginFactory for SurfacePluginFactory {
         "surface_test"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -579,6 +575,12 @@ impl lash_core::facade_support::PluginFactory for SurfacePluginFactory {
         lash_core::PluginError,
     > {
         Ok(Arc::new(SurfacePlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for SurfacePluginFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("surface_test")
     }
 }
 
@@ -1066,6 +1068,7 @@ mod control_admin;
 mod core_session_builder;
 mod deployment_and_testing_facade;
 mod durable_session;
+mod facade_construction;
 mod harness;
 pub(crate) use harness::{
     AcceptedSend as _, DecoratedBackend, core_now_ms, double_backend,

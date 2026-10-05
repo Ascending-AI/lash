@@ -9,10 +9,6 @@ impl lash_core::facade_support::PluginFactory for EffectControllerTestProtocolFa
         "test_protocol"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -20,6 +16,12 @@ impl lash_core::facade_support::PluginFactory for EffectControllerTestProtocolFa
         Ok(Arc::new(EffectControllerTestProtocolPlugin {
             code_executor: self.code_executor.clone(),
         }))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for EffectControllerTestProtocolFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("test_protocol")
     }
 }
 
@@ -65,15 +67,17 @@ impl lash_core::facade_support::PluginFactory for PromptRefusingProtocolFactory 
         "test_protocol"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
         Ok(Arc::new(PromptRefusingProtocolPlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for PromptRefusingProtocolFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("test_protocol")
     }
 }
 

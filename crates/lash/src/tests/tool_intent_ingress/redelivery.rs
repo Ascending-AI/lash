@@ -23,7 +23,10 @@ use super::*;
 // ---------------------------------------------------------------------------
 
 fn ingress_of(core: &LashCore) -> Result<crate::tools::ToolIntentIngress> {
-    core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))
+    core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )
 }
 
 fn signal_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {

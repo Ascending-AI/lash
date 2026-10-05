@@ -99,7 +99,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
 
     let parked = Box::pin(
         source
-            .session("owner-preserved")
+            .session(crate::SessionId::parse("owner-preserved").expect("nonblank host identity"))
             .created_with(session_spec_for(&llm_profile_spec(
                 "resume-model",
                 None,
@@ -173,7 +173,13 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    drop(core.session("delete-retry").created().await.open().await?);
+    drop(
+        core.session(crate::SessionId::parse("delete-retry").expect("nonblank host identity"))
+            .created()
+            .await
+            .open()
+            .await?,
+    );
     let first = delete_bound_session_outcome(&core, "delete-retry").await?;
     let crate::SessionDeletion::Closing(closing) = first else {
         panic!("the failed retirement leaves the session closing, got {first:?}");
@@ -189,13 +195,18 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
     assert!(closing.obligation.is_some());
     assert!(
         !core
-            .session("delete-retry")
+            .session(crate::SessionId::parse("delete-retry").expect("nonblank host identity"))
             .durable()
             .await?
             .was_deleted()
             .await?
     );
-    let reopened = core.session("delete-retry").created().await.open().await?;
+    let reopened = core
+        .session(crate::SessionId::parse("delete-retry").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let refused = reopened
         .send(TurnInput::text("sent to a closing session"))
         .output()
@@ -222,7 +233,7 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
     .await?;
     assert_eq!(pass.claimed, 1, "{pass:?}");
     assert!(
-        core.session("delete-retry")
+        core.session(crate::SessionId::parse("delete-retry").expect("nonblank host identity"))
             .durable()
             .await?
             .was_deleted()
@@ -240,24 +251,30 @@ async fn parent_relation_is_read_back_and_a_conflicting_create_is_refused() -> R
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    core.session("relation-child")
+    core.session(crate::SessionId::parse("relation-child").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec(),
             parent: Some("relation-parent".into()),
         })
         .await?;
-    let child = core.session("relation-child").open().await?;
+    let child = core
+        .session(crate::SessionId::parse("relation-child").expect("nonblank host identity"))
+        .open()
+        .await?;
     assert_eq!(child.parent_session_id(), Some("relation-parent"));
     drop(child);
 
     // A reopen names no parent and still reports the recorded relation: the
     // handle reads the durable fact.
-    let reopened = core.session("relation-child").open().await?;
+    let reopened = core
+        .session(crate::SessionId::parse("relation-child").expect("nonblank host identity"))
+        .open()
+        .await?;
     assert_eq!(reopened.parent_session_id(), Some("relation-parent"));
     drop(reopened);
 
     let error = match core
-        .session("relation-child")
+        .session(crate::SessionId::parse("relation-child").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec(),
             parent: Some("other-parent".into()),
@@ -277,7 +294,10 @@ async fn parent_relation_is_read_back_and_a_conflicting_create_is_refused() -> R
     );
 
     // The refusal left the recorded relation intact.
-    let after = core.session("relation-child").open().await?;
+    let after = core
+        .session(crate::SessionId::parse("relation-child").expect("nonblank host identity"))
+        .open()
+        .await?;
     assert_eq!(after.parent_session_id(), Some("relation-parent"));
     Ok(())
 }
@@ -330,7 +350,7 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
             .build(owner)?;
 
     let session = source
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "owner-services-model",
             None,

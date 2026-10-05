@@ -206,7 +206,18 @@ impl PluginHost {
     /// This host's plugins in hook order ([`super::PluginComposition`]): the
     /// builtin factories, then the embedder's, each as it declares itself.
     pub fn composition(&self) -> Result<super::PluginComposition, super::PluginDeclarationError> {
-        super::PluginComposition::of(self.factories())
+        let mut declarations = Vec::with_capacity(self.factories().len());
+        for factory in self.factories() {
+            let declaration = factory.plugin_declaration();
+            if declaration.id.as_str() != factory.id() {
+                return Err(super::PluginDeclarationError::IdMismatch {
+                    factory: factory.id().to_owned(),
+                    declared: declaration.id.as_str().to_owned(),
+                });
+            }
+            declarations.push(declaration);
+        }
+        super::PluginComposition::new(declarations)
     }
 
     /// Admit this host's composition against the fleet record `store`
@@ -313,7 +324,7 @@ impl PluginHost {
         self.factories()
             .iter()
             .map(|factory| {
-                PluginRevision::new(factory.id(), factory.declaration().behavior_revision)
+                PluginRevision::new(factory.id(), factory.plugin_declaration().behavior_revision)
             })
             .collect()
     }
@@ -504,7 +515,7 @@ impl PluginHost {
                 .plugins
                 .entry(factory.id().into())
                 .or_insert_with(|| super::PluginNamespaceState {
-                    format_version: factory.declaration().format_version,
+                    format_version: factory.plugin_declaration().format_version,
                     ..Default::default()
                 });
         }
@@ -523,7 +534,7 @@ impl PluginHost {
             }
             let mut reg = PluginRegistrar::new(PluginRevision::new(
                 factory.id(),
-                factory.declaration().behavior_revision,
+                factory.plugin_declaration().behavior_revision,
             ));
             reg.contributions = contributions;
             reg.tool_names = tool_names;

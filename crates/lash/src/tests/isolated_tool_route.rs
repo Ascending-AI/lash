@@ -89,10 +89,6 @@ impl lash_core::plugin::PluginFactory for WorkerEngineFactory {
         "fig4997-worker-engine"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn process_engine_contributions(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
@@ -109,6 +105,12 @@ impl lash_core::plugin::PluginFactory for WorkerEngineFactory {
     ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
     {
         Ok(Arc::new(WorkerEnginePlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for WorkerEngineFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("fig4997-worker-engine")
     }
 }
 
@@ -282,7 +284,7 @@ async fn l08_an_isolated_rlm_tool_starts_one_worker_process_before_any_body_and_
     let world = Isolated::new(true).await;
     let session = world
         .core
-        .session("isolated-route")
+        .session(crate::SessionId::parse("isolated-route").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -291,7 +293,7 @@ async fn l08_an_isolated_rlm_tool_starts_one_worker_process_before_any_body_and_
         WEDGE,
         session
             .send(TurnInput::text("start the worker"))
-            .id("isolated-route-run")
+            .id(crate::TurnId::parse("isolated-route-run").expect("nonblank host identity"))
             .await?
             .output(),
     )
@@ -343,7 +345,7 @@ async fn l08_an_unbound_isolated_tool_refuses_typed_before_any_body() -> Result<
     let world = Isolated::new(false).await;
     let session = world
         .core
-        .session("isolated-unbound")
+        .session(crate::SessionId::parse("isolated-unbound").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -352,7 +354,7 @@ async fn l08_an_unbound_isolated_tool_refuses_typed_before_any_body() -> Result<
         WEDGE,
         session
             .send(TurnInput::text("start the worker"))
-            .id("isolated-unbound-run")
+            .id(crate::TurnId::parse("isolated-unbound-run").expect("nonblank host identity"))
             .await?
             .output(),
     )
@@ -412,7 +414,7 @@ async fn cancelled_at(suffix: &str) -> (Isolated, Result<crate::TurnOutput>) {
         .unwrap();
     let handle = session
         .send(TurnInput::text("start the worker"))
-        .id("isolated-cancel-run")
+        .id(crate::TurnId::parse("isolated-cancel-run").expect("nonblank host identity"))
         .await
         .unwrap();
     tokio::time::timeout(WEDGE, crashes.wait_until(1))
@@ -486,14 +488,14 @@ async fn l08_cold_process_redelivery_adopts_the_live_worker_without_a_second_lau
     let world = Isolated::new(true).await;
     let session = world
         .core
-        .session("isolated-orphan")
+        .session("isolated-orphan".parse().unwrap())
         .created()
         .await
         .open()
         .await?;
     let output = session
         .send(TurnInput::text("start"))
-        .id("orphan-run")
+        .id("orphan-run".parse().unwrap())
         .await?
         .output()
         .await?;
@@ -531,14 +533,14 @@ async fn l08_cold_process_redelivery_keeps_the_reaped_worker_and_its_receipt() -
     let world = Isolated::new(true).await;
     let session = world
         .core
-        .session("isolated-reaped")
+        .session("isolated-reaped".parse().unwrap())
         .created()
         .await
         .open()
         .await?;
     let output = session
         .send(TurnInput::text("start"))
-        .id("reaped-run")
+        .id("reaped-run".parse().unwrap())
         .await?
         .output()
         .await?;

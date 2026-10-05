@@ -1425,12 +1425,24 @@ pub(super) struct ProcessControlToolProvider;
 
 pub(super) fn process_control_tool_definitions() -> Vec<lash_core::ToolDefinition> {
     vec![
-        lash_plugin_process_controls::process_start_tool_definition(),
-        lash_plugin_process_controls::process_signal_tool_definition(),
-        lash_plugin_process_controls::process_emit_tool_definition(),
-        lash_plugin_process_controls::process_get_tool_definition(),
-        lash_plugin_process_controls::process_await_tool_definition(),
-        lash_plugin_process_controls::process_cancel_tool_definition(),
+        lash_plugin_process_controls::process_tool_definition(
+            lash_plugin_process_controls::ProcessControlTool::Start,
+        ),
+        lash_plugin_process_controls::process_tool_definition(
+            lash_plugin_process_controls::ProcessControlTool::Signal,
+        ),
+        lash_plugin_process_controls::process_tool_definition(
+            lash_plugin_process_controls::ProcessControlTool::Emit,
+        ),
+        lash_plugin_process_controls::process_tool_definition(
+            lash_plugin_process_controls::ProcessControlTool::Get,
+        ),
+        lash_plugin_process_controls::process_tool_definition(
+            lash_plugin_process_controls::ProcessControlTool::Await,
+        ),
+        lash_plugin_process_controls::process_tool_definition(
+            lash_plugin_process_controls::ProcessControlTool::Cancel,
+        ),
     ]
 }
 

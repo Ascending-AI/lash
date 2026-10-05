@@ -81,7 +81,7 @@ finish(result);
         let mut turn = tokio::spawn(async move {
             session
                 .send(lash::TurnInput::text("Apply the demo change."))
-                .id("approval-approve-turn")
+                .id(lash::TurnId::parse("approval-approve-turn").expect("nonblank host identity"))
                 .require_finish()
                 .expect("require approval finish")
                 .output()
@@ -204,7 +204,7 @@ finish(result);
         let mut turn = tokio::spawn(async move {
             session
                 .send(lash::TurnInput::text("Apply the demo change."))
-                .id("approval-repair-turn")
+                .id(lash::TurnId::parse("approval-repair-turn").expect("nonblank host identity"))
                 .require_finish()
                 .expect("require approval finish")
                 .output()
@@ -305,7 +305,7 @@ try {
         let mut turn = tokio::spawn(async move {
             session
                 .send(lash::TurnInput::text("Apply the demo change."))
-                .id("approval-deny-turn")
+                .id(lash::TurnId::parse("approval-deny-turn").expect("nonblank host identity"))
                 .require_finish()
                 .expect("require denial finish")
                 .output()
@@ -378,7 +378,7 @@ finish(result.status);
         let mut turn = tokio::spawn(async move {
             session
                 .send(lash::TurnInput::text("Apply the restart demo change."))
-                .id("approval-restart-turn")
+                .id(lash::TurnId::parse("approval-restart-turn").expect("nonblank host identity"))
                 .require_finish()
                 .expect("require restart finish")
                 .output()
@@ -462,7 +462,7 @@ try {
     let mut turn = tokio::spawn(async move {
         session
             .send(lash::TurnInput::text("Apply async change"))
-            .id("async-turn")
+            .id(lash::TurnId::parse("async-turn").expect("nonblank host identity"))
             .require_finish()
             .unwrap()
             .output()
@@ -497,7 +497,7 @@ try {
     let session = crate::tests::open_session_once_released(&core, &session_id).await;
     let output = session
         .send(lash::TurnInput::text("Apply async change"))
-        .id("async-turn")
+        .id(lash::TurnId::parse("async-turn").expect("nonblank host identity"))
         .require_finish()
         .unwrap()
         .output()

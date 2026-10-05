@@ -707,7 +707,7 @@ async fn register_then_disable(
                 },
                 lash::process::ProcessIdentity::new("cron-test-engine"),
             )
-            .with_payload_schema(lash::triggers::JsonSchema::any()),
+            .with_payload_schema(lash::schema::JsonSchema::any()),
         },
     )
     .await

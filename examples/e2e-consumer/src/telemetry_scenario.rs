@@ -151,7 +151,9 @@ impl Scenario {
                     async move {
                         let head = stores
                             .session_store_factory()
-                            .load_session_head_meta(&lash::SessionId::fixture(session))
+                            .load_session_head_meta(
+                                &lash::SessionId::parse(session).map_err(super::api_error)?,
+                            )
                             .await
                             .map_err(|error| {
                                 (
@@ -250,11 +252,15 @@ impl PluginFactory for TelemetryPlugin {
     fn id(&self) -> &'static str {
         "s34-telemetry"
     }
-    fn declaration(&self) -> PluginDeclaration {
-        PluginDeclaration::initial(PluginFactory::id(self))
-    }
+
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(Self(self.0.clone())))
+    }
+}
+
+impl lash::plugins::PluginDefinition for TelemetryPlugin {
+    fn declaration() -> PluginDeclaration {
+        PluginDeclaration::initial("s34-telemetry")
     }
 }
 

@@ -21,10 +21,6 @@ impl lash_core::facade_support::PluginFactory for OpenLifecycleProbeFactory {
         "fig3367-open-lifecycle-probe"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -35,6 +31,12 @@ impl lash_core::facade_support::PluginFactory for OpenLifecycleProbeFactory {
         Ok(Arc::new(OpenLifecycleProbePlugin {
             counters: Arc::clone(&self.counters),
         }))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for OpenLifecycleProbeFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("fig3367-open-lifecycle-probe")
     }
 }
 

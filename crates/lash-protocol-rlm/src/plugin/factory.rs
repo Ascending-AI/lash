@@ -326,10 +326,6 @@ impl PluginFactory for RlmProtocolPluginFactory {
         RLM_PROTOCOL_PLUGIN_ID
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     /// The session's RLM namespace and its one command (FIG-4379): the
     /// channel and dialect this host selected are recorded at creation.
     fn register_config(
@@ -429,6 +425,12 @@ impl PluginFactory for RlmProtocolPluginFactory {
             }));
         }
         Ok(Arc::new(RlmProtocolPlugin { config, dialect }))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for RlmProtocolPluginFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(RLM_PROTOCOL_PLUGIN_ID)
     }
 }
 

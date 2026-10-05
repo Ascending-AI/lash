@@ -101,7 +101,7 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
         .await?;
     let failed = session
         .send(lash::TurnInput::text("malformed fixture"))
-        .id("malformed")
+        .id(lash::TurnId::parse("malformed")?)
         .output()
         .await?;
     assert_eq!(
@@ -130,7 +130,10 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
         .iter()
         .flat_map(|message| message.parts.iter().map(|part| part.content()))
         .collect();
-    let reattached = session.attach_id("malformed").output().await?;
+    let reattached = session
+        .attach_id(lash::TurnId::parse("malformed")?)
+        .output()
+        .await?;
     assert_eq!(reattached.result.outcome, failed.result.outcome);
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -143,7 +146,7 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
     );
     let recovered = session
         .send(lash::TurnInput::text("valid multi-block fixture"))
-        .id("valid")
+        .id(lash::TurnId::parse("valid")?)
         .output()
         .await?;
     assert!(matches!(

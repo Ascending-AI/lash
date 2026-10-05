@@ -206,7 +206,9 @@ impl ProductionToolCell {
         runtime: &mut lash_core::facade_support::LashRuntime,
         effect_host: &dyn EffectHost,
     ) -> Result<lash_core::facade_support::AssembledTurn, lash_core::RuntimeError> {
-        let turn_scope = runtime.export_persistence_state().turn_scope(&self.turn_id);
+        let turn_scope = runtime
+            .export_persistence_state()
+            .turn_scope(self.turn_id.clone());
         let scoped_effect_controller = effect_host
             .scoped(durable_admission(&turn_scope))
             .expect("scope production tool cell");
@@ -464,7 +466,9 @@ async fn assert_crash_at_final_commit_redrive_commits_the_live_state(script: Vec
         armed: AtomicBool::new(true),
     });
     let mut crashed = cell.runtime_on(crashing.clone()).await;
-    let turn_scope = crashed.export_persistence_state().turn_scope(&cell.turn_id);
+    let turn_scope = crashed
+        .export_persistence_state()
+        .turn_scope(cell.turn_id.clone());
     let crashed_turn = crashed
         .execute_turn(
             replay_test_input(&cell.turn_id),

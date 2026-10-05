@@ -120,10 +120,6 @@ impl PluginFactory for SubagentsPluginFactory {
         "subagents"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         ctx: &PluginSessionContext,
@@ -146,6 +142,12 @@ impl PluginFactory for SubagentsPluginFactory {
             Arc::new(move |_ctx| Ok(PluginSpec::new().with_tool_provider(Arc::clone(&provider)))),
         )
         .build(ctx)
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for SubagentsPluginFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("subagents")
     }
 }
 

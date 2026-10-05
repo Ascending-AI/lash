@@ -36,8 +36,8 @@ pub(super) fn button_pressed_event_type() -> NamedDataType {
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub(super) fn button_pressed_payload_schema() -> lash::triggers::JsonSchema {
-    lash::triggers::JsonSchema::admit(serde_json::json!({
+pub(super) fn button_pressed_payload_schema() -> lash::schema::JsonSchema {
+    lash::schema::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "properties": {
             "button": { "type": "string", "enum": ["Red", "Blue"] },

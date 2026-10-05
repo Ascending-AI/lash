@@ -67,10 +67,6 @@ impl PluginFactory for WorkbenchPluginFactory {
         "agent_workbench"
     }
 
-    fn declaration(&self) -> lash::plugins::PluginDeclaration {
-        lash::plugins::PluginDeclaration::initial(self.id())
-    }
-
     #[expect(
         clippy::expect_used,
         reason = "the contribution wraps statically defined abilities and resources that \
@@ -98,6 +94,12 @@ impl PluginFactory for WorkbenchPluginFactory {
             deferred_tools: self.deferred_tools.clone(),
             approvals: self.approvals.clone(),
         }))
+    }
+}
+
+impl lash::plugins::PluginDefinition for WorkbenchPluginFactory {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial("agent_workbench")
     }
 }
 
@@ -412,8 +414,8 @@ pub(crate) fn mail_received_event_type() -> lash::rlm::lang::NamedDataType {
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub(crate) fn mail_received_payload_schema() -> lash::triggers::JsonSchema {
-    lash::triggers::JsonSchema::admit(serde_json::json!({
+pub(crate) fn mail_received_payload_schema() -> lash::schema::JsonSchema {
+    lash::schema::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "properties": {
             "account": { "type": "string" },
@@ -430,8 +432,8 @@ pub(crate) fn mail_received_payload_schema() -> lash::triggers::JsonSchema {
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub(crate) fn button_trigger_payload_schema() -> lash::triggers::JsonSchema {
-    lash::triggers::JsonSchema::admit(serde_json::json!({
+pub(crate) fn button_trigger_payload_schema() -> lash::schema::JsonSchema {
+    lash::schema::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "properties": {
             "button": { "type": "string", "enum": ["Red", "Blue"] },

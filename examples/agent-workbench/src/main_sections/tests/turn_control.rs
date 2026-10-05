@@ -44,10 +44,10 @@ struct ProcessAwaitEntered {
     entered: tokio::sync::Notify,
 }
 
-impl lash::runtime::RuntimeTurnPhaseProbe for ProcessAwaitEntered {
-    fn begin(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
+impl lash::testing::RuntimeTurnPhaseProbe for ProcessAwaitEntered {
+    fn begin(&self, _phase: lash::testing::RuntimeTurnPhase) {}
 
-    fn end(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
+    fn end(&self, _phase: lash::testing::RuntimeTurnPhase) {}
 
     fn begin_named(&self, phase: &str) {
         if phase == "process.await_handle" {
@@ -337,7 +337,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .expect("durable handle for the raced session")
         .send(lash::TurnInput::text("must not be stranded"))
         .ingress(checked_ingress)
-        .id("settle-race-input")
+        .id(lash::TurnId::parse("settle-race-input").expect("nonblank host identity"))
         .await
         .expect("send after the checked turn settled")
         .receipt()
@@ -858,7 +858,7 @@ finish(await handle);
     });
     session
         .set_turn_phase_probe(
-            Arc::clone(&await_entered) as Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>
+            Arc::clone(&await_entered) as Arc<dyn lash::testing::RuntimeTurnPhaseProbe>
         )
         .await;
     // The engine works a session's runs on the most recent open of it, so
@@ -1139,7 +1139,8 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     // request; the route forwards the same strength and attaches to the
     // stopped terminal.
     state.track_turn(&session_id, &TurnId::from("stop-mode-turn"));
-    let address = session.turn_address("stop-mode-turn");
+    let address = session
+        .turn_address(lash::TurnId::parse("stop-mode-turn").expect("nonblank host identity"));
     let (stopped, turn) = tokio::join!(
         cancel_turn(
             State(state.clone()),
@@ -1160,7 +1161,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
             assert_eq!(recorded.request.mode, lash::TurnCancelMode::AfterStep);
             session
                 .send(lash::TurnInput::text("stop after the step"))
-                .id("stop-mode-turn")
+                .id(lash::TurnId::parse("stop-mode-turn").expect("nonblank host identity"))
                 .output()
                 .await
         },
@@ -1206,7 +1207,9 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
         .turn_work_driver()
         .request_cancel(
             lash::TurnCancelRequest::new(
-                session.turn_address("escalate-turn"),
+                session.turn_address(
+                    lash::TurnId::parse("escalate-turn").expect("nonblank host identity"),
+                ),
                 "host-stop",
                 Some("user".to_string()),
             )
@@ -1253,12 +1256,15 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
         .await
         .expect("look up store");
     assert!(matches!(lookup, lash::persistence::SessionLookup::Live(_)));
-    let durable = state
-        .session_store_factory
-        .turn_cancel_request(&session.turn_address("escalate-turn"))
-        .await
-        .expect("read durable request")
-        .expect("durable request recorded");
+    let durable =
+        state
+            .session_store_factory
+            .turn_cancel_request(&session.turn_address(
+                lash::TurnId::parse("escalate-turn").expect("nonblank host identity"),
+            ))
+            .await
+            .expect("read durable request")
+            .expect("durable request recorded");
     assert_eq!(durable.request.mode, lash::TurnCancelMode::AfterStep);
     assert_eq!(durable.request.request_id, "host-stop");
     assert_eq!(durable.request.origin.as_deref(), Some("user"));

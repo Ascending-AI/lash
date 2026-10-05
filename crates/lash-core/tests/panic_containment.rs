@@ -419,12 +419,14 @@ impl PluginFactory for MinimalProtocolFactory {
         "panic-containment-protocol"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(MinimalProtocolPlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for MinimalProtocolFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("panic-containment-protocol")
     }
 }
 

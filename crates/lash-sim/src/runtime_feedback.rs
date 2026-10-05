@@ -443,9 +443,6 @@ impl lash_core::plugin::PluginFactory for FeedbackPlugin {
         "runtime-feedback-witness"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
     fn build(
         &self,
         ctx: &lash_core::plugin::PluginSessionContext,
@@ -481,6 +478,12 @@ impl lash_core::plugin::PluginFactory for FeedbackPlugin {
             ),
             ctx,
         )
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for FeedbackPlugin {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("runtime-feedback-witness")
     }
 }
 async fn captured_checkpoint_feedback() -> Vec<LlmRequest> {

@@ -28,16 +28,18 @@ impl lash_core::plugin::PluginFactory for GenerationFactory {
         "admission_generation"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::plugin::PluginSessionContext,
     ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
     {
         Ok(Arc::new(GenerationExecutor))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for GenerationFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("admission_generation")
     }
 }
 
@@ -104,7 +106,7 @@ async fn a_first_admission_redrives_under_its_bound_executor_generation() -> Res
         .handler("run"),
     );
     let session = core
-        .session("generation-redrive")
+        .session(crate::SessionId::parse("generation-redrive").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -113,7 +115,7 @@ async fn a_first_admission_redrives_under_its_bound_executor_generation() -> Res
         std::time::Duration::from_secs(30),
         session
             .send(TurnInput::text("first turn"))
-            .id("generation-run")
+            .id(crate::TurnId::parse("generation-run").expect("nonblank host identity"))
             .output(),
     )
     .await;
@@ -153,14 +155,6 @@ impl lash_core::plugin::PluginFactory for PredecessorGenerationFactory {
         "admission_generation"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        let mut declaration = lash_core::plugin::PluginDeclaration::initial(self.id());
-        declaration.format_version = lash_core::FormatVersion::new(2).expect("native format");
-        declaration.writable_formats =
-            vec![lash_core::FormatVersion::ONE, declaration.format_version];
-        declaration
-    }
-
     fn migrate_format(
         &self,
         from: lash_core::FormatVersion,
@@ -185,6 +179,16 @@ impl lash_core::plugin::PluginFactory for PredecessorGenerationFactory {
     }
 }
 
+impl lash_core::plugin::PluginDefinition for PredecessorGenerationFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        let mut declaration = lash_core::plugin::PluginDeclaration::initial("admission_generation");
+        declaration.format_version = lash_core::FormatVersion::new(2).expect("native format");
+        declaration.writable_formats =
+            vec![lash_core::FormatVersion::ONE, declaration.format_version];
+        declaration
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_readable_predecessor_root_converts_in_its_transition_before_running() -> Result<()> {
     let backend =
@@ -199,7 +203,10 @@ async fn a_readable_predecessor_root_converts_in_its_transition_before_running()
         .plugin(Arc::new(PredecessorGenerationFactory(conversions.clone())))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let created = core.session("predecessor-generation").created().await;
+    let created = core
+        .session(crate::SessionId::parse("predecessor-generation").expect("nonblank host identity"))
+        .created()
+        .await;
     let raw: Arc<dyn lash_core::RuntimeStore> = core.store_factory.clone();
     let store = lash_core::store::SessionStore::new(
         raw,
@@ -238,7 +245,7 @@ async fn a_readable_predecessor_root_converts_in_its_transition_before_running()
         std::time::Duration::from_secs(10),
         session
             .send(TurnInput::text("readable predecessor"))
-            .id("predecessor-run")
+            .id(crate::TurnId::parse("predecessor-run").expect("nonblank host identity"))
             .output(),
     )
     .await
@@ -289,14 +296,14 @@ async fn a_root_records_only_its_nonce_and_atomic_admission_before_preparation()
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("atomic-admission")
+        .session(crate::SessionId::parse("atomic-admission").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
     session
         .send(TurnInput::text("ask once"))
-        .id("atomic-run")
+        .id(crate::TurnId::parse("atomic-run").expect("nonblank host identity"))
         .output()
         .await?;
     double.server().settle().await;
@@ -390,7 +397,7 @@ async fn a_lost_atomic_admission_result_reuses_its_nonce_and_bound_rows() -> Res
         .handler("run"),
     );
     let session = core
-        .session("lost-root-result")
+        .session(crate::SessionId::parse("lost-root-result").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -399,7 +406,7 @@ async fn a_lost_atomic_admission_result_reuses_its_nonce_and_bound_rows() -> Res
         std::time::Duration::from_secs(30),
         session
             .send(TurnInput::text("one admitted input"))
-            .id("lost-root-run")
+            .id(crate::TurnId::parse("lost-root-run").expect("nonblank host identity"))
             .output(),
     )
     .await
@@ -465,10 +472,15 @@ async fn a_lost_atomic_admission_result_reuses_its_nonce_and_bound_rows() -> Res
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_purged_root_refuses_execution_lost_without_selecting_again() -> Result<()> {
     let (core, double, calls) = nonce_core().await;
-    let session = core.session("purged-root").created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse("purged-root").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("execute once"))
-        .id("purged-root-run")
+        .id(crate::TurnId::parse("purged-root-run").expect("nonblank host identity"))
         .output()
         .await?;
     double.server().settle().await;
@@ -680,13 +692,19 @@ fn paid_usage() -> lash_core::llm::types::LlmUsage {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_superseded_turn_commit_ends_its_run_typed_and_never_pauses() -> Result<()> {
     let fixture = Fixture::head_moves_under_the_first_turn().await;
-    let session = fixture.core.session(SESSION).created().await.open().await?;
+    let session = fixture
+        .core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
 
     let superseded = tokio::time::timeout(
         std::time::Duration::from_secs(60),
         session
             .send(TurnInput::text("the head moves under this turn's commit"))
-            .id(TURN)
+            .id(crate::TurnId::parse(TURN).expect("nonblank host identity"))
             .output(),
     )
     .await;
@@ -746,12 +764,18 @@ async fn the_send_after_a_refused_run_executes_a_new_run() -> Result<()> {
     // The head moves under the second turn, so the first commits the head
     // the session's later turns run on.
     let fixture = Fixture::head_moves_under_model_call(1).await;
-    let session = fixture.core.session(SESSION).created().await.open().await?;
+    let session = fixture
+        .core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     tokio::time::timeout(
         std::time::Duration::from_secs(60),
         session
             .send(TurnInput::text("the session's first turn"))
-            .id(FIRST_TURN)
+            .id(crate::TurnId::parse(FIRST_TURN).expect("nonblank host identity"))
             .output(),
     )
     .await
@@ -761,7 +785,7 @@ async fn the_send_after_a_refused_run_executes_a_new_run() -> Result<()> {
         std::time::Duration::from_secs(60),
         session
             .send(TurnInput::text("the head moves under this turn's commit"))
-            .id(TURN)
+            .id(crate::TurnId::parse(TURN).expect("nonblank host identity"))
             .output(),
     )
     .await
@@ -777,7 +801,7 @@ async fn the_send_after_a_refused_run_executes_a_new_run() -> Result<()> {
         std::time::Duration::from_secs(60),
         session
             .send(TurnInput::text("the session's next send"))
-            .id(NEXT_TURN)
+            .id(crate::TurnId::parse(NEXT_TURN).expect("nonblank host identity"))
             .output(),
     )
     .await;
@@ -813,12 +837,18 @@ async fn the_send_after_a_refused_run_executes_a_new_run() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_refused_run_crashed_before_its_outcome_converges_on_one_terminal() -> Result<()> {
     let fixture = Fixture::head_moves_under_model_call(1).await;
-    let session = fixture.core.session(SESSION).created().await.open().await?;
+    let session = fixture
+        .core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     tokio::time::timeout(
         std::time::Duration::from_secs(60),
         session
             .send(TurnInput::text("the session's first turn"))
-            .id(FIRST_TURN)
+            .id(crate::TurnId::parse(FIRST_TURN).expect("nonblank host identity"))
             .output(),
     )
     .await
@@ -836,7 +866,7 @@ async fn a_refused_run_crashed_before_its_outcome_converges_on_one_terminal() ->
         std::time::Duration::from_secs(60),
         session
             .send(TurnInput::text("the head moves under this turn's commit"))
-            .id(TURN)
+            .id(crate::TurnId::parse(TURN).expect("nonblank host identity"))
             .output(),
     )
     .await;
@@ -854,7 +884,7 @@ async fn a_refused_run_crashed_before_its_outcome_converges_on_one_terminal() ->
         std::time::Duration::from_secs(60),
         session
             .send(TurnInput::text("the session's next send"))
-            .id(NEXT_TURN)
+            .id(crate::TurnId::parse(NEXT_TURN).expect("nonblank host identity"))
             .output(),
     )
     .await
@@ -910,12 +940,18 @@ async fn a_refused_run_crashed_before_its_outcome_converges_on_one_terminal() ->
 /// refusal: the send answers it, the run's one terminal is the refusal, it
 /// is never parked, and the session's next send completes under a new run.
 async fn a_redriven_run_past_shift_head_ends_with_its_refusal(fixture: Fixture) -> Result<()> {
-    let session = fixture.core.session(SESSION).created().await.open().await?;
+    let session = fixture
+        .core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     tokio::time::timeout(
         std::time::Duration::from_secs(60),
         session
             .send(TurnInput::text("the session's first turn"))
-            .id(FIRST_TURN)
+            .id(crate::TurnId::parse(FIRST_TURN).expect("nonblank host identity"))
             .output(),
     )
     .await
@@ -925,7 +961,7 @@ async fn a_redriven_run_past_shift_head_ends_with_its_refusal(fixture: Fixture) 
         std::time::Duration::from_secs(60),
         session
             .send(TurnInput::text("the head moves under this turn's commit"))
-            .id(TURN)
+            .id(crate::TurnId::parse(TURN).expect("nonblank host identity"))
             .output(),
     )
     .await;
@@ -972,7 +1008,7 @@ async fn a_redriven_run_past_shift_head_ends_with_its_refusal(fixture: Fixture) 
         std::time::Duration::from_secs(60),
         session
             .send(TurnInput::text("the session's next send"))
-            .id(NEXT_TURN)
+            .id(crate::TurnId::parse(NEXT_TURN).expect("nonblank host identity"))
             .output(),
     )
     .await

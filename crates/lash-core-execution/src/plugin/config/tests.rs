@@ -145,10 +145,6 @@ impl PluginFactory for CounterFactory {
         self.id
     }
 
-    fn declaration(&self) -> crate::plugin::PluginDeclaration {
-        crate::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &crate::plugin::PluginSessionContext,
@@ -177,6 +173,12 @@ impl PluginFactory for CounterFactory {
                 output: count,
             })
         })
+    }
+}
+
+impl crate::plugin::PluginMetadata for CounterFactory {
+    fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(self.id)
     }
 }
 
@@ -841,14 +843,17 @@ fn registrations_that_cannot_stand_are_refused() {
             CORE_CONFIG_OWNER
         }
 
-        fn declaration(&self) -> crate::plugin::PluginDeclaration {
-            crate::plugin::PluginDeclaration::initial(self.id())
-        }
         fn build(
             &self,
             _ctx: &crate::plugin::PluginSessionContext,
         ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
             Err(crate::PluginError::Session("unused".to_string()))
+        }
+    }
+
+    impl crate::plugin::PluginDefinition for Reserved {
+        fn declaration() -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(CORE_CONFIG_OWNER)
         }
     }
     assert_eq!(
@@ -889,13 +894,6 @@ impl PluginFactory for FormattedCounter {
         Self::ID
     }
 
-    fn declaration(&self) -> crate::plugin::PluginDeclaration {
-        let mut declaration = crate::plugin::PluginDeclaration::initial(Self::ID);
-        declaration.format_version = crate::FormatVersion::new(2).expect("a format version");
-        declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
-        declaration
-    }
-
     fn migrate_format(
         &self,
         from: crate::FormatVersion,
@@ -931,6 +929,15 @@ impl PluginFactory for FormattedCounter {
 
     fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
         self.0.register_config(reg)
+    }
+}
+
+impl crate::plugin::PluginDefinition for FormattedCounter {
+    fn declaration() -> crate::plugin::PluginDeclaration {
+        let mut declaration = crate::plugin::PluginDeclaration::initial(Self::ID);
+        declaration.format_version = crate::FormatVersion::new(2).expect("a format version");
+        declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
+        declaration
     }
 }
 

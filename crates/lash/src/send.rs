@@ -8,10 +8,8 @@
 //!
 //! Polling any one of a handle's [`events`](SendHandle::events),
 //! [`outcome`](SendHandle::outcome) or [`output`](SendHandle::output) is
-//! enough for the turn to complete, on every engine: on a core that runs no
-//! engine and executes in the caller's task, each of them executes. The handle
-//! remembers its answer, so a later call answers the same outcome without
-//! executing again.
+//! enough to follow the engine to completion. The handle remembers its
+//! answer, so a later call answers the same retained outcome.
 
 mod batch;
 mod cancel;
@@ -316,6 +314,12 @@ pub(crate) enum SendTraceContext {
 }
 
 impl SendTraceContext {
+    pub(crate) fn set_context(&mut self, context: lash_core::TraceCarrier) {
+        *self = Self::Captured(Some(context));
+    }
+    pub(crate) fn capture(&mut self, capture: impl FnOnce() -> Option<lash_core::TraceCarrier>) {
+        *self = Self::Captured(capture());
+    }
     /// The cause the submission carries: a link to the captured context,
     /// snapshotting it from `target` now when none was chosen.
     pub(crate) fn into_context(self, target: &SendTarget) -> Option<lash_core::TraceCarrier> {
@@ -360,7 +364,7 @@ impl SendBuilder {
     /// given, and a retry under another context is the same submission and
     /// keeps the first one.
     pub fn trace_context(mut self, context: lash_core::TraceCarrier) -> Self {
-        self.trace = SendTraceContext::Captured(Some(context));
+        self.trace.set_context(context);
         self
     }
 
@@ -370,7 +374,7 @@ impl SendBuilder {
     /// is, such as a spawned task. With no adapter installed there is
     /// nothing to capture and the input is linked to nothing.
     pub fn capture_trace_context(mut self) -> Self {
-        self.trace = SendTraceContext::Captured(self.target.capture_trace_context());
+        self.trace.capture(|| self.target.capture_trace_context());
         self
     }
 
@@ -395,8 +399,8 @@ impl SendBuilder {
     /// A retry validates the original submission digest, including after
     /// settlement. Identical content returns the original acceptance; changed
     /// content is refused.
-    pub fn id(mut self, id: impl Into<TurnId>) -> Self {
-        self.id = Some(id.into());
+    pub fn id(mut self, id: TurnId) -> Self {
+        self.id = Some(id);
         self
     }
 
@@ -1000,22 +1004,46 @@ impl SendHandle {
 
 /// A logical run, re-awaited by id: after a restart, a park verb, or from a
 /// handle that only knows the host id.
-#[derive(Clone)]
-pub struct RunHandle {
+pub struct RunHandle<Output = serde_json::Value, Error = lash_core::plugin::PluginOperationFailure>
+{
     target: SendTarget,
-    run: TurnId,
+    run: crate::RunId,
     cursor: lash_core::SessionCursor,
     shared: Arc<HandleShared>,
+    operation_name: Option<&'static str>,
+    decode_error: fn(
+        lash_core::plugin::PluginOperationFailure,
+    )
+        -> std::result::Result<Error, Box<lash_core::plugin::PluginOperationFailure>>,
+    output_type: std::marker::PhantomData<fn() -> Output>,
 }
 
-impl RunHandle {
-    pub fn run(&self) -> &TurnId {
+impl<Output, Error> Clone for RunHandle<Output, Error> {
+    fn clone(&self) -> Self {
+        Self {
+            target: self.target.clone(),
+            run: self.run.clone(),
+            cursor: self.cursor.clone(),
+            shared: self.shared.clone(),
+            operation_name: self.operation_name,
+            decode_error: self.decode_error,
+            output_type: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<Output, Error> RunHandle<Output, Error> {
+    /// The logical Run identity, including for operation Runs.
+    pub fn run(&self) -> &crate::RunId {
         &self.run
     }
 
     /// Request cancellation of this logical owner. Dropping a follower never cancels it.
     pub fn cancel(&self) -> CancelBuilder {
-        CancelBuilder::new(self.target.clone(), CancelTarget::Run(self.run.clone()))
+        CancelBuilder::new(
+            self.target.clone(),
+            CancelTarget::Run(self.run.clone().into()),
+        )
     }
 
     /// Live activity of the run from the moment this handle was made; no
@@ -1023,7 +1051,7 @@ impl RunHandle {
     pub fn events(&self) -> TurnEvents {
         spawn_events(
             self.target.clone(),
-            Subject::Run(self.run.clone()),
+            Subject::Run(self.run.clone().into()),
             self.cursor.clone(),
             Arc::clone(&self.shared),
         )
@@ -1033,7 +1061,7 @@ impl RunHandle {
     pub async fn outcome(self) -> Result<SendOutcome> {
         settle(
             &self.target,
-            &Subject::Run(self.run.clone()),
+            &Subject::Run(self.run.clone().into()),
             &self.cursor,
             &self.shared,
             Tap::Quiet,
@@ -1044,12 +1072,10 @@ impl RunHandle {
     pub async fn output(self) -> Result<TurnOutput> {
         let run = self.run.clone();
         let outcome = self.outcome().await?;
-        settled_output(InputId::from(&run), outcome)
+        settled_output(InputId::from(run.stored()), outcome)
     }
 
-    /// The typed plugin result of a host operation. Refusals keep their causes;
-    /// a park or cancellation remains observable through [`Self::outcome`].
-    pub async fn result(
+    async fn raw_result(
         self,
     ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
         let run = self.run.clone();
@@ -1083,15 +1109,70 @@ impl RunHandle {
                 }
                 lash_core::runtime::PluginOperationCommandOutcome::Cancelled => {
                     Err(EmbedError::from(SendError::NotSettled {
-                        input_id: InputId::from(&run),
+                        input_id: InputId::from(run.stored()),
                         status,
                     }))
                 }
             },
             _ => Err(EmbedError::from(SendError::NotSettled {
-                input_id: InputId::from(&run),
+                input_id: InputId::from(run.stored()),
                 status,
             })),
+        }
+    }
+}
+
+impl<Output: serde::de::DeserializeOwned, Error> RunHandle<Output, Error> {
+    /// Read a task's receipt using the output and error codecs selected by
+    /// `start_task::<Op>`. Unknown error envelopes remain intact. A raw task
+    /// handle returns JSON and the original failure envelope.
+    pub async fn result(
+        self,
+    ) -> std::result::Result<
+        lash_core::facade_support::PluginOperationReceipt<Output>,
+        crate::admin::PluginTaskResultError<Error>,
+    > {
+        let name = self.operation_name.unwrap_or("raw task");
+        let decode_error = self.decode_error;
+        let receipt = self.raw_result().await.map_err(|error| {
+            use crate::admin::PluginTaskResultError;
+            match error {
+                EmbedError::Control(
+                    lash_core::facade_support::PluginOperationInvokeError::Failed(failure),
+                ) => match decode_error(*failure.clone()) {
+                    Ok(error) => PluginTaskResultError::Failed { error, failure },
+                    Err(failure) => PluginTaskResultError::Host(Box::new(EmbedError::Control(
+                        lash_core::facade_support::PluginOperationInvokeError::Failed(failure),
+                    ))),
+                },
+                error => PluginTaskResultError::Host(Box::new(error)),
+            }
+        })?;
+        let output = serde_json::from_value(receipt.output).map_err(|error| {
+            crate::admin::PluginTaskResultError::Host(Box::new(EmbedError::Plugin(
+                lash_core::PluginError::Invoke(format!("invalid {name} output: {error}")),
+            )))
+        })?;
+        Ok(lash_core::facade_support::PluginOperationReceipt {
+            output,
+            events: receipt.events,
+            pending_turn_inputs: receipt.pending_turn_inputs,
+        })
+    }
+}
+
+impl RunHandle {
+    pub(crate) fn typed<Op: lash_core::facade_support::PluginTask>(
+        self,
+    ) -> RunHandle<Op::Output, Op::Error> {
+        RunHandle {
+            target: self.target,
+            run: self.run,
+            cursor: self.cursor,
+            shared: self.shared,
+            operation_name: Some(Op::NAME),
+            decode_error: Op::decode_error,
+            output_type: std::marker::PhantomData,
         }
     }
 }
@@ -1132,9 +1213,12 @@ pub(crate) fn run(target: SendTarget, run: TurnId) -> RunHandle {
     let cursor = target.current_cursor();
     RunHandle {
         target,
-        run,
+        run: run.into(),
         cursor,
         shared: Arc::new(HandleShared::pending()),
+        operation_name: None,
+        decode_error: Ok,
+        output_type: std::marker::PhantomData,
     }
 }
 

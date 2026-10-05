@@ -487,7 +487,7 @@ mod tests {
                 "law",
             ))
             .unwrap();
-        core.session("load-admission")
+        core.session(lash::SessionId::parse("load-admission").expect("nonblank host identity"))
             .create(lash::SessionCreation::root(lash::SessionSpec::new(
                 "mock-model",
                 lash::TurnBudget::bounded(3),
@@ -495,7 +495,11 @@ mod tests {
             )))
             .await
             .unwrap();
-        let session = core.session("load-admission").open().await.unwrap();
+        let session = core
+            .session(lash::SessionId::parse("load-admission").expect("nonblank host identity"))
+            .open()
+            .await
+            .unwrap();
         for ordinal in [28, 29] {
             let key = format!("smoke-v1-20261001205043/2/{ordinal}");
             let input = format!(

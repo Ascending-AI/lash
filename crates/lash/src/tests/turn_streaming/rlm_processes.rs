@@ -17,7 +17,10 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
         let session = core
-            .session("rlm-leaf-append-stale-rollback")
+            .session(
+                crate::SessionId::parse("rlm-leaf-append-stale-rollback")
+                    .expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -215,7 +218,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
             .tools(Arc::new(FrameStateDeferredTools))
             .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core
-        .session(session_id)
+        .session((session_id).clone())
         .created()
         .await
         .open()
@@ -285,7 +288,9 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     );
     let redriven = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        first_session.run(TurnId::fixture(run_id.clone())).outcome(),
+        first_session
+            .run(crate::RunId::parse(run_id.clone())?)
+            .outcome(),
     )
     .await
     .expect("the redriven run settles")?;
@@ -305,7 +310,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core
-        .session(session_id)
+        .session((session_id).clone())
         .created()
         .await
         .open()
@@ -318,7 +323,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .expect("reopened RLM has an execution snapshot");
 
     let follow_on = reopened_session
-        .run(TurnId::fixture(run_id.clone()))
+        .run(crate::RunId::parse(run_id.clone())?)
         .output()
         .await?;
     assert_eq!(
@@ -328,7 +333,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         ))
     );
     let settled_again = reopened_session
-        .run(TurnId::fixture(run_id))
+        .run(crate::RunId::parse(run_id)?)
         .outcome()
         .await?;
     assert_eq!(settled_again.status(), crate::TurnStatus::Answered);
@@ -439,11 +444,16 @@ pub(super) async fn engine_driven_chained_continue_as_survives_nested_commit_han
         }))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
 
     let output = session
         .send(TurnInput::text("start chained frame handoff"))
-        .id("engine-chained-continue-as")
+        .id(crate::TurnId::parse("engine-chained-continue-as").expect("nonblank host identity"))
         .output()
         .await?;
 
@@ -475,11 +485,16 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let activities = RecordingEvents::default();
     let output = session
         .send(TurnInput::text("switch frames"))
-        .id(run_turn_id)
+        .id(crate::TurnId::parse(run_turn_id).expect("nonblank host identity"))
         .output_into(&activities)
         .await?;
 
@@ -596,7 +611,9 @@ finish(value);"#,
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("rlm-lashlang-graph-store")
+        .session(
+            crate::SessionId::parse("rlm-lashlang-graph-store").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -706,7 +723,7 @@ pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_to
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("rlm-failed-code-event")
+        .session(crate::SessionId::parse("rlm-failed-code-event").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -764,7 +781,10 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("rlm-process-definition-filter")
+        .session(
+            crate::SessionId::parse("rlm-process-definition-filter")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()

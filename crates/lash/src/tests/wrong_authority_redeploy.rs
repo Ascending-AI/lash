@@ -35,8 +35,12 @@ async fn a_send_under_another_authority_is_answered_with_the_binding_mismatch() 
     let first = restate_double(SEED).await;
     {
         let core = core_over(&first)?;
-        core.session(ID).created().await.open().await?;
-        core.session(ID)
+        core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+            .created()
+            .await
+            .open()
+            .await?;
+        core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
             .durable()
             .await?
             .send(TurnInput::text("under the first authority"))
@@ -60,7 +64,7 @@ async fn a_send_under_another_authority_is_answered_with_the_binding_mismatch() 
     // run that is refused the same way rather than one queued behind it.
     for send in ["the first send", "the second send"] {
         let answer = tokio::time::timeout(ANSWERS_WITHIN, async {
-            core.session(ID)
+            core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
                 .durable()
                 .await?
                 .send(TurnInput::text("under another authority"))
@@ -228,7 +232,7 @@ mod permanent_run_admission {
             .await
             .expect("create the session");
         let durable = core
-            .session(ID)
+            .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
             .durable()
             .await
             .expect("open before fencing admission");

@@ -1465,8 +1465,8 @@ fn drain_area_witnesses() {
     let _ = lash::runtime::ExecutionScope::from_journal_key;
     // W0506: lash::durability::CanonicalRuntimeEffectEnvelope::json [function]
     let _ = lash::durability::CanonicalRuntimeEffectEnvelope::json;
-    // W0509: lash::AdmissionRefusal::as_str [function]
-    let _ = lash::AdmissionRefusal::as_str;
+    // W0509: lash::IngressAdmissionRefusal::as_str [function]
+    let _ = lash::IngressAdmissionRefusal::as_str;
     // W0510: lash::runtime::AssembledTurn::turn_cancel_input_outcome [field]
     field_witness(|value: &lash::runtime::AssembledTurn| {
         let _ = &value.turn_cancel_input_outcome;

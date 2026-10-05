@@ -131,7 +131,7 @@ async fn new_turn_after_abandoned_shift_admits_without_waiting() {
     };
     let output = successor
         .send(lash::TurnInput::text("complete after process loss"))
-        .id(turn_id)
+        .id(lash::TurnId::parse(turn_id).expect("nonblank host identity"))
         .require_finish()
         .expect("require finish")
         .output_into(&ui_events)
@@ -969,7 +969,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
         .open_session_for_observation(&old_session_id)
         .await
         .expect("observe the still-live session")
-        .run(retried_turn.clone());
+        .run(retried_turn.clone().into());
     tokio::time::timeout(Duration::from_secs(10), root.outcome())
         .await
         .expect("the still-live turn settles")

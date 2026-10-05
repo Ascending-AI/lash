@@ -176,7 +176,7 @@ async fn missing_unstarted_run_executes_once_from_its_ingress() {
         .send(lash::TurnInput::text(
             crate::crash_matrix::invariants::input_text(run),
         ))
-        .id(run)
+        .id(lash::TurnId::parse(run).expect("nonblank host identity"))
         .await
         .expect("accept the input");
     driver.record_host(

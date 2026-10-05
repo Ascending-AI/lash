@@ -673,14 +673,16 @@ impl PluginFactory for StandardCompactionPluginFactory {
         STANDARD_COMPACTION_PLUGIN_ID
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(StandardCompactionPlugin {
             config: self.config.clone(),
         }))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for StandardCompactionPluginFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(STANDARD_COMPACTION_PLUGIN_ID)
     }
 }
 

@@ -43,12 +43,14 @@ impl PluginFactory for ToolFixtureArgs {
         PLUGIN
     }
 
-    fn declaration(&self) -> PluginDeclaration {
-        PluginDeclaration::initial(PLUGIN)
-    }
-
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for ToolFixtureArgs {
+    fn declaration() -> PluginDeclaration {
+        PluginDeclaration::initial(PLUGIN)
     }
 }
 

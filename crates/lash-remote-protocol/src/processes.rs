@@ -1388,6 +1388,11 @@ pub struct RemotePersistProcessEnvRequest {
 }
 
 impl RemotePersistProcessEnvRequest {
+    /// Persist the complete execution environment a process will capture.
+    pub fn new(env_spec: RemoteProcessExecutionEnvSpec) -> Self {
+        Self { env_spec }
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         self.env_spec.validate("RemotePersistProcessEnvRequest")
     }

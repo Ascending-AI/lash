@@ -216,7 +216,7 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
     let core = core_over(double_backend().await, looping_provider(&calls))?;
     for requested in [crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES + 1, u8::MAX] {
         let error = core
-            .session(ID)
+            .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
             .create(crate::SessionCreation {
                 spec: mock_session_spec().charge_safety(
                     crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
@@ -284,7 +284,7 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
             )
         );
     }
-    core.session(ID)
+    core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec().charge_safety(
                 crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
@@ -328,7 +328,10 @@ async fn a_commanded_turn_budget_bounds_the_next_run() -> Result<()> {
     let calls = Arc::new(AtomicUsize::new(0));
     let core = core_over(double_backend().await, looping_provider(&calls))?;
     create_with_budget(&core, ID, crate::TurnBudget::Unbounded).await?;
-    let session = core.session(ID).open().await?;
+    let session = core
+        .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+        .open()
+        .await?;
     let before = session
         .send(TurnInput::text("look it all up"))
         .output()
@@ -889,7 +892,10 @@ async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
         crate::MaxToolCalls::new(1024),
         "the session records the limit it was created with"
     );
-    let session = core.session(ID).open().await?;
+    let session = core
+        .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+        .open()
+        .await?;
     session
         .send(TurnInput::text("look two things up"))
         .output()
@@ -991,7 +997,7 @@ async fn a_creation_without_max_tool_calls_is_refused() -> Result<()> {
     let mut unstated = mock_session_spec();
     unstated.max_tool_calls = None;
     let error = core
-        .session(ID)
+        .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(unstated))
         .await
         .err()
@@ -1003,7 +1009,9 @@ async fn a_creation_without_max_tool_calls_is_refused() -> Result<()> {
     assert!(error.is_terminal() && !error.is_retryable(), "{error}");
     assert!(
         matches!(
-            core.session(ID).open().await,
+            core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+                .open()
+                .await,
             Err(crate::EmbedError::UnknownSession { .. })
         ),
         "the refused creation wrote no session"
@@ -1034,7 +1042,7 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
             max_duplicate_cost_tokens: None,
         });
     let core = core_over(backend.clone(), mock_provider())?;
-    core.session(SOURCE)
+    core.session(crate::SessionId::parse(SOURCE).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(stated))
         .await?;
     engine_executed_turn(&core, SOURCE, "before the fork").await?;
@@ -1057,7 +1065,7 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
             ..Default::default()
         });
     later
-        .session(LATER)
+        .session(crate::SessionId::parse(LATER).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(changed))
         .await?;
     later

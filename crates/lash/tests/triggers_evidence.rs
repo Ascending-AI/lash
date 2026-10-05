@@ -30,12 +30,12 @@ fn drain_area_witnesses() {
     fn meth_0007<T: lash_conformance::TriggerOccurrenceRetentionFaultInjector>(_: &T) {
         let _ = T::fail_occurrence_delete;
     }
-    // W0015: lash::triggers::JsonSchema::object [function]
-    let _ = lash::triggers::JsonSchema::object;
-    // W0016: lash::triggers::JsonSchema::as_value [function]
-    let _ = lash::triggers::JsonSchema::as_value;
-    // W0017: lash::triggers::JsonSchema::validate [function]
-    let _ = lash::triggers::JsonSchema::validate;
+    // W0015: lash::schema::JsonSchema::object [function]
+    let _ = lash::schema::JsonSchema::object;
+    // W0016: lash::schema::JsonSchema::as_value [function]
+    let _ = lash::schema::JsonSchema::as_value;
+    // W0017: lash::schema::JsonSchema::validate [function]
+    let _ = lash::schema::JsonSchema::validate;
     // W0018: lash::triggers::TriggerCommand::Delete::actor [field]
     field_witness(|value: &lash::triggers::TriggerCommand| {
         if let lash::triggers::TriggerCommand::Delete { actor, .. } = value {

@@ -1118,15 +1118,17 @@ impl PluginFactory for FailFirstTurnPersisted {
         "fig2521-fail-first-turn-persisted"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(PluginFactory::id(self))
-    }
-
     fn build(
         &self,
         _: &lash_core::facade_support::PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
         Ok(Arc::new(FailFirstTurnPersisted))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for FailFirstTurnPersisted {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("fig2521-fail-first-turn-persisted")
     }
 }
 

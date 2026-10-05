@@ -398,7 +398,7 @@ impl crate::PluginSession {
             .host
             .factories()
             .iter()
-            .map(|factory| factory.declaration())
+            .map(|factory| factory.plugin_declaration())
             .find(|declaration| declaration.id.as_str() == batch.plugin.plugin)
             .filter(|declaration| declaration.behavior_revision == batch.plugin.behavior_revision)
             .ok_or(StateCommandRefusal::WrongOwner)?;

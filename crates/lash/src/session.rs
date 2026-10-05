@@ -89,10 +89,10 @@ impl SessionCreation {
     /// A session created from `spec` and recorded as `parent`'s child
     /// (ADR 0089). It is an ordinary session: its config is `spec`, not its
     /// parent's.
-    pub fn child_of(parent: impl Into<SessionId>, spec: SessionSpec) -> Self {
+    pub fn child_of(parent: SessionId, spec: SessionSpec) -> Self {
         Self {
             spec,
-            parent: Some(parent.into()),
+            parent: Some(parent),
         }
     }
 }
@@ -889,15 +889,12 @@ impl LashSession {
 
     /// The scope uses the exact store-backed session identity owned by this
     /// facade handle's Session Binding.
-    pub fn turn_scope(&self, turn_id: impl Into<TurnId>) -> lash_core::ExecutionScope {
+    pub fn turn_scope(&self, turn_id: TurnId) -> lash_core::ExecutionScope {
         self.runtime.observe().turn_scope(turn_id)
     }
 
     /// Build the cancellation and terminal-observation address for a turn.
-    pub fn turn_address(
-        &self,
-        turn_id: impl Into<TurnId>,
-    ) -> lash_core::facade_support::TurnAddress {
+    pub fn turn_address(&self, turn_id: TurnId) -> lash_core::facade_support::TurnAddress {
         let observation = self.runtime.observe();
         lash_core::facade_support::TurnAddress::new(observation.session_id(), turn_id)
     }
@@ -972,13 +969,13 @@ impl LashSession {
     /// ([`SendBuilder::id`](crate::SendBuilder::id)): after a restart, with
     /// nothing but the id. It follows the input wherever it went, including
     /// into another run, and never commits anything.
-    pub fn attach_id(&self, id: impl Into<TurnId>) -> crate::SendHandle {
-        crate::send::attach_id(crate::send::SendTarget::Live(self.clone()), id.into())
+    pub fn attach_id(&self, id: TurnId) -> crate::SendHandle {
+        crate::send::attach_id(crate::send::SendTarget::Live(self.clone()), id)
     }
 
     /// Re-await a logical run: after a park verb, or by the host id a send
     /// named.
-    pub fn run(&self, run: impl Into<TurnId>) -> crate::RunHandle {
+    pub fn run(&self, run: crate::RunId) -> crate::RunHandle {
         crate::send::run(crate::send::SendTarget::Live(self.clone()), run.into())
     }
 
@@ -1069,7 +1066,8 @@ impl LashSession {
     ///
     /// ```ignore
     /// let pending = session.durable().pending_turn_inputs().await?;
-    /// session.durable().send(input).id("draft-1").await?;
+    /// let id = lash::TurnId::parse("draft-1")?;
+    /// session.durable().send(input).id(id).await?;
     /// ```
     pub fn durable(&self) -> DurableSession {
         DurableSession::from_binding(
@@ -1108,8 +1106,9 @@ impl LashSession {
         self.runtime.observe().read_view.clone()
     }
 
-    /// Install explicitly unstable internal instrumentation for this runtime.
-    #[doc(hidden)]
+    /// Install turn-phase instrumentation for a test or performance harness.
+    /// Phase names follow the runtime implementation.
+    #[cfg(any(test, feature = "testing"))]
     pub async fn set_turn_phase_probe(
         &self,
         probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,

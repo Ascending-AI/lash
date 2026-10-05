@@ -126,7 +126,7 @@ async fn a_turn_pinned_at_send_forks_after_collection_on_the_sim_engine() {
         .await
         .expect("the pinned input forks after the collection");
     let branch = core
-        .session("sim-revision-pins-fork")
+        .session(lash::SessionId::parse("sim-revision-pins-fork").expect("nonblank host identity"))
         .open()
         .await
         .expect("open the fork");

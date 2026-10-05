@@ -223,7 +223,7 @@ async fn a_refused_cell_reservation_replays_into_a_host_with_capacity(
         BOUND,
         session
             .send(lash::TurnInput::text("count once"))
-            .id("worker-verdict-root")
+            .id(lash::TurnId::parse("worker-verdict-root").expect("nonblank host identity"))
             .output(),
     )
     .await

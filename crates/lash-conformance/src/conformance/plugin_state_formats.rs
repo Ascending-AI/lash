@@ -12,13 +12,7 @@ impl PluginFactory for FormatPlugin {
     fn id(&self) -> &'static str {
         "format-state"
     }
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        let mut declaration = lash_core::plugin::PluginDeclaration::initial("format-state");
-        declaration.format_version = lash_core::FormatVersion::new(2).unwrap();
-        declaration.writable_formats =
-            vec![lash_core::FormatVersion::ONE, declaration.format_version];
-        declaration
-    }
+
     fn migrate_format(
         &self,
         from: lash_core::FormatVersion,
@@ -30,7 +24,7 @@ impl PluginFactory for FormatPlugin {
                 plugin: "format-state".into(),
                 namespace,
                 stored: from,
-                readable: self.declaration().format_version,
+                readable: crate::plugin::PluginMetadata::plugin_declaration(self).format_version,
             });
         }
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -50,12 +44,12 @@ impl PluginFactory for FormatPlugin {
             let map = value.as_object_mut().unwrap();
             let total = map.remove("total").unwrap();
             map.insert("count".into(), total);
-        } else if to != self.declaration().format_version {
+        } else if to != crate::plugin::PluginMetadata::plugin_declaration(self).format_version {
             return Err(lash_core::FormatRefusal {
                 plugin: "format-state".into(),
                 namespace,
                 stored: to,
-                readable: self.declaration().format_version,
+                readable: crate::plugin::PluginMetadata::plugin_declaration(self).format_version,
             });
         }
         Ok(value)
@@ -63,6 +57,20 @@ impl PluginFactory for FormatPlugin {
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(Arc::new(self.clone()))
+    }
+}
+
+#[expect(
+    clippy::unwrap_used,
+    reason = "format law uses known versions and exact object fixtures"
+)]
+impl crate::plugin::PluginDefinition for FormatPlugin {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        let mut declaration = lash_core::plugin::PluginDeclaration::initial("format-state");
+        declaration.format_version = lash_core::FormatVersion::new(2).unwrap();
+        declaration.writable_formats =
+            vec![lash_core::FormatVersion::ONE, declaration.format_version];
+        declaration
     }
 }
 impl SessionPlugin for FormatPlugin {

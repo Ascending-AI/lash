@@ -898,7 +898,7 @@ impl Processes {
     /// Returns the current process-session snapshot.
     pub async fn session_snapshot(
         &self,
-        session_id: impl Into<SessionId>,
+        session_id: SessionId,
     ) -> Result<lash_core::facade_support::ProcessWorkSnapshot> {
         self.make_observer()?
             .snapshot_for_session(session_id)

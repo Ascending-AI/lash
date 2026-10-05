@@ -621,10 +621,6 @@ mod tests {
             "toolbench_timeout_shutdown_witness"
         }
 
-        fn declaration(&self) -> lash::plugins::PluginDeclaration {
-            lash::plugins::PluginDeclaration::initial(self.id())
-        }
-
         fn build(
             &self,
             _ctx: &lash::plugins::PluginSessionContext,
@@ -636,6 +632,12 @@ mod tests {
         async fn shutdown(&self) -> std::result::Result<(), lash::plugins::PluginError> {
             self.called.store(true, Ordering::SeqCst);
             Ok(())
+        }
+    }
+
+    impl lash::plugins::PluginDefinition for ShutdownWitness {
+        fn declaration() -> lash::plugins::PluginDeclaration {
+            lash::plugins::PluginDeclaration::initial("toolbench_timeout_shutdown_witness")
         }
     }
 

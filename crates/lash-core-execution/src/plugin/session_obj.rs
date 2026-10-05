@@ -447,7 +447,7 @@ impl PluginSession {
         let mut writers = self.plugin_admission()?.writers();
         let mut native = true;
         for factory in self.host.factories() {
-            let declared = factory.declaration().format_version;
+            let declared = factory.plugin_declaration().format_version;
             native &= *writers.entry(factory.id().to_owned()).or_insert(declared) == declared;
         }
         (!native).then_some(writers)
@@ -1556,13 +1556,17 @@ mod presentation_plan_tests {
         fn id(&self) -> &'static str {
             "plan-presenter"
         }
-        fn declaration(&self) -> PluginDeclaration {
-            let mut declaration = PluginDeclaration::initial(self.id());
-            declaration.behavior_revision = BehaviorRevision::new(self.revision).unwrap();
-            declaration
-        }
+
         fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
             Ok(Arc::new(Presenter(Arc::clone(&self.calls))))
+        }
+    }
+
+    impl crate::plugin::PluginMetadata for PresenterFactory {
+        fn plugin_declaration(&self) -> PluginDeclaration {
+            let mut declaration = PluginDeclaration::initial("plan-presenter");
+            declaration.behavior_revision = BehaviorRevision::new(self.revision).unwrap();
+            declaration
         }
     }
 

@@ -205,7 +205,7 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
             "owner",
         ))
         .unwrap();
-    core.session("operation-tool-law")
+    core.session(lash::SessionId::parse("operation-tool-law").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "mock-model",
             lash::TurnBudget::Unbounded,
@@ -213,7 +213,11 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
         )))
         .await
         .unwrap();
-    let session = core.session("operation-tool-law").open().await.unwrap();
+    let session = core
+        .session(lash::SessionId::parse("operation-tool-law").expect("nonblank host identity"))
+        .open()
+        .await
+        .unwrap();
     let mut runs = Vec::new();
     for label in ["singleton", "parallel", "deferred"] {
         let task = session
@@ -289,7 +293,7 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
         let key = crate::recorded_turn_invocation_key(
             backend.stores().session_store_factory().as_ref(),
             &lash_core::SessionId::from("operation-tool-law"),
-            &run,
+            &run.clone().into(),
         )
         .await
         .unwrap()

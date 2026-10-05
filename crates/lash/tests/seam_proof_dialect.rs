@@ -396,7 +396,10 @@ async fn a_suspended_session_keeps_its_selected_dialect(tier: Tier, seed: u64) {
         Arc::new(lash::rlm::TypescriptDialect),
         &Script::new(&[]),
     );
-    let refused = substituted.session(session_id).open().await;
+    let refused = substituted
+        .session(lash::SessionId::parse(session_id).expect("nonblank host identity"))
+        .open()
+        .await;
     let error = format!(
         "{:?}",
         refused

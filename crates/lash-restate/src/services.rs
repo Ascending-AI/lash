@@ -136,6 +136,14 @@ pub enum RestateNamespaceError {
     Reserved { namespace: String },
 }
 
+/// A qualified host service name refused by the Restate SDK.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("Restate service name `{name}` is invalid: {reason}")]
+pub struct RestateServiceNameError {
+    pub name: String,
+    pub reason: String,
+}
+
 impl RestateNamespace {
     /// `value` as a namespace; the empty string is the
     /// [`default`](Self::default) namespace.
@@ -164,6 +172,27 @@ impl RestateNamespace {
             return refuse(|namespace| RestateNamespaceError::Reserved { namespace });
         }
         Ok(Self(Some(Arc::from(value))))
+    }
+
+    /// Bind a native host service under this deployment's namespace.
+    ///
+    /// Keeps its handlers, service options and dispatcher. Host services use
+    /// stable names; Lash owns its generation lanes. Pass the result to the
+    /// builder returned by [`crate::RestateEngine::endpoint_builder`].
+    pub fn service_definition(
+        &self,
+        definition: impl restate_sdk::service::IntoServiceDefinition,
+    ) -> Result<restate_sdk::service::ServiceDefinition, RestateServiceNameError> {
+        let definition = definition.into_service_definition();
+        let name = self.service_name(&definition.name().to_string());
+        let qualified =
+            restate_sdk::discovery::ServiceName::try_from(name.clone()).map_err(|error| {
+                RestateServiceNameError {
+                    name,
+                    reason: error.to_string(),
+                }
+            })?;
+        Ok(definition.with_name(qualified))
     }
 
     /// The namespace as written; empty for the default namespace.
@@ -879,6 +908,87 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct NativeHost;
+
+    #[restate_sdk::service]
+    impl NativeHost {
+        #[handler]
+        async fn echo(
+            &self,
+            _ctx: restate_sdk::context::Context<'_>,
+            value: String,
+        ) -> restate_sdk::errors::HandlerResult<String> {
+            Ok(value)
+        }
+    }
+
+    /// FIG-5020: qualifying a native definition preserves its handler and
+    /// options, and default and tenant bindings both dispatch normally.
+    #[tokio::test]
+    async fn a_native_host_definition_keeps_its_contract_under_a_namespace() {
+        use lash_http_transport::{HttpMethod, HttpRequest, read_http_body_text};
+        use restate_sdk::service::IntoServiceDefinition;
+        for namespace in [
+            RestateNamespace::default(),
+            RestateNamespace::new("host").unwrap(),
+        ] {
+            let definition = NativeHost
+                .into_service_definition()
+                .options(ServiceOptions::new().metadata("owner", "host-contract"));
+            let definition = namespace.service_definition(definition).unwrap();
+            assert_eq!(
+                definition.name().to_string(),
+                namespace.service_name("NativeHost")
+            );
+            let endpoint = restate_sdk::endpoint::Endpoint::builder()
+                .bind(definition)
+                .build();
+            let response = endpoint.handle(
+                http::Request::builder()
+                    .uri("/discover")
+                    .header("accept", "application/vnd.restate.endpointmanifest.v2+json")
+                    .body(http_body_util::Empty::<bytes::Bytes>::new())
+                    .unwrap(),
+            );
+            use http_body_util::BodyExt;
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let discovery: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                discovery["services"][0]["metadata"]["owner"],
+                "host-contract"
+            );
+            assert_eq!(discovery["services"][0]["handlers"][0]["name"], "echo");
+            let server = lash_restate_test::RestateTestServer::start(
+                endpoint,
+                lash_restate_test::ServerConfig::default(),
+            )
+            .await
+            .unwrap();
+            let response = server
+                .transport()
+                .send(
+                    HttpRequest::new(
+                        HttpMethod::Post,
+                        format!(
+                            "{}/{}/echo",
+                            server.ingress_url(),
+                            namespace.service_name("NativeHost")
+                        ),
+                        serde_json::to_string("hello").unwrap(),
+                    )
+                    .with_header("content-type", "application/json"),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status, 200);
+            let echoed = read_http_body_text(response.body, 1024, None, "host echo")
+                .await
+                .unwrap();
+            assert_eq!(serde_json::from_str::<String>(&echoed).unwrap(), "hello");
+        }
+    }
 
     fn namespaces() -> [RestateNamespace; 3] {
         [

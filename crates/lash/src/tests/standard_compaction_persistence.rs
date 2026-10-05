@@ -234,7 +234,7 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
         .plugin(window_probe.plugin())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -245,7 +245,8 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
         .await?;
     session
         .send(TurnInput::text("first request"))
-        .id("standard-compaction-pressure-first")
+        .id(crate::TurnId::parse("standard-compaction-pressure-first")
+            .expect("nonblank host identity"))
         .output()
         .await?;
     let before = session.read_view();
@@ -253,7 +254,10 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
 
     let threshold = session
         .send(TurnInput::text("threshold request"))
-        .id("standard-compaction-pressure-threshold")
+        .id(
+            crate::TurnId::parse("standard-compaction-pressure-threshold")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     assert!(threshold.result.is_success(), "{:?}", threshold.result);
@@ -307,7 +311,8 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
     // The next turn stays in that frame.
     session
         .send(TurnInput::text("after request"))
-        .id("standard-compaction-pressure-after")
+        .id(crate::TurnId::parse("standard-compaction-pressure-after")
+            .expect("nonblank host identity"))
         .output()
         .await?;
     let next = session.read_view();
@@ -345,7 +350,7 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -360,7 +365,7 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
     ] {
         session
             .send(TurnInput::text(text))
-            .id(turn_id)
+            .id(crate::TurnId::parse(turn_id).expect("nonblank host identity"))
             .output()
             .await?;
     }
@@ -372,7 +377,8 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
 
     session
         .send(TurnInput::text("after request"))
-        .id("standard-compaction-explicit-after")
+        .id(crate::TurnId::parse("standard-compaction-explicit-after")
+            .expect("nonblank host identity"))
         .output()
         .await?;
     let next = session.read_view();
@@ -415,7 +421,7 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -426,7 +432,10 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
         .await?;
     let overflow = session
         .send(TurnInput::text("summarize the report"))
-        .id("standard-compaction-recovery-overflow")
+        .id(
+            crate::TurnId::parse("standard-compaction-recovery-overflow")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     assert!(
@@ -438,7 +447,8 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
 
     let recovered = session
         .send(TurnInput::text("now give me the verdict"))
-        .id("standard-compaction-recovery-verdict")
+        .id(crate::TurnId::parse("standard-compaction-recovery-verdict")
+            .expect("nonblank host identity"))
         .output()
         .await?;
     assert!(recovered.result.is_success(), "{:?}", recovered.result);
@@ -578,7 +588,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -589,7 +599,10 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
         .await?;
     let overflow = session
         .send(TurnInput::text("summarize the report"))
-        .id("standard-compaction-exhausted-overflow")
+        .id(
+            crate::TurnId::parse("standard-compaction-exhausted-overflow")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     assert!(
@@ -616,7 +629,8 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     }
     session
         .send(TurnInput::text("after the cap"))
-        .id("standard-compaction-exhausted-after")
+        .id(crate::TurnId::parse("standard-compaction-exhausted-after")
+            .expect("nonblank host identity"))
         .output()
         .await?;
 
@@ -686,7 +700,7 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -697,7 +711,10 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
         .await?;
     let overflow = session
         .send(TurnInput::text("summarize the report"))
-        .id("standard-compaction-residency-overflow")
+        .id(
+            crate::TurnId::parse("standard-compaction-residency-overflow")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     assert!(
@@ -718,7 +735,10 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
 
     let recovered = session
         .send(TurnInput::text("now give me the verdict"))
-        .id("standard-compaction-residency-verdict")
+        .id(
+            crate::TurnId::parse("standard-compaction-residency-verdict")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     assert!(recovered.result.is_success(), "{:?}", recovered.result);
@@ -881,7 +901,7 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -896,7 +916,7 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
     ] {
         session
             .send(TurnInput::text(text))
-            .id(turn_id)
+            .id(crate::TurnId::parse(turn_id).expect("nonblank host identity"))
             .output()
             .await?;
     }
@@ -952,7 +972,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .trace_jsonl_path(trace_path.clone())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -964,7 +984,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
 
     session
         .send(TurnInput::text("first request"))
-        .id("standard-compaction-first")
+        .id(crate::TurnId::parse("standard-compaction-first").expect("nonblank host identity"))
         .output()
         .await?;
     let (durable_leaf_before_threshold, max_generation_before_threshold) =
@@ -972,7 +992,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
 
     session
         .send(TurnInput::text("threshold request"))
-        .id("standard-compaction-threshold")
+        .id(crate::TurnId::parse("standard-compaction-threshold").expect("nonblank host identity"))
         .output()
         .await?;
 
@@ -1066,7 +1086,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -1077,7 +1097,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .await?;
     reopened_session
         .send(TurnInput::text("continue after compaction"))
-        .id("standard-compaction-reopened")
+        .id(crate::TurnId::parse("standard-compaction-reopened").expect("nonblank host identity"))
         .output()
         .await?;
     let conn = rusqlite::Connection::open(
@@ -1118,7 +1138,7 @@ async fn repeated_compactions_use_distinct_physical_parents() -> Result<()> {
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -1134,7 +1154,7 @@ async fn repeated_compactions_use_distinct_physical_parents() -> Result<()> {
     ] {
         session
             .send(TurnInput::text(text))
-            .id(turn_id)
+            .id(crate::TurnId::parse(turn_id).expect("nonblank host identity"))
             .output()
             .await?;
     }
@@ -1154,7 +1174,7 @@ async fn repeated_compactions_use_distinct_physical_parents() -> Result<()> {
     ] {
         session
             .send(TurnInput::text(text))
-            .id(turn_id)
+            .id(crate::TurnId::parse(turn_id).expect("nonblank host identity"))
             .output()
             .await?;
     }
@@ -1203,7 +1223,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         .trace_jsonl_path(trace_path.clone())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "attachment-prune-model",
             None,
@@ -1220,7 +1240,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
                 vec![1, 2, 3],
             ),
         ))
-        .id("attachment-prune-first")
+        .id(crate::TurnId::parse("attachment-prune-first").expect("nonblank host identity"))
         .output()
         .await?;
     // The turn's input is admitted durably before it executes (ADR 0069), so its
@@ -1240,7 +1260,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     let first_input_message_id = original_durable_message.id.clone();
     session
         .send(TurnInput::text("trigger ephemeral pruning"))
-        .id("attachment-prune-second")
+        .id(crate::TurnId::parse("attachment-prune-second").expect("nonblank host identity"))
         .output()
         .await?;
 
@@ -1355,7 +1375,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         .plugin(Arc::new(injection_plugin))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "plugin-message-id-model",
             None,
@@ -1426,7 +1446,7 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-rlm-model",
             None,
@@ -1438,7 +1458,7 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
 
     let primed = session
         .send(TurnInput::text("prime durable history"))
-        .id("standard-compaction-rlm-first")
+        .id(crate::TurnId::parse("standard-compaction-rlm-first").expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(primed.final_value(), Some(&serde_json::json!("primed")));
@@ -1447,7 +1467,8 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
 
     let continued = session
         .send(TurnInput::text("cross the threshold and continue"))
-        .id("standard-compaction-rlm-threshold")
+        .id(crate::TurnId::parse("standard-compaction-rlm-threshold")
+            .expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(
@@ -1557,7 +1578,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
         .plugin(Arc::new(plugin))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "after-turn-model",
             None,
@@ -1568,7 +1589,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
         .await?;
     session
         .send(TurnInput::text("first request"))
-        .id("enqueue-first")
+        .id(crate::TurnId::parse("enqueue-first").expect("nonblank host identity"))
         .output()
         .await?;
     assert!(
@@ -1611,7 +1632,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
 
     session
         .send(TurnInput::text("second request"))
-        .id("enqueue-second")
+        .id(crate::TurnId::parse("enqueue-second").expect("nonblank host identity"))
         .output()
         .await?;
     let next = sqlite_node_rows(store_factory.as_ref(), &SessionId::from(session_id))
@@ -1665,7 +1686,7 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
         .plugin(Arc::new(plugin))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "after-turn-model",
             None,
@@ -1676,7 +1697,7 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
         .await?;
     session
         .send(TurnInput::text("first request"))
-        .id("enqueue-once")
+        .id(crate::TurnId::parse("enqueue-once").expect("nonblank host identity"))
         .output()
         .await?;
 
@@ -1744,7 +1765,7 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -1755,12 +1776,18 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         .await?;
     session
         .send(TurnInput::text("first request"))
-        .id("standard-compaction-commit-failure-one")
+        .id(
+            crate::TurnId::parse("standard-compaction-commit-failure-one")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     session
         .send(TurnInput::text("second request"))
-        .id("standard-compaction-commit-failure-two")
+        .id(
+            crate::TurnId::parse("standard-compaction-commit-failure-two")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     let calls_before = provider_calls.load(Ordering::SeqCst);
@@ -1870,7 +1897,7 @@ async fn prompt_view_history_law(remove: bool) -> Result<()> {
             .plugin(Arc::new(factory))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("prompt-view-law")
+            .session(crate::SessionId::parse("prompt-view-law").expect("nonblank host identity"))
             .created_with(session_spec_for(&profile))
             .await
             .open()
@@ -1889,7 +1916,7 @@ async fn prompt_view_history_law(remove: bool) -> Result<()> {
         }
         session
             .send(TurnInput::text("real input"))
-            .id("prompt-view-turn")
+            .id(crate::TurnId::parse("prompt-view-turn").expect("nonblank host identity"))
             .output()
             .await?;
         double.server().settle().await;

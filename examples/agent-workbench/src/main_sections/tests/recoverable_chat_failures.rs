@@ -21,7 +21,7 @@ async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
         .send(lash::TurnInput::text("fail through the provider"))
-        .id("provider-failure-turn")
+        .id(lash::TurnId::parse("provider-failure-turn").expect("nonblank host identity"))
         .require_finish()
         .expect("require finish")
         .output_into(&ChannelTurnEvents {

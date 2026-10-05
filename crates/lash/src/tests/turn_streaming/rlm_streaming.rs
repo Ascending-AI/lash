@@ -16,7 +16,7 @@ pub(super) async fn pending_host_tool_completion_parks_turn_and_resolves_through
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("pending-host-tool")
+        .session(crate::SessionId::parse("pending-host-tool").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -158,7 +158,9 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("interleaved-standard-order")
+        .session(
+            crate::SessionId::parse("interleaved-standard-order").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -303,7 +305,10 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
         let session = core
-            .session("rlm-streamed-raw-final-cell")
+            .session(
+                crate::SessionId::parse("rlm-streamed-raw-final-cell")
+                    .expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -392,7 +397,7 @@ pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
             .into_handle();
         let core = rlm_abort_drain_core(provider).await?;
         let session = core
-            .session("rlm-abort-reset")
+            .session(crate::SessionId::parse("rlm-abort-reset").expect("nonblank host identity"))
             .created()
             .await
             .open()
@@ -475,7 +480,9 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
         let session = core
-            .session("rlm-abort-late-events")
+            .session(
+                crate::SessionId::parse("rlm-abort-late-events").expect("nonblank host identity"),
+            )
             .created_with(
                 mock_session_spec().generation(lash_core::GenerationOptions {
                     stop_sequences: vec!["caller-owned-stop".to_string()],
@@ -620,7 +627,7 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
             .into_handle();
         let core = rlm_abort_drain_core(provider).await?;
         let session = core
-            .session("rlm-abort-no-usage")
+            .session(crate::SessionId::parse("rlm-abort-no-usage").expect("nonblank host identity"))
             .created()
             .await
             .open()
@@ -675,7 +682,7 @@ pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() ->
             .into_handle();
         let core = rlm_abort_drain_core(provider).await?;
         let session = core
-            .session("rlm-zero-usage")
+            .session(crate::SessionId::parse("rlm-zero-usage").expect("nonblank host identity"))
             .created()
             .await
             .open()
@@ -720,7 +727,7 @@ finish("done");"#,
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("rlm-live-tool-events")
+        .session(crate::SessionId::parse("rlm-live-tool-events").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -896,7 +903,10 @@ finish("recovered");"#,
             .tools(Arc::new(FailingAppTools))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("rlm-recovered-tool-failure")
+            .session(
+                crate::SessionId::parse("rlm-recovered-tool-failure")
+                    .expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -945,7 +955,7 @@ finish("done");"#,
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("rlm-aggregate-tool-ids")
+        .session(crate::SessionId::parse("rlm-aggregate-tool-ids").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1044,7 +1054,10 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
         let session = core
-            .session("rlm-native-tool-contract")
+            .session(
+                crate::SessionId::parse("rlm-native-tool-contract")
+                    .expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -1129,7 +1142,7 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inne
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("rlm-pending-host-tool")
+        .session(crate::SessionId::parse("rlm-pending-host-tool").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1228,7 +1241,10 @@ finish(result);"#,
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("rlm-process-pending-host-tool")
+        .session(
+            crate::SessionId::parse("rlm-process-pending-host-tool")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1319,7 +1335,9 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
-        .session("continue-as-observation")
+        .session(
+            crate::SessionId::parse("continue-as-observation").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1380,7 +1398,12 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
         }))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
 
     let first = session
         .send(TurnInput::text("plain finish with nested append"))
@@ -1551,7 +1574,12 @@ finish({ established: established.total });"#,
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let established = session
         .send(TurnInput::text(
             "establish a durable global carried across the frame switch",
@@ -1575,7 +1603,7 @@ finish({ established: established.total });"#,
     let turn = tokio::spawn(async move {
         turn_session
             .send(TurnInput::text("switch frames with a durable seed"))
-            .id("engine-continue-as-seed")
+            .id(crate::TurnId::parse("engine-continue-as-seed").expect("nonblank host identity"))
             .output()
             .await
     });
@@ -1591,7 +1619,7 @@ finish({ established: established.total });"#,
     session
         .durable()
         .send(TurnInput::text("keep this pending across the frame switch"))
-        .id("pending-after-continue-as")
+        .id(crate::TurnId::parse("pending-after-continue-as").expect("nonblank host identity"))
         .accepted()
         .await?;
     release_first_provider_call.notify_one();

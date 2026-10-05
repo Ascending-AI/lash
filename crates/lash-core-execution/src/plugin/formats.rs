@@ -13,7 +13,7 @@ impl PluginHost {
         stored: FormatVersion,
     ) -> Result<(), FormatRefusal> {
         if let Some(factory) = self.factories().iter().find(|factory| factory.id() == id) {
-            let readable = factory.declaration().format_version;
+            let readable = factory.plugin_declaration().format_version;
             if stored > readable {
                 return Err(FormatRefusal {
                     plugin: id.into(),
@@ -46,7 +46,7 @@ impl PluginHost {
         config: &PluginConfig,
     ) -> Result<(), FormatRefusal> {
         for factory in self.factories() {
-            let native = factory.declaration().format_version;
+            let native = factory.plugin_declaration().format_version;
             for (namespace, stored) in [
                 (
                     FormatNamespace::State,
@@ -100,7 +100,7 @@ impl PluginHost {
         // as recorded, at whatever stamp: a malformed payload is refused
         // before the converter or any callback sees it.
         super::state::validate_namespace(&namespace.values)?;
-        let native = factory.declaration().format_version;
+        let native = factory.plugin_declaration().format_version;
         if namespace.format_version == native {
             return Ok(namespace);
         }
@@ -151,7 +151,7 @@ impl PluginHost {
                     plugin: factory.id().into(),
                     namespace: FormatNamespace::State,
                     stored: namespace.format_version,
-                    readable: factory.declaration().format_version,
+                    readable: factory.plugin_declaration().format_version,
                 })?;
             if to == namespace.format_version {
                 continue;
@@ -192,7 +192,7 @@ impl PluginHost {
                     plugin: factory.id().into(),
                     namespace: FormatNamespace::Config,
                     stored: namespace.format_version,
-                    readable: factory.declaration().format_version,
+                    readable: factory.plugin_declaration().format_version,
                 })?;
             if to == namespace.format_version {
                 continue;
@@ -213,27 +213,31 @@ pub(super) fn decode_config_for(
 ) -> Result<PluginConfig, FormatRefusal> {
     for factory in factories {
         if let Some(namespace) = config.namespace(factory.id())
-            && namespace.format_version > factory.declaration().format_version
+            && namespace.format_version > factory.plugin_declaration().format_version
         {
             return Err(FormatRefusal {
                 plugin: factory.id().into(),
                 namespace: FormatNamespace::Config,
                 stored: namespace.format_version,
-                readable: factory.declaration().format_version,
+                readable: factory.plugin_declaration().format_version,
             });
         }
     }
     let mut decoded = config.clone();
     for factory in factories {
         if let Some(namespace) = config.namespace(factory.id())
-            && namespace.format_version != factory.declaration().format_version
+            && namespace.format_version != factory.plugin_declaration().format_version
         {
             let value = factory.migrate_format(
                 namespace.format_version,
                 FormatNamespace::Config,
                 namespace.value.clone(),
             )?;
-            decoded.insert_versioned(factory.id(), factory.declaration().format_version, value);
+            decoded.insert_versioned(
+                factory.id(),
+                factory.plugin_declaration().format_version,
+                value,
+            );
         }
     }
     Ok(decoded)

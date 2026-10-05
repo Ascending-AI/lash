@@ -458,7 +458,12 @@ async fn a_turn_cancelled_while_parked_on_rank_n_ends_cancelled(
         Arc::clone(&requests),
     )?;
     serve_processes(&core);
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let cancel = CancellationToken::new();
     let streamed = Arc::clone(&theatre);
     let turn_cancel = cancel.clone();

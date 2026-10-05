@@ -76,7 +76,10 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("reasoning-single-publication")
+        .session(
+            crate::SessionId::parse("reasoning-single-publication")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -203,7 +206,9 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("reasoning-tool-publication")
+        .session(
+            crate::SessionId::parse("reasoning-tool-publication").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -258,7 +263,9 @@ async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Res
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("reasoning-buffered-text")
+        .session(
+            crate::SessionId::parse("reasoning-buffered-text").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -304,7 +311,10 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("identical-reasoning-publication")
+        .session(
+            crate::SessionId::parse("identical-reasoning-publication")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -508,7 +518,10 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
             )
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("rlm-provider-retry-prose")
+            .session(
+                crate::SessionId::parse("rlm-provider-retry-prose")
+                    .expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -606,7 +619,10 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
         Box::pin(session.close()).await?;
 
         let reopened = core
-            .session("rlm-provider-retry-prose")
+            .session(
+                crate::SessionId::parse("rlm-provider-retry-prose")
+                    .expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -649,7 +665,10 @@ pub(super) fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> R
             )
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("rlm-natural-prose-single-copy")
+            .session(
+                crate::SessionId::parse("rlm-natural-prose-single-copy")
+                    .expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -744,7 +763,10 @@ pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_t
 -> Result<()> {
     let core = standard_core().await;
     let session = core
-        .session("session-observation-turn-identity")
+        .session(
+            crate::SessionId::parse("session-observation-turn-identity")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -753,7 +775,7 @@ pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_t
 
     session
         .send(TurnInput::text("identify this turn"))
-        .id("observation-turn")
+        .id(crate::TurnId::parse("observation-turn").expect("nonblank host identity"))
         .output()
         .await?;
 
@@ -811,7 +833,10 @@ pub(super) async fn session_observation_recovery_stream_replays_buffered_events_
 -> Result<()> {
     let core = standard_core().await;
     let session = core
-        .session("session-observation-recovered-stream")
+        .session(
+            crate::SessionId::parse("session-observation-recovered-stream")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -869,7 +894,10 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("trimmed-gap-unseen-auxiliary-event")
+        .session(
+            crate::SessionId::parse("trimmed-gap-unseen-auxiliary-event")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1027,7 +1055,10 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
         .live_replay_store(replay_store)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("failed-commit-observation-reconciliation")
+        .session(
+            crate::SessionId::parse("failed-commit-observation-reconciliation")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1082,7 +1113,10 @@ pub(super) async fn idle_session_reconnect_after_failed_append_yields_gap_withou
         .live_replay_store(Arc::new(FailingAppendReplayStore::new()))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("idle-failed-commit-observation-reconciliation")
+        .session(
+            crate::SessionId::parse("idle-failed-commit-observation-reconciliation")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1229,7 +1263,10 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
         .live_replay_store(replay_store.clone())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("notification-observes-installed-projection")
+        .session(
+            crate::SessionId::parse("notification-observes-installed-projection")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1357,7 +1394,10 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
 pub(super) async fn payload_authority_matches_revision_transition() -> Result<()> {
     let core = standard_core().await;
     let session = core
-        .session("payload-authority-transition")
+        .session(
+            crate::SessionId::parse("payload-authority-transition")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1593,7 +1633,9 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
 pub(super) async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Result<()> {
     let core = standard_core().await;
     let session = core
-        .session("recoverable-chat-redelivery")
+        .session(
+            crate::SessionId::parse("recoverable-chat-redelivery").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1601,7 +1643,7 @@ pub(super) async fn recoverable_chat_conformance_deduplicates_redelivery_identit
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     session
         .send(TurnInput::text("redelivery identity"))
-        .id("recoverable-redelivery-turn")
+        .id(crate::TurnId::parse("recoverable-redelivery-turn").expect("nonblank host identity"))
         .output()
         .await?;
 
@@ -1643,7 +1685,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         .build(crate::testing::runtime_lease_owner())?;
     Box::pin(
         bootstrap_core
-            .session(session_id)
+            .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
             .created()
             .await
             .open()
@@ -1660,7 +1702,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1692,7 +1734,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1781,7 +1823,7 @@ pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() ->
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("recoverable-chat-gap")
+        .session(crate::SessionId::parse("recoverable-chat-gap").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -1845,7 +1887,10 @@ pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("subscriber-lag-trimmed-recovery")
+        .session(
+            crate::SessionId::parse("subscriber-lag-trimmed-recovery")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1936,7 +1981,9 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("recoverable-chat-disconnect")
+        .session(
+            crate::SessionId::parse("recoverable-chat-disconnect").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -1947,7 +1994,7 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
     let mut turn = tokio::spawn(async move {
         run_session
             .send(TurnInput::text("keep running"))
-            .id("disconnect-is-not-cancel")
+            .id(crate::TurnId::parse("disconnect-is-not-cancel").expect("nonblank host identity"))
             .output()
             .await
     });

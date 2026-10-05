@@ -165,7 +165,7 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .expect("open the session");
     let handle = session
         .send(lash::TurnInput::text("hand this off"))
-        .id(TURN)
+        .id(lash::TurnId::parse(TURN).expect("nonblank host identity"))
         .await
         .expect("accept the turn input");
     // The acceptance scheduled the shift under the input's own request; the

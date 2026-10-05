@@ -189,7 +189,10 @@ pub async fn a_waiter_follows_its_input_past_a_lost_ask(seed: u64) -> Result<Vec
         world
             .host_op(async move {
                 let session = crate::open_created_session(super::MODEL, &core, session).await?;
-                session.send(lash::TurnInput::text(text)).id(run).await
+                session
+                    .send(lash::TurnInput::text(text))
+                    .id(lash::TurnId::parse(run)?)
+                    .await
             })
             .await
             .ok_or_else(|| "the host died inside the send".to_owned())?

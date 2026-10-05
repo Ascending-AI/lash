@@ -7,14 +7,17 @@ use lash_upgrade_harness::node::h3::double_fixture;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn s17_operation_drop_and_follow_sqlite_memory() -> Result<()> {
     let (core, double) = double_fixture(0x493417).await?;
-    core.session("s17-operation")
+    core.session(lash::SessionId::parse("s17-operation").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "upgrade-harness-model",
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(8),
         )))
         .await?;
-    let session = core.session("s17-operation").open().await?;
+    let session = core
+        .session(lash::SessionId::parse("s17-operation").expect("nonblank host identity"))
+        .open()
+        .await?;
     let operation = session
         .plugin_operations()
         .start_task_raw(
@@ -41,7 +44,7 @@ async fn s17_operation_drop_and_follow_sqlite_memory() -> Result<()> {
     let invocation = lash_upgrade_harness::node::h3::operation_invocation(
         &double,
         &lash::SessionId::fixture("s17-operation"),
-        &run,
+        &run.clone().into(),
     )
     .await?;
     let journal = double
@@ -216,7 +219,7 @@ async fn s21_cancel_reaches_a_suspended_deferred_operation_sqlite_memory() -> Re
             "s21-cancel-deferred",
         )
         .await?;
-    let run = handle.run().clone();
+    let run: lash::TurnId = handle.run().clone().into();
     drop(handle);
     tokio::time::timeout(std::time::Duration::from_secs(10), double.server().settle()).await?;
     let invocation =
@@ -234,7 +237,7 @@ async fn s21_cancel_reaches_a_suspended_deferred_operation_sqlite_memory() -> Re
             .is_none(),
         "suspended operation already has a terminal"
     );
-    let receipt = session.run(run.clone()).cancel().await?;
+    let receipt = session.run((run.clone()).into()).cancel().await?;
     ensure!(
         matches!(
             receipt,
@@ -247,7 +250,7 @@ async fn s21_cancel_reaches_a_suspended_deferred_operation_sqlite_memory() -> Re
     );
     let outcome = match tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        session.durable().run(run.clone()).outcome(),
+        session.durable().run((run.clone()).into()).outcome(),
     )
     .await
     {
@@ -323,10 +326,10 @@ async fn s18_cancel_suspended_application_timer_sqlite_memory() -> Result<()> {
     let session = core.session(session_id.clone()).open().await?;
     let handle = session
         .send(lash::TurnInput::text("await the application timer"))
-        .id("s18-timer-input")
+        .id(lash::TurnId::parse("s18-timer-input").expect("nonblank host identity"))
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(10), double.server().settle()).await?;
-    let run = handle
+    let run: lash::TurnId = handle
         .run()
         .await?
         .ok_or_else(|| anyhow::anyhow!("timer input not admitted"))?;
@@ -334,7 +337,7 @@ async fn s18_cancel_suspended_application_timer_sqlite_memory() -> Result<()> {
     let invocation =
         lash_upgrade_harness::node::h3::operation_invocation(&double, &session_id, &run).await?;
     if invocation.status != "suspended" {
-        let outcome = session.run(run.clone()).outcome().await?;
+        let outcome = session.run((run.clone()).into()).outcome().await?;
         anyhow::bail!(
             "application timer did not wait: {invocation:?}; terminal={:?}",
             outcome.status()
@@ -373,8 +376,8 @@ async fn s18_cancel_suspended_application_timer_sqlite_memory() -> Result<()> {
             .is_none(),
         "suspended operation already has a terminal"
     );
-    let follow = session.run(run.clone()).outcome();
-    let receipt = session.run(run.clone()).cancel().await?;
+    let follow = session.run((run.clone()).into()).outcome();
+    let receipt = session.run((run.clone()).into()).cancel().await?;
     ensure!(
         matches!(receipt, lash::CancelReceipt::Requested { .. }),
         "public cancellation did not address the admitted operation: {receipt:?}"
@@ -400,7 +403,7 @@ async fn s18_cancel_suspended_application_timer_sqlite_memory() -> Result<()> {
     );
     let late = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        session.durable().run(run.clone()).outcome(),
+        session.durable().run((run.clone()).into()).outcome(),
     )
     .await??;
     ensure!(

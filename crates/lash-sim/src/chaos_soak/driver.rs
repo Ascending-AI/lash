@@ -289,10 +289,6 @@ impl lash_core::plugin::PluginFactory for LashlangProcesses {
         "chaos-soak-lashlang-processes"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn bound_backend(&self) -> Option<&str> {
         lash_core::plugin::PluginFactory::bound_backend(&self.rlm)
     }
@@ -309,6 +305,12 @@ impl lash_core::plugin::PluginFactory for LashlangProcesses {
         _ctx: &lash_core::plugin::PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
         Ok(Arc::new(NoSessionSurface))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for LashlangProcesses {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("chaos-soak-lashlang-processes")
     }
 }
 

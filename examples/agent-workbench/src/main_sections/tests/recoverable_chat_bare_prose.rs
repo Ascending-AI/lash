@@ -56,7 +56,7 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     // `finish`, and the one every queued turn reaches.
     let output = session
         .send(lash::TurnInput::text("answer in prose"))
-        .id("bare-prose-turn")
+        .id(lash::TurnId::parse("bare-prose-turn").expect("nonblank host identity"))
         .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
@@ -156,7 +156,7 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
     // No `require_finish`: the termination every queued turn reaches.
     let output = session
         .send(lash::TurnInput::text("answer in prose, thinking first"))
-        .id("reasoned-prose-turn")
+        .id(lash::TurnId::parse("reasoned-prose-turn").expect("nonblank host identity"))
         .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
@@ -271,7 +271,7 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
         .send(lash::TurnInput::text("take a step, then answer"))
-        .id("mid-turn-prose-turn")
+        .id(lash::TurnId::parse("mid-turn-prose-turn").expect("nonblank host identity"))
         .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })

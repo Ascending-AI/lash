@@ -35,7 +35,12 @@ fn plugin_source<'a>(error: &'a (dyn Error + 'static)) -> Option<&'a PluginError
 async fn a_native_tool_membership_refusal_preserves_its_cause() -> Result<()> {
     let backend = double_backend_explicit_reconcile().await;
     let core = core(backend);
-    let session = core.session("typed-tools").created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse("typed-tools").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     materialize_session(&session).await?;
     let tools = session.admin().tools();
     let before = tools.state().await?;
@@ -68,9 +73,6 @@ impl PluginFactory for StateHook {
         "typed-state"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(PluginFactory::id(self))
-    }
     fn initialize_state(
         &self,
         _: &lash_core::RuntimeOwner,
@@ -84,6 +86,12 @@ impl PluginFactory for StateHook {
         _: &PluginSessionContext,
     ) -> std::result::Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for StateHook {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("typed-state")
     }
 }
 impl SessionPlugin for StateHook {
@@ -234,7 +242,7 @@ async fn cleanup_law() -> Result<()> {
                 let id = format!("typed-cleanup-{recorded}-{step}-{transient}");
                 let id = &lash_core::SessionId::fixture(id);
                 if recorded {
-                    core.session(id)
+                    core.session((id).clone())
                         .create(crate::SessionCreation::root(mock_session_spec()))
                         .await?;
                 }

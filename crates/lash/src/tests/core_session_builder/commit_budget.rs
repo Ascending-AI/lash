@@ -21,18 +21,24 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    core.session("commit-graph-only-budget-surface")
-        .created()
-        .await
-        .open()
-        .await?
-        .send(TurnInput::text("graph rows only"))
-        .id("commit-graph-only-budget-turn")
-        .output()
-        .await?;
+    core.session(
+        crate::SessionId::parse("commit-graph-only-budget-surface")
+            .expect("nonblank host identity"),
+    )
+    .created()
+    .await
+    .open()
+    .await?
+    .send(TurnInput::text("graph rows only"))
+    .id(crate::TurnId::parse("commit-graph-only-budget-turn").expect("nonblank host identity"))
+    .output()
+    .await?;
 
     let session = core
-        .session("commit-adoption-row-budget-surface")
+        .session(
+            crate::SessionId::parse("commit-adoption-row-budget-surface")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -49,7 +55,8 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
                     vec![4, 5, 6],
                 )),
         )
-        .id("commit-adoption-row-budget-turn")
+        .id(crate::TurnId::parse("commit-adoption-row-budget-turn")
+            .expect("nonblank host identity"))
         .output()
         .await
         .expect_err("the adoption row must push the commit past its row limit");

@@ -35,10 +35,6 @@ impl lash_core::facade_support::PluginFactory for ReconciliationProbeFactory {
         "session-model-reconciliation-probe"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -49,6 +45,13 @@ impl lash_core::facade_support::PluginFactory for ReconciliationProbeFactory {
         Ok(Arc::new(ReconciliationProbePlugin {
             transform: Arc::clone(&self.transform),
         }))
+    }
+}
+
+#[cfg(feature = "rlm")]
+impl lash_core::plugin::PluginDefinition for ReconciliationProbeFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("session-model-reconciliation-probe")
     }
 }
 
@@ -202,10 +205,6 @@ impl lash_core::facade_support::PluginFactory for CompileSurfaceToolFactory {
         self.id
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         ctx: &lash_core::facade_support::PluginSessionContext,
@@ -224,6 +223,13 @@ impl lash_core::facade_support::PluginFactory for CompileSurfaceToolFactory {
             plugin_id: self.id,
             tool_name,
         }))
+    }
+}
+
+#[cfg(feature = "rlm")]
+impl lash_core::plugin::PluginMetadata for CompileSurfaceToolFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id)
     }
 }
 
@@ -321,14 +327,14 @@ async fn the_standard_prompt_comes_from_the_session_spec_and_its_command() -> Re
         .map_err(EmbedError::ProtocolTurnOptions)?;
 
     let defaulted = core
-        .session("prompt-core-default")
+        .session(crate::SessionId::parse("prompt-core-default").expect("nonblank host identity"))
         .created_with(host_default)
         .await
         .open()
         .await?;
     defaulted.send(TurnInput::text("first")).output().await?;
 
-    core.session("prompt-own")
+    core.session(crate::SessionId::parse("prompt-own").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec()
                 .plugin(
@@ -346,7 +352,10 @@ async fn the_standard_prompt_comes_from_the_session_spec_and_its_command() -> Re
             parent: None,
         })
         .await?;
-    let own = core.session("prompt-own").open().await?;
+    let own = core
+        .session(crate::SessionId::parse("prompt-own").expect("nonblank host identity"))
+        .open()
+        .await?;
     own.send(TurnInput::text("second")).output().await?;
     own.admin()
         .config()
@@ -411,14 +420,17 @@ async fn a_session_key_selects_its_transport_and_an_unserved_key_is_refused_type
         .llm_profiles(Arc::new(registry))
         .build(crate::testing::runtime_lease_owner())
         .expect("standard core");
-    core.session("main")
+    core.session(crate::SessionId::parse("main").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(crate::SessionSpec::new(
             "session-model",
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
         )))
         .await?;
-    let session = core.session("main").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("main").expect("nonblank host identity"))
+        .open()
+        .await?;
 
     let session_result = session.send(TurnInput::text("hello")).output().await?;
     assert_eq!(assistant_prose(&session_result.activities), "session");
@@ -479,7 +491,12 @@ async fn the_spec_reasoning_is_recorded_and_reaches_the_request() -> Result<()> 
     .reasoning(lash_core::ReasoningSelection::Effort(
         "core-variant".to_string(),
     ));
-    let session = core.session("main").created_with(spec).await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse("main").expect("nonblank host identity"))
+        .created_with(spec)
+        .await
+        .open()
+        .await?;
     assert_eq!(
         session.policy_snapshot().model.map(|model| model.reasoning),
         Some(lash_core::ReasoningSelection::Effort(
@@ -535,7 +552,7 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() -> Result<()>
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("rlm-abilities-prompt")
+        .session(crate::SessionId::parse("rlm-abilities-prompt").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -681,14 +698,14 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
         .build(crate::testing::runtime_lease_owner())?;
 
     let markdown = core
-        .session("rlm-root-markdown")
+        .session(crate::SessionId::parse("rlm-root-markdown").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
     markdown.send(TurnInput::text("hello")).output().await?;
 
-    core.session("rlm-root-raw")
+    core.session(crate::SessionId::parse("rlm-root-raw").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec().plugin_options(
                 lash_core::PluginOptions::typed(
@@ -703,7 +720,10 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
             parent: None,
         })
         .await?;
-    let raw = core.session("rlm-root-raw").open().await?;
+    let raw = core
+        .session(crate::SessionId::parse("rlm-root-raw").expect("nonblank host identity"))
+        .open()
+        .await?;
     raw.send(TurnInput::text("hello"))
         .require_finish()?
         .output()
@@ -730,29 +750,38 @@ async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() 
         )
         .build(crate::testing::runtime_lease_owner())?;
 
-    core.session("rlm-format-survives-reopen")
-        .create(crate::SessionCreation {
-            spec: mock_session_spec().plugin_options(
-                lash_core::PluginOptions::typed(
-                    lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                    lash_rlm_types::RlmCreateExtras {
-                        final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-                        ..lash_rlm_types::RlmCreateExtras::default()
-                    },
-                )
-                .map_err(EmbedError::ProtocolTurnOptions)?,
-            ),
-            parent: None,
-        })
+    core.session(
+        crate::SessionId::parse("rlm-format-survives-reopen").expect("nonblank host identity"),
+    )
+    .create(crate::SessionCreation {
+        spec: mock_session_spec().plugin_options(
+            lash_core::PluginOptions::typed(
+                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash_rlm_types::RlmCreateExtras {
+                    final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+                    ..lash_rlm_types::RlmCreateExtras::default()
+                },
+            )
+            .map_err(EmbedError::ProtocolTurnOptions)?,
+        ),
+        parent: None,
+    })
+    .await?;
+    let raw = core
+        .session(
+            crate::SessionId::parse("rlm-format-survives-reopen").expect("nonblank host identity"),
+        )
+        .open()
         .await?;
-    let raw = core.session("rlm-format-survives-reopen").open().await?;
     raw.send(TurnInput::text("hello"))
         .require_finish()?
         .output()
         .await?;
     Box::pin(raw.close()).await?;
     let reopened = core
-        .session("rlm-format-survives-reopen")
+        .session(
+            crate::SessionId::parse("rlm-format-survives-reopen").expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -778,7 +807,12 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let _parent = core.session("rlm-root").created().await.open().await?;
+    let _parent = core
+        .session(crate::SessionId::parse("rlm-root").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let mut plugin_options = lash_core::PluginOptions {
         plugins: BTreeMap::new(),
     };
@@ -793,7 +827,7 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
     );
 
     let err = match core
-        .session("rlm-child-bad-extras")
+        .session(crate::SessionId::parse("rlm-child-bad-extras").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             parent: Some("rlm-root".into()),
             spec: mock_session_spec().plugin_options(plugin_options),
@@ -856,7 +890,12 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     materialize_session(&session).await?;
     let mut state = session.admin().state().persist_current().await?;
     state.set_execution_state_snapshot(Some(old_version_snapshot.into()));
@@ -876,7 +915,13 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
         .await?;
     drop(session);
 
-    let error = match core.session(session_id).created().await.open().await {
+    let error = match core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await
+    {
         Ok(_) => panic!("cold open must reject the persisted v5 execution snapshot"),
         Err(error) => error,
     };
@@ -900,7 +945,12 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("parked").created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse("parked").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     session.send(TurnInput::text("hello")).output().await?;
     let before = session
         .read_view()
@@ -955,7 +1005,7 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
-        .session("deleted-while-parked")
+        .session(crate::SessionId::parse("deleted-while-parked").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -965,11 +1015,13 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
 
     delete_bound_session(&core, "deleted-while-parked").await?;
     assert!(
-        core.session("deleted-while-parked")
-            .durable()
-            .await?
-            .was_deleted()
-            .await?,
+        core.session(
+            crate::SessionId::parse("deleted-while-parked").expect("nonblank host identity")
+        )
+        .durable()
+        .await?
+        .was_deleted()
+        .await?,
         "the delete must leave a durable tombstone for the parked id"
     );
 
@@ -998,7 +1050,12 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("busy").created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse("busy").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     // A live clone shares the underlying runtime handle, exactly as an in-flight
     // turn would: parking must refuse rather than silently flush a session that
     // something else is still executing.
@@ -1011,7 +1068,15 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
 
     // Once the other handle is gone, the sole remaining handle parks cleanly.
     drop(live_clone);
-    let parked = Box::pin(core.session("busy").created().await.open().await?.park()).await?;
+    let parked = Box::pin(
+        core.session(crate::SessionId::parse("busy").expect("nonblank host identity"))
+            .created()
+            .await
+            .open()
+            .await?
+            .park(),
+    )
+    .await?;
     assert_eq!(parked.session_id(), "busy");
     Ok(())
 }
@@ -1028,7 +1093,12 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
         ("retired-append-messages", false),
         ("retired-append-plugin-body", true),
     ] {
-        let session = core.session(session_id).created().await.open().await?;
+        let session = core
+            .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+            .created()
+            .await
+            .open()
+            .await?;
         factory
             .delete_session(&SessionId::from(session_id))
             .await
@@ -1143,7 +1213,7 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() -> Result<()> {
         .plugin(probe_factory)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&historical_model))
         .await
         .open()
@@ -1203,7 +1273,7 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() -> Result<()> {
         .await?;
     drop(session);
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&top_level_model))
         .await
         .open()
@@ -1364,7 +1434,7 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
-        .session(session_id)
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
         .created_with(session_spec_for(&builder_model))
         .await
         .open_with_state(persisted)

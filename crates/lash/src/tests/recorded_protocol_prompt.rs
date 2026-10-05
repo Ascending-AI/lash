@@ -275,11 +275,11 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
             creating_core_metadata(),
         )?;
         creator
-            .session(DEFAULTED)
+            .session(crate::SessionId::parse(DEFAULTED).expect("nonblank host identity"))
             .create(crate::SessionCreation::root(spec_stating(DEFAULTS_A)?))
             .await?;
         creator
-            .session(STATED)
+            .session(crate::SessionId::parse(STATED).expect("nonblank host identity"))
             .create(crate::SessionCreation {
                 spec: spec_stating(OWN)?,
                 parent: None,
@@ -287,7 +287,7 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
             .await?;
         for (id, intro) in recorded {
             creator
-                .session(id)
+                .session(crate::SessionId::parse(id).expect("nonblank host identity"))
                 .durable()
                 .await?
                 .send(TurnInput::text("before the restart"))
@@ -309,7 +309,7 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
         tokio::time::timeout(
             ANSWERS_WITHIN,
             redeployed
-                .session(id)
+                .session(crate::SessionId::parse(id).expect("nonblank host identity"))
                 .durable()
                 .await?
                 .send(TurnInput::text("after the restart, on the engine's reopen"))
@@ -327,7 +327,7 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
             tokio::time::timeout(
                 ANSWERS_WITHIN,
                 redeployed
-                    .session(id)
+                    .session(crate::SessionId::parse(id).expect("nonblank host identity"))
                     .durable()
                     .await?
                     .send(TurnInput::text("dies under its call and is redriven"))
@@ -345,7 +345,12 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
                 .settle_session_shift(&lash_core::SessionId::from(id))
                 .await;
         }
-        let opened = retry_when_claim_frees(|| redeployed.session(id).open()).await?;
+        let opened = retry_when_claim_frees(|| {
+            redeployed
+                .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+                .open()
+        })
+        .await?;
         opened
             .send(TurnInput::text("after the restart, on a host open"))
             .output()
@@ -361,11 +366,11 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
     // The redeployed host's default spec is what a session it creates
     // records.
     redeployed
-        .session(CREATED_LATER)
+        .session(crate::SessionId::parse(CREATED_LATER).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(spec_stating(DEFAULTS_B)?))
         .await?;
     redeployed
-        .session(CREATED_LATER)
+        .session(crate::SessionId::parse(CREATED_LATER).expect("nonblank host identity"))
         .durable()
         .await?
         .send(TurnInput::text("created after the restart"))
@@ -454,10 +459,13 @@ async fn a_prompt_command_reaches_the_next_run_and_not_the_running_one(
         scripted_provider(&served, &script),
         creating_core_metadata(),
     )?;
-    core.session(ID)
+    core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(spec_stating(DEFAULTS_A)?))
         .await?;
-    let session = core.session(ID).open().await?;
+    let session = core
+        .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+        .open()
+        .await?;
 
     script.holds.store(true, Ordering::SeqCst);
     script.calls_a_tool.store(true, Ordering::SeqCst);
@@ -538,7 +546,7 @@ async fn a_child_created_before_its_parents_prompt_changed_keeps_its_own(
         scripted_provider(&served, &script),
         creating_core_metadata(),
     )?;
-    core.session(PARENT)
+    core.session(crate::SessionId::parse(PARENT).expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: spec_stating(OWN)?,
             parent: None,
@@ -588,7 +596,10 @@ async fn a_child_created_before_its_parents_prompt_changed_keeps_its_own(
     .await
     .expect("create the child session");
 
-    let parent = core.session(PARENT).open().await?;
+    let parent = core
+        .session(crate::SessionId::parse(PARENT).expect("nonblank host identity"))
+        .open()
+        .await?;
     parent
         .admin()
         .config()
@@ -602,17 +613,23 @@ async fn a_child_created_before_its_parents_prompt_changed_keeps_its_own(
         .send(TurnInput::text("after the change"))
         .output()
         .await?;
-    let child = core.session(CHILD).open().await?;
+    let child = core
+        .session(crate::SessionId::parse(CHILD).expect("nonblank host identity"))
+        .open()
+        .await?;
     child
         .send(TurnInput::text("after the parent's change"))
         .output()
         .await?;
     Box::pin(child.close()).await?;
-    retry_when_claim_frees(|| core.session(CHILD).durable())
-        .await?
-        .send(TurnInput::text("on the engine's reopen"))
-        .output()
-        .await?;
+    retry_when_claim_frees(|| {
+        core.session(crate::SessionId::parse(CHILD).expect("nonblank host identity"))
+            .durable()
+    })
+    .await?
+    .send(TurnInput::text("on the engine's reopen"))
+    .output()
+    .await?;
 
     let parents = requests_of(&served, PARENT);
     assert_eq!(parents.len(), 1);
@@ -700,10 +717,13 @@ async fn a_run_options_prompt_is_refused(stores: Stores, seed: u64) -> Result<()
         scripted_provider(&served, &script),
         creating_core_metadata(),
     )?;
-    core.session(ID)
+    core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(spec_stating(DEFAULTS_A)?))
         .await?;
-    let session = core.session(ID).open().await?;
+    let session = core
+        .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+        .open()
+        .await?;
     let recorded = session.read_view().protocol_turn_options().payload.clone();
     let recorded_behaviour = recorded
         .get("behaviour")
@@ -778,10 +798,13 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
             mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
-    core.session(ID)
+    core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
-    let session = core.session(ID).open().await?;
+    let session = core
+        .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+        .open()
+        .await?;
     let refused = session
         .send(TurnInput::text("a prompt for this run"))
         .protocol_turn_options(lash_core::ProtocolTurnOptions::from_payload(

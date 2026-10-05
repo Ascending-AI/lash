@@ -26,10 +26,6 @@ impl PluginFactory for LlmToolsPluginFactory {
         "llm_tools"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         ctx: &PluginSessionContext,
@@ -37,10 +33,16 @@ impl PluginFactory for LlmToolsPluginFactory {
         let provider: Arc<dyn ToolProvider> = Arc::new(llm_query_provider());
 
         PluginSpecFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("llm_tools"),
+            <Self as lash_core::plugin::PluginDefinition>::declaration(),
             Arc::new(move |_ctx| Ok(PluginSpec::new().with_tool_provider(Arc::clone(&provider)))),
         )
         .build(ctx)
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for LlmToolsPluginFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("llm_tools")
     }
 }
 

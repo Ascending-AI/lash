@@ -5,9 +5,6 @@ use lash_sansio::SessionId;
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
-    /// A core may install only one identity-producing telemetry adapter.
-    #[error("telemetry was installed more than once; configure one adapter per core")]
-    DuplicateTelemetry,
     #[error(
         "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(backend)/LashCore::rlm_builder(backend, ...)"
     )]
@@ -52,7 +49,7 @@ pub enum EmbedError {
     #[error("a model key is required; a root session's spec must name a registered model")]
     /// Returned when a creation's spec states no model: an overlay
     /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)) passed where a
-    /// run is created. Nothing is created.
+    /// root session is created. Nothing is created.
     MissingLlmProfile,
     #[error(transparent)]
     /// Returned when a creation's model key has no binding in the host's
@@ -67,7 +64,7 @@ pub enum EmbedError {
     )]
     /// Returned when a creation's spec states no turn budget: an overlay
     /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)) passed where a
-    /// run is created. Nothing is created.
+    /// root session is created. Nothing is created.
     MissingTurnBudget,
     #[error(
         "max_tool_calls is required; SessionSpec must carry a MaxToolCalls: the total tool calls one cell may make, and the number a process may hold at once"
@@ -355,7 +352,6 @@ impl EmbedError {
             // deployment that serves the recorded key repairs it.
             Self::Session(SessionError::LlmProfileUnavailable { .. }) => true,
             Self::MissingProtocolPlugin
-            | Self::DuplicateTelemetry
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
@@ -415,7 +411,6 @@ impl EmbedError {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::MissingProtocolPlugin
-            | Self::DuplicateTelemetry
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
             | Self::BuildGenerationRebound(_)

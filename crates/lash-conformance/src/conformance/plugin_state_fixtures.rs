@@ -22,9 +22,6 @@ impl PluginFactory for MockPlugin {
         "mock-state"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(PluginFactory::id(self))
-    }
     fn initialize_state(
         &self,
         _: &crate::RuntimeOwner,
@@ -38,6 +35,12 @@ impl PluginFactory for MockPlugin {
     }
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+impl crate::plugin::PluginDefinition for MockPlugin {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("mock-state")
     }
 }
 impl SessionPlugin for MockPlugin {

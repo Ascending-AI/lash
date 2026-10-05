@@ -80,7 +80,12 @@ async fn ingress_core_over(
             ),
         )
         .await?;
-    let _session = core.session(SESSION).created().await.open().await?;
+    let _session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     Ok((core, registry, process))
 }
 
@@ -156,7 +161,12 @@ async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
             ),
         )
         .await?;
-    let _session = core.session(SESSION).created().await.open().await?;
+    let _session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     Ok(core)
 }
 
@@ -247,7 +257,12 @@ async fn ingress_core_with_trigger_store(
             ),
         )
         .await?;
-    let _session = core.session(SESSION).created().await.open().await?;
+    let _session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     Ok((core, store, subscription, registry))
 }
 
@@ -278,7 +293,10 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
     )
     .await?;
     let (core, _, _) = ingress_core(backend).await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let register =
         lash_core::ToolIntent::RegisterTrigger(Box::new(lash_core::RegisterTriggerIntent {
             owner: crate::RuntimeOwner::Session(SessionId::from(SESSION)),
@@ -414,7 +432,10 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     let backend = sqlite_memory_store_backend().await;
     let (core, store, subscription, _) =
         ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let key = ingress
         .key("host-trigger-call", 0)
         .expect("a host submission handle");
@@ -537,8 +558,16 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
             ),
         )
         .await?;
-    let _session = core.session(SESSION).created().await.open().await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let _session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
 
     let draft = || {
         lash_core::TriggerSubscriptionDraft::for_process(
@@ -636,7 +665,10 @@ async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_e
     let backend = sqlite_memory_store_backend().await;
     let (core, store, _subscription, _) =
         ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let first_key = ingress
         .key("host-trigger-call-a", 0)
         .expect("a host submission handle");
@@ -722,7 +754,10 @@ async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Resul
     let backend = sqlite_memory_store_backend().await;
     let (core, store, _, _) =
         ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let mut predecessor = serde_json::to_value(
         ingress
             .key("predecessor-trigger-call", 0)
@@ -1114,7 +1149,10 @@ fn cancel_intent_for_target(session_id: &SessionId, target: &ProcessId) -> lash_
 #[tokio::test]
 async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> Result<()> {
     let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let key = ingress
         .key("host-call", 0)
         .expect("a host submission handle");
@@ -1191,7 +1229,10 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
 #[tokio::test]
 async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking() -> Result<()> {
     let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let key = ingress
         .key("kind-swap-start-emit", 0)
         .expect("a host submission handle");
@@ -1238,7 +1279,10 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
 #[tokio::test]
 async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -> Result<()> {
     let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let key = ingress
         .key("kind-swap-emit-cancel", 0)
         .expect("a host submission handle");
@@ -1303,7 +1347,10 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
         Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>,
     )
     .await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let key = ingress
         .key("seeded-outside-protocol", 0)
         .expect("a host submission handle");
@@ -1348,7 +1395,10 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
 #[tokio::test]
 async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
     let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let foreign_session = crate::tools::ToolIntentIngressKey::derive(
         &lash_core::SessionId::from("foreign-session"),
         SCOPE,
@@ -1399,7 +1449,10 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
 #[tokio::test]
 async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
     let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let mut malformed = serde_json::to_value(crate::tools::ToolIntentIngressKey::derive(
         &lash_core::SessionId::from(SESSION),
         SCOPE,
@@ -1588,7 +1641,10 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
         Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>,
     )
     .await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let key = ingress
         .key("crash-redrive-call", 0)
         .expect("a host submission handle");
@@ -1688,7 +1744,10 @@ async fn a_digest_only_start_redrives_without_republishing_its_environment() -> 
         Some(Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>),
     )
     .await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let key = ingress
         .key("start-env-crash-redrive", 0)
         .expect("a host submission handle");
@@ -1758,7 +1817,10 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
         Some(Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>),
     )
     .await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
     let key = ingress
         .key("start-env-store-error", 0)
         .expect("a host submission handle");
@@ -1939,10 +2001,6 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
         "ingress-admission-engine-factory"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn process_engine_contributions(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
@@ -1960,6 +2018,12 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
     ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
     {
         Ok(Arc::new(IngressAdmissionEnginePlugin))
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for IngressAdmissionEngineFactory {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial("ingress-admission-engine-factory")
     }
 }
 
@@ -1986,7 +2050,12 @@ async fn ingress_engine_core(
             ),
         )
         .await?;
-    let _session = core.session(SESSION).created().await.open().await?;
+    let _session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     Ok((core, registry))
 }
 
@@ -2036,7 +2105,10 @@ fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
 #[tokio::test]
 async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> {
     let (core, registry) = ingress_engine_core(sqlite_memory_store_backend().await).await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let ingress = core.tool_intents(
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_core::ExecutionScope::turn(SESSION, SCOPE),
+    )?;
 
     let unregistered_key = ingress
         .key("ingress-unregistered-engine", 0)
@@ -2157,7 +2229,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
     let payload = serde_json::json!({"program": "environment-sensitive"});
 
     let ingress = core.tool_intents(
-        SESSION,
+        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, "host-ingress-route"),
     )?;
     let ingress_key = ingress
@@ -2185,7 +2257,12 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         .expect("host ingress registers a process")
         .identity;
 
-    let session = core.session(SESSION).created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let effect_host = session.effect_host();
     let scoped = effect_host.scoped(lash_core::AdmittedScope::turn(
         SESSION,

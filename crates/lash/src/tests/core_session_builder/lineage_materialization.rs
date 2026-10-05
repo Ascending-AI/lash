@@ -89,10 +89,6 @@ impl lash_core::facade_support::PluginFactory for LineageRoots {
         LINEAGE
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -110,6 +106,12 @@ impl lash_core::facade_support::PluginFactory for LineageRoots {
         registrar.owner(LineageOwner {
             resolved: Arc::clone(&self.resolved),
         })
+    }
+}
+
+impl lash_core::plugin::PluginDefinition for LineageRoots {
+    fn declaration() -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(LINEAGE)
     }
 }
 

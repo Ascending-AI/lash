@@ -568,7 +568,7 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
     let outcome = session
         .durable()
         .send(lash_core::TurnInput::text("commit before dispatch"))
-        .id("fig-430-retry")
+        .id(lash::TurnId::parse("fig-430-retry").expect("nonblank host identity"))
         .await
         .map(|handle| handle.receipt().clone());
     let persisted = session
@@ -599,7 +599,7 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
     let retry_receipt = session
         .durable()
         .send(lash_core::TurnInput::text("commit before dispatch"))
-        .id("fig-430-retry")
+        .id(lash::TurnId::parse("fig-430-retry").expect("nonblank host identity"))
         .await
         .map(|handle| handle.receipt().clone())
         .expect("retry the same durable source identity");

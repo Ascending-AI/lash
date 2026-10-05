@@ -300,12 +300,12 @@ impl DurableSession {
 
     /// Re-attach to the input a send accepted under host id `id`, with
     /// nothing but the id: see [`LashSession::attach_id`](crate::LashSession::attach_id).
-    pub fn attach_id(&self, id: impl Into<lash_core::TurnId>) -> crate::SendHandle {
-        crate::send::attach_id(crate::send::SendTarget::Durable(self.clone()), id.into())
+    pub fn attach_id(&self, id: lash_core::TurnId) -> crate::SendHandle {
+        crate::send::attach_id(crate::send::SendTarget::Durable(self.clone()), id)
     }
 
     /// Re-await a logical run by id.
-    pub fn run(&self, run: impl Into<lash_core::TurnId>) -> crate::RunHandle {
+    pub fn run(&self, run: crate::RunId) -> crate::RunHandle {
         crate::send::run(crate::send::SendTarget::Durable(self.clone()), run.into())
     }
 

@@ -584,7 +584,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         )
         .await
         .expect("remove the partially published observer");
-    core.session("fork-observer-branch")
+    core.session(crate::SessionId::parse("fork-observer-branch").expect("nonblank host identity"))
         .created()
         .await
         .open_with_state(lash_core::RuntimeSessionState {
@@ -630,7 +630,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         )
         .await
         .expect("deliberately remove the recovered observer");
-    core.session("fork-observer-branch")
+    core.session(crate::SessionId::parse("fork-observer-branch").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -919,7 +919,11 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             .await?,
         "the fixture must preserve the real crash gap before publication"
     );
-    core.session(session_id).created().await.open().await?;
+    core.session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     assert!(
         registry
             .is_observer(&SessionId::from(session_id), &process_id)
@@ -936,7 +940,11 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         observer_event_count, 1,
         "recovery must publish the missing observer edge exactly once"
     );
-    core.session(session_id).created().await.open().await?;
+    core.session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     assert_eq!(
         registry
             .full_event_window(&process_id, 0)
@@ -963,7 +971,11 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             lash_core::ProcessObserverBy::host("post-recovery-removal"),
         )
         .await?;
-    core.session(session_id).created().await.open().await?;
+    core.session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     assert!(
         !registry
             .is_observer(&SessionId::from(session_id), &process_id)
@@ -1047,7 +1059,11 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
             );
         }
 
-        core.session(&session_id).created().await.open().await?;
+        core.session(session_id.clone())
+            .created()
+            .await
+            .open()
+            .await?;
 
         assert!(
             registry
@@ -1118,11 +1134,13 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    core.session("generation-fork-host-default")
-        .create(crate::SessionCreation::root(
-            mock_session_spec().generation(host_generation.clone()),
-        ))
-        .await?;
+    core.session(
+        crate::SessionId::parse("generation-fork-host-default").expect("nonblank host identity"),
+    )
+    .create(crate::SessionCreation::root(
+        mock_session_spec().generation(host_generation.clone()),
+    ))
+    .await?;
 
     let source_profile = Some(recorded_llm_profile(llm_profile_spec(
         "fork-source-model",
@@ -1185,7 +1203,10 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
     )
     .await?;
 
-    let branch = core.session("generation-fork-branch").open().await?;
+    let branch = core
+        .session(crate::SessionId::parse("generation-fork-branch").expect("nonblank host identity"))
+        .open()
+        .await?;
     let branch_state = branch.admin().state().persist_current().await?;
     assert_ne!(branch_state.policy.generation, host_generation);
     assert_eq!(

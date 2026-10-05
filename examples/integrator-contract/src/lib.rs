@@ -105,15 +105,18 @@ impl PluginFactory for Integrator {
         unreachable!("external signature witness")
     }
 
-    fn declaration(&self) -> lash::plugins::PluginDeclaration {
-        lash::plugins::PluginDeclaration::initial(PluginFactory::id(self))
-    }
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         let recorded: &AdmittedPluginConfig = &ctx.plugin_config;
         unreachable!("external signature witness")
     }
     fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
         reg.owner(IntegratorConfigOwner)
+    }
+}
+
+impl lash::plugins::PluginDefinition for Integrator {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        unreachable!("external signature witness")
     }
 }
 
@@ -463,7 +466,7 @@ impl RuntimeEffectController for Integrator {
         &self,
         name: String,
         step: RunRecordStep<'_>,
-    ) -> Result<run_event::RunJournalEntry, RuntimeEffectControllerError> {
+    ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
         unreachable!("external signature witness")
     }
     async fn execute_effect(
@@ -1297,21 +1300,21 @@ impl FleetFormatStore for Integrator {
 /// A host's generic aggregate requires only its admitted journal controller.
 pub async fn generic_aggregate_witness(
     scoped: &ScopedEffectController<'_>,
-) -> Result<(), lash::runtime::SingletonRunError> {
-    let plan = lash::runtime::AggregatePlan {
+) -> Result<(), lash::plugins::SingletonRunError> {
+    let plan = lash::plugins::AggregatePlan {
         key: "integrator-timers".to_owned(),
-        leaves: vec![lash::runtime::AggregateLeaf::Timer { duration_ms: 1 }],
+        leaves: vec![lash::plugins::AggregateLeaf::Timer { duration_ms: 1 }],
         operands: vec![0],
     };
-    let mut run = lash::runtime::RunCoordinator::open(
+    let mut run = lash::plugins::RunCoordinator::open(
         scoped,
         EffectOpener::session_operation("integrator", "timers"),
-        lash::runtime::SegmentOrdinal(0),
+        lash::plugins::SegmentOrdinal(0),
         Vec::new(),
     );
     run.admit_aggregate(&plan, &lash::runtime::SystemClock)
         .await?;
-    run.consume_aggregate(&plan.key, lash::runtime::AggregateConsumer::Race)
+    run.consume_aggregate(&plan.key, lash::plugins::AggregateConsumer::Race)
         .await?;
     run.close().await
 }

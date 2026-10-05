@@ -70,7 +70,7 @@ impl LashCoreBuilder {
                 .with_projector(adapter)
                 .with_metrics(metrics);
         }
-        for sink in self.trace_sinks.drain(..) {
+        if let Some(sink) = self.trace_sink.take() {
             core.tracing = core.tracing.with_trace_sink(sink);
         }
         if let Some(level) = self.trace_level.take() {
@@ -154,40 +154,27 @@ mod tests {
         }
     }
 
+    /// FIG-5020: repeated sink and telemetry setters replace their own value.
     #[tokio::test]
-    async fn telemetry_installation_preserves_passive_sinks_and_refuses_a_second_adapter() {
+    async fn trace_configuration_setters_replace_previous_values() {
         let backend = crate::tests::double_backend().await;
-        let measurements = Arc::new(AtomicUsize::new(0));
-        let duplicate = LashCore::builder(backend.clone())
-            .telemetry(telemetry(measurements.clone()))
-            .telemetry(telemetry(measurements.clone()))
-            .build(crate::testing::runtime_lease_owner());
-        let error = match duplicate {
-            Err(error) => error,
-            Ok(_) => panic!("a second telemetry adapter was accepted"),
-        };
-        assert!(matches!(error, EmbedError::DuplicateTelemetry));
-        assert!(error.is_terminal());
-        assert!(!error.is_retryable());
+        let old_metrics = Arc::new(AtomicUsize::new(0));
+        let metrics = Arc::new(AtomicUsize::new(0));
         let first = Arc::new(Sink(AtomicUsize::new(0)));
         let second = Arc::new(Sink(AtomicUsize::new(0)));
-        let retained = Arc::new(Sink(AtomicUsize::new(0)));
         let mut builder = crate::tests::explicit_ephemeral_facets(LashCore::builder(backend))
-            .trace_runtime(
-                lash_core::trace::TraceRuntime::default().with_trace_sink(retained.clone()),
-            )
+            .telemetry(telemetry(old_metrics.clone()))
             .trace_sink(first.clone())
-            .telemetry(telemetry(measurements.clone()))
+            .telemetry(telemetry(metrics.clone()))
             .trace_sink(second.clone());
-        let config = builder
-            .resolve_runtime_host_config()
-            .expect("telemetry config");
+        let config = builder.resolve_runtime_host_config().expect("trace config");
         config
             .tracing
             .metrics()
             .tool_intent
             .record_executed("start_process");
-        assert_eq!(measurements.load(Ordering::Relaxed), 1);
+        assert_eq!(old_metrics.load(Ordering::Relaxed), 0);
+        assert_eq!(metrics.load(Ordering::Relaxed), 1);
         let scope = lash_trace::DurableTraceScope {
             scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
                 session_id: "s".into(),
@@ -197,27 +184,8 @@ mod tests {
             anchor: lash_trace::TraceAnchor::Untraced,
             started_at_ms: 1,
         };
-        for runtime in [&config.tracing, &lash_core::trace::TraceRuntime::default()] {
-            runtime.emitter().emit(
-                None,
-                &scope,
-                None,
-                || panic!("denied emission built an identity"),
-                2,
-                || panic!("denied emission built a record"),
-            );
-        }
-        lash_core::trace::TraceRuntime::default().emitter().emit(
-            Some(&lash_trace::EmissionPermit::new_transition()),
-            &scope,
-            None,
-            || panic!("unobserved emission built an identity"),
-            2,
-            || panic!("unobserved emission built a record"),
-        );
-        let permit = lash_trace::EmissionPermit::new_transition();
         config.tracing.emitter().emit(
-            Some(&permit),
+            Some(&lash_trace::EmissionPermit::new_transition()),
             &scope,
             None,
             || lash_trace::TraceRecordIdentity::Transition {
@@ -235,8 +203,7 @@ mod tests {
                 )
             },
         );
-        assert_eq!(retained.0.load(Ordering::Relaxed), 1);
-        assert_eq!(first.0.load(Ordering::Relaxed), 1);
+        assert_eq!(first.0.load(Ordering::Relaxed), 0);
         assert_eq!(second.0.load(Ordering::Relaxed), 1);
     }
 }

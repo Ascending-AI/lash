@@ -447,7 +447,7 @@ impl Harness {
     async fn open(&self, session_id: &SessionId) -> Result<lash::LashSession> {
         match self
             .core
-            .session(session_id)
+            .session(session_id.clone())
             .create(lash::SessionCreation::root(lash::SessionSpec::new(
                 PROFILE_KEY,
                 lash::TurnBudget::Unbounded,
@@ -461,7 +461,7 @@ impl Harness {
             }
         }
         self.core
-            .session(session_id)
+            .session(session_id.clone())
             .open()
             .await
             .with_context(|| format!("open session `{session_id}`"))
@@ -608,10 +608,6 @@ impl lash::plugins::PluginFactory for OverflowPluginFactory {
         "context-overflow-recovery"
     }
 
-    fn declaration(&self) -> lash::plugins::PluginDeclaration {
-        lash::plugins::PluginDeclaration::initial(self.id())
-    }
-
     fn build(
         &self,
         _ctx: &PluginSessionContext,
@@ -620,6 +616,12 @@ impl lash::plugins::PluginFactory for OverflowPluginFactory {
             tool_bytes: Arc::clone(&self.tool_bytes),
             protocol: self.protocol,
         }))
+    }
+}
+
+impl lash::plugins::PluginDefinition for OverflowPluginFactory {
+    fn declaration() -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial("context-overflow-recovery")
     }
 }
 

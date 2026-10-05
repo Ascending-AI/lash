@@ -1054,7 +1054,10 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
 /// operation binds to the shipped `processes.start` tool id and carries that
 /// tool's own contract rather than a fixture-local shape.
 fn process_control_resources() -> lashlang::LashlangHostCatalog {
-    let contract = lash_plugin_process_controls::process_start_tool_definition().contract();
+    let contract = lash_plugin_process_controls::process_tool_definition(
+        lash_plugin_process_controls::ProcessControlTool::Start,
+    )
+    .contract();
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources
         .add_module_operation_contract(

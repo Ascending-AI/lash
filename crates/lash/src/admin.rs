@@ -130,15 +130,22 @@ impl CoreTriggerAdmin {
     pub async fn changed_since(
         &self,
         cursor: lash_core::TriggerSubscriptionChangeCursor,
-        limit: usize,
-    ) -> Result<(
-        Vec<lash_core::TriggerSubscriptionChange>,
-        lash_core::TriggerSubscriptionChangeCursor,
-    )> {
-        self.store()?
-            .subscriptions_changed_since(cursor, limit)
-            .await
-            .map_err(Into::into)
+        limit: std::num::NonZeroUsize,
+    ) -> Result<
+        crate::ChangePage<
+            lash_core::TriggerSubscriptionChange,
+            lash_core::TriggerSubscriptionChangeCursor,
+        >,
+    > {
+        let (changes, next) = self
+            .store()?
+            .subscriptions_changed_since(cursor, limit.get())
+            .await?;
+        Ok(crate::ChangePage {
+            changes,
+            next,
+            retained_after: None,
+        })
     }
 
     /// Atomically read all live subscriptions and their continuation cursor.
@@ -156,7 +163,16 @@ impl CoreTriggerAdmin {
 
     /// Retain tombstones until this host-chosen cutoff. Consumers behind the
     /// removed evidence receive a typed refusal and must resync.
-    pub async fn compact_subscription_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize> {
+    pub async fn compact_subscription_tombstones(
+        &self,
+        cutoff: std::time::SystemTime,
+    ) -> Result<usize> {
+        let cutoff_epoch_ms = cutoff
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| EmbedError::Session(SessionError::Protocol(error.to_string())))?
+            .as_millis();
+        let cutoff_epoch_ms = u64::try_from(cutoff_epoch_ms)
+            .map_err(|error| EmbedError::Session(SessionError::Protocol(error.to_string())))?;
         self.store()?
             .compact_subscription_tombstones(cutoff_epoch_ms)
             .await
@@ -552,9 +568,8 @@ impl SessionAdmin {
     /// whichever runtime works the session, and the submitter reads the
     /// outcome that shift committed.
     ///
-    /// A storeless session has no shift and no command lane: it compacts
-    /// directly under the writer, which already serializes the compaction
-    /// with every turn it runs.
+    /// Every facade session is catalog-backed and submits through this lane
+    /// under its immutable session binding (ADR 0088).
     async fn compact_context(&self, instructions: Option<String>) -> Result<bool> {
         let submitted = self
             .with_writer(async |runtime: &mut LashRuntime| {
@@ -1197,6 +1212,32 @@ impl SessionStateAdmin {
     }
 }
 
+/// A task's decoded operation failure or a facade refusal. The complete
+/// failure envelope retains classification, provenance and unknown data.
+#[derive(Debug, thiserror::Error)]
+pub enum PluginTaskResultError<Error> {
+    /// The operation's declared error, decoded using its registered codec.
+    #[error("plugin operation failed: {failure}")]
+    Failed {
+        error: Error,
+        failure: Box<lash_core::plugin::PluginOperationFailure>,
+    },
+    /// Storage, cancellation, protocol, or an unrecognized operation failure.
+    #[error(transparent)]
+    Host(Box<EmbedError>),
+}
+
+impl<Error> From<PluginTaskResultError<Error>> for EmbedError {
+    fn from(error: PluginTaskResultError<Error>) -> Self {
+        match error {
+            PluginTaskResultError::Failed { failure, .. } => Self::Control(
+                lash_core::facade_support::PluginOperationInvokeError::Failed(failure),
+            ),
+            PluginTaskResultError::Host(error) => *error,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct PluginOperations {
     pub(crate) control: SessionAdmin,
@@ -1210,9 +1251,11 @@ impl PluginOperations {
         &self,
         args: Op::Args,
         idempotency_key: impl Into<String>,
-    ) -> Result<crate::RunHandle> {
-        self.start_task_raw(Op::NAME, encode_plugin_args::<Op>(args)?, idempotency_key)
-            .await
+    ) -> Result<crate::RunHandle<Op::Output, Op::Error>> {
+        Ok(self
+            .start_task_raw(Op::NAME, encode_plugin_args::<Op>(args)?, idempotency_key)
+            .await?
+            .typed::<Op>())
     }
 
     /// Submit a task by its registered name. Equal key and content reattach

@@ -242,13 +242,18 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = journaled_session(ctx, core, DEFAULT_SESSION_ID).await?;
+        let session = journaled_session(
+            ctx,
+            core,
+            lash::SessionId::parse(DEFAULT_SESSION_ID).map_err(terminal_error)?,
+        )
+        .await?;
         let run = request.queued_run.as_deref().ok_or_else(|| {
             terminal_error("DrainQueued requires `queued_run`: the executed queued run to claim")
         })?;
         let turn = settled_output(
             session
-                .run(lash::TurnId::parse(run).map_err(terminal_error)?)
+                .run((lash::TurnId::parse(run).map_err(terminal_error)?).into())
                 .outcome_restate(ctx, RestateWait::new())
                 .await?,
         )?;
@@ -291,7 +296,12 @@ impl AppState {
         // acceptance journals its replay cursor with the receipt, so a
         // replayed invocation reconciles from exactly the position the
         // acceptance recorded rather than minting a fresh one.
-        let session = journaled_session(ctx, core, session_id).await?;
+        let session = journaled_session(
+            ctx,
+            core,
+            lash::SessionId::parse(session_id).map_err(terminal_error)?,
+        )
+        .await?;
         let input = TurnInput::text(prompt_for_request(&request));
         // The engine executes the turn under the workflow id; this handler
         // only journals the acceptance and waits in journaled probes, so a
@@ -496,7 +506,12 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = journaled_session(ctx, core, FRAME_CRASH_SESSION_ID).await?;
+        let session = journaled_session(
+            ctx,
+            core,
+            lash::SessionId::parse(FRAME_CRASH_SESSION_ID).map_err(terminal_error)?,
+        )
+        .await?;
         let recovered = settled_output(
             session
                 .send(TurnInput::text(format!(
@@ -1115,7 +1130,12 @@ async fn open_e2e_session(
     ctx: &WorkflowContext<'_>,
     core: &lash::LashCore,
 ) -> HandlerResult<lash::DurableSession> {
-    journaled_session(ctx, core, DEFAULT_SESSION_ID).await
+    journaled_session(
+        ctx,
+        core,
+        lash::SessionId::parse(DEFAULT_SESSION_ID).map_err(terminal_error)?,
+    )
+    .await
 }
 
 async fn wait_for_cancel_gate(pool: &sqlx::PgPool, workflow_id: &str) -> Result<()> {
@@ -1268,7 +1288,7 @@ impl E2eTurnWorkflow for E2eTurnWorkflowImpl {
 }
 
 fn main() -> Result<()> {
-    lash::runtime::set_loud(true);
+    lash::testing::set_loud(true);
     let stack_bytes = e2e_tokio_thread_stack_bytes()?;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()

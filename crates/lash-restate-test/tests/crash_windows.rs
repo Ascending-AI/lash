@@ -1009,7 +1009,7 @@ async fn cell_parity(
         BOUND,
         session
             .send(lash::TurnInput::text("two isolated cells"))
-            .id("cell-parity-run")
+            .id(lash::TurnId::parse("cell-parity-run").expect("nonblank host identity"))
             .output(),
     )
     .await
@@ -1060,7 +1060,7 @@ async fn cell_parity(
     );
     Box::pin(session.close()).await.expect("close cell session");
     let reopened = core
-        .session("cell-parity-session")
+        .session(lash::SessionId::parse("cell-parity-session").expect("nonblank host identity"))
         .open()
         .await
         .expect("reopen cell state");
@@ -1068,7 +1068,7 @@ async fn cell_parity(
         BOUND,
         reopened
             .send(lash::TurnInput::text("read persisted globals"))
-            .id("cell-parity-read")
+            .id(lash::TurnId::parse("cell-parity-read").expect("nonblank host identity"))
             .output(),
     )
     .await

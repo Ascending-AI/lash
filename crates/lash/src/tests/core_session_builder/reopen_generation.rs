@@ -14,7 +14,7 @@ async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    core.session("generation-merge")
+    core.session(crate::SessionId::parse("generation-merge").expect("nonblank host identity"))
         .create(crate::SessionCreation {
             spec: mock_session_spec().generation(lash_core::GenerationOptions {
                 seed: Some(73),
@@ -23,7 +23,10 @@ async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<
             parent: None,
         })
         .await?;
-    let session = core.session("generation-merge").open().await?;
+    let session = core
+        .session(crate::SessionId::parse("generation-merge").expect("nonblank host identity"))
+        .open()
+        .await?;
     let store =
         lash_core::store::SessionStore::new(factory.clone(), SessionId::from("generation-merge"))?;
     let recorded_generation = || async {
@@ -47,7 +50,10 @@ async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<
     drop(session);
 
     let before = store.load_session_head_meta().await?.expect("head");
-    let reopened = core.session("generation-merge").open().await?;
+    let reopened = core
+        .session(crate::SessionId::parse("generation-merge").expect("nonblank host identity"))
+        .open()
+        .await?;
     assert_eq!(reopened.policy_snapshot().generation.seed, Some(73));
     assert_eq!(
         reopened.policy_snapshot().generation.output_token_cap,

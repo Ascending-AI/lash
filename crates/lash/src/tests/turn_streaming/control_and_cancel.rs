@@ -9,7 +9,7 @@ pub(super) async fn turn_stream_finish_returns_committed_assistant_prose() -> Re
         .serve_test_llm_profile(semantic_group_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("turn-stream-last-group")
+        .session(crate::SessionId::parse("turn-stream-last-group").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -36,7 +36,12 @@ pub(super) async fn retry_status_streams_as_semantic_turn_event() -> Result<()> 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
         .serve_test_llm_profile(retry_once_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("retry-status").created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse("retry-status").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let events = RecordingEvents::default();
 
     let result = session
@@ -81,14 +86,19 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
             mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("queued-input").created().await.open().await?;
+    let session = core
+        .session(crate::SessionId::parse("queued-input").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
     let events = Arc::new(RecordingEvents::default());
     let turn_session = session.clone();
     let turn_events = Arc::clone(&events);
     let turn = tokio::spawn(async move {
         turn_session
             .send(TurnInput::text("hello"))
-            .id("queued-input-turn")
+            .id(crate::TurnId::parse("queued-input-turn").expect("nonblank host identity"))
             .output_into(turn_events.as_ref())
             .await
     });
@@ -218,7 +228,7 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
         }))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("queued-work-live-lease")
+        .session(crate::SessionId::parse("queued-work-live-lease").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -231,14 +241,16 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
     entered.await;
     let baseline_builds = builds.load(Ordering::SeqCst);
 
-    core.session("queued-work-live-lease")
-        .durable()
-        .await?
-        .send(TurnInput::text("queued while foreground owns the lease"))
-        .ingress(lash_core::TurnInputIngress::NextTurn)
-        .id("queued-during-live-turn")
-        .accepted()
-        .await?;
+    core.session(
+        crate::SessionId::parse("queued-work-live-lease").expect("nonblank host identity"),
+    )
+    .durable()
+    .await?
+    .send(TurnInput::text("queued while foreground owns the lease"))
+    .ingress(lash_core::TurnInputIngress::NextTurn)
+    .id(crate::TurnId::parse("queued-during-live-turn").expect("nonblank host identity"))
+    .accepted()
+    .await?;
     wait_for_stable_build_count(&builds).await;
 
     let hydrations = builds
@@ -283,7 +295,7 @@ pub(super) async fn cancelling_both_sends_stops_the_running_run_and_withdraws_th
         .build(crate::testing::runtime_lease_owner())
         .expect("core");
     let session = core
-        .session("cancel-lock-queue")
+        .session(crate::SessionId::parse("cancel-lock-queue").expect("nonblank host identity"))
         .created()
         .await
         .open()
@@ -336,10 +348,15 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session((session_id).clone())
+        .created()
+        .await
+        .open()
+        .await?;
     let handle = session
         .send(TurnInput::text("hang until session cancellation"))
-        .id(turn_id)
+        .id((turn_id).clone())
         .await?;
     let mut events = handle.events();
     started_rx.await.expect("turn reached the provider");
@@ -480,7 +497,10 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("active-steer-interrupt-cancel")
+        .session(
+            crate::SessionId::parse("active-steer-interrupt-cancel")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -488,7 +508,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
     let active_turn_id = "active-steer-interrupt-turn";
     let primary = session
         .send(TurnInput::text("primary hangs"))
-        .id(active_turn_id)
+        .id(crate::TurnId::parse(active_turn_id).expect("nonblank host identity"))
         .await?;
     let turn = tokio::spawn(async move { primary.outcome().await });
 
@@ -498,7 +518,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         .expect("provider started signal");
     let active = session
         .send(TurnInput::text("deferred active steer"))
-        .id("active-steer")
+        .id(crate::TurnId::parse("active-steer").expect("nonblank host identity"))
         .ingress(lash_core::TurnInputIngress::active_turn(
             active_turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,
@@ -506,7 +526,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         .await?;
     let queued = session
         .send(TurnInput::text("cancelled next turn"))
-        .id("cancelled-next")
+        .id(crate::TurnId::parse("cancelled-next").expect("nonblank host identity"))
         .await?;
     let cancelled = queued.cancel().await?;
     let crate::CancelReceipt::Withdrawn(cancelled) = cancelled else {
@@ -625,7 +645,10 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("accepted-active-steer-interrupt")
+        .session(
+            crate::SessionId::parse("accepted-active-steer-interrupt")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -633,7 +656,7 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
     let active_turn_id = "accepted-active-steer-turn";
     let primary = session
         .send(TurnInput::text("primary waits for active steer"))
-        .id(active_turn_id)
+        .id(crate::TurnId::parse(active_turn_id).expect("nonblank host identity"))
         .await?;
     let turn = tokio::spawn(async move { primary.outcome().await });
 
@@ -643,7 +666,7 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         .expect("first provider signal");
     let active = session
         .send(TurnInput::text("accepted active steer"))
-        .id("accepted-active-steer")
+        .id(crate::TurnId::parse("accepted-active-steer").expect("nonblank host identity"))
         .ingress(lash_core::TurnInputIngress::active_turn(
             active_turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,
@@ -759,7 +782,10 @@ pub(super) async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("checkpoint-admitted-steer-cancel")
+        .session(
+            crate::SessionId::parse("checkpoint-admitted-steer-cancel")
+                .expect("nonblank host identity"),
+        )
         .created()
         .await
         .open()
@@ -767,7 +793,7 @@ pub(super) async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result
     let active_turn_id = "checkpoint-admitted-steer-turn";
     let primary = session
         .send(TurnInput::text("primary waits for active steer"))
-        .id(active_turn_id)
+        .id(crate::TurnId::parse(active_turn_id).expect("nonblank host identity"))
         .await?;
     let turn = tokio::spawn(async move { primary.outcome().await });
 
@@ -777,7 +803,7 @@ pub(super) async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result
         .expect("first provider signal");
     let active = session
         .send(TurnInput::text("cancelled active steer"))
-        .id("checkpoint-admitted-steer")
+        .id(crate::TurnId::parse("checkpoint-admitted-steer").expect("nonblank host identity"))
         .ingress(lash_core::TurnInputIngress::active_turn(
             active_turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,
@@ -864,7 +890,10 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session("rlm-active-input-next-iteration")
+            .session(
+                crate::SessionId::parse("rlm-active-input-next-iteration")
+                    .expect("nonblank host identity"),
+            )
             .created()
             .await
             .open()
@@ -874,7 +903,7 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
         let turn = tokio::spawn(async move {
             turn_session
                 .send(TurnInput::text("perform two iterations"))
-                .id(active_turn_id)
+                .id(crate::TurnId::parse(active_turn_id).expect("nonblank host identity"))
                 .require_finish()?
                 .output()
                 .await
@@ -884,7 +913,7 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
         session
             .durable()
             .send(TurnInput::text("mid-turn injection marker"))
-            .id("rlm-mid-turn-injection")
+            .id(crate::TurnId::parse("rlm-mid-turn-injection").expect("nonblank host identity"))
             .ingress(lash_core::TurnInputIngress::active_turn(
                 active_turn_id,
                 lash_core::TurnInputCheckpointBoundary::AfterWork,
@@ -905,7 +934,7 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
         );
         session
             .send(TurnInput::text("later turn input"))
-            .id("rlm-later-turn")
+            .id(crate::TurnId::parse("rlm-later-turn").expect("nonblank host identity"))
             .require_finish()?
             .output()
             .await?;
@@ -946,7 +975,7 @@ pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Re
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session("fanout-tool-events")
+        .session(crate::SessionId::parse("fanout-tool-events").expect("nonblank host identity"))
         .created()
         .await
         .open()
