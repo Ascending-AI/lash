@@ -14,6 +14,9 @@ pub(super) struct PendingPresentation<'a> {
     pub select_key: Option<parallel::KeyHandle<'a>>,
     pub handle: Option<parallel::Handle<'a>>,
     pub consume: bool,
+    /// The last V of a consume frame that no consumption record follows
+    /// checks a generation cut in its own step.
+    pub check_cut: bool,
     pub prepared: RunStartPrepared,
     owed: Owed<'a>,
     fresh: std::sync::Arc<AtomicBool>,
@@ -204,6 +207,7 @@ impl<'a> RunCoordinator<'a> {
                 select_key: None,
                 owed,
                 consume,
+                check_cut: false,
                 fresh: std::sync::Arc::new(AtomicBool::new(false)),
                 prepared: RunStartPrepared::default(),
                 settle: Vec::new(),
@@ -264,6 +268,7 @@ impl<'a> RunCoordinator<'a> {
             handle,
             owed,
             consume,
+            check_cut: false,
             settle,
             fresh: std::sync::Arc::new(AtomicBool::new(false)),
             prepared: RunStartPrepared::default(),
@@ -286,6 +291,8 @@ impl<'a> RunCoordinator<'a> {
         let opener = self.journal.owner.clone();
         let settle = pending.settle.clone();
         let consume = pending.consume;
+        let controller = self.journal.scoped.controller();
+        let check_cut = pending.check_cut && consume && self.observe_generation_cuts;
         let executed = std::sync::Arc::clone(&pending.fresh);
         let record = self
             .journal
@@ -356,8 +363,25 @@ impl<'a> RunCoordinator<'a> {
                             (None, None, BTreeMap::new())
                         };
                     executed.store(true, Ordering::Relaxed);
+                    // Consumption belongs to the program's outcome: a cut
+                    // observed here records the check instead, and the
+                    // successor's consumer records its own `Consumed`.
+                    let cut = if check_cut {
+                        controller
+                            .peek_run_cut()
+                            .await
+                            .map_err(|error| error.to_string())?
+                    } else {
+                        None
+                    };
                     let mut events = settle;
-                    events.extend(presented(&call_id, presentation, consume, failure));
+                    events.extend(presented(
+                        &call_id,
+                        presentation,
+                        consume && cut.is_none(),
+                        failure,
+                    ));
+                    events.extend(cut.map(|reason| RunEvent::CutChecked { reason }));
                     Ok(RunJournalEntry {
                         state: Vec::new(),
                         materials,
@@ -371,7 +395,7 @@ impl<'a> RunCoordinator<'a> {
             )
             .await?;
         self.finish_presentation(pending, &record)?;
-        Ok(())
+        self.accept_cut_request(&record)
     }
 
     pub(super) fn finish_presentation(

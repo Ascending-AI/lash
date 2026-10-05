@@ -113,8 +113,14 @@ calls remain Live under the Run. `RunBodies` polls issued X bodies beside every
 owner wait — the program, its requests and each coordinator frame — while
 their results are awaited only inside those frames. `drain_protected` records
 presentation and incorporation without consumption; a later consumer records
-its own `Consumed` fact. Coordination retains material references, rather than
-storing another copy of the loser's output.
+its own `Consumed` fact. A consumer that observes every leaf (`allSettled`, the
+list batch) takes each value in its V, and after selection every V the consumer
+is still owed records its consumption; a consumption record follows only for a
+value presented earlier without it. When no such record follows, the frame's
+last V checks a generation cut in its own step and, on a cut, records
+`CutChecked` instead of `Consumed`, leaving the consumption to the successor.
+Coordination retains material references, rather than storing another copy of
+the loser's output.
 
 The aggregate owner supplies its clock. Timer admission records the original
 instant; recovery registers the remaining wait through the existing Restate

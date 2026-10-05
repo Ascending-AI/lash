@@ -14,7 +14,7 @@ use lash_trace::{
     TraceToolTerminal, TraceTransitionKind,
 };
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 struct BoundRun {
@@ -28,7 +28,13 @@ struct BoundRun {
 #[derive(Default)]
 pub struct RunRecordObserver {
     bound: Mutex<Option<BoundRun>>,
+    accepted: AcceptedRequests,
 }
+
+/// Request receipts this invocation accepted, by request key, until their
+/// terminal completes. A terminal whose admission another invocation
+/// observed reads the stored receipt instead.
+type AcceptedRequests = Arc<Mutex<BTreeMap<String, ToolRequestReceipt>>>;
 
 impl RunRecordObserver {
     pub(crate) fn bind(&self, controller: &ScopedEffectController<'_>) {
@@ -116,6 +122,7 @@ impl RunRecordObserver {
         let owner = TraceToolOwner::from(&opener);
         let observations = RunObservations {
             runtime: runtime.clone(),
+            accepted: Arc::clone(&self.accepted),
         };
         let issue = super::StepIssue::new(
             bound.frontier,
@@ -171,6 +178,7 @@ impl RunRecordObserver {
 
 struct RunObservations {
     runtime: super::TraceRuntime,
+    accepted: AcceptedRequests,
 }
 
 struct ReceiptTransition<'a> {
@@ -230,6 +238,10 @@ impl RunObservations {
                         Err(_) => lash_trace::TraceCandidateOutcome::Refused,
                     });
                     let receipt = receipt?;
+                    self.accepted
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(receipt.record.request_key.clone(), receipt.record.clone());
                     self.emit(
                         &receipt.record,
                         &member.call_id,
@@ -281,11 +293,16 @@ impl RunObservations {
         event: &RunEvent,
     ) -> Result<(), RuntimeEffectControllerError> {
         let key = request_key(&trace.owner, call_id)?;
-        let Some(request) = store.tool_request_receipt(&key).await? else {
-            return Err(crate::StoreError::Backend(format!(
-                "Run call {call_id} has no accepted receipt"
-            ))
-            .into());
+        let accepted = self
+            .accepted
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&key);
+        let request = match accepted {
+            Some(request) => request,
+            None => store.tool_request_receipt(&key).await?.ok_or_else(|| {
+                crate::StoreError::Backend(format!("Run call {call_id} has no accepted receipt"))
+            })?,
         };
         let receipt = store
             .record_tool_completion(&ToolCompletionReceipt {

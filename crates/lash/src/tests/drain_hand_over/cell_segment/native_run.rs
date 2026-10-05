@@ -802,7 +802,17 @@ async fn l09_generation_drain_cuts_native_aggregate_without_a_turn_wait() {
         (false, Some(false)),
         (false, Some(true)),
     ] {
-        native_cut_without_wait(last_only, false, crash).await;
+        native_cut_without_wait(last_only, false, crash, false).await;
+    }
+}
+
+/// An allSettled consumer takes each value in its V, so the last V of the
+/// consume frame checks the drain: it records the cut instead of the
+/// consumption, and the successor's consumer records its own.
+#[tokio::test]
+async fn l09_generation_drain_cuts_native_all_settled_at_its_last_presentation() {
+    for (last_only, process) in [(false, false), (true, false), (false, true)] {
+        native_cut_without_wait(last_only, process, None, true).await;
     }
 }
 
@@ -814,7 +824,7 @@ async fn l09_generation_drain_cuts_native_process_aggregate_without_a_source_wai
         (false, Some(false)),
         (false, Some(true)),
     ] {
-        native_cut_without_wait(last_only, true, crash).await;
+        native_cut_without_wait(last_only, true, crash, false).await;
     }
 }
 
@@ -822,6 +832,7 @@ async fn native_cut_without_wait(
     last_only: bool,
     process: bool,
     crash_after_cut_ack: Option<bool>,
+    settled: bool,
 ) {
     let world = double_world(Storage::SqliteMemory).await;
     let Engine::Double(double) = &world.engine else {
@@ -835,11 +846,21 @@ async fn native_cut_without_wait(
         Arc::new(tokio::sync::Notify::new()),
     ];
     let requests = Arc::default();
-    let code = typescript_block(if process {
-        r#"const worker = await processes.create({ source: 'const worker = async () => { let local = 40; const results = await Promise.all([cut.body({id:"a"}), cut.body({id:"b"})]); return {results, local:local + 2}; };', dialect: "typescript" }); const job = await processes.start({definition:worker}); finish(await job);"#
-    } else {
-        r#"let local = 40; const results = await Promise.all([cut.body({id:"a"}), cut.body({id:"b"})]); finish({results, local:local + 2});"#
-    });
+    let code = match (process, settled) {
+        (true, false) => {
+            r#"const worker = await processes.create({ source: 'const worker = async () => { let local = 40; const results = await Promise.all([cut.body({id:"a"}), cut.body({id:"b"})]); return {results, local:local + 2}; };', dialect: "typescript" }); const job = await processes.start({definition:worker}); finish(await job);"#
+        }
+        (false, false) => {
+            r#"let local = 40; const results = await Promise.all([cut.body({id:"a"}), cut.body({id:"b"})]); finish({results, local:local + 2});"#
+        }
+        (true, true) => {
+            r#"const worker = await processes.create({ source: 'const worker = async () => { let local = 40; const settled = await Promise.allSettled([cut.body({id:"a"}), cut.body({id:"b"})]); return {results:[settled[0].value, settled[1].value], local:local + 2}; };', dialect: "typescript" }); const job = await processes.start({definition:worker}); finish(await job);"#
+        }
+        (false, true) => {
+            r#"let local = 40; const settled = await Promise.allSettled([cut.body({id:"a"}), cut.body({id:"b"})]); finish({results:[settled[0].value, settled[1].value], local:local + 2});"#
+        }
+    };
+    let code = typescript_block(code);
     let tools = Arc::new(NativeCutBodies {
         entered,
         release: release.clone(),
@@ -1051,6 +1072,40 @@ async fn native_cut_without_wait(
         retained,
         "the Capturable K6 Run and VM continuation were not retained together"
     );
+    let records: Vec<Vec<String>> = views
+        .iter()
+        .flat_map(|view| double.server().journal(&view.id).unwrap_or_default())
+        .filter_map(|entry| entry.run_completion().and_then(std::result::Result::ok))
+        .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .filter_map(|value| {
+            let events = value.pointer("/record/events")?.as_array()?;
+            Some(
+                events
+                    .iter()
+                    .filter_map(|event| Some(event.get("event")?.as_str()?.to_owned()))
+                    .collect(),
+            )
+        })
+        .collect();
+    let cut = records
+        .iter()
+        .find(|events| events.iter().any(|event| event == "cut_checked"))
+        .expect("the drain was checked in a Run record");
+    if settled {
+        assert!(
+            cut.iter().any(|event| event == "presented")
+                && !cut.iter().any(|event| event == "consumed"),
+            "the last V checks the cut and leaves its consumption to the successor: {cut:?}"
+        );
+    } else {
+        assert_eq!(cut, &["cut_checked"], "the consumption step checks the cut");
+    }
+    let consumed = records
+        .iter()
+        .flatten()
+        .filter(|event| *event == "consumed")
+        .count();
+    assert_eq!(consumed, 2, "each value is consumed once across the cut");
 }
 
 // Process VM state is opaque bytes inside its journaled handover. Decode that

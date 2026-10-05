@@ -473,8 +473,50 @@ def _journal_json(row):
 
 
 
+# Every source command after a Run's last tool record and before its owner
+# completes is a per-turn or per-Run cost, never a per-call one. Each family
+# carries the reason it leaves the A+X+D+V window; an unknown one fails.
+TOOL_ROUTE_TAIL_FAMILIES = (
+    (re.compile(r'^RunCommand lash:run:lifecycle:(Closing|Settled)$'),
+     'run-terminal', 'the logical Run closes once: Closing freezes admission and drains, Settled ends it'),
+    (re.compile(r'^RunCommand lash:[^ ]*:(checkpoint|sync_execution_environment|before_llm_call|llm_call):\d+$'),
+     'step-hooks', 'the model step that reads the incorporated results; once per step, not per call'),
+    (re.compile(r'^RunCommand lash:[^ ]*:exec_code:\d+:(outputs|[^ ]*~seal)$'),
+     'cell-close', 'a code cell records its outputs and seals once per cell'),
+    (re.compile(r'^RunCommand lash:drain-mark:'),
+     'drain-mark', 'the generation drain mark read at each model step boundary'),
+    (re.compile(r'^CallCommand LashDurableWaitIndex/peek_turn_gate$'),
+     'turn-gate', 'the turn cancel gate read before each model step'),
+    (re.compile(r'^(CallCommand|OneWayCallCommand) LashDurableWaitIndex/resolve$'),
+     'wait-resolve', "turn completion resolves the turn's durable waits"),
+    (re.compile(r'^CallCommand LashDurableWaitWorkflow/resolve$'),
+     'wait-workflow-resolve', 'the wait index resolves each registered wait workflow'),
+    (re.compile(r'^OneWayCallCommand LashTurn/close$'),
+     'turn-close', 'the finished turn hands its close to the shift'),
+    (re.compile(r'^RunCommand lash:shift-close:'),
+     'shift-close', 'the shift closes the finished turn'),
+    (re.compile(r'^(RunCommand lash\.process\.(complete|parent-end|terminal\.published)'
+                r'|CallCommand LashDurableWaitIndex/release_process_journal)$'),
+     'process-terminal', 'a started process commits its terminal and releases its journal once'),
+    (re.compile(r'^(CallCommand LashDurableWaitIndex/deliver_process_terminal'
+                r'|CallCommand LashDurableWaitWorkflow/seal_source|CompleteAwakeableCommand'
+                r'|OneWayCallCommand LashDurableWaitIndex/unsubscribe_process_terminal'
+                r'|RunCommand process-terminal-(acquire|retain))$'),
+     'process-terminal-delivery', "a process terminal seals its declared start's source once"),
+)
+
+
+def _command_label(row):
+    if row['entry_type'] in {'CallCommand', 'OneWayCallCommand'}:
+        fields = _protobuf_fields(base64.b64decode(row['payload_base64']))
+        target = '/'.join(fields.get(number, [b''])[0].decode() for number in (1, 2))
+        return f"{row['entry_type']} {target}"
+    return f"{row['entry_type']} {row.get('name') or ''}".rstrip()
+
+
 def tool_route_census(receipt):
-    """Count the native admission through owner completion and all descendants."""
+    """Count the native admission through the Run's last tool record and the
+    descendants it issued; explain every later command up to owner completion."""
     invocations = {row['id']: row for row in receipt['invocations']}
     entries = defaultdict(list)
     for row in receipt['journal']:
@@ -484,11 +526,13 @@ def tool_route_census(receipt):
         if row['entry_type'] == 'CallInvocationIdCompletionNotification':
             fields = _protobuf_fields(base64.b64decode(row['payload_base64']))
             targets[(row['id'], fields.get(1, [0])[0])] = fields[16][0].decode()
+    issued = {}
     for row in receipt['journal']:
         if row['entry_type'] in {'CallCommand', 'OneWayCallCommand'}:
             fields = _protobuf_fields(base64.b64decode(row['payload_base64']))
             target = targets[(row['id'], fields.get(10, [0])[0])]
             require(target in invocations, 'missing called invocation descendant')
+            issued[target] = (row['id'], row['index'])
     native = []
     for identity, rows in entries.items():
         commands = {}
@@ -509,35 +553,70 @@ def tool_route_census(receipt):
                   if any(event['event'] == 'admitted' for event in record['events'])]
     require(admissions, 'no native Run admission in tool cost receipt')
     owner_ids = {identity for identity, _ in admissions}
-    selected_ids = set(owner_ids)
-    while True:
-        descendants = {row['id'] for row in invocations.values()
-                       if row['invoked_by_id'] in selected_ids}
-        if descendants <= selected_ids:
-            break
-        selected_ids |= descendants
     starts = {identity: min(command['index'] for owner, command in admissions if owner == identity)
               for identity in owner_ids}
-    selected = [row for row in receipt['journal'] if row['id'] in selected_ids
-                and (row['id'] not in starts or row['index'] >= starts[row['id']])]
+    # The window closes at each owner's last tool record; lifecycle records
+    # are the Run's shared terminal commit.
+    ends = {identity: max(command['index'] for owner, command, record in native
+                          if owner == identity and command['index'] >= starts[identity]
+                          and any(event['event'] != 'lifecycle' for event in record['events']))
+            for identity in owner_ids}
+
+    def placement(identity):
+        """'round', 'tail' or None (before admission), by the issuing command."""
+        while identity not in owner_ids:
+            if identity not in issued:
+                return None
+            identity, index = issued[identity]
+            if identity in owner_ids:
+                if index < starts[identity]:
+                    return None
+                return 'round' if index <= ends[identity] else 'tail'
+        return None
+
     primitives = {'RunCommand', 'CallCommand', 'OneWayCallCommand', 'SleepCommand',
                   'AwakeableCommand', 'CompleteAwakeableCommand'}
+    selected, tail, descendants = [], [], set()
+    for row in receipt['journal']:
+        if row['id'] in owner_ids:
+            if row['index'] < starts[row['id']]:
+                continue
+            place = 'round' if row['index'] <= ends[row['id']] else 'tail'
+        else:
+            place = placement(row['id'])
+            if place is None:
+                continue
+            descendants.add(row['id'])
+        (selected if place == 'round' else tail).append(row)
     source = Counter(row['entry_type'] for row in selected if row['entry_type'] in primitives)
     raw = Counter(row['entry_type'] for row in selected)
+    explained = Counter()
+    for row in tail:
+        if row['entry_type'] not in primitives:
+            continue
+        label = _command_label(row)
+        family = next((name for pattern, name, _ in TOOL_ROUTE_TAIL_FAMILIES if pattern.search(label)), None)
+        require(family is not None, f'unexplained command after the tool route: {label}')
+        explained[family] += 1
     events = Counter(event['event'] for _, _, record in native for event in record['events'])
     width = receipt['fixture']['width']
     complete = receipt['branch_observation']['boundary_complete']
     if receipt['fixture']['branch'] == 'done' and complete:
-        for event in ('attempt_recorded', 'decided', 'presented', 'incorporated'):
+        for event in ('attempt_recorded', 'decided', 'presented', 'consumed', 'incorporated'):
             require(events[event] == width, f'incomplete native {event} population')
     budget = 1 + 3 * width
-    result = dict(boundary_complete=complete, descendant_ids=sorted(selected_ids - owner_ids),
+    result = dict(boundary_complete=complete, descendant_ids=sorted(descendants),
                   native_events=dict(events), source_commands=sum(source.values()),
                   source_by_kind=dict(source), raw_engine_records=sum(raw.values()),
                   raw_by_kind=dict(raw), target_budget=budget,
                   source_target_met=sum(source.values()) <= budget,
                   raw_target_met=sum(raw.values()) <= budget,
-                  boundary='native round admission through owner completion and scope close, including descendants')
+                  tail_source_commands=sum(explained.values()),
+                  tail_by_family=dict(explained),
+                  tail_raw_engine_records=len(tail),
+                  tail_explanations={name: reason for _, name, reason in TOOL_ROUTE_TAIL_FAMILIES},
+                  boundary='native round admission through the last tool record with its descendants;'
+                           ' the explained tail runs to owner completion and scope close')
     if len(owner_ids) == 1:
         result['opener'] = next(iter(owner_ids))
     return result

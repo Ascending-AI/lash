@@ -60,8 +60,15 @@ unfinished waits are marked censored, and the raw failures are retained. They
 are not completed Done samples. The runtime decoder is unchanged.
 
 The independent summary decodes call-target notifications and retained Run
-completions, checks all descendants, and reconstructs the tool route from
-request binding through incorporation and close. It exposes Ready/read-rank
+completions, checks all descendants, and reconstructs the tool route from the
+round's admission through each owner's last tool record (its V, which consumes
+and incorporates), with the descendants that window issued. Every later source
+command up to owner completion is a per-step, per-turn or per-process cost and
+is reported as an explained tail family (`TOOL_ROUTE_TAIL_FAMILIES`: Run
+`Closing`/`Settled`, the consuming model step's hooks, drain mark and turn
+gate, turn-wait resolution, turn and shift close, a code cell's outputs and
+seal, and a started process's terminal and its source delivery). An
+unexplained command refuses the census. It exposes Ready/read-rank
 responses, physical presentation records, bytes by service, SQL transactions
 with overlapping table roles, and opener input-starvation intervals. SQL
 worker grouping follows connection execution order; table roles do not assert
@@ -116,3 +123,24 @@ The compiler/executor budgets are unchanged. Final proof includes thirteen
 executed Rust laws, one independent archive law and the failed root-only census
 witness. The raw archive contains 33 completed samples and three explicit
 codec-refusal prefixes.
+
+## Post-arc re-measure (FIG-4989)
+
+The same fixture at FIG-4989 meets the route budget for every Done sample:
+the round is `admit` (A), `attempt:1` (X), the schedule record (D) and
+`present` (V, carrying `Presented`, `Consumed` and `Incorporated`) per call.
+
+| Width | Whole Run source | Round source | Budget | Explained tail | Application SQL transactions |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 36 | 4 | 4 | 18 | 27 |
+| 2 | 39 | 7 | 7 | 18 | 28 |
+| 16 | 81 | 49 | 49 | 18 | 57 |
+
+The tail is identical at every width: Run `Closing` and `Settled` (2), the
+consuming model step (5 hooks, 2 turn-gate reads, 1 drain mark), turn-wait
+resolution (3 calls and 3 workflow resolutions) and turn and shift close (2).
+Each call writes one accepted and one terminal receipt (L14); the terminal
+reuses the receipt its admission accepted in the same invocation. A Deferred
+call adds the retention, retirement and attachment fence of its sealed result
+(L07, L13). Declared start is measured with a tool that declares its
+`start_process` intent.

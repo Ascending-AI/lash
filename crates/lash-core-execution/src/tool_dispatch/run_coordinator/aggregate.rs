@@ -222,6 +222,19 @@ impl<'a> RunCoordinator<'a> {
         host_control: bool,
     ) -> Result<RunAggregateOutcome, SingletonRunError> {
         let plan = self.aggregate_plan(key)?;
+        // A consumer that observes every leaf takes each value at its V, so a
+        // Done call costs A+X+D+V with consumption and incorporation in V.
+        let every_leaf: BTreeSet<_> = match consumer {
+            AggregateConsumer::AllSettled | AggregateConsumer::ListBatch => plan
+                .leaves
+                .iter()
+                .filter_map(|leaf| match leaf {
+                    AggregateLeaf::Call { call_id } => Some(call_id.clone()),
+                    _ => None,
+                })
+                .collect(),
+            _ => BTreeSet::new(),
+        };
         let mut presentation = None;
         let (selection, settlements) = loop {
             let (selection, settlements) =
@@ -236,7 +249,7 @@ impl<'a> RunCoordinator<'a> {
             {
                 break (selection, settlements);
             }
-            self.begin_aggregate_drain(u64::MAX, &BTreeSet::new(), &mut presentation)
+            self.begin_aggregate_drain(u64::MAX, &every_leaf, &mut presentation)
                 .await?;
             self.progress_with_presentation(&mut presentation).await?;
         };
@@ -266,13 +279,32 @@ impl<'a> RunCoordinator<'a> {
             .iter()
             .filter_map(|index| settlements[*index].as_ref()?.rank)
             .max();
+        // V records the consumption when every consumed value is still owed
+        // to this frame, and its last V checks the generation cut. A value
+        // presented earlier without consumption keeps the separate record.
+        let fused = if consumed.iter().all(|id| {
+            self.journal.ledger.consumed(id)
+                || self.owed.values().any(|owed| owed.call_id == *id)
+                || presentation
+                    .as_ref()
+                    .is_some_and(|pending: &drain::PendingPresentation<'_>| pending.call_id == *id)
+        }) {
+            consumed.clone()
+        } else {
+            BTreeSet::new()
+        };
         if let Some(through) = through {
             loop {
-                self.begin_aggregate_drain(through, &BTreeSet::new(), &mut presentation)
+                self.begin_aggregate_drain(through, &fused, &mut presentation)
                     .await?;
-                if presentation.is_none() {
+                let last = !self
+                    .owed
+                    .first_key_value()
+                    .is_some_and(|(rank, _)| *rank <= through);
+                let Some(pending) = presentation.as_mut() else {
                     break;
-                }
+                };
+                pending.check_cut = last && pending.consume;
                 self.progress_with_presentation(&mut presentation).await?;
             }
         }
@@ -282,7 +314,7 @@ impl<'a> RunCoordinator<'a> {
             self.progress_with_presentation(&mut presentation).await?;
         }
         // Presentation is protected through acceptance; consumption belongs
-        // to the VM outcome and must stay unrecorded when this frame cuts.
+        // to the VM outcome and stays unrecorded when this frame cuts.
         // A background drain may have presented a result before this consumer
         // asked for it. Taking its value is a separate recorded fact then.
         let events: Vec<_> = consumed

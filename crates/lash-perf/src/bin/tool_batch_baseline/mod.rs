@@ -133,11 +133,16 @@ impl Tool {
         if matches!(self.branch, Branch::Retry) {
             definition.manifest.retry_policy = lash_core::ToolRetryPolicy::safe(2, 1, 1);
         }
-        if matches!(
-            self.branch,
-            Branch::Deferred | Branch::DeclaredStart | Branch::RaceLoser
-        ) {
+        if matches!(self.branch, Branch::Deferred | Branch::RaceLoser) {
             definition = definition.with_declaration(lash_core::ToolDeclaration::deferring());
+        }
+        // The body's Deferred result is resolved by the process it starts,
+        // so the call's admission permits that start intent.
+        if matches!(self.branch, Branch::DeclaredStart) {
+            definition = definition.with_declaration(
+                lash_core::ToolDeclaration::deferring()
+                    .with_intents([lash_core::ToolIntentKind::StartProcess]),
+            );
         }
         definition
     }

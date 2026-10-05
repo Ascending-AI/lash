@@ -63,6 +63,98 @@ async fn l15_census_tracks_native_run_records_and_all_descendants() {
             incorporated, admitted,
             "consumption belongs to the boundary"
         );
+        for record in &records {
+            for event in &record.events {
+                if let RunEvent::Presented { call_id, .. } = event {
+                    assert!(
+                        record.events.iter().any(
+                            |other| matches!(other, RunEvent::Consumed { call_id: id } if id == call_id)
+                        ) && record.events.iter().any(
+                            |other| matches!(other, RunEvent::Incorporated { call_id: id } if id == call_id)
+                        ),
+                        "V consumes and incorporates its call in the same record"
+                    );
+                }
+            }
+        }
+        let opener = receipt
+            .journal
+            .iter()
+            .find(|entry| {
+                entry
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| name.ends_with(":admit"))
+            })
+            .expect("the round's admission")
+            .id
+            .clone();
+        let owner: Vec<_> = receipt
+            .journal
+            .iter()
+            .filter(|entry| entry.id == opener)
+            .collect();
+        let named = |suffix: &str| -> Vec<usize> {
+            owner
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .name
+                        .as_deref()
+                        .is_some_and(|name| name.ends_with(suffix))
+                })
+                .map(|entry| entry.index)
+                .collect()
+        };
+        let admission = *named(":admit").iter().min().expect("admission index");
+        let presentation = *named(":present").iter().max().expect("presentation index");
+        let round = owner
+            .iter()
+            .filter(|entry| (admission..=presentation).contains(&entry.index))
+            .filter(|entry| {
+                matches!(
+                    entry.entry_type.as_str(),
+                    "CallCommand"
+                        | "OneWayCallCommand"
+                        | "RunCommand"
+                        | "SleepCommand"
+                        | "AwakeableCommand"
+                        | "CompleteAwakeableCommand"
+                )
+            })
+            .count();
+        assert_eq!(
+            round,
+            1 + 3 * width,
+            "a Done round costs A plus X, D and V per call"
+        );
+        // L14: one accepted and one terminal business receipt per call; the
+        // terminal reuses the receipt its admission accepted.
+        let mut open = BTreeMap::<String, bool>::new();
+        let mut receipts = 0;
+        for row in receipt.sql["rows"].as_array().expect("SQL trace rows") {
+            let worker = row["connection_worker"].to_string();
+            let sql = row["sql"]
+                .as_str()
+                .expect("SQL text")
+                .trim_start()
+                .to_lowercase();
+            if sql.starts_with("begin") {
+                open.insert(worker, false);
+            } else if let Some(touches) = open.get_mut(&worker) {
+                *touches |= sql.contains("tool_call_receipts");
+                if (sql.starts_with("commit") || sql.starts_with("rollback"))
+                    && open.remove(&worker) == Some(true)
+                {
+                    receipts += 1;
+                }
+            }
+        }
+        assert_eq!(
+            receipts,
+            2 * width,
+            "each call writes its accepted and terminal receipt once"
+        );
         assert_eq!(receipt.engine.total, receipt.journal.len());
         assert_eq!(
             receipt.engine.total,
