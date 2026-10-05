@@ -103,6 +103,15 @@ Expected, within the 5-minute cache lifetime:
   step after it reads the system prompt plus the rewritten context;
 - the system-prompt hash column is the same on every row.
 
+Provider caches are per upstream, and OpenRouter spreads a model across
+upstreams, so pin one that caches with
+`AGENT_WORKBENCH_OPENROUTER_PROVIDER=<slug>` (comma-separated slugs; it sets
+the request's `provider.only`) and check the `upstream` column. For the
+default `z-ai/glm-5.3-flash`, `z-ai` caches. Its caching is automatic: it
+ignores the breakpoints, reads in 64-token blocks, and a new prefix becomes
+readable some seconds after the request that first sent it, so the step
+right after a new prefix can still read only the older one.
+
 ## Teardown
 
 ```sh
