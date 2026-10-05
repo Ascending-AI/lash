@@ -716,10 +716,17 @@ impl LashRuntime {
         // its own boundary (turn final commit, session commands), so a runtime
         // between boundaries already equals its last commit. Flushing is only
         // needed when the state has never been persisted, has accepted plugin
-        // writes, or has pending graph nodes; an unconditional commit here
-        // would bump the head revision on every park/close, disturbing
+        // writes, changed tool curation, or pending graph nodes; an unconditional
+        // commit here would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
+        // Capability admission can publish the first checkpoint before host
+        // curation (FIG-4857). Compare the captured catalog with its durable
+        // content address: stamping alone does not make an unchanged park dirty.
+        let tools_changed = self.state.tool_state_is_dirty().map_err(|source| {
+            session_commit_error("failed to compare parked tool state", source)
+        })?;
         if self.state.checkpoint_ref.is_some()
+            && !tools_changed
             && !self.state.plugin_state_is_dirty()
             && self.state.pending_graph_commit().nodes().is_empty()
         {

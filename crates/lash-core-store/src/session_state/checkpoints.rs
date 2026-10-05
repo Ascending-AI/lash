@@ -29,6 +29,20 @@ impl RuntimeSessionState {
         self.checkpoint_components.set_tool_state_snapshot(snapshot);
     }
 
+    /// Whether the captured tool catalog differs from its durable component.
+    /// Released bodies are unchanged; a repeated stamp of the same catalog
+    /// also remains unchanged, even though it supplies a pending body.
+    pub fn tool_state_is_dirty(&self) -> Result<bool, crate::StoreError> {
+        let Some(snapshot) = self.tool_state_snapshot() else {
+            return Ok(false);
+        };
+        let bytes = crate::store::encode_checkpoint_component(
+            crate::store::TOOL_STATE_CHECKPOINT_COMPONENT,
+            snapshot,
+        )?;
+        Ok(self.tool_state_ref() != Some(&crate::store::BlobRef::for_content(&bytes)))
+    }
+
     /// Durable reference for the well-known plugin-snapshot component.
     pub fn plugin_state_ref(&self) -> Option<&crate::store::BlobRef> {
         self.checkpoint_components

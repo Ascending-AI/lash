@@ -436,7 +436,16 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
     runtime
         .stamp_live_plugin_state()
         .expect("the live plugin state is captured");
-    runtime.edit_resident_state_for_test(|state| *state.authority = Default::default());
+    // FIG-4857 (f5a42a7e43) records admission before capabilities exist.
+    // Widen the recorded authority through its config command; a resident-only
+    // test edit cannot replace the config that a cold reopen reads.
+    set_tool_access_through_shift(
+        &mut runtime,
+        &double,
+        Default::default(),
+        "persisted-broader-authority",
+    )
+    .await;
     let parked = Box::pin(runtime.park())
         .await
         .expect("persist broader authority");
