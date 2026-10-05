@@ -503,7 +503,6 @@ struct RecordedPending {
 
 struct DecisionSlot {
     record: RunRecord,
-    rank: u64,
     address: crate::EffectAddress,
     aborted: bool,
 }
@@ -517,7 +516,6 @@ async fn decision_entry(
 ) -> Result<RunJournalEntry, String> {
     let DecisionSlot {
         mut record,
-        rank,
         address,
         aborted,
     } = slot;
@@ -649,7 +647,6 @@ async fn decision_entry(
         }
         record.events.push(RunEvent::Decided {
             call_id: call.call_id.clone(),
-            rank,
             decision,
             after,
         });
@@ -1205,10 +1202,8 @@ impl<'a> RunCoordinator<'a> {
         candidate: Option<(ResultSource, SingletonCapture)>,
     ) -> Result<DecidedCall, SingletonRunError> {
         let journal = &mut self.journal;
-        // D: the one final-or-cancel decision, under the Run's next rank. The
-        // Run's cancellation is read here and nowhere else, so the decision
-        // chooses once.
-        let rank = journal.ledger.next_rank();
+        // D chooses final-or-cancel once. Acceptance derives its rank from
+        // the fold; the cancellation is read only inside this recorded step.
         let decide_record = journal.record(Vec::new());
         let checked = candidate.clone();
         let plugins = handlers.get().plugin_session();
@@ -1232,7 +1227,6 @@ impl<'a> RunCoordinator<'a> {
             checked,
             DecisionSlot {
                 record: decide_record,
-                rank,
                 address,
                 aborted: journal.ledger.aborted()
                     || journal.ledger.lifecycle() != crate::tool_run::RunLifecycle::Live,
@@ -1246,7 +1240,7 @@ impl<'a> RunCoordinator<'a> {
         if let Some(publication) = publication {
             publication.publish_run(state)?;
         }
-        let (rank, decision) = recorded_decision(&decided.events, &call.call_id)?;
+        let (rank, decision) = recorded_decision(&journal.ledger, &decided.events, &call.call_id)?;
         self.owed.insert(
             rank,
             Owed {
@@ -1267,6 +1261,7 @@ impl<'a> RunCoordinator<'a> {
 /// kind: a leading recorded attempt, the after-check contributions recorded
 /// with it, and exactly one `Decided`. Anything else is out of order.
 fn recorded_decision<'r>(
+    ledger: &RunLedger,
     events: &'r [RunEvent],
     call_id: &ToolCallId,
 ) -> Result<(u64, &'r CallDecision), SingletonRunError> {
@@ -1278,14 +1273,17 @@ fn recorded_decision<'r>(
                 if id == call_id && decided.is_none() => {}
             RunEvent::Decided {
                 call_id: id,
-                rank,
                 decision,
                 ..
-            } if id == call_id && decided.is_none() => decided = Some((*rank, decision)),
+            } if id == call_id && decided.is_none() => decided = Some(decision),
             _ => return Err(boundary(call_id)),
         }
     }
-    decided.ok_or_else(|| boundary(call_id))
+    let decision = decided.ok_or_else(|| boundary(call_id))?;
+    let rank = ledger
+        .decision_rank(call_id)
+        .ok_or_else(|| boundary(call_id))?;
+    Ok((rank, decision))
 }
 
 fn boundary(call_id: &ToolCallId) -> SingletonRunError {

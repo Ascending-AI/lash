@@ -596,7 +596,6 @@ mod tests {
                 first: lash_core::tool_run::RunEventOrdinal(0),
                 events: vec![lash_core::tool_run::RunEvent::Decided {
                     call_id: lash_core::ToolCallId::fixture("predecessor-check-cancel"),
-                    rank: 1,
                     decision: lash_core::tool_run::CallDecision::Cancelled,
                     after: Some(lash_core::tool_run::CheckRecord::reduce(vec![
                         lash_core::tool_run::AttributedVerdict {

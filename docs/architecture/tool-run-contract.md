@@ -320,9 +320,11 @@ These calls use the owning handler's admitted journal logic generation.
 
 **Protected drain (K3, FIG-4880).** `lash_core::tool_dispatch::RunCoordinator`
 runs several calls in one logical Run, each admitted as a singleton round.
-`decide` records a call's A, X and D; the decision takes the Run's next rank
-(`RunLedger::next_rank`, from 1), so ranks follow the order decisions became
-durable. `drain` then works through every decided call in rank order. A final
+`decide` records a call's A, X and D; the fold derives the decision's rank
+from accepted decision order, starting at 1 (`RunLedger::decision_rank`). D
+stores no rank. Attempts and refused records take no rank, and adoption
+rebuilds the same ranks from the acknowledged journal. `drain` then works
+through every decided call in rank order. A final
 whose result declares intents issues them (`declare`) only once every
 committed final ranked below it is seated (`RunLedger::drain_frontier_open`),
 sends intent realization to `LashToolRealization` under the Run/call idempotency
@@ -405,7 +407,7 @@ with `Ignore`. Standard rounds use this source path through the shared Run coord
 | --- | --- | --- |
 | A, admission | prepared request material, declaration, binding, policy, before-check record, operand slots, capacity | owner opener |
 | X, attempt | attempt output and captures, or the Deferred source key | attempt ordinal |
-| D, decision | final-or-cancel, rank, after-check record, declarations flag, resolved state batch | X or the cached result |
+| D, decision | final-or-cancel, after-check record, declarations flag, resolved state batch | X or the cached result |
 | V, presentation | presentation bytes distinct from the output, incorporation | D |
 | Source seal | the resolved result, owned by the source | source key |
 | Run transfer | event prefix, retained material, subscriptions, owed starts and cancels, state frontier, capacity, VM continuation flag | owner opener |

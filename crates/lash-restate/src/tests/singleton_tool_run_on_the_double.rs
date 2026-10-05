@@ -647,13 +647,11 @@ async fn cancelled_spending_calls_and_unreturned_losers_keep_recorded_provider_r
                                     events: vec![
                                         RunEvent::Decided {
                                             call_id: ids[0].clone(),
-                                            rank: 1,
                                             decision: CallDecision::Cancelled,
                                             after: None,
                                         },
                                         RunEvent::Decided {
                                             call_id: ids[1].clone(),
-                                            rank: 2,
                                             decision: CallDecision::Aborted,
                                             after: Some(CheckRecord::reduce(vec![AttributedVerdict {
                                                 callback: binding(1).executable,
@@ -897,13 +895,11 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                     vec![
                         RunEvent::Decided {
                             call_id: a.clone(),
-                            rank: 1,
                             decision: CallDecision::Cancelled,
                             after: None,
                         },
                         RunEvent::Decided {
                             call_id: b.clone(),
-                            rank: 2,
                             decision: CallDecision::Final {
                                 source: ResultSource::Attempt {
                                     attempt: AttemptOrdinal::FIRST,
@@ -914,7 +910,6 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                         },
                         RunEvent::Decided {
                             call_id: c.clone(),
-                            rank: 3,
                             decision: CallDecision::Final {
                                 source: ResultSource::DeferredCompletion {
                                     attempt: AttemptOrdinal::new(1).unwrap(),

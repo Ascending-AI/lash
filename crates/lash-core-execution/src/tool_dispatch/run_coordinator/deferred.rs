@@ -140,7 +140,6 @@ impl<'a> RunCoordinator<'a> {
         start: SingletonStart,
     ) -> Result<DecidedCall, SingletonRunError> {
         let obligation = recorded_obligation(&self.journal, &call.call_id, &start)?;
-        let rank = self.journal.ledger.next_rank();
         let record = self.journal.record(Vec::new());
         let id = call.call_id.clone();
         let key = start.start_key.clone();
@@ -154,7 +153,6 @@ impl<'a> RunCoordinator<'a> {
                     let event = if closing || binding.run_cancel_requested().await? {
                         RunEvent::Decided {
                             call_id: id,
-                            rank,
                             decision: CallDecision::Cancelled,
                             after: None,
                         }
@@ -176,6 +174,11 @@ impl<'a> RunCoordinator<'a> {
             )
             .await?;
         if matches!(admitted.events.first(), Some(RunEvent::Decided { .. })) {
+            let rank = self
+                .journal
+                .ledger
+                .decision_rank(&call.call_id)
+                .ok_or_else(|| boundary(&call.call_id))?;
             self.owed.insert(
                 rank,
                 Owed {
@@ -352,10 +355,8 @@ impl<'a> RunCoordinator<'a> {
         }
         match seal {
             SourceSeal::Cancelled => {
-                let rank = self.journal.ledger.next_rank();
                 let record = self.journal.record(vec![RunEvent::Decided {
                     call_id: id.clone(),
-                    rank,
                     decision: CallDecision::Cancelled,
                     after: None,
                 }]);
@@ -371,6 +372,11 @@ impl<'a> RunCoordinator<'a> {
                         }),
                     )
                     .await?;
+                let rank = self
+                    .journal
+                    .ledger
+                    .decision_rank(id)
+                    .ok_or_else(|| boundary(id))?;
                 self.owed.insert(
                     rank,
                     Owed {

@@ -131,10 +131,9 @@ impl Log {
     }
 }
 
-fn decided(call_id: &ToolCallId, rank: u64, decision: CallDecision) -> RunEvent {
+fn decided(call_id: &ToolCallId, decision: CallDecision) -> RunEvent {
     RunEvent::Decided {
         call_id: call_id.clone(),
-        rank,
         decision,
         after: allow_all(),
     }
@@ -180,7 +179,7 @@ fn the_singleton_route_is_four_records_and_its_codec_is_pinned() {
             round: admitted.clone(),
         }],
         vec![done(&id, 1)],
-        vec![decided(&id, 1, final_of(1, false))],
+        vec![decided(&id, final_of(1, false))],
         vec![
             RunEvent::Presented {
                 call_id: id.clone(),
@@ -238,11 +237,10 @@ fn the_singleton_route_is_four_records_and_its_codec_is_pinned() {
         })
     );
     assert_eq!(
-        serde_json::to_value(decided(&id, 1, final_of(1, false))).unwrap(),
+        serde_json::to_value(decided(&id, final_of(1, false))).unwrap(),
         json!({
             "event": "decided",
             "call_id": id.as_str(),
-            "rank": 1,
             "decision": {"decision": "final", "source": {"source": "attempt", "attempt": 1}, "declares": false},
             "after": [{"callback": {"owner": {"plugin": "policy", "behavior_revision": 1}, "key": "tool_result_check:first"}, "verdict": {"verdict": "allow"}}],
         })
@@ -665,7 +663,6 @@ fn l05_check_cancellation_cannot_be_recorded_as_run_control() {
     assert_eq!(
         log.push(RunEvent::Decided {
             call_id: call_id.clone(),
-            rank: 1,
             decision: CallDecision::Cancelled,
             after: after.clone(),
         }),
@@ -677,7 +674,6 @@ fn l05_check_cancellation_cannot_be_recorded_as_run_control() {
     assert_eq!(
         log.push(RunEvent::Decided {
             call_id: call_id.clone(),
-            rank: 1,
             decision: CallDecision::CheckCancelled,
             after: allow_all(),
         }),
@@ -688,7 +684,6 @@ fn l05_check_cancellation_cannot_be_recorded_as_run_control() {
     );
     let decided = RunEvent::Decided {
         call_id: call_id.clone(),
-        rank: 1,
         decision: CallDecision::CheckCancelled,
         after,
     };
@@ -722,54 +717,126 @@ fn l05_check_cancellation_cannot_be_recorded_as_run_control() {
 }
 
 #[test]
-fn final_or_cancel_chooses_once_and_ranks_rise() {
-    let mut log = Log::new();
-    let (a, b) = (ToolCallId::fixture("a"), ToolCallId::fixture("b"));
-    log.push(RunEvent::Admitted {
-        round: round(vec![call("a"), call("b")]),
-    })
-    .unwrap();
-    log.push(done(&a, 1)).unwrap();
+fn k3_decision_ranks_are_dense_in_fold_order() {
+    let mut ledger = RunLedger::new(opener());
+    let (a, b, c) = (
+        ToolCallId::fixture("a"),
+        ToolCallId::fixture("b"),
+        ToolCallId::fixture("c"),
+    );
+    let admission = RunRecord {
+        trace: None,
+        segment: SegmentOrdinal(0),
+        first: RunEventOrdinal(0),
+        events: vec![
+            RunEvent::Admitted {
+                round: round(vec![call("a"), call("b"), call("c")]),
+            },
+            done(&b, 1),
+        ],
+    };
+    ledger.append(SegmentOrdinal(0), &admission).unwrap();
+    assert_eq!(ledger.decision_rank(&b), None, "an attempt takes no rank");
+    let first = RunRecord {
+        events: vec![decided(&b, final_of(1, false))],
+        first: ledger.next_ordinal(),
+        ..admission.clone()
+    };
+    ledger.append(SegmentOrdinal(0), &first).unwrap();
     assert_eq!(
-        log.push(done(&a, 1)),
+        ledger.decision_rank(&b),
+        Some(1),
+        "K3: the first decision has rank 1"
+    );
+    assert_eq!(ledger.decision_rank(&a), None);
+    let refused = RunRecord {
+        events: vec![
+            RunEvent::Decided {
+                call_id: a.clone(),
+                decision: CallDecision::Cancelled,
+                after: None,
+            },
+            decided(&c, final_of(1, false)),
+        ],
+        first: ledger.next_ordinal(),
+        ..admission.clone()
+    };
+    assert_eq!(
+        ledger.append(SegmentOrdinal(0), &refused),
+        Err(RunEventRefusal::DecisionUnsupported { call_id: c.clone() })
+    );
+    assert_eq!(ledger.next_ordinal(), refused.first);
+    assert_eq!(
+        ledger.decision_rank(&a),
+        None,
+        "a refused batch reserves no rank"
+    );
+    let duplicate = RunRecord {
+        events: vec![RunEvent::Decided {
+            call_id: b.clone(),
+            decision: CallDecision::Cancelled,
+            after: None,
+        }],
+        ..refused.clone()
+    };
+    assert_eq!(
+        ledger.append(SegmentOrdinal(0), &duplicate),
+        Err(RunEventRefusal::DecidedTwice { call_id: b.clone() })
+    );
+    let repeated_attempt = RunRecord {
+        events: vec![done(&b, 1)],
+        ..refused.clone()
+    };
+    assert_eq!(
+        ledger.append(SegmentOrdinal(0), &repeated_attempt),
         Err(RunEventRefusal::AttemptNotIssued {
-            call_id: a.clone(),
+            call_id: b.clone(),
             attempt: attempt(1)
         })
     );
-    log.push(decided(&a, 2, final_of(1, false))).unwrap();
+    // A cold successor derives the same ranks solely from accepted records.
+    let mut successor = RunLedger::new(opener());
+    for record in [&admission, &first] {
+        successor.append(record.segment, record).unwrap();
+    }
+    successor.admit_successor(SegmentOrdinal(1));
+    let closing = RunRecord {
+        trace: None,
+        segment: SegmentOrdinal(1),
+        first: successor.next_ordinal(),
+        events: vec![
+            RunEvent::Lifecycle {
+                state: RunLifecycle::Closing,
+            },
+            RunEvent::Decided {
+                call_id: c.clone(),
+                decision: CallDecision::Cancelled,
+                after: None,
+            },
+            RunEvent::Decided {
+                call_id: a.clone(),
+                decision: CallDecision::Cancelled,
+                after: None,
+            },
+            done(&c, 1),
+            done(&a, 1),
+        ],
+    };
+    successor.append(SegmentOrdinal(1), &closing).unwrap();
+    assert_eq!(successor.decision_rank(&b), Some(1));
+    assert_eq!(successor.decision_rank(&c), Some(2));
     assert_eq!(
-        log.push(RunEvent::Decided {
-            call_id: a.clone(),
-            rank: 3,
-            decision: CallDecision::Cancelled,
-            after: None,
-        }),
-        Err(RunEventRefusal::DecidedTwice { call_id: a.clone() })
+        successor.decision_rank(&a),
+        Some(3),
+        "batch order wins over call-id order"
     );
-    assert_eq!(
-        log.push(RunEvent::Decided {
-            call_id: b.clone(),
-            rank: 2,
-            decision: CallDecision::Cancelled,
-            after: None,
-        }),
-        Err(RunEventRefusal::RankOrder { rank: 2, last: 2 })
-    );
-    assert_eq!(
-        log.push(decided(&b, 3, final_of(1, false))),
-        Err(RunEventRefusal::DecisionUnsupported { call_id: b.clone() }),
-        "a final needs a recorded attempt"
-    );
-    log.push(RunEvent::Decided {
-        call_id: b.clone(),
-        rank: 3,
-        decision: CallDecision::Cancelled,
-        after: None,
-    })
-    .unwrap();
-    // The cancelled call's issued attempt still settles durably.
-    log.push(done(&b, 1)).unwrap();
+    let mut replay = RunLedger::new(opener());
+    for record in [&admission, &first, &closing] {
+        replay.append(record.segment, record).unwrap();
+    }
+    for id in [&a, &b, &c] {
+        assert_eq!(replay.decision_rank(id), successor.decision_rank(id));
+    }
 }
 
 #[test]
@@ -844,7 +911,7 @@ fn reported_retries_follow_one_recorded_schedule() {
         log.push(retry(&a, 1)).is_err(),
         "a non-retryable failure is final"
     );
-    log.push(decided(&a, 1, final_of(1, false))).unwrap();
+    log.push(decided(&a, final_of(1, false))).unwrap();
 }
 
 #[test]
@@ -871,7 +938,6 @@ fn cancellation_during_backoff_starts_no_next_attempt() {
     .unwrap();
     log.push(RunEvent::Decided {
         call_id: a.clone(),
-        rank: 1,
         decision: CallDecision::Cancelled,
         after: None,
     })
@@ -898,13 +964,13 @@ fn protected_drain_is_transitive_across_intent_free_ranks() {
     for id in &ids {
         log.push(done(id, 1)).unwrap();
     }
-    log.push(decided(&ids[0], 1, final_of(1, true))).unwrap();
+    log.push(decided(&ids[0], final_of(1, true))).unwrap();
     log.push(RunEvent::DeclarationsIssued {
         call_id: ids[0].clone(),
     })
     .unwrap();
-    log.push(decided(&ids[1], 2, final_of(1, false))).unwrap();
-    log.push(decided(&ids[2], 3, final_of(1, true))).unwrap();
+    log.push(decided(&ids[1], final_of(1, false))).unwrap();
+    log.push(decided(&ids[2], final_of(1, true))).unwrap();
     // Rank 2 is intent-free and seated, but rank 1 still drains.
     assert_eq!(
         log.push(RunEvent::DeclarationsIssued {
@@ -992,7 +1058,6 @@ fn a_declared_start_drains_inside_its_declarations_under_one_key() {
     // The Run's cancellation of the undecided call.
     log.push(RunEvent::Decided {
         call_id: ids[1].clone(),
-        rank: 1,
         decision: CallDecision::Cancelled,
         after: None,
     })
@@ -1002,7 +1067,7 @@ fn a_declared_start_drains_inside_its_declarations_under_one_key() {
         Err(order(&ids[1])),
         "a cancel before admission forbids the start"
     );
-    log.push(decided(&ids[0], 2, final_of(1, true))).unwrap();
+    log.push(decided(&ids[0], final_of(1, true))).unwrap();
     assert_eq!(
         log.push(admitted(&ids[0], &key)),
         Err(order(&ids[0])),
@@ -1036,7 +1101,7 @@ fn a_declared_start_drains_inside_its_declarations_under_one_key() {
     })
     .unwrap();
 
-    log.push(decided(&ids[2], 3, final_of(1, true))).unwrap();
+    log.push(decided(&ids[2], final_of(1, true))).unwrap();
     log.push(RunEvent::DeclarationsIssued {
         call_id: ids[2].clone(),
     })
@@ -1088,7 +1153,6 @@ fn a_declared_start_drains_inside_its_declarations_under_one_key() {
     .unwrap();
     log.push(RunEvent::Decided {
         call_id: id.clone(),
-        rank: 1,
         decision: CallDecision::Cancelled,
         after: None,
     })
@@ -1131,7 +1195,6 @@ fn check_decisions_follow_their_records_and_abort_run_stops_admission() {
     assert_eq!(
         log.push(RunEvent::Decided {
             call_id: b.clone(),
-            rank: 1,
             decision: CallDecision::Final {
                 source: ResultSource::Cached,
                 declares: false
@@ -1143,7 +1206,6 @@ fn check_decisions_follow_their_records_and_abort_run_stops_admission() {
     );
     log.push(RunEvent::Decided {
         call_id: b.clone(),
-        rank: 1,
         decision: CallDecision::Final {
             source: ResultSource::Cached,
             declares: false,
@@ -1169,7 +1231,6 @@ fn check_decisions_follow_their_records_and_abort_run_stops_admission() {
     assert_eq!(
         log.push(RunEvent::Decided {
             call_id: a.clone(),
-            rank: 2,
             decision: CallDecision::Denied,
             after: abort.clone(),
         }),
@@ -1177,7 +1238,6 @@ fn check_decisions_follow_their_records_and_abort_run_stops_admission() {
     );
     log.push(RunEvent::Decided {
         call_id: a.clone(),
-        rank: 2,
         decision: CallDecision::Aborted,
         after: abort,
     })
@@ -1581,7 +1641,6 @@ fn receipts_name_the_logical_call_and_permits_come_from_records() {
         RunEventOrdinal(2),
         &RunEvent::Decided {
             call_id: a.clone(),
-            rank: 1,
             decision: CallDecision::Cancelled,
             after: None,
         },
@@ -1900,9 +1959,9 @@ fn capacity_holds_a_round_whole_until_every_member_is_presented() {
         0
     );
     assert_eq!(log.ledger.held_calls(), 3);
-    let present = |log: &mut Log, id: &ToolCallId, rank| {
+    let present = |log: &mut Log, id: &ToolCallId| {
         log.push(done(id, 1)).unwrap();
-        log.push(decided(id, rank, final_of(1, false))).unwrap();
+        log.push(decided(id, final_of(1, false))).unwrap();
         log.push(RunEvent::Presented {
             call_id: id.clone(),
             presentation: None,
@@ -1910,14 +1969,14 @@ fn capacity_holds_a_round_whole_until_every_member_is_presented() {
         })
         .unwrap();
     };
-    present(&mut log, &a.call_id, 1);
+    present(&mut log, &a.call_id);
     assert_eq!(
         log.ledger.counted(&CapacityScope::Held),
         2,
         "a presented winner releases nothing while its sibling is held"
     );
-    present(&mut log, &b.call_id, 2);
-    present(&mut log, &c.call_id, 3);
+    present(&mut log, &b.call_id);
+    present(&mut log, &c.call_id);
     assert_eq!(log.ledger.counted(&CapacityScope::Held), 0);
     assert_eq!(
         log.ledger.counted(&cell),

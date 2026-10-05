@@ -514,7 +514,7 @@ impl<'a> RunCoordinator<'a> {
                 }),
             )
             .await?;
-        self.accept_backoff_cancellations(&recorded.events);
+        self.accept_backoff_cancellations(&recorded.events)?;
         Ok(())
     }
 
@@ -667,10 +667,7 @@ impl<'a> RunCoordinator<'a> {
                         });
                     }
                     RunEvent::Decided {
-                        call_id,
-                        rank,
-                        decision,
-                        ..
+                        call_id, decision, ..
                     } => {
                         let Some(leaf) = plan.leaves.iter().position(|leaf| matches!(leaf, AggregateLeaf::Call { call_id: id } if id == call_id)) else { continue; };
                         if host_control
@@ -717,7 +714,12 @@ impl<'a> RunCoordinator<'a> {
                             } else {
                                 (true, ordinal)
                             },
-                            rank: Some(*rank),
+                            rank: Some(
+                                self.journal
+                                    .ledger
+                                    .decision_rank(call_id)
+                                    .ok_or_else(|| boundary(call_id))?,
+                            ),
                         });
                     }
                     _ => {}

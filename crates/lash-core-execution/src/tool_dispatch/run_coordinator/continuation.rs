@@ -336,12 +336,14 @@ impl<'a> RunCoordinator<'a> {
                     attempts.insert(call_id.clone(), (*attempt, result.clone()));
                 }
                 RunEvent::Decided {
-                    call_id,
-                    rank,
-                    decision,
-                    ..
+                    call_id, decision, ..
                 } => {
-                    decisions.insert(call_id.clone(), (*rank, decision.clone()));
+                    let rank = run
+                        .journal
+                        .ledger
+                        .decision_rank(call_id)
+                        .ok_or_else(|| boundary(call_id))?;
+                    decisions.insert(call_id.clone(), (rank, decision.clone()));
                 }
                 RunEvent::Presented {
                     call_id,

@@ -299,11 +299,10 @@ pub enum RunEvent {
         call_id: ToolCallId,
         material: MaterialRef,
     },
-    /// D: the call's one decision and its rank, with the after-check
+    /// D: the call's one decision, with the after-check
     /// record when a result candidate existed.
     Decided {
         call_id: ToolCallId,
-        rank: u64,
         decision: CallDecision,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         after: Option<CheckRecord<AfterCheckVerdict>>,
@@ -469,8 +468,6 @@ pub enum RunEventRefusal {
     },
     #[error("call {call_id} already has its one decision")]
     DecidedTwice { call_id: ToolCallId },
-    #[error("rank {rank} is not above the last rank {last}")]
-    RankOrder { rank: u64, last: u64 },
     #[error("call {call_id}'s decision does not follow from its record")]
     DecisionUnsupported { call_id: ToolCallId },
     #[error("call {call_id} issued declarations before every lower final rank was seated")]
@@ -548,7 +545,7 @@ pub struct RunLedger {
     latest_segment: Option<SegmentOrdinal>,
     lifecycle: RunLifecycle,
     aborted: bool,
-    last_rank: Option<u64>,
+    decisions: u64,
     calls: BTreeMap<ToolCallId, CallState>,
     aggregates: BTreeMap<String, AggregatePlan>,
     elapsed: std::collections::BTreeSet<(String, u32)>,
@@ -566,7 +563,7 @@ impl RunLedger {
             latest_segment: None,
             lifecycle: RunLifecycle::Live,
             aborted: false,
-            last_rank: None,
+            decisions: 0,
             calls: BTreeMap::new(),
             aggregates: BTreeMap::new(),
             elapsed: std::collections::BTreeSet::new(),
@@ -632,10 +629,15 @@ impl RunLedger {
         RunEventOrdinal(self.next)
     }
 
-    /// The rank the Run's next decision takes: one above the last, from 1.
+    /// The call's rank, derived from accepted decision order, starting at 1.
+    /// Attempts and refused records take no rank.
     #[must_use]
-    pub fn next_rank(&self) -> u64 {
-        self.last_rank.map_or(1, |last| last + 1)
+    pub fn decision_rank(&self, call_id: &ToolCallId) -> Option<u64> {
+        self.calls
+            .get(call_id)?
+            .decision
+            .as_ref()
+            .map(|(rank, _)| *rank)
     }
 
     /// Whether a final ranked `rank` may issue its declarations (L18): every
@@ -937,10 +939,9 @@ impl RunLedger {
             }
             RunEvent::Decided {
                 call_id,
-                rank,
                 decision,
                 after,
-            } => self.decide(call_id, *rank, decision, after.as_ref()),
+            } => self.decide(call_id, decision, after.as_ref()),
             RunEvent::DeclarationsIssued { call_id } => self.issue_declarations(call_id),
             RunEvent::DeclarationsSettled { call_id } => {
                 let call = self.call(call_id)?;
@@ -1124,15 +1125,10 @@ impl RunLedger {
     fn decide(
         &mut self,
         call_id: &ToolCallId,
-        rank: u64,
         decision: &CallDecision,
         after: Option<&CheckRecord<AfterCheckVerdict>>,
     ) -> Result<(), RunEventRefusal> {
-        if let Some(last) = self.last_rank
-            && rank <= last
-        {
-            return Err(RunEventRefusal::RankOrder { rank, last });
-        }
+        let rank = self.decisions + 1;
         let call = self.call(call_id)?;
         if call.decision.is_some() {
             return Err(RunEventRefusal::DecidedTwice {
@@ -1156,7 +1152,7 @@ impl RunLedger {
         if matches!(decision, CallDecision::Aborted) {
             self.aborted = true;
         }
-        self.last_rank = Some(rank);
+        self.decisions = rank;
         Ok(())
     }
 

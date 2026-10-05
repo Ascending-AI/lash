@@ -254,7 +254,17 @@ async fn l18_all_drains_a_committed_operand_before_the_remaining_bodies_finish()
         assert_eq!(probe.realized.lock().unwrap().len(), 2);
         let events: Vec<_> = records.iter().flat_map(|record| &record.events).collect();
         let declaration = events.iter().position(|event| matches!(event, RunEvent::DeclarationsIssued { call_id } if *call_id == ids[0])).unwrap();
-        let second = events.iter().position(|event| matches!(event, RunEvent::Decided { call_id, rank: 2, .. } if *call_id == ids[1])).unwrap();
+        let second = events
+            .iter()
+            .position(
+                |event| matches!(event, RunEvent::Decided { call_id, .. } if *call_id == ids[1]),
+            )
+            .unwrap();
+        let mut ledger = lash_core::tool_run::RunLedger::new(owner());
+        for record in records {
+            ledger.append(record.segment, record).unwrap();
+        }
+        assert_eq!(ledger.decision_rank(&ids[1]), Some(2));
         let settled = events.iter().position(|event| matches!(event, RunEvent::DeclarationsSettled { call_id } if *call_id == ids[0])).unwrap();
         let unrelated = events.iter().position(|event| matches!(event, RunEvent::Decided { call_id, .. } if *call_id == probe.program_release.as_ref().unwrap().call_id)).unwrap();
         assert!(

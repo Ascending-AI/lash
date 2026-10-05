@@ -65,11 +65,8 @@ fn brief_event(event: &RunEvent) -> String {
             call_id, attempt, ..
         } => format!("AttemptRecorded({call_id}@{})", attempt.get()),
         RunEvent::Decided {
-            call_id,
-            rank,
-            decision,
-            ..
-        } => format!("Decided({call_id} rank={rank} {decision:?})"),
+            call_id, decision, ..
+        } => format!("Decided({call_id} {decision:?})"),
         RunEvent::DeclarationsIssued { call_id } => format!("DeclarationsIssued({call_id})"),
         RunEvent::DeclarationsSettled { call_id } => format!("DeclarationsSettled({call_id})"),
         RunEvent::Presented { call_id, .. } => format!("Presented({call_id})"),

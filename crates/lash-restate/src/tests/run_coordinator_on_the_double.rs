@@ -741,6 +741,20 @@ fn drain_violations(
     deferred: &BTreeSet<ToolCallId>,
     cancelled_from: Option<usize>,
 ) -> Vec<String> {
+    let owner = records
+        .iter()
+        .flat_map(|record| &record.events)
+        .find_map(|event| match event {
+            RunEvent::Admitted { round } => Some(round.owner.clone()),
+            _ => None,
+        })
+        .expect("Run records contain admission");
+    let mut ledger = lash_core::tool_run::RunLedger::new(owner);
+    for record in records {
+        ledger
+            .append(record.segment, record)
+            .expect("Run records fold");
+    }
     let mut violations = Vec::new();
     let mut ranks: BTreeMap<ToolCallId, u64> = BTreeMap::new();
     let mut finals: BTreeMap<ToolCallId, bool> = BTreeMap::new();
@@ -751,16 +765,16 @@ fn drain_violations(
     for event in records.iter().flat_map(|record| &record.events) {
         match event {
             RunEvent::Decided {
-                call_id,
-                rank,
-                decision,
-                ..
+                call_id, decision, ..
             } => {
+                let rank = ledger
+                    .decision_rank(call_id)
+                    .expect("accepted decision has a rank");
                 if deferred.contains(call_id) {
                     violations.push(format!("Deferred {call_id} was decided"));
                 }
                 let reserved = u64::try_from(ranks.len()).unwrap() + 1;
-                if *rank != reserved {
+                if rank != reserved {
                     violations.push(format!(
                         "{call_id} took rank {rank}, but decision order reserved rank {reserved}"
                     ));
@@ -773,7 +787,7 @@ fn drain_violations(
                     ));
                 }
                 decisions += 1;
-                ranks.insert(call_id.clone(), *rank);
+                ranks.insert(call_id.clone(), rank);
                 if let CallDecision::Final { declares, .. } = decision {
                     finals.insert(call_id.clone(), *declares);
                     if !declares {

@@ -355,7 +355,6 @@ impl<'a> RunCoordinator<'a> {
         let mut decision = None;
         {
             let record = self.journal.record(Vec::new());
-            let rank = self.journal.ledger.next_rank();
             let aborted = self.journal.ledger.aborted()
                 || self.journal.ledger.lifecycle() != crate::tool_run::RunLifecycle::Live;
             let mut choices: Vec<_> = self
@@ -582,7 +581,6 @@ impl<'a> RunCoordinator<'a> {
                                 Some((ResultSource::Attempt { attempt: ordinal }, capture)),
                                 DecisionSlot {
                                     record,
-                                    rank,
                                     address,
                                     aborted,
                                 },
@@ -601,7 +599,6 @@ impl<'a> RunCoordinator<'a> {
                         let event = if aborted || handlers.run_cancel_requested().await? {
                             RunEvent::Decided {
                                 call_id,
-                                rank,
                                 decision: CallDecision::Cancelled,
                                 after: None,
                             }
@@ -908,7 +905,8 @@ impl<'a> RunCoordinator<'a> {
                     });
                 }
                 events => {
-                    let (rank, recorded_decision) = recorded_decision(events, &call.call_id)?;
+                    let (rank, recorded_decision) =
+                        recorded_decision(&self.journal.ledger, events, &call.call_id)?;
                     self.owed.insert(
                         rank,
                         Owed {
@@ -937,21 +935,21 @@ impl<'a> RunCoordinator<'a> {
         self.pending
             .iter()
             .filter(|pending| pending.timer)
-            .enumerate()
-            .map(|(index, pending)| RunEvent::Decided {
+            .map(|pending| RunEvent::Decided {
                 call_id: pending.work.call.call_id.clone(),
-                rank: self.journal.ledger.next_rank() + index as u64,
                 decision: CallDecision::Cancelled,
                 after: None,
             })
             .collect()
     }
 
-    pub(super) fn accept_backoff_cancellations(&mut self, events: &[RunEvent]) {
+    pub(super) fn accept_backoff_cancellations(
+        &mut self,
+        events: &[RunEvent],
+    ) -> Result<(), SingletonRunError> {
         for event in events {
             if let RunEvent::Decided {
                 call_id,
-                rank,
                 decision: CallDecision::Cancelled,
                 ..
             } = event
@@ -962,8 +960,13 @@ impl<'a> RunCoordinator<'a> {
             {
                 let pending = self.pending.remove(position);
                 self.journal.selection.disown(&pending.select_key);
+                let rank = self
+                    .journal
+                    .ledger
+                    .decision_rank(call_id)
+                    .ok_or_else(|| boundary(call_id))?;
                 self.owed.insert(
-                    *rank,
+                    rank,
                     Owed {
                         call_id: call_id.clone(),
                         handlers: Handlers(std::sync::Arc::clone(&pending.work.handlers)),
@@ -973,6 +976,7 @@ impl<'a> RunCoordinator<'a> {
                 );
             }
         }
+        Ok(())
     }
 
     fn issue_attempt(

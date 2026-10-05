@@ -768,16 +768,21 @@ fn assert_cancel_race(
         .iter()
         .filter(|event| event.event_type == "tool_receipt")
         .collect();
-    let ranks: Vec<_> = run_entries(evidence, work)?
+    let entries = run_entries(evidence, work)?;
+    let owner = entries
         .iter()
         .flat_map(|entry| &entry.record.events)
-        .filter_map(|event| match event {
-            RunEvent::Decided { call_id, rank, .. } if call_id == &call => Some(*rank),
+        .find_map(|event| match event {
+            RunEvent::Admitted { round } => Some(round.owner.clone()),
             _ => None,
         })
-        .collect();
+        .context("race has no Run admission")?;
+    let mut ledger = lash_core::tool_run::RunLedger::new(owner);
+    for entry in &entries {
+        ledger.append(entry.record.segment, &entry.record)?;
+    }
     ensure!(
-        ranks == vec![1],
+        ledger.decision_rank(&call) == Some(1),
         "race decision did not retain its original rank"
     );
     match decisions

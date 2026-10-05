@@ -11619,31 +11619,6 @@
         {
           "additionalProperties": false,
           "properties": {
-            "last": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "rank": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "refusal": {
-              "const": "rank_order",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal",
-            "rank",
-            "last"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
             "call_id": {
               "type": "string"
             },
