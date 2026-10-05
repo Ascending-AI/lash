@@ -59,4 +59,3 @@ tokio-util = { workspace = true }
 [[test]]
 name = "pool_laws"
 path = "tests/pool_laws.rs"
-required-features = ["testing"]
