@@ -45,8 +45,15 @@ pub(crate) struct LeftVariables {
     pub(crate) relay_left_variables: Vec<LeftVariable>,
 }
 
-/// The messages of one relay request: the context, one block per entry with
-/// a cache breakpoint on the last, then the harness message.
+/// The messages of one relay request: the context, one block per entry,
+/// then the harness message.
+///
+/// The cache breakpoints, in order, are the last context block unchanged
+/// since the previous commit (the end of the prefix an earlier request
+/// already wrote), the end of the context, and the end of the harness. The
+/// system prompt and tools before them carry the provider's own breakpoints.
+/// When the first two coincide there is one; a provider over its marker limit
+/// drops the earliest.
 pub(crate) fn build_relay_messages(input: RelayHarnessInput<'_>) -> Vec<LlmMessage> {
     let context = input
         .view
@@ -54,27 +61,35 @@ pub(crate) fn build_relay_messages(input: RelayHarnessInput<'_>) -> Vec<LlmMessa
         .as_ref()
         .map(|baton| baton.context.as_slice())
         .unwrap_or_default();
-    let mut blocks = context
+    let unchanged = input
+        .view
+        .previous
+        .as_ref()
+        .map_or(0, |previous| common_prefix(&previous.context, context));
+    let entries = context
         .iter()
-        .filter(|entry| !entry.trim().is_empty())
-        .map(|entry| text_block(entry.clone(), false))
+        .enumerate()
+        .filter(|(_, entry)| !entry.trim().is_empty())
         .collect::<Vec<_>>();
-    // The one message breakpoint the provider layer honours goes at the end
-    // of the context: the system prompt has its own, and the harness after it
-    // changes every step.
-    if let Some(LlmContentBlock::Text {
-        cache_breakpoint, ..
-    }) = blocks.last_mut()
-    {
-        *cache_breakpoint = true;
-    }
+    let last_unchanged = entries.iter().rposition(|(index, _)| *index < unchanged);
+    let last = entries.len().checked_sub(1);
+    let blocks = entries
+        .iter()
+        .enumerate()
+        .map(|(position, (_, entry))| {
+            text_block(
+                entry.as_str(),
+                Some(position) == last_unchanged || Some(position) == last,
+            )
+        })
+        .collect::<Vec<_>>();
     let mut messages = Vec::new();
     if !blocks.is_empty() {
         messages.push(LlmMessage::new(LlmRole::User, blocks));
     }
     messages.push(LlmMessage::new(
         LlmRole::User,
-        vec![text_block(harness_text(&input), false)],
+        vec![text_block(harness_text(&input), true)],
     ));
     messages
 }
@@ -250,14 +265,19 @@ fn harness_text(input: &RelayHarnessInput<'_>) -> String {
     out
 }
 
-/// The first entry at which `current` differs from `previous`, or `None` when
-/// they are equal.
-fn first_change(previous: &[String], current: &[String]) -> Option<usize> {
-    let common = previous
+/// How many leading entries `previous` and `current` share.
+fn common_prefix(previous: &[String], current: &[String]) -> usize {
+    previous
         .iter()
         .zip(current)
         .take_while(|(before, after)| before == after)
-        .count();
+        .count()
+}
+
+/// The first entry at which `current` differs from `previous`, or `None` when
+/// they are equal.
+fn first_change(previous: &[String], current: &[String]) -> Option<usize> {
+    let common = common_prefix(previous, current);
     (common != previous.len() || common != current.len()).then_some(common)
 }
 

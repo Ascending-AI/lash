@@ -59,8 +59,8 @@ fn marked_whitespace_only_block_falls_back_without_wire_marker() {
         ],
     )]);
 
-    let (_, _, breakpoint) = provider.build_messages(&req).expect("messages");
-    assert!(breakpoint.is_none(), "a dropped block has no address");
+    let (_, _, breakpoints) = provider.build_messages(&req).expect("messages");
+    assert!(breakpoints.is_empty(), "a dropped block has no address");
 
     let body = provider.build_request_body(&req).expect("body");
 
@@ -91,14 +91,14 @@ fn marked_block_in_second_same_role_message_keeps_merged_address() {
         ),
     ]);
 
-    let (_, messages, breakpoint) = provider.build_messages(&req).expect("messages");
+    let (_, messages, breakpoints) = provider.build_messages(&req).expect("messages");
     assert_eq!(messages.len(), 1, "same-role messages merge on the wire");
     assert_eq!(
-        breakpoint,
-        Some(BreakpointAddress {
+        breakpoints,
+        [BreakpointAddress {
             message_index: 0,
             block_index: 1,
-        })
+        }]
     );
 
     let body = provider.build_request_body(&req).expect("body");
@@ -131,13 +131,13 @@ fn marked_leading_feedback_keeps_its_wire_block_address() {
         LlmMessage::text(LlmRole::User, "dynamic tail"),
     ]);
 
-    let (_, _, breakpoint) = provider.build_messages(&req).expect("messages");
+    let (_, _, breakpoints) = provider.build_messages(&req).expect("messages");
     assert_eq!(
-        breakpoint,
-        Some(crate::request::BreakpointAddress {
+        breakpoints,
+        [BreakpointAddress {
             message_index: 0,
             block_index: 0
-        })
+        }]
     );
 
     let body = provider.build_request_body(&req).expect("body");

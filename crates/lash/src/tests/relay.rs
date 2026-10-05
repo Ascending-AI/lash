@@ -694,3 +694,57 @@ await control.next({ context: [...context, "reported"], final: true });"#
     );
     Ok(())
 }
+
+/// The cached prefix holds: the system prompt and the tools a relay request
+/// renders are byte-identical across the steps of a turn and across turns.
+#[tokio::test]
+async fn system_prompt_and_tools_are_byte_identical_across_steps_and_turns() -> Result<()> {
+    let served = Served::default();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (_core, session) = relay_session(
+        double_backend().await,
+        "relay-stable-prefix",
+        &served,
+        script(|request| match request.step {
+            1 => r#"await tools.bump({});
+await control.next({ context: [...context, "bumped"], vars: { n: 1 } });"#
+                .to_string(),
+            _ => r#"await control.send_user_output({ text: `entries ${context.length}` });
+await control.next({ context, final: true });"#
+                .to_string(),
+        }),
+        Arc::new(BumpTools {
+            calls: Arc::clone(&calls),
+        }),
+        None,
+    )
+    .await?;
+    session.send(TurnInput::text("first")).output().await?;
+    session.send(TurnInput::text("second")).output().await?;
+
+    let requests = served.lock_recover().clone();
+    assert_eq!(requests.len(), 4, "two steps in each of two turns");
+    let prefix = |request: &LlmRequest| {
+        let body = lash_provider_anthropic::testing::serialize_request(
+            request,
+            lash_core::provider::CacheRetention::Short,
+        )
+        .expect("anthropic body");
+        serde_json::to_vec(&(&body["system"], &body["tools"])).expect("prefix bytes")
+    };
+    assert!(
+        requests[0]
+            .instructions
+            .as_deref()
+            .is_some_and(|system| system.contains("bump")),
+        "the system prompt describes the tools"
+    );
+    let first = prefix(&requests[0]);
+    for (index, request) in requests.iter().enumerate().skip(1) {
+        assert!(
+            prefix(request) == first,
+            "request {index}'s system prompt or tools differ from the first's"
+        );
+    }
+    Ok(())
+}

@@ -17,7 +17,13 @@ pub(crate) struct BreakpointAddress {
     pub(crate) block_index: usize,
 }
 
-type BuiltMessages = (Option<String>, Vec<Value>, Option<BreakpointAddress>);
+/// Anthropic accepts at most this many `cache_control` markers per request,
+/// counting the system prompt's and the last tool's.
+pub(crate) const MAX_CACHE_CONTROL_MARKERS: usize = 4;
+
+/// The system prompt, the wire messages, and every marked block's address in
+/// request order.
+type BuiltMessages = (Option<String>, Vec<Value>, Vec<BreakpointAddress>);
 
 impl AnthropicProvider {
     fn role_name(role: &LlmRole) -> &'static str {
@@ -205,7 +211,7 @@ impl AnthropicProvider {
         let system_prompt = req.instructions.as_deref().map(str::to_owned);
         let tool_ids = provider_call_id_map(req)?;
         let mut out: Vec<Value> = Vec::new();
-        let mut breakpoint = None;
+        let mut breakpoints = Vec::new();
         for (index, msg) in req.messages.iter().enumerate() {
             let feedback = matches!(msg.role, LlmRole::System);
             let native = Self::native_feedback_content(msg)
@@ -221,7 +227,7 @@ impl AnthropicProvider {
                 Self::role_name(&msg.role)
             };
             let mut blocks: Vec<Value> = Vec::new();
-            let mut marked_block_index = None;
+            let mut marked_block_indexes = Vec::new();
             let tagged;
             let source_blocks = if feedback && !native {
                 let mut fallback = vec![LlmContentBlock::Text {
@@ -261,7 +267,7 @@ impl AnthropicProvider {
                             ..
                         }
                     ) {
-                        marked_block_index = Some(blocks.len());
+                        marked_block_indexes.push(blocks.len());
                     }
                     blocks.push(value);
                 }
@@ -278,22 +284,22 @@ impl AnthropicProvider {
                 && prev.get("role").and_then(|v| v.as_str()) == Some(wire_role)
                 && let Some(prev_content) = prev.get_mut("content").and_then(|c| c.as_array_mut())
             {
-                if let Some(block_index) = marked_block_index {
-                    breakpoint = Some(BreakpointAddress {
+                breakpoints.extend(marked_block_indexes.into_iter().map(|block_index| {
+                    BreakpointAddress {
                         message_index: message_count - 1,
                         block_index: prev_content.len() + block_index,
-                    });
-                }
+                    }
+                }));
                 prev_content.extend(blocks);
                 continue;
             }
 
-            if let Some(block_index) = marked_block_index {
-                breakpoint = Some(BreakpointAddress {
+            breakpoints.extend(marked_block_indexes.into_iter().map(|block_index| {
+                BreakpointAddress {
                     message_index: message_count,
                     block_index,
-                });
-            }
+                }
+            }));
             out.push(json!({
                 "role": wire_role,
                 "content": blocks,
@@ -312,8 +318,9 @@ impl AnthropicProvider {
             )]
             let blocks = message["content"].as_array_mut().expect("content blocks");
             let is_result = |block: &Value| block["type"] == "tool_result";
-            if let Some(address) = breakpoint.as_mut()
-                && address.message_index == message_index
+            for address in breakpoints
+                .iter_mut()
+                .filter(|address| address.message_index == message_index)
             {
                 let old = address.block_index;
                 address.block_index = if is_result(&blocks[old]) {
@@ -325,7 +332,9 @@ impl AnthropicProvider {
             }
             blocks.sort_by_key(|block| !is_result(block));
         }
-        Ok((system_prompt, out, breakpoint))
+        // Wire order: a message's results moved ahead of its other blocks.
+        breakpoints.sort_by_key(|address| (address.message_index, address.block_index));
+        Ok((system_prompt, out, breakpoints))
     }
 
     fn projection_error(err: SchemaResolutionError) -> LlmTransportError {
@@ -382,12 +391,13 @@ impl AnthropicProvider {
         system: &mut Option<Value>,
         messages: &mut [Value],
         tools: &mut [Value],
-        breakpoint: Option<BreakpointAddress>,
+        breakpoints: &[BreakpointAddress],
     ) -> bool {
         let Some(ctrl) = Self::cache_control_value(cache_retention) else {
             return false;
         };
         let mut cache_control_emitted = false;
+        let mut markers = 0;
 
         if let Some(sys) = system
             && let Some(arr) = sys.as_array_mut()
@@ -396,13 +406,20 @@ impl AnthropicProvider {
         {
             last["cache_control"] = ctrl.clone();
             cache_control_emitted = true;
+            markers += 1;
+        }
+        if tools.last().is_some_and(Value::is_object) {
+            markers += 1;
         }
 
-        #[expect(
-            clippy::expect_used,
-            reason = "the address was recorded from `messages` earlier in this call and nothing removes blocks in between"
-        )]
-        if let Some(address) = breakpoint {
+        // Over the limit, the earliest message breakpoints go: the latest
+        // covers the longest prefix and is the one the next request extends.
+        let kept = breakpoints.len().min(MAX_CACHE_CONTROL_MARKERS - markers);
+        for &address in &breakpoints[breakpoints.len() - kept..] {
+            #[expect(
+                clippy::expect_used,
+                reason = "the address was recorded from `messages` earlier in this call and nothing removes blocks in between"
+            )]
             let block = messages
                 .get_mut(address.message_index)
                 .and_then(|message| message.get_mut("content"))
@@ -413,7 +430,7 @@ impl AnthropicProvider {
             cache_control_emitted = true;
         }
 
-        if breakpoint.is_none()
+        if breakpoints.is_empty()
             && let Some(last_msg) = messages.last_mut()
             && matches!(
                 last_msg.get("role").and_then(|v| v.as_str()),
@@ -554,7 +571,7 @@ impl AnthropicProvider {
             // when resolution asks for the summary.
             emission.thinking_summary = policy.request_thinking_summary;
         }
-        let (system_text, mut messages, breakpoint) = self.build_messages(req)?;
+        let (system_text, mut messages, breakpoints) = self.build_messages(req)?;
         let mut tools = self.build_tools(req)?;
 
         let mut system_value: Option<Value> = system_text.map(|text| {
@@ -564,15 +581,16 @@ impl AnthropicProvider {
             }])
         });
 
-        // Cache control: mark system, last user message, and last tool as
-        // ephemeral to benefit from prompt caching. Applied before the body
-        // is assembled so we only serialize the final state once.
+        // Cache control: mark system, the request's marked blocks (or else
+        // the last user message), and last tool as ephemeral to benefit from
+        // prompt caching. Applied before the body is assembled so we only
+        // serialize the final state once.
         emission.cache = self.apply_cache_control(
             policy.cache_retention,
             &mut system_value,
             &mut messages,
             &mut tools,
-            breakpoint,
+            &breakpoints,
         );
 
         let mut body = json!({

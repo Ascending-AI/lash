@@ -115,6 +115,129 @@ fn standard_iterations(model: &str) -> Vec<LlmRequest> {
     ]
 }
 
+async fn captured_rlm_iterations() -> Vec<LlmRequest> {
+    captured_rlm_requests(
+        lash_protocol_rlm::RlmExecutionPolicy::Chronological,
+        &[
+            "let value = 1;\nprint(value);",
+            "value = value + 1;\nprint(value);",
+            "finish(value);",
+        ],
+        Arc::new(|session: &lash::LashSession| {
+            session
+                .send(lash::TurnInput::text("increment a bound value twice"))
+                .require_finish()
+        }),
+    )
+    .await
+}
+
+/// Four relay steps of one turn: an empty start, a first commit, an append
+/// and a rewrite of the first entry.
+async fn captured_relay_steps() -> Vec<LlmRequest> {
+    captured_rlm_requests(
+        lash_protocol_rlm::RlmExecutionPolicy::Relay,
+        &[
+            r#"await control.next({ context: ["a", "b"] });"#,
+            r#"await control.next({ context: [...context, "c"] });"#,
+            r#"await control.next({ context: ["x", ...context.slice(1)] });"#,
+            r#"await control.send_user_output({ text: "done" });
+await control.next({ context, final: true });"#,
+        ],
+        Arc::new(|session: &lash::LashSession| {
+            Ok(session.send(lash::TurnInput::text("edit the context")))
+        }),
+    )
+    .await
+}
+
+/// Every request one scripted RLM turn under `policy` makes; the model
+/// answers the `cells` in order.
+async fn captured_rlm_requests(
+    policy: lash_protocol_rlm::RlmExecutionPolicy,
+    cells: &[&str],
+    build: crate::backend::SimTurnBuild,
+) -> Vec<LlmRequest> {
+    use std::collections::VecDeque;
+
+    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let responses = Arc::new(tokio::sync::Mutex::new(
+        cells
+            .iter()
+            .map(|cell| format!("<typescript>\n{cell}\n</typescript>"))
+            .collect::<VecDeque<_>>(),
+    ));
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("cache-regression-rlm")
+        .complete({
+            let captures = Arc::clone(&captures);
+            move |request| {
+                let captures = Arc::clone(&captures);
+                let responses = Arc::clone(&responses);
+                async move {
+                    captures.lock_recover().push(request);
+                    let text = responses
+                        .lock()
+                        .await
+                        .pop_front()
+                        .expect("RLM response script");
+                    Ok(lash_core::LlmResponse {
+                        parts: vec![lash_core::LlmOutputPart::Text {
+                            text,
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..lash_core::LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let engine = crate::backend::SimEngine::new(0x5eed_7004)
+        .await
+        .expect("sim engine");
+    let backend = engine.backend();
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build()
+            .with_execution_policy(policy),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        &backend,
+    );
+    let core = lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_llm_profile(
+            provider,
+            lash_core::LlmProfileMetadata::builder("cache-regression-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("cache regression model"),
+        )
+        .build(crate::sim_process_owner())
+        .expect("RLM cache regression core");
+    let session =
+        crate::open_created_session("cache-regression-model", &core, "cache-regression-session")
+            .await
+            .expect("RLM cache regression session");
+    engine
+        .run_turn(
+            &session,
+            "cache-regression-turn",
+            Arc::new(crate::backend::DiscardedTurnActivity),
+            build,
+        )
+        .await
+        .expect("RLM cache regression handler")
+        .expect("RLM cache regression turn");
+
+    captures.lock_recover().clone()
+}
+
 fn prefix_for_openai_chat(body: Value, stable_messages: usize) -> SerializedPromptRequest {
     let mut stable_prefix = Value::Array(
         body["messages"]
@@ -549,6 +672,309 @@ fn runtime_feedback_participates_in_serialized_cache_prefixes() {
             &format!("feedback {serializer:?}"),
             &iterations,
             |request, stable| serialize_prefix(serializer, request, stable),
+        );
+    }
+}
+
+/// The JSON paths of every `cache_control` marker in a request body, sorted.
+fn cache_marker_paths(body: &Value) -> Vec<String> {
+    fn walk(value: &Value, path: String, out: &mut Vec<String>) {
+        match value {
+            Value::Object(object) => {
+                if object.contains_key("cache_control") {
+                    out.push(path.clone());
+                }
+                for (key, child) in object {
+                    if !matches!(
+                        key.as_str(),
+                        "cache_control" | "input_schema" | "parameters"
+                    ) {
+                        walk(child, format!("{path}.{key}"), out);
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    walk(child, format!("{path}[{index}]"), out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(body, String::new(), &mut out);
+    out.sort();
+    out
+}
+
+fn sorted_paths(paths: &[&str]) -> Vec<String> {
+    let mut paths = paths
+        .iter()
+        .map(|path| path.to_string())
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+/// `request` with one tool on the wire, so the body carries the provider's
+/// tool marker too.
+fn with_wire_tool(request: &LlmRequest) -> LlmRequest {
+    let mut request = request.clone();
+    request.tools = Arc::new(vec![lash_core::llm::types::LlmToolSpec {
+        name: "probe".to_string(),
+        description: "Probe".to_string(),
+        input_schema: lash_sansio::SchemaContract::admit(json!({"type": "object"}))
+            .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
+    }]);
+    request
+}
+
+fn anthropic_body(request: &LlmRequest) -> Value {
+    lash_provider_anthropic::testing::serialize_request(request, CacheRetention::Short)
+        .expect("Anthropic request")
+}
+
+fn chat_anthropic_dialect_body(
+    request: &LlmRequest,
+) -> (Value, lash_provider_openai::testing::CacheBreakpointReport) {
+    lash_provider_openai::testing::serialize_chat_request(
+        &with_cache_control(request.clone(), CacheControlDialect::Anthropic),
+        CacheRetention::Short,
+    )
+    .expect("OpenAI-compatible Chat request")
+}
+
+fn relay_request_contexts(requests: &[LlmRequest]) -> Vec<Vec<String>> {
+    requests
+        .iter()
+        .map(|request| match request.messages.as_slice() {
+            [context, _harness] => context
+                .blocks
+                .iter()
+                .filter_map(|block| match block {
+                    LlmContentBlock::Text { text, .. } => Some(text.to_string()),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// On the Anthropic wire a relay step marks the system prompt, the last
+/// context block unchanged since the previous commit, the end of the context
+/// and the end of the harness; its two user messages merge into one. With no
+/// unchanged prefix the first context marker is absent, and over the
+/// four-marker limit the earliest message marker goes.
+#[tokio::test]
+async fn relay_anthropic_body_marks_system_unchanged_prefix_context_end_and_harness() {
+    let requests = captured_relay_steps().await;
+    assert_eq!(
+        relay_request_contexts(&requests),
+        [
+            vec![],
+            vec!["a", "b"],
+            vec!["a", "b", "c"],
+            vec!["x", "b", "c"]
+        ]
+    );
+    let markers = |request: &LlmRequest| cache_marker_paths(&anthropic_body(request));
+    // An empty context: only the harness.
+    assert_eq!(
+        markers(&requests[0]),
+        sorted_paths(&[".system[0]", ".messages[0].content[0]"])
+    );
+    // The first commit: nothing was unchanged.
+    assert_eq!(
+        markers(&requests[1]),
+        sorted_paths(&[
+            ".system[0]",
+            ".messages[0].content[1]",
+            ".messages[0].content[2]"
+        ])
+    );
+    // An append: the old end (`b`), the new end (`c`), the harness.
+    assert_eq!(
+        markers(&requests[2]),
+        sorted_paths(&[
+            ".system[0]",
+            ".messages[0].content[1]",
+            ".messages[0].content[2]",
+            ".messages[0].content[3]"
+        ])
+    );
+    // A rewrite of entry 0: nothing unchanged.
+    assert_eq!(
+        markers(&requests[3]),
+        sorted_paths(&[
+            ".system[0]",
+            ".messages[0].content[2]",
+            ".messages[0].content[3]"
+        ])
+    );
+    // System, tool and three message markers: the earliest message marker goes.
+    assert_eq!(
+        markers(&with_wire_tool(&requests[2])),
+        sorted_paths(&[
+            ".system[0]",
+            ".tools[0]",
+            ".messages[0].content[2]",
+            ".messages[0].content[3]"
+        ])
+    );
+}
+
+/// On an OpenAI-compatible chat route with the Anthropic cache dialect
+/// (OpenRouter's Claude models) a relay step carries the same markers on its
+/// system, context and harness messages, and over the limit the earliest
+/// message marker is dropped and reported.
+#[tokio::test]
+async fn relay_chat_anthropic_dialect_body_marks_system_unchanged_prefix_context_end_and_harness() {
+    let requests = captured_relay_steps().await;
+    let markers = |request: &LlmRequest| {
+        let (body, report) = chat_anthropic_dialect_body(request);
+        (
+            cache_marker_paths(&body),
+            report.requested,
+            report.emitted,
+            report.dropped,
+        )
+    };
+    assert_eq!(
+        markers(&requests[0]),
+        (
+            sorted_paths(&[".messages[0].content[0]", ".messages[1].content[0]"]),
+            1,
+            1,
+            0
+        )
+    );
+    assert_eq!(
+        markers(&requests[1]),
+        (
+            sorted_paths(&[
+                ".messages[0].content[0]",
+                ".messages[1].content[1]",
+                ".messages[2].content[0]"
+            ]),
+            2,
+            2,
+            0
+        )
+    );
+    assert_eq!(
+        markers(&requests[2]),
+        (
+            sorted_paths(&[
+                ".messages[0].content[0]",
+                ".messages[1].content[1]",
+                ".messages[1].content[2]",
+                ".messages[2].content[0]"
+            ]),
+            3,
+            3,
+            0
+        )
+    );
+    assert_eq!(
+        markers(&requests[3]),
+        (
+            sorted_paths(&[
+                ".messages[0].content[0]",
+                ".messages[1].content[2]",
+                ".messages[2].content[0]"
+            ]),
+            2,
+            2,
+            0
+        )
+    );
+    assert_eq!(
+        markers(&with_wire_tool(&requests[2])),
+        (
+            sorted_paths(&[
+                ".messages[0].content[0]",
+                ".tools[0]",
+                ".messages[1].content[2]",
+                ".messages[2].content[0]"
+            ]),
+            3,
+            2,
+            1
+        )
+    );
+}
+
+/// Chronological RLM marks one message block, its rolling history fence,
+/// and both Anthropic serializers put exactly the system marker and that one
+/// message marker on the wire, at the fenced block (or, before any history,
+/// at the last user block).
+#[tokio::test]
+async fn chronological_rlm_bodies_carry_the_system_marker_and_one_message_marker() {
+    let requests = captured_rlm_iterations().await;
+    assert_eq!(requests.len(), 3, "RLM protocol call count");
+    for (index, request) in requests.iter().enumerate() {
+        let fenced = request
+            .messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                LlmContentBlock::Text {
+                    text,
+                    cache_breakpoint: true,
+                    ..
+                } => Some(text.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(fenced.len() <= 1, "request {index} marks {fenced:?}");
+        let marked_message_texts = |messages: &Value| {
+            messages
+                .as_array()
+                .expect("messages")
+                .iter()
+                .flat_map(|message| message["content"].as_array().expect("content").iter())
+                .filter(|block| block.get("cache_control").is_some())
+                .map(|block| block["text"].as_str().expect("marked text").to_string())
+                .collect::<Vec<_>>()
+        };
+
+        let anthropic = anthropic_body(request);
+        let expected = fenced.first().cloned().unwrap_or_else(|| {
+            let last = anthropic["messages"]
+                .as_array()
+                .and_then(|messages| messages.last())
+                .expect("a last message");
+            assert_eq!(last["role"], "user");
+            last["content"]
+                .as_array()
+                .and_then(|content| content.last())
+                .and_then(|block| block["text"].as_str())
+                .expect("last user text")
+                .to_string()
+        });
+        assert_eq!(count_key(&anthropic, "cache_control"), 2, "request {index}");
+        assert!(anthropic["system"][0].get("cache_control").is_some());
+        assert_eq!(
+            marked_message_texts(&anthropic["messages"]),
+            [expected.clone()],
+            "request {index}"
+        );
+
+        let (chat, _) = chat_anthropic_dialect_body(request);
+        assert_eq!(count_key(&chat, "cache_control"), 2, "request {index}");
+        let chat_messages = chat["messages"].as_array().expect("chat messages");
+        assert!(
+            chat_messages[0]["content"][0]
+                .get("cache_control")
+                .is_some()
+        );
+        assert_eq!(
+            marked_message_texts(&Value::Array(chat_messages[1..].to_vec())),
+            [expected],
+            "request {index}"
         );
     }
 }

@@ -8,6 +8,11 @@ use std::borrow::Cow;
 
 const PROVIDER: &str = "OpenAI-compatible";
 
+/// Anthropic accepts at most this many `cache_control` markers per request,
+/// counting the system prompt's and the last tool's; OpenRouter passes the
+/// Anthropic dialect's markers through.
+const ANTHROPIC_MAX_CACHE_CONTROL_MARKERS: usize = 4;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CacheBreakpointDiagnostics {
     pub(crate) requested: usize,
@@ -375,30 +380,54 @@ impl OpenAiCompatibleProvider {
             };
         }
 
-        let mut cache_control_emitted = false;
-        if req.instructions.is_some()
-            && let Some(message) = messages.first_mut()
-        {
-            cache_control_emitted |=
-                Self::add_cache_control_to_text_content(message, &cache_control);
-        }
+        let system_marked = req.instructions.is_some()
+            && messages.first_mut().is_some_and(|message| {
+                Self::add_cache_control_to_text_content(message, &cache_control)
+            });
+        let mut cache_control_emitted = system_marked;
         if let Some(last_tool) = tools.last_mut() {
             last_tool["cache_control"] = cache_control.clone();
             cache_control_emitted = true;
         }
-        let mut applied_explicit_breakpoint = false;
-        for message in messages.iter_mut().rev() {
-            if matches!(
-                message.get("role").and_then(Value::as_str),
-                Some("user" | "assistant" | "system" | "developer")
-            ) && Self::add_cache_control_to_marked_text_content(message, &cache_control)
-            {
-                applied_explicit_breakpoint = true;
-                cache_control_emitted = true;
-                break;
-            }
+        // Every marked text part, in wire order. Over Anthropic's marker
+        // limit the earliest go: the latest covers the longest prefix and is
+        // the one the next request extends.
+        let fixed_markers = usize::from(system_marked) + usize::from(!tools.is_empty());
+        let marked = messages
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| {
+                matches!(
+                    message.get("role").and_then(Value::as_str),
+                    Some("user" | "assistant" | "system" | "developer")
+                )
+            })
+            .flat_map(|(message_index, message)| {
+                message
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                    .filter(|(_, part)| {
+                        part.get("type").and_then(Value::as_str) == Some("text")
+                            && part
+                                .get("__lash_cache_breakpoint")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false)
+                    })
+                    .map(move |(part_index, _)| (message_index, part_index))
+            })
+            .collect::<Vec<_>>();
+        let kept = marked
+            .len()
+            .min(ANTHROPIC_MAX_CACHE_CONTROL_MARKERS.saturating_sub(fixed_markers));
+        for &(message_index, part_index) in &marked[marked.len() - kept..] {
+            messages[message_index]["content"][part_index]["cache_control"] = cache_control.clone();
         }
-        if !applied_explicit_breakpoint {
+        let applied_explicit_breakpoints = kept;
+        cache_control_emitted |= kept > 0;
+        if applied_explicit_breakpoints == 0 {
             for message in messages.iter_mut().rev() {
                 if matches!(
                     message.get("role").and_then(Value::as_str),
@@ -411,7 +440,7 @@ impl OpenAiCompatibleProvider {
             }
         }
         Self::strip_internal_cache_markers(messages);
-        let emitted = usize::from(applied_explicit_breakpoint);
+        let emitted = applied_explicit_breakpoints;
         CacheBreakpointDiagnostics {
             requested,
             emitted,

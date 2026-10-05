@@ -23,9 +23,12 @@ requests in the trace, never on prose.
 ## Answer key: state this before observing
 
 - Every relay request has at most two messages: one user message of context
-  blocks (one block per entry of the last committed `next`, the last block a
-  cache breakpoint), then one user message beginning `=== HARNESS · step N ===`.
-  The first step of a session has no context message.
+  blocks (one block per entry of the last committed `next`), then one user
+  message beginning `=== HARNESS · step N ===`. The first step of a session
+  has no context message.
+- Cache breakpoints: the harness block; the last context block; and, when the
+  context kept a prefix of the previous commit's entries, the last block of
+  that prefix. The provider adds the system prompt's (and the last tool's).
 - Every harness message of a turn carries that turn's user message under
   `--- User message (this turn) ---`, on every step, committed or not.
 - A step whose harness says `--- Last step (committed) ---` has a context equal
