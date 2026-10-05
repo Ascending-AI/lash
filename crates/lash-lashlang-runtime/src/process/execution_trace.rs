@@ -420,42 +420,6 @@ impl LashlangProcessExecutionTrace {
         call_id
     }
 
-    pub(super) fn tool_child_execution_trace_hook(
-        &self,
-        call_site: lashlang::LashlangExecutionCallSite,
-    ) -> Option<ToolChildExecutionTraceHook> {
-        if !self.tracing.observes_language() {
-            return None;
-        }
-        let trace = self.clone();
-        let parent_node_id = call_site.site.node_id;
-        let occurrence = call_site.occurrence;
-        Some(ToolChildExecutionTraceHook::new(move |started| {
-            let child = TraceLanguageChildExecution {
-                scope: trace.scope(),
-                process_id: started.process_id,
-                attempt: started.attempt,
-                module_ref: None,
-                entry_ref: None,
-                entry_name: started.child_entry_name,
-            };
-            let child_graph_key = child
-                .graph_key()
-                .unwrap_or_else(|| format!("process:{}", child.process_id));
-            trace.emit(TraceLanguageExecution {
-                event_key: trace.event_key(format!(
-                    "child:{parent_node_id}:{occurrence}:{child_graph_key}"
-                )),
-                identity: trace.identity(),
-                payload: TraceLanguageExecutionPayload::ChildStarted {
-                    parent_node_id: parent_node_id.clone(),
-                    occurrence,
-                    child,
-                },
-            });
-        }))
-    }
-
     pub(super) fn emit(&self, event: TraceLanguageExecution) {
         self.tracing.observe_language(&event.event_key, || {
             let mut context = self.tracing.trace_runtime().base_context().clone();

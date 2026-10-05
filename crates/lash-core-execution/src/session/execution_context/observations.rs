@@ -110,6 +110,38 @@ impl RuntimeExecutionContext<'_> {
 }
 
 impl RuntimeExecutionContext<'_> {
+    /// Retain the language call's passive graph identity for any process it
+    /// declares. Replay reconstructs this correlation while re-executing code;
+    /// it never participates in admission, keys, or the journal command stream.
+    pub fn record_language_call_attribution(
+        &self,
+        call_id: crate::ToolCallId,
+        language: impl Into<String>,
+        identity: lash_trace::TraceLanguageExecutionIdentity,
+        parent_node_id: impl Into<String>,
+        occurrence: u64,
+    ) {
+        self.language_calls.lock_recover().insert(
+            call_id,
+            Arc::new(crate::runtime::process::LanguageCallAttribution {
+                language: language.into(),
+                identity,
+                parent_node_id: parent_node_id.into(),
+                occurrence,
+            }),
+        );
+    }
+
+    pub(crate) fn process_scope_for_language_call(
+        &self,
+        parent_invocation: crate::RuntimeInvocation,
+        call_id: &crate::ToolCallId,
+    ) -> crate::ProcessOpScope<'_> {
+        let mut scope = self.process_scope(Some(parent_invocation));
+        scope.language_call = self.language_calls.lock_recover().get(call_id).cloned();
+        scope
+    }
+
     pub(crate) fn tool_observation_attribution(&self) -> ToolObservationAttribution {
         ToolObservationAttribution {
             context: self

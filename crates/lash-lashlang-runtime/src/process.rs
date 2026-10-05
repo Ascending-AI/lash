@@ -23,7 +23,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use lash_core::facade_support::ToolChildExecutionTraceHook;
 use lash_sansio::sync::MutexExt;
 use lash_trace::{
     TraceBranchSelection, TraceEvent, TraceLanguageChildExecution, TraceLanguageExecution,

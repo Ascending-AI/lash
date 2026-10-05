@@ -1,3 +1,18 @@
+/// Passive correlation with the language call that declared a process start.
+#[derive(Clone)]
+pub(crate) struct LanguageCallAttribution {
+    pub language: String,
+    pub identity: lash_trace::TraceLanguageExecutionIdentity,
+    pub parent_node_id: String,
+    pub occurrence: u64,
+}
+
+pub(crate) type LanguageCallAttributions = std::sync::Arc<
+    std::sync::Mutex<
+        std::collections::BTreeMap<crate::ToolCallId, std::sync::Arc<LanguageCallAttribution>>,
+    >,
+>;
+
 #[derive(Clone)]
 pub struct ProcessOpScope<'scope> {
     pub parent_invocation: Option<crate::RuntimeInvocation>,
@@ -10,6 +25,7 @@ pub struct ProcessOpScope<'scope> {
     /// The parked call a start made here registers its child under, when the
     /// start is a call's declared start (ADR 0116 §3.6).
     pub consumer_hold: Option<crate::ConsumerHold>,
+    pub(crate) language_call: Option<std::sync::Arc<LanguageCallAttribution>>,
 }
 
 impl<'scope> ProcessOpScope<'scope> {
@@ -23,7 +39,89 @@ impl<'scope> ProcessOpScope<'scope> {
             turn_cancellation: None,
             process_lineage: None,
             consumer_hold: None,
+            language_call: None,
         }
+    }
+
+    /// Attribute a realized start to its issuing language graph. This observes
+    /// the minted record and issues no effect or journal command.
+    pub fn observe_process_started(
+        &self,
+        tracing: &crate::trace::TraceRuntime,
+        record: &crate::ProcessRecord,
+    ) {
+        let Some(call) = self.language_call.clone() else {
+            return;
+        };
+        let process_id = record.id.clone();
+        let entry_name = Some(record.identity.kind.as_str().to_owned());
+        let observation = move || {
+            let identity = &call.identity;
+            let context = lash_trace::TraceContext {
+                session_id: identity.scope.session_id.clone(),
+                turn_id: identity.scope.turn_id.clone(),
+                turn_index: identity.scope.turn_index,
+                protocol_iteration: identity.scope.protocol_iteration,
+                effect_id: match &identity.subject {
+                    lash_trace::TraceRuntimeSubject::Effect { effect_id, .. } => {
+                        Some(effect_id.clone())
+                    }
+                    _ => None,
+                },
+                graph_node_id: Some(call.parent_node_id.clone()),
+                ..Default::default()
+            };
+            let event = lash_trace::TraceLanguageExecution {
+                event_key: format!(
+                    "lashlang_execution:{}:child:{}:{}:process:{process_id}",
+                    identity.graph_key(),
+                    call.parent_node_id,
+                    call.occurrence,
+                ),
+                identity: identity.clone(),
+                payload: lash_trace::TraceLanguageExecutionPayload::ChildStarted {
+                    parent_node_id: call.parent_node_id.clone(),
+                    occurrence: call.occurrence,
+                    child: lash_trace::TraceLanguageChildExecution {
+                        scope: identity.scope.clone(),
+                        process_id: process_id.clone(),
+                        attempt: None,
+                        module_ref: None,
+                        entry_ref: None,
+                        entry_name: entry_name.clone(),
+                    },
+                },
+            };
+            (
+                context,
+                lash_trace::TraceEvent::LanguageExecution {
+                    language: call.language.clone(),
+                    event,
+                },
+            )
+        };
+        // Product graphs observe language facts independently of external
+        // telemetry and its live-journal emission permission.
+        tracing.emitter().observe_product(|| {
+            let (context, event) = observation();
+            let lash_trace::TraceEvent::LanguageExecution {
+                event: ref language_event,
+                ..
+            } = event
+            else {
+                unreachable!("the start observation is a language event")
+            };
+            lash_trace::TraceRecord {
+                schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+                id: language_event.event_key.clone(),
+                timestamp: tracing.clock().timestamp_datetime(),
+                context,
+                event,
+            }
+        });
+        tracing
+            .turn_execution(&self.effect_controller)
+            .observe_deferred(observation);
     }
 
     /// Registers a start made under this operation with a parked call's hold.

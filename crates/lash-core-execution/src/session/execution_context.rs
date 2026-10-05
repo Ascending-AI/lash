@@ -118,6 +118,8 @@ pub struct RuntimeExecutionContext<'run> {
     code_block_graph_key: Option<String>,
     /// Workflow node that issued tool calls through this context.
     pub(super) issuing_language_node_id: Option<Arc<str>>,
+    /// Passive graph attribution, shared with the logical Run's process starts.
+    pub(super) language_calls: crate::runtime::process::LanguageCallAttributions,
     /// Work-driver handle for this execution's process wiring, when the
     /// deployment provides one. Threaded through so in-run process
     /// operations (e.g. signalling another process) that build their own
@@ -473,6 +475,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             fixture_standing: self.fixture_standing.clone(),
             code_block_graph_key: self.code_block_graph_key.clone(),
             issuing_language_node_id: self.issuing_language_node_id.clone(),
+            language_calls: Arc::clone(&self.language_calls),
 
             process_work: self.process_work.clone(),
             started_process_ids: Arc::clone(&self.started_process_ids),

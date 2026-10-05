@@ -87,11 +87,14 @@ impl LashlangProcessHost<'_> {
         let mut invocation =
             lash_core::facade_support::ToolInvocation::new(call_id, manifest.id.clone(), payload);
         invocation = invocation.with_issuing_language_node_id(site.site.node_id.clone());
-        if let Some(hook) = self
-            .lashlang_execution_trace
-            .tool_child_execution_trace_hook(site.clone())
-        {
-            invocation = invocation.with_child_execution_trace_hook(hook);
+        if self.lashlang_execution_trace.tracing.observes_language() {
+            self.ctx.record_language_call_attribution(
+                invocation.id.clone(),
+                crate::LASHLANG_ENGINE_KIND,
+                self.lashlang_execution_trace.identity(),
+                site.site.node_id.clone(),
+                site.occurrence,
+            );
         }
         Ok(PreparedResourceInvocation::Tool {
             invocation,

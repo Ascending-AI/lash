@@ -5,9 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use lash_core::{
     AttachmentRef, Observation, RuntimeExecutionContext, ToolExecutionGrant, TraceEvent,
-    facade_support::ToolChildExecutionTraceHook, facade_support::ToolInvocation,
-    facade_support::ToolInvocationReply, facade_support::TraceBranchSelection,
-    facade_support::TraceRuntimeSubject,
+    facade_support::ToolInvocation, facade_support::ToolInvocationReply,
+    facade_support::TraceBranchSelection, facade_support::TraceRuntimeSubject,
 };
 use lash_lashlang_runtime::{
     CommandShape, ExecutionCancellation, TraceLanguageChildExecution, TraceLanguageExecution,
@@ -233,6 +232,13 @@ impl<'run> HostBridge<'run> {
         };
         if let Some(trace) = &self.lashlang_execution_trace {
             trace.record_resource_call(call_site, &call_id);
+            self.ctx.record_language_call_attribution(
+                call_id.clone(),
+                trace.language,
+                trace.identity().clone(),
+                call_site.site.node_id.clone(),
+                call_site.occurrence,
+            );
         }
         Ok(call_id)
     }
@@ -278,7 +284,7 @@ impl<'run> HostBridge<'run> {
 
     /// Builds one tool call's invocation: its positional id, the grant a
     /// deferred resolution pinned when the catalog does not carry the tool,
-    /// the issuing node for traces, and the child-execution trace hook.
+    /// and the issuing node for traces.
     fn tool_invocation(
         &self,
         call_id: lash_core::ToolCallId,
@@ -298,11 +304,6 @@ impl<'run> HostBridge<'run> {
             && let Some(grant) = self.deferred_grant_for_tool_id(&invocation.tool_id)
         {
             invocation = invocation.with_execution_grant(grant);
-        }
-        if let (Some(trace), Some(call_site)) = (&self.lashlang_execution_trace, call_site) {
-            invocation = invocation.with_child_execution_trace_hook(
-                trace.tool_child_execution_trace_hook(call_site.clone()),
-            );
         }
         invocation
     }
@@ -345,43 +346,6 @@ impl LashlangExecutionTrace {
 
     pub(super) fn event_key(&self, suffix: impl std::fmt::Display) -> String {
         format!("lashlang_execution:{}:{suffix}", self.identity.graph_key())
-    }
-
-    pub(super) fn tool_child_execution_trace_hook(
-        &self,
-        call_site: lashlang::LashlangExecutionCallSite,
-    ) -> ToolChildExecutionTraceHook {
-        let trace = self.clone();
-        let parent_node_id = call_site.site.node_id;
-        let occurrence = call_site.occurrence;
-        ToolChildExecutionTraceHook::new(move |started| {
-            let child = TraceLanguageChildExecution {
-                scope: trace.identity.scope.clone(),
-                process_id: started.process_id,
-                attempt: started.attempt,
-                module_ref: None,
-                entry_ref: None,
-                entry_name: started.child_entry_name,
-            };
-            let child_graph_key = child
-                .graph_key()
-                .unwrap_or_else(|| format!("process:{}", child.process_id));
-            trace.emit(TraceLanguageExecution {
-                event_key: format!(
-                    "lashlang_execution:{}:child:{}:{}:{}",
-                    trace.identity.graph_key(),
-                    parent_node_id,
-                    occurrence,
-                    child_graph_key
-                ),
-                identity: trace.identity.clone(),
-                payload: TraceLanguageExecutionPayload::ChildStarted {
-                    parent_node_id: parent_node_id.clone(),
-                    occurrence,
-                    child,
-                },
-            });
-        })
     }
 
     pub(super) fn emit(&self, event: TraceLanguageExecution) {

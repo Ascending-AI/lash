@@ -112,6 +112,7 @@ pub use observer_intent::{
     SessionObserverIntentSource, reconcile_session_process_observer_intents,
 };
 pub use op_scope::ProcessOpScope;
+pub(crate) use op_scope::{LanguageCallAttribution, LanguageCallAttributions};
 pub use parent_end::{
     ParentEndApplication, apply_parent_end_plan, end_parent_scope, end_session_runs,
     parent_end_delivery_key, parent_end_requester,

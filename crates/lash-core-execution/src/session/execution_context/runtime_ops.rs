@@ -166,6 +166,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             fixture_standing: None,
             code_block_graph_key: None,
             issuing_language_node_id: None,
+            language_calls: Arc::default(),
             process_work: None,
         }
     }

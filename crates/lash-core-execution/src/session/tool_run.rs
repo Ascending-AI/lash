@@ -23,7 +23,10 @@ pub(super) struct ToolRunChannel(Sender<Request>);
 /// A request channel to the invocation's stack-owned tool Run.
 /// It carries no controller, coordinator or issued attempt future.
 #[derive(Clone)]
-pub struct ToolRunOwner(ToolRunChannel);
+pub struct ToolRunOwner(
+    ToolRunChannel,
+    crate::runtime::process::LanguageCallAttributions,
+);
 
 impl ToolRunOwner {
     pub async fn capture_tool_run(
@@ -159,11 +162,14 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// Share the enclosing invocation's request channel with a phase context.
     pub(super) fn tool_run_owner(&self) -> Option<ToolRunOwner> {
-        self.tool_run.clone().map(ToolRunOwner)
+        self.tool_run
+            .clone()
+            .map(|channel| ToolRunOwner(channel, Arc::clone(&self.language_calls)))
     }
 
     pub(super) fn with_tool_run_owner(mut self, owner: &ToolRunOwner) -> Self {
         self.tool_run = Some(owner.0.clone());
+        self.language_calls = Arc::clone(&owner.1);
         self
     }
 

@@ -1126,8 +1126,10 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .processes
             .start_bound(
                 obligation.registration.clone(),
-                self.context
-                    .process_scope(Some(parent.into_runtime_invocation())),
+                self.context.process_scope_for_language_call(
+                    parent.into_runtime_invocation(),
+                    &obligation.call_id,
+                ),
             )
             .await
             .map_err(|error| {

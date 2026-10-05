@@ -459,13 +459,16 @@ impl ProcessCapability {
             .await?;
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
-        self.command_runner(current, &scope)?
+        let record = self
+            .command_runner(current, &scope)?
             .start_in_run(
                 registration,
                 options.initial_observers.into_iter().collect(),
                 execution_context,
             )
-            .await
+            .await?;
+        scope.observe_process_started(&current.host.core.tracing, &record);
+        Ok(record)
     }
 
     pub(in crate::runtime::session_manager) async fn start_process(
