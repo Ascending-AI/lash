@@ -5,6 +5,24 @@ release. The [rolling upgrade runbook](../../runbooks/rolling-upgrade/runbook.md
 rehearses the two-build sequence. [ADR 0115](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
 defines the compatibility contract.
 
+## Upgrading lash before 1.0
+
+Until 1.0, lash keeps its stored format versions and journal logic epoch
+frozen: a build may change stored and journal shapes in place without
+moving the build generation, so an unchanged generation is not evidence
+that two builds are compatible.
+
+Every lash version bump before 1.0 must therefore reset lash's state
+instead of rolling: recreate the stores, and retire the old build's Restate
+deployments, its generation lanes (`…_g$OLD_GENERATION`) and any
+invocations still pinned to them.
+
+From 1.0 on, any replay or format change moves the generation, and the
+drain, finalize and object-upgrade path in this guide applies.
+[ADR 0115](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
+states the freeze in its release-cut guardrails and defines the post-1.0
+contract.
+
 ## Choose the deployment shape
 
 **In-process SQLite.** One host owns the store's durable-core,
