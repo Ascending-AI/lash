@@ -137,7 +137,7 @@ pub(super) struct Shared {
     admin: String,
     namespace: String,
     stores: Arc<dyn lash::StoreSet>,
-    postgres: Option<lash_postgres_store::PostgresStorage>,
+    pub(super) postgres: Option<lash_postgres_store::PostgresStorage>,
     pub(super) store_root: PathBuf,
     pub(super) chat: Mutex<Option<String>>,
     artifacts: Vec<ArtifactIdentity>,
@@ -530,7 +530,6 @@ impl Shared {
     /// follow-on the fenced session head still owes it, and whether it is
     /// the session's unfinished Run.
     pub(super) async fn run_snapshot(&self, run: &str) -> Result<serde_json::Value> {
-        use lash_core::store::RunStore as _;
         let chat = self
             .chat
             .lock()
@@ -539,30 +538,40 @@ impl Shared {
             .context("no bound native session")?;
         let session = lash::SessionId::parse(&chat)?;
         let turn = lash::TurnId::parse(run)?;
-        let stores = lash::sqlite::SqliteStoreSet::open(&self.store_root).await?;
-        let store = stores.open_store().await?;
+        let store = self.stores.session_store_factory();
         let terminal = store.run_terminal(&session, &turn).await?;
         let unfinished = store
             .unfinished_run(&session)
             .await?
             .is_some_and(|unfinished| unfinished.run == turn);
         // The follow-on the fenced session head still owes, if it is this Run's.
-        let path = self.store_root.join("durable-core.db");
-        let raw_session = chat.clone();
-        let owed = tokio::task::spawn_blocking(move || -> Result<Option<String>> {
-            let db = rusqlite::Connection::open_with_flags(
-                path,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-            )?;
-            let mut query =
-                db.prepare("SELECT pending_follow_on_json FROM session_head WHERE session_id=?1")?;
-            Ok(query
-                .query_map([raw_session], |row| row.get::<_, Option<String>>(0))?
-                .next()
-                .transpose()?
-                .flatten())
-        })
-        .await??;
+        let owed: Option<String> = match &self.postgres {
+            Some(storage) => sqlx::query_scalar::<_, Option<String>>(
+                "SELECT pending_follow_on_json FROM lash_session_head WHERE session_id=$1",
+            )
+            .bind(&chat)
+            .fetch_optional(storage.pool())
+            .await?
+            .flatten(),
+            None => {
+                let path = self.store_root.join("durable-core.db");
+                tokio::task::spawn_blocking(move || -> Result<Option<String>> {
+                    let db = rusqlite::Connection::open_with_flags(
+                        path,
+                        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                    )?;
+                    let mut query = db.prepare(
+                        "SELECT pending_follow_on_json FROM session_head WHERE session_id=?1",
+                    )?;
+                    Ok(query
+                        .query_map([chat], |row| row.get::<_, Option<String>>(0))?
+                        .next()
+                        .transpose()?
+                        .flatten())
+                })
+                .await??
+            }
+        };
         let continuation = match owed {
             Some(raw) if raw.contains(run) => serde_json::from_str(&raw)?,
             _ => serde_json::Value::Null,

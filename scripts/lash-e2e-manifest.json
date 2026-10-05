@@ -1339,7 +1339,7 @@
           "registration": null
         },
         {
-          "variant": "default",
+          "variant": "inline",
           "store": "postgresql",
           "leg": "live",
           "channel": "rlm",
@@ -1362,7 +1362,34 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: cancel::s11_inline_loser and cancel::s11_deferred_loser exercise the sqlite_file/live leg only; no owner ticket filed.",
+          "hold_reason": "PostgreSQL live proof pending the e2e drain route (FIG-5055); registrations and oracles in FIG-5047",
+          "registration": null
+        },
+        {
+          "variant": "deferred",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "PostgreSQL live proof pending the e2e drain route (FIG-5055); registrations and oracles in FIG-5047",
           "registration": null
         },
         {
@@ -1494,7 +1521,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: handover::s12_deferred_survives_removal_of_n proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
+          "hold_reason": "PostgreSQL live proof pending the e2e drain route (FIG-5055); registrations and oracles in FIG-5047",
           "registration": null
         },
         {
@@ -2818,7 +2845,7 @@
           "registration": null
         },
         {
-          "variant": "default",
+          "variant": "capture-adoption",
           "store": "postgresql",
           "leg": "live",
           "channel": "rlm",
@@ -2841,7 +2868,34 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: handover::s23_cancel_between_capture_and_adoption and handover::s23_cancel_after_adoption prove the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
+          "hold_reason": "PostgreSQL live proof pending the e2e drain route (FIG-5055); registrations and oracles in FIG-5047",
+          "registration": null
+        },
+        {
+          "variant": "post-adoption",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "PostgreSQL live proof pending the e2e drain route (FIG-5055); registrations and oracles in FIG-5047",
           "registration": null
         },
         {
@@ -4105,7 +4159,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: handover::s31_publication_crash_hands_over_once proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
+          "hold_reason": "PostgreSQL live proof pending the e2e drain route (FIG-5055); registrations and oracles in FIG-5047",
           "registration": null
         },
         {
@@ -4237,7 +4291,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: handover::s32_missing_retained_material_refuses_without_body_replay proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
+          "hold_reason": "PostgreSQL live proof pending the e2e drain route (FIG-5055); registrations and oracles in FIG-5047",
           "registration": null
         },
         {

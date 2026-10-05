@@ -37,6 +37,13 @@ h2_case!(s09_after_intent, AfterIntent, SqliteFile, Live);
 h2_case!(s10_empty_middle_rank, Ranks, SqliteFile, Live);
 h2_case!(s11_inline_loser, InlineLoser, SqliteFile, Live);
 h2_case!(s11_deferred_loser, DeferredLoser, SqliteFile, Live);
+h2_case!(s11_inline_loser_postgresql, InlineLoser, PostgreSql, Live);
+h2_case!(
+    s11_deferred_loser_postgresql,
+    DeferredLoser,
+    PostgreSql,
+    Live
+);
 
 pub fn spec(id: &str, store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Result<CaseSpec> {
     let (rules, channel) = match id {

@@ -1,6 +1,7 @@
 //! H3 transfer rows on the workbench product host: S12, S23, S31 and S32.
 //!
-//! Two workbench generations share one SQLite file store. The production
+//! Two workbench generations share one persistent store (SQLite file or
+//! PostgreSQL). The production
 //! generation drain cuts the Run on N; N+1 adopts the fenced follow-on.
 //! Transfer facts are read from the authoritative session head, never from
 //! a Restate completion slot, and every Run fact from its own V7 journal.
@@ -49,6 +50,36 @@ h2_case!(
     s32_missing_retained_material_refuses_without_body_replay,
     RetainedRemoval,
     SqliteFile,
+    Live
+);
+h2_case!(
+    s12_deferred_survives_removal_of_n_postgresql,
+    RetirePending,
+    PostgreSql,
+    Live
+);
+h2_case!(
+    s23_cancel_between_capture_and_adoption_postgresql,
+    CancelAtCapture,
+    PostgreSql,
+    Live
+);
+h2_case!(
+    s23_cancel_after_adoption_postgresql,
+    CancelAfterAdoption,
+    PostgreSql,
+    Live
+);
+h2_case!(
+    s31_publication_crash_hands_over_once_postgresql,
+    PublicationCrash,
+    PostgreSql,
+    Live
+);
+h2_case!(
+    s32_missing_retained_material_refuses_without_body_replay_postgresql,
+    RetainedRemoval,
+    PostgreSql,
     Live
 );
 
@@ -832,55 +863,87 @@ pub async fn remove_retained(
     Ok(evidence)
 }
 
-fn store_path(shared: &Shared) -> std::path::PathBuf {
-    shared.store_root.join("durable-core.db")
-}
-
 /// Each retained bundle's pointer and its lease edges, read from the store.
 async fn material_rows(shared: &Shared, artifacts: &[String]) -> Result<Vec<serde_json::Value>> {
-    let path = store_path(shared);
-    let artifacts = artifacts.to_vec();
-    tokio::task::spawn_blocking(move || -> Result<Vec<serde_json::Value>> {
-        let db = rusqlite::Connection::open_with_flags(
-            path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )?;
-        artifacts
-            .iter()
-            .map(|artifact| {
-                let bundle: i64 = db.query_row(
-                    "SELECT COUNT(*) FROM artifact_refs WHERE namespace='tool_material' AND artifact_ref=?1",
-                    [artifact],
-                    |row| row.get(0),
+    let counts: Vec<(i64, i64)> = match &shared.postgres {
+        Some(storage) => {
+            let mut counts = Vec::new();
+            for artifact in artifacts {
+                counts.push(sqlx::query_as::<_, (i64, i64)>(
+                    "SELECT (SELECT COUNT(*) FROM lash_lashlang_artifacts WHERE namespace='tool_material' AND artifact_ref=$1), (SELECT COUNT(*) FROM lash_artifact_referrer_edges WHERE namespace='tool_material' AND artifact_ref=$1)",
+                )
+                .bind(artifact)
+                .fetch_one(storage.pool())
+                .await?);
+            }
+            counts
+        }
+        None => {
+            let path = shared.store_root.join("durable-core.db");
+            let artifacts = artifacts.to_vec();
+            tokio::task::spawn_blocking(move || -> Result<Vec<(i64, i64)>> {
+                let db = rusqlite::Connection::open_with_flags(
+                    path,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
                 )?;
-                let leases: i64 = db.query_row(
-                    "SELECT COUNT(*) FROM artifact_referrer_edges WHERE namespace='tool_material' AND artifact_ref=?1",
-                    [artifact],
-                    |row| row.get(0),
-                )?;
-                Ok(json!({"artifact":artifact,"bundle":bundle == 1,"leases":leases}))
+                artifacts
+                    .iter()
+                    .map(|artifact| {
+                        Ok(db.query_row(
+                            "SELECT (SELECT COUNT(*) FROM artifact_refs WHERE namespace='tool_material' AND artifact_ref=?1), (SELECT COUNT(*) FROM artifact_referrer_edges WHERE namespace='tool_material' AND artifact_ref=?1)",
+                            [artifact],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )?)
+                    })
+                    .collect()
             })
-            .collect()
-    })
-    .await?
+            .await??
+        }
+    };
+    Ok(artifacts
+        .iter()
+        .zip(counts)
+        .map(|(artifact, (bundle, leases))| {
+            json!({"artifact":artifact,"bundle":bundle == 1,"leases":leases})
+        })
+        .collect())
 }
 
-/// Remove each retained bundle's stored pointer; its leases stay recorded.
+/// Remove each retained bundle's stored row, so no later read finds it.
 async fn remove_material(shared: &Shared, artifacts: &[String]) -> Result<serde_json::Value> {
-    let path = store_path(shared);
-    let artifacts = artifacts.to_vec();
-    tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
-        let db = rusqlite::Connection::open(path)?;
-        let mut removed = Vec::new();
-        for artifact in &artifacts {
-            let rows = db.execute(
-                "DELETE FROM artifact_refs WHERE namespace='tool_material' AND artifact_ref=?1",
-                [artifact],
-            )?;
-            ensure!(rows == 1, "retained bundle {artifact} was not stored");
-            removed.push(artifact.clone());
+    let mut removed = Vec::new();
+    match &shared.postgres {
+        Some(storage) => {
+            for artifact in artifacts {
+                let rows = sqlx::query(
+                    "DELETE FROM lash_lashlang_artifacts WHERE namespace='tool_material' AND artifact_ref=$1",
+                )
+                .bind(artifact)
+                .execute(storage.pool())
+                .await?
+                .rows_affected();
+                ensure!(rows == 1, "retained bundle {artifact} was not stored");
+                removed.push(artifact.clone());
+            }
         }
-        Ok(json!({"kind":"h3_retained_material_removed","removed":removed}))
-    })
-    .await?
+        None => {
+            let path = shared.store_root.join("durable-core.db");
+            let artifacts = artifacts.to_vec();
+            removed = tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
+                let db = rusqlite::Connection::open(path)?;
+                let mut removed = Vec::new();
+                for artifact in &artifacts {
+                    let rows = db.execute(
+                        "DELETE FROM artifact_refs WHERE namespace='tool_material' AND artifact_ref=?1",
+                        [artifact],
+                    )?;
+                    ensure!(rows == 1, "retained bundle {artifact} was not stored");
+                    removed.push(artifact.clone());
+                }
+                Ok(removed)
+            })
+            .await??;
+        }
+    }
+    Ok(json!({"kind":"h3_retained_material_removed","removed":removed}))
 }
