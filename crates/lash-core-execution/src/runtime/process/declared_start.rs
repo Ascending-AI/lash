@@ -15,7 +15,7 @@
 use lash_sansio::ToolCallId;
 use serde::{Deserialize, Serialize};
 
-use super::model::{ProcessStartRegistration, StartKey};
+use super::model::{ConsumerHold, ProcessStartRegistration, StartKey};
 
 pub use crate::tool_run::ProcessExecutionBoundary;
 
@@ -52,10 +52,35 @@ pub use crate::tool_run::IsolatedStartRefusal;
 
 /// A declared start, admitted with its call.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "DeclaredStartObligationWire")]
 pub struct DeclaredStartObligation {
     pub call_id: ToolCallId,
     pub registration: ProcessStartRegistration,
+    // Keep validated facts off the stack of the Run's futures. The journal
+    // retains its registration wire shape.
+    #[serde(skip)]
+    binding: Box<DeclaredStartBinding>,
+}
+
+#[derive(Debug)]
+struct DeclaredStartBinding {
+    start_key: StartKey,
+    consumer_hold: ConsumerHold,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeclaredStartObligationWire {
+    call_id: ToolCallId,
+    registration: ProcessStartRegistration,
+}
+
+impl TryFrom<DeclaredStartObligationWire> for DeclaredStartObligation {
+    type Error = DeclaredStartObligationRefusal;
+
+    fn try_from(wire: DeclaredStartObligationWire) -> Result<Self, Self::Error> {
+        Self::new(wire.call_id, wire.registration)
+    }
 }
 
 pub use crate::tool_run::DeclaredStartObligationRefusal;
@@ -102,36 +127,33 @@ impl DeclaredStartObligation {
         call_id: ToolCallId,
         registration: ProcessStartRegistration,
     ) -> Result<Self, DeclaredStartObligationRefusal> {
-        if registration.start_key.is_none() {
-            return Err(DeclaredStartObligationRefusal::Keyless);
-        }
+        let start_key = registration
+            .start_key
+            .as_ref()
+            .ok_or(DeclaredStartObligationRefusal::Keyless)?
+            .clone();
         if registration.env_ref.is_none() && !registration.input.is_externally_owned() {
             return Err(DeclaredStartObligationRefusal::NoEnvironment);
         }
-        if registration.consumer_hold.is_none() {
-            return Err(DeclaredStartObligationRefusal::NoConsumerHold);
-        }
+        let consumer_hold = registration
+            .consumer_hold
+            .as_ref()
+            .ok_or(DeclaredStartObligationRefusal::NoConsumerHold)?
+            .clone();
         Ok(Self {
             call_id,
             registration,
+            binding: Box::new(DeclaredStartBinding {
+                start_key,
+                consumer_hold,
+            }),
         })
     }
 
     /// The start's stable key.
-    ///
-    /// # Panics
-    ///
-    /// Never: [`Self::new`] refuses a keyless registration.
     #[must_use]
-    #[expect(
-        clippy::expect_used,
-        reason = "construction refuses a keyless registration"
-    )]
     pub fn start_key(&self) -> &StartKey {
-        self.registration
-            .start_key
-            .as_ref()
-            .expect("a declared start has a key")
+        &self.binding.start_key
     }
 
     /// What a cancel of the owning call at `phase` must do.
@@ -142,11 +164,7 @@ impl DeclaredStartObligation {
             DeclaredStartPhase::Admitted | DeclaredStartPhase::Launched => {
                 StartCancelDecision::RecoverAndDischarge {
                     start_key: self.start_key().clone(),
-                    cancel_process: self
-                        .registration
-                        .consumer_hold
-                        .as_ref()
-                        .is_some_and(|hold| hold.cancels),
+                    cancel_process: self.binding.consumer_hold.cancels,
                 }
             }
             DeclaredStartPhase::Discharged => StartCancelDecision::Discharged,
@@ -181,6 +199,52 @@ mod tests {
         registration
     }
 
+    fn material_without(field: &str) -> serde_json::Value {
+        let obligation =
+            DeclaredStartObligation::new(ToolCallId::fixture("start"), registration(true)).unwrap();
+        let mut material = serde_json::to_value(obligation).unwrap();
+        material["registration"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        material
+    }
+
+    #[test]
+    fn decoding_a_keyless_declared_start_refuses_before_replay_reads_its_key() {
+        let error = match serde_json::from_value::<DeclaredStartObligation>(material_without(
+            "start_key",
+        )) {
+            Ok(obligation) => panic!("decoded a keyless start: {:?}", obligation.start_key()),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.to_string(),
+            DeclaredStartObligationRefusal::Keyless.to_string()
+        );
+    }
+
+    #[test]
+    fn decoding_a_declared_start_without_its_hold_refuses() {
+        let error =
+            serde_json::from_value::<DeclaredStartObligation>(material_without("consumer_hold"))
+                .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            DeclaredStartObligationRefusal::NoConsumerHold.to_string()
+        );
+    }
+
+    #[test]
+    fn decoding_a_lash_executed_declared_start_without_its_environment_refuses() {
+        let error = serde_json::from_value::<DeclaredStartObligation>(material_without("env_ref"))
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            DeclaredStartObligationRefusal::NoEnvironment.to_string()
+        );
+    }
+
     #[test]
     fn a_declared_start_needs_its_key_environment_and_hold() {
         let call_id = ToolCallId::fixture("start");
@@ -203,8 +267,11 @@ mod tests {
             .into(),
         ));
         external.env_ref = None;
+        let external = DeclaredStartObligation::new(call_id.clone(), external).unwrap();
+        let decoded: DeclaredStartObligation =
+            serde_json::from_value(serde_json::to_value(external).unwrap()).unwrap();
         assert!(
-            DeclaredStartObligation::new(call_id.clone(), external).is_ok(),
+            decoded.registration.env_ref.is_none(),
             "an externally owned start runs under no environment"
         );
         let mut unheld = registration(false);
@@ -215,8 +282,9 @@ mod tests {
         );
         let obligation = DeclaredStartObligation::new(call_id, registration(false)).unwrap();
         let encoded = serde_json::to_value(&obligation).unwrap();
-        let decoded: DeclaredStartObligation = serde_json::from_value(encoded).unwrap();
+        let decoded: DeclaredStartObligation = serde_json::from_value(encoded.clone()).unwrap();
         assert_eq!(decoded.start_key(), &StartKey::for_host("declared-start"));
+        assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
     }
 
     #[test]
@@ -224,6 +292,8 @@ mod tests {
         let key = StartKey::for_host("declared-start");
         let obligation =
             DeclaredStartObligation::new(ToolCallId::fixture("start"), registration(true)).unwrap();
+        let obligation: DeclaredStartObligation =
+            serde_json::from_value(serde_json::to_value(obligation).unwrap()).unwrap();
         assert_eq!(
             obligation.on_cancel(DeclaredStartPhase::Declared),
             StartCancelDecision::ForbidStart
