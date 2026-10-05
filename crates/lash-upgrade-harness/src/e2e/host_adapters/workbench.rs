@@ -97,7 +97,9 @@ impl WorkbenchHost {
             .trim_end_matches('/')
             .to_owned()
     }
-    async fn spawn(&mut self) -> Result<HostReady> {
+    /// Start the workbench child. `register` runs the product's deployment
+    /// registration; a process restarted in place serves its existing one.
+    async fn spawn(&mut self, register: bool) -> Result<HostReady> {
         let artifact = self
             .artifact
             .clone()
@@ -145,24 +147,26 @@ impl WorkbenchHost {
             lease.deadline,
         )
         .await?;
-        let mut registration = HostProcess::spawn_with_args(
-            &artifact,
-            &mut lease,
-            "workbench-registration",
-            environment,
-            Vec::new(),
-            &["register-deployment".into(), self.advertised_uri()],
-        )
-        .await?;
-        let result = registration.finish(lease.deadline).await;
-        let cleanup = registration
-            .stop(Instant::now() + Duration::from_secs(10), None)
-            .await;
-        if let Ok(receipts) = &cleanup {
-            lease.cleanup.extend(receipts.clone());
+        if register {
+            let mut registration = HostProcess::spawn_with_args(
+                &artifact,
+                &mut lease,
+                "workbench-registration",
+                environment,
+                Vec::new(),
+                &["register-deployment".into(), self.advertised_uri()],
+            )
+            .await?;
+            let result = registration.finish(lease.deadline).await;
+            let cleanup = registration
+                .stop(Instant::now() + Duration::from_secs(10), None)
+                .await;
+            if let Ok(receipts) = &cleanup {
+                lease.cleanup.extend(receipts.clone());
+            }
+            result?;
+            cleanup?;
         }
-        result?;
-        cleanup?;
         let listing: Value = self
             .http
             .get(format!("{}/deployments", self.admin))
@@ -408,7 +412,7 @@ impl HostAdapter for WorkbenchHost {
             self.directory = Some(lease.directory.clone());
             self.artifact = Some(artifact.clone());
             self.lease = Some(copy_lease(lease));
-            let ready = self.spawn().await?;
+            let ready = self.spawn(true).await?;
             let retained = self.lease.as_ref().context("workbench lease missing")?;
             lease.processes = retained.processes.clone();
             lease.cleanup = retained.cleanup.clone();
@@ -563,7 +567,14 @@ impl HostAdapter for WorkbenchHost {
                     }
                     "restart" => {
                         ensure!(self.process.is_none(), "workbench still running");
-                        serde_json::to_value(self.spawn().await?)?
+                        serde_json::to_value(self.spawn(true).await?)?
+                    }
+                    // A rolled-back or crashed build's process returns under
+                    // its registered deployment; re-registering would make a
+                    // draining generation the newest again.
+                    "restart-in-place" => {
+                        ensure!(self.process.is_none(), "workbench still running");
+                        serde_json::to_value(self.spawn(false).await?)?
                     }
                     "await-tool-bodies" => self.await_bodies(&input).await?,
                     "register-receiver" => {

@@ -1277,9 +1277,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s12_retire_pending_source); FIG-4934 deferred it; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "handover::s12_deferred_survives_removal_of_n"
+          }
         },
         {
           "variant": "default",
@@ -1305,7 +1308,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s12_retire_pending_source); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing replay oracle: handover::s12_deferred_survives_removal_of_n proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1332,7 +1335,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s12_retire_pending_source); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing PostgreSQL oracle: handover::s12_deferred_survives_removal_of_n proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -1359,14 +1362,15 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s12_retire_pending_source); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: handover::s12_deferred_survives_removal_of_n proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
       "setup": "Pending source in turn and process, N+1 adopts transfer.",
       "fault": "Drain and non-forcibly retire N while source unresolved; resolve afterward.",
       "observable": "No old deployment needed; same source/call seals once, wakes N+1 and returns exact value; no old reads/waits.",
-      "arc_guards": []
+      "arc_guards": [],
+      "host": "workbench"
     },
     {
       "id": "S13",
@@ -2527,7 +2531,7 @@
       "dependencies": "Base, B01/B02/O02, F02",
       "cases": [
         {
-          "variant": "default",
+          "variant": "capture-adoption",
           "store": "sqlite_file",
           "leg": "live",
           "channel": "rlm",
@@ -2549,9 +2553,42 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s23_cancel_then_fresh_input); FIG-4934 deferred it; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "handover::s23_cancel_between_capture_and_adoption"
+          }
+        },
+        {
+          "variant": "post-adoption",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "handover::s23_cancel_after_adoption"
+          }
         },
         {
           "variant": "default",
@@ -2577,7 +2614,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s23_cancel_then_fresh_input); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing replay oracle: handover::s23_cancel_between_capture_and_adoption and handover::s23_cancel_after_adoption prove the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2604,7 +2641,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s23_cancel_then_fresh_input); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing PostgreSQL oracle: handover::s23_cancel_between_capture_and_adoption and handover::s23_cancel_after_adoption prove the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -2631,14 +2668,15 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s23_cancel_then_fresh_input); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: handover::s23_cancel_between_capture_and_adoption and handover::s23_cancel_after_adoption prove the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
       "setup": "Capture old turn/process then admit successor; identical new input.",
       "fault": "Cancel at capture\u2192adoption and post-adoption cuts.",
       "observable": "Old owner terminal/continuation cleared; new Run has new owner and no inherited old effects/state; material ownership remains fenced.",
-      "arc_guards": []
+      "arc_guards": [],
+      "host": "workbench"
     },
     {
       "id": "S24",
@@ -3596,9 +3634,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s31_publication_crash); FIG-4934 deferred it; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "handover::s31_publication_crash_hands_over_once"
+          }
         },
         {
           "variant": "default",
@@ -3624,7 +3665,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s31_publication_crash); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing replay oracle: handover::s31_publication_crash_hands_over_once proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3651,7 +3692,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s31_publication_crash); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing PostgreSQL oracle: handover::s31_publication_crash_hands_over_once proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3678,14 +3719,15 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s31_publication_crash); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: handover::s31_publication_crash_hands_over_once proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
       "setup": "RLM process with pending source, held loser, state, retained material and declared start.",
       "fault": "Journal-budget cut; SIGKILL after successor publication before predecessor discharge.",
       "observable": "One successor under process fence; exact VM/Run facts and obligations, no Closing from physical exit, no duplicate start or premature reclaim.",
-      "arc_guards": []
+      "arc_guards": [],
+      "host": "workbench"
     },
     {
       "id": "S32",
@@ -3724,9 +3766,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s32_remove_retained_result); FIG-4934 deferred it; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "handover::s32_missing_retained_material_refuses_without_body_replay"
+          }
         },
         {
           "variant": "default",
@@ -3752,7 +3797,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s32_remove_retained_result); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing replay oracle: handover::s32_missing_retained_material_refuses_without_body_replay proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3779,7 +3824,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s32_remove_retained_result); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing PostgreSQL oracle: handover::s32_missing_retained_material_refuses_without_body_replay proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -3806,14 +3851,15 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: tests/e2e/transfer.rs holds an unselected draft procedure (s32_remove_retained_result); FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Missing PostgreSQL and replay oracle: handover::s32_missing_retained_material_refuses_without_body_replay proves the sqlite_file/live leg only; FIG-4990 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],
       "setup": "Transfer real retained result to successor; ensure owner-qualified reference published.",
       "fault": "Corrupt/remove artifact or release final dependency, then cold follow.",
       "observable": "Typed retained-result refusal; zero body restart/new identity; required bytes stay readable before last dependency ends.",
-      "arc_guards": []
+      "arc_guards": [],
+      "host": "workbench"
     },
     {
       "id": "S33",

@@ -46,7 +46,17 @@ impl Fixture {
         ensure!(
             matches!(
                 config.scenario.as_str(),
-                "S01" | "S02" | "S05" | "S08" | "S09" | "S10" | "S11"
+                "S01"
+                    | "S02"
+                    | "S05"
+                    | "S08"
+                    | "S09"
+                    | "S10"
+                    | "S11"
+                    | "S12"
+                    | "S23"
+                    | "S31"
+                    | "S32"
             ),
             "unknown H2 fixture scenario"
         );
@@ -81,6 +91,10 @@ impl Fixture {
             "S08" | "S09" => &["intent"],
             "S10" => &["rank_one", "rank_two", "rank_three"],
             "S11" => &["winner", "loser", "after"],
+            "S12" => &["gate", "source"],
+            "S23" => &["winner", "source", "gate", "later"],
+            "S32" => &["winner", "source", "gate"],
+            "S31" => &["winner", "loser", "gate"],
             _ => &[],
         }
     }
@@ -94,7 +108,9 @@ impl Fixture {
                 "c" => "C",
                 value => value,
             });
-            let result = if *label == "loser" && self.config.deferred_loser {
+            let result = if (*label == "loser" && self.config.deferred_loser)
+                || matches!(*label, "source" | "later")
+            {
                 BodyResult::Deferred
             } else if matches!(*label, "intent" | "rank_one" | "rank_three") {
                 BodyResult::EmitToReceiver {

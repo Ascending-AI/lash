@@ -29,6 +29,9 @@ pub enum BarrierKind {
     VDurable,
     ContinuationPublished,
     SuccessorAdmitted,
+    /// A successor segment's V7 Start reached its deployment's transport and
+    /// is held there: the continuation is published but not yet adopted.
+    SuccessorStarting,
     PredecessorDischarged,
     SourceSealed,
     Suspended,

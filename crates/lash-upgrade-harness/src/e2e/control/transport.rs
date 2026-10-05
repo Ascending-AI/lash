@@ -40,6 +40,8 @@ struct Registry {
     active: usize,
     publications: Vec<PublicationCut>,
     dynamic_cuts: Vec<TransportCut>,
+    starts: Vec<StartHold>,
+    commands: Vec<CommandHold>,
 }
 #[derive(Default)]
 struct Connection {
@@ -60,6 +62,21 @@ pub struct PublicationCut {
     pub journal_name: String,
     pub proposal: Barrier,
     pub before_ack: Barrier,
+}
+/// Hold every V7 Start whose invocation key contains `key_fragment` until
+/// the barrier is released. Only a Run's own segment invocations carry it.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct StartHold {
+    pub key_fragment: String,
+    pub barrier: Barrier,
+}
+/// Hold one invocation's outgoing command of `command`'s type until the
+/// barrier is released: what follows it never reaches Restate meanwhile.
+#[derive(Clone)]
+pub struct CommandHold {
+    pub invocation: String,
+    pub command: MessageType,
+    pub barrier: Barrier,
 }
 impl V7Proxy {
     pub async fn start(
@@ -209,6 +226,30 @@ impl V7Proxy {
             .map_err(|_| anyhow::anyhow!("transport registry poisoned"))?
             .publications
             .push(cut);
+        Ok(())
+    }
+    pub fn arm_start_hold(&self, hold: StartHold) -> Result<()> {
+        ensure!(
+            !hold.key_fragment.is_empty() && hold.barrier.kind == BarrierKind::SuccessorStarting,
+            "start hold needs an actual Run key and the successor-start phase"
+        );
+        self.registry
+            .lock()
+            .map_err(|_| anyhow::anyhow!("transport registry poisoned"))?
+            .starts
+            .push(hold);
+        Ok(())
+    }
+    pub fn arm_command_hold(&self, hold: CommandHold) -> Result<()> {
+        ensure!(
+            !hold.invocation.is_empty() && !hold.barrier.kind.durable(),
+            "command hold needs an actual invocation and a non-durable phase"
+        );
+        self.registry
+            .lock()
+            .map_err(|_| anyhow::anyhow!("transport registry poisoned"))?
+            .commands
+            .push(hold);
         Ok(())
     }
     pub fn bind_invocation(&self, invocation: String, work: WorkIdentity) -> Result<()> {
@@ -373,11 +414,46 @@ async fn relay(
                 )?;
                 if to_host && frame.ty == MessageType::Start {
                     let message: StartMessage = frame.decode()?;
+                    for hold in registry
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("transport registry poisoned"))?
+                        .starts
+                        .iter()
+                        .filter(|hold| message.key.contains(&hold.key_fragment))
+                    {
+                        holds.push(Hold::Enter(
+                            hold.barrier.clone(),
+                            artifact.display().to_string(),
+                        ));
+                    }
                     connection_state
                         .lock()
                         .map_err(|_| anyhow::anyhow!("connection state poisoned"))?
                         .invocations
                         .insert(stream, message.debug_id);
+                }
+                if !to_host {
+                    let invocation = connection_state
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("connection state poisoned"))?
+                        .invocations
+                        .get(&stream)
+                        .cloned();
+                    for hold in registry
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("transport registry poisoned"))?
+                        .commands
+                        .iter()
+                        .filter(|hold| {
+                            hold.command == frame.ty
+                                && invocation.as_ref() == Some(&hold.invocation)
+                        })
+                    {
+                        holds.push(Hold::Enter(
+                            hold.barrier.clone(),
+                            artifact.display().to_string(),
+                        ));
+                    }
                 }
                 if !to_host && frame.ty == MessageType::RunCommand {
                     let message: RunCommandMessage = frame.decode()?;

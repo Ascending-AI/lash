@@ -14,7 +14,7 @@ use lash_upgrade_harness::e2e::{
         Barrier, BarrierKind, BarrierProof, CleanupReceipt, Control, CoreControl, Fault,
         FaultReceipt, FileBarriers, ToolControl, WorkIdentity,
         callback::BodyCallbacks,
-        transport::{TransportCut, V7Proxy},
+        transport::{CommandHold, StartHold, TransportCut, V7Proxy},
     },
     evidence::{Evidence, EvidenceReader},
     host::{HostAdapter, HostCommand, HostObservation, HostReady},
@@ -38,6 +38,11 @@ pub enum Row {
     Ranks,
     InlineLoser,
     DeferredLoser,
+    RetirePending,
+    CancelAtCapture,
+    CancelAfterAdoption,
+    PublicationCrash,
+    RetainedRemoval,
 }
 impl Row {
     fn id(self) -> &'static str {
@@ -49,6 +54,10 @@ impl Row {
             Self::BeforeIntent | Self::AfterIntent => "S09",
             Self::Ranks => "S10",
             Self::InlineLoser | Self::DeferredLoser => "S11",
+            Self::RetirePending => "S12",
+            Self::CancelAtCapture | Self::CancelAfterAdoption => "S23",
+            Self::PublicationCrash => "S31",
+            Self::RetainedRemoval => "S32",
         }
     }
     fn slug(self) -> &'static str {
@@ -62,6 +71,11 @@ impl Row {
             Self::Ranks => "s10",
             Self::InlineLoser => "s11-inline",
             Self::DeferredLoser => "s11-deferred",
+            Self::RetirePending => "s12",
+            Self::CancelAtCapture => "s23-capture-adoption",
+            Self::CancelAfterAdoption => "s23-post-adoption",
+            Self::PublicationCrash => "s31",
+            Self::RetainedRemoval => "s32",
         }
     }
     fn labels(self) -> &'static [&'static str] {
@@ -71,8 +85,26 @@ impl Row {
             Self::Batch => &["a", "b", "c"],
             Self::PreFinal | Self::BeforeIntent | Self::AfterIntent => &["intent"],
             Self::Ranks => &["rank_one", "rank_two", "rank_three"],
-            Self::InlineLoser | Self::DeferredLoser => &["winner", "loser"],
+            Self::InlineLoser | Self::DeferredLoser | Self::PublicationCrash => {
+                &["winner", "loser"]
+            }
+            Self::RetirePending => &["gate"],
+            Self::CancelAtCapture | Self::CancelAfterAdoption | Self::RetainedRemoval => {
+                &["winner", "source"]
+            }
         }
+    }
+    /// H3's transfer rows: their successor serves behind its own transport,
+    /// and each case's evidence is scoped to the logical Run's own segments.
+    pub(super) fn transfers(self) -> bool {
+        matches!(
+            self,
+            Self::RetirePending
+                | Self::CancelAtCapture
+                | Self::CancelAfterAdoption
+                | Self::PublicationCrash
+                | Self::RetainedRemoval
+        )
     }
     fn receiver(self) -> bool {
         matches!(
@@ -82,11 +114,11 @@ impl Row {
     }
 }
 
-struct Shared {
-    host: Mutex<WorkbenchHost>,
-    successor: Mutex<Option<WorkbenchHost>>,
-    generation_drain: Mutex<Option<serde_json::Value>>,
-    view: RestateView,
+pub(super) struct Shared {
+    pub(super) host: Mutex<WorkbenchHost>,
+    pub(super) successor: Mutex<Option<WorkbenchHost>>,
+    pub(super) generation_drain: Mutex<Option<serde_json::Value>>,
+    pub(super) view: RestateView,
     callbacks: Mutex<BodyCallbacks>,
     directory: PathBuf,
     delivery: PathBuf,
@@ -98,9 +130,23 @@ struct Shared {
     proxy: Mutex<V7Proxy>,
     admin: String,
     namespace: String,
-    store_root: PathBuf,
-    chat: Mutex<Option<String>>,
+    pub(super) store_root: PathBuf,
+    pub(super) chat: Mutex<Option<String>>,
     artifacts: Vec<ArtifactIdentity>,
+    /// The successor's advertised transport, when the row owns one.
+    successor_proxy: Mutex<Option<V7Proxy>>,
+    successor_uri: Option<String>,
+    /// Each bound logical Run's turn-invocation key, without its segment
+    /// ordinal: every physical segment of that Run, and nothing else, has it.
+    run_keys: Mutex<BTreeMap<String, String>>,
+    /// Fenced follow-ons as first read. The session head moves on once the
+    /// successor commits, so a transfer row keeps what publication showed.
+    retained: Mutex<Vec<lash_upgrade_harness::e2e::evidence::RetainedTransferFact>>,
+    /// Set once the predecessor is retired or killed for good: every later
+    /// follow and resolution goes to the successor, the only host left.
+    pub(super) predecessor_gone: Mutex<bool>,
+    /// A transfer row boots N+1 when it requests the drain, not before.
+    successor_boot: Mutex<Option<(ArtifactIdentity, CaseLease)>>,
 }
 impl Shared {
     async fn journals(&self, work: &WorkIdentity) -> Result<Evidence> {
@@ -109,12 +155,26 @@ impl Shared {
             id: String,
             pinned_service_protocol_version: Option<u32>,
         }
-        // A case owns one chat and no other turn. Include every actual segment
-        // after handover, retaining each invocation's own journal provenance.
-        let prefix = self.view.service_name("LashTurn").replace('\'', "''");
-        let rows: Vec<Invocation> = self.view.query(&format!(
-            "SELECT id, pinned_service_protocol_version FROM sys_invocation WHERE target_service_name LIKE '{prefix}%' AND target_handler_name = 'run' ORDER BY created_at"
-        )).await?;
+        let rows: Vec<Invocation> = if self.row.transfers() {
+            // Only this logical Run's segments; one Restate has not started
+            // yet has no journal.
+            self.segments(&work.run)
+                .await?
+                .into_iter()
+                .filter(|segment| segment.pinned_service_protocol_version.is_some())
+                .map(|segment| Invocation {
+                    id: segment.id,
+                    pinned_service_protocol_version: segment.pinned_service_protocol_version,
+                })
+                .collect()
+        } else {
+            // A case owns one chat and no other turn. Include every actual segment
+            // after handover, retaining each invocation's own journal provenance.
+            let prefix = self.view.service_name("LashTurn").replace('\'', "''");
+            self.view.query(&format!(
+                "SELECT id, pinned_service_protocol_version FROM sys_invocation WHERE target_service_name LIKE '{prefix}%' AND target_handler_name = 'run' ORDER BY created_at"
+            )).await?
+        };
         ensure!(
             !rows.is_empty(),
             "actual admitted turn invocation is absent"
@@ -126,8 +186,12 @@ impl Shared {
                 row.pinned_service_protocol_version == Some(7),
                 "actual segment is not V7"
             );
+            // A transfer row's barriers name the admitted work; each fact
+            // still retains the actual invocation it was read from.
             let mut segment = work.clone();
-            segment.segment = row.id.clone();
+            if !self.row.transfers() {
+                segment.segment = row.id.clone();
+            }
             evidence
                 .journals
                 .extend(self.view.journal(&segment, &row.id, 7).await?);
@@ -191,7 +255,24 @@ impl Shared {
             let mut query = db.prepare("SELECT turn_id,result_json FROM runtime_turn_commits WHERE session_id=?1 ORDER BY change_seq")?;
             Ok(query.query_map([chat], |row| Ok((row.get(0)?,row.get(1)?)))?.collect::<std::result::Result<_,_>>()?)
         }).await??;
+        if self.row.transfers() {
+            // Which logical turns committed, for a missed-publication diagnosis.
+            let turns: Vec<_> = rows.iter().map(|(turn, _)| turn.clone()).collect();
+            super::write(
+                &self.directory.join("native-commit-turns.json"),
+                &json!({"run":work.run,"turns":turns}),
+            )?;
+        }
         for (turn, raw) in rows {
+            // A commit's key names the logical turn it belongs to in its scope.
+            if self.row.transfers()
+                && serde_json::from_str::<serde_json::Value>(&turn)
+                    .ok()
+                    .and_then(|key| key.pointer("/scope/turn_id").cloned())
+                    != Some(json!(work.run))
+            {
+                continue;
+            }
             let receipt = lash_core::store::decode_runtime_commit_receipt(&session, &turn, &raw)?;
             if let Some(follow_on) = &receipt.pending_follow_on
                 && follow_on
@@ -215,6 +296,22 @@ impl Shared {
                 )?;
             }
         }
+        if self.row.transfers() {
+            let mut retained = self.retained.lock().await;
+            for fact in std::mem::take(&mut evidence.transfers) {
+                if !retained
+                    .iter()
+                    .any(|seen| seen.artifact == fact.artifact && seen.transfer == fact.transfer)
+                {
+                    retained.push(fact);
+                }
+            }
+            evidence.transfers = retained
+                .iter()
+                .filter(|fact| fact.work.run == work.run)
+                .cloned()
+                .collect();
+        }
         Ok(())
     }
     async fn bind(&self, work: WorkIdentity, chat: &str) -> Result<WorkIdentity> {
@@ -235,6 +332,13 @@ impl Shared {
             RestateView::new(&self.admin, &self.namespace)?,
             7,
         );
+        let key = lash_restate::recorded_turn_invocation_key(store.as_ref(), &session, &run)
+            .await?
+            .context("accepted Run has no retained turn invocation key")?;
+        let key = key
+            .rsplit_once('#')
+            .map_or(key.clone(), |(prefix, _)| prefix.to_owned());
+        self.run_keys.lock().await.insert(work.run.clone(), key);
         let work = reader
             .bind_public_run(store.as_ref(), &session, &run, work.ingress)
             .await?;
@@ -252,6 +356,199 @@ impl Shared {
         *self.chat.lock().await = Some(chat.into());
         *self.admitted.lock().await = Some(work.clone());
         Ok(work)
+    }
+}
+
+/// Whether a physical invocation key is a segment of the logical Run `run`
+/// admitted under `key`: an admission of its input, or a transferred segment.
+fn segment_of(candidate: &str, key: &str, run: &str) -> bool {
+    candidate == key
+        || candidate
+            .strip_prefix(key)
+            .is_some_and(|ordinal| ordinal.starts_with('#'))
+        || candidate.contains(&transferred(run))
+}
+
+/// The admission fragment of every segment a successor runs `run` under.
+pub(super) fn transferred(run: &str) -> String {
+    format!("run:{run}#")
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(super) struct Segment {
+    pub(super) id: String,
+    pub(super) target_service_name: String,
+    pub(super) target_service_key: String,
+    pub(super) status: String,
+    pub(super) pinned_deployment_id: Option<String>,
+    pub(super) pinned_service_protocol_version: Option<u32>,
+}
+
+impl Shared {
+    /// Every physical `run` invocation of the logical Run, oldest first.
+    pub(super) async fn segments(&self, run: &str) -> Result<Vec<Segment>> {
+        let key = self.key_of(run).await?;
+        let prefix = self.view.service_name("LashTurn").replace('\'', "''");
+        let rows: Vec<Segment> = self.view.query(&format!(
+            "SELECT id, target_service_name, target_service_key, status, pinned_deployment_id, pinned_service_protocol_version FROM sys_invocation WHERE target_service_name LIKE '{prefix}%' AND target_handler_name = 'run' ORDER BY created_at"
+        )).await?;
+        super::write(&self.directory.join("turn-invocations.json"), &rows)?;
+        Ok(rows
+            .into_iter()
+            .filter(|row| segment_of(&row.target_service_key, &key, run))
+            .collect())
+    }
+    async fn key_of(&self, run: &str) -> Result<String> {
+        self.run_keys
+            .lock()
+            .await
+            .get(run)
+            .cloned()
+            .context("logical Run has no bound invocation key")
+    }
+    pub(super) async fn successor_deployment(
+        &self,
+    ) -> Result<lash_upgrade_harness::restate_view::Deployment> {
+        self.view
+            .deployment_at(
+                self.successor_uri
+                    .as_deref()
+                    .context("row has no advertised successor transport")?,
+            )
+            .await
+    }
+    /// The successor segment, once it adopted the transfer and parked on its
+    /// own wait: pinned to the successor deployment and suspended there.
+    async fn successor_admitted(&self, work: &WorkIdentity) -> Result<PathBuf> {
+        let deployment = self.successor_deployment().await?;
+        loop {
+            let segments = self.segments(&work.run).await?;
+            if let Some(segment) = segments.iter().find(|segment| {
+                segment.target_service_key.contains(&transferred(&work.run))
+                    && segment.pinned_deployment_id.as_deref() == Some(deployment.id.as_str())
+                    && segment.status == "suspended"
+            }) {
+                let artifact = self
+                    .directory
+                    .join(format!("successor-admitted-{}.json", segment.id));
+                super::write(
+                    &artifact,
+                    &json!({"run":work.run,"predecessor":work.segment,"successor":segment,
+                        "deployment":{"id":deployment.id,"endpoint":deployment.endpoint},"segments":segments}),
+                )?;
+                return Ok(artifact);
+            }
+            ensure!(
+                Instant::now() < self.deadline,
+                "successor never adopted the transfer: {segments:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    /// The operator floor: the successor's production drain report must show
+    /// the predecessor generation drained before its only deployment goes.
+    async fn drain_and_retire(&self, generation: &str) -> Result<serde_json::Value> {
+        let status = loop {
+            let value = self
+                .successor
+                .lock()
+                .await
+                .as_ref()
+                .context("no replacing workbench generation")?
+                .control(
+                    reqwest::Method::GET,
+                    &format!("/api/admin/generations/{generation}/drain"),
+                    None,
+                )
+                .await?;
+            let status: lash::GenerationDrainStatus = serde_json::from_value(value.clone())?;
+            if status.drained() {
+                break value;
+            }
+            ensure!(
+                Instant::now() < self.deadline,
+                "the predecessor generation never drained: {value}"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+        let deployments = self.view.deployments_of_generation(generation).await?;
+        let predecessor = self.proxy.lock().await.endpoint.clone();
+        ensure!(
+            deployments.len() == 1
+                && deployments[0].endpoint.trim_end_matches('/')
+                    == predecessor.trim_end_matches('/'),
+            "the predecessor generation is not exactly the predecessor deployment: {deployments:?}"
+        );
+        let deployment = deployments[0].clone();
+        self.view.remove_deployment(&deployment.id).await?;
+        ensure!(
+            self.view
+                .deployments_of_generation(generation)
+                .await?
+                .is_empty(),
+            "retired deployment is still registered"
+        );
+        let cleanup = self.host.lock().await.stop().await?;
+        ensure!(
+            !cleanup.is_empty() && cleanup.iter().all(|receipt| receipt.closed),
+            "the retired workbench did not shut down cleanly"
+        );
+        *self.predecessor_gone.lock().await = true;
+        Ok(
+            json!({"kind":"h3_generation_retired","generation":generation,"drain":status,
+            "deployment":{"id":deployment.id,"endpoint":deployment.endpoint},"cleanup":cleanup}),
+        )
+    }
+    /// The authoritative store's view of one logical Run: its terminal, the
+    /// follow-on the fenced session head still owes it, and whether it is
+    /// the session's unfinished Run.
+    pub(super) async fn run_snapshot(&self, run: &str) -> Result<serde_json::Value> {
+        use lash_core::store::RunStore as _;
+        let chat = self
+            .chat
+            .lock()
+            .await
+            .clone()
+            .context("no bound native session")?;
+        let session = lash::SessionId::parse(&chat)?;
+        let turn = lash::TurnId::parse(run)?;
+        let stores = lash::sqlite::SqliteStoreSet::open(&self.store_root).await?;
+        let store = stores.open_store().await?;
+        let terminal = store.run_terminal(&session, &turn).await?;
+        let unfinished = store
+            .unfinished_run(&session)
+            .await?
+            .is_some_and(|unfinished| unfinished.run == turn);
+        // The follow-on the fenced session head still owes, if it is this Run's.
+        let path = self.store_root.join("durable-core.db");
+        let raw_session = chat.clone();
+        let owed = tokio::task::spawn_blocking(move || -> Result<Option<String>> {
+            let db = rusqlite::Connection::open_with_flags(
+                path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?;
+            let mut query =
+                db.prepare("SELECT pending_follow_on_json FROM session_head WHERE session_id=?1")?;
+            Ok(query
+                .query_map([raw_session], |row| row.get::<_, Option<String>>(0))?
+                .next()
+                .transpose()?
+                .flatten())
+        })
+        .await??;
+        let continuation = match owed {
+            Some(raw) if raw.contains(run) => serde_json::from_str(&raw)?,
+            _ => serde_json::Value::Null,
+        };
+        let snapshot = json!({"run":run,"terminal":terminal,"continuation":continuation,"unfinished":unfinished});
+        super::write(
+            &self.directory.join(format!(
+                "run-snapshot-{}.json",
+                lash_core::stable_hash::sha256_hex(run.as_bytes())
+            )),
+            &snapshot,
+        )?;
+        Ok(snapshot)
     }
 }
 
@@ -293,7 +590,24 @@ impl HostAdapter for Host {
                         .into(),
                 );
             }
-            if previous.is_none()
+            if previous.is_none() && self.0.row.transfers() {
+                // N+1 registers only when the roll begins. Registered first,
+                // it would take the session's admission and run the turn itself.
+                *self.0.successor_boot.lock().await = Some((
+                    artifact.clone(),
+                    CaseLease {
+                        gate_id: lease.gate_id.clone(),
+                        namespace: lease.namespace.clone(),
+                        authority: lease.authority.clone(),
+                        directory: lease.directory.join("successor"),
+                        postgres_url: lease.postgres_url.clone(),
+                        ports: lease.ports.clone(),
+                        deadline: lease.deadline,
+                        processes: Vec::new(),
+                        cleanup: Vec::new(),
+                    },
+                ));
+            } else if previous.is_none()
                 && let Some(successor) = self.0.successor.lock().await.as_mut()
             {
                 let mut next_lease = CaseLease {
@@ -334,6 +648,30 @@ impl HostAdapter for Host {
                     admitted.run == *run,
                     "handover targeted another logical Run"
                 );
+                if let Some((artifact, mut next_lease)) = self.0.successor_boot.lock().await.take()
+                {
+                    std::fs::create_dir_all(&next_lease.directory)?;
+                    let next = self
+                        .0
+                        .successor
+                        .lock()
+                        .await
+                        .as_mut()
+                        .context("no replacing workbench generation")?
+                        .boot(&artifact, &mut next_lease)
+                        .await?;
+                    let ready = self
+                        .0
+                        .ready
+                        .lock()
+                        .await
+                        .clone()
+                        .context("no live owned host")?;
+                    ensure!(
+                        next.process.pid != ready.process.pid,
+                        "successor reused the predecessor process"
+                    );
+                }
                 let predecessor = self.0.host.lock().await;
                 let generation = predecessor
                     .control(reqwest::Method::GET, "/api/e2e/generation", None)
@@ -366,6 +704,39 @@ impl HostAdapter for Host {
                 return Ok(HostObservation {
                     work: admitted,
                     output,
+                });
+            }
+            if let HostCommand::Attach { run } = &command
+                && *self.0.predecessor_gone.lock().await
+            {
+                // Only the successor deployment remains; follow through it.
+                let admitted = self
+                    .0
+                    .admitted
+                    .lock()
+                    .await
+                    .clone()
+                    .context("no bound admission")?;
+                ensure!(admitted.run == *run, "follow targeted another logical Run");
+                let chat = self
+                    .0
+                    .chat
+                    .lock()
+                    .await
+                    .clone()
+                    .context("no bound session")?;
+                let next = self.0.successor.lock().await;
+                let next = next.as_ref().context("no replacing workbench generation")?;
+                let outcome = next
+                    .control(
+                        reqwest::Method::GET,
+                        &format!("/api/e2e/sessions/{chat}/inputs/{}", admitted.ingress),
+                        None,
+                    )
+                    .await?;
+                return Ok(HostObservation {
+                    work: admitted,
+                    output: json!({"outcome":outcome}),
                 });
             }
             let submitting = matches!(command, HostCommand::Submit { .. });
@@ -433,12 +804,23 @@ impl Control for Controller {
                             .publish_store(barrier, &PathBuf::from(&fact.artifact))?;
                         break;
                     }
+                    if self.shared.row.transfers() {
+                        let snapshot = self.shared.run_snapshot(&barrier.work.run).await?;
+                        ensure!(
+                            snapshot["terminal"].is_null(),
+                            "the Run ended without publishing its continuation: {snapshot}"
+                        );
+                    }
                     ensure!(
                         Instant::now() < self.shared.deadline,
                         "continuation publication was absent"
                     );
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
+            }
+            if barrier.kind == BarrierKind::SuccessorAdmitted {
+                let artifact = self.shared.successor_admitted(&barrier.work).await?;
+                self.core.barriers.publish_store(barrier, &artifact)?;
             }
             let proof = self.core.await_barrier(barrier).await?;
             self.observed.push(proof.clone());
@@ -453,6 +835,25 @@ impl Control for Controller {
                     && p.journal_index == proof.journal_index),
                 "fault lacks an observed exact barrier"
             );
+            if let Fault::DrainAndRetire { generation } = &fault {
+                let incarnation = self
+                    .shared
+                    .ready
+                    .lock()
+                    .await
+                    .as_ref()
+                    .context("no live owned host")?
+                    .process
+                    .incarnation;
+                let receipt = self.shared.drain_and_retire(generation).await?;
+                let artifact = self.shared.directory.join("generation-retired.json");
+                super::write(&artifact, &receipt)?;
+                return Ok(FaultReceipt {
+                    fault,
+                    proof: proof.clone(),
+                    target_incarnation: incarnation,
+                });
+            }
             let Fault::KillHost { target } = &fault else {
                 bail!("H2 only kills its owned workbench host")
             };
@@ -510,17 +911,54 @@ impl Control for Controller {
                     .completion
                     .as_ref()
                     .context("body did not reserve a completion descriptor")?;
-                self.shared
-                    .host
-                    .lock()
-                    .await
-                    .command(HostCommand::Process {
-                        action: "resolve".into(),
-                        input: json!({"key":key,"value":value}),
-                    })
-                    .await?;
+                let resolve = HostCommand::Process {
+                    action: "resolve".into(),
+                    input: json!({"key":key,"value":value}),
+                };
+                if *self.shared.predecessor_gone.lock().await {
+                    self.shared
+                        .successor
+                        .lock()
+                        .await
+                        .as_mut()
+                        .context("no replacing workbench generation")?
+                        .command(resolve)
+                        .await?;
+                } else {
+                    self.shared.host.lock().await.command(resolve).await?;
+                }
                 Ok(())
             } else {
+                if let ToolControl::Hold(barrier) = &command
+                    && barrier.kind == BarrierKind::PredecessorDischarged
+                {
+                    // The predecessor's successor start is its last command
+                    // before Output: holding it keeps the discharge owed.
+                    self.shared
+                        .proxy
+                        .lock()
+                        .await
+                        .arm_command_hold(CommandHold {
+                            invocation: barrier.work.segment.clone(),
+                            command: lash_restate_test::protocol::MessageType::OneWayCallCommand,
+                            barrier: barrier.clone(),
+                        })?;
+                }
+                if let ToolControl::Hold(barrier) = &command
+                    && barrier.kind == BarrierKind::SuccessorStarting
+                {
+                    let key_fragment = transferred(&barrier.work.run);
+                    self.shared
+                        .successor_proxy
+                        .lock()
+                        .await
+                        .as_ref()
+                        .context("row has no successor transport")?
+                        .arm_start_hold(StartHold {
+                            key_fragment,
+                            barrier: barrier.clone(),
+                        })?;
+                }
                 if let ToolControl::Hold(barrier) = &command
                     && matches!(
                         barrier.kind,
@@ -549,9 +987,12 @@ pub async fn run(row: Row) -> Result<()> {
     let base: u16 = std::env::var("LASH_E2E_PORT_BASE")?.parse()?;
     ensure!(base <= u16::MAX - 50, "private port range overflow");
     lease.ports = (base + 10..base + 14).collect();
-    let needs_successor = matches!(row, Row::InlineLoser | Row::DeferredLoser);
+    let needs_successor = matches!(row, Row::InlineLoser | Row::DeferredLoser) || row.transfers();
     if needs_successor {
         lease.ports.extend([base + 20, base + 21]);
+    }
+    if row.transfers() {
+        lease.ports.push(base + 22);
     }
     let server = super::artifact(
         "restate-server",
@@ -579,12 +1020,13 @@ pub async fn run(row: Row) -> Result<()> {
     let delivery = lease.directory.join("tool-deliveries.jsonl");
     let fixture = json!({"scenario":row.id(), "delivery_ledger":delivery,
         "provider_ledger":lease.directory.join("provider.jsonl"), "body_callback_url":callbacks.endpoint,
-        "deferred_loser":matches!(row,Row::DeferredLoser)});
-    let protocol = if matches!(row, Row::Ranks | Row::InlineLoser | Row::DeferredLoser) {
-        "rlm"
-    } else {
-        "standard"
-    };
+        "deferred_loser":matches!(row,Row::DeferredLoser | Row::PublicationCrash)});
+    let protocol =
+        if matches!(row, Row::Ranks | Row::InlineLoser | Row::DeferredLoser) || row.transfers() {
+            "rlm"
+        } else {
+            "standard"
+        };
     let fixture_path = lease.directory.join("tool-fixture.json");
     super::write(&fixture_path, &fixture)?;
     let mut environment = BTreeMap::from([
@@ -595,6 +1037,23 @@ pub async fn run(row: Row) -> Result<()> {
         ("OPENROUTER_API_KEY".into(), "case-owned-fixture".into()),
         ("AGENT_WORKBENCH_PROTOCOL".into(), protocol.into()),
     ]);
+    // A transfer row's successor serves behind its own transport, so a case
+    // can hold the successor segment's Start between publication and adoption.
+    let successor_proxy = if row.transfers() {
+        Some(
+            V7Proxy::start(
+                std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, base + 22))?,
+                std::net::SocketAddr::from(([127, 0, 0, 1], base + 21)),
+                callback_dir.clone(),
+                deadline,
+                Vec::new(),
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    let successor_uri = successor_proxy.as_ref().map(|proxy| proxy.endpoint.clone());
     let successor = if needs_successor {
         // The existing opt-in shutdown factory adds a real composition
         // declaration. Normal core construction computes and binds a distinct
@@ -612,6 +1071,12 @@ pub async fn run(row: Row) -> Result<()> {
             "AGENT_WORKBENCH_DATA_DIR".into(),
             lease.directory.join("workbench-data").display().to_string(),
         );
+        if let Some(proxy) = &successor_proxy {
+            next_environment.insert(
+                "AGENT_WORKBENCH_RESTATE_ADVERTISE_URL".into(),
+                proxy.endpoint.clone(),
+            );
+        }
         Some(
             WorkbenchHost::new(
                 boot.nodes[0].ingress_url.clone(),
@@ -654,6 +1119,12 @@ pub async fn run(row: Row) -> Result<()> {
         store_root: lease.directory.join("workbench-data/lash-sessions"),
         chat: Mutex::new(None),
         artifacts: vec![server.clone(), artifact.clone()],
+        successor_proxy: Mutex::new(successor_proxy),
+        successor_uri,
+        run_keys: Mutex::new(BTreeMap::new()),
+        retained: Mutex::new(Vec::new()),
+        predecessor_gone: Mutex::new(false),
+        successor_boot: Mutex::new(None),
     });
     let source = shared.clone();
     let snapshot: Snapshot = Arc::new(move |work| {
@@ -669,7 +1140,13 @@ pub async fn run(row: Row) -> Result<()> {
         shared: shared.clone(),
         observed: Vec::new(),
     };
-    let spec = if matches!(row, Row::Singleton | Row::Partial | Row::Batch) {
+    let spec = if row.transfers() {
+        super::handover::spec(
+            row.id(),
+            StoreKind::SqliteFile,
+            vec![server, artifact.clone()],
+        )?
+    } else if matches!(row, Row::Singleton | Row::Partial | Row::Batch) {
         super::tools::spec(
             row.id(),
             StoreKind::SqliteFile,
@@ -723,6 +1200,31 @@ pub async fn run(row: Row) -> Result<()> {
         Row::Ranks => super::cancel::empty_middle_rank(&mut scenario, &spec).await,
         Row::InlineLoser => super::cancel::live_loser(&mut scenario, &spec, false).await,
         Row::DeferredLoser => super::cancel::live_loser(&mut scenario, &spec, true).await,
+        Row::RetirePending => super::handover::retire_pending(&mut scenario, &shared, &spec).await,
+        Row::CancelAtCapture => {
+            super::handover::cancel_then_fresh(
+                &mut scenario,
+                &shared,
+                &spec,
+                super::handover::Cut::CaptureToAdoption,
+            )
+            .await
+        }
+        Row::CancelAfterAdoption => {
+            super::handover::cancel_then_fresh(
+                &mut scenario,
+                &shared,
+                &spec,
+                super::handover::Cut::PostAdoption,
+            )
+            .await
+        }
+        Row::PublicationCrash => {
+            super::handover::publication_crash(&mut scenario, &shared, &spec).await
+        }
+        Row::RetainedRemoval => {
+            super::handover::remove_retained(&mut scenario, &shared, &spec).await
+        }
     };
     let mut errors = Vec::new();
     let mut evidence = match result {
@@ -745,6 +1247,16 @@ pub async fn run(row: Row) -> Result<()> {
     let host_cleanup = host.stop().await;
     let callback_cleanup = shared.callbacks.lock().await.finish().await;
     let proxy_cleanup = shared.proxy.lock().await.finish().await;
+    let successor_proxy_cleanup = match shared.successor_proxy.lock().await.as_mut() {
+        Some(proxy) => proxy.finish().await.map(|()| {
+            vec![CleanupReceipt {
+                resource: format!("listener:{}", base + 22),
+                closed: true,
+                detail: "successor proxy tasks joined and listener refused connection".into(),
+            }]
+        }),
+        None => Ok(Vec::new()),
+    };
     let cluster_cleanup = cluster.finish().await;
     for (resource, cleanup) in [
         ("host", host_cleanup),
@@ -768,6 +1280,7 @@ pub async fn run(row: Row) -> Result<()> {
                 }]
             }),
         ),
+        ("successor-proxy", successor_proxy_cleanup),
         ("cluster", cluster_cleanup),
     ] {
         match cleanup {

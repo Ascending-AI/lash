@@ -30,7 +30,7 @@ pub fn scripted_provider(
     ensure!(
         matches!(
             scenario,
-            "S01" | "S02" | "S05" | "S08" | "S09" | "S10" | "S11"
+            "S01" | "S02" | "S05" | "S08" | "S09" | "S10" | "S11" | "S12" | "S23" | "S31" | "S32"
         ),
         "unknown H2 scenario"
     );
@@ -112,13 +112,18 @@ fn response(
     file.rewind()?;
     let mut previous = String::new();
     file.read_to_string(&mut previous)?;
+    // S23 submits identical input again after cancelling the first Run; each
+    // Run makes exactly one request of its own.
+    let runs = if config.scenario == "S23" { 2 } else { 1 };
+    let mut repeated = 0;
     for line in previous.lines() {
         let value: serde_json::Value = serde_json::from_str(line)?;
-        ensure!(
-            value["stage"] != stage,
-            "unexpected repeated provider request at {stage}"
-        );
+        repeated += usize::from(value["stage"] == stage);
     }
+    ensure!(
+        repeated < runs,
+        "unexpected repeated provider request at {stage}"
+    );
     let parts = match protocol {
         FixtureProtocol::Standard if stage == "initial" => {
             if config.scenario == "S05" {
@@ -229,6 +234,18 @@ fn response(
                 }
                 "S11" => {
                     "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); await tools.after({}); finish(value);"
+                }
+                "S12" => {
+                    "const gate = await tools.gate({}); const value = await tools.source({}); finish(gate + '|' + value);"
+                }
+                "S31" => {
+                    "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); const gate = await tools.gate({}); finish(value + '|' + gate);"
+                }
+                "S23" => {
+                    "const winner = tools.winner({}); const source = tools.source({}); const value = await Promise.race([winner,source]); const gate = await tools.gate({}); const later = await tools.later({}); finish(value + '|' + gate + '|' + later);"
+                }
+                "S32" => {
+                    "const winner = tools.winner({}); const source = tools.source({}); const value = await Promise.race([winner,source]); const gate = await tools.gate({}); finish(value + '|' + gate);"
                 }
                 _ => return Err(anyhow!("scenario needs a Standard channel")),
             };

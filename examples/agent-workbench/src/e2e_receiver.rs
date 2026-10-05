@@ -71,10 +71,12 @@ impl ReceiverState {
     }
 }
 
+/// The settled outcome, or the typed runtime refusal the follow ended with:
+/// a cause the engine typed stays typed for the case reading it.
 async fn attach(
     State(state): State<ReceiverState>,
     Path((session_id, input_id)): Path<(lash::SessionId, lash::InputId)>,
-) -> AppResult<Json<lash::remote::turn_result::RemoteSendOutcome>> {
+) -> AppResult<Json<serde_json::Value>> {
     let durable = state
         .app
         .core
@@ -82,12 +84,18 @@ async fn attach(
         .durable()
         .await
         .map_err(error)?;
-    let outcome = durable
-        .attach(input_id.clone())
-        .outcome()
-        .await
-        .map_err(error)?;
-    Ok(Json(outcome.to_remote(&session_id, &input_id)))
+    match durable.attach(input_id.clone()).outcome().await {
+        Ok(outcome) => Ok(Json(
+            serde_json::to_value(outcome.to_remote(&session_id, &input_id)).map_err(error)?,
+        )),
+        Err(lash::EmbedError::Runtime(refusal)) => Ok(Json(serde_json::json!({
+            "type": "refused",
+            "session_id": session_id,
+            "input_id": input_id,
+            "error": refusal,
+        }))),
+        Err(other) => Err(error(other)),
+    }
 }
 
 fn error(message: impl std::fmt::Display) -> AppError {
