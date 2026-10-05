@@ -1733,6 +1733,7 @@
           "leg": "live",
           "channel": "standard",
           "tiers": [
+            "smoke",
             "full",
             "release"
           ],
@@ -1837,35 +1838,6 @@
           "state": "held",
           "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the workbench case operation::s17_workbench_operation_drop_and_follow exists and FIG-4994 threads the permutation into it.",
           "registration": null
-        },
-        {
-          "variant": "default",
-          "store": "sqlite_memory",
-          "leg": "live",
-          "channel": "standard",
-          "tiers": [
-            "smoke"
-          ],
-          "server_nodes": 1,
-          "binaries": [
-            "host",
-            "vm_worker"
-          ],
-          "artifacts": [
-            "journal",
-            "store",
-            "host",
-            "trace",
-            "cleanup",
-            "junit",
-            "provenance"
-          ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "process::s17_operation_drop_and_follow_sqlite_memory"
-          }
         }
       ],
       "setup": "Workbench e2e-tools plugin task issues a native tool and returns completion; node::h3::double_fixture proves admission and follow on the server double.",
@@ -4235,7 +4207,7 @@
   "server": {
     "version": "1.7.13",
     "archive_sha256": "5429b216b68f3fa52b7f0e6627a2c2a86fc0c75d19b1e152cd2e7dcd8bab4c82",
-    "executable_sha256": null,
+    "executable_sha256": "bf9d787022823280eefdb898f66b9c92983fba27372e1479a4c00fad35d12d74",
     "protocol": "V7"
   },
   "release_audits": {

@@ -1,0 +1,129 @@
+name: E2E receipts
+
+# FIG-5001: every executed case writes a certified receipt. Push to main runs
+# the smoke tier, the six-hour schedule runs the full tier, and dispatch picks
+# either. The live tier stays manual; this job is advisory until the receipts
+# prove themselves on the schedule.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: Receipt tier to run
+        type: choice
+        options: [smoke, full]
+        default: smoke
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ (github.event_name == 'schedule' || inputs.tier == 'full') && 'full' || 'smoke' }}
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: E2E ${{ (github.event_name == 'schedule' || inputs.tier == 'full') && 'full' || 'smoke' }} tier
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ (github.event_name == 'schedule' || inputs.tier == 'full') && 360 || 120 }}
+    environment: build-cache
+    env:
+      TIER: ${{ (github.event_name == 'schedule' || inputs.tier == 'full') && 'full' || 'smoke' }}
+      KILN_GATE_ID: e2e-${{ github.run_id }}
+      KILN_FORK_DIR: ${{ github.workspace }}
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      # The checkout step is the canonical shallow fetch, so the arc guards'
+      # `git merge-base --is-ancestor <commit> origin/main` needs this extra
+      # unshallow fetch of origin/main and the trigger SHA.
+      - name: Fetch origin/main history
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 600 git fetch --no-tags --unshallow origin \
+              "${GITHUB_SHA}" "+refs/heads/main:refs/remotes/origin/main"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+
+      - name: Configure Buck2 shared cache
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Install Chromium for Playwright
+        run: uv run --with playwright==1.62.0 playwright install --with-deps chromium
+
+      - name: Shim kiln onto PATH
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          # shellcheck disable=SC2016 # the shim expands these at call time
+          printf '#!/usr/bin/env bash\nexec "$GITHUB_WORKSPACE/scripts/hermetic-build.sh" "$@"\n' \
+            > "$RUNNER_TEMP/bin/kiln"
+          chmod +x "$RUNNER_TEMP/bin/kiln"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Run the E2E tier
+        run: python3 scripts/lash-e2e.py run --tier "$TIER" --ready --sha "$GITHUB_SHA" --artifacts target/e2e/"$TIER"
+
+      - name: Upload E2E receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-${{ env.TIER }}-${{ github.run_id }}
+          path: |
+            target/e2e/
+            !target/e2e/**/binaries/**
+            !target/e2e/**/tmp/**
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"

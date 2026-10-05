@@ -88,7 +88,7 @@ def load_manifest(path: Path = MANIFEST) -> dict:
         require(len(keys) == len(set(keys)), f"{scenario['id']}: duplicate permutation")
     smoke = select(manifest, "smoke", [])
     require(len(smoke) == 6 and {r['scenario'] for r in smoke} == SMOKE, "smoke must select exactly its six scenarios")
-    require(all(r["leg"] == "live" and r["store"] == ("sqlite_file" if r["scenario"] in {"S01", "S02", "S18", "S26"} else "sqlite_memory") for r in smoke), "smoke needs live SQLite rows; S01/S02/S18/S26 persisted")
+    require(all(r["leg"] == "live" and r["store"] == ("sqlite_file" if r["scenario"] in {"S01", "S02", "S17", "S18", "S26"} else "sqlite_memory") for r in smoke), "smoke needs live SQLite rows; S01/S02/S17/S18/S26 persisted")
     deterministic = {f"S{i:02}" for i in range(1, 35)}
     for tier in ("full", "release"):
         require({r["scenario"] for r in select(manifest, tier, [])} == deterministic, f"{tier}: deterministic catalogue incomplete")
@@ -116,17 +116,22 @@ def ancestor(commit: str, source: str) -> bool:
     return subprocess.run(["git", "merge-base", "--is-ancestor", commit, source], cwd=ROOT, check=False).returncode == 0
 
 
-def plan(manifest: dict, manifest_sha: str, tier: str, scenarios: list[str], source: str, cases: list[str] | None = None) -> dict:
+def plan(manifest: dict, manifest_sha: str, tier: str, scenarios: list[str], source: str, cases: list[str] | None = None, ready: bool = False) -> dict:
     require(SHA.fullmatch(source) is not None, "source must be an exact commit SHA")
-    require(tier != "release" or not (scenarios or cases), "release certification cannot select a subset")
+    require(tier != "release" or not (scenarios or cases or ready), "release certification cannot select a subset")
     rows = select(manifest, tier, scenarios)
     if cases:
         require(len(cases) == len(set(cases)), "duplicate case selector")
         require(set(cases) <= {case_key(row) for row in rows}, "case selector absent from tier/scenarios")
         rows = [row for row in rows if case_key(row) in cases]
+    excluded_held = [case_key(r) for r in rows if r["state"] == "held"] if ready else []
+    if ready:
+        rows = [r for r in rows if r["state"] != "held"]
+        require(bool(rows), "zero selected cases")
     return {"source_sha": source, "manifest_sha256": manifest_sha, "tier": tier,
             "selectors": scenarios, "selected": len(rows), "cases": rows,
             "guarded": [case_key(r) for r in rows if any(g["commit"] is None or not ancestor(g["commit"], source) or not ancestor(g["commit"], "origin/main") for g in r["arc_guards"])],
+            "excluded_held": excluded_held, "tier_complete": not excluded_held,
             "held": [case_key(r) for r in rows if r["state"] == "held"]}
 
 
@@ -150,6 +155,14 @@ def counts(rows: list[dict]) -> dict:
 def check_counts(reported: dict, actual: dict, label: str) -> None:
     require(isinstance(reported, dict) and set(reported) == set(COUNTS), f"{label}: invalid count fields")
     require(all(type(reported[k]) is int and reported[k] >= 0 for k in COUNTS) and reported == actual, f"{label}: counts differ")
+
+
+def store_leg_groups(cases: list[dict], rows: list[dict]) -> dict:
+    wanted = {case_key(row): row for row in cases}
+    groups = {}
+    for key in sorted({f"{r['store']}/{r['leg']}" for r in wanted.values()}):
+        groups[key] = counts([r for r in rows if f"{wanted[r['key']]['store']}/{wanted[r['key']]['leg']}" == key])
+    return groups
 
 
 def reconcile(expected: dict, receipt: dict, root: Path, manifest: dict) -> dict:
@@ -180,6 +193,7 @@ def reconcile(expected: dict, receipt: dict, root: Path, manifest: dict) -> dict
         require(len(junit) == 1 and junit[0].get("name") == spec["registration"]["test"], f"{row['key']}: JUnit count/test mismatch")
         require(not any(list(xml.iter(tag)) for tag in ("failure", "error", "skipped")), f"{row['key']}: unsuccessful JUnit case")
         provenance = json.loads(paths["provenance"].read_text())
+        require(provenance.get("evidence_error") is None, f"{row['key']}: evidence error: {provenance.get('evidence_error')}")
         require(provenance["source_sha"] == expected["source_sha"] and provenance["case"] == row["key"], "wrong binary provenance")
         require(provenance["protocol"] == "V7", "missing negotiated V7 receipt")
         require(provenance["server_nodes"] == spec["server_nodes"], "wrong cluster size")
@@ -187,17 +201,15 @@ def reconcile(expected: dict, receipt: dict, root: Path, manifest: dict) -> dict
         require(set(binaries) == set(spec["binaries"]), "missing binary provenance")
         for name, binary in binaries.items():
             require(SHA.fullmatch(binary["source_sha"]) is not None and binary["source_sha"] == expected["source_sha"], f"{name}: binary from another source")
-            artifact(root, binary["artifact"])
+            artifact(paths["provenance"].parent, binary["artifact"])
         server = provenance["server"]
         require(server["version"] == manifest["server"]["version"] and server["archive_sha256"] == manifest["server"]["archive_sha256"], "server archive differs from pin")
         require(manifest["server"]["executable_sha256"] is not None, "server executable pin not yet registered")
         require(server["artifact"]["sha256"] == manifest["server"]["executable_sha256"], "server executable differs from pin")
-        artifact(root, server["artifact"])
+        artifact(paths["provenance"].parent, server["artifact"])
     actual = counts(rows)
     check_counts(receipt["counts"], actual, "aggregate")
-    groups = {}
-    for key in sorted({f"{r['store']}/{r['leg']}" for r in wanted.values()}):
-        groups[key] = counts([r for r in rows if f"{wanted[r['key']]['store']}/{wanted[r['key']]['leg']}" == key])
+    groups = store_leg_groups(expected["cases"], rows)
     require(receipt["groups"] == groups, "per-store/per-leg counts differ")
     for key, group in groups.items():
         check_counts(receipt["groups"][key], group, key)
@@ -219,31 +231,68 @@ def write(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
-def run_cases(expected: dict, artifacts: Path) -> dict:
+def conclude(expected: dict, receipt_path: Path, manifest: dict, destination: Path) -> dict:
+    """Certify a receipt against the plan, recording the refusal reason instead."""
+    conclusion = {"source_sha": expected["source_sha"],
+                  "manifest_sha256": expected["manifest_sha256"],
+                  "tier": expected["tier"], "receipt_sha256": None,
+                  "certified": False, "reason": None, "counts": None, "groups": None,
+                  "excluded_held": expected["excluded_held"],
+                  "tier_complete": expected["tier_complete"]}
+    try:
+        receipt = json.loads(receipt_path.read_text())
+        conclusion["receipt_sha256"] = digest(receipt_path)
+        if isinstance(receipt, dict):
+            conclusion["counts"] = receipt.get("counts")
+            conclusion["groups"] = receipt.get("groups")
+        result = reconcile(expected, receipt, receipt_path.parent, manifest)
+        conclusion.update(counts=result["counts"], groups=result["groups"], certified=True)
+    except (ValueError, KeyError, TypeError, OSError, ET.ParseError) as error:
+        conclusion["reason"] = str(error)
+    write(destination / "conclusion.json", conclusion)
+    return conclusion
+
+
+def run_cases(expected: dict, artifacts: Path, manifest: dict) -> dict:
     require(not expected["held"], f"unavailable registrations: {', '.join(expected['held'])}")
     require(not expected["guarded"], f"unlanded arc guards: {', '.join(expected['guarded'])}")
     require(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() == expected["source_sha"], "checkout differs from exact source SHA")
     require(not subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True).strip(), "execution requires a clean source checkout")
+    role_files = {"journal": "journal.json", "store": "store.json", "host": "host.json",
+                  "trace": "trace.json", "cleanup": "cleanup.json", "junit": "junit.xml",
+                  "provenance": "provenance.json"}
     rows = []
     for index, row in enumerate(expected["cases"]):
         directory = artifacts / f"case-{index}"
-        code = subprocess.call([
+        subprocess.call([
             "python3", str(ROOT / RUNNER), row["registration"]["label"], row["registration"]["test"],
-            "--artifacts", str(directory),
+            "--artifacts", str(directory), "--case", case_key(row),
         ], cwd=ROOT)
-        execution = json.loads((directory / "execution.json").read_text())
-        require(execution["scenario"] == row["registration"]["test"], "wrong scenario report")
-        executed = execution["counts"]["executed"] == 1
+        execution_path = directory / "execution.json"
+        if execution_path.is_file():
+            execution = json.loads(execution_path.read_text())
+            require(execution["scenario"] == row["registration"]["test"], "wrong scenario report")
+        else:
+            # A runner that died before reporting cannot certify; the case still
+            # lands in the receipt so reconcile names the refusal.
+            execution = {"counts": {"executed": 0, "passed": 0, "failed": 0}}
+        executed = bool(execution["counts"]["executed"])
         if executed:
             require(execution["source_sha"] == expected["source_sha"], "wrong source report")
-        status = "passed" if executed and code == 0 and execution["counts"]["passed"] == 1 else ("failed" if executed else "not_run")
-        rows.append({"key": case_key(row), "executed": executed, "status": status, "artifacts": str(directory)})
+        status = ("passed" if executed and execution["counts"]["passed"] == 1
+                  and execution.get("exit_code") == 0
+                  else "failed" if executed else "not_run")
+        evidence = {role: {"path": f"case-{index}/{name}", "sha256": digest(directory / name)}
+                    for role, name in role_files.items() if (directory / name).is_file()}
+        rows.append({"key": case_key(row), "status": status, "executed": executed,
+                     "artifacts": evidence, "quarantine": None})
     # These are execution results. Tier certification still requires reconcile's
     # complete journal/store/trace/cleanup/provenance receipts and release gates.
-    result = {"source_sha": expected["source_sha"], "manifest_sha256": expected["manifest_sha256"],
-              "tier": expected["tier"], "cases": rows, "counts": counts(rows), "certified": False}
-    write(artifacts / "execution.json", result)
-    return result
+    receipt = {"source_sha": expected["source_sha"], "manifest_sha256": expected["manifest_sha256"],
+               "tier": expected["tier"], "cases": rows, "counts": counts(rows),
+               "groups": store_leg_groups(expected["cases"], rows), "audits": {}, "gates": {}}
+    write(artifacts / "receipt.json", receipt)
+    return conclude(expected, artifacts / "receipt.json", manifest, artifacts)
 
 
 def main() -> int:
@@ -255,6 +304,7 @@ def main() -> int:
         command.add_argument("--tier", choices=("smoke", "full", "release", "live"), required=True)
         command.add_argument("--scenario", action="append", default=[])
         command.add_argument("--case", action="append", default=[], help="exact scenario/variant/store/leg/channel permutation (non-release tiers)")
+        command.add_argument("--ready", action="store_true", help="exclude held registrations (non-release tiers)")
         command.add_argument("--sha", required=True)
         command.add_argument("--artifacts", type=Path, required=True)
         if name == "reconcile":
@@ -262,7 +312,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         manifest = load_manifest(args.manifest)
-        expected = plan(manifest, digest(args.manifest), args.tier, args.scenario, args.sha, args.case)
+        expected = plan(manifest, digest(args.manifest), args.tier, args.scenario, args.sha, args.case, args.ready)
         args.artifacts = args.artifacts.resolve()
         args.artifacts.mkdir(parents=True, exist_ok=True)
         destination = args.artifacts / "plan.json"
@@ -273,15 +323,12 @@ def main() -> int:
             print(json.dumps(expected, indent=2))
             return 0
         if args.command == "run":
-            result = run_cases(expected, args.artifacts)
+            result = run_cases(expected, args.artifacts, manifest)
             print(json.dumps(result))
-            return int(result["counts"]["passed"] != result["counts"]["selected"])
-        result = reconcile(expected, json.loads(args.receipt.read_text()), args.receipt.parent, manifest)
-        result["receipt_sha256"] = digest(args.receipt)
-        result["manifest_sha256"] = expected["manifest_sha256"]
-        write(args.artifacts / "conclusion.json", result)
+            return int(not result["certified"])
+        result = conclude(expected, args.receipt, manifest, args.artifacts)
         print(json.dumps(result))
-        return 0
+        return int(not result["certified"])
     except (ValueError, KeyError, TypeError, OSError, ET.ParseError, subprocess.CalledProcessError) as error:
         print(f"lash-e2e rejected: {error}", file=sys.stderr)
         return 1

@@ -2,13 +2,16 @@
 //! its real HTTP contract, with the controller owning its lifetime.
 mod workbench_browser;
 mod workbench_provider;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, ensure};
 use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease};
+use lash_upgrade_harness::e2e::control::{CleanupReceipt, WorkIdentity};
+use lash_upgrade_harness::e2e::evidence::{CaseReceipt, Evidence, JournalFact, Verdict};
 use lash_upgrade_harness::e2e::host::{HostAdapter as _, HostCommand};
 use lash_upgrade_harness::e2e::host_adapters::consumer::ConsumerHost;
+use lash_upgrade_harness::restate_view::RestateView;
 use serde_json::json;
 
 fn required(name: &str) -> Result<String> {
@@ -101,6 +104,91 @@ fn artifact(prefix: &str, role: &str) -> Result<ArtifactIdentity> {
     })
 }
 
+/// Fold teardown results into the evidence and write the CaseReceipt. Returns
+/// the final error list so callers keep their own propagation order.
+pub(crate) fn write_case_receipt(
+    directory: &Path,
+    mut evidence: Evidence,
+    mut errors: Vec<String>,
+    cleanups: &[(&str, &Result<Vec<CleanupReceipt>>)],
+) -> Result<Vec<String>> {
+    for (resource, cleanup) in cleanups {
+        match cleanup {
+            Ok(receipts) => evidence.cleanup.extend(receipts.iter().cloned()),
+            Err(error) => {
+                errors.push(format!("{resource} cleanup: {error:#}"));
+                evidence.cleanup.push(CleanupReceipt {
+                    resource: (*resource).into(),
+                    closed: false,
+                    detail: format!("{error:#}"),
+                });
+            }
+        }
+    }
+    if evidence.cleanup.is_empty() || evidence.cleanup.iter().any(|receipt| !receipt.closed) {
+        errors.push("case leaked owned resources".into());
+    }
+    let verdict = if errors.is_empty() {
+        Verdict::Passed
+    } else {
+        Verdict::Failed {
+            reason: errors.join("; "),
+        }
+    };
+    CaseReceipt { evidence, verdict }.write(directory)?;
+    Ok(errors)
+}
+
+/// ingress and run carry the LashTurn workflow (admission) key.
+pub(crate) async fn turn_journals(view: &RestateView) -> Result<Vec<JournalFact>> {
+    #[derive(serde::Deserialize)]
+    struct Row {
+        id: String,
+        target_service_key: String,
+        target_service_name: String,
+        pinned_service_protocol_version: Option<u32>,
+    }
+    let prefix = view.service_name("LashTurn");
+    let rows: Vec<Row> = view
+        .query(
+            "SELECT id, target_service_key, target_service_name, \
+             pinned_service_protocol_version FROM sys_invocation \
+             WHERE target_handler_name='run'",
+        )
+        .await?;
+    let rows: Vec<Row> = rows
+        .into_iter()
+        .filter(|row| {
+            row.target_service_name == prefix
+                || row.target_service_name.starts_with(&format!("{prefix}_g"))
+        })
+        .collect();
+    ensure!(
+        !rows.is_empty(),
+        "no V7 LashTurn journal in the case namespace"
+    );
+    let mut journals = Vec::new();
+    for row in rows {
+        let key = row.target_service_key;
+        let work = WorkIdentity {
+            ingress: key.clone(),
+            run: key,
+            segment: row.id.clone(),
+            call: None,
+            ordinal: None,
+        };
+        journals.extend(
+            view.journal(
+                &work,
+                &row.id,
+                row.pinned_service_protocol_version.unwrap_or(0),
+            )
+            .await?,
+        );
+    }
+    Ok(journals)
+}
+
 #[test]
 #[ignore = "prebuilt external consumer and private real Restate supplied by the E2E controller"]
 fn s30_external_consumer_accept_follow_cancel() -> Result<()> {
@@ -118,6 +206,14 @@ async fn s30() -> Result<()> {
         role: "external-consumer".into(),
         path: required("LASH_E2E_CONSUMER_BIN")?.into(),
         sha256: required("LASH_E2E_CONSUMER_SHA256")?,
+        candidate_sha: required("LASH_E2E_CANDIDATE_SHA")?,
+        generation: required("LASH_E2E_CONSUMER_GENERATION")?,
+    };
+    let server_path = required("LASH_RESTATE_SERVER_BIN")?;
+    let server = ArtifactIdentity {
+        role: "restate-server".into(),
+        sha256: lash_core::stable_hash::sha256_hex(&std::fs::read(&server_path)?),
+        path: server_path.into(),
         candidate_sha: required("LASH_E2E_CANDIDATE_SHA")?,
         generation: required("LASH_E2E_CONSUMER_GENERATION")?,
     };
@@ -139,6 +235,8 @@ async fn s30() -> Result<()> {
         port,
         port + 1,
     )?;
+    let mut evidence = Evidence::empty("S30".into());
+    evidence.artifacts = vec![artifact.clone(), server];
     let scenario = async {
         let ready = host.boot(&artifact, &mut lease).await?;
         ensure!(ready.protocol == 7, "the real deployment did not negotiate V7");
@@ -212,34 +310,31 @@ async fn s30() -> Result<()> {
             ensure!(Instant::now() < lease.deadline,"original consumer Attempt receipt was not independently journaled");
             tokio::time::sleep(Duration::from_millis(20)).await;
         };
-        std::fs::write(root.join("s30-evidence.json"), serde_json::to_vec_pretty(&json!({
-            "scenario":"S30", "rules":["R7","L03","L08","L21"], "selected":1,"executed":1,
-            "ready":ready,"run":run,"binding":binding,"work":work,"invocation":invocations[0],"journals":journals,"outcome":first,"cancelled":terminal,"bodies":bodies,"transcript":host.transcript()?
-        }))?)?;
+        evidence.stores = vec![binding, invocations[0].clone()];
+        evidence.effects = bodies.clone();
+        evidence.journals = journals;
         anyhow::Ok(())
     }.await;
-    let cleanup = host.stop().await;
-    std::fs::write(
-        root.join("s30-transcript.json"),
-        serde_json::to_vec_pretty(
-            &json!({"observations":host.transcript()?,"scenario_error":scenario.as_ref().err().map(ToString::to_string)}),
-        )?,
-    )?;
     // Cleanup runs before propagating any oracle error, preserving the
     // first failure alongside cleanup evidence.
-    std::fs::create_dir_all(&root)?;
-    std::fs::write(
-        root.join("s30-cleanup.json"),
-        serde_json::to_vec_pretty(&json!({
-            "processes":lease.processes,"receipts":cleanup.as_ref().ok(),"error":cleanup.as_ref().err().map(ToString::to_string)
-        }))?,
+    let cleanup = host.stop().await;
+    let mut errors = Vec::new();
+    if let Err(error) = &scenario {
+        errors.push(format!("{error:#}"));
+    }
+    match host.transcript() {
+        Ok(observations) => evidence.outputs = observations,
+        Err(error) => errors.push(format!("transcript: {error:#}")),
+    }
+    let errors = write_case_receipt(
+        &lease.directory,
+        evidence,
+        errors,
+        &[("consumer", &cleanup)],
     )?;
     scenario?;
-    let cleanup = cleanup?;
-    ensure!(
-        !cleanup.is_empty() && cleanup.iter().all(|receipt| receipt.closed),
-        "consumer lifetime was not closed"
-    );
+    cleanup?;
+    ensure!(errors.is_empty(), "S30 case receipt recorded a failure");
     Ok(())
 }
 
@@ -368,26 +463,42 @@ async fn s28_workbench() -> Result<()> {
         port + 21,
     )?
     .configure(environment)?;
+    let view = RestateView::new(&format!("http://127.0.0.1:{}", port + 1), &lease.namespace)?;
+    let mut evidence = Evidence::empty("S28".into());
+    evidence.artifacts = vec![workbench.clone(), server.clone()];
     let result = async {
         let boot = cluster.boot(&server, 1, &mut lease).await?;
-        std::fs::write(lease.directory.join("cluster-boot.json"), serde_json::to_vec_pretty(&boot)?)?;
+        std::fs::write(
+            lease.directory.join("cluster-boot.json"),
+            serde_json::to_vec_pretty(&boot)?,
+        )?;
         host.boot_mcp(&workbench, &mut lease).await?;
-        let ready = host.boot(&workbench, &mut lease).await?;
-        let score = host.mcp_oracle(&PathBuf::from(required("LASH_E2E_REPO")?),
-            &PathBuf::from(required("LASH_E2E_PYTHON")?), &mut lease).await?;
-        std::fs::write(lease.directory.join("host-evidence.json"), serde_json::to_vec_pretty(
-            &json!({"scenario":"S28","selected":1,"executed":1,"ready":ready,"scorecard":score,"artifacts":[workbench,server]}))?)?;
+        host.boot(&workbench, &mut lease).await?;
+        host.mcp_oracle(
+            &PathBuf::from(required("LASH_E2E_REPO")?),
+            &PathBuf::from(required("LASH_E2E_PYTHON")?),
+            &mut lease,
+        )
+        .await?;
+        evidence.journals = turn_journals(&view).await?;
         anyhow::Ok(())
-    }.await;
+    }
+    .await;
     let host_cleanup = host.stop().await;
     let cluster_cleanup = cluster.finish().await;
-    std::fs::write(
-        lease.directory.join("cleanup.json"),
-        serde_json::to_vec_pretty(&json!({
-            "host":host_cleanup.as_ref().ok(),"cluster":cluster_cleanup.as_ref().ok(),
-            "host_error":host_cleanup.as_ref().err().map(ToString::to_string),"cluster_error":cluster_cleanup.as_ref().err().map(ToString::to_string),
-            "scenario_error":result.as_ref().err().map(ToString::to_string)
-        }))?,
+    let mut errors = Vec::new();
+    if let Err(error) = &result {
+        errors.push(format!("{error:#}"));
+    }
+    match host.transcript() {
+        Ok(observations) => evidence.outputs = observations,
+        Err(error) => errors.push(format!("transcript: {error:#}")),
+    }
+    write_case_receipt(
+        &lease.directory,
+        evidence,
+        errors,
+        &[("host", &host_cleanup), ("cluster", &cluster_cleanup)],
     )?;
     result?;
     let host_cleanup = host_cleanup?;

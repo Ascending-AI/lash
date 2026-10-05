@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -72,10 +74,121 @@ def test_counts(report: Path, label: str, name: str) -> dict:
     failed = int(any(cases[0].find(tag) is not None for tag in ("failure", "error")))
     if (result["status"] == "PASS") != (failed == 0):
         raise ValueError("Kiln status and JUnit verdict disagree")
-    return {"executed": 1, "passed": 1 - failed, "failed": failed}
+    return {"executed": 1, "passed": 1 - failed, "failed": failed,
+            "junit_xml": result["outputs"]["junit_xml"]}
 
 
-def run(label: str, name: str, artifacts: Path) -> int:
+def hardlink(path: Path, destination: Path) -> None:
+    try:
+        os.link(path, destination)
+    except OSError as error:
+        if error.errno != errno.EXDEV:
+            raise
+        shutil.copy2(path, destination)
+
+
+def certify_case(artifacts: Path, junit: Path, outputs: dict[str, Path], source: str,
+                 case: str | None, admin_url: str, base_provenance: dict) -> dict:
+    """Split the case's CaseReceipt into the role files reconcile consumes."""
+    errors: list[str] = []
+    shutil.copy2(junit, artifacts / "junit.xml")
+    evidence: dict = {}
+    receipts = sorted((artifacts / "case").rglob("receipt.json"))
+    if len(receipts) != 1:
+        errors.append(f"expected one CaseReceipt under case/, found {len(receipts)}")
+    else:
+        try:
+            evidence = json.loads(receipts[0].read_text())["case"]["evidence"]
+            if not isinstance(evidence, dict):
+                raise ValueError("receipt evidence is not an object")
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            errors.append(f"unreadable CaseReceipt: {error}")
+    journals = evidence.get("journals") or []
+    cleanup = evidence.get("cleanup") or []
+    if evidence:
+        if journals:
+            write(artifacts / "journal.json", {
+                "journals": journals,
+                "native_records": evidence.get("native_records") or [],
+                "transfers": evidence.get("transfers") or [],
+            })
+        else:
+            errors.append("no journal evidence")
+        write(artifacts / "store.json", {"stores": evidence.get("stores") or []})
+        write(artifacts / "host.json", {
+            "outputs": evidence.get("outputs") or [],
+            "artifacts": evidence.get("artifacts") or [],
+        })
+        write(artifacts / "trace.json", {
+            "barriers": evidence.get("barriers") or [],
+            "faults": evidence.get("faults") or [],
+            "effects": evidence.get("effects") or [],
+        })
+        write(artifacts / "cleanup.json", {
+            "complete": bool(cleanup) and all(receipt.get("closed") for receipt in cleanup),
+            "errors": [f"{receipt.get('resource')}: {receipt.get('detail')}"
+                       for receipt in cleanup if not receipt.get("closed")]
+                      + ([] if cleanup else ["no cleanup receipts"]),
+            "remaining": [receipt.get("resource") for receipt in cleanup
+                          if not receipt.get("closed")],
+        })
+    binaries: dict[str, dict] = {}
+    binary_dir = artifacts / "binaries"
+    binary_dir.mkdir(exist_ok=True)
+
+    def descriptor(role: str, path: Path) -> dict:
+        hardlink(path, binary_dir / role)
+        sha = hashlib.sha256(path.read_bytes()).hexdigest()
+        return {"source_sha": source,
+                "artifact": {"path": f"binaries/{role}", "sha256": sha}}
+
+    if evidence:
+        artifact_shas = {
+            artifact["sha256"] for artifact in evidence.get("artifacts") or []
+        }
+        hosts = {
+            name: hashlib.sha256(outputs[name].read_bytes()).hexdigest()
+            for name in ("workbench", "workbench_e2e", "node", "consumer")
+        }
+        matched = sorted(name for name, sha in hosts.items() if sha in artifact_shas)
+        if len({hosts[name] for name in matched}) == 1:
+            binaries["host"] = descriptor("host", outputs[matched[0]])
+        else:
+            errors.append(f"expected one host artifact match, found {len({hosts[name] for name in matched})}")
+        if hashlib.sha256(outputs["node_next"].read_bytes()).hexdigest() in artifact_shas:
+            binaries["synthetic_next_host"] = descriptor("synthetic_next_host", outputs["node_next"])
+    binaries["vm_worker"] = descriptor("vm_worker", outputs["vm_worker"])
+    server = descriptor("restate-server", outputs["server"])
+    lock = json.loads((ROOT / "tools/buck2/native-tools-lock.json").read_text())["tools"]["restate"]
+    nodes = {
+        receipt["resource"] for receipt in cleanup
+        if re.fullmatch(r"restate-\d+", str(receipt.get("resource", "")))
+    }
+    if nodes:
+        server_nodes = len(nodes)
+    elif journals and all(str(fact.get("admin_url", "")).rstrip("/") == admin_url
+                          for fact in journals):
+        server_nodes = 1
+    else:
+        server_nodes = None
+    provenance = {
+        **base_provenance,
+        "case": case,
+        "protocol": "V7" if journals and all(fact.get("protocol") == 7 for fact in journals) else None,
+        "server_nodes": server_nodes,
+        "binaries": binaries,
+        "server": {
+            "version": lock["version"],
+            "archive_sha256": lock["sha256"],
+            "artifact": server["artifact"],
+        },
+        "evidence_error": "; ".join(errors) or None,
+    }
+    write(artifacts / "provenance.json", provenance)
+    return provenance
+
+
+def run(label: str, name: str, artifacts: Path, case: str | None) -> int:
     gate = os.environ["KILN_GATE_ID"]
     # S28 owns a second cluster in this block and fleet PostgreSQL owns
     # offset 40; serve owns offsets 45–47.
@@ -112,8 +225,17 @@ def run(label: str, name: str, artifacts: Path) -> int:
         "--target-platforms", "prelude//platforms:default",
         "--build-report", str(build),
     ], cwd=ROOT, env=env, check=True)
-    workbench = output(build, WORKBENCH)
-    worker = output(build, WORKER)
+    outputs = {
+        "workbench": Path(output(build, WORKBENCH)),
+        "workbench_e2e": Path(output(build, workbench_e2e)),
+        "node": Path(output(build, NODE)),
+        "node_next": Path(output(build, node_next)),
+        "consumer": Path(output(build, CONSUMER)),
+        "vm_worker": Path(output(build, WORKER)),
+        "server": Path(output(build, SERVER)),
+    }
+    workbench = str(outputs["workbench"])
+    worker = str(outputs["vm_worker"])
     python = ROOT / "target/e2e-gate/python/bin/python"
     if not python.exists():
         subprocess.run([
@@ -136,8 +258,6 @@ def run(label: str, name: str, artifacts: Path) -> int:
     epochs = (ROOT / "crates/lash-restate/src/process/admission.rs").read_text()
     generation = re.search(r"pub const JOURNAL_LOGIC_EPOCH: u32 = (\d+);", epochs).group(1)
     source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    server = output(build, SERVER)
-    consumer = output(build, CONSUMER)
     env.update({
         "LASH_E2E_HOST_ARTIFACTS": str(artifacts / "case"),
         "LASH_E2E_ARTIFACT_DIR": str(artifacts / "case"),
@@ -150,13 +270,13 @@ def run(label: str, name: str, artifacts: Path) -> int:
         "LASH_E2E_PYTHON": str(python),
         "LASH_E2E_WORKBENCH_BIN": workbench,
         "LASH_E2E_WORKBENCH_SHA256": hashlib.sha256(Path(workbench).read_bytes()).hexdigest(),
-        "LASH_WORKBENCH_E2E_BIN": output(build, workbench_e2e),
-        "LASH_UPGRADE_NODE_N": output(build, NODE),
-        "LASH_UPGRADE_NODE_NEXT": output(build, node_next),
-        "LASH_E2E_CONSUMER_BIN": consumer,
-        "LASH_E2E_CONSUMER_SHA256": hashlib.sha256(Path(consumer).read_bytes()).hexdigest(),
+        "LASH_WORKBENCH_E2E_BIN": str(outputs["workbench_e2e"]),
+        "LASH_UPGRADE_NODE_N": str(outputs["node"]),
+        "LASH_UPGRADE_NODE_NEXT": str(outputs["node_next"]),
+        "LASH_E2E_CONSUMER_BIN": str(outputs["consumer"]),
+        "LASH_E2E_CONSUMER_SHA256": hashlib.sha256(outputs["consumer"].read_bytes()).hexdigest(),
         "LASH_E2E_CONSUMER_GENERATION": generation,
-        "LASH_RESTATE_SERVER_BIN": server,
+        "LASH_RESTATE_SERVER_BIN": str(outputs["server"]),
         "LASH_VM_WORKER": worker,
     })
     (artifacts / "case").mkdir()
@@ -175,12 +295,6 @@ def run(label: str, name: str, artifacts: Path) -> int:
              "LASH_PHASE_A_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH", "TMPDIR",
              "RESTATE_INGRESS_URL", "RESTATE_ADMIN_URL"]
     command.extend(f"--test_env={key}" for key in sorted(keys))
-    write(artifacts / "provenance.json", {
-        "scenario": name, "label": label, "source_sha": source, "gate": gate,
-        "port_base": base, "generation": generation, "playwright": "1.62.0",
-        "workbench": {"path": workbench, "sha256": env["LASH_E2E_WORKBENCH_SHA256"]},
-        "server": {"path": server, "sha256": hashlib.sha256(Path(server).read_bytes()).hexdigest()},
-    })
     code = subprocess.call([
         "python3", str(RESTATE), "serve", "--name", f"e2e-{gate}",
         "--server-env", "RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true",
@@ -188,13 +302,25 @@ def run(label: str, name: str, artifacts: Path) -> int:
         "--", *command,
     ], cwd=ROOT, env=env)
     counts = test_counts(report, label, name)
+    junit = Path(counts.pop("junit_xml"))
+    # serve's port roles are ingress/admin/node, so the runner-served admin URL
+    # the journal facts record is base + 46.
+    provenance = certify_case(artifacts, junit, outputs, source, case,
+                              f"http://127.0.0.1:{base + 46}", {
+                                  "scenario": name, "label": label, "source_sha": source,
+                                  "gate": gate, "port_base": base, "generation": generation,
+                                  "playwright": "1.62.0",
+                                  "workbench": {"path": workbench,
+                                                "sha256": env["LASH_E2E_WORKBENCH_SHA256"]},
+                              })
     write(artifacts / "execution.json", {
         "scenario": name, "label": label, "source_sha": source, "counts": counts,
-        "exit_code": code, "artifacts": str(artifacts),
+        "exit_code": code, "evidence_error": provenance["evidence_error"],
+        "artifacts": str(artifacts),
     })
     print(f"{name}: executed={counts['executed']} passed={counts['passed']} "
           f"failed={counts['failed']} artifacts={artifacts}", flush=True)
-    return code if code else int(counts["failed"] != 0)
+    return code if code else int(counts["failed"] != 0 or provenance["evidence_error"] is not None)
 
 
 def main() -> int:
@@ -202,6 +328,7 @@ def main() -> int:
     parser.add_argument("label", choices=sorted(LABELS), help="registered test target label")
     parser.add_argument("test", help="full exact test path inside the label")
     parser.add_argument("--artifacts", type=Path, help="fresh directory inside this fork")
+    parser.add_argument("--case", help="manifest scenario/variant/store/leg/channel key")
     args = parser.parse_args()
     if not re.fullmatch(r"[a-zA-Z0-9_:]+", args.test):
         parser.error("test must be a full test path")
@@ -210,10 +337,13 @@ def main() -> int:
     if not artifacts.is_relative_to(ROOT):
         parser.error("artifacts must be inside this fork")
     if not os.environ.get("KILN_GATE_ID"):
-        os.execvp("kiln", [
+        command = [
             "kiln", "gate", "lash", ROOT.name, "--", "python3", str(Path(__file__).resolve()),
             args.label, args.test, "--artifacts", str(artifacts),
-        ])
+        ]
+        if args.case is not None:
+            command += ["--case", args.case]
+        os.execvp("kiln", command)
     if Path(os.environ.get("KILN_FORK_DIR", "")).resolve() != ROOT:
         parser.error("Kiln gate belongs to another fork")
     lock = ROOT / "target/e2e-gate/gate.lock"
@@ -223,11 +353,12 @@ def main() -> int:
         artifacts.mkdir(parents=True, exist_ok=False)
         print(f"e2e artifacts: {artifacts}", flush=True)
         try:
-            return run(args.label, args.test, artifacts)
+            return run(args.label, args.test, artifacts, args.case)
         except (OSError, ValueError, KeyError, ET.ParseError, subprocess.CalledProcessError) as error:
             write(artifacts / "execution.json", {
                 "scenario": args.test, "label": args.label,
                 "counts": {"executed": 0, "passed": 0, "failed": 0},
+                "evidence_error": None,
                 "infrastructure_error": str(error), "artifacts": str(artifacts),
             })
             print(f"{args.test}: executed=0 passed=0 failed=0 "

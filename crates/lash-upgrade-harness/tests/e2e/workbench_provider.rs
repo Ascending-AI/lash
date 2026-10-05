@@ -20,6 +20,7 @@ use lash_remote_protocol::RemoteSessionObservationEvent;
 use lash_restate::EFFECT_JOURNAL_VERSION;
 use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease};
 use lash_upgrade_harness::e2e::control::ProcessReceipt;
+use lash_upgrade_harness::e2e::evidence::Evidence;
 use lash_upgrade_harness::e2e::host::{HostAdapter as _, HostCommand};
 use lash_upgrade_harness::e2e::host_adapters::workbench::WorkbenchHost;
 use lash_upgrade_harness::e2e::provider_http::transcript::{HttpOccurrence, HttpTranscript};
@@ -31,7 +32,7 @@ use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::process::Command;
 use tokio::time::{sleep, timeout};
 
-use super::{artifact, required};
+use super::{artifact, required, turn_journals, write_case_receipt};
 
 pub struct Scenario {
     /// Lease, artifact and scorecard identity.
@@ -647,6 +648,8 @@ pub async fn run(scenario: &'static Scenario) -> Result<()> {
     let workbench = artifact("WORKBENCH", "workbench")?;
     let script =
         PathBuf::from(required("LASH_E2E_REPO")?).join("scripts/e2e-workbench-provider.py");
+    let mut evidence = Evidence::empty(scenario.id.to_string());
+    evidence.artifacts = vec![workbench.clone(), python.clone()];
     let result = async {
         let boot = host.boot(&workbench, &mut lease).await?;
         let mut browser = Command::new(&python.path)
@@ -764,11 +767,10 @@ pub async fn run(scenario: &'static Scenario) -> Result<()> {
                 "{} scorecard does not record the executed scenario: {score}",
                 scenario.id
             );
-            let mut journal = Vec::new();
             if scenario.id != "s18-application-timer" {
-                journal.extend(journal_oracle(scenario, &view).await?);
+                journal_oracle(scenario, &view).await?;
             } else {
-                journal.push(timer_journal_evidence(&view).await?);
+                timer_journal_evidence(&view).await?;
                 let bodies = fixture.requests()?;
                 ensure!(
                     bodies.len() == 1,
@@ -776,16 +778,7 @@ pub async fn run(scenario: &'static Scenario) -> Result<()> {
                     bodies.len()
                 );
             }
-            let evidence = json!({
-                "scenario": scenario.id,
-                "requests": fixture.requests()?,
-                "receipt": fixture.receipt()?,
-                "journal": journal,
-            });
-            std::fs::write(
-                directory.join(format!("{}-evidence.json", scenario.id)),
-                serde_json::to_vec_pretty(&evidence)?,
-            )?;
+            evidence.journals = turn_journals(&view).await?;
             println!(
                 "{} selected=1 executed=1 workbench={} python={}",
                 scenario.id, workbench.sha256, python.sha256
@@ -812,7 +805,18 @@ pub async fn run(scenario: &'static Scenario) -> Result<()> {
     .await;
     let outcome = result.map_err(|error| format!("{error:#}"));
     let host_cleanup = host.stop().await;
-    let transcript = host.transcript();
+    let mut errors = Vec::new();
+    if let Err(error) = &outcome {
+        errors.push(error.clone());
+    }
+    match host.transcript() {
+        Ok(observations) => evidence.outputs = observations,
+        Err(error) => errors.push(format!("transcript: {error:#}")),
+    }
+    match fixture.requests() {
+        Ok(requests) => evidence.effects = requests,
+        Err(error) => errors.push(format!("fixture requests: {error:#}")),
+    }
     let fixture_receipt = match fixture.finish().await {
         Ok(receipt) => receipt,
         Err(error) => HttpReceipt {
@@ -826,20 +830,15 @@ pub async fn run(scenario: &'static Scenario) -> Result<()> {
             violations: vec![format!("fixture.finish failed: {error:#}")],
         },
     };
-    std::fs::write(
-        directory.join(format!("{}-cleanup.json", scenario.id)),
-        serde_json::to_vec_pretty(&json!({
-            "scenario_error": outcome.clone().err(),
-            "transcript": transcript.map_err(|error| format!("{error:#}")),
-            "fixture_receipt": fixture_receipt,
-            "processes": &lease.processes,
-            "lease_cleanup": &lease.cleanup,
-            "host_cleanup": host_cleanup
-                .as_ref()
-                .ok()
-                .map(|receipts| receipts.iter().map(|receipt| receipt.closed).collect::<Vec<_>>()),
-        }))?,
-    )?;
+    match serde_json::to_value(&fixture_receipt) {
+        Ok(receipt) => evidence.effects.push(receipt),
+        Err(error) => errors.push(format!("fixture receipt: {error:#}")),
+    }
+    if let Err(error) = fixture_receipt.verify() {
+        errors.push(format!("fixture receipt: {error:#}"));
+    }
+    evidence.cleanup.extend(lease.cleanup.iter().cloned());
+    write_case_receipt(&directory, evidence, errors, &[("host", &host_cleanup)])?;
     outcome.map_err(|error| anyhow!("{error}"))?;
     fixture_receipt.verify()?;
     ensure!(

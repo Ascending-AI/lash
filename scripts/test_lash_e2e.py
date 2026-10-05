@@ -60,6 +60,7 @@ class ReceiptLaws(unittest.TestCase):
                 "server_nodes": row["server_nodes"], "binaries": binaries,
                 "server": {"version": manifest["server"]["version"],
                            "archive_sha256": manifest["server"]["archive_sha256"], "artifact": server},
+                "evidence_error": None,
             })
             rows.append({"key": key, "status": "passed", "executed": True, "artifacts": artifacts, "quarantine": None})
         groups = {}
@@ -200,25 +201,179 @@ class ReceiptLaws(unittest.TestCase):
         def runner_call(command, **kwargs):
             self.assertEqual(command[2], "//crates/lash-upgrade-harness:e2e_hosts__test")
             self.assertEqual(command[3], "s28_workbench_mcp_peer_restart")
-            directory = Path(command[-1])
+            self.assertEqual(command[command.index("--case") + 1], key)
+            directory = Path(command[command.index("--artifacts") + 1])
             directory.mkdir()
             e2e.write(directory / "execution.json", {
                 "scenario": command[3], "label": command[2], "source_sha": SOURCE,
                 "counts": {"executed": 1, "passed": 0, "failed": 1},
+                "exit_code": 32,
             })
             return 32
 
         with patch.object(e2e.subprocess, "check_output", side_effect=[SOURCE + "\n", ""]), \
              patch.object(e2e.subprocess, "call", side_effect=runner_call):
-            result = e2e.run_cases(expected, self.root)
+            result = e2e.run_cases(expected, self.root, self.manifest)
         self.assertEqual(result["counts"], {"selected": 1, "executed": 1, "passed": 0, "failed": 1, "not_run": 0})
         self.assertIs(result["certified"], False)
-        self.assertFalse((self.root / "conclusion.json").exists())
+        self.assertTrue(result["reason"])
+        conclusion = json.loads((self.root / "conclusion.json").read_text())
+        self.assertIs(conclusion["certified"], False)
+        self.assertEqual(conclusion["reason"], result["reason"])
+        self.assertTrue((self.root / "receipt.json").exists())
         held = e2e.plan(self.manifest, "b" * 64, "full", ["S28"], SOURCE)
         with self.assertRaisesRegex(ValueError, "unavailable registrations"), \
              patch.object(e2e.subprocess, "call") as command:
-            e2e.run_cases(held, self.root)
+            e2e.run_cases(held, self.root, self.manifest)
             command.assert_not_called()
+
+    def test_r8_runner_splits_a_case_receipt_into_reconcilable_role_files_and_names_missing_evidence(self):
+        gate = e2e.GATE
+        admin = "http://127.0.0.1:61046"
+        key = "S30/default/sqlite_memory/live/standard"
+        test_name = "s30_external_consumer_accept_follow_cancel"
+        outputs = {
+            name: self.root / f"built-{name}"
+            for name in ("workbench", "workbench_e2e", "node", "consumer", "node_next", "vm_worker", "server")
+        }
+        for name, path in outputs.items():
+            path.write_text(f"built {name}")
+        evidence = {
+            "case": "S30",
+            "artifacts": [{
+                "role": "external-consumer", "path": str(outputs["workbench"]),
+                "sha256": e2e.digest(outputs["workbench"]),
+                "candidate_sha": SOURCE, "generation": "1",
+            }],
+            "journals": [{
+                "work": {"ingress": "k", "run": "k", "segment": "inv-1", "call": None, "ordinal": None},
+                "invocation": "inv-1", "index": 0, "entry_type": "Run", "name": None,
+                "value": {}, "decoded": None, "admin_url": admin, "protocol": 7,
+            }],
+            "native_records": [], "barriers": [], "faults": [],
+            "stores": [{"binding": True}], "effects": [{"body": 1}],
+            "outputs": [{"observation": "ok"}],
+            "cleanup": [{"resource": "restate-1", "closed": True, "detail": "stopped"}],
+            "transfers": [],
+        }
+        case_dir = self.root / "case-0"
+        (case_dir / "case").mkdir(parents=True)
+        (case_dir / "case" / "receipt.json").write_text(json.dumps({
+            "counts": {"selected": 1, "executed": 1, "passed": 1, "failed": 0, "not_run": 0},
+            "case": {"evidence": evidence, "verdict": "Passed"},
+        }))
+        junit_source = self.root / "kiln-junit.xml"
+        junit_source.write_text(f'<testsuite><testcase name="{test_name}" /></testsuite>')
+        base = {"scenario": test_name, "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+                "source_sha": SOURCE, "gate": "law", "port_base": 61000, "generation": "1",
+                "playwright": "1.62.0", "workbench": {"path": "w", "sha256": "0" * 64}}
+        provenance = gate.certify_case(case_dir, junit_source, outputs, SOURCE, key, admin, base)
+        self.assertIsNone(provenance["evidence_error"])
+        self.assertEqual(provenance["protocol"], "V7")
+        self.assertEqual(provenance["server_nodes"], 1)
+        self.assertEqual(set(provenance["binaries"]), {"host", "vm_worker"})
+        roles = {"journal": "journal.json", "store": "store.json", "host": "host.json",
+                 "trace": "trace.json", "cleanup": "cleanup.json", "junit": "junit.xml",
+                 "provenance": "provenance.json"}
+        spec = {"scenario": "S30", "variant": "default", "store": "sqlite_memory",
+                "leg": "live", "channel": "standard", "server_nodes": 1,
+                "binaries": ["host", "vm_worker"], "artifacts": list(roles),
+                "state": "ready",
+                "registration": {"label": "//x:t", "test": test_name}}
+        expected = {"source_sha": SOURCE, "manifest_sha256": "b" * 64, "tier": "smoke",
+                    "selectors": [], "selected": 1, "cases": [spec],
+                    "guarded": [], "excluded_held": [], "tier_complete": True, "held": []}
+        manifest = copy.deepcopy(self.manifest)
+        manifest["server"]["executable_sha256"] = provenance["server"]["artifact"]["sha256"]
+        row = {"key": key, "status": "passed", "executed": True,
+               "artifacts": {role: {"path": name, "sha256": e2e.digest(case_dir / name)}
+                             for role, name in roles.items()},
+               "quarantine": None}
+        receipt = {"source_sha": SOURCE, "manifest_sha256": "b" * 64, "tier": "smoke",
+                   "cases": [row], "counts": e2e.counts([row]),
+                   "groups": e2e.store_leg_groups(expected["cases"], [row]),
+                   "audits": {}, "gates": {}}
+        self.assertEqual(e2e.reconcile(expected, receipt, case_dir, manifest)["status"], "passed")
+
+        missing = self.root / "case-1"
+        (missing / "case").mkdir(parents=True)
+        provenance = gate.certify_case(missing, junit_source, outputs, SOURCE, key, admin, dict(base))
+        self.assertIsNotNone(provenance["evidence_error"])
+        self.assertFalse((missing / "journal.json").exists())
+        row = {"key": key, "status": "passed", "executed": True,
+               "artifacts": {role: {"path": name, "sha256": e2e.digest(missing / name)}
+                             for role, name in roles.items() if (missing / name).exists()},
+               "quarantine": None}
+        receipt = {"source_sha": SOURCE, "manifest_sha256": "b" * 64, "tier": "smoke",
+                   "cases": [row], "counts": e2e.counts([row]),
+                   "groups": e2e.store_leg_groups(expected["cases"], [row]),
+                   "audits": {}, "gates": {}}
+        with self.assertRaises(ValueError):
+            e2e.reconcile(expected, receipt, missing, manifest)
+
+    def test_r8_ready_selection_excludes_held_rows_and_marks_the_tier_incomplete(self):
+        planned = e2e.plan(self.manifest, "b" * 64, "full", [], SOURCE, [], True)
+        held_keys = {e2e.case_key({"scenario": scenario["id"], **row})
+                     for scenario in self.manifest["scenarios"] for row in scenario["cases"]
+                     if "full" in row["tiers"] and row["state"] == "held"}
+        self.assertTrue(held_keys)
+        self.assertEqual(set(planned["excluded_held"]), held_keys)
+        self.assertIs(planned["tier_complete"], False)
+        self.assertEqual(planned["held"], [])
+        self.assertEqual(planned["selected"], len(planned["cases"]))
+        with self.assertRaisesRegex(ValueError, "release certification"):
+            e2e.plan(self.manifest, "b" * 64, "release", [], SOURCE, [], True)
+
+        manifest = copy.deepcopy(self.manifest)
+        for scenario in manifest["scenarios"]:
+            scenario["arc_guards"] = []
+        server_file = self.root / "server-bin"
+        server_file.write_text("synthetic server")
+        manifest["server"]["executable_sha256"] = e2e.digest(server_file)
+        planned = e2e.plan(manifest, "b" * 64, "full", ["S17"], SOURCE, [], True)
+        self.assertIs(planned["tier_complete"], False)
+        self.assertEqual(len(planned["cases"]), 1)
+        row = planned["cases"][0]
+        key = e2e.case_key(row)
+        test_name = row["registration"]["test"]
+
+        def runner_call(command, **kwargs):
+            self.assertEqual(command[command.index("--case") + 1], key)
+            directory = Path(command[command.index("--artifacts") + 1])
+            (directory / "binaries").mkdir(parents=True)
+            (directory / "junit.xml").write_text(f'<testsuite><testcase name="{test_name}" /></testsuite>')
+            for role in ("journal", "store", "host", "trace"):
+                (directory / f"{role}.json").write_text(json.dumps({role: []}))
+            e2e.write(directory / "cleanup.json", {"complete": True, "errors": [], "remaining": []})
+            binaries = {}
+            for name in row["binaries"]:
+                binary = directory / "binaries" / name
+                binary.write_text(f"synthetic {name}")
+                binaries[name] = {"source_sha": SOURCE,
+                                  "artifact": {"path": f"binaries/{name}", "sha256": e2e.digest(binary)}}
+            server_link = directory / "binaries" / "restate-server"
+            server_link.write_text("synthetic server")
+            e2e.write(directory / "provenance.json", {
+                "source_sha": SOURCE, "case": key, "protocol": "V7",
+                "server_nodes": row["server_nodes"], "binaries": binaries,
+                "server": {"version": manifest["server"]["version"],
+                           "archive_sha256": manifest["server"]["archive_sha256"],
+                           "artifact": {"path": "binaries/restate-server", "sha256": e2e.digest(server_link)}},
+                "evidence_error": None})
+            e2e.write(directory / "execution.json", {
+                "scenario": test_name, "label": row["registration"]["label"], "source_sha": SOURCE,
+                "counts": {"executed": 1, "passed": 1, "failed": 0}, "exit_code": 0})
+            return 0
+
+        with patch.object(e2e.subprocess, "check_output", side_effect=[SOURCE + "\n", ""]), \
+             patch.object(e2e.subprocess, "call", side_effect=runner_call):
+            result = e2e.run_cases(planned, self.root, manifest)
+        self.assertIs(result["certified"], True)
+        self.assertIs(result["tier_complete"], False)
+        conclusion = json.loads((self.root / "conclusion.json").read_text())
+        self.assertIs(conclusion["certified"], True)
+        self.assertEqual(conclusion["excluded_held"], planned["excluded_held"])
+        self.assertTrue((self.root / "receipt.json").exists())
 
 
 if __name__ == "__main__":

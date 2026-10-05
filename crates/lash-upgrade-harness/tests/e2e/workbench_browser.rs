@@ -9,14 +9,16 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result, ensure};
 use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease};
 use lash_upgrade_harness::e2e::control::ProcessReceipt;
+use lash_upgrade_harness::e2e::evidence::Evidence;
 use lash_upgrade_harness::e2e::host::{HostAdapter as _, HostCommand};
 use lash_upgrade_harness::e2e::host_adapters::process::{HostProcess, ready};
 use lash_upgrade_harness::e2e::host_adapters::workbench::WorkbenchHost;
+use lash_upgrade_harness::restate_view::RestateView;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::process::Command;
 
-use super::{artifact, required};
+use super::{artifact, required, turn_journals, write_case_receipt};
 
 pub async fn run() -> Result<()> {
     let directory = std::path::PathBuf::from(required("LASH_E2E_HOST_ARTIFACTS")?);
@@ -83,6 +85,18 @@ pub async fn run() -> Result<()> {
         ("OPENROUTER_MODEL".into(), "openai/gpt-5.4".into()),
         ("OPENROUTER_MODEL_VARIANT".into(), "high".into()),
     ]))?;
+    let server_path = required("LASH_RESTATE_SERVER_BIN")?;
+    let server = ArtifactIdentity {
+        role: "restate-server".into(),
+        sha256: lash_core::stable_hash::sha256_hex(&std::fs::read(&server_path)?),
+        path: server_path.into(),
+        candidate_sha: required("LASH_E2E_CANDIDATE_SHA")?,
+        generation: required("LASH_E2E_HOST_GENERATION")?,
+    };
+    let workbench = artifact("WORKBENCH", "workbench")?;
+    let view = RestateView::new(&required("RESTATE_ADMIN_URL")?, &lease.namespace)?;
+    let mut evidence = Evidence::empty("S29".into());
+    evidence.artifacts = vec![workbench.clone(), python.clone(), server];
     let result = async {
         ready(
             &mut provider,
@@ -92,9 +106,7 @@ pub async fn run() -> Result<()> {
             lease.deadline,
         )
         .await?;
-        let boot = host
-            .boot(&artifact("WORKBENCH", "workbench")?, &mut lease)
-            .await?;
+        let boot = host.boot(&workbench, &mut lease).await?;
         let mut browser_args = args;
         browser_args.extend(["--base-url".into(), boot.endpoint.clone()]);
         let mut browser = Command::new(&python.path)
@@ -169,23 +181,29 @@ pub async fn run() -> Result<()> {
                 closed: true,
                 detail: "browser oracle reaped".into(),
             });
-        collected
+        collected?;
+        evidence.journals = turn_journals(&view).await?;
+        anyhow::Ok(())
     }
     .await;
     let host_cleanup = host.stop().await;
     let provider_cleanup = provider
         .stop(Instant::now() + Duration::from_secs(10), None)
         .await;
-    std::fs::write(
-        directory.join("s29-cleanup.json"),
-        serde_json::to_vec_pretty(&json!({
-            "processes":lease.processes,"lease_cleanup":lease.cleanup,
-            "host":host_cleanup.as_ref().ok(),"provider":provider_cleanup.as_ref().ok(),
-            "host_error":host_cleanup.as_ref().err().map(ToString::to_string),
-            "provider_error":provider_cleanup.as_ref().err().map(ToString::to_string),
-            "scenario_error":result.as_ref().err().map(ToString::to_string),
-            "transcript":host.transcript()?
-        }))?,
+    let mut errors = Vec::new();
+    if let Err(error) = &result {
+        errors.push(format!("{error:#}"));
+    }
+    match host.transcript() {
+        Ok(observations) => evidence.outputs = observations,
+        Err(error) => errors.push(format!("transcript: {error:#}")),
+    }
+    evidence.cleanup.extend(lease.cleanup.iter().cloned());
+    write_case_receipt(
+        &directory,
+        evidence,
+        errors,
+        &[("host", &host_cleanup), ("provider", &provider_cleanup)],
     )?;
     result?;
     ensure!(
