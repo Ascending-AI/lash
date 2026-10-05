@@ -747,9 +747,9 @@ impl LiveConformanceHarness {
         let key = host
             .await_event_key(
                 &scope,
-                lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                    "active-wait",
-                )),
+                lash_core::AwaitEventWaitIdentity::Custom {
+                    key: "active-wait".into(),
+                },
             )
             .await
             .expect("mint registration-first wait key");
@@ -780,9 +780,9 @@ impl LiveConformanceHarness {
         let retired_key = host
             .await_event_key(
                 &retired_scope,
-                lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                    "late-wait",
-                )),
+                lash_core::AwaitEventWaitIdentity::Custom {
+                    key: "late-wait".into(),
+                },
             )
             .await
             .expect("mint retirement-first wait key");

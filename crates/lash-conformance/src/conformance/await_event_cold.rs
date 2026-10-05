@@ -65,7 +65,7 @@ pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, 
     .await;
     super::effect_host::effect_host_when_quiescent_waits_for_executing_effects(make()).await;
     let prefix = format!("cold-await-{}", uuid::Uuid::new_v4());
-    cold_mint_resolve_observe_all_identities(&make, &prefix).await;
+    cold_mint_resolve_observe_application_and_control_identities(&make, &prefix).await;
     cold_first_writer_wins(&make, &make_catalog, &prefix).await;
     cold_replayed_parked_owner(&make, &prefix).await;
     cold_key_stability(&make, &prefix).await;
@@ -91,9 +91,9 @@ where
     let key = make()
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
-                "{prefix}-parked-call"
-            ))),
+            AwaitEventWaitIdentity::Custom {
+                key: format!("{prefix}-parked-call"),
+            },
         )
         .await
         .expect("host A mints parked-owner key");
@@ -174,14 +174,13 @@ where
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn cold_mint_resolve_observe_all_identities<F>(make: &F, prefix: &str)
+async fn cold_mint_resolve_observe_application_and_control_identities<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
     let identities = [
-        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
-            "{prefix}-tool"
-        ))),
+        // Tool completions are armed Run sources, covered by L07/L12's
+        // source-seal laws rather than this application's promise contract.
         AwaitEventWaitIdentity::process_signal(
             crate::ProcessId::fixture(&format!("{prefix}-process")),
             "ready",

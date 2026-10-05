@@ -12,7 +12,10 @@ use super::*;
 use std::sync::atomic::AtomicBool;
 
 const CELL: &str = r#"
-    const worker = async () => { return "done"; };
+    const worker = await processes.create({
+        source: 'const worker = async () => { return "done"; };',
+        dialect: "typescript"
+    });
     let before = 20;
     print("started");
     const handle = await processes.start({ definition: worker });
@@ -30,6 +33,33 @@ struct Fixture {
     processes: Arc<dyn lash_core::ProcessService>,
     hand_over: Arc<AtomicBool>,
     session_policy: lash_core::SessionPolicy,
+}
+
+struct CellTools {
+    create: Arc<dyn lash_core::ToolProvider>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for CellTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        let mut manifests = ProcessControlToolProvider.tool_manifests();
+        manifests.extend(self.create.tool_manifests());
+        manifests
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        self.create
+            .resolve_contract(name)
+            .or_else(|| ProcessControlToolProvider.resolve_contract(name))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() == "create_process" {
+            self.create.execute(call).await
+        } else {
+            ProcessControlToolProvider.execute(call).await
+        }
+    }
 }
 
 impl Fixture {
@@ -125,11 +155,19 @@ impl Fixture {
                 lash_core::TurnId::fixture(turn),
             ))
             .await;
+        let mut definitions = process_control_tool_definitions();
+        definitions.push(lash_lashlang_runtime::process_create_tool_definition());
         let ctx = lash_core::testing::TestExecutionContextBuilder::new(
             crate::testing::double_ports(self.table.double(), &handler),
         )
-        .provider(Arc::new(ProcessControlToolProvider))
-        .tool_catalog(process_control_tool_catalog())
+        .provider(Arc::new(CellTools {
+            create: Arc::new(lash_lashlang_runtime::process_create_tool_provider(
+                "typescript",
+                self.surface.clone(),
+                self.workers.clone(),
+            )),
+        }))
+        .tool_catalog(lash_core::ToolCatalog::from_tool_definitions(definitions))
         .processes(Arc::clone(&self.processes))
         .execution_env_spec(lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),

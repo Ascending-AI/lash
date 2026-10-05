@@ -74,7 +74,8 @@ async fn catalog_fork_records_child_admission(storage: Storage) -> Result<()> {
         parent_view.request.owner,
         lash_core::RuntimeOwner::Session(parent_id.clone())
     );
-    assert_eq!(hook_calls.load(Ordering::SeqCst), 1);
+    // The shared deriver runs accept, refuse and response once per turn.
+    assert_eq!(hook_calls.load(Ordering::SeqCst), 3);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
 
     core.fork_at(
@@ -105,7 +106,7 @@ async fn catalog_fork_records_child_admission(storage: Storage) -> Result<()> {
     assert!(seed.plugin_admission_snapshot().is_none());
     assert_eq!(seed.plugin_state(), parent.plugin_state());
     assert_eq!(seed.authority.plugin_config, parent.authority.plugin_config);
-    assert_eq!(hook_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(hook_calls.load(Ordering::SeqCst), 3);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
     assert!(
         !owners
@@ -146,19 +147,24 @@ async fn catalog_fork_records_child_admission(storage: Storage) -> Result<()> {
     let inherited = &parent.plugin_state().expect("parent state").plugins["state-replay-deriver"];
     let child_state = &child.plugin_state().expect("child state").plugins["state-replay-deriver"];
     assert_eq!(inherited.generation, 2);
-    assert_eq!(child_state.values, inherited.values);
+    assert_eq!(inherited.values["accepted"], serde_json::json!(17));
+    assert_eq!(inherited.values["second"], serde_json::json!(23));
+    let mut expected_child = inherited.values.clone();
+    // The child's accepting hook applies another recorded add(23).
+    expected_child.insert("second".into(), serde_json::json!(46));
+    assert_eq!(child_state.values, expected_child);
     assert_eq!(child_state.generation, 4);
     assert_eq!(
         loaded(&core, &parent_id).await?.plugin_state(),
         parent.plugin_state()
     );
-    assert_eq!(hook_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(hook_calls.load(Ordering::SeqCst), 6);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
     drop(core);
 
     let core = build_core();
     drop(core.session(child_id).open().await?);
-    assert_eq!(hook_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(hook_calls.load(Ordering::SeqCst), 6);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
     Ok(())
 }

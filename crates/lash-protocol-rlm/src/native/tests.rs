@@ -1575,3 +1575,159 @@ fn a_step_archive_survives_both_driver_checkpoint_paths() {
         assert_eq!(step.output_archive.as_deref(), Some(&archive));
     }
 }
+
+/// L19: a restored pending execution accounts its recorded tool answer once,
+/// keeps the full terminal value, and spends no additional model usage.
+#[test]
+fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints() {
+    let payload =
+        serde_json::json!({"terminal": "x".repeat(80_000), "nested": [1, {"complete": true}]});
+    for native in [false, true] {
+        let mut machine = TurnMachine::new(
+            config(native, RlmTermination::Natural),
+            Vec::new(),
+            Default::default(),
+            0,
+        );
+        let initial = drain(&mut machine);
+        let id = initial
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LlmCall { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("one model call");
+        let parts = if native {
+            vec![call(
+                "terminal",
+                "execute_code",
+                r#"{"code":"await tools.app_lookup({});"}"#,
+            )]
+        } else {
+            vec![text(
+                "<typescript>\nawait tools.app_lookup({});\n</typescript>",
+            )]
+        };
+        machine.handle_response(Response::LlmComplete {
+            id,
+            text_streamed: false,
+            result: Ok(LlmResponse {
+                parts,
+                usage: lash_core::llm::types::LlmUsage {
+                    input_tokens: 11,
+                    output_tokens: 7,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        });
+        drain(&mut machine);
+        let saved = serde_json::to_value(machine.checkpoint()).unwrap();
+        let usage = saved["cumulative_usage"].clone();
+        machine = TurnMachine::restore_from_checkpoint(
+            config(native, RlmTermination::Natural),
+            serde_json::from_value(saved).unwrap(),
+        )
+        .expect("restore pending execution");
+        let replayed = drain(&mut machine);
+        assert!(
+            !replayed
+                .iter()
+                .any(|effect| matches!(effect, Effect::LlmCall { .. }))
+        );
+        let exec_id = replayed
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::ExecCode { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("redeliver the pending execution");
+        let mut exec = response(None);
+        exec.calls.push(lash_core::ExecutedCall {
+            operation: "tools.app_lookup".into(),
+            outcome: lash_core::ExecutedCallOutcome::Ok,
+            host_record: Some(lash_core::ToolCallRecord {
+                call_id: lash_core::ToolCallId::fixture("terminal-call"),
+                provider_call_id: None,
+                tool: "app_lookup".into(),
+                args: serde_json::json!({}),
+                output: lash_core::ToolCallOutput::success(payload.clone()).with_control(
+                    lash_core::ToolControl::Finish {
+                        value: lash_core::ToolValue::untrusted_json(payload.clone()),
+                    },
+                ),
+            }),
+        });
+        machine.handle_response(Response::ExecResult {
+            id: exec_id,
+            result: Ok(exec),
+        });
+        let accounted = drain(&mut machine);
+        let outputs = accounted
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Emit(lash_core::session_model::SessionStreamEvent::ToolCall {
+                    output,
+                    ..
+                }) => Some(output),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(outputs.len(), 1, "one recorded tool accounting event");
+        let output = serde_json::to_string(outputs[0]).unwrap();
+        assert!(output.contains("omitted_bytes"));
+        assert!(!output.contains(&"x".repeat(80_000)));
+        let checkpoint_id = accounted
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Checkpoint { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("terminal checkpoint");
+        let saved = serde_json::to_value(machine.checkpoint()).unwrap();
+        assert_eq!(saved["cumulative_usage"], usage);
+        machine = TurnMachine::restore_from_checkpoint(
+            config(native, RlmTermination::Natural),
+            serde_json::from_value(saved).unwrap(),
+        )
+        .expect("restore terminal checkpoint");
+        let redelivered = drain(&mut machine);
+        assert!(
+            !redelivered
+                .iter()
+                .any(|effect| matches!(effect, Effect::LlmCall { .. } | Effect::ExecCode { .. }))
+        );
+        machine.handle_response(Response::Checkpoint {
+            id: checkpoint_id,
+            delivery: Default::default(),
+        });
+        let terminal = drain(&mut machine);
+        let outcome = terminal
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
+                    outcome,
+                }) => Some(outcome),
+                _ => None,
+            })
+            .expect("terminal outcome");
+        assert_eq!(
+            *outcome,
+            lash_core::facade_support::TurnOutcome::Finished(
+                lash_core::facade_support::TurnFinish::ToolValue {
+                    tool_name: "app_lookup".into(),
+                    value: payload.clone()
+                },
+            )
+        );
+        assert_eq!(
+            serde_json::to_value(machine.checkpoint()).unwrap()["cumulative_usage"],
+            usage
+        );
+        assert!(
+            terminal
+                .iter()
+                .any(|effect| matches!(effect, Effect::Done { .. }))
+        );
+    }
+}

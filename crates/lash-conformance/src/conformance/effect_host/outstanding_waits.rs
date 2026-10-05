@@ -37,9 +37,9 @@ pub(crate) async fn effect_host_lists_registered_unresolved_waits(
     let unregistered = owner
         .await_event_key(
             &scope_a,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
-                "unregistered-{suffix}"
-            ))),
+            AwaitEventWaitIdentity::Custom {
+                key: format!("unregistered-{suffix}"),
+            },
         )
         .await
         .expect("derive a key without registering it");
@@ -54,18 +54,18 @@ pub(crate) async fn effect_host_lists_registered_unresolved_waits(
     let key_a = owner
         .await_event_key(
             &scope_a,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
-                "registered-a-{suffix}"
-            ))),
+            AwaitEventWaitIdentity::Custom {
+                key: format!("registered-a-{suffix}"),
+            },
         )
         .await
         .expect("derive session A key");
     let key_b = owner
         .await_event_key(
             &scope_b,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
-                "registered-b-{suffix}"
-            ))),
+            AwaitEventWaitIdentity::Custom {
+                key: format!("registered-b-{suffix}"),
+            },
         )
         .await
         .expect("derive session B key");
@@ -179,9 +179,9 @@ pub(crate) async fn effect_host_lists_registered_unresolved_waits(
     let revoked_key = owner
         .await_event_key(
             &scope_a,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
-                "revoked-{suffix}"
-            ))),
+            AwaitEventWaitIdentity::Custom {
+                key: format!("revoked-{suffix}"),
+            },
         )
         .await
         .expect("derive revoked-session witness key");

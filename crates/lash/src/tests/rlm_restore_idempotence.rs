@@ -12,11 +12,12 @@
 //! the memory and SQLite backends with the shipped RLM plugin, not
 //! a test protocol.
 //!
-//! Three bounds on that rebuild are witnessed alongside: a storeless session
+//! Two bounds on that rebuild are witnessed alongside: a storeless session
 //! keeps its accepted execution across a post-commit observer failure, a
 //! rolled-back append leaves the next commit exactly as large as it would have
-//! been without the append, and a turn rejected before its commit never hands
-//! its execution to the next ordinary turn (storeless and store-backed).
+//! been without the append. Uncommitted execution isolation is also pinned by
+//! the RLM runtime state restore laws; after-turn refusals are recorded terminal
+//! outcomes, witnessed by the facade finalize-fault laws.
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
 // access is sanctioned here (the workspace clippy ban targets production
@@ -33,11 +34,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, PluginSession,
-    PluginSpec, RuntimeHostConfig, TurnFinish, TurnOutcome,
+    RuntimeHostConfig, TurnFinish, TurnOutcome,
 };
-use lash_core::plugin::{
-    PluginFactory, RuntimeServices, SessionAuthorityContext, StaticPluginFactory,
-};
+use lash_core::plugin::{PluginFactory, RuntimeServices, SessionAuthorityContext};
 use lash_core::store::{RuntimeCommitReceipt, RuntimeStoreDecorator};
 use lash_core::{
     AppendSessionNodesRequest, CommitBudget, DeploymentStore, LlmOutputPart, LlmResponse,
@@ -1317,137 +1316,6 @@ async fn message_append_keeps_the_committed_execution(backend: Backend) {
     );
 }
 
-/// A plugin whose second `after_turn` hook refuses the turn: the first turn
-/// commits, the second turn's finalization fails before its commit, and the
-/// third turn runs.
-fn refuse_second_turn_finalize() -> Arc<dyn PluginFactory> {
-    let calls = Arc::new(AtomicUsize::new(0));
-    Arc::new(StaticPluginFactory::new(
-        lash_core::plugin::PluginDeclaration::initial("fig2521-refuse-second-finalize"),
-        PluginSpec::new().with_after_turn(
-            crate::hook_key!("after-turn-1"),
-            Arc::new(move |_| {
-                let calls = Arc::clone(&calls);
-                Box::pin(async move {
-                    if calls.fetch_add(1, Ordering::SeqCst) == 1 {
-                        Err(lash_core::PluginError::attempt_fault(
-                            "injected pre-commit finalize failure".to_string(),
-                        ))
-                    } else {
-                        Ok(Default::default())
-                    }
-                })
-            }),
-        ),
-    ))
-}
-
-fn reassign_response() -> String {
-    typescript_block("let accumulated = \"REJECTED\";\nfinish(accumulated);")
-}
-
-/// Runs the rejected turn: the executor has already assigned `REJECTED` when
-/// the after-turn hook refuses finalization, so the turn returns an error
-/// without a commit.
-async fn rejected_reassignment(label: &str, runtime: &mut LashRuntime) {
-    let rejected = shift(
-        runtime,
-        TurnInput::text("reject-reassignment"),
-        "reject-reassignment",
-    )
-    .await
-    .expect_err("the refused finalization fails the turn");
-    assert!(
-        rejected
-            .to_string()
-            .contains("injected pre-commit finalize failure"),
-        "{label}: {rejected:?}"
-    );
-}
-
-/// (g) Storeless: the accepted execution holds `COMMITTED`; the next turn
-/// assigns `REJECTED` and its after-turn hook refuses finalization before the
-/// commit. A rejected first physical turn invalidates the resident state
-/// exactly like a rejected follow-on turn, so the next ordinary turn rebuilds
-/// from the accepted execution and reads `COMMITTED`, not the rejected
-/// executor's `REJECTED`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_storeless_rejected_turn_is_redriven_before_the_next_turn() {
-    let mut runtime = Box::pin(storeless_runtime(
-        vec![establish_response(), reassign_response(), read_response()],
-        vec![refuse_second_turn_finalize()],
-    ))
-    .await;
-    assert_final_value(
-        "storeless",
-        &turn(&mut runtime, "establish").await,
-        serde_json::json!("COMMITTED"),
-    );
-    let accepted = runtime
-        .export_persistence_state()
-        .execution_state_hydration()
-        .expect("the accepted execution is retained, not refused")
-        .expect("the accepted execution is retained, not absent");
-
-    rejected_reassignment("storeless", &mut runtime).await;
-    assert_eq!(
-        runtime
-            .export_persistence_state()
-            .execution_state_hydration()
-            .expect("the accepted execution is still retained"),
-        Some(accepted),
-        "storeless: the rejected turn must not replace the accepted resident execution"
-    );
-
-    assert_final_value(
-        "storeless",
-        &turn(&mut runtime, "after-rejection").await,
-        serde_json::json!("COMMITTED"),
-    );
-}
-
-/// (g) store-backed: the rejected turn's reassignment must not escape its
-/// failed attempt into the next ordinary turn's execution state. Session
-/// driver redrive is covered by the facade's finalize-fault laws.
-async fn rejected_turn_does_not_leak_execution(backend: Backend) {
-    let SeededSession {
-        mut runtime,
-        plugins,
-        ..
-    } = committed_session_with_plugins(
-        &backend,
-        "rejected-turn",
-        vec![establish_response(), reassign_response(), read_response()],
-        &[refuse_second_turn_finalize()],
-    )
-    .await;
-
-    rejected_reassignment(backend.label, &mut runtime).await;
-
-    assert_final_value(
-        backend.label,
-        &turn(&mut runtime, "after-rejection").await,
-        serde_json::json!("COMMITTED"),
-    );
-    drop(plugins);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_rejected_turn_does_not_leak_execution_on_memory() {
-    Box::pin(rejected_turn_does_not_leak_execution(
-        Backend::memory().await,
-    ))
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_rejected_turn_does_not_leak_execution_on_sqlite() {
-    Box::pin(rejected_turn_does_not_leak_execution(
-        Backend::sqlite().await,
-    ))
-    .await;
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_message_append_keeps_the_committed_execution_on_memory() {
     Box::pin(message_append_keeps_the_committed_execution(
@@ -1462,172 +1330,6 @@ async fn rlm_message_append_keeps_the_committed_execution_on_sqlite() {
         Backend::sqlite().await,
     ))
     .await;
-}
-
-struct TerminalPayloadTool {
-    payload: serde_json::Value,
-    calls: Arc<AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::ToolProvider for TerminalPayloadTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![super::app_tool_definition().manifest()]
-    }
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(super::app_tool_definition().contract()))
-    }
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        lash_core::ToolOutcome::ok(self.payload.clone())
-            .with_control(lash_core::ToolControl::Finish {
-                value: lash_core::ToolValue::untrusted_json(self.payload.clone()),
-            })
-            .into()
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_cold_replay_preserves_terminal_payload_and_zero_exec_usage() {
-    for sqlite in [false, true] {
-        for native in [false, true] {
-            let backend = if sqlite {
-                Backend::sqlite().await
-            } else {
-                Backend::memory().await
-            };
-            let script = Arc::new(Script {
-                native,
-                reported_usage: true,
-                responses: vec![if native {
-                    "await tools.app_lookup({}); finish(\"unreachable\");".into()
-                } else {
-                    typescript_block("await tools.app_lookup({}); finish(\"unreachable\");")
-                }],
-                ..Default::default()
-            });
-            let calls = Arc::new(AtomicUsize::new(0));
-            let payload = serde_json::json!({"terminal": "x".repeat(80_000), "nested": [1, {"complete": true}]});
-            let tool = Arc::new(TerminalPayloadTool {
-                payload: payload.clone(),
-                calls: Arc::clone(&calls),
-            });
-            let finalize = Arc::new(AtomicUsize::new(0));
-            let fail = Arc::clone(&finalize);
-            let plugins: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
-                lash_core::plugin::PluginDeclaration::initial("cold-terminal-fixture"),
-                PluginSpec::new().with_tool_provider(tool).with_after_turn(
-                    crate::hook_key!("after-turn-2"),
-                    Arc::new(move |_| {
-                        let fail = Arc::clone(&fail);
-                        Box::pin(async move {
-                            if fail.fetch_add(1, Ordering::SeqCst) == 0 {
-                                return Err(lash_core::PluginError::attempt_fault(
-                                    "lose the resident runtime before commit",
-                                ));
-                            }
-                            Ok(Default::default())
-                        })
-                    }),
-                ),
-            ))];
-            let seeded = Box::pin(backend.seeded_session_with_plugins(
-                "cold-terminal",
-                Arc::clone(&script),
-                &plugins,
-            ))
-            .await;
-            let id = SessionId::from(seeded.runtime.session_id());
-            let store = Arc::clone(&seeded.store);
-            Box::pin(seeded.runtime.park())
-                .await
-                .expect("release seeded runtime");
-            drop(seeded.plugins);
-            let turns = Arc::new(Mutex::new(Vec::new()));
-            let attempt: lash_restate_test::HandlerAttempt = {
-                let backend = backend.backend.clone();
-                let script = Arc::clone(&script);
-                let store = Arc::clone(&store);
-                let turns = Arc::clone(&turns);
-                Arc::new(move |controller| {
-                    let backend = backend.clone();
-                    let script = Arc::clone(&script);
-                    let store = Arc::clone(&store);
-                    let turns = Arc::clone(&turns);
-                    let plugins = plugins.clone();
-                    Box::pin(async move {
-                        let state = lash_core::store::load_session_window_state(
-                            &store.base,
-                            lash_core::store::WindowSelector::Current,
-                        )
-                        .await
-                        .unwrap()
-                        .unwrap()
-                        .state;
-                        let (mut runtime, _plugins) =
-                            open_with_plugins(&backend, store, script, state, &plugins).await;
-                        let result = runtime
-                            .execute_turn(
-                                TurnInput::text("finish with the full tool payload"),
-                                lash_core::facade_support::TurnOptions::new(
-                                    tokio_util::sync::CancellationToken::new(),
-                                    controller,
-                                ),
-                            )
-                            .await;
-                        match result {
-                            Ok(turn) => turns.lock_recover().push(turn),
-                            Err(error) => {
-                                panic!("cold restart after the journaled terminal: {error}")
-                            }
-                        }
-                    })
-                })
-            };
-            backend
-                ._double
-                .run_crashed_then_redriven(
-                    lash_core::AdmittedScope::turn(&id, TurnId::from("cold-terminal-run")),
-                    Arc::clone(&attempt),
-                    attempt,
-                )
-                .await
-                .expect("redrive on a fresh runtime");
-            let turns = turns.lock_recover();
-            assert_eq!(turns.len(), 1);
-            let turn = &turns[0];
-            assert_eq!(
-                turn.outcome,
-                TurnOutcome::Finished(TurnFinish::ToolValue {
-                    tool_name: "app_lookup".into(),
-                    value: payload
-                })
-            );
-            assert_eq!(
-                script.calls.load(Ordering::SeqCst),
-                1,
-                "the model call replayed"
-            );
-            assert_eq!(calls.load(Ordering::SeqCst), 1, "the tool call replayed");
-            assert_eq!(finalize.load(Ordering::SeqCst), 2, "one cold retry");
-            assert_eq!(turn.llm_calls.len(), 1, "exec adds no model ledger row");
-            assert_eq!(turn.llm_calls[0].attempts.len(), 1);
-            assert_eq!(turn.token_usage.input_tokens, 11);
-            assert_eq!(turn.token_usage.output_tokens, 7);
-            assert_eq!(
-                turn.tool_calls.len(),
-                1,
-                "cold exec replay rebuilds tool accounting"
-            );
-            assert_eq!(turn.tool_calls[0].tool, "app_lookup");
-            let accounted = serde_json::to_value(&turn.tool_calls[0].output).unwrap();
-            assert!(
-                accounted.to_string().contains("omitted_bytes"),
-                "exec accounting bounds the payload: {accounted}"
-            );
-            assert!(!accounted.to_string().contains(&"x".repeat(80_000)));
-        }
-    }
 }
 
 /// `state` with the RLM protocol's recorded namespace set to `options`
