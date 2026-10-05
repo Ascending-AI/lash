@@ -825,8 +825,8 @@ lash_store_sql::statements! {
         /// Reclaim settled plans older than `?1` that no live child still
         /// names.
         delete_reclaimable = "DELETE FROM parent_end_plans
-         WHERE settled_at_ms IS NOT NULL
-           AND settled_at_ms < ?1
+         WHERE obligation_state = 'delivered'
+           AND obligation_settled_at_ms < ?1
            AND NOT EXISTS (
                SELECT 1 FROM processes AS child
                WHERE child.lifetime_scope_kind = parent_end_plans.parent_kind

@@ -468,9 +468,9 @@ lash_store_sql::statements! {
                  RETURNING current_seq
              ), settled_park_event AS (
                  INSERT INTO turn_park_events
-                     (seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms)
+                     (seq, session_id, turn_id, park_id, kind, cause_json, reason_json, at_ms)
                  SELECT clock.current_seq, park.session_id, park.turn_id, park.park_id,
-                        'unparked', 'turn_committed', NULL,
+                        'unparked', '{\"type\":\"turn_committed\"}', NULL,
                         floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
                  FROM settled_park AS park
                  CROSS JOIN settled_park_clock AS clock

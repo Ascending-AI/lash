@@ -169,7 +169,8 @@ async fn a_child_registering_as_its_parent_scope_ends_is_refused_or_swept() {
                 .get_parent_end_plan(&parent)
                 .await
                 .expect("read the ledger row")
-                .is_some_and(|plan| plan.settled_at_ms.is_some()),
+                .is_some_and(|plan| plan.obligation_state
+                    == lash_core_execution::store::ObligationState::Delivered),
             "the racing sweep settled the scope"
         );
     }

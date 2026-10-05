@@ -78,18 +78,18 @@ pub(super) async fn read_park_feed(
             .await
             .map_err(|error| format!("read the turn park feed: {error}"))?;
         let read = page.events.len();
-        rows.extend(page.events.into_iter().map(|event| {
+        for event in page.events {
             let (intent, cause) = match &event.kind {
                 lash_core::store::ParkEventKind::RedriveRequested { intent } => {
                     (Some(intent.to_string()), None)
                 }
-                lash_core::store::ParkEventKind::Unparked { cause } => (None, Some(cause.encode())),
+                lash_core::store::ParkEventKind::Unparked { cause } => (None, Some(cause.encode().map_err(|error| format!("encode the park closing cause: {error}"))?)),
                 lash_core::store::ParkEventKind::Cancelled { cause } => {
-                    (None, Some(cause.encode()))
+                    (None, Some(cause.encode().map_err(|error| format!("encode the park closing cause: {error}"))?))
                 }
                 _ => (None, None),
             };
-            ParkEventRow {
+            rows.push(ParkEventRow {
                 seq: event.seq,
                 at_ms: event.at_ms,
                 session: event.target.session_id.to_string(),
@@ -98,8 +98,8 @@ pub(super) async fn read_park_feed(
                 kind: event.kind.kind_code().to_owned(),
                 intent,
                 cause,
-            }
-        }));
+            });
+        }
         if read < PAGE.get() {
             return Ok(rows);
         }

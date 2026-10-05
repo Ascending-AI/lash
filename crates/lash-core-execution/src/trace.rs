@@ -962,7 +962,6 @@ mod span_identity_tests {
                     evidence: None,
                     generation_disposition: None,
                     usage: None,
-                    usage_disposition: Default::default(),
                 },
                 crate::AttemptRecord {
                     ordinal: 2,
@@ -974,7 +973,6 @@ mod span_identity_tests {
                     evidence: None,
                     generation_disposition: None,
                     usage: None,
-                    usage_disposition: Default::default(),
                 },
             ],
         };

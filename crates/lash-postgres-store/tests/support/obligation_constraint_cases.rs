@@ -93,7 +93,8 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
                 );
             }
             let cleanup = constraint.contains("ck_artifact_cleanup_obligations_obligation");
-            let not_null = if cleanup { "NOT NULL" } else { "" };
+            let trigger = constraint.contains("ck_trigger_deliveries_obligation");
+            let not_null = if cleanup || trigger { "NOT NULL" } else { "" };
             let prefix = if constraint.contains("start_obligation_state") {
                 "start_"
             } else {
@@ -116,6 +117,7 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
             let mut accepted = 0;
             for (values, valid) in &cases {
                 let expected = *valid
+                    && (!trigger || !values.starts_with("NULL"))
                     && (!cleanup
                         || (!values.contains("'delivered'") && !values.starts_with("NULL")));
                 let result = sqlx::query(&format!(
@@ -135,7 +137,8 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
                         .expect("a constraint violation is a database error");
                     assert!(
                         database_error.is_check_violation()
-                            || (cleanup && database_error.code().as_deref() == Some("23502")),
+                            || ((cleanup || trigger)
+                                && database_error.code().as_deref() == Some("23502")),
                         "unexpected insert error: {error}"
                     );
                     if database_error.is_check_violation() {
@@ -144,7 +147,16 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
                 }
             }
             if mismatches.is_empty() {
-                assert_eq!(accepted, if cleanup { 5 } else { 7 });
+                assert_eq!(
+                    accepted,
+                    if cleanup {
+                        5
+                    } else if trigger {
+                        6
+                    } else {
+                        7
+                    }
+                );
             }
             sqlx::query("DROP TABLE obligation_projection")
                 .execute(&mut connection)

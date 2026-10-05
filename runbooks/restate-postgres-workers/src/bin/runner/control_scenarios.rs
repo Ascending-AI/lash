@@ -827,7 +827,6 @@ pub(super) fn assert_requested(outcome: &TurnCancelOutcome, request_id: &str) ->
 pub(super) fn assert_cancelled_terminal(terminal: &TurnTerminal, request_id: &str) -> Result<()> {
     let TurnTerminal::Committed {
         stop: Some(TurnStop::Cancelled { evidence }),
-        session_revision: _,
     } = terminal
     else {
         anyhow::bail!("expected committed cancellation terminal, got {terminal:?}")
@@ -844,9 +843,7 @@ pub(super) fn assert_cancelled_terminal(terminal: &TurnTerminal, request_id: &st
 }
 
 pub(super) fn assert_non_cancel_terminal(terminal: &TurnTerminal) -> Result<()> {
-    let TurnTerminal::Committed { stop, .. } = terminal else {
-        anyhow::bail!("expected committed completion terminal, got {terminal:?}")
-    };
+    let TurnTerminal::Committed { stop } = terminal;
     anyhow::ensure!(
         !matches!(stop, Some(TurnStop::Cancelled { .. })),
         "completion-sealed terminal reported Cancelled"

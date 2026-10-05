@@ -568,6 +568,29 @@ pub(crate) enum CleanupStorage {
     ProcessRegistry,
 }
 
+impl CleanupStorage {
+    fn for_referrer(referrer: &ArtifactReferrer) -> Self {
+        if referrer.kind() == lash_core_execution::ArtifactReferrerKind::ProcessRecord {
+            Self::ProcessRegistry
+        } else {
+            Self::DurableCore
+        }
+    }
+}
+
+const REGISTRY_FENCE_LAYOUT: lash_store_sql::TableLayout =
+    lash_store_sql::TableLayout::new(&[lash_store_sql::SchemaTables::new(
+        "durable_core",
+        &["referrer_fences"],
+    )]);
+static REGISTRY_END_FENCES: std::sync::LazyLock<
+    lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements,
+> = std::sync::LazyLock::new(|| {
+    lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements::render(
+        lash_store_sql::Dialect::sqlite(REGISTRY_FENCE_LAYOUT),
+    )
+});
+
 pub(crate) fn arm_cleanup_tx(
     tx: &rusqlite::Connection,
     cleanup: &ArtifactCleanup,
@@ -575,6 +598,12 @@ pub(crate) fn arm_cleanup_tx(
     storage: CleanupStorage,
 ) -> Result<ObligationId, StoreError> {
     use rusqlite::{OptionalExtension, params};
+    if storage != CleanupStorage::for_referrer(&cleanup.referrer()) {
+        return Err(StoreError::StoredDataCorrupt {
+            record_kind: "ArtifactCleanup",
+            message: "cleanup referrer belongs to a different database".to_string(),
+        });
+    }
     let kind = cleanup.referrer().kind().as_str();
     let referrer_id = cleanup.referrer().canonical_id();
     let row: Option<(String, String, String, String, String)> = tx
@@ -626,9 +655,20 @@ pub(crate) fn arm_cleanup_tx(
         }
         CleanupUpsert::Keep => {}
     }
-    if storage == CleanupStorage::DurableCore && cleanup.is_ended() {
-        crate::artifact_store::fence_artifact_referrer_tx(tx, &cleanup.referrer(), now_ms)
-            .map_err(sqlite_error)?;
+    if cleanup.is_ended() {
+        match storage {
+            CleanupStorage::DurableCore => {
+                crate::artifact_store::fence_artifact_referrer_tx(tx, &cleanup.referrer(), now_ms)
+                    .map_err(sqlite_error)?
+            }
+            CleanupStorage::ProcessRegistry => {
+                tx.execute(
+                    REGISTRY_END_FENCES.insert_fence.sql(),
+                    params![kind, referrer_id, crate::clamp_epoch_ms(now_ms)],
+                )
+                .map_err(sqlite_error)?;
+            }
+        }
     }
     Ok(id)
 }
@@ -766,11 +806,15 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
         now_ms: u64,
     ) -> Result<ObligationId, StoreError> {
         let cleanup = cleanup.clone();
-        self.core
+        let storage = CleanupStorage::for_referrer(&cleanup.referrer());
+        let ledger = match storage {
+            CleanupStorage::DurableCore => &self.core,
+            CleanupStorage::ProcessRegistry => &self.registry,
+        };
+        ledger
             .conn
             .write(move |tx| {
-                arm_cleanup_tx(tx, &cleanup, now_ms, CleanupStorage::DurableCore)
-                    .map_err(sqlite_conversion_error)
+                arm_cleanup_tx(tx, &cleanup, now_ms, storage).map_err(sqlite_conversion_error)
             })
             .await
             .map_err(sqlite_error)
@@ -849,6 +893,48 @@ mod artifact_cleanup_tests {
     use super::*;
     use lash_core_execution::ReferrerGuard;
     use rusqlite::OptionalExtension;
+
+    #[tokio::test]
+    async fn process_record_cleanup_routes_to_registry_and_fences_at_arm() {
+        use lash_core_execution::StoreSet as _;
+        let set = crate::SqliteStoreSet::memory()
+            .await
+            .expect("memory stores");
+        let referrer = ArtifactReferrer::ProcessRecord(
+            lash_sansio::ProcessId::parse("p_00000000000070008000000000000001")
+                .expect("minted process id"),
+        );
+        let cleanup = ArtifactCleanup::ended(referrer.clone(), Vec::new(), None);
+        let ledger = set.artifact_cleanup();
+        let id = ledger
+            .arm_cleanup(&cleanup, 7)
+            .await
+            .expect("arm process cleanup");
+        assert!(
+            cleanup_row(&set.process_env_store(), &referrer)
+                .await
+                .is_none()
+        );
+        assert!(ledger.load_cleanup(&id).await.expect("read").is_some());
+        assert!(fenced(&set.process_env_store(), &referrer).await);
+        let registry = set.process_registry();
+        registry
+            .conn
+            .call(move |conn| {
+                assert!(arm_cleanup_tx(conn, &cleanup, 8, CleanupStorage::ProcessRegistry).is_ok());
+                let count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM artifact_cleanup_obligations",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("registry count");
+                assert_eq!(count, 1);
+                Ok(())
+            })
+            .await
+            .expect("registry row");
+    }
 
     #[tokio::test]
     async fn cleanup_kind_mismatch_is_stored_corruption() {

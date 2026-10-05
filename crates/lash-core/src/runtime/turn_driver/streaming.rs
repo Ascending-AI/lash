@@ -529,8 +529,6 @@ impl RuntimeTurnDriver<'_> {
                                     evidence: None,
                                     generation_disposition: None,
                                     usage: None,
-                                    usage_disposition:
-                                        crate::AttemptUsageOutcome::UnreportedAfterFailure,
                                 }],
                             });
                             let failure = LlmCallError {

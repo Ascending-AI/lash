@@ -8,7 +8,7 @@
 //! the process row: a prune or a session deletion that removes the row keeps
 //! its transitions, so the table holds no process foreign key.
 //!
-//! `kind` is the transition's class and `cause` what ended it — a
+//! `kind` is the transition's class and `cause_json` what ended it — a
 //! `ParkEventKind` decoded across the two columns plus `reason_json`, which
 //! only a `Parked` row carries. Reads are cursor pages (`seq > ?`);
 //! compaction deletes at or below a host-chosen cursor and raises the clock's
@@ -20,8 +20,7 @@ pub const TABLE: &str = "process_park_events";
 /// Every column an event row carries, in insert order. `park_build_generation`
 /// is the generation stamped on the checkpoint a `Parked` row records
 /// (FIG-3795): NULL on the closing rows, which name no checkpoint.
-pub const INSERT_COLUMNS: &str =
-    "seq, process_id, park_id, kind, cause, reason_json, at_ms, park_build_generation";
+pub const INSERT_COLUMNS: &str = "seq, process_id, park_id, kind, cause_json, reason_json, at_ms, park_build_generation, redrive_intent";
 
 crate::statements! {
     /// `process_park_events` statements both backends issue verbatim.
@@ -30,11 +29,11 @@ crate::statements! {
         /// sequenced `?1`, carrying reason `?6` when it is a `Parked`, at
         /// `?7`, stamped `?8` with the checkpoint's build generation when the
         /// park's writer records one (FIG-3795).
-        insert_event = "INSERT INTO process_park_events (seq, process_id, park_id, kind, cause, reason_json, at_ms, park_build_generation)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+        insert_event = "INSERT INTO process_park_events (seq, process_id, park_id, kind, cause_json, reason_json, at_ms, park_build_generation, redrive_intent)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
 
         /// The `?2` oldest events strictly after cursor `?1`, in commit order.
-        select_events_after = "SELECT seq, process_id, park_id, kind, cause, reason_json, at_ms, park_build_generation
+        select_events_after = "SELECT seq, process_id, park_id, kind, cause_json, reason_json, at_ms, park_build_generation, redrive_intent
              FROM process_park_events
              WHERE seq > ?1
              ORDER BY seq

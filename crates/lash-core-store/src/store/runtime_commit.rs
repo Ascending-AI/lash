@@ -540,8 +540,9 @@ pub struct RuntimeCommitReceipt {
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
     /// set this transient decision bit when returning an earlier commit result;
-    /// it is stored as `false` in the receipt itself.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    /// serialization always omits it and deserialization always clears it.
+    #[serde(skip)]
+    #[schemars(skip)]
     pub receipt_replayed: bool,
 }
 

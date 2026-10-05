@@ -135,21 +135,19 @@ lash_sansio::tool_intent_variants!(define_tool_intent);
 /// crash redrives see the same first writer: a cancel binds its target here
 /// before realization, and every submission retains its first outcome here.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(try_from = "ToolIntentSubmissionWire")]
 pub struct ToolIntentSubmissionRecord {
     /// Version selecting the admission and realization contract.
     pub protocol_version: u16,
     /// Canonical `(session, scope, call, index)` identity and replay key.
     pub identity: ToolIntentIdentity,
-    /// First submitted command kind.
-    pub kind: ToolIntentKind,
     /// Hash of the first serialized payload.
     pub payload_hash: String,
     /// First payload retained for crash redrive.
     pub intent: ToolIntent,
     /// First typed realization outcome, absent while admission is pending.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub outcome: Option<crate::ToolIntentExecutionOutcome>,
-    pub completed_at_ms: Option<u64>,
+    pub settlement: Option<ToolIntentSubmissionSettlement>,
     /// The submission's trace scope: the cause and anchor its first
     /// submission offered and when it was made. The ledger's first writer
     /// retains it with the row; a later submission of the identity reads it
@@ -160,6 +158,85 @@ pub struct ToolIntentSubmissionRecord {
     pub trace: Option<lash_trace::DurableTraceScope>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToolIntentSubmissionWire {
+    protocol_version: u16,
+    identity: ToolIntentIdentity,
+    payload_hash: String,
+    intent: ToolIntent,
+    settlement: Option<ToolIntentSubmissionSettlement>,
+    trace: Option<lash_trace::DurableTraceScope>,
+}
+
+impl TryFrom<ToolIntentSubmissionWire> for ToolIntentSubmissionRecord {
+    type Error = crate::PluginError;
+
+    fn try_from(row: ToolIntentSubmissionWire) -> Result<Self, Self::Error> {
+        let record = Self {
+            protocol_version: row.protocol_version,
+            identity: row.identity,
+            payload_hash: row.payload_hash,
+            intent: row.intent,
+            settlement: row.settlement,
+            trace: row.trace,
+        };
+        record.validate_settlement()?;
+        Ok(record)
+    }
+}
+
+/// One completed submission: its instant and outcome are inseparable.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolIntentSubmissionSettlement {
+    pub at_ms: u64,
+    pub outcome: ToolIntentSubmissionOutcome,
+}
+
+/// A per-identity result holds neither a second identity nor a batch refusal.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "status",
+    content = "result",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum ToolIntentSubmissionOutcome {
+    Executed(crate::ToolIntentRealized),
+    Refused(crate::ToolIntentRefusalReason),
+}
+
+impl ToolIntentSubmissionOutcome {
+    fn try_from_execution(
+        outcome: crate::ToolIntentExecutionOutcome,
+        identity: &ToolIntentIdentity,
+        kind: ToolIntentKind,
+    ) -> Result<Self, crate::PluginError> {
+        use crate::ToolIntentExecutionOutcome as Answer;
+        match outcome {
+            Answer::Executed {
+                identity: recorded,
+                realized,
+            } if &recorded == identity && realized.kind() == kind => Ok(Self::Executed(realized)),
+            Answer::Refused {
+                identity: Some(recorded),
+                intent_index,
+                kind: recorded_kind,
+                refusal,
+            } if &recorded == identity
+                && intent_index == identity.intent_index
+                && recorded_kind == kind =>
+            {
+                Ok(Self::Refused(refusal))
+            }
+            _ => Err(crate::durable_identity_conflict(
+                "submission settlement must name its retained identity and command kind",
+            )),
+        }
+    }
+}
+
 impl ToolIntentSubmissionRecord {
     /// Builds the canonical first-submission row for protocol and
     /// process-engine implementors before any intent realization occurs.
@@ -167,7 +244,6 @@ impl ToolIntentSubmissionRecord {
         identity: ToolIntentIdentity,
         intent: ToolIntent,
     ) -> Result<Self, serde_json::Error> {
-        let kind = intent.kind();
         // The hash is the intent's business identity: an occurrence an
         // emission carries is hashed without the trace offer beside it.
         let payload_hash = crate::stable_hash::blake3_hex(
@@ -180,13 +256,66 @@ impl ToolIntentSubmissionRecord {
         Ok(Self {
             protocol_version: TOOL_INTENT_PROTOCOL_V3,
             identity,
-            kind,
             payload_hash,
             intent,
-            outcome: None,
-            completed_at_ms: None,
+            settlement: None,
             trace: None,
         })
+    }
+
+    /// The command kind is owned by the retained intent.
+    pub fn kind(&self) -> ToolIntentKind {
+        self.intent.kind()
+    }
+
+    /// Refuse a malformed per-identity settlement at admission and decode.
+    pub fn validate_settlement(&self) -> Result<(), crate::PluginError> {
+        if let Some(ToolIntentSubmissionSettlement {
+            outcome: ToolIntentSubmissionOutcome::Executed(realized),
+            ..
+        }) = &self.settlement
+            && realized.kind() != self.kind()
+        {
+            return Err(crate::durable_identity_conflict(
+                "submission realization differs from its retained command kind",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Rebuild the external answer using this row's identity and kind.
+    pub fn execution_outcome(&self) -> Option<crate::ToolIntentExecutionOutcome> {
+        use crate::ToolIntentExecutionOutcome as Answer;
+        self.settlement
+            .as_ref()
+            .map(|settlement| match &settlement.outcome {
+                ToolIntentSubmissionOutcome::Executed(realized) => Answer::Executed {
+                    identity: self.identity.clone(),
+                    realized: realized.clone(),
+                },
+                ToolIntentSubmissionOutcome::Refused(refusal) => Answer::Refused {
+                    identity: Some(self.identity.clone()),
+                    intent_index: self.identity.intent_index,
+                    kind: self.kind(),
+                    refusal: refusal.clone(),
+                },
+            })
+    }
+
+    /// Validate the answer at the ledger boundary before keeping the first settlement.
+    pub fn complete(
+        &mut self,
+        at_ms: u64,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<bool, crate::PluginError> {
+        self.validate_settlement()?;
+        let outcome =
+            ToolIntentSubmissionOutcome::try_from_execution(outcome, &self.identity, self.kind())?;
+        if self.settlement.is_some() {
+            return Ok(false);
+        }
+        self.settlement = Some(ToolIntentSubmissionSettlement { at_ms, outcome });
+        Ok(true)
     }
 
     /// The scope id of this submission's trace scope: its owning runtime
@@ -745,6 +874,72 @@ mod tests {
                 .contains("missing field `protocol_version`"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn submission_settlement_refuses_foreign_identity_kind_and_batch_outcomes() {
+        let intent = sample_intent(ToolIntentKind::CancelProcess);
+        let identity = derive_tool_intent_identity(
+            intent.owner(),
+            "turn",
+            &crate::ToolCallId::fixture("call"),
+            0,
+        );
+        let mut record = ToolIntentSubmissionRecord::new(identity.clone(), intent).expect("row");
+        let refused = |identity, kind, intent_index| crate::ToolIntentExecutionOutcome::Refused {
+            identity,
+            kind,
+            intent_index,
+            refusal: crate::ToolIntentRefusalReason::IntentIndexOverflow,
+        };
+        let mut foreign = identity.clone();
+        foreign.replay_key.push_str("foreign");
+        for answer in [
+            refused(Some(foreign), record.kind(), 0),
+            refused(Some(identity.clone()), ToolIntentKind::SignalProcess, 0),
+            refused(Some(identity.clone()), record.kind(), 1),
+            refused(None, record.kind(), 0),
+            crate::ToolIntentExecutionOutcome::ProtocolRefused {
+                refusal: crate::ToolIntentRefusalReason::IntentIndexOverflow,
+            },
+        ] {
+            let error = record.complete(7, answer).expect_err("foreign settlement");
+            assert!(crate::is_durable_identity_conflict(&error));
+            assert!(record.settlement.is_none());
+        }
+        let wrong_realization =
+            crate::ToolIntentRealized::CancelProcess(crate::ProcessCancelReceipt {
+                process_id: crate::process_id_for_test("process"),
+                status: crate::ProcessStatus::Running,
+                origin: crate::CancelOrigin::ModelRequested,
+            });
+        let other_intent = sample_intent(ToolIntentKind::SignalProcess);
+        let mut other =
+            ToolIntentSubmissionRecord::new(identity.clone(), other_intent).expect("other row");
+        other.settlement = Some(ToolIntentSubmissionSettlement {
+            at_ms: 7,
+            outcome: ToolIntentSubmissionOutcome::Executed(wrong_realization),
+        });
+        assert!(other.validate_settlement().is_err());
+        assert!(
+            serde_json::from_value::<ToolIntentSubmissionRecord>(
+                serde_json::to_value(&other).expect("invalid bytes")
+            )
+            .is_err()
+        );
+        let answer = refused(Some(identity), record.kind(), 0);
+        assert!(record.complete(7, answer.clone()).expect("settle"));
+        assert!(
+            !record
+                .complete(9, answer.clone())
+                .expect("first settlement wins")
+        );
+        assert_eq!(record.settlement.as_ref().expect("settled").at_ms, 7);
+        assert_eq!(record.execution_outcome(), Some(answer));
+        let encoded = serde_json::to_value(&record).expect("encode");
+        assert!(encoded.get("kind").is_none());
+        assert!(encoded.get("completed_at_ms").is_none());
+        assert!(encoded["settlement"]["outcome"].get("identity").is_none());
     }
 
     #[test]

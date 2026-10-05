@@ -84,3 +84,6 @@ pub(crate) const SELECT_RELEASE_STAMP_TABLE_EXISTS: &str =
 /// lease's expiry.
 pub(crate) const SELECT_DATABASE_EPOCH_MS: &str =
     "SELECT CAST(unixepoch('subsec') * 1000 AS INTEGER)";
+
+/// Attach the durable core so registry cleanup arms its end fence atomically.
+pub(crate) const ATTACH_DURABLE_CORE: &str = "ATTACH DATABASE ?1 AS durable_core";

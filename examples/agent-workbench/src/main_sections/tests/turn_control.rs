@@ -992,7 +992,6 @@ impl lash::TurnAttach for ConcurrentCancelTerminal {
         }
         Ok(lash::TurnTerminal::Committed {
             stop: Some(lash::TurnStop::Cancelled { evidence }),
-            session_revision: None,
         })
     }
 }

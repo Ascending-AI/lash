@@ -1573,7 +1573,6 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
                 output_tokens: 5,
                 ..LlmUsage::default()
             }),
-            usage_disposition: Default::default(),
         }],
     };
     let attempts = crate::trace::trace_llm_attempts(Some(&call_record));

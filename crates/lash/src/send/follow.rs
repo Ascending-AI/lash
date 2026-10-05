@@ -370,7 +370,6 @@ impl TerminalWait {
             // A failed turn publishes no further terminal, and neither does
             // a run whose retirement (or its session's revocation) released
             // the wait.
-            Ok(TurnTerminal::Failed { .. }) => self.ended = true,
             Err(error)
                 if error.code == lash_core::RuntimeErrorCode::TurnControlUnknownOrRevoked =>
             {

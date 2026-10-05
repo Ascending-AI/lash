@@ -11,7 +11,7 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "parent_end_plans";
 
-/// Every column, in insert order. `settled_at_ms` and the obligation
+/// Every column, in insert order. The obligation
 /// columns are absent: a plan is recorded unsettled and armed by the record.
 pub const INSERT_COLUMNS: &str = "parent_kind, parent_id, parent_payload, ended_at_ms";
 
@@ -30,8 +30,8 @@ crate::statements! {
 
         exists = "SELECT 1 FROM parent_end_plans WHERE parent_kind = ?1 AND parent_id = ?2";
 
-        /// Scope `?1` / `?2`'s typed payload, two instants and obligation.
-        select_stamps = "SELECT parent_payload, ended_at_ms, settled_at_ms, obligation_id, obligation_state
+        /// Scope `?1` / `?2`'s typed payload, end instant and obligation.
+        select_stamps = "SELECT parent_payload, ended_at_ms, obligation_id, obligation_state
              FROM parent_end_plans
              WHERE parent_kind = ?1 AND parent_id = ?2";
 
@@ -40,8 +40,7 @@ crate::statements! {
         /// a stalled plan keeps its operator-owned stall and is not reclaimable.
         /// Repetition preserves the first delivered timestamp.
         settle = "UPDATE parent_end_plans
-             SET settled_at_ms = COALESCE(settled_at_ms, ?3),
-                 obligation_state = 'delivered', obligation_due_at_ms = NULL,
+             SET obligation_state = 'delivered', obligation_due_at_ms = NULL,
                  obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = COALESCE(obligation_settled_at_ms, ?3)
              WHERE parent_kind = ?1 AND parent_id = ?2
@@ -98,7 +97,7 @@ crate::statements! {
         /// Settle claim `?2` on obligation `?1` delivered at `?3`, arming reclaim.
         obligation_settle_delivered = "UPDATE parent_end_plans
              SET obligation_state = 'delivered', obligation_claim_token = NULL,
-                 settled_at_ms = COALESCE(settled_at_ms, ?3), obligation_due_at_ms = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
+                 obligation_due_at_ms = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = ?3
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";

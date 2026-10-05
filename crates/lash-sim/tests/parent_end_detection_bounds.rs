@@ -267,8 +267,8 @@ async fn a_due_plan_is_claimed_and_delivered_within_one_tick() {
             .await
             .expect("read the settled plan")
             .expect("the row is kept")
-            .settled_at_ms
-            .is_some(),
+            .obligation_state
+            == lash_core::store::ObligationState::Delivered,
         "the delivery applied and settled the plan"
     );
     assert!(world.stalled().await.is_empty());

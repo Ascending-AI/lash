@@ -15,7 +15,7 @@ pub const RETIRED_OWNERS_TABLE: &str = "tool_intent_retired_owners";
 
 /// Every column an insert writes.
 pub const INSERT_COLUMNS: &str = "replay_key, owner, execution_scope_id, tool_call_id,
-     intent_index, kind, payload_hash, submission_json, admitted_at_ms";
+     intent_index, payload_hash, submission_json, admitted_at_ms";
 
 crate::statements! {
     /// `tool_intent_submissions` statements both backends issue verbatim.

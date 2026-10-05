@@ -717,7 +717,8 @@ async fn check_scopes(world: &CrashWorld, expected: &Expected, violations: &mut 
             }
         }
         match registry.get_parent_end_plan(scope).await {
-            Ok(Some(plan)) if plan.settled_at_ms.is_some() => {}
+            Ok(Some(plan))
+                if plan.obligation_state == lash_core::store::ObligationState::Delivered => {}
             Ok(Some(plan)) => violations.push(format!(
                 "the scope of `{scope}` closed at {} but its plan never settled",
                 plan.ended_at_ms

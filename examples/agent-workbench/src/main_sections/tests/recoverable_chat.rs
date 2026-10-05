@@ -952,7 +952,6 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
                         honoured_after_step: Some(0),
                     },
                 }),
-                session_revision: Some(1),
             })
             .expect("serialize the typed Stop terminal"),
         )

@@ -274,6 +274,8 @@ impl SqliteStoreSet {
         // delivery's start (FIG-4369).
         let process_registry = Arc::new(
             process_registry
+                .with_attached_durable_core(&core)
+                .await?
                 .with_attached_trigger_store(&triggers)
                 .await?,
         );

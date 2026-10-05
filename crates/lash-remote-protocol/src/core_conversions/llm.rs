@@ -662,6 +662,7 @@ impl From<core_llm::ProviderReplayDrop> for RemoteProviderReplayDrop {
 
 impl From<core_llm::AttemptRecord> for RemoteAttemptRecord {
     fn from(value: core_llm::AttemptRecord) -> Self {
+        let usage_disposition = value.usage_disposition();
         let core_llm::AttemptRecord {
             ordinal,
             outcome,
@@ -672,7 +673,6 @@ impl From<core_llm::AttemptRecord> for RemoteAttemptRecord {
             evidence,
             generation_disposition,
             usage,
-            usage_disposition,
         } = value;
         Self {
             ordinal,

@@ -701,8 +701,8 @@ lash_store_sql::statements! {
         /// deleting from inside a correlated subquery without one, and SQLite
         /// cannot use one at all in a `DELETE`.
         delete_reclaimable = "DELETE FROM parent_end_plans AS plan
-         WHERE plan.settled_at_ms IS NOT NULL
-           AND plan.settled_at_ms < ?1
+         WHERE plan.obligation_state = 'delivered'
+           AND plan.obligation_settled_at_ms < ?1
            AND NOT EXISTS (
                SELECT 1 FROM processes AS child
                WHERE child.lifetime_scope_kind = plan.parent_kind

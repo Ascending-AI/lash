@@ -539,7 +539,7 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
         // Abort-retains-usage law: the late usage landed inside the drain
         // grace, so the aborted attempt is reported, not a hole.
         assert_eq!(
-            attempt.usage_disposition,
+            attempt.usage_disposition(),
             lash_core::AttemptUsageOutcome::Reported
         );
         assert_eq!(
@@ -647,7 +647,7 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
         assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Aborted);
         assert_eq!(attempt.usage, None);
         assert_eq!(
-            attempt.usage_disposition,
+            attempt.usage_disposition(),
             lash_core::AttemptUsageOutcome::UnreportedAfterAbort
         );
 
@@ -690,7 +690,7 @@ pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() ->
             .expect("completed attempt");
         assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Completed);
         assert_eq!(
-            attempt.usage_disposition,
+            attempt.usage_disposition(),
             lash_core::AttemptUsageOutcome::UnreportedByProvider
         );
 

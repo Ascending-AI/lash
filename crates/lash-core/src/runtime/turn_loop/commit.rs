@@ -709,7 +709,7 @@ impl LashRuntime {
             publish_terminal_after_commit(
                 turn_control,
                 turn_control_resolver,
-                &TurnTerminal::committed(&assembled.outcome, None),
+                &TurnTerminal::committed(&assembled.outcome),
                 &self.state.session_id,
                 &trace_turn_id,
             )
@@ -952,7 +952,7 @@ impl LashRuntime {
         publish_terminal_after_commit(
             turn_control,
             turn_control_resolver,
-            &TurnTerminal::committed(&delivery.turn.outcome, None),
+            &TurnTerminal::committed(&delivery.turn.outcome),
             &self.state.session_id,
             &trace_turn_id,
         )

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use crate::{ErrorEnvelope, TurnOutcome, TurnStop};
+use crate::{TurnOutcome, TurnStop};
 
 use super::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
@@ -174,24 +174,18 @@ pub enum TurnTerminal {
         /// A committed stop retains its typed cause and cancellation evidence.
         /// The answer body is read from the run's durable terminal record.
         stop: Option<TurnStop>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        session_revision: Option<u64>,
-    },
-    Failed {
-        error: ErrorEnvelope,
     },
 }
 
 impl TurnTerminal {
     /// The status published after a physical turn commits, without its answer.
     #[must_use]
-    pub fn committed(outcome: &TurnOutcome, session_revision: Option<u64>) -> Self {
+    pub fn committed(outcome: &TurnOutcome) -> Self {
         Self::Committed {
             stop: match outcome {
                 TurnOutcome::Stopped(stop) => Some(stop.clone()),
                 _ => None,
             },
-            session_revision,
         }
     }
 }

@@ -355,6 +355,30 @@ fn only_requested_options_can_be_omitted() {
 
 #[test]
 fn attempt_usage_disposition_follows_outcome_when_usage_is_absent() {
+    let mut record: AttemptRecord = serde_json::from_value(serde_json::json!({
+        "ordinal": 1, "outcome": "aborted", "protocol_position": "output_started", "retry_budget_consumed": true
+    })).expect("attempt");
+    for outcome in [
+        AttemptOutcome::Completed,
+        AttemptOutcome::Failed,
+        AttemptOutcome::Aborted,
+        AttemptOutcome::Interrupted,
+    ] {
+        record.outcome = outcome;
+        assert_eq!(
+            record.usage_disposition(),
+            AttemptUsageOutcome::for_attempt(outcome, None)
+        );
+        assert!(
+            serde_json::to_value(&record)
+                .expect("encode")
+                .get("usage_disposition")
+                .is_none()
+        );
+    }
+    record.usage = Some(LlmUsage::default());
+    assert_eq!(record.usage_disposition(), AttemptUsageOutcome::Reported);
+
     let usage = LlmUsage {
         input_tokens: 1,
         ..LlmUsage::default()
@@ -388,37 +412,4 @@ fn attempt_usage_disposition_follows_outcome_when_usage_is_absent() {
     );
     assert!(AttemptUsageOutcome::UnreportedAfterAbort.is_unreported_after_interruption());
     assert!(!AttemptUsageOutcome::UnreportedByProvider.is_unreported_after_interruption());
-}
-
-#[test]
-fn legacy_attempt_records_decode_as_reported_and_reported_stays_elided() {
-    // Sealed before FIG-2765: no `usage_disposition` field at all.
-    let legacy = serde_json::json!({
-        "ordinal": 1,
-        "started_at": 42,
-        "duration": { "secs": 0, "nanos": 7000000 },
-        "outcome": "aborted",
-        "protocol_position": "output_started",
-        "retry_budget_consumed": true
-    });
-    let record: AttemptRecord = serde_json::from_value(legacy.clone()).expect("legacy attempt");
-    assert_eq!(record.usage_disposition, AttemptUsageOutcome::Reported);
-    // Sealed timing fields decode but are dropped on re-encode: recorded
-    // content carries no wall-clock measurements.
-    let mut stripped = legacy.clone();
-    stripped
-        .as_object_mut()
-        .expect("legacy object")
-        .retain(|key, _| key != "started_at" && key != "duration");
-    assert_eq!(serde_json::to_value(&record).expect("encode"), stripped);
-
-    let mut aborted = record.clone();
-    aborted.usage_disposition = AttemptUsageOutcome::UnreportedAfterAbort;
-    let encoded = serde_json::to_value(&aborted).expect("encode aborted");
-    assert_eq!(encoded["usage_disposition"], "unreported_after_abort");
-    let decoded: AttemptRecord = serde_json::from_value(encoded).expect("decode aborted");
-    assert_eq!(
-        decoded.usage_disposition,
-        AttemptUsageOutcome::UnreportedAfterAbort
-    );
 }

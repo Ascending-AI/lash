@@ -233,7 +233,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                         evidence: None,
                         generation_disposition: None,
                         usage: None,
-                        usage_disposition: Default::default(),
                     }],
                 },
             },

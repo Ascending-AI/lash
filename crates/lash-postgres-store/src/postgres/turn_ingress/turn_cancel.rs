@@ -93,8 +93,8 @@ lash_store_sql::statements! {
         /// replay key: a replayed submission is the point of the ledger.
         insert_new = "INSERT INTO tool_intent_submissions (
                  replay_key, owner, execution_scope_id, tool_call_id,
-                 intent_index, kind, payload_hash, submission_json, admitted_at_ms
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 intent_index, payload_hash, submission_json, admitted_at_ms
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT (replay_key) DO NOTHING";
 
         /// Fence every durably deleted session owner with a row admitted

@@ -34,8 +34,6 @@ pub(super) fn synthesize_protocol_abort(
     // the ledger must show, never a zero (ADR 0031).
     let usage = (response.provider_usage.is_some() || response.usage != LlmUsage::default())
         .then(|| response.usage.clone());
-    let usage_disposition =
-        crate::AttemptUsageOutcome::for_attempt(crate::AttemptOutcome::Aborted, usage.as_ref());
     let call_record = crate::LlmCallRecord {
         call_id,
         label: None,
@@ -50,7 +48,6 @@ pub(super) fn synthesize_protocol_abort(
             evidence: Some(execution_evidence),
             generation_disposition: response.generation_disposition,
             usage,
-            usage_disposition,
         }],
     };
     (response, call_record)

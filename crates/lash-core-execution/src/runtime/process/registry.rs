@@ -94,9 +94,6 @@ pub struct ParentEndPlan {
     pub parent: crate::ScopeId,
     /// Registry-stamped instant at which the scope ended.
     pub ended_at_ms: u64,
-    /// Reclaim eligibility, set only once the plan's delivery is acknowledged.
-    /// `None` while children or a claimed/stalled delivery remain unsettled.
-    pub settled_at_ms: Option<u64>,
     /// The store→engine obligation the row carries (ADR 0109): the record
     /// that writes the row arms it in the same transaction.
     pub obligation_id: crate::store::ObligationId,
@@ -983,7 +980,6 @@ mod parent_end_plan_tests {
         let plan = ParentEndPlan {
             parent: crate::ScopeId::Session(crate::SessionId::from("session")),
             ended_at_ms: 7,
-            settled_at_ms: None,
             obligation_id: crate::store::ObligationId::new("obligation"),
             obligation_state: crate::store::ObligationState::Due,
         };

@@ -175,12 +175,9 @@ fn cancel_request_without_undelivered_fails_decode() {
 
 #[test]
 fn terminal_success_has_no_cancellation_evidence() {
-    let terminal = TurnTerminal::committed(
-        &TurnOutcome::Finished(TurnFinish::AssistantMessage {
-            text: "the answer lives in the terminal record".repeat(4096),
-        }),
-        None,
-    );
+    let terminal = TurnTerminal::committed(&TurnOutcome::Finished(TurnFinish::AssistantMessage {
+        text: "the answer lives in the terminal record".repeat(4096),
+    }));
     let encoded = terminal_resolution(&terminal).expect("encode terminal");
     assert_eq!(
         encoded,
@@ -256,4 +253,14 @@ fn code_cell_peeks_have_their_own_identities_and_defer_after_step() {
         .causal_identity(),
         checkpoint.causal_identity()
     );
+}
+
+#[test]
+fn terminal_refuses_unwritten_failure_and_revision_states() {
+    for value in [
+        serde_json::json!({"status": "committed", "stop": null, "session_revision": 7}),
+        serde_json::json!({"status": "failed", "error": {}}),
+    ] {
+        assert!(serde_json::from_value::<TurnTerminal>(value).is_err());
+    }
 }

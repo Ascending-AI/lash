@@ -111,7 +111,7 @@ pub fn trace_llm_attempts(record: Option<&crate::LlmCallRecord>) -> Option<Vec<T
                     }),
                     generation_disposition: attempt.generation_disposition,
                     usage: attempt.usage.as_ref().map(trace_usage_from_llm),
-                    usage_disposition: trace_attempt_usage_disposition(attempt.usage_disposition),
+                    usage_disposition: trace_attempt_usage_disposition(attempt.usage_disposition()),
                 },
             })
             .collect(),

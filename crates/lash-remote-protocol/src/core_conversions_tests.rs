@@ -624,7 +624,6 @@ fn synthetic_terminal_call_record(
             evidence: None,
             generation_disposition: None,
             usage: None,
-            usage_disposition: Default::default(),
         }],
     }
 }
@@ -742,7 +741,6 @@ fn attempt_records_expose_only_structured_failure_facts() {
             evidence: None,
             generation_disposition: None,
             usage: None,
-            usage_disposition: Default::default(),
         }],
     };
 

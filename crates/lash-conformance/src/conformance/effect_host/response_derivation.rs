@@ -101,7 +101,7 @@ where
         };
         record
     }
-    use crate::{AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ProtocolPosition};
+    use crate::{AttemptOutcome, AttemptRecord, ProtocolPosition};
     let invocation = make();
     let mut recorded = Vec::new();
     for (index, terminal) in [
@@ -185,10 +185,6 @@ where
                         }),
                         evidence: None,
                         generation_disposition: None,
-                        usage_disposition: AttemptUsageOutcome::for_attempt(
-                            outcome,
-                            usage.as_ref(),
-                        ),
                         usage,
                     }
                 })

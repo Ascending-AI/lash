@@ -162,10 +162,10 @@ pub use maintenance::{
 };
 pub use obligation::*;
 pub use park::{
-    EnginePark, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
-    ParkId, ParkReason, ParkReasonCode, ParkReport, ProcessPark, ProcessParkKey, ProcessParkQuery,
-    ProcessParkWrite, StoreTransition, StoredParkRedrive, StoredTurnParkHead, TurnPark,
-    TurnParkOrigin, TurnParkQuery, TurnParkTarget, TurnParkWrite, TurnParkWriteDecision,
+    EnginePark, ParkCancelCause, ParkEventColumns, ParkEventKind, ParkFeedCursor, ParkFeedEvent,
+    ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkReport, ProcessPark, ProcessParkKey,
+    ProcessParkQuery, ProcessParkWrite, StoreTransition, StoredParkRedrive, StoredTurnParkHead,
+    TurnPark, TurnParkOrigin, TurnParkQuery, TurnParkTarget, TurnParkWrite, TurnParkWriteDecision,
     UnparkCause, UnsettledTurnCounts, decide_turn_park_write,
 };
 pub use pending_follow_on::{

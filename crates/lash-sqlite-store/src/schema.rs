@@ -376,11 +376,12 @@ CREATE TABLE IF NOT EXISTS turn_park_events (
     turn_id     TEXT NOT NULL,
     park_id     INTEGER NOT NULL,
     kind        TEXT NOT NULL CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested')),
-    cause       TEXT,
+    cause_json       TEXT,
     reason_json TEXT,
     at_ms       INTEGER NOT NULL,
     park_build_generation TEXT,
-    CONSTRAINT ck_turn_park_events_parked_reason CHECK ((kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL))
+    redrive_intent INTEGER,
+    CONSTRAINT ck_turn_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL AND park_build_generation IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0 AND park_build_generation IS NULL)) IS TRUE)
 );
 
 CREATE TABLE IF NOT EXISTS queued_work_batches (
@@ -633,7 +634,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_referrer_edges_referrer
     ON artifact_referrer_edges(referrer_kind, referrer_id);
 
 CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CHECK (length(referrer_kind) > 0),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_database CHECK (length(referrer_kind) > 0 AND referrer_kind <> 'process_record'),
     referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
     obligation_id TEXT NOT NULL,
@@ -866,12 +867,13 @@ CREATE TABLE IF NOT EXISTS process_park_events (
     seq         INTEGER PRIMARY KEY,
     process_id  TEXT NOT NULL,
     park_id     INTEGER NOT NULL,
-    kind        TEXT NOT NULL CONSTRAINT ck_process_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled')),
-    cause       TEXT,
+    kind        TEXT NOT NULL CONSTRAINT ck_process_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested')),
+    cause_json       TEXT,
     reason_json TEXT,
     at_ms       INTEGER NOT NULL,
     park_build_generation TEXT,
-    CONSTRAINT ck_process_park_events_parked_reason CHECK ((kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL))
+    redrive_intent INTEGER,
+    CONSTRAINT ck_process_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL AND park_build_generation IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0 AND park_build_generation IS NULL)) IS TRUE)
 );
 
 CREATE TABLE IF NOT EXISTS process_change_clock (
@@ -961,11 +963,10 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
 
--- The referrer-kind CHECK admits any non-empty label, as the durable core's
--- does: the vocabulary is typed in ArtifactReferrer::decode (ADR 0115
--- section 5), so a later build's kind needs no table rebuild.
+-- Process-record cleanup is owned by this registry. Every other kind lives
+-- in the durable core, whose vocabulary remains open (ADR 0115 section 5).
 CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CHECK (length(referrer_kind) > 0),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_database CHECK (referrer_kind = 'process_record'),
     referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
     obligation_id TEXT NOT NULL,
@@ -1013,7 +1014,6 @@ CREATE TABLE IF NOT EXISTS parent_end_plans (
     parent_id        TEXT NOT NULL,
     parent_payload   TEXT NOT NULL,
     ended_at_ms      INTEGER NOT NULL,
-    settled_at_ms    INTEGER CONSTRAINT ck_parent_end_plans_reclaimable CHECK ((settled_at_ms IS NULL OR obligation_state = 'delivered') IS TRUE),
     obligation_id    TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -1057,11 +1057,9 @@ CREATE TABLE IF NOT EXISTS tool_intent_submissions (
     execution_scope_id  TEXT NOT NULL,
     tool_call_id        TEXT NOT NULL,
     intent_index        INTEGER NOT NULL,
-    kind                TEXT NOT NULL,
     payload_hash        TEXT NOT NULL,
     submission_json     TEXT NOT NULL,
-    admitted_at_ms      INTEGER NOT NULL,
-    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger', 'publish_definition', 'get_definition', 'register_trigger'))
+    admitted_at_ms      INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
     ON tool_intent_submissions(owner, execution_scope_id, intent_index);

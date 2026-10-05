@@ -61,7 +61,7 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         "the row is keyed by the scope it ends"
     );
     assert!(
-        pending.settled_at_ms.is_none(),
+        pending.obligation_state != crate::ObligationState::Delivered,
         "a freshly written ledger row is unsettled"
     );
     assert!(
@@ -179,7 +179,7 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         .expect("read settled ledger row")
         .expect("a settled row is retained, not deleted");
     assert!(
-        settled.settled_at_ms.is_some(),
+        settled.obligation_state == crate::ObligationState::Delivered,
         "settlement stamps the row rather than deleting the fence"
     );
     assert_eq!(

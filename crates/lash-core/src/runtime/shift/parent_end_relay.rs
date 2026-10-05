@@ -134,7 +134,7 @@ impl ObligationRelay for ParentEndRelay {
         // A settled plan is already applied: the settle that applied it ran
         // while this claim was outstanding, so delivering is the no-op the
         // claim's settle marks `delivered`.
-        if plan.settled_at_ms.is_some() {
+        if plan.obligation_state == crate::store::ObligationState::Delivered {
             return Ok(());
         }
         apply_parent_end_plan(

@@ -382,6 +382,25 @@ impl SqliteProcessRegistry {
         })
     }
 
+    /// Attach the durable core so pruning arms its referrer fence atomically.
+    pub(crate) async fn with_attached_durable_core(
+        self,
+        core: &DatabaseLocation,
+    ) -> tokio_rusqlite::Result<Self> {
+        let name = core.target().open_name();
+        self.conn
+            .call(move |conn| {
+                crate::conn::cached_execute(
+                    conn,
+                    crate::connection_sql::ATTACH_DURABLE_CORE,
+                    params![name],
+                )
+                .map(|_| ())
+            })
+            .await?;
+        Ok(self)
+    }
+
     /// Attach the store set's trigger store at `triggers` to this registry's
     /// connection, so a delivery's start is registered against the
     /// delivery's binding (FIG-4369).

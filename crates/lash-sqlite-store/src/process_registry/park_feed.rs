@@ -49,7 +49,7 @@ pub(crate) fn log_process_park_transitions_conn(
 ) -> Result<(), lash_core_execution::PluginError> {
     for (park_id, kind) in transitions {
         let seq = allocate_process_park_seq_conn(conn)?;
-        let (cause, reason_json) = kind.encode_columns();
+        let (cause, reason_json, redrive_intent) = kind.encode_columns()?;
         let generation = matches!(kind, ParkEventKind::Parked { .. })
             .then_some(build_generation)
             .flatten();
@@ -65,6 +65,7 @@ pub(crate) fn log_process_park_transitions_conn(
                 reason_json,
                 crate::clamp_epoch_ms(at_ms),
                 generation,
+                redrive_intent,
             ],
         )
         .map_err(process_sqlite_error)?;
@@ -165,6 +166,7 @@ pub(super) async fn process_park_feed(
                             row.get::<_, Option<String>>(5)?,
                             row.get::<_, i64>(6)?,
                             row.get::<_, Option<String>>(7)?,
+                            row.get::<_, Option<i64>>(8)?,
                         ))
                     })
                     .map_err(process_sqlite_error)?;
@@ -182,6 +184,7 @@ pub(super) async fn process_park_feed(
                         reason_json,
                         at_ms,
                         build_generation,
+                        redrive_intent,
                     ) = row.map_err(process_sqlite_error)?;
                     let seq = plugin_u64_from_sql("ProcessParkEvent", "seq", seq)?;
                     let build_generation = build_generation
@@ -209,6 +212,7 @@ pub(super) async fn process_park_feed(
                             &kind,
                             cause.as_deref(),
                             reason_json.as_deref(),
+                            redrive_intent,
                         )
                         .map_err(|error| {
                             lash_core_execution::PluginError::StoredDataCorrupt {

@@ -81,7 +81,8 @@ fn sqlite_obligation_checks_reject_incomplete_variants() {
         for constraint in ddl.lines().filter_map(obligation_constraint) {
             constraints += 1;
             let cleanup = constraint.contains("ck_artifact_cleanup_obligations_obligation");
-            let not_null = if cleanup { "NOT NULL" } else { "" };
+            let trigger = constraint.contains("ck_trigger_deliveries_obligation");
+            let not_null = if cleanup || trigger { "NOT NULL" } else { "" };
             let connection = Connection::open_in_memory().expect("open obligation CHECK fixture");
             // Preserve the production predicate, including the process start prefix.
             let prefix = if constraint.contains("start_obligation_state") {
@@ -104,6 +105,7 @@ fn sqlite_obligation_checks_reject_incomplete_variants() {
             let mut accepted = 0;
             for (values, valid) in &cases {
                 let expected = *valid
+                    && (!trigger || !values.starts_with("NULL"))
                     && (!cleanup
                         || (!values.contains("'delivered'") && !values.starts_with("NULL")));
                 let result = connection.execute(
@@ -126,7 +128,16 @@ fn sqlite_obligation_checks_reject_incomplete_variants() {
                 }
             }
             if mismatches.is_empty() {
-                assert_eq!(accepted, if cleanup { 5 } else { 7 });
+                assert_eq!(
+                    accepted,
+                    if cleanup {
+                        5
+                    } else if trigger {
+                        6
+                    } else {
+                        7
+                    }
+                );
             }
         }
     }

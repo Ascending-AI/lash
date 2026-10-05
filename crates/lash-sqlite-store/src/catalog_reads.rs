@@ -15,6 +15,7 @@ type ParkFeedRow = (
     Option<String>,
     i64,
     Option<String>,
+    Option<i64>,
 );
 
 impl SqliteStore {
@@ -71,6 +72,7 @@ impl SqliteStore {
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, i64>(7)?,
                         row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<i64>>(9)?,
                     ))
                 })?;
                 rows.collect::<Result<Vec<_>, _>>()
@@ -87,12 +89,14 @@ impl SqliteStore {
             reason_json,
             at_ms,
             build_generation,
+            redrive_intent,
         ) in rows
         {
             let kind = lash_core_execution::store::ParkEventKind::decode_columns(
                 &kind,
                 cause.as_deref(),
                 reason_json.as_deref(),
+                redrive_intent,
             )?;
             let build_generation = build_generation
                 .map(|stored| {

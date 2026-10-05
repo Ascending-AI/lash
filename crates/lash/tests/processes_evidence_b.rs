@@ -994,9 +994,9 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::tools::ToolIntentSubmissionRecord| {
         let _ = &value.identity;
     });
-    // W0695: lash::tools::ToolIntentSubmissionRecord::kind [field]
+    // W0695: lash::tools::ToolIntentSubmissionRecord::kind [function]
     field_witness(|value: &lash::tools::ToolIntentSubmissionRecord| {
-        let _ = &value.kind;
+        let _ = value.kind();
     });
     // W0696: lash::tools::ToolIntentSubmissionRecord::payload_hash [field]
     field_witness(|value: &lash::tools::ToolIntentSubmissionRecord| {
@@ -1006,9 +1006,9 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::tools::ToolIntentSubmissionRecord| {
         let _ = &value.intent;
     });
-    // W0698: lash::tools::ToolIntentSubmissionRecord::outcome [field]
+    // W0698: lash::tools::ToolIntentSubmissionRecord::settlement [field]
     field_witness(|value: &lash::tools::ToolIntentSubmissionRecord| {
-        let _ = &value.outcome;
+        let _ = &value.settlement;
     });
     // W0700: lash::tools::ToolIntentSubmissionRecord::new [function]
     let _ = lash::tools::ToolIntentSubmissionRecord::new;

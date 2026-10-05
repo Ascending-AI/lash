@@ -735,10 +735,10 @@ impl ToolIntentIngress {
                 },
             ));
         }
-        if existing.kind != kind {
+        if existing.kind() != kind {
             return Err(RealizationFailure::Refused(
                 ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-                    recorded_kind: existing.kind,
+                    recorded_kind: existing.kind(),
                     submitted_kind: kind,
                 },
             ));
@@ -753,7 +753,7 @@ impl ToolIntentIngress {
                 ToolIntentIngressRefusal::DuplicateIdentity { kind },
             ));
         }
-        Ok(match existing.outcome {
+        Ok(match existing.execution_outcome() {
             Some(lash_core::ToolIntentExecutionOutcome::Executed { realized, .. }) => {
                 Some(realized)
             }
@@ -784,7 +784,7 @@ impl ToolIntentIngress {
         let recorded = match registry.admit_tool_intent_submission(submission).await? {
             lash_core::ToolIntentSubmissionAdmission::Admitted => false,
             lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
-                existing.outcome.is_some()
+                existing.settlement.is_some()
             }
             // The owner was deleted and its ledger reclaimed while this
             // submission realized: its fence already refuses every redelivery,
@@ -797,12 +797,12 @@ impl ToolIntentIngress {
                 .await?;
             let permit = receipt.permit();
             let runtime = &self.core.env.core.tracing;
-            let status = match receipt.record.outcome.as_ref() {
+            let status = match receipt.record.execution_outcome().as_ref() {
                 Some(lash_core::ToolIntentExecutionOutcome::Executed { .. }) => {
                     lash_core::operational_metrics::record_tool_intent_executed(
                         runtime.metrics(),
                         permit.as_ref(),
-                        receipt.record.kind.as_str(),
+                        receipt.record.kind().as_str(),
                     );
                     lash_trace::TraceDomainStatus::Completed
                 }
@@ -813,16 +813,21 @@ impl ToolIntentIngress {
                     lash_core::operational_metrics::record_tool_intent_refused(
                         runtime.metrics(),
                         permit.as_ref(),
-                        receipt.record.kind.as_str(),
+                        receipt.record.kind().as_str(),
                         refusal.code().as_ref(),
                     );
                     lash_trace::TraceDomainStatus::Failed
                 }
                 None => return Ok(()),
             };
-            if let (Some(scope), Some(at_ms)) =
-                (&receipt.record.trace, receipt.record.completed_at_ms)
-            {
+            if let (Some(scope), Some(at_ms)) = (
+                &receipt.record.trace,
+                receipt
+                    .record
+                    .settlement
+                    .as_ref()
+                    .map(|settlement| settlement.at_ms),
+            ) {
                 runtime.unreplayed(Some(scope.clone())).transition(
                     permit.as_ref(),
                     at_ms,
@@ -834,7 +839,7 @@ impl ToolIntentIngress {
                             scope.started_at_ms,
                             status,
                         );
-                        completion.intent_kind = Some(receipt.record.kind.as_str().to_string());
+                        completion.intent_kind = Some(receipt.record.kind().as_str().to_string());
                         (
                             lash_trace::TraceContext::default(),
                             lash_trace::TraceEvent::DomainCompleted { completion },

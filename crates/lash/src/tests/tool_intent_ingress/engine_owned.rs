@@ -31,7 +31,9 @@ async fn ledger_outcome(
     match lash_core::ProcessToolIntents::admit_tool_intent_submission(registry.as_ref(), record)
         .await?
     {
-        lash_core::ToolIntentSubmissionAdmission::Existing(existing) => Ok(existing.outcome),
+        lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
+            Ok(existing.execution_outcome())
+        }
         lash_core::ToolIntentSubmissionAdmission::Admitted
         | lash_core::ToolIntentSubmissionAdmission::Reclaimed => {
             panic!("the submission must already hold a ledger row")

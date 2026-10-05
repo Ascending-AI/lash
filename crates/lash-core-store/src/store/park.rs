@@ -785,44 +785,30 @@ pub enum ParkEventKind {
     },
 }
 
-/// The stored `cause` column value: the serde tag for a unit cause, its JSON
-/// body for a payload-carrying one.
-fn encode_cause<T: Serialize>(cause: &T) -> String {
-    let value = serde_json::to_value(cause).unwrap_or_default();
-    match value.as_object() {
-        Some(object) if object.len() == 1 => object
-            .get("type")
-            .and_then(serde_json::Value::as_str)
-            .map_or_else(|| value.to_string(), str::to_string),
-        _ => value.to_string(),
-    }
-}
-
-/// Decode a stored `cause` column: a bare tag is a unit cause, anything else
-/// is the JSON body of a payload-carrying one.
-fn decode_cause<T: serde::de::DeserializeOwned>(cause: &str) -> Option<T> {
-    if cause.starts_with('{') {
-        serde_json::from_str(cause).ok()
-    } else {
-        serde_json::from_value(serde_json::json!({ "type": cause })).ok()
-    }
+/// Encode a closing cause as its complete tagged JSON body.
+fn encode_cause<T: Serialize>(cause: &T) -> Result<String, crate::StoreError> {
+    serde_json::to_string(cause).map_err(|error| crate::StoreError::RecordEncodingFailed {
+        record_kind: "ParkEvent".to_string(),
+        message: error.to_string(),
+    })
 }
 
 impl UnparkCause {
-    /// The stored `cause` column value: the serde tag for a unit cause, its
-    /// JSON body for a payload-carrying one.
-    pub fn encode(&self) -> String {
+    /// The complete tagged JSON of this cause.
+    pub fn encode(&self) -> Result<String, crate::StoreError> {
         encode_cause(self)
     }
 }
 
 impl ParkCancelCause {
-    /// The stored `cause` column value; see [`UnparkCause::encode`]. A
-    /// payload-carrying cause stores its JSON body.
-    pub fn encode(&self) -> String {
+    /// The complete tagged JSON of this cause.
+    pub fn encode(&self) -> Result<String, crate::StoreError> {
         encode_cause(self)
     }
 }
+
+/// Encoded `(cause_json, reason_json, redrive_intent)` values of a park event.
+pub type ParkEventColumns = (Option<String>, Option<String>, Option<i64>);
 
 impl ParkEventKind {
     /// The event that ends a run's park when the run ends with `cause`
@@ -874,73 +860,59 @@ impl ParkEventKind {
         }
     }
 
-    /// The `(cause, reason_json)` column pair this kind stores: a `Parked`
-    /// carries its reason and no cause; the closing kinds carry a cause and
-    /// no reason.
-    pub fn encode_columns(&self) -> (Option<String>, Option<String>) {
-        match self {
-            Self::Parked { reason } => (
+    /// Encode `(cause_json, reason_json, redrive_intent)`, with exactly one populated.
+    pub fn encode_columns(&self) -> Result<ParkEventColumns, crate::StoreError> {
+        Ok(match self {
+            Self::Parked { reason } => (None, Some(encode_cause(reason)?), None),
+            Self::Unparked { cause } => (Some(cause.encode()?), None, None),
+            Self::Cancelled { cause } => (Some(cause.encode()?), None, None),
+            Self::RedriveRequested { intent } => (
                 None,
-                Some(serde_json::to_string(reason).unwrap_or_default()),
+                None,
+                Some(i64::try_from(intent.sequence()).map_err(|error| {
+                    crate::StoreError::RecordEncodingFailed {
+                        record_kind: "ParkEvent".to_string(),
+                        message: error.to_string(),
+                    }
+                })?),
             ),
-            Self::Unparked { cause } => (Some(cause.encode()), None),
-            Self::Cancelled { cause } => (Some(cause.encode()), None),
-            Self::RedriveRequested { intent } => (Some(intent.to_string()), None),
-        }
+        })
     }
 
-    /// Decode a feed row's `(kind, cause, reason_json)` columns.
-    ///
-    /// # Errors
-    /// When the combination is not one the writer produces: a `parked` row
-    /// with an unreadable reason, or a closing row whose cause decodes to
-    /// neither [`UnparkCause`] nor [`ParkCancelCause`].
+    /// Decode a feed row's discriminant and exclusive variant columns.
     pub fn decode_columns(
         kind: &str,
-        cause: Option<&str>,
+        cause_json: Option<&str>,
         reason_json: Option<&str>,
+        redrive_intent: Option<i64>,
     ) -> Result<Self, crate::StoreError> {
         let corrupt = |message: String| crate::StoreError::StoredDataCorrupt {
             record_kind: "ParkEvent",
             message,
         };
-        match kind {
-            "parked" => {
-                let reason: ParkReason = serde_json::from_str(reason_json.unwrap_or_default())
-                    .map_err(|error| {
-                        corrupt(format!("parked event reason is unreadable: {error}"))
-                    })?;
-                Ok(Self::Parked { reason })
-            }
-            "unparked" => {
-                let cause =
-                    cause.ok_or_else(|| corrupt("unparked event carries no cause".to_string()))?;
-                Ok(Self::Unparked {
-                    cause: decode_cause(cause).ok_or_else(|| {
-                        corrupt(format!("unparked event cause `{cause}` is unknown"))
-                    })?,
-                })
-            }
-            "cancelled" => {
-                let cause =
-                    cause.ok_or_else(|| corrupt("cancelled event carries no cause".to_string()))?;
-                Ok(Self::Cancelled {
-                    cause: decode_cause(cause).ok_or_else(|| {
-                        corrupt(format!("cancelled event cause `{cause}` is unknown"))
-                    })?,
-                })
-            }
-            "redrive_requested" => {
-                let intent = cause
-                    .and_then(|cause| cause.parse::<u64>().ok())
-                    .ok_or_else(|| {
-                        corrupt("redrive_requested event carries no intent".to_string())
-                    })?;
+        match (kind, cause_json, reason_json, redrive_intent) {
+            ("parked", None, Some(reason), None) => Ok(Self::Parked {
+                reason: serde_json::from_str(reason)
+                    .map_err(|error| corrupt(format!("park reason is unreadable: {error}")))?,
+            }),
+            ("unparked", Some(cause), None, None) => Ok(Self::Unparked {
+                cause: serde_json::from_str(cause)
+                    .map_err(|error| corrupt(format!("unpark cause is unreadable: {error}")))?,
+            }),
+            ("cancelled", Some(cause), None, None) => Ok(Self::Cancelled {
+                cause: serde_json::from_str(cause)
+                    .map_err(|error| corrupt(format!("cancel cause is unreadable: {error}")))?,
+            }),
+            ("redrive_requested", None, None, Some(intent)) => {
                 Ok(Self::RedriveRequested {
-                    intent: super::ControlIntentId::from_sequence(intent),
+                    intent: super::ControlIntentId::from_sequence(u64::try_from(intent).map_err(
+                        |error| corrupt(format!("redrive intent is unreadable: {error}")),
+                    )?),
                 })
             }
-            other => Err(corrupt(format!("park event kind `{other}` is unknown"))),
+            _ => Err(corrupt(format!(
+                "park event `{kind}` has invalid variant columns"
+            ))),
         }
     }
 }

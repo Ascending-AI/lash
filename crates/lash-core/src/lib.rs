@@ -852,8 +852,9 @@ pub use tool_intent::{
     GetDefinitionIntent, PublishDefinitionIntent, RegisterTriggerIntent, SignalProcessIntent,
     StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
     TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolAttemptOutcome, ToolIntent,
-    ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents, ToolOutcomeDone,
-    derive_tool_intent_identity, derive_tool_intent_identity_under, rederive_tool_intent_identity,
+    ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome, ToolIntentSubmissionRecord,
+    ToolIntentSubmissionSettlement, ToolIntents, ToolOutcomeDone, derive_tool_intent_identity,
+    derive_tool_intent_identity_under, rederive_tool_intent_identity,
 };
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{

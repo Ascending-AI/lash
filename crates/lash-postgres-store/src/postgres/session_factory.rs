@@ -281,10 +281,12 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
             let reason_json: Option<String> = row.get(6);
             let at_ms: i64 = row.get(7);
             let build_generation: Option<String> = row.get(8);
+            let redrive_intent: Option<i64> = row.get(9);
             let kind = lash_core_execution::store::ParkEventKind::decode_columns(
                 &kind,
                 cause.as_deref(),
                 reason_json.as_deref(),
+                redrive_intent,
             )?;
             let build_generation = build_generation
                 .map(|stored| {

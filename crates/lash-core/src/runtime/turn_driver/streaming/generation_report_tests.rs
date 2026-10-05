@@ -22,7 +22,6 @@ fn attempt(generation_disposition: Option<crate::GenerationReceipt>) -> crate::A
         evidence: None,
         generation_disposition,
         usage: None,
-        usage_disposition: Default::default(),
     }
 }
 fn call_record(attempts: Vec<crate::AttemptRecord>) -> crate::LlmCallRecord {

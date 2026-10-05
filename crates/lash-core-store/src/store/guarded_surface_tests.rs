@@ -314,3 +314,62 @@ fn unknown_version_is_refused_with_zero_mutation() {
 fn upcast_preserves_immutable_bytes_and_hashes() {
     laws::upcast_preserves_immutable_bytes_and_hashes(OWNER, &probes());
 }
+
+#[test]
+fn receipt_replay_is_never_part_of_the_durable_record() {
+    let bytes = write_receipt(FleetFormat::current());
+    let mut receipt: RuntimeCommitReceipt = serde_json::from_slice(&bytes).expect("receipt");
+    receipt.receipt_replayed = true;
+    assert_eq!(serde_json::to_vec(&receipt).expect("re-encode"), bytes);
+    let mut stored: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
+    stored["receipt_replayed"] = serde_json::json!(true);
+    let decoded: RuntimeCommitReceipt = serde_json::from_value(stored).expect("decode");
+    assert!(!decoded.receipt_replayed);
+}
+
+#[test]
+fn park_feed_has_one_json_cause_spelling_and_an_integer_redrive() {
+    use super::{ControlIntentId, ParkEventKind, UnparkCause};
+    let event = ParkEventKind::Unparked {
+        cause: UnparkCause::TurnCommitted,
+    };
+    let (cause, reason, intent) = event.encode_columns().expect("cause JSON");
+    assert_eq!(cause.as_deref(), Some(r#"{"type":"turn_committed"}"#));
+    assert_eq!(
+        ParkEventKind::decode_columns("unparked", cause.as_deref(), reason.as_deref(), intent)
+            .expect("decode"),
+        event
+    );
+    assert!(ParkEventKind::decode_columns("unparked", Some("turn_committed"), None, None).is_err());
+    assert!(ParkEventKind::decode_columns("unparked", cause.as_deref(), None, Some(7)).is_err());
+    let event = ParkEventKind::RedriveRequested {
+        intent: ControlIntentId::from_sequence(7),
+    };
+    assert_eq!(
+        event.encode_columns().expect("intent"),
+        (None, None, Some(7))
+    );
+    assert_eq!(
+        ParkEventKind::decode_columns("redrive_requested", None, None, Some(7))
+            .expect("decode intent"),
+        event
+    );
+    assert!(ParkEventKind::decode_columns("redrive_requested", None, None, Some(-1)).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn park_feed_refuses_unencodable_reason_before_writing() {
+    use std::os::unix::ffi::OsStringExt as _;
+    let event = super::ParkEventKind::Parked {
+        reason: super::ParkReason::WorkerDeployment {
+            executable: std::ffi::OsString::from_vec(vec![0xff]).into(),
+            fault: lash_vm_protocol::WorkerDeploymentFault::NotFound,
+            message: "worker unavailable".into(),
+        },
+    };
+    assert!(matches!(
+        event.encode_columns(),
+        Err(crate::StoreError::RecordEncodingFailed { .. })
+    ));
+}

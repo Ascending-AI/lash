@@ -571,10 +571,7 @@ where
         SessionId::fixture(format!("{prefix}-attach-after-session")),
         TurnId::fixture(format!("{prefix}-attach-after-turn")),
     );
-    let after_terminal = crate::TurnTerminal::Committed {
-        stop: None,
-        session_revision: Some(1),
-    };
+    let after_terminal = crate::TurnTerminal::Committed { stop: None };
     let after_key = make()
         .await_event_key(
             &ExecutionScope::turn(&after.session_id, &after.turn_id),
@@ -603,10 +600,7 @@ where
         SessionId::fixture(format!("{prefix}-attach-before-session")),
         TurnId::fixture(format!("{prefix}-attach-before-turn")),
     );
-    let before_terminal = crate::TurnTerminal::Committed {
-        stop: None,
-        session_revision: Some(2),
-    };
+    let before_terminal = crate::TurnTerminal::Committed { stop: None };
     let attach_address = before.clone();
     let attach_host = make();
     let store_factory = catalog_with_sessions(make_catalog, &[before.session_id.as_str()]).await;

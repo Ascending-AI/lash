@@ -1666,7 +1666,7 @@ pub enum ChargeSafetyDecision {
 }
 
 /// ADR 0031: absence means unreported and an explicit zero is information.
-/// The outcome makes the reason for an absence part of the sealed record,
+/// The outcome derives the reason for absent usage from the sealed attempt,
 /// so a host summing cost can tell "the provider reported nothing" from "the
 /// call was cut off before the provider's final usage chunk arrived" — the
 /// latter is billed by the provider even though lash never saw the count.
@@ -1677,8 +1677,7 @@ pub enum ChargeSafetyDecision {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttemptUsageOutcome {
-    /// Provider-reported usage was observed; `usage` is `Some`. Records
-    /// sealed before this outcome existed decode here.
+    /// Provider-reported usage was observed; `usage` is `Some`.
     #[default]
     Reported,
     /// The attempt completed and the provider reported no usage at all.
@@ -1738,10 +1737,13 @@ pub struct AttemptRecord {
     /// Provider-reported usage only. Absence is not zero usage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<LlmUsage>,
-    /// Why `usage` is present or absent. Additive: records sealed without it
-    /// decode as [`AttemptUsageOutcome::Reported`].
-    #[serde(default, skip_serializing_if = "AttemptUsageOutcome::is_reported")]
-    pub usage_disposition: AttemptUsageOutcome,
+}
+
+impl AttemptRecord {
+    /// Why provider usage is present or absent for this outcome.
+    pub fn usage_disposition(&self) -> AttemptUsageOutcome {
+        AttemptUsageOutcome::for_attempt(self.outcome, self.usage.as_ref())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

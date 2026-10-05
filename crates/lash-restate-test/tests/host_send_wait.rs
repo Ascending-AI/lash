@@ -1489,9 +1489,6 @@ fn committed_status(terminal: &lash_core::facade_support::TurnTerminal) -> serde
         lash_core::facade_support::TurnTerminal::Committed { .. } => {
             serde_json::to_value(terminal).expect("encode the terminal status")
         }
-        lash_core::facade_support::TurnTerminal::Failed { error } => {
-            panic!("the turn committed, yet its terminal failed: {error:?}")
-        }
     }
 }
 

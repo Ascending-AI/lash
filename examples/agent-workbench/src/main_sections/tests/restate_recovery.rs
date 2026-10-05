@@ -568,9 +568,7 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
     .await
     .expect("auth failure must publish a turn terminal")
     .expect("attach auth-failure terminal");
-    let lash::TurnTerminal::Committed { stop, .. } = terminal else {
-        panic!("provider auth failure did not settle through the turn contract: {terminal:#?}");
-    };
+    let lash::TurnTerminal::Committed { stop, .. } = terminal;
     assert_eq!(stop, Some(lash::TurnStop::ProviderError));
     assert_eq!(
         stop.as_ref().and_then(|stop| match stop {
@@ -1935,9 +1933,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
         session_shift_epoch(&data_dir, backend, &session_id).await >= first_generation,
         "replacement must preserve the durable shift epoch through recovery"
     );
-    let lash::TurnTerminal::Committed { stop, .. } = terminal else {
-        panic!("recovered turn returned non-committed terminal: {terminal:#?}");
-    };
+    let lash::TurnTerminal::Committed { stop, .. } = terminal;
     let Some(lash::TurnStop::Cancelled { evidence }) = stop else {
         panic!("recovered turn did not commit Cancelled: {stop:#?}");
     };

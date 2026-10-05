@@ -146,7 +146,6 @@ async fn after_step_request_defers_until_immediate_escalates_it(
     assert_eq!(settled, abort_evidence);
     let terminal = TurnTerminal::Committed {
         stop: Some(TurnStop::Cancelled { evidence: settled }),
-        session_revision: Some(9),
     };
     active
         .publish_terminal(host.as_ref(), &terminal)
@@ -159,7 +158,6 @@ async fn after_step_request_defers_until_immediate_escalates_it(
     {
         TurnTerminal::Committed {
             stop: Some(TurnStop::Cancelled { evidence }),
-            session_revision: Some(9),
         } => assert_eq!(evidence, abort_evidence),
         other => panic!("attached terminal does not name the escalated abort: {other:?}"),
     }
@@ -242,7 +240,6 @@ async fn after_step_request_is_honoured_at_the_step_boundary(
     assert_eq!(settled, honoured);
     let terminal = TurnTerminal::Committed {
         stop: Some(TurnStop::Cancelled { evidence: settled }),
-        session_revision: Some(10),
     };
     active
         .publish_terminal(host.as_ref(), &terminal)
@@ -323,7 +320,6 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
 
     let terminal = TurnTerminal::Committed {
         stop: Some(TurnStop::Cancelled { evidence: observed }),
-        session_revision: Some(7),
     };
     recovered
         .publish_terminal(host.as_ref(), &terminal)
@@ -343,20 +339,13 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
                     ..
                 }
             }),
-            session_revision: Some(7),
         } if request_id == "request-1" && origin == "conformance-user"
     ));
 
     // Terminal publication is idempotent and first-writer-wins too. A stale
     // owner cannot replace the recovered owner's authoritative cancellation.
     recovered
-        .publish_terminal(
-            host.as_ref(),
-            &TurnTerminal::Committed {
-                stop: None,
-                session_revision: Some(6),
-            },
-        )
+        .publish_terminal(host.as_ref(), &TurnTerminal::Committed { stop: None })
         .await
         .expect("duplicate terminal publication is idempotent");
     let attached_again = driver
@@ -373,7 +362,6 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
                     ..
                 }
             }),
-            session_revision: Some(7),
         } if request_id == "request-1" && origin == "conformance-user"
     ));
 }
@@ -396,15 +384,11 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(
         driver.request_cancel(request(address.clone(), "race-request")),
     );
     let terminal = match (seal.expect("seal"), cancel.expect("cancel").outcome) {
-        (None, TurnCancelOutcome::CompletionWonRace) => TurnTerminal::Committed {
-            stop: None,
-            session_revision: Some(8),
-        },
+        (None, TurnCancelOutcome::CompletionWonRace) => TurnTerminal::Committed { stop: None },
         (Some(evidence), TurnCancelOutcome::Requested(requested)) => {
             assert_eq!(evidence, requested);
             TurnTerminal::Committed {
                 stop: Some(TurnStop::Cancelled { evidence }),
-                session_revision: Some(8),
             }
         }
         other => panic!("inconsistent gate race result: {other:?}"),

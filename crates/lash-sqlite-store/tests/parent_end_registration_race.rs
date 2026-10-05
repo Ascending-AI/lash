@@ -152,8 +152,8 @@ async fn a_child_registering_as_its_parent_scope_ends_is_refused_or_swept() {
                 .await
                 .expect("read the settled ledger row")
                 .expect("the ledger row exists")
-                .settled_at_ms
-                .is_some(),
+                .obligation_state
+                == lash_core_execution::store::ObligationState::Delivered,
             "scope {index} settled"
         );
     }

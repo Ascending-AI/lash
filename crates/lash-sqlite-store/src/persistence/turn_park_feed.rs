@@ -39,7 +39,7 @@ fn insert_turn_park_event_conn(
     at_ms: i64,
     build_generation: Option<&str>,
 ) -> Result<(), StoreError> {
-    let (cause, reason_json) = kind.encode_columns();
+    let (cause, reason_json, redrive_intent) = kind.encode_columns()?;
     crate::conn::cached_execute(
         conn,
         crate::turn_ingress::turn_ingress_sql()
@@ -55,7 +55,8 @@ fn insert_turn_park_event_conn(
             cause,
             reason_json,
             at_ms,
-            build_generation
+            build_generation,
+            redrive_intent
         ],
     )
     .map_err(sqlite_error)?;

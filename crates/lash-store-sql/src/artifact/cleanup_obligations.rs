@@ -7,7 +7,7 @@
 //! owes — and a delivered row is deleted rather than kept: the fences in
 //! every artifact store are the permanent evidence. On SQLite the table
 //! exists in the durable core and in the process registry, and the ledger
-//! routes by the obligation id's `core:`/`registry:` prefix.
+//! routes process-record referrers to the registry and all others to the durable core.
 //!
 //! The upsert rule of `arm_cleanup` (a guard inserts only when no row exists;
 //! `Ended` replaces a guard; nothing replaces `Ended`) needs the stored plan,

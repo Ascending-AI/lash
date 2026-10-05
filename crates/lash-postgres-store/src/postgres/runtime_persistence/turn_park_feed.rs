@@ -39,7 +39,7 @@ async fn insert_turn_park_event_tx(
     at_ms: u64,
     build_generation: Option<&str>,
 ) -> Result<(), StoreError> {
-    let (cause, reason_json) = kind.encode_columns();
+    let (cause, reason_json, redrive_intent) = kind.encode_columns()?;
     sqlx::query(
         crate::turn_ingress::turn_ingress_sql()
             .turn_park_events
@@ -55,6 +55,7 @@ async fn insert_turn_park_event_tx(
     .bind(reason_json)
     .bind(i64::try_from(at_ms).unwrap_or(i64::MAX))
     .bind(build_generation)
+    .bind(redrive_intent)
     .execute(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;

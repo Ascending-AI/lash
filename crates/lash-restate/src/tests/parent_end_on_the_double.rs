@@ -385,7 +385,7 @@ async fn a_run_end_cancels_its_cancel_children_once_on_restate() {
         .expect("read the run's plan")
         .expect("the run's end recorded its plan");
     assert!(
-        plan.settled_at_ms.is_some(),
+        plan.obligation_state == lash_core::store::ObligationState::Delivered,
         "the plan is settled: {plan:?}"
     );
     assert!(
@@ -432,7 +432,7 @@ async fn a_detached_child_outlives_its_run_end_on_restate() {
         .expect("read the run's plan")
         .expect("the run's end recorded its plan");
     assert!(
-        plan.settled_at_ms.is_some(),
+        plan.obligation_state == lash_core::store::ObligationState::Delivered,
         "the plan is settled: {plan:?}"
     );
     world.harness.finish().await;
@@ -477,10 +477,9 @@ async fn a_session_close_ends_the_scopes_of_its_runs_on_restate() {
     assert_eq!(world.cancel_invocations(&detached), 0);
     for scope in [&active_scope, &parked_scope] {
         assert!(
-            world
-                .plan(scope)
-                .await
-                .is_some_and(|plan| plan.settled_at_ms.is_some()),
+            world.plan(scope).await.is_some_and(
+                |plan| plan.obligation_state == lash_core::store::ObligationState::Delivered
+            ),
             "each closed run's plan is settled"
         );
     }
@@ -558,7 +557,7 @@ async fn a_process_end_cancels_its_cancel_children_on_restate() {
         .expect("read the process's plan")
         .expect("the terminal completion recorded the plan");
     assert!(
-        plan.settled_at_ms.is_some(),
+        plan.obligation_state == lash_core::store::ObligationState::Delivered,
         "the plan is settled: {plan:?}"
     );
     world.harness.finish().await;
@@ -674,10 +673,9 @@ async fn a_lost_parent_end_delivery_is_retried_and_delivered_once() {
         "the lost reply fails the close's first run"
     );
     assert!(
-        world
-            .plan(&parent)
-            .await
-            .is_some_and(|plan| plan.settled_at_ms.is_none()),
+        world.plan(&parent).await.is_some_and(
+            |plan| plan.obligation_state != lash_core::store::ObligationState::Delivered
+        ),
         "the failed run leaves the plan recorded and unsettled"
     );
     sink.close_run_scope(&terminal)
@@ -711,7 +709,7 @@ async fn a_lost_parent_end_delivery_is_retried_and_delivered_once() {
         .expect("read the run's plan")
         .expect("the run's end recorded its plan");
     assert!(
-        plan.settled_at_ms.is_some(),
+        plan.obligation_state == lash_core::store::ObligationState::Delivered,
         "the plan is settled: {plan:?}"
     );
     world.harness.finish().await;
@@ -810,10 +808,9 @@ async fn an_unapplied_plan_is_delivered_once_by_its_obligation_relay() {
     assert_eq!(world.cancel_invocations(&child), 1, "delivered once");
     assert!(world.record(&detached).await.cancel_request.is_none());
     assert!(
-        world
-            .plan(&parent)
-            .await
-            .is_some_and(|plan| plan.settled_at_ms.is_some()),
+        world.plan(&parent).await.is_some_and(
+            |plan| plan.obligation_state == lash_core::store::ObligationState::Delivered
+        ),
         "the plan is settled"
     );
     world.harness.finish().await;
@@ -841,10 +838,9 @@ async fn a_run_end_on_the_shift_path_cancels_its_cancel_children() {
     assert_parent_ended(&world.record(&child).await, &parent);
     assert_eq!(world.cancel_invocations(&child), 1);
     assert!(
-        world
-            .plan(&parent)
-            .await
-            .is_some_and(|plan| plan.settled_at_ms.is_some()),
+        world.plan(&parent).await.is_some_and(
+            |plan| plan.obligation_state == lash_core::store::ObligationState::Delivered
+        ),
         "the run's close settled its plan"
     );
     world.harness.finish().await;

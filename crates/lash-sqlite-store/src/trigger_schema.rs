@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS trigger_deliveries (
     subscription_snapshot_json TEXT NOT NULL,
     created_at_ms    INTEGER NOT NULL,
     obligation_id         TEXT,
-    obligation_state      TEXT,
+    obligation_state      TEXT NOT NULL,
     obligation_attempts   INTEGER NOT NULL DEFAULT 0,
     obligation_due_at_ms  INTEGER,
     obligation_claim_token TEXT,
@@ -104,9 +104,10 @@ CREATE TABLE IF NOT EXISTS trigger_deliveries (
     obligation_last_error TEXT,
     obligation_last_error_code TEXT CONSTRAINT ck_trigger_deliveries_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
     obligation_settled_at_ms INTEGER,
-    CONSTRAINT ck_trigger_deliveries_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
+    CONSTRAINT ck_trigger_deliveries_obligation CHECK (((obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     PRIMARY KEY (occurrence_id, subscription_id),
-    FOREIGN KEY (occurrence_id, occurrence_outcome_kind) REFERENCES trigger_occurrences(occurrence_id, outcome_kind) ON DELETE CASCADE
+    FOREIGN KEY (occurrence_id, occurrence_outcome_kind) REFERENCES trigger_occurrences(occurrence_id, outcome_kind) ON DELETE CASCADE,
+    CONSTRAINT ck_trigger_deliveries_binding CHECK ((process_id IS NOT NULL) = (obligation_state = 'delivered'))
 );
 
 -- A reserved delivery owes its start (ADR 0109, ADR 0021): its obligation id,

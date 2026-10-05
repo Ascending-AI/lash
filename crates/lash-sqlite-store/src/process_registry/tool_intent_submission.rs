@@ -15,6 +15,7 @@ pub(super) async fn admit(
     registry: &SqliteProcessRegistry,
     submission: ToolIntentSubmissionRecord,
 ) -> Result<ToolIntentSubmissionAdmission, PluginError> {
+    submission.validate_settlement()?;
     let admitted_at_ms = registry.clock.timestamp_ms();
     registry
         .conn
@@ -39,7 +40,6 @@ pub(super) async fn admit(
                                 submission.identity.execution_scope_id.as_str(),
                                 submission.identity.tool_call_id.as_str(),
                                 i64::from(submission.identity.intent_index),
-                                submission.kind.as_str(),
                                 submission.payload_hash,
                                 serde_json::to_string(&submission).map_err(process_decode_error)?,
                                 crate::clamp_epoch_ms(admitted_at_ms),
@@ -96,10 +96,8 @@ pub(super) async fn complete(
                     .map_err(process_sqlite_error)?;
                 let mut submission: ToolIntentSubmissionRecord =
                     serde_json::from_str(&encoded).map_err(process_decode_error)?;
-                let changed = submission.outcome.is_none();
+                let changed = submission.complete(at_ms, outcome)?;
                 if changed {
-                    submission.completed_at_ms = Some(at_ms);
-                    submission.outcome = Some(outcome);
                     crate::conn::cached_execute(
                         tx,
                         crate::turn_ingress::tool_intent_sql()

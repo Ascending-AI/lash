@@ -34,7 +34,7 @@ pub(crate) async fn log_process_park_transitions_tx(
             .fetch_one(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
-        let (cause, reason_json) = kind.encode_columns();
+        let (cause, reason_json, redrive_intent) = kind.encode_columns()?;
         let generation = matches!(kind, ParkEventKind::Parked { .. })
             .then_some(build_generation)
             .flatten();
@@ -47,6 +47,7 @@ pub(crate) async fn log_process_park_transitions_tx(
             .bind(reason_json)
             .bind(clamp_epoch_ms(at_ms))
             .bind(generation)
+            .bind(redrive_intent)
             .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -130,6 +131,7 @@ pub(super) async fn process_park_feed(
         let reason_json: Option<String> = row.get(5);
         let at_ms = plugin_u64_from_sql("ProcessParkEvent", "at_ms", row.get::<i64, _>(6))?;
         let build_generation: Option<String> = row.get(7);
+        let redrive_intent: Option<i64> = row.get(8);
         let build_generation = build_generation
             .map(|stored| {
                 lash_core_execution::engine::BuildGeneration::parse(&stored).map_err(|error| {
@@ -145,11 +147,16 @@ pub(super) async fn process_park_feed(
             at_ms,
             target: crate::stored_process_id(&process_id)?,
             park_id: ParkId::from_feed_sequence(park_id),
-            kind: ParkEventKind::decode_columns(&kind, cause.as_deref(), reason_json.as_deref())
-                .map_err(|error| PluginError::StoredDataCorrupt {
-                    record_kind: "ProcessParkEvent".to_string(),
-                    message: error.to_string(),
-                })?,
+            kind: ParkEventKind::decode_columns(
+                &kind,
+                cause.as_deref(),
+                reason_json.as_deref(),
+                redrive_intent,
+            )
+            .map_err(|error| PluginError::StoredDataCorrupt {
+                record_kind: "ProcessParkEvent".to_string(),
+                message: error.to_string(),
+            })?,
             build_generation,
         });
         page.next = ParkFeedCursor::from_store_sequence(seq);

@@ -18,6 +18,7 @@ pub(super) async fn admit(
     submission: ToolIntentSubmissionRecord,
     admitted_at_ms: u64,
 ) -> Result<ToolIntentSubmissionAdmission, PluginError> {
+    submission.validate_settlement()?;
     let mut tx = crate::begin_guarded(pool, fence)
         .await
         .map_err(crate::plugin_store_error)?;
@@ -44,7 +45,6 @@ pub(super) async fn admit(
             .bind(&submission.identity.execution_scope_id)
             .bind(submission.identity.tool_call_id.as_str())
             .bind(i64::from(submission.identity.intent_index))
-            .bind(submission.kind.as_str())
             .bind(&submission.payload_hash)
             .bind(encoded)
             .bind(crate::support::clamp_epoch_ms(admitted_at_ms))
@@ -91,10 +91,8 @@ pub(super) async fn complete(
     .await
     .map_err(plugin_sqlx_error)?;
     let mut submission = decode(row.get(0))?;
-    let changed = submission.outcome.is_none();
+    let changed = submission.complete(at_ms, outcome)?;
     if changed {
-        submission.completed_at_ms = Some(at_ms);
-        submission.outcome = Some(outcome);
         let encoded = serde_json::to_string(&submission).map_err(process_decode_error)?;
         sqlx::query(
             crate::turn_ingress::turn_ingress_sql()

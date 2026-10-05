@@ -146,7 +146,6 @@ fn decode_plan(
     id: String,
     payload: String,
     ended: i64,
-    settled: Option<i64>,
     obligation_id: Option<String>,
     obligation_state: Option<String>,
     fleet_format: lash_core_execution::FleetFormat,
@@ -176,7 +175,6 @@ fn decode_plan(
     Ok(ParentEndPlan {
         parent,
         ended_at_ms: ended.max(0) as u64,
-        settled_at_ms: settled.map(|value| value.max(0) as u64),
         obligation_id: lash_core_execution::store::ObligationId::new(obligation_id),
         obligation_state,
     })
@@ -202,9 +200,8 @@ async fn get_by_columns(
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
-                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<String>>(2)?,
                         row.get::<_, Option<String>>(3)?,
-                        row.get::<_, Option<String>>(4)?,
                     ))
                 },
             )
@@ -212,20 +209,17 @@ async fn get_by_columns(
         })
         .await
         .map_err(process_sqlite_error)?;
-    row.map(
-        |(payload, ended, settled, obligation_id, obligation_state)| {
-            decode_plan(
-                lookup.0.clone(),
-                lookup.1.clone(),
-                payload,
-                ended,
-                settled,
-                obligation_id,
-                obligation_state,
-                registry.conn.fleet(),
-            )
-        },
-    )
+    row.map(|(payload, ended, obligation_id, obligation_state)| {
+        decode_plan(
+            lookup.0.clone(),
+            lookup.1.clone(),
+            payload,
+            ended,
+            obligation_id,
+            obligation_state,
+            registry.conn.fleet(),
+        )
+    })
     .transpose()
 }
 

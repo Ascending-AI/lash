@@ -490,7 +490,10 @@ pub mod tools {
         facade_support::ToolSurfaceOpenMode,
     };
     /// Engine-owned tool-intent admission records used by process-registry integrators.
-    pub use lash_core::{ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord};
+    pub use lash_core::{
+        ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome, ToolIntentSubmissionRecord,
+        ToolIntentSubmissionSettlement,
+    };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
@@ -698,15 +701,16 @@ pub mod persistence {
     pub use lash_core::store::{
         AppendRequestIdentity, CheckpointComponentDescriptor, FollowOnWork, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, InterruptedTurnClosure,
-        OperationId, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
-        ParkId, ParkReason, ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, ProcessPark,
-        ProcessParkKey, ProcessParkQuery, RunContinuation, RunOpenerState, RuntimeCommit,
-        RuntimeCommitReceipt, RuntimeStoreDecorator, RuntimeTurnCommitStamp,
-        SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
-        SuspendedCell, TurnChange, TurnChangeCursor, TurnChangeKind, TurnChangePage,
-        TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkOrigin, TurnParkQuery,
-        TurnParkTarget, TurnParkWrite, TurnProjectionWatermark, UnparkCause, UnsettledTurnCounts,
-        commit_runtime_state_verified, validate_turn_commit_outcome_code,
+        OperationId, ParkCancelCause, ParkEventColumns, ParkEventKind, ParkFeedCursor,
+        ParkFeedEvent, ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkReport,
+        PendingFollowOn, PhysicalTurn, ProcessPark, ProcessParkKey, ProcessParkQuery,
+        RunContinuation, RunOpenerState, RuntimeCommit, RuntimeCommitReceipt,
+        RuntimeStoreDecorator, RuntimeTurnCommitStamp, SemanticBoundaryOperation,
+        SessionCheckpoint, SessionHeadMeta, SessionHeadPayload, SuspendedCell, TurnChange,
+        TurnChangeCursor, TurnChangeKind, TurnChangePage, TurnCommitFailureCause,
+        TurnCommitOutcome, TurnPark, TurnParkOrigin, TurnParkQuery, TurnParkTarget, TurnParkWrite,
+        TurnProjectionWatermark, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
+        validate_turn_commit_outcome_code,
     };
     /// A logical run's durable terminal evidence and the store segment that
     /// answers and binds runs (FIG-3600 S7, FIG-3607 item 8), and the

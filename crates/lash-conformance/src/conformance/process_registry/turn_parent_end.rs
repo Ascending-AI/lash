@@ -103,7 +103,7 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
         "the row is keyed by the scope it ends"
     );
     assert!(
-        recorded.settled_at_ms.is_none(),
+        recorded.obligation_state != crate::ObligationState::Delivered,
         "a freshly recorded row is unsettled"
     );
 
@@ -126,7 +126,7 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
         .expect("read the ledger row after the repeated record")
         .expect("the repeat left the one row");
     assert!(
-        pending.settled_at_ms.is_none()
+        pending.obligation_state != crate::ObligationState::Delivered
             && pending.obligation_state == lash_core::store::ObligationState::Due,
         "the repeat kept the first row unsettled with its obligation still due"
     );
@@ -190,7 +190,7 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
         .expect("read the settled row")
         .expect("settlement stamps the row rather than deleting the fence");
     assert!(
-        settled.settled_at_ms.is_some(),
+        settled.obligation_state == crate::ObligationState::Delivered,
         "the row records its settlement"
     );
     registry
@@ -372,7 +372,7 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_runs
         .expect("read the session's close row")
         .expect("the close records the session's row");
     assert!(
-        owed.settled_at_ms.is_none()
+        owed.obligation_state != crate::ObligationState::Delivered
             && owed.obligation_state == lash_core::store::ObligationState::Due,
         "the session's plan owes the never-run turn's child its cancel, so it is \
          not settled as childless: {owed:?}"
@@ -459,8 +459,8 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_runs
             .await
             .expect("re-read the session's close row")
             .expect("the row survives its application")
-            .settled_at_ms
-            .is_some(),
+            .obligation_state
+            == crate::ObligationState::Delivered,
         "the applied session plan settles"
     );
     assert!(

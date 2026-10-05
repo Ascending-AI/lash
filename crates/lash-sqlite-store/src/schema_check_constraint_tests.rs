@@ -238,15 +238,6 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
             "ck_process_tombstones_terminal_label",
         );
     }
-    assert_check_rejects(
-        &process,
-        "INSERT INTO tool_intent_submissions (
-             replay_key, owner, execution_scope_id, tool_call_id,
-             intent_index, kind, payload_hash, submission_json, admitted_at_ms
-         ) VALUES ('bad-tool-kind', 'session:session', 'scope', 'call', 0,
-                   'restart_process', 'hash', '{}', 0)",
-        "ck_tool_intent_submissions_kind",
-    );
 
     let triggers = Connection::open_in_memory().expect("open trigger constraint fixture");
     triggers
@@ -449,36 +440,6 @@ fn reclaim_markers_require_terminal_owners() {
     process
         .execute_batch(PROCESS_SCHEMA)
         .expect("create process schema");
-    for (state, fields) in [
-        ("NULL", "NULL, NULL, NULL, NULL, NULL"),
-        ("'due'", "'due-id', 1, NULL, NULL, NULL"),
-        ("'claimed'", "'claim-id', 1, 'token', NULL, NULL"),
-        ("'stalled'", "'stall-id', NULL, NULL, 'refused', 1"),
-    ] {
-        process
-            .execute_batch(&format!(
-                "DELETE FROM parent_end_plans;
-             INSERT INTO parent_end_plans (parent_kind, parent_id, parent_payload,
-                 ended_at_ms, obligation_state, obligation_id, obligation_due_at_ms,
-                 obligation_claim_token, obligation_stall_reason, obligation_settled_at_ms)
-             VALUES ('session', 'parent', '{{}}', 0, {state}, {fields})"
-            ))
-            .expect("retain an unreclaimable plan");
-        assert_check_rejects(
-            &process,
-            "UPDATE parent_end_plans SET settled_at_ms = 1",
-            "ck_parent_end_plans_reclaimable",
-        );
-    }
-    process
-        .execute_batch(
-            "DELETE FROM parent_end_plans;
-        INSERT INTO parent_end_plans (parent_kind, parent_id, parent_payload,
-            ended_at_ms, settled_at_ms, obligation_id, obligation_state, obligation_settled_at_ms)
-        VALUES ('session', 'parent', '{}', 0, 1, 'delivered-id', 'delivered', 1)",
-        )
-        .expect("a delivered plan may be reclaimed");
-
     let triggers = Connection::open_in_memory().expect("open change-feed fixture");
     triggers
         .execute_batch(TRIGGER_SCHEMA)
@@ -542,7 +503,7 @@ fn parent_end_delivery_atomically_arms_reclaim() {
     let stamps = || {
         process
             .query_row(
-                "SELECT obligation_state, settled_at_ms FROM parent_end_plans",
+                "SELECT obligation_state, CASE WHEN obligation_state = 'delivered' THEN obligation_settled_at_ms END FROM parent_end_plans",
                 [],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
             )
@@ -555,7 +516,7 @@ fn parent_end_delivery_atomically_arms_reclaim() {
     assert_eq!(stamps(), ("delivered".into(), Some(7)));
     process
         .execute_batch(
-            "UPDATE parent_end_plans SET settled_at_ms = NULL,
+            "UPDATE parent_end_plans SET
         obligation_state = 'claimed', obligation_due_at_ms = 1, obligation_claim_token = 'token',
         obligation_settled_at_ms = NULL",
         )
@@ -580,7 +541,7 @@ fn parent_end_delivery_atomically_arms_reclaim() {
     assert_eq!(stamps(), ("delivered".into(), Some(13)));
     process
         .execute_batch(
-            "UPDATE parent_end_plans SET settled_at_ms = NULL,
+            "UPDATE parent_end_plans SET
         obligation_state = 'stalled', obligation_stall_reason = 'refused'",
         )
         .expect("retain a stalled application");
@@ -591,4 +552,55 @@ fn parent_end_delivery_atomically_arms_reclaim() {
         )
         .expect("apply stalled plan");
     assert_eq!(stamps(), ("stalled".into(), None));
+}
+
+#[test]
+fn trigger_delivery_cannot_settle_without_binding() {
+    let conn = Connection::open_in_memory().expect("trigger fixture");
+    conn.execute_batch(crate::trigger_schema::TRIGGER_SCHEMA)
+        .expect("trigger schema");
+    conn.execute_batch("INSERT INTO trigger_occurrences
+        (occurrence_id, idempotency_key, source_type, source_key, occurred_at_ms, outcome_kind, record_json)
+        VALUES ('occurrence', 'key', 'source', 'key', 0, 'fired', '{}')").expect("occurrence");
+    assert_check_rejects(&conn,
+        "INSERT INTO trigger_deliveries (occurrence_id, subscription_id, subscription_incarnation,
+         subscription_revision, subscription_snapshot_json, created_at_ms, obligation_id,
+         obligation_state, obligation_settled_at_ms)
+         VALUES ('occurrence', 'subscription', 'incarnation', 1, '{}', 0, 'obligation', 'delivered', 1)",
+        "ck_trigger_deliveries_binding");
+}
+
+#[test]
+fn cleanup_referrer_has_exactly_one_database_owner() {
+    for (schema, refused) in [(SCHEMA, "process_record"), (PROCESS_SCHEMA, "host_pin")] {
+        let conn = Connection::open_in_memory().expect("cleanup fixture");
+        conn.execute_batch(schema).expect("schema");
+        assert_check_rejects(&conn, &format!("INSERT INTO artifact_cleanup_obligations
+            (referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms)
+            VALUES ('{refused}', 'referrer', '{{}}', 'obligation', 'due', 0)"),
+            "ck_artifact_cleanup_obligations_database");
+    }
+}
+
+#[test]
+fn park_feed_columns_refuse_mixed_variants_and_closing_generations() {
+    let conn = Connection::open_in_memory().expect("park feed fixture");
+    conn.execute_batch(SCHEMA).expect("schema");
+    assert_check_rejects(&conn, "INSERT INTO turn_park_events
+        (seq, session_id, turn_id, park_id, kind, cause_json, at_ms, park_build_generation)
+        VALUES (1, 'session', 'turn', 1, 'unparked', '{\"type\":\"turn_committed\"}', 0, 'generation')",
+        "ck_turn_park_events_parked_reason");
+    assert_check_rejects(
+        &conn,
+        "INSERT INTO turn_park_events
+        (seq, session_id, turn_id, park_id, kind, cause_json, redrive_intent, at_ms)
+        VALUES (1, 'session', 'turn', 1, 'redrive_requested', '7', 7, 0)",
+        "ck_turn_park_events_parked_reason",
+    );
+    conn.execute_batch(
+        "INSERT INTO turn_park_events
+        (seq, session_id, turn_id, park_id, kind, redrive_intent, at_ms)
+        VALUES (1, 'session', 'turn', 1, 'redrive_requested', 7, 0)",
+    )
+    .expect("integer redrive");
 }

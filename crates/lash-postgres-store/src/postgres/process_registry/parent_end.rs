@@ -32,13 +32,11 @@ fn ledger_payload(
 /// One stored row's plan. A row whose typed payload does not decode is
 /// corrupt stored data: the obligation relay stalls it `undecodable` rather
 /// than failing its due page (ADR 0109 §1.4).
-#[allow(clippy::too_many_arguments)]
 fn decode_plan(
     kind: String,
     id: String,
     payload: String,
     ended_at_ms: i64,
-    settled_at_ms: Option<i64>,
     obligation_id: Option<String>,
     obligation_state: Option<String>,
     fleet_format: lash_core_execution::FleetFormat,
@@ -68,7 +66,6 @@ fn decode_plan(
     Ok(ParentEndPlan {
         parent,
         ended_at_ms: ended_at_ms.max(0) as u64,
-        settled_at_ms: settled_at_ms.map(|value| value.max(0) as u64),
         obligation_id: lash_core_execution::store::ObligationId::new(obligation_id),
         obligation_state,
     })
@@ -238,7 +235,6 @@ async fn get_by_columns(
             row.get(1),
             row.get(2),
             row.get(3),
-            row.get(4),
             fleet_format,
         )
     })
