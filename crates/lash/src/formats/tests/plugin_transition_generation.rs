@@ -650,3 +650,38 @@ async fn stamped_turn_state_refuses_predecessor_before_decode_and_retains_drain(
     )
     .await;
 }
+
+/// FIG-5020: offline deployment decisions and boot bind the same generation.
+#[cfg(all(feature = "restate", feature = "sqlite"))]
+#[tokio::test]
+async fn offline_composed_generation_equals_the_booted_core() -> crate::Result<()> {
+    use std::sync::Arc;
+    let protocol: Arc<dyn PluginFactory> =
+        Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new());
+    let plugin: Arc<dyn PluginFactory> = Arc::new(StaticPluginFactory::new(
+        PluginDeclaration::initial("host-generation"),
+        PluginSpec::new(),
+    ));
+    let composition = crate::plugins::PluginHost::new(vec![protocol.clone(), plugin.clone()])
+        .with_protocol_plugin(protocol.clone())
+        .composition()?;
+    let offline = composed_generation(&composition);
+    let connection = crate::restate::RestateConnection::new("https://restate.invalid");
+    let engine = crate::restate::RestateEngine::new(
+        Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap()),
+        crate::restate::RestateConfig::new(
+            connection.clone(),
+            connection,
+            crate::restate::RestateAuthorityId::new("offline-generation").unwrap(),
+        ),
+    );
+    let core = crate::tests::explicit_ephemeral_facets(crate::LashCore::builder(
+        lash_core::Backend::new(Arc::new(engine)),
+    ))
+    .protocol_plugin(protocol)
+    .plugin(plugin)
+    .build(crate::testing::runtime_lease_owner())?;
+    assert_eq!(&offline, core.build_generation());
+    assert_eq!(&offline, core.backend().build_generation()?);
+    Ok(())
+}

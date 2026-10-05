@@ -564,10 +564,14 @@ fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
 /// different `G`. There is no environment input; the same code and the same
 /// registration give the same `G`, which is what makes a generation routable.
 ///
-/// Only a core computes it, after its plugins are registered, and binds it
-/// into its engine: there is no generation of a build without its
-/// composition, so no caller can open work on a lane no deployment serves.
-pub(crate) fn composed_generation(composition: &PluginComposition) -> BuildGeneration {
+/// Compute this before boot from the deployment's ordered plugin composition.
+/// Obtain it through [`crate::plugins::PluginHost::composition`], which includes
+/// the builtin factories and their overrides. Supply the protocol plugin first,
+/// followed by the same factories registered on the core (including any
+/// tool-provider plugin). Runtime model and tracing
+/// settings are not generation inputs. [`crate::LashCore`] calls this same
+/// function and binds the result into its engine when built.
+pub fn composed_generation(composition: &PluginComposition) -> BuildGeneration {
     build_generation_of(
         durable_formats(),
         journal_logic_epoch(),
