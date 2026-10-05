@@ -145,9 +145,22 @@ async fn a_deferred_tools_run_hands_over_before_its_external_result() -> Result<
     deferred_round_law(DeferredCase::Resolve).await
 }
 
+/// FIG-5059: an operator drain from a backend that holds no core, as
+/// `lashctl drain` runs it, hands over a Run parked on its source wait at
+/// once: no recovery pass runs after the drain, yet the Run cuts without
+/// asking the model or running its tool again, and its continuation is
+/// admitted on the newest build.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_operator_drain_hands_over_a_run_parked_on_its_source_wait() -> Result<()> {
+    deferred_round_law(DeferredCase::OperatorDrain).await
+}
+
 #[derive(Clone, Copy, Debug)]
 enum DeferredCase {
     Resolve,
+    /// The drain is the operator's, from a backend that holds no core, and
+    /// no recovery pass follows it.
+    OperatorDrain,
     Mixed,
     HeldPending,
     Cancel,
@@ -314,19 +327,26 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
     engine
         .roll(next.clone(), &Arc::new(Model::holding(0)))
         .await;
-    engine
-        .old_backend()
-        .generation_drain()
-        .mark_draining(&old, 1)
-        .await?;
+    let operator_drain = matches!(case, DeferredCase::OperatorDrain);
+    if operator_drain {
+        assert!(crate::drain_generation(&engine.old_backend(), &old).await?);
+    } else {
+        engine
+            .old_backend()
+            .generation_drain()
+            .mark_draining(&old, 1)
+            .await?;
+    }
     let deadline = tokio::time::Instant::now() + WEDGE;
     loop {
-        core._session_shifts
-            .reconcile(
-                &lash_core::engine::ReconcileCursor::default(),
-                std::num::NonZeroUsize::new(16).expect("a page"),
-            )
-            .await?;
+        if !operator_drain {
+            core._session_shifts
+                .reconcile(
+                    &lash_core::engine::ReconcileCursor::default(),
+                    std::num::NonZeroUsize::new(16).expect("a page"),
+                )
+                .await?;
+        }
         let drain = engine.old_backend().generation_drain();
         if drain.generation_work(&old).await?.in_flight_turns == 0
             && drain.generation_work(&next).await?.in_flight_turns == 1
@@ -361,6 +381,13 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
         },
         "handover never redispatches the tool"
     );
+    if operator_drain {
+        // The operator's drain cut the Run and N+1 holds its continuation;
+        // what the continuation does next is the other cases' to pin.
+        drop(core);
+        engine.finish().await;
+        return Ok(());
+    }
     let completion = key.lock_recover().clone().expect("the original key");
     parked_deferred_run(
         double.server(),

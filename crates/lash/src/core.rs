@@ -20,7 +20,7 @@ pub(crate) mod session_shifts;
 pub use session_deletion::SessionDeleteCompletion;
 mod work_drivers;
 
-pub use drain::{DeploymentDrainStatus, GenerationDrainStatus};
+pub use drain::{DeploymentDrainStatus, GenerationDrainStatus, drain_generation};
 use session_shifts::{CoreSessionShifts, CoreSessionShiftsConfig};
 use work_drivers::{CoreWorkSetup, WakeDeliveryDriverSetup};
 pub(crate) use work_drivers::{CoreWorkSlot, ResolvedQueuedWork};
@@ -255,7 +255,9 @@ impl LashCore {
     /// Mark `generation` draining and request every active turn and process
     /// Run's physical cut. Issued native work reaches durable acknowledgement
     /// before its retained continuation moves to the newest build. Recovery
-    /// retries any delivery an interrupted drain left owed. Poll
+    /// retries any delivery an interrupted drain left owed. An operator that
+    /// holds no core runs the same drain through
+    /// [`drain_generation`](crate::drain_generation). Poll
     /// [`generation_drain_status`](Self::generation_drain_status) until it
     /// reports drained, then retire the generation's deployment.
     ///
@@ -274,14 +276,7 @@ impl LashCore {
                 generation: generation.clone(),
             });
         }
-        let now_ms = self.env.core.clock.timestamp_ms();
-        let changed = self
-            .backend
-            .generation_drain()
-            .mark_draining(generation, now_ms)
-            .await?;
-        self.request_generation_cuts(generation).await?;
-        Ok(changed)
+        drain::drain_generation(&self.backend, generation).await
     }
 
     /// Stop draining `generation`: the recovery leader wakes none of its

@@ -22,6 +22,14 @@ fn run(args: &[&str], database_url: Option<&str>) -> (i32, Value) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lashctl"));
     command.args(args);
     command.env_remove("LASH_POSTGRES_DATABASE_URL");
+    // `drain` hands over through the deployment's engine; the catalogs these
+    // contracts drain hold no work for it to reach.
+    command
+        .env_remove("LASH_SQLITE_DIR")
+        .env("RESTATE_AUTHORITY_ID", "lashctl-contract-test")
+        .env("RESTATE_NAMESPACE", "lashctl-contract-test")
+        .env("RESTATE_INGRESS_URL", "http://127.0.0.1:1")
+        .env("RESTATE_ADMIN_URL", "http://127.0.0.1:1");
     if let Some(url) = database_url {
         command.env("LASH_POSTGRES_DATABASE_URL", url);
     }

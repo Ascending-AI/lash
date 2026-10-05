@@ -100,51 +100,63 @@ impl serde::Serialize for DeploymentDrainStatus {
 /// and the operator binary share one definition (FIG-3884).
 pub use lash_core::store::generation_drain::GenerationDrainStatus;
 
-impl crate::LashCore {
-    // Deliver the accepted mark to current owners immediately. The durable
-    // mark remains recovery's retry authority if any delivery is interrupted.
-    pub(super) async fn request_generation_cuts(
-        &self,
-        generation: &lash_core::engine::BuildGeneration,
-    ) -> crate::Result<()> {
-        let marks = self.backend.generation_drain();
-        let page = std::num::NonZeroUsize::MIN.saturating_add(255);
-        let control = self.backend.session_work().control();
-        let mut after = None;
-        loop {
-            let sessions = marks
-                .sessions_in_flight(generation, after.as_ref(), page)
-                .await?;
-            if sessions.is_empty() {
-                break;
-            }
-            for session in sessions {
-                control
-                    .hand_over_turns(&session, generation)
-                    .await
-                    .map_err(|error| lash_core::RuntimeError::new(error.code, error.message))?;
-                after = Some(session);
-            }
+/// Mark `generation` draining in `backend`'s stores and request every active
+/// turn and process Run's physical cut: the whole drain
+/// [`LashCore::drain_generation`](crate::LashCore::drain_generation) runs,
+/// for an operator that holds no core, such as `lashctl drain` (FIG-5059).
+/// The two share this one function, so an operator drain wakes a Run parked
+/// on a durable wait as promptly as a core's drain does.
+///
+/// The accepted mark is delivered to the generation's current owners at
+/// once: each session it holds a turn in flight for hands its parked turn
+/// waits over, and each live process its segment. The durable mark remains
+/// recovery's retry authority for any delivery an interrupted drain left
+/// owed. Idempotent: `true` when this call marked the generation, `false`
+/// when it was already draining.
+pub async fn drain_generation(
+    backend: &crate::Backend,
+    generation: &lash_core::engine::BuildGeneration,
+) -> crate::Result<bool> {
+    let marks = backend.generation_drain();
+    let changed = marks
+        .mark_draining(generation, backend.clock().timestamp_ms())
+        .await?;
+    let page = std::num::NonZeroUsize::MIN.saturating_add(255);
+    let control = backend.session_work().control();
+    let mut after = None;
+    loop {
+        let sessions = marks
+            .sessions_in_flight(generation, after.as_ref(), page)
+            .await?;
+        if sessions.is_empty() {
+            break;
         }
-        let process_work = self.backend.process_work();
-        let mut after = None;
-        loop {
-            let processes = marks
-                .live_processes(generation, after.as_ref(), page)
-                .await?;
-            if processes.is_empty() {
-                break;
-            }
-            for process in processes {
-                process_work
-                    .port()
-                    .deliver_hand_over(&process, generation)
-                    .await?;
-                after = Some(process);
-            }
+        for session in sessions {
+            control
+                .hand_over_turns(&session, generation)
+                .await
+                .map_err(|error| lash_core::RuntimeError::new(error.code, error.message))?;
+            after = Some(session);
         }
-        Ok(())
     }
+    let process_work = backend.process_work();
+    let mut after = None;
+    loop {
+        let processes = marks
+            .live_processes(generation, after.as_ref(), page)
+            .await?;
+        if processes.is_empty() {
+            break;
+        }
+        for process in processes {
+            process_work
+                .port()
+                .deliver_hand_over(&process, generation)
+                .await?;
+            after = Some(process);
+        }
+    }
+    Ok(changed)
 }
 
 #[cfg(test)]

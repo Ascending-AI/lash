@@ -140,6 +140,10 @@ state while investigating either refusal.
    lashctl drain-status "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json
    ```
 
+   `drain` marks the generation and hands its work over at once, as a core's
+   drain does: every turn parked on a durable wait and every live process on
+   N is asked to move to N+1 through the Restate deployment that
+   `RESTATE_INGRESS_URL`, `RESTATE_AUTHORITY_ID` and `RESTATE_NAMESPACE` name.
    Repeat `drain-status` until its `drained` field is true and exit code is 0.
    Drained means nothing left needs N's deployment: the generation is marked,
    and it holds no live or parked process, no parked or in-flight turn, no

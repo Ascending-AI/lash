@@ -3,7 +3,7 @@ use super::{CliError, Exit, OPERATOR_POOL_MAX, USAGE, stalled_result};
 use lash::{ObligationId, ObligationKind, ParkedWorkRef};
 use serde_json::{Value, json};
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub(super) struct Invocation {
@@ -79,9 +79,10 @@ fn kind(value: &str) -> Result<ObligationKind, CliError> {
         .ok_or_else(usage)
 }
 
-/// Consume backend selection separately so every recovery verb addresses the
-/// same store. A cursor is opaque JSON; an obligation cursor is its plain id.
-pub(super) fn parse(verb: &str, rest: &[String]) -> Result<Invocation, CliError> {
+/// Consume backend selection separately so every recovery and drain verb
+/// addresses the same store: the words left over, and the SQLite directory
+/// `--sqlite-dir` names.
+pub(super) fn split_sqlite_dir(rest: &[String]) -> Result<(Vec<&str>, Option<PathBuf>), CliError> {
     let mut words = Vec::new();
     let mut sqlite_dir = None;
     let mut index = 0;
@@ -97,6 +98,12 @@ pub(super) fn parse(verb: &str, rest: &[String]) -> Result<Invocation, CliError>
             index += 1;
         }
     }
+    Ok((words, sqlite_dir))
+}
+
+/// A cursor is opaque JSON; an obligation cursor is its plain id.
+pub(super) fn parse(verb: &str, rest: &[String]) -> Result<Invocation, CliError> {
+    let (words, sqlite_dir) = split_sqlite_dir(rest)?;
     let command = match (verb, words.as_slice()) {
         ("park", [action @ ("list" | "events"), options @ ..]) => {
             let (after, limit) = page(options)?;
@@ -179,54 +186,68 @@ fn page<'a>(options: &[&'a str]) -> Result<(Option<&'a str>, NonZeroUsize), CliE
     Ok((after, limit))
 }
 
+/// The selected store: the SQLite directory `--sqlite-dir` or
+/// `LASH_SQLITE_DIR` names, else the PostgreSQL database.
+pub(super) async fn open_stores(
+    sqlite_dir: Option<&Path>,
+) -> Result<Arc<dyn lash::StoreSet>, CliError> {
+    let sqlite_dir = sqlite_dir
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::var_os("LASH_SQLITE_DIR").map(PathBuf::from));
+    Ok(if let Some(path) = sqlite_dir {
+        Arc::new(
+            lash::sqlite::SqliteStoreSet::open(path)
+                .await
+                .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?,
+        )
+    } else {
+        let storage = lash::postgres::PostgresStorage::connect_with(
+            &super::database_url()?,
+            lash::postgres::PostgresStoreConfig {
+                max_connections: OPERATOR_POOL_MAX,
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(CliError::store)?;
+        Arc::new(lash::postgres::PostgresStoreSet::new(
+            &storage,
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                ".lashctl-attachments",
+            )),
+        ))
+    })
+}
+
+/// The deployment's engine over `stores`: the Restate server
+/// `RESTATE_INGRESS_URL` and `RESTATE_ADMIN_URL` name, for the authority
+/// `RESTATE_AUTHORITY_ID` names, in `RESTATE_NAMESPACE`.
+pub(super) fn restate_backend(stores: Arc<dyn lash::StoreSet>) -> Result<lash::Backend, CliError> {
+    let authority = std::env::var("RESTATE_AUTHORITY_ID").map_err(|_| {
+        CliError::new(
+            Exit::Refused,
+            "RESTATE_AUTHORITY_ID must name the deployment authority",
+        )
+    })?;
+    let namespace = lash::restate::RestateNamespace::new(
+        std::env::var("RESTATE_NAMESPACE").unwrap_or_default(),
+    )
+    .map_err(|error| CliError::new(Exit::Usage, error.to_string()))?;
+    let config = lash::restate::RestateConfig::new(
+        std::env::var("RESTATE_INGRESS_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into()),
+        std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:9070".into()),
+        lash::restate::RestateAuthorityId::new(authority)
+            .map_err(|error| CliError::new(Exit::Usage, error.to_string()))?,
+    )
+    .with_namespace(namespace);
+    Ok(lash::Backend::new(Arc::new(
+        lash::restate::RestateEngine::new(stores, config),
+    )))
+}
+
 impl Invocation {
     async fn core(&self) -> Result<lash::LashCore, CliError> {
-        let sqlite_dir = self
-            .sqlite_dir
-            .clone()
-            .or_else(|| std::env::var_os("LASH_SQLITE_DIR").map(PathBuf::from));
-        let stores: Arc<dyn lash::StoreSet> = if let Some(path) = sqlite_dir {
-            Arc::new(
-                lash::sqlite::SqliteStoreSet::open(path)
-                    .await
-                    .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?,
-            )
-        } else {
-            let storage = lash::postgres::PostgresStorage::connect_with(
-                &super::database_url()?,
-                lash::postgres::PostgresStoreConfig {
-                    max_connections: OPERATOR_POOL_MAX,
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(CliError::store)?;
-            Arc::new(lash::postgres::PostgresStoreSet::new(
-                &storage,
-                Arc::new(lash::persistence::FileAttachmentStore::new(
-                    ".lashctl-attachments",
-                )),
-            ))
-        };
-        let authority = std::env::var("RESTATE_AUTHORITY_ID").map_err(|_| {
-            CliError::new(
-                Exit::Refused,
-                "RESTATE_AUTHORITY_ID must name the deployment authority",
-            )
-        })?;
-        let namespace = lash::restate::RestateNamespace::new(
-            std::env::var("RESTATE_NAMESPACE").unwrap_or_default(),
-        )
-        .map_err(|error| CliError::new(Exit::Usage, error.to_string()))?;
-        let config = lash::restate::RestateConfig::new(
-            std::env::var("RESTATE_INGRESS_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into()),
-            std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:9070".into()),
-            lash::restate::RestateAuthorityId::new(authority)
-                .map_err(|error| CliError::new(Exit::Usage, error.to_string()))?,
-        )
-        .with_namespace(namespace);
-        let backend =
-            lash::Backend::new(Arc::new(lash::restate::RestateEngine::new(stores, config)));
+        let backend = restate_backend(open_stores(self.sqlite_dir.as_deref()).await?)?;
         // This core sends control intents through Restate. It serves no model,
         // starts no host turn, and does not install an HTTP handler endpoint.
         lash::LashCore::standard_builder(backend)
@@ -320,7 +341,7 @@ async fn execute(core: &lash::LashCore, command: &Command) -> Result<Value, CliE
     })
 }
 
-fn core_error(error: lash::EmbedError) -> CliError {
+pub(super) fn core_error(error: lash::EmbedError) -> CliError {
     match error {
         lash::EmbedError::Store(error) => store_error(error),
         lash::EmbedError::Runtime(error) => {

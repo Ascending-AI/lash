@@ -199,7 +199,7 @@ pub use crate::admin::{
 pub use crate::core::{
     DeploymentDrainStatus, GenerationDrainStatus, LashCore, LashCoreBuilder, SessionClosing,
     SessionDeleteCompletion, SessionDeleteFailure, SessionDeleteReport, SessionDeleteWait,
-    SessionDeletion,
+    SessionDeletion, drain_generation,
 };
 pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, SendError};

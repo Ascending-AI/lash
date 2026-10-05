@@ -49,7 +49,7 @@ const OPERATOR_POOL_MAX: u32 = 2;
 /// The most stalled obligations `drain-status` lists per kind, first by id;
 /// `stalled_obligations` still counts every one.
 const STALLED_LISTED_PER_KIND: std::num::NonZeroUsize = std::num::NonZeroUsize::new(100).unwrap();
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> --restate-admin-url <url> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] [--plugin-registrations <json-file>] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | park list|events [--after <json>] [--limit <n>] | park redrive|cancel|fork --target <json> --park-id <n> | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery commands accept --sqlite-dir <path>) | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> --restate-admin-url <url> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] [--plugin-registrations <json-file>] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | park list|events [--after <json>] [--limit <n>] | park redrive|cancel|fork --target <json> --park-id <n> | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery and drain commands accept --sqlite-dir <path>) | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -173,17 +173,22 @@ enum Command {
         phase: MigrationPhase,
         dry_run: bool,
     },
+    /// Mark the generation draining and hand its turns and processes over
+    /// through the deployment's engine, as a core's drain does (FIG-5059).
     Drain {
         generation: BuildGeneration,
+        sqlite_dir: Option<std::path::PathBuf>,
     },
     DrainStatus {
         generation: BuildGeneration,
         /// The engine's admin API: the unfinished invocations still pinned
         /// to the generation's deployments are read there (FIG-4454).
         restate_admin_url: String,
+        sqlite_dir: Option<std::path::PathBuf>,
     },
     EndDrain {
         generation: BuildGeneration,
+        sqlite_dir: Option<std::path::PathBuf>,
     },
     Finalize {
         retired: BuildGeneration,
@@ -281,30 +286,34 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
             }
             Command::Migrate { phase, dry_run }
         }
-        "drain" | "end-drain" if rest.len() == 1 => {
-            let generation = BuildGeneration::parse(&rest[0])
+        "drain" | "end-drain" | "drain-status" => {
+            let (words, sqlite_dir) = recovery::split_sqlite_dir(rest)?;
+            let Some((generation, options)) = words.split_first() else {
+                return Err(CliError::new(Exit::Usage, USAGE));
+            };
+            let generation = BuildGeneration::parse(generation)
                 .map_err(|_| CliError::new(Exit::Usage, "invalid build generation"))?;
-            match verb {
-                "drain" => Command::Drain { generation },
-                _ => Command::EndDrain { generation },
-            }
-        }
-        "drain-status" if !rest.is_empty() => {
-            let generation = BuildGeneration::parse(&rest[0])
-                .map_err(|_| CliError::new(Exit::Usage, "invalid build generation"))?;
-            let restate_admin_url = match &rest[1..] {
-                [flag, url] if flag == "--restate-admin-url" => url.clone(),
-                [] => {
+            match (verb, options) {
+                ("drain", []) => Command::Drain {
+                    generation,
+                    sqlite_dir,
+                },
+                ("end-drain", []) => Command::EndDrain {
+                    generation,
+                    sqlite_dir,
+                },
+                ("drain-status", ["--restate-admin-url", url]) => Command::DrainStatus {
+                    generation,
+                    restate_admin_url: (*url).to_owned(),
+                    sqlite_dir,
+                },
+                ("drain-status", []) => {
                     return Err(CliError::new(
                         Exit::Usage,
                         "drain-status needs --restate-admin-url: undrained group children are read from the engine",
                     ));
                 }
                 _ => return Err(CliError::new(Exit::Usage, USAGE)),
-            };
-            Command::DrainStatus {
-                generation,
-                restate_admin_url,
             }
         }
         "finalize" if !rest.is_empty() => {
@@ -872,84 +881,81 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             };
             (preflight_result(&status, capacity.as_ref())?, exit)
         }
-        Command::Drain { generation }
-        | Command::EndDrain { generation }
-        | Command::DrainStatus { generation, .. } => {
-            let storage = PostgresStorage::connect_with(
-                &database_url()?,
-                PostgresStoreConfig {
-                    max_connections: OPERATOR_POOL_MAX,
-                    ..Default::default()
-                },
+        Command::Drain {
+            generation,
+            sqlite_dir,
+        } => {
+            // The same drain a core runs: the mark, then the hand-over that
+            // wakes turns parked on durable waits (FIG-5059).
+            let stores = recovery::open_stores(sqlite_dir.as_deref()).await?;
+            let backend = recovery::restate_backend(stores)?;
+            let changed = lash::drain_generation(&backend, generation)
+                .await
+                .map_err(|error| match error {
+                    lash::EmbedError::Store(error) => CliError::store(error),
+                    error => recovery::core_error(error),
+                })?;
+            (
+                json!({"generation":generation.as_str(),"marked":changed}),
+                Exit::Done,
+            )
+        }
+        Command::EndDrain {
+            generation,
+            sqlite_dir,
+        } => {
+            let changed = recovery::open_stores(sqlite_dir.as_deref())
+                .await?
+                .generation_drain()
+                .clear_draining(generation)
+                .await
+                .map_err(CliError::store)?;
+            (
+                json!({"generation":generation.as_str(),"cleared":changed}),
+                Exit::Done,
+            )
+        }
+        Command::DrainStatus {
+            generation,
+            restate_admin_url,
+            sqlite_dir,
+        } => {
+            let stores = recovery::open_stores(sqlite_dir.as_deref()).await?;
+            let registry = lash_restate::RestateDeploymentRegistry::new(
+                lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(
+                    restate_admin_url.clone(),
+                )),
+            );
+            let status = GenerationDrainStatus::collect(
+                stores.generation_drain().as_ref(),
+                stores.session_delete_ledger().as_ref(),
+                |kind| stores.obligation_ledger(kind),
+                &registry,
+                generation,
+                lash_core_execution::facade_support::SystemClock.timestamp_ms(),
             )
             .await
             .map_err(CliError::store)?;
-            let drain = storage.generation_drain();
-            match command {
-                Command::Drain { .. } => {
-                    let changed = drain
-                        .mark_draining(
-                            generation,
-                            lash_core_execution::facade_support::SystemClock.timestamp_ms(),
-                        )
-                        .await
-                        .map_err(CliError::store)?;
-                    (
-                        json!({"generation":generation.as_str(),"marked":changed}),
-                        Exit::Done,
-                    )
-                }
-                Command::EndDrain { .. } => {
-                    let changed = drain
-                        .clear_draining(generation)
-                        .await
-                        .map_err(CliError::store)?;
-                    (
-                        json!({"generation":generation.as_str(),"cleared":changed}),
-                        Exit::Done,
-                    )
-                }
-                Command::DrainStatus {
-                    restate_admin_url, ..
-                } => {
-                    let registry = lash_restate::RestateDeploymentRegistry::new(
-                        lash_restate::RestateAdminClient::new(
-                            lash_restate::RestateConnection::new(restate_admin_url.clone()),
-                        ),
+            // Stalled obligations never hold the drain, so each is
+            // listed for the operator to settle before retirement.
+            let mut stalled = Vec::new();
+            for kind in ObligationKind::ALL {
+                if status.stalled_obligations.get(&kind).copied().unwrap_or(0) > 0 {
+                    stalled.extend(
+                        stores
+                            .obligation_ledger(kind)
+                            .list_stalled(None, STALLED_LISTED_PER_KIND)
+                            .await
+                            .map_err(CliError::store)?,
                     );
-                    let status = GenerationDrainStatus::collect(
-                        drain.as_ref(),
-                        storage.session_delete_ledger().as_ref(),
-                        |kind| storage.obligation_ledger(kind),
-                        &registry,
-                        generation,
-                        lash_core_execution::facade_support::SystemClock.timestamp_ms(),
-                    )
-                    .await
-                    .map_err(CliError::store)?;
-                    // Stalled obligations never hold the drain, so each is
-                    // listed for the operator to settle before retirement.
-                    let mut stalled = Vec::new();
-                    for kind in ObligationKind::ALL {
-                        if status.stalled_obligations.get(&kind).copied().unwrap_or(0) > 0 {
-                            stalled.extend(
-                                storage
-                                    .obligation_ledger(kind)
-                                    .list_stalled(None, STALLED_LISTED_PER_KIND)
-                                    .await
-                                    .map_err(CliError::store)?,
-                            );
-                        }
-                    }
-                    let exit = if status.drained() {
-                        Exit::Done
-                    } else {
-                        Exit::NotYet
-                    };
-                    (drain_status_result(&status, &stalled), exit)
                 }
-                _ => unreachable!("matched a drain command"),
             }
+            let exit = if status.drained() {
+                Exit::Done
+            } else {
+                Exit::NotYet
+            };
+            (drain_status_result(&status, &stalled), exit)
         }
     };
     Ok(outcome)
