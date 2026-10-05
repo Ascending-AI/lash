@@ -361,25 +361,29 @@ def shell_logical_commands(script: str) -> list[str]:
 class ConfidenceGateCiContractTest(unittest.TestCase):
     def test_full_stage_jobs_share_exactly_one_build_artifact(self):
         jobs = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())["jobs"]
-        consumers = {"confidence-harnesses", "confidence-generated", "confidence-minimizer",
-                     "confidence-backends", "confidence-coverage",
-                     "confidence-mutation-core", "confidence-mutation-sim",
-                     "confidence-mutation-packages-rotating",
-                     "sim-search"}
+        # Only these stages run the prebuilt tests; coverage and cargo-mutants
+        # build in their own target trees and need only the tools.
+        build_consumers = {"confidence-harnesses", "confidence-generated", "confidence-minimizer",
+                           "confidence-backends", "sim-search"}
+        consumers = build_consumers | {"confidence-coverage", "confidence-mutation-core",
+                                       "confidence-mutation-sim", "confidence-mutation-packages-rotating"}
         self.assertEqual(consumers | {"confidence", "confidence-build", "confidence-conclusion", "append-vec-miri"}, set(jobs))
         self.assertNotIn("needs", jobs["append-vec-miri"])
         self.assertNotIn("download-artifact@", str(jobs["append-vec-miri"]["steps"]))
-        artifact = "confidence-build-${{ github.sha }}-${{ github.run_attempt }}"
-        producer = jobs["confidence-build"]
-        uploads = [s for j in jobs.values() for s in j["steps"]
-                   if "upload-artifact@" in s.get("uses", "") and s["with"]["name"] == artifact]
-        self.assertEqual(1, len(uploads))
-        self.assertEqual("error", uploads[0]["with"]["if-no-files-found"])
+        build = "confidence-build-${{ github.sha }}-${{ github.run_attempt }}"
+        tools = "confidence-tools-${{ github.sha }}-${{ github.run_attempt }}"
+        for artifact in (build, tools):
+            uploads = [s for j in jobs.values() for s in j["steps"]
+                       if "upload-artifact@" in s.get("uses", "") and s["with"]["name"] == artifact]
+            self.assertEqual(1, len(uploads), artifact)
+            self.assertIn(uploads[0], jobs["confidence-build"]["steps"])
+            self.assertEqual("error", uploads[0]["with"]["if-no-files-found"])
         for job in consumers:
             with self.subTest(job=job):
                 self.assertEqual("confidence-build", jobs[job]["needs"])
                 downloads = [s for s in jobs[job]["steps"] if "download-artifact@" in s.get("uses", "")]
-                self.assertEqual([artifact], [s["with"]["name"] for s in downloads])
+                expected = [tools, build] if job in build_consumers else [tools]
+                self.assertEqual(expected, [s["with"]["name"] for s in downloads])
                 self.assertNotIn("rust-cache@", str(jobs[job]["steps"]))
                 self.assertNotIn("continue-on-error", jobs[job])
         for job in jobs.values():
@@ -392,62 +396,71 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual("always()", jobs["confidence-conclusion"]["if"])
         self.assertIn("scripts/ci/conclusion.py conclusion", str(jobs["confidence-conclusion"]["steps"]))
 
-    def test_shared_build_archive_never_needs_a_second_copy_of_target(self) -> None:
-        """Run 36294879308 ran the build runner out of disk in "Pack shared build".
+    def test_shared_build_never_needs_a_second_copy_of_target(self) -> None:
+        """Runs 36294879308 and 37258510534 ran the build runner out of disk in
+        "Pack shared build", and run 37181695061 ran it out while building.
 
-        The step wrote an uncompressed tar of `target` beside the tree it was
-        copying (the 2026-09-20 artifact was 29.7 GB), so the runner had to
-        hold the build twice, and every consumer held it twice again while it
-        restored. The archive is compressed as it is written, a consumer drops
-        it once restored, and the producer reclaims runner disk before it
-        builds.
+        The image offered 86 GB free (90001852 KiB), above the 80 GiB reclaim
+        floor, so reclaim never ran, and the compressed archive was written
+        beside a tree that already filled the disk. Now every runner that holds
+        the tree reclaims disk first, pack deletes each file once it is in the
+        archive, and restore deletes each chunk once it is extracted, so no
+        runner holds the build twice.
         """
         jobs = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())["jobs"]
-        archive = "build.tar.zst"
         helper = "bash scripts/ci/confidence-shared-build.sh"
+        tools_dir, build_dir = "${RUNNER_TEMP}/confidence-tools", "${RUNNER_TEMP}/confidence-build"
 
         producer = jobs["confidence-build"]["steps"]
         names = [step.get("name") for step in producer]
         self.assertLess(names.index("Reclaim runner disk"), names.index("Build full confidence"))
         reclaim = producer[names.index("Reclaim runner disk")]
         self.assertEqual("bash scripts/ci-reclaim-disk.sh", reclaim["run"])
-        # Twice the measured 29.7 GB archive, plus the registry and toolchain.
-        self.assertGreaterEqual(int(reclaim["env"]["CI_RECLAIM_MIN_FREE_KIB"]), 80 * 1024 * 1024)
-        self.assertEqual(
-            f'{helper} pack "${{RUNNER_TEMP}}/{archive}"',
-            producer[names.index("Pack shared build")]["run"],
-        )
+        self.assertGreater(int(reclaim["env"]["CI_RECLAIM_MIN_FREE_KIB"]), 90001852)
+        self.assertEqual(f'{helper} pack "{tools_dir}" "{build_dir}"',
+                         producer[names.index("Pack shared build")]["run"])
+        self.assertEqual("${{ runner.temp }}/confidence-tools",
+                         producer[names.index("Upload confidence tools")]["with"]["path"])
         upload = producer[names.index("Upload shared build")]["with"]
-        self.assertEqual(f"${{{{ runner.temp }}}}/{archive}", upload["path"])
+        self.assertEqual("${{ runner.temp }}/confidence-build", upload["path"])
         self.assertEqual(0, upload["compression-level"])
 
         consumers = [job for job in jobs.values() if job.get("needs") == "confidence-build"]
         self.assertEqual(9, len(consumers))
         for job in consumers:
-            restores = [step["run"] for step in job["steps"] if step.get("name") == "Restore shared build"]
-            self.assertEqual([f'{helper} restore "${{RUNNER_TEMP}}/confidence-build/{archive}"'], restores)
+            steps = job["steps"]
+            restores = [step["run"] for step in steps if step.get("name", "").startswith("Restore ")]
+            if "confidence-build-" in str(steps):
+                self.assertEqual([f'{helper} restore "{tools_dir}" "{build_dir}"'], restores)
+                order = [step.get("name") for step in steps]
+                self.assertIn(reclaim, steps)
+                self.assertLess(order.index("Reclaim runner disk"), order.index("Download shared build"))
+            else:
+                self.assertEqual([f'{helper} restore "{tools_dir}"'], restores)
         self.assertNotIn("tar -", CONFIDENCE_WORKFLOW.read_text())
 
-        # The helper itself: a packed tree costs a fraction of the tree, and a
-        # restore reproduces it, installs the tools and leaves no archive.
+        # The helper itself: a packed tree costs a fraction of the tree and is
+        # gone from the producer; a restore reproduces it, installs the tools
+        # (artifact transfer drops the executable bit) and leaves no chunks.
         with tempfile.TemporaryDirectory() as raw:
             tmp = pathlib.Path(raw)
             payload = b"lash shared build\n" * (512 * 1024)
-            built, restored = tmp / "built", tmp / "restored"
+            built, restored, tools_only = tmp / "built", tmp / "restored", tmp / "tools-only"
             (built / "target" / "debug" / "deps").mkdir(parents=True)
             (built / "target" / "debug" / "deps" / "liblash.rlib").write_bytes(payload)
-            for home in ("build-home", "restore-home"):
+            for home in ("build-home", "restore-home", "tools-home"):
                 (tmp / home / "bin").mkdir(parents=True)
             for tool in ("cargo-mutants", "cargo-llvm-cov"):
                 binary = tmp / "build-home" / "bin" / tool
                 binary.write_text(f"#!/bin/sh\necho {tool}\n", encoding="utf-8")
                 binary.chmod(0o755)
             restored.mkdir()
-            packed = tmp / "transfer" / archive
+            tools_only.mkdir()
+            packed_tools, packed_build = tmp / "transfer" / "tools", tmp / "transfer" / "build"
 
-            def run(action: str, cwd: pathlib.Path, home: str) -> None:
+            def run(cwd: pathlib.Path, home: str, *args: pathlib.Path | str) -> None:
                 subprocess.run(
-                    ["bash", str(ROOT / "scripts" / "ci" / "confidence-shared-build.sh"), action, str(packed)],
+                    ["bash", str(ROOT / "scripts" / "ci" / "confidence-shared-build.sh"), *map(str, args)],
                     cwd=cwd,
                     env={**os.environ, "CARGO_HOME": str(tmp / home)},
                     check=True,
@@ -455,21 +468,30 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                     text=True,
                 )
 
-            run("pack", built, "build-home")
-            self.assertLess(packed.stat().st_size * 10, len(payload))
-            run("restore", restored, "restore-home")
+            run(built, "build-home", "pack", packed_tools, packed_build)
+            self.assertFalse((built / "target").exists())
+            chunks = list(packed_build.iterdir())
+            self.assertTrue(chunks)
+            self.assertLess(sum(c.stat().st_size for c in chunks) * 10, len(payload))
+            for tool in packed_tools.iterdir():
+                tool.chmod(0o644)
+            run(tools_only, "tools-home", "restore", packed_tools)
+            self.assertFalse((tools_only / "target").exists())
+            run(restored, "restore-home", "restore", packed_tools, packed_build)
             self.assertEqual(
                 payload, (restored / "target" / "debug" / "deps" / "liblash.rlib").read_bytes()
             )
-            for tool in ("cargo-mutants", "cargo-llvm-cov"):
-                self.assertTrue(os.access(tmp / "restore-home" / "bin" / tool, os.X_OK))
-            self.assertFalse(packed.exists())
+            for home in ("restore-home", "tools-home"):
+                for tool in ("cargo-mutants", "cargo-llvm-cov"):
+                    self.assertTrue(os.access(tmp / home / "bin" / tool, os.X_OK))
+            self.assertEqual([], list(packed_build.iterdir()))
 
             # A missing tool fails the pack instead of shipping a build the
             # mutation and coverage stages cannot use.
+            (restored / "target").rename(built / "target")
             (tmp / "build-home" / "bin" / "cargo-mutants").unlink()
             with self.assertRaises(subprocess.CalledProcessError):
-                run("pack", built, "build-home")
+                run(built, "build-home", "pack", tmp / "again" / "tools", tmp / "again" / "build")
 
     def test_full_stage_partition_calls_every_original_function_once(self):
         functions = {
@@ -481,7 +503,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "minimizer": ["run_minimizer_fixture_suite"],
             "backends": ["run_local_backend_conformance", "run_backend_contention_evidence",
                          "run_current_postgres_contention_evidence", "run_postgres_conformance"],
-            "workers": ["run_restate_postgres_workers_e2e"],
             "coverage": ["run_coverage_blind_spots"],
             "mutation-core": ["run_lash_core_direct_model_mutation_evidence"],
             "mutation-sim": ["run_lash_sim_runtime_completion_mutation_evidence"],

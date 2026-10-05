@@ -114,13 +114,15 @@ jobs:
     steps:
       - *checkout
 
-      # This runner holds the whole build and then its archive. The build was
-      # 29.7 GB on 2026-09-20 and run 36294879308 ran out of disk packing it,
-      # so the floor is twice that plus the registry and toolchain, although
-      # the archive is now compressed.
-      - name: Reclaim runner disk
+      # This runner holds the whole debug build, and every stage that restores
+      # it holds the same tree (the archive streams in and out, so never twice).
+      # The ubuntu-24.04 image offers 86 GB free, above the old 80 GiB floor, so
+      # reclaim never ran, and run 37181695061 filled those 86 GB while still
+      # building. The 128 GiB floor makes reclaim run on that image.
+      - &reclaim
+        name: Reclaim runner disk
         env:
-          CI_RECLAIM_MIN_FREE_KIB: "83886080"
+          CI_RECLAIM_MIN_FREE_KIB: "134217728"
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
@@ -138,21 +140,29 @@ jobs:
         with:
           shared-key: confidence
           cache-bin: true
-          cache-workspace-crates: true
 
       - name: Build full confidence
         env:
           LASH_CONFIDENCE_STAGE: build
         run: bash scripts/confidence-gate.sh full
 
+      # Packing consumes `target`, so the cache keeps the registry and tools.
       - name: Pack shared build
-        run: bash scripts/ci/confidence-shared-build.sh pack "${RUNNER_TEMP}/build.tar.zst"
+        run: bash scripts/ci/confidence-shared-build.sh pack "${RUNNER_TEMP}/confidence-tools" "${RUNNER_TEMP}/confidence-build"
+
+      - name: Upload confidence tools
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-tools-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-tools
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Upload shared build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/build.tar.zst
+          path: ${{ runner.temp }}/confidence-build
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
@@ -176,6 +186,14 @@ jobs:
         with:
           tool: protoc
 
+      - *reclaim
+
+      - name: Download confidence tools
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-tools-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-tools
+
       - name: Download shared build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -183,7 +201,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-tools" "${RUNNER_TEMP}/confidence-build"
 
       - name: Run harnesses
         env:
@@ -222,6 +240,14 @@ jobs:
         with:
           tool: protoc
 
+      - *reclaim
+
+      - name: Download confidence tools
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-tools-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-tools
+
       - name: Download shared build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -229,7 +255,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-tools" "${RUNNER_TEMP}/confidence-build"
 
       - name: Run generated
         env:
@@ -265,6 +291,14 @@ jobs:
         with:
           tool: protoc
 
+      - *reclaim
+
+      - name: Download confidence tools
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-tools-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-tools
+
       - name: Download shared build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -272,7 +306,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-tools" "${RUNNER_TEMP}/confidence-build"
 
       - name: Run minimizer
         env:
@@ -307,6 +341,14 @@ jobs:
         with:
           tool: protoc
 
+      - *reclaim
+
+      - name: Download confidence tools
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-tools-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-tools
+
       - name: Download shared build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -314,7 +356,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-tools" "${RUNNER_TEMP}/confidence-build"
 
       - name: Run backends
         env:
@@ -349,14 +391,14 @@ jobs:
         with:
           tool: protoc
 
-      - name: Download shared build
+      - name: Download confidence tools
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/confidence-build
+          name: confidence-tools-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-tools
 
-      - name: Restore shared build
-        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
+      - name: Restore confidence tools
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-tools"
 
       - name: Run coverage
         env:
@@ -391,14 +433,14 @@ jobs:
         with:
           tool: protoc
 
-      - name: Download shared build
+      - name: Download confidence tools
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/confidence-build
+          name: confidence-tools-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-tools
 
-      - name: Restore shared build
-        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
+      - name: Restore confidence tools
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-tools"
 
       - name: Run mutation-core
         env:
@@ -440,14 +482,14 @@ jobs:
         with:
           tool: protoc
 
-      - name: Download shared build
+      - name: Download confidence tools
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/confidence-build
+          name: confidence-tools-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-tools
 
-      - name: Restore shared build
-        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
+      - name: Restore confidence tools
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-tools"
 
       - name: Run mutation-sim
         env:
@@ -549,14 +591,14 @@ jobs:
         with:
           tool: protoc
 
-      - name: Download shared build
+      - name: Download confidence tools
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/confidence-build
+          name: confidence-tools-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-tools
 
-      - name: Restore shared build
-        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
+      - name: Restore confidence tools
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-tools"
 
       - name: Run mutation-packages-rotating
         env:
@@ -606,6 +648,14 @@ jobs:
         with:
           tool: protoc
 
+      - *reclaim
+
+      - name: Download confidence tools
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-tools-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-tools
+
       - name: Download shared build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -613,7 +663,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-tools" "${RUNNER_TEMP}/confidence-build"
 
       - name: Run sim-search
         env:

@@ -11,8 +11,6 @@ case "$LASH_CONFIDENCE_STAGE" in
     cargo test --workspace --all-targets --locked --no-run
     cargo build --workspace --bins --locked
     cargo build --workspace --examples --locked
-    cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
-    cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker
     ;;
   harnesses)
     run_scenario_harnesses
@@ -33,7 +31,6 @@ case "$LASH_CONFIDENCE_STAGE" in
     run_current_postgres_contention_evidence
     run_postgres_conformance
     ;;
-  workers) run_restate_postgres_workers_e2e ;;
   coverage) run_coverage_blind_spots ;;
   mutation-core)
     run_lash_core_direct_model_mutation_evidence
