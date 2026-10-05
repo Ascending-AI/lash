@@ -28,7 +28,15 @@ pub(crate) async fn app_state(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
-    let active_turn = state.active_turns.for_session(&session_id);
+    Ok(Json(read_state_snapshot(&state, &session_id).await?))
+}
+
+/// The settled state rendered after either a read or a session reset.
+async fn read_state_snapshot(
+    state: &AppState,
+    session_id: &SessionId,
+) -> Result<StateReadSnapshot, AppError> {
+    let active_turn = state.active_turns.for_session(session_id);
     let StateProjectionReads {
         read_view,
         durable,
@@ -37,7 +45,7 @@ pub(crate) async fn app_state(
         queued_work,
         turn_input_applications,
         turn_failure_settlements,
-    } = read_state_projection(&state, &session_id).await?;
+    } = read_state_projection(state, session_id).await?;
     let active_turn_ids = active_turn
         .iter()
         .map(|active_turn| active_turn.address.turn_id.clone())
@@ -59,13 +67,13 @@ pub(crate) async fn app_state(
         .filter_map(|row| row.provenance.turn_id.clone())
         .collect::<BTreeSet<_>>();
     state.event_tx.reconcile_settled(
-        &session_id,
+        session_id,
         &committed_message_ids,
         &committed_input_turn_ids,
         &active_turn_ids,
     );
-    let product_events = state.event_tx.snapshot(&session_id);
-    let mut product_messages = product_chat_messages(&state, &session_id);
+    let product_events = state.event_tx.snapshot(session_id);
+    let mut product_messages = product_chat_messages(state, session_id);
     if let Some(active) = &active_turn
         && let Some(input) = ui_input_message_from_active_turn(active)
         && !product_messages.iter().any(|message| matches!(
@@ -77,14 +85,14 @@ pub(crate) async fn app_state(
     }
     let messages =
         displayed_messages(&transcript, &product_messages).map_err(AppError::internal)?;
-    let unknown_turn_terminals = state.unknown_turn_terminals.for_session(&session_id);
+    let unknown_turn_terminals = state.unknown_turn_terminals.for_session(session_id);
     let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
     let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
         read_view,
         cursor: cursor.clone(),
     });
     debug_assert_eq!(observation.cursor, cursor.to_string());
-    Ok(Json(StateReadSnapshot {
+    Ok(StateReadSnapshot {
         transcript,
         state: StateSnapshot {
             settings: state.settings_for_session(session_id.clone()),
@@ -105,7 +113,7 @@ pub(crate) async fn app_state(
             unknown_turn_terminals,
             pending_approvals,
         },
-    }))
+    })
 }
 
 pub(crate) const MAX_WORKBENCH_ATTACHMENT_BYTES: usize = 1024 * 1024;
@@ -820,7 +828,7 @@ async fn retire_for_reset(
 pub(crate) async fn reset_chat(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
-) -> Result<Json<StateSnapshot>, AppError> {
+) -> Result<Json<StateReadSnapshot>, AppError> {
     let old_session_id = query.resolve(&state)?;
     let (new_session_id, replaced_current) = retire_for_reset(&state, &old_session_id).await?;
     // The retired id is never served again, so its unknown-terminal disclosures
@@ -841,23 +849,11 @@ pub(crate) async fn reset_chat(
         state.mail_world.clear();
         record_accounts_context(&state).await?;
     }
-    let session = state
+    state
         .create_or_open_session(&new_session_id, "api.reset")
         .await
         .map_err(AppError::session_open)?;
-    Ok(Json(StateSnapshot {
-        settings: state.settings_for_session(new_session_id.clone()),
-        messages: Vec::new(),
-        observation: session.observe().current_remote_observation(),
-        product_events: ProductEventSnapshot::default(),
-        active_turns: Vec::new(),
-        pending_turn_inputs: Vec::new(),
-        queued_work: Vec::new(),
-        turn_input_applications: Vec::new(),
-        turn_failure_settlements: Vec::new(),
-        unknown_turn_terminals: Vec::new(),
-        pending_approvals: state.approvals.pending().map_err(AppError::internal)?,
-    }))
+    Ok(Json(read_state_snapshot(&state, &new_session_id).await?))
 }
 
 /// How long a terminal process stays on the rail after leaving the live set.

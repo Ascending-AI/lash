@@ -159,7 +159,7 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         "mock Restate ingress must not consume deletion work inline"
     );
     assert!(
-        crate::created_session(&state.core, snapshot.settings.session_id)
+        crate::created_session(&state.core, snapshot.state.settings.session_id)
             .await
             .open()
             .await
@@ -431,7 +431,7 @@ async fn a_reset_whose_request_goes_away_still_takes_the_roster_off_the_tombston
                 }),
             ))
             .await
-            .map(|Json(snapshot)| snapshot.settings.session_id)
+            .map(|Json(snapshot)| snapshot.state.settings.session_id)
         }
     });
 
@@ -473,4 +473,84 @@ async fn a_reset_whose_request_goes_away_still_takes_the_roster_off_the_tombston
         state.active_turns.retirement(&old_session_id),
         Some(SessionRetirement::Retired)
     );
+}
+
+/// FIG-5022: every reset response is a settled state the page can render.
+#[test]
+fn reset_response_carries_the_replacement_sessions_durable_transcript() {
+    run_async_test_on_stack_budget("workbench-reset-transcript", || async {
+        let double = crate::tests::test_double_backend(0).await;
+        let mut state = recoverable_chat_test_state(&double, 16).await;
+        let (restate_ingress_url, _requests) = spawn_restate_ingress_capture().await;
+        state.restate_ingress_url = restate_ingress_url;
+        let app = Router::new()
+            .route("/api/reset", post(reset_chat))
+            .route("/api/session", delete(reset_chat))
+            .route("/api/state", get(app_state))
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = reqwest::Client::new();
+        for (method, path) in [
+            (reqwest::Method::POST, "/api/reset"),
+            (reqwest::Method::DELETE, "/api/session"),
+        ] {
+            let old_session_id = state.current_session_id();
+            let response = client
+                .request(method, format!("http://{address}{path}"))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap();
+            assert_eq!(
+                response.get("transcript"),
+                Some(&json!([])),
+                "{path} must carry the fresh session's durable transcript"
+            );
+            assert_ne!(response["settings"]["session_id"], json!(old_session_id));
+            let settled = client
+                .get(format!("http://{address}/api/state"))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap();
+            assert_eq!(
+                response, settled,
+                "reset and GET must project the same state"
+            );
+
+            // Exercise the page's actual renderer with the HTTP response,
+            // including the iteration that threw on the missing transcript.
+            let renderer = ui::INDEX_HTML
+                .split("// BEGIN WORKBENCH_SETTLED_TRANSCRIPT")
+                .nth(1)
+                .unwrap()
+                .split("// END WORKBENCH_SETTLED_TRANSCRIPT")
+                .next()
+                .unwrap();
+            let node =
+                std::env::var_os("LASH_WORKBENCH_TEST_NODE").unwrap_or_else(|| "node".into());
+            let output = std::process::Command::new(node)
+                .arg("-e")
+                .arg(format!("{renderer}\nrenderStateTranscript({response});"))
+                .output()
+                .expect("Node.js is required for the reset renderer regression");
+            assert!(
+                output.status.success(),
+                "reset response failed to render: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        server.abort();
+        let _ = server.await;
+    });
 }
