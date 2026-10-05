@@ -127,7 +127,10 @@ impl DurableSessionOps {
                 Err(error) => {
                     tracing::warn!(session_id = %self.session_id, %error,
                         "failed to read queue observation head; invalidating replay continuity");
-                    if let Err(error) = self.live_replay_store.invalidate_session(&self.session_id)
+                    if let Err(error) = self
+                        .live_replay_store
+                        .invalidate_session(&self.session_id)
+                        .await
                     {
                         tracing::warn!(session_id = %self.session_id, %error,
                             "failed to invalidate queue observation replay continuity");
@@ -140,15 +143,11 @@ impl DurableSessionOps {
             None::<crate::TurnId>,
             SessionObservationEventPayload::QueueChanged { kind, batch_ids },
         )];
-        let result = self
+        if let Err(err) = self
             .live_replay_store
-            .prepare_publication(&self.session_id, revision, drafts)
-            .and_then(|prepared| {
-                self.live_replay_store
-                    .publish_prepared(prepared)
-                    .map(|_| ())
-            });
-        if let Err(err) = result {
+            .publish(&self.session_id, revision, drafts)
+            .await
+        {
             tracing::warn!(
                 session_id = %self.session_id,
                 error = %err,

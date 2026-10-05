@@ -14,10 +14,10 @@ pub(in crate::runtime) use replay::observation_revision;
 pub use replay::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
-    LiveReplaySubscribeOutcome, LiveReplaySubscription, ParsedSessionCursor,
-    PreparedLiveReplayPublication, SessionCursor, SessionCursorError, SessionObservation,
-    SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
-    SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, ParsedSessionCursor, SessionCursor,
+    SessionCursorError, SessionObservation, SessionObservationEvent,
+    SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
+    SessionQueueEventKind, SessionResume, SessionRevision,
 };
 
 /// The plugin query services one resident session publishes together.
@@ -409,14 +409,16 @@ impl RuntimeHandle {
         self.observation.load_full()
     }
 
-    pub fn publish_from(&self, runtime: &LashRuntime) {
-        self.publish_from_inner(runtime, false);
+    /// Publish `runtime`'s change since this handle's observation, then
+    /// install the observation with the cursor the store assigned it.
+    pub async fn publish_from(&self, runtime: &LashRuntime) {
+        self.publish_from_inner(runtime, false).await;
     }
 
     /// Publish a revision-stable authoritative resident change that is not
     /// represented in the serializable session projection.
-    pub fn publish_resident_from(&self, runtime: &LashRuntime) {
-        self.publish_from_inner(runtime, true);
+    pub async fn publish_resident_from(&self, runtime: &LashRuntime) {
+        self.publish_from_inner(runtime, true).await;
     }
 
     /// Adopt `runtime`'s state as this handle's observation without
@@ -446,7 +448,7 @@ impl RuntimeHandle {
         clippy::expect_used,
         reason = "resident history was validated on restore and emitted through typed writers"
     )]
-    fn publish_from_inner(&self, runtime: &LashRuntime, force_resident: bool) {
+    async fn publish_from_inner(&self, runtime: &LashRuntime, force_resident: bool) {
         let revision = SessionRevision::from_runtime(runtime);
         let previous = self.observation.load_full();
         let turn_id = (previous.revision != revision)
@@ -504,57 +506,54 @@ impl RuntimeHandle {
         }
         drafts.push(LiveReplayEventDraft::new(turn_id, payload));
 
-        let prepared = match self.live_replay_store.prepare_publication(
-            runtime.session_id(),
-            revision,
-            drafts,
-        ) {
-            Ok(prepared) => prepared,
+        // The store assigns the batch its positions as it publishes it; the
+        // observation moves to the batch's cursor only once the batch is
+        // visible, so a cursor never names a position nobody can replay.
+        next.cursor = match self
+            .live_replay_store
+            .publish(runtime.session_id(), revision, drafts)
+            .await
+        {
+            Ok(published) => match published.last() {
+                Some(event) => event.cursor.clone(),
+                None => self
+                    .live_replay_store
+                    .current_cursor(runtime.session_id(), revision),
+            },
             Err(err) => {
                 tracing::warn!(
                     session_id = %runtime.session_id(),
                     error = %err,
-                    "failed to reserve session observation publication; reconnect will fall back to gap recovery",
+                    "failed to publish session observation; reconnect will fall back to gap recovery",
                 );
-                next.cursor = self
-                    .live_replay_store
-                    .current_cursor(runtime.session_id(), revision);
-                self.observation.store(Arc::new(next));
-                return;
+                self.live_replay_store
+                    .current_cursor(runtime.session_id(), revision)
             }
         };
-        next.cursor = prepared.latest_cursor().clone();
         self.observation.store(Arc::new(next));
-        if let Err(err) = self.live_replay_store.publish_prepared(prepared) {
-            tracing::warn!(
-                session_id = %runtime.session_id(),
-                error = %err,
-                "failed to publish prepared session observation; reconnect will fall back to gap recovery",
-            );
-        }
     }
 
-    fn publish_live_events(
+    async fn publish_live_events(
         &self,
         session_id: &SessionId,
         revision: SessionRevision,
         drafts: Vec<LiveReplayEventDraft>,
         failure: &'static str,
     ) {
-        let result = self
+        if let Err(err) = self
             .live_replay_store
-            .prepare_publication(session_id, revision, drafts)
-            .and_then(|prepared| {
-                self.live_replay_store
-                    .publish_prepared(prepared)
-                    .map(|_| ())
-            });
-        if let Err(err) = result {
+            .publish(session_id, revision, drafts)
+            .await
+        {
             tracing::warn!(session_id = %session_id, error = %err, "{failure}");
         }
     }
 
-    pub fn record_turn_activity(&self, turn_id: Option<&TurnId>, activity: crate::TurnActivity) {
+    pub async fn record_turn_activity(
+        &self,
+        turn_id: Option<&TurnId>,
+        activity: crate::TurnActivity,
+    ) {
         let observation = self.observe();
         self.publish_live_events(
             observation.session_id(),
@@ -564,10 +563,11 @@ impl RuntimeHandle {
                 SessionObservationEventPayload::TurnActivity(activity),
             )],
             "failed to publish live turn activity to session observation replay; reconnect may require gap recovery",
-        );
+        )
+        .await;
     }
 
-    pub fn record_queue_changed(&self, kind: SessionQueueEventKind, batch_ids: Vec<String>) {
+    pub async fn record_queue_changed(&self, kind: SessionQueueEventKind, batch_ids: Vec<String>) {
         let observation = self.observe();
         self.publish_live_events(
             observation.session_id(),
@@ -577,124 +577,8 @@ impl RuntimeHandle {
                 SessionObservationEventPayload::QueueChanged { kind, batch_ids },
             )],
             "failed to publish queue observation event; reconnect may require gap recovery",
-        );
-    }
-
-    pub fn resume_session_observation(
-        &self,
-        cursor: &SessionCursor,
-    ) -> Result<SessionResume, LiveReplayStoreError> {
-        let observation = self.observe();
-        let requested = cursor.parse_for_session(observation.session_id())?;
-        match self.live_replay_store.replay_after_cursor(cursor)? {
-            LiveReplayOutcome::Replayed(events)
-                if Self::has_replacement_evidence(
-                    requested.revision,
-                    observation.session_revision(),
-                    events.iter().map(AsRef::as_ref),
-                ) =>
-            {
-                Ok(SessionResume::Replayed { events })
-            }
-            LiveReplayOutcome::Replayed(_) => {
-                let (observation, gap) = self.live_replay_gap(
-                    cursor,
-                    LiveReplayGapReason::Unavailable,
-                    observation.as_ref(),
-                );
-                Ok(SessionResume::Gap { observation, gap })
-            }
-            LiveReplayOutcome::Gap(reason) => {
-                let (observation, gap) = self.live_replay_gap(cursor, reason, observation.as_ref());
-                Ok(SessionResume::Gap { observation, gap })
-            }
-        }
-    }
-
-    pub fn subscribe_session_observation(
-        &self,
-        cursor: &SessionCursor,
-    ) -> Result<SessionObservationSubscription, LiveReplayStoreError> {
-        let observation = self.observe();
-        let requested = cursor.parse_for_session(observation.session_id())?;
-        match self.live_replay_store.subscribe_after_cursor(cursor)? {
-            LiveReplaySubscribeOutcome::Subscribed(subscription)
-                if requested.revision == observation.session_revision()
-                    || (requested.revision < observation.session_revision()
-                        && subscription.bridges_to(observation.session_revision())) =>
-            {
-                Ok(SessionObservationSubscription::Subscribed(subscription))
-            }
-            LiveReplaySubscribeOutcome::Subscribed(_) => {
-                let (observation, gap) = self.live_replay_gap(
-                    cursor,
-                    LiveReplayGapReason::Unavailable,
-                    observation.as_ref(),
-                );
-                Ok(SessionObservationSubscription::Gap { observation, gap })
-            }
-            LiveReplaySubscribeOutcome::Gap(reason) => {
-                let (observation, gap) = self.live_replay_gap(cursor, reason, observation.as_ref());
-                Ok(SessionObservationSubscription::Gap { observation, gap })
-            }
-        }
-    }
-
-    fn has_replacement_evidence<'a>(
-        requested_revision: SessionRevision,
-        authoritative_revision: SessionRevision,
-        events: impl IntoIterator<Item = &'a SessionObservationEvent>,
-    ) -> bool {
-        requested_revision == authoritative_revision
-            || (requested_revision < authoritative_revision
-                && events.into_iter().any(|event| {
-                    event.revision() >= authoritative_revision
-                        && matches!(
-                            &event.payload,
-                            SessionObservationEventPayload::Committed { .. }
-                        )
-                }))
-    }
-
-    fn live_replay_gap(
-        &self,
-        requested_cursor: &SessionCursor,
-        reason: LiveReplayGapReason,
-        observation: &RuntimeObservation,
-    ) -> (SessionObservation, LiveReplayGap) {
-        let latest_revision = observation.session_revision();
-        let observation_cursor = observation.cursor();
-        let current_cursor = self
-            .live_replay_store
-            .current_cursor(observation.session_id(), latest_revision);
-        let latest_cursor = match (
-            requested_cursor.parse_for_session(observation.session_id()),
-            observation_cursor.parse_for_session(observation.session_id()),
-            current_cursor.parse_for_session(observation.session_id()),
-        ) {
-            (Ok(requested), Ok(observation), Ok(current)) => [
-                (observation.live_position, observation_cursor.clone()),
-                (current.live_position, current_cursor),
-            ]
-            .into_iter()
-            .filter(|(position, _)| *position != requested.live_position)
-            .min_by_key(|(position, _)| *position)
-            .map_or_else(|| observation_cursor.clone(), |(_, cursor)| cursor),
-            _ => observation_cursor.clone(),
-        };
-        (
-            SessionObservation {
-                read_view: observation.read_view.clone(),
-                cursor: latest_cursor.clone(),
-            },
-            LiveReplayGap {
-                session_id: observation.session_id().clone(),
-                requested_cursor: requested_cursor.clone(),
-                latest_cursor,
-                latest_revision,
-                reason,
-            },
         )
+        .await;
     }
 
     /// Build this live session's Durable Session operations and its queue
@@ -824,8 +708,6 @@ mod tests {
         state.refresh_current_frame_projection();
     }
 
-    struct PanicLiveReplayStore;
-
     #[derive(Debug)]
     struct FailCommittedLiveReplayStore {
         inner: InMemoryLiveReplayStore,
@@ -839,13 +721,14 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl LiveReplayStore for FailCommittedLiveReplayStore {
-        fn prepare_publication(
+        async fn publish(
             &self,
             session_id: &SessionId,
             revision: SessionRevision,
             events: Vec<LiveReplayEventDraft>,
-        ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError> {
+        ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError> {
             if events.iter().any(|event| {
                 matches!(
                     &event.payload,
@@ -856,28 +739,21 @@ mod tests {
                     "injected committed-event append failure".to_string(),
                 ));
             }
-            self.inner.prepare_publication(session_id, revision, events)
+            self.inner.publish(session_id, revision, events).await
         }
 
-        fn publish_prepared(
-            &self,
-            prepared: PreparedLiveReplayPublication,
-        ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError> {
-            self.inner.publish_prepared(prepared)
-        }
-
-        fn replay_after_cursor(
+        async fn replay_after_cursor(
             &self,
             cursor: &SessionCursor,
         ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
-            self.inner.replay_after_cursor(cursor)
+            self.inner.replay_after_cursor(cursor).await
         }
 
-        fn subscribe_after_cursor(
+        async fn subscribe_after_cursor(
             &self,
             cursor: &SessionCursor,
         ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
-            self.inner.subscribe_after_cursor(cursor)
+            self.inner.subscribe_after_cursor(cursor).await
         }
 
         fn current_cursor(
@@ -888,196 +764,16 @@ mod tests {
             self.inner.current_cursor(session_id, revision)
         }
 
-        fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
-            self.inner.invalidate_session(session_id)
-        }
-
-        fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
-            self.inner.trim_session(session_id)
-        }
-    }
-
-    impl LiveReplayStore for PanicLiveReplayStore {
-        fn prepare_publication(
-            &self,
-            _session_id: &SessionId,
-            _revision: SessionRevision,
-            _events: Vec<LiveReplayEventDraft>,
-        ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError> {
-            panic!("prepare should not be called by cursor rejection tests")
-        }
-
-        fn publish_prepared(
-            &self,
-            _prepared: PreparedLiveReplayPublication,
-        ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError> {
-            panic!("publish should not be called by cursor rejection tests")
-        }
-
-        fn replay_after_cursor(
-            &self,
-            _cursor: &SessionCursor,
-        ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
-            panic!("replay_after_cursor should not be called for rejected cursors")
-        }
-
-        fn subscribe_after_cursor(
-            &self,
-            _cursor: &SessionCursor,
-        ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
-            panic!("subscribe_after_cursor should not be called for rejected cursors")
-        }
-
-        fn current_cursor(
+        async fn invalidate_session(
             &self,
             session_id: &SessionId,
-            revision: SessionRevision,
-        ) -> SessionCursor {
-            SessionCursor::new("panic-replay-incarnation", session_id, revision, 0)
+        ) -> Result<(), LiveReplayStoreError> {
+            self.inner.invalidate_session(session_id).await
         }
 
-        fn invalidate_session(&self, _session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
-            Ok(())
+        async fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
+            self.inner.trim_session(session_id).await
         }
-
-        fn trim_session(&self, _session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn runtime_rejects_bad_cursors_before_replay_store_gap_handling() {
-        let runtime = Box::pin(
-            LashRuntime::builder(
-                crate::RuntimeHostConfig::new(
-                    crate::testing::sqlite_memory_store_backend().await,
-                    crate::CommitBudget::bounded(1024 * 1024, 512),
-                    crate::QueuedWorkBatchingConfig::new(1),
-                ),
-                crate::testing::runtime_lease_owner(),
-            )
-            .with_session_id("session-a")
-            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-            .with_policy(crate::SessionPolicy {
-                model: Some(crate::LlmProfileConfig::new(
-                    crate::RecordedLlmProfile::mint(
-                        crate::LlmProfileKey::from("test-model"),
-                        crate::LlmProfileMetadata::builder("test-model")
-                            .context_window_tokens(1024)
-                            .build()
-                            .expect("model"),
-                    ),
-                )),
-                ..crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                )
-            })
-            .build(),
-        )
-        .await
-        .expect("runtime");
-        let handle = RuntimeHandle::with_live_replay_store(runtime, Arc::new(PanicLiveReplayStore));
-        let wrong_session = SessionCursor::new(
-            "panic-replay-incarnation",
-            "session-b",
-            SessionRevision(0),
-            99,
-        );
-        let malformed = SessionCursor::from_raw_for_testing("bad");
-
-        assert!(matches!(
-            handle.resume_session_observation(&wrong_session),
-            Err(LiveReplayStoreError::Cursor(
-                SessionCursorError::WrongSession { .. }
-            ))
-        ));
-        assert!(matches!(
-            handle.subscribe_session_observation(&wrong_session),
-            Err(LiveReplayStoreError::Cursor(
-                SessionCursorError::WrongSession { .. }
-            ))
-        ));
-        assert!(matches!(
-            handle.resume_session_observation(&malformed),
-            Err(LiveReplayStoreError::Cursor(
-                SessionCursorError::Malformed { .. }
-            ))
-        ));
-        assert!(matches!(
-            handle.subscribe_session_observation(&malformed),
-            Err(LiveReplayStoreError::Cursor(
-                SessionCursorError::Malformed { .. }
-            ))
-        ));
-    }
-
-    #[tokio::test]
-    async fn empty_is_proven_continuity_not_missing_history_for_future_revision() {
-        let runtime = Box::pin(
-            LashRuntime::builder(
-                crate::RuntimeHostConfig::new(
-                    crate::testing::sqlite_memory_store_backend().await,
-                    crate::CommitBudget::bounded(1024 * 1024, 512),
-                    crate::QueuedWorkBatchingConfig::new(1),
-                ),
-                crate::testing::runtime_lease_owner(),
-            )
-            .with_session_id("future-revision-cursor")
-            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-            .with_policy(crate::SessionPolicy {
-                model: Some(crate::LlmProfileConfig::new(
-                    crate::RecordedLlmProfile::mint(
-                        crate::LlmProfileKey::from("test-model"),
-                        crate::LlmProfileMetadata::builder("test-model")
-                            .context_window_tokens(1024)
-                            .build()
-                            .expect("model"),
-                    ),
-                )),
-                ..crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                )
-            })
-            .build(),
-        )
-        .await
-        .expect("runtime");
-        let handle = RuntimeHandle::new(runtime);
-        let ahead = SessionCursor::new(
-            "future-replay-incarnation",
-            "future-revision-cursor",
-            SessionRevision::new(1),
-            0,
-        );
-
-        assert!(matches!(
-            handle
-                .resume_session_observation(&ahead)
-                .expect("resume future revision"),
-            SessionResume::Gap {
-                gap: LiveReplayGap {
-                    reason: LiveReplayGapReason::Unavailable,
-                    latest_revision: SessionRevision(0),
-                    ..
-                },
-                ..
-            }
-        ));
-        assert!(matches!(
-            handle
-                .subscribe_session_observation(&ahead)
-                .expect("subscribe future revision"),
-            SessionObservationSubscription::Gap {
-                gap: LiveReplayGap {
-                    reason: LiveReplayGapReason::Unavailable,
-                    latest_revision: SessionRevision(0),
-                    ..
-                },
-                ..
-            }
-        ));
     }
 
     #[tokio::test]
@@ -1118,9 +814,11 @@ mod tests {
         let mut runtime = writer.lock().await;
         switch_test_frame(&mut runtime.state, "next-frame");
 
-        handle.publish_from(&runtime);
-        let SessionResume::Replayed { events } = handle
-            .resume_session_observation(&cursor)
+        handle.publish_from(&runtime).await;
+        let LiveReplayOutcome::Replayed(events) = handle
+            .live_replay_store
+            .replay_after_cursor(&cursor)
+            .await
             .expect("replay publication")
         else {
             panic!("publication should remain replayable");
@@ -1178,44 +876,18 @@ mod tests {
         runtime.state.turn_index = 1;
         switch_test_frame(&mut runtime.state, "next-frame");
 
-        handle.publish_from(&runtime);
+        handle.publish_from(&runtime).await;
         drop(runtime);
         let LiveReplayOutcome::Replayed(events) = replay_store
             .replay_after_cursor(&cursor)
+            .await
             .expect("inspect retained auxiliary event")
         else {
             panic!("the retained auxiliary event should remain positionally replayable");
         };
         assert!(
             events.is_empty(),
-            "an atomic authoritative batch must not expose its frame switch when reservation fails"
+            "an atomic authoritative batch must not expose its frame switch when publication fails"
         );
-
-        assert!(matches!(
-            handle
-                .resume_session_observation(&cursor)
-                .expect("resume through public runtime seam"),
-            SessionResume::Gap {
-                gap: LiveReplayGap {
-                    reason: LiveReplayGapReason::Unavailable,
-                    latest_revision: SessionRevision(1),
-                    ..
-                },
-                ..
-            }
-        ));
-        assert!(matches!(
-            handle
-                .subscribe_session_observation(&cursor)
-                .expect("subscribe through public runtime seam"),
-            SessionObservationSubscription::Gap {
-                gap: LiveReplayGap {
-                    reason: LiveReplayGapReason::Unavailable,
-                    latest_revision: SessionRevision(1),
-                    ..
-                },
-                ..
-            }
-        ));
     }
 }

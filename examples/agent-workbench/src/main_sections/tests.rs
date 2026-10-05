@@ -763,6 +763,7 @@ finish("snapshot cursor");
             session
                 .observe()
                 .subscribe_from_cursor(&snapshot.cursor)
+                .await
                 .expect("attach at the snapshot cursor"),
             lash::observe::SessionObservationSubscription::Subscribed(_)
         ),
@@ -779,6 +780,7 @@ finish("snapshot cursor");
             session
                 .observe()
                 .subscribe_from_cursor(&resnapshot.cursor)
+                .await
                 .expect("re-attach at the snapshot cursor"),
             lash::observe::SessionObservationSubscription::Subscribed(_)
         ),
@@ -797,6 +799,7 @@ finish("snapshot cursor");
     let recovery_cursor = match session
         .observe()
         .subscribe_from_cursor(&stale_cursor)
+        .await
         .expect("attach at the dead incarnation's cursor")
     {
         lash::observe::SessionObservationSubscription::Gap { observation, gap } => {
@@ -816,6 +819,7 @@ finish("snapshot cursor");
             session
                 .observe()
                 .subscribe_from_cursor(&recovery_cursor)
+                .await
                 .expect("attach at the recovery cursor"),
             lash::observe::SessionObservationSubscription::Subscribed(_)
         ),

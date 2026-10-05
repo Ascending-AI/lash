@@ -258,11 +258,10 @@ pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
     LiveReplaySubscribeOutcome, LiveReplaySubscription, ObservationPluginServices,
-    ParsedSessionCursor, PreparedLiveReplayPublication, RuntimeHandle, RuntimeObservation,
-    SessionCursor, SessionCursorError, SessionObservation, SessionObservationEvent,
-    SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
-    SessionQueueEventKind, SessionResume, SessionRevision, WeakRuntimeHandle,
-    load_durable_observation_head,
+    ParsedSessionCursor, RuntimeHandle, RuntimeObservation, SessionCursor, SessionCursorError,
+    SessionObservation, SessionObservationEvent, SessionObservationEventPayload,
+    SessionObservationSubscription, SessionProcessEventKind, SessionQueueEventKind, SessionResume,
+    SessionRevision, WeakRuntimeHandle, load_durable_observation_head,
 };
 pub use observation_publisher::{ObservationSource, work_with_observations};
 pub use process::ProcessChangeSubscription;

@@ -42,7 +42,7 @@ pub(super) async fn run_once_live_replay_pressure(
                 let start_cursor = store.current_cursor(&session_id, revision);
 
                 let ((first_cursor, replay_incarnation_id), append_phase) =
-                    measure_runtime_perf_phase("live_replay.append", || {
+                    measure_runtime_perf_async_phase("live_replay.append", async {
                         let mut first_event_identity = None;
                         for event_index in 0..LIVE_REPLAY_EVENTS_PER_TURN {
                             let event = publish_one(
@@ -53,7 +53,8 @@ pub(super) async fn run_once_live_replay_pressure(
                                 live_replay_text_payload(format!(
                                     "turn-{turn_index}-event-{event_index}"
                                 )),
-                            )?;
+                            )
+                            .await?;
                             if first_event_identity.is_none() {
                                 first_event_identity = Some((
                                     event.cursor.clone(),
@@ -63,14 +64,15 @@ pub(super) async fn run_once_live_replay_pressure(
                         }
                         first_event_identity
                             .ok_or_else(|| anyhow::anyhow!("live replay append produced no cursor"))
-                    })?;
+                    })
+                    .await?;
                 appended_events += LIVE_REPLAY_EVENTS_PER_TURN;
                 phase_profile.insert(append_phase.0, append_phase.1);
 
                 let (current_cursor, current_phase) =
-                    measure_runtime_perf_phase("live_replay.current_cursor_parse", || {
+                    measure_runtime_perf_async_phase("live_replay.current_cursor_parse", async {
                         let cursor = store.current_cursor(&session_id, revision);
-                        match store.replay_after_cursor(&cursor)? {
+                        match store.replay_after_cursor(&cursor).await? {
                             LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),
                             LiveReplayOutcome::Replayed(events) => anyhow::bail!(
                                 "current cursor replay unexpectedly returned {} events",
@@ -80,18 +82,20 @@ pub(super) async fn run_once_live_replay_pressure(
                                 anyhow::bail!("current cursor replay returned gap {reason:?}")
                             }
                         }
-                    })?;
+                    })
+                    .await?;
                 phase_profile.insert(current_phase.0, current_phase.1);
 
                 let (replay_count, replay_phase) =
-                    measure_runtime_perf_phase("live_replay.replay_after_cursor", || match store
-                        .replay_after_cursor(&start_cursor)?
-                    {
-                        LiveReplayOutcome::Replayed(events) => Ok(events.len()),
-                        LiveReplayOutcome::Gap(reason) => {
-                            anyhow::bail!("start cursor replay returned gap {reason:?}")
+                    measure_runtime_perf_async_phase("live_replay.replay_after_cursor", async {
+                        match store.replay_after_cursor(&start_cursor).await? {
+                            LiveReplayOutcome::Replayed(events) => Ok(events.len()),
+                            LiveReplayOutcome::Gap(reason) => {
+                                anyhow::bail!("start cursor replay returned gap {reason:?}")
+                            }
                         }
-                    })?;
+                    })
+                    .await?;
                 if replay_count != LIVE_REPLAY_EVENTS_PER_TURN {
                     anyhow::bail!(
                         "live replay expected {} replayed events, got {replay_count}",
@@ -103,7 +107,10 @@ pub(super) async fn run_once_live_replay_pressure(
 
                 let ((buffered_count, live_count), subscribe_phase) =
                     measure_runtime_perf_async_phase("live_replay.subscribe_buffered", async {
-                        let mut subscription = match store.subscribe_after_cursor(&first_cursor)? {
+                        let mut subscription = match store
+                            .subscribe_after_cursor(&first_cursor)
+                            .await?
+                        {
                             LiveReplaySubscribeOutcome::Subscribed(subscription) => subscription,
                             LiveReplaySubscribeOutcome::Gap(reason) => {
                                 anyhow::bail!(
@@ -128,7 +135,8 @@ pub(super) async fn run_once_live_replay_pressure(
                             revision,
                             Some(&turn_id),
                             live_replay_text_payload(format!("turn-{turn_index}-live-event")),
-                        )?;
+                        )
+                        .await?;
                         crate::runtime_perf::smoke::with_budget(
                             Duration::from_secs(1),
                             futures_util::StreamExt::next(&mut subscription),
@@ -144,7 +152,7 @@ pub(super) async fn run_once_live_replay_pressure(
                 phase_profile.insert(subscribe_phase.0, subscribe_phase.1);
 
                 let (trim_gap_count, trim_phase) =
-                    measure_runtime_perf_phase("live_replay.trim_by_capacity", || {
+                    measure_runtime_perf_async_phase("live_replay.trim_by_capacity", async {
                         let trim_store =
                             lash_core::facade_support::InMemoryLiveReplayStore::with_bounds(
                                 LIVE_REPLAY_TRIM_CAPACITY,
@@ -164,10 +172,11 @@ pub(super) async fn run_once_live_replay_pressure(
                                 live_replay_text_payload(format!(
                                     "trim-{turn_index}-{event_index}"
                                 )),
-                            )?;
+                            )
+                            .await?;
                         }
-                        trim_store.trim_session(&trim_session_id)?;
-                        match trim_store.replay_after_cursor(&trim_start)? {
+                        trim_store.trim_session(&trim_session_id).await?;
+                        match trim_store.replay_after_cursor(&trim_start).await? {
                             LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Trimmed) => {
                                 Ok(1usize)
                             }
@@ -179,12 +188,13 @@ pub(super) async fn run_once_live_replay_pressure(
                                 events.len()
                             ),
                         }
-                    })?;
+                    })
+                    .await?;
                 trim_gaps += trim_gap_count;
                 phase_profile.insert(trim_phase.0, trim_phase.1);
 
                 let (unavailable_gap_count, gap_phase) =
-                    measure_runtime_perf_phase("live_replay.gap_handling", || {
+                    measure_runtime_perf_async_phase("live_replay.gap_handling", async {
                         let ahead_cursor: lash_core::SessionCursor =
                             serde_json::from_value(serde_json::json!(format!(
                                 "lashsc2:{}:{}:999999:{}",
@@ -193,7 +203,7 @@ pub(super) async fn run_once_live_replay_pressure(
                                 session_id
                             )))?;
                         let mut gaps = 0usize;
-                        match store.replay_after_cursor(&ahead_cursor)? {
+                        match store.replay_after_cursor(&ahead_cursor).await? {
                             LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => {
                                 gaps += 1
                             }
@@ -205,7 +215,7 @@ pub(super) async fn run_once_live_replay_pressure(
                                 events.len()
                             ),
                         }
-                        match store.subscribe_after_cursor(&ahead_cursor)? {
+                        match store.subscribe_after_cursor(&ahead_cursor).await? {
                             LiveReplaySubscribeOutcome::Gap(
                                 lash_core::LiveReplayGapReason::Unavailable,
                             ) => gaps += 1,
@@ -217,11 +227,12 @@ pub(super) async fn run_once_live_replay_pressure(
                             }
                         }
                         Ok(gaps)
-                    })?;
+                    })
+                    .await?;
                 unavailable_gaps += unavailable_gap_count;
                 phase_profile.insert(gap_phase.0, gap_phase.1);
 
-                match store.replay_after_cursor(&current_cursor)? {
+                match store.replay_after_cursor(&current_cursor).await? {
                     LiveReplayOutcome::Replayed(events) if events.len() == 1 => {}
                     LiveReplayOutcome::Replayed(events) => anyhow::bail!(
                         "current cursor should see only the live event after subscribe, got {}",
@@ -283,20 +294,20 @@ pub(super) async fn run_once_live_replay_pressure(
     }))
 }
 
-fn publish_one(
+async fn publish_one(
     store: &impl lash_core::LiveReplayStore,
     session_id: &SessionId,
     revision: SessionRevision,
     turn_id: Option<&TurnId>,
     payload: SessionObservationEventPayload,
 ) -> anyhow::Result<Arc<lash_core::SessionObservationEvent>> {
-    let prepared = store.prepare_publication(
-        session_id,
-        revision,
-        vec![lash_core::LiveReplayEventDraft::new(turn_id, payload)],
-    )?;
     store
-        .publish_prepared(prepared)?
+        .publish(
+            session_id,
+            revision,
+            vec![lash_core::LiveReplayEventDraft::new(turn_id, payload)],
+        )
+        .await?
         .into_iter()
         .next()
         .ok_or_else(|| anyhow::anyhow!("published live replay batch was empty"))

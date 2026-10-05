@@ -48,6 +48,7 @@ async fn invalidated_live_observation_recovers_with_an_authoritative_snapshot() 
     );
     replay
         .invalidate_session(&session_id)
+        .await
         .expect("invalidate replay continuity");
     let recovered = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
         .await
@@ -136,6 +137,7 @@ async fn a_disconnected_host_reconciles_a_failed_turn_after_live_replay_trims() 
     assert!(matches!(
         replay
             .replay_after_cursor(&live_cursor)
+            .await
             .expect("replay read"),
         lash_core::LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Trimmed)
     ));

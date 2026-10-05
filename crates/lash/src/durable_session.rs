@@ -355,12 +355,13 @@ impl DurableSession {
     /// process runs replays only what this process's store buffered — with
     /// the default in-memory store, cross-process visibility is exactly what
     /// the module documentation describes.
-    pub fn replay_after_cursor(
+    pub async fn replay_after_cursor(
         &self,
         cursor: &lash_core::SessionCursor,
     ) -> Result<lash_core::runtime::LiveReplayOutcome> {
         self.live_replay_store
             .replay_after_cursor(cursor)
+            .await
             .map_err(|error| {
                 EmbedError::Runtime(lash_core::RuntimeError::new(
                     crate::support::RuntimeErrorCode::LiveReplay,

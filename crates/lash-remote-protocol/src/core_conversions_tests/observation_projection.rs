@@ -210,17 +210,18 @@ fn tool_call_completed_observation_projects_frame_switch_without_seed_bodies() {
         graph_key: None,
     });
     let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
-    let prepared = lash_core::LiveReplayStore::prepare_publication(
-        &store,
-        &SessionId::from("session"),
-        lash_core::SessionRevision::new(1),
-        vec![lash_core::LiveReplayEventDraft::new(
-            Some(&TurnId::from("turn")),
-            lash_core::SessionObservationEventPayload::TurnActivity(activity),
-        )],
-    )
-    .expect("prepare observation");
-    let event = lash_core::LiveReplayStore::publish_prepared(&store, prepared)
+    let event = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("test runtime")
+        .block_on(lash_core::LiveReplayStore::publish(
+            &store,
+            &SessionId::from("session"),
+            lash_core::SessionRevision::new(1),
+            vec![lash_core::LiveReplayEventDraft::new(
+                Some(&TurnId::from("turn")),
+                lash_core::SessionObservationEventPayload::TurnActivity(activity),
+            )],
+        ))
         .expect("publish observation")
         .remove(0);
 

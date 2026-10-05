@@ -108,9 +108,12 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
         .expect("queued input should run");
 
     let crate::observe::RemoteSessionObservationSubscription::Subscribed(mut subscription) =
-        session.observe().subscribe_from_remote_cursor(
-            &crate::remote::observations::RemoteSessionCursor::new(cursor),
-        )?
+        session
+            .observe()
+            .subscribe_from_remote_cursor(&crate::remote::observations::RemoteSessionCursor::new(
+                cursor,
+            ))
+            .await?
     else {
         panic!("recent cursor should replay typed application");
     };

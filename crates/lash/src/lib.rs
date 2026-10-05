@@ -375,9 +375,9 @@ pub mod observe {
     };
     pub use lash_core::{
         LiveReplayEventDraft, LiveReplayGapReason, LiveReplayStore, LiveReplayStoreError,
-        LiveReplaySubscribeOutcome, PreparedLiveReplayPublication, SessionCursor,
-        SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
-        SessionQueueEventKind, SessionRevision, facade_support::InMemoryLiveReplayStore,
+        LiveReplaySubscribeOutcome, SessionCursor, SessionObservationEvent,
+        SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
+        SessionRevision, facade_support::InMemoryLiveReplayStore,
         facade_support::InMemoryLiveReplayStoreConfig, facade_support::LiveReplayGap,
         facade_support::SessionObservation, facade_support::SessionObservationSubscription,
         facade_support::SessionResume,

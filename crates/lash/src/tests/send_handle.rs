@@ -1086,22 +1086,12 @@ async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
         .id(crate::TurnId::parse("gap-run").expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, 1).await;
-    drop(
-        fixture
-            .core
-            .live_replay_store
-            .prepare_publication(
-                &session.session_id(),
-                lash_core::SessionRevision::new(0),
-                vec![lash_core::LiveReplayEventDraft::new(
-                    None::<lash_core::TurnId>,
-                    lash_core::SessionObservationEventPayload::AgentFrameSwitched {
-                        frame_id: "lost".into(),
-                    },
-                )],
-            )
-            .expect("abandon a publication to create a known replay gap"),
-    );
+    fixture
+        .core
+        .live_replay_store
+        .invalidate_session(&session.session_id())
+        .await
+        .expect("invalidate the replay to create a known gap");
     let mut events = handle.events();
     let event = tokio::time::timeout(std::time::Duration::from_secs(2), events.next())
         .await
@@ -1757,9 +1747,8 @@ async fn exact_host_run_frame_switch(host_id: &str, cancel: bool) -> Result<()> 
             })
         })
         .collect();
-    let prepared = core
-        .live_replay_store
-        .prepare_publication(
+    core.live_replay_store
+        .publish(
             &session.session_id(),
             lash_core::SessionRevision::new(0),
             markers
@@ -1773,9 +1762,7 @@ async fn exact_host_run_frame_switch(host_id: &str, cancel: bool) -> Result<()> 
                 })
                 .collect(),
         )
-        .expect("prepare run membership markers");
-    core.live_replay_store
-        .publish_prepared(prepared)
+        .await
         .expect("publish run membership markers");
 
     let mut input_events = handle.events();

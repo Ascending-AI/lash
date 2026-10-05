@@ -447,7 +447,7 @@ impl Observation {
     /// taken in another process, before a restart).
     async fn resubscribe(&mut self, ctx: &SendContext, tap: &mut Tap<'_>) {
         let store = &ctx.parts.live_replay_store;
-        let reason = match store.subscribe_after_cursor(&self.last_cursor) {
+        let reason = match store.subscribe_after_cursor(&self.last_cursor).await {
             Ok(LiveReplaySubscribeOutcome::Subscribed(subscription)) => {
                 self.replay = Replay::Live(subscription);
                 return;
@@ -465,7 +465,7 @@ impl Observation {
         let gap = replay_gap(ctx, &self.last_cursor, reason);
         self.last_cursor = gap.latest_cursor.clone();
         self.report(gap, tap).await;
-        self.replay = match store.subscribe_after_cursor(&self.last_cursor) {
+        self.replay = match store.subscribe_after_cursor(&self.last_cursor).await {
             Ok(LiveReplaySubscribeOutcome::Subscribed(subscription)) => Replay::Live(subscription),
             _ => Replay::Ended,
         };
@@ -919,6 +919,7 @@ async fn drain(
         .parts
         .live_replay_store
         .replay_after_cursor(&observation.last_cursor)
+        .await
     {
         for event in events {
             observation.last_cursor = event.cursor.clone();

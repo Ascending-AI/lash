@@ -713,6 +713,7 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() -
     let lash::observe::SessionObservationSubscription::Subscribed(mut subscription) = session
         .observe()
         .subscribe_from_cursor(&cursor)
+        .await
         .expect("subscribe before retry turn")
     else {
         panic!("fresh observer cursor unexpectedly had a replay gap");
@@ -769,6 +770,7 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() -
     } = session
         .observe()
         .resume_from_cursor(&cursor)
+        .await
         .expect("replay retry events")
     else {
         panic!("retry events should remain in bounded replay");

@@ -59,6 +59,7 @@ async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_re
         lash::remote::observations::RemoteSessionCursor::new(snapshot.cursor.to_string());
     let mut direct = match observable
         .subscribe_from_remote_cursor(&remote_cursor)
+        .await
         .expect("subscribe from remote cursor")
     {
         lash::observe::RemoteSessionObservationSubscription::Subscribed(stream) => stream,

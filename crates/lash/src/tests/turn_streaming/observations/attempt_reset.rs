@@ -17,7 +17,7 @@ pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()>
     let session = core.session(crate::SessionId::parse("retry-visible-observation").expect("nonblank host identity")).open().await?;
     let cursor = session.observe().snapshot().await.expect("durable snapshot").cursor;
     let lash_core::facade_support::SessionObservationSubscription::Subscribed(mut subscription) =
-        session.observe().subscribe_from_cursor(&cursor)?
+        session.observe().subscribe_from_cursor(&cursor).await?
     else {
         panic!("fresh cursor should subscribe without a gap");
     };
@@ -53,7 +53,7 @@ pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()>
 
     let lash_core::facade_support::SessionResume::Replayed {
         events: replay_events,
-    } = session.observe().resume_from_cursor(&cursor)?
+    } = session.observe().resume_from_cursor(&cursor).await?
     else {
         panic!("recent cursor should replay all attempt activity");
     };

@@ -79,7 +79,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         .await
         .expect("durable snapshot");
     assert!(
-        matches!(session.observe().resume_from_cursor(&old).expect("retained replay"), SessionResume::Replayed { events } if !events.is_empty())
+        matches!(session.observe().resume_from_cursor(&old).await.expect("retained replay"), SessionResume::Replayed { events } if !events.is_empty())
     );
 
     replay.current_cursor(
@@ -89,6 +89,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
     let SessionResume::Gap { observation, gap } = session
         .observe()
         .resume_from_cursor(&old)
+        .await
         .expect("eviction recovery")
     else {
         panic!("evicted cursor must recover through a gap");
@@ -105,13 +106,13 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
     );
     assert_ne!(observation.cursor, old);
     assert!(matches!(
-        replay.replay_after_cursor(&old),
+        replay.replay_after_cursor(&old).await,
         Ok(lash::persistence::LiveReplayOutcome::Gap(
             LiveReplayGapReason::Unavailable
         ))
     ));
     assert!(matches!(
-        replay.subscribe_after_cursor(&old),
+        replay.subscribe_after_cursor(&old).await,
         Ok(lash::observe::LiveReplaySubscribeOutcome::Gap(
             LiveReplayGapReason::Unavailable
         ))

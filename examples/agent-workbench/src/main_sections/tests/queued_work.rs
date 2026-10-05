@@ -139,6 +139,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         let lash::observe::SessionResume::Replayed { events } = session
             .observe()
             .resume_from_cursor(&cursor)
+            .await
             .expect("resume queue events")
         else {
             panic!("recent workbench cursor must replay queue events");

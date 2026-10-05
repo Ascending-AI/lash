@@ -10,7 +10,9 @@ use lash_core::{
 use lash_sansio::sync::MutexExt;
 use lash_sansio::{ProcessId, SessionId};
 
-type SessionPublisher = dyn Fn(SessionProcessEventKind, ProcessId) -> bool + Send + Sync;
+/// One open handle's route: the revision its observation stands at, or
+/// `None` once the handle is gone.
+type SessionPublisher = dyn Fn() -> Option<lash_core::SessionRevision> + Send + Sync;
 
 pub(crate) struct ProcessLifecycleRoute {
     feed: Weak<ProcessLifecycleFeed>,
@@ -64,6 +66,26 @@ impl ProcessLifecycleFeed {
         self.routes.lock_recover().values().map(Vec::len).sum()
     }
 
+    async fn publish(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+        kind: SessionProcessEventKind,
+        process_id: &ProcessId,
+    ) {
+        let draft = LiveReplayEventDraft::new(
+            None::<lash_core::TurnId>,
+            SessionObservationEventPayload::ProcessChanged {
+                kind,
+                process_ids: vec![process_id.clone()],
+            },
+        );
+        if let Err(error) = self.store.publish(session_id, revision, vec![draft]).await {
+            tracing::warn!(session_id = %session_id, %error,
+                "failed to publish process lifecycle observation");
+        }
+    }
+
     fn release_dead_publisher(&self, session_id: &SessionId, dead: &Arc<SessionPublisher>) {
         let mut routes = self.routes.lock_recover();
         if let Some(publishers) = routes.get_mut(session_id) {
@@ -78,31 +100,9 @@ impl ProcessLifecycleFeed {
         let observation = handle.observe();
         let session_id = SessionId::from(observation.session_id());
         let weak = Arc::downgrade(&handle.observation);
-        let store = Arc::clone(&self.store);
-        let route_session_id = session_id.clone();
-        let publisher: Arc<SessionPublisher> = Arc::new(move |kind, process_id| {
-            let Some(observation) = weak.upgrade() else {
-                return false;
-            };
-            let revision = observation.load_full().session_revision();
-            let result = store
-                .prepare_publication(
-                    &route_session_id,
-                    revision,
-                    vec![LiveReplayEventDraft::new(
-                        None::<lash_core::TurnId>,
-                        SessionObservationEventPayload::ProcessChanged {
-                            kind,
-                            process_ids: vec![process_id],
-                        },
-                    )],
-                )
-                .and_then(|prepared| store.publish_prepared(prepared).map(|_| ()));
-            if let Err(error) = result {
-                tracing::warn!(session_id = %route_session_id, %error,
-                    "failed to publish process lifecycle observation");
-            }
-            true
+        let publisher: Arc<SessionPublisher> = Arc::new(move || {
+            weak.upgrade()
+                .map(|observation| observation.load_full().session_revision())
         });
         self.routes
             .lock_recover()
@@ -137,7 +137,9 @@ impl ProcessEventSink for ProcessLifecycleFeed {
                     };
                     for (session_id, publishers) in routes {
                         for publisher in publishers {
-                            if publisher(kind, event.process_id.clone()) {
+                            if let Some(revision) = publisher() {
+                                self.publish(&session_id, revision, kind, &event.process_id)
+                                    .await;
                                 break;
                             }
                             self.release_dead_publisher(&session_id, &publisher);

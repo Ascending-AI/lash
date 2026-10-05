@@ -53,8 +53,10 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
             .expect("valid view");
         let replay = Arc::new(crate::facade_support::InMemoryLiveReplayStore::default());
         let cursor = replay.current_cursor(&session_id, revision);
-        let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
-            replay.subscribe_after_cursor(&cursor).expect("subscribe")
+        let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = replay
+            .subscribe_after_cursor(&cursor)
+            .await
+            .expect("subscribe")
         else {
             panic!("healthy cursor subscribes");
         };
@@ -105,11 +107,11 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
             "the injected read was reached"
         );
         assert!(matches!(
-            replay.replay_after_cursor(&cursor),
+            replay.replay_after_cursor(&cursor).await,
             Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
         ));
         assert!(matches!(
-            replay.subscribe_after_cursor(&cursor),
+            replay.subscribe_after_cursor(&cursor).await,
             Ok(LiveReplaySubscribeOutcome::Gap(
                 LiveReplayGapReason::Unavailable
             ))
@@ -130,7 +132,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
             revision
         );
         assert!(
-            matches!(replay.replay_after_cursor(&recovered), Ok(LiveReplayOutcome::Replayed(events)) if events.is_empty())
+            matches!(replay.replay_after_cursor(&recovered).await, Ok(LiveReplayOutcome::Replayed(events)) if events.is_empty())
         );
         let second = store
             .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
@@ -145,6 +147,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
             .expect("healthy cancellation");
         let LiveReplayOutcome::Replayed(events) = replay
             .replay_after_cursor(&recovered)
+            .await
             .expect("replay after resync")
         else {
             panic!("resynced cursor replays");
@@ -161,30 +164,17 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
 
 struct FailingQueuePublication {
     inner: crate::facade_support::InMemoryLiveReplayStore,
-    fail_prepare: bool,
     attempts: std::sync::atomic::AtomicUsize,
 }
+#[async_trait::async_trait]
 impl crate::LiveReplayStore for FailingQueuePublication {
-    fn prepare_publication(
+    async fn publish(
         &self,
-        session: &SessionId,
-        revision: SessionRevision,
+        _session: &SessionId,
+        _revision: SessionRevision,
         events: Vec<crate::LiveReplayEventDraft>,
-    ) -> Result<crate::PreparedLiveReplayPublication, crate::LiveReplayStoreError> {
-        if self.fail_prepare {
-            self.attempts
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            return Err(crate::LiveReplayStoreError::Store(
-                "injected queue preparation failure".into(),
-            ));
-        }
-        self.inner.prepare_publication(session, revision, events)
-    }
-    fn publish_prepared(
-        &self,
-        prepared: crate::PreparedLiveReplayPublication,
     ) -> Result<Vec<Arc<crate::SessionObservationEvent>>, crate::LiveReplayStoreError> {
-        assert!(prepared.events().iter().all(|event| matches!(
+        assert!(events.iter().all(|event| matches!(
             event.payload,
             SessionObservationEventPayload::QueueChanged { .. }
         )));
@@ -194,17 +184,17 @@ impl crate::LiveReplayStore for FailingQueuePublication {
             "injected queue publication failure".into(),
         ))
     }
-    fn replay_after_cursor(
+    async fn replay_after_cursor(
         &self,
         cursor: &crate::SessionCursor,
     ) -> Result<LiveReplayOutcome, crate::LiveReplayStoreError> {
-        self.inner.replay_after_cursor(cursor)
+        self.inner.replay_after_cursor(cursor).await
     }
-    fn subscribe_after_cursor(
+    async fn subscribe_after_cursor(
         &self,
         cursor: &crate::SessionCursor,
     ) -> Result<LiveReplaySubscribeOutcome, crate::LiveReplayStoreError> {
-        self.inner.subscribe_after_cursor(cursor)
+        self.inner.subscribe_after_cursor(cursor).await
     }
     fn current_cursor(
         &self,
@@ -213,18 +203,21 @@ impl crate::LiveReplayStore for FailingQueuePublication {
     ) -> crate::SessionCursor {
         self.inner.current_cursor(session, revision)
     }
-    fn trim_session(&self, session: &SessionId) -> Result<(), crate::LiveReplayStoreError> {
-        self.inner.trim_session(session)
+    async fn trim_session(&self, session: &SessionId) -> Result<(), crate::LiveReplayStoreError> {
+        self.inner.trim_session(session).await
     }
-    fn invalidate_session(&self, session: &SessionId) -> Result<(), crate::LiveReplayStoreError> {
-        self.inner.invalidate_session(session)
+    async fn invalidate_session(
+        &self,
+        session: &SessionId,
+    ) -> Result<(), crate::LiveReplayStoreError> {
+        self.inner.invalidate_session(session).await
     }
 }
 
 #[expect(clippy::expect_used, reason = "conformance fixture assertions")]
 pub async fn queue_publication_failure_preserves_committed_mutation(backend: crate::Backend) {
-    for fail_prepare in [true, false] {
-        let id = SessionId::fixture(format!("publication-failure-{fail_prepare}"));
+    {
+        let id = SessionId::fixture("publication-failure");
         let store = backend
             .session_store_factory()
             .admit_view(&crate::testing::store_fixtures::session_store_request(
@@ -244,7 +237,6 @@ pub async fn queue_publication_failure_preserves_committed_mutation(backend: cra
             .expect("accept input");
         let replay = Arc::new(FailingQueuePublication {
             inner: Default::default(),
-            fail_prepare,
             attempts: Default::default(),
         });
         let ops = crate::facade_support::DurableSessionOps::new(

@@ -616,27 +616,21 @@ impl Stream for ExternalLiveTail {
 
 #[lash::async_trait]
 impl LiveReplayStore for Integrator {
-    fn prepare_publication(
+    async fn publish(
         &self,
         session_id: &SessionId,
         revision: SessionRevision,
         events: Vec<LiveReplayEventDraft>,
-    ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError> {
-        unreachable!("external signature witness")
-    }
-    fn publish_prepared(
-        &self,
-        prepared: PreparedLiveReplayPublication,
     ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError> {
         unreachable!("external signature witness")
     }
-    fn replay_after_cursor(
+    async fn replay_after_cursor(
         &self,
         cursor: &SessionCursor,
     ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
         unreachable!("external signature witness")
     }
-    fn subscribe_after_cursor(
+    async fn subscribe_after_cursor(
         &self,
         cursor: &SessionCursor,
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
@@ -647,10 +641,10 @@ impl LiveReplayStore for Integrator {
     fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor {
         unreachable!("external signature witness")
     }
-    fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
+    async fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         unreachable!("external signature witness")
     }
-    fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
+    async fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         unreachable!("external signature witness")
     }
 }

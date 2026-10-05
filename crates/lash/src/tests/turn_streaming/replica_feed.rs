@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::recoverable_chat::{RecoverableChatSnapshot, RecoverableChatUpdate};
-use lash_core::{LiveReplayStore, SessionReadView};
+use lash_core::{LiveReplayStore, LiveReplayStoreError, SessionReadView};
 
 const FEED_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -324,6 +324,7 @@ async fn a_commit_that_extends_a_revision_the_consumer_lacks_resyncs_from_the_he
     }
     let lash_core::LiveReplayOutcome::Replayed(events) = publisher_replay
         .replay_after_cursor(&published_at)
+        .await
         .map_err(crate::observation_feed::live_replay_error)?
     else {
         panic!("the publisher's replay holds both commits");
@@ -348,8 +349,8 @@ async fn a_commit_that_extends_a_revision_the_consumer_lacks_resyncs_from_the_he
         lash_core::SessionRevision::new(0),
         "the second commit extends the first, which the consumer lacks"
     );
-    let prepared = observer_replay
-        .prepare_publication(
+    observer_replay
+        .publish(
             &session_id,
             second.revision(),
             vec![lash_core::LiveReplayEventDraft::new(
@@ -357,9 +358,7 @@ async fn a_commit_that_extends_a_revision_the_consumer_lacks_resyncs_from_the_he
                 second.payload.clone(),
             )],
         )
-        .map_err(crate::observation_feed::live_replay_error)?;
-    observer_replay
-        .publish_prepared(prepared)
+        .await
         .map_err(crate::observation_feed::live_replay_error)?;
 
     let update = tokio::time::timeout(FEED_DEADLINE, feed.next())
@@ -388,4 +387,354 @@ async fn a_commit_that_extends_a_revision_the_consumer_lacks_resyncs_from_the_he
         in_memory(),
     )
     .await
+}
+
+/// Events each replica publishes in
+/// [`concurrent_writers_on_two_replicas_share_one_gap_free_order`].
+const RACED_EVENTS: usize = 64;
+
+/// Two replicas write one session at once through the store they share,
+/// as the run's runtime and the replica that accepted a send do: the
+/// store sequences them into one contiguous order, each replica's events
+/// keep their own order, and a feed carries every event once (FIG-5099).
+async fn concurrent_writers_on_two_replicas_share_one_gap_free_order(
+    shared: Arc<dyn LiveReplayStore>,
+) -> Result<()> {
+    let (publisher, observer) = replicas(Arc::clone(&shared), shared).await?;
+    let session_id = SessionId::from("replica-feed-concurrent-writers");
+    let published = publisher
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let observed = observer.session(session_id.clone()).open().await?;
+    let opened_at = observed.observe().snapshot().await?;
+    let mut feed = observed.observe().subscribe_and_recover(opened_at.cursor);
+
+    let activity = |text: String| {
+        lash_core::TurnActivity::independent(lash_core::TurnEvent::AssistantProseDelta {
+            text: text.into(),
+            block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+        })
+    };
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let activity_writer = {
+        let runtime = published.runtime.clone();
+        let barrier = Arc::clone(&barrier);
+        tokio::spawn(async move {
+            barrier.wait().await;
+            for index in 0..RACED_EVENTS {
+                runtime
+                    .record_turn_activity(None, activity(format!("activity {index}")))
+                    .await;
+                if index % 8 == 0 {
+                    tokio::task::yield_now().await;
+                }
+            }
+        })
+    };
+    let queue_writer = {
+        let runtime = observed.runtime.clone();
+        let barrier = Arc::clone(&barrier);
+        tokio::spawn(async move {
+            barrier.wait().await;
+            for index in 0..RACED_EVENTS {
+                runtime
+                    .record_queue_changed(
+                        lash_core::SessionQueueEventKind::Enqueued,
+                        vec![format!("batch {index}")],
+                    )
+                    .await;
+                if index % 8 == 0 {
+                    tokio::task::yield_now().await;
+                }
+            }
+        })
+    };
+    activity_writer.await.expect("join the activity writer");
+    queue_writer.await.expect("join the queue writer");
+
+    let mut positions = Vec::new();
+    let mut activities = Vec::new();
+    let mut batches = Vec::new();
+    while positions.len() < 2 * RACED_EVENTS {
+        let item = tokio::time::timeout(FEED_DEADLINE, feed.next())
+            .await
+            .expect("the feed delivers every raced event")
+            .expect("the feed stays open")?;
+        let crate::observe::SessionObservationStreamItem::Event(event) = item else {
+            panic!("a feed over one shared sequence never gaps: {item:?}");
+        };
+        positions.push(
+            event
+                .cursor
+                .parse_for_session(&session_id)
+                .expect("a feed event names its session")
+                .live_position,
+        );
+        match &event.payload {
+            lash_core::SessionObservationEventPayload::TurnActivity(activity) => {
+                let lash_core::TurnEvent::AssistantProseDelta { text, .. } = &activity.event else {
+                    panic!("only raced deltas are published");
+                };
+                activities.push(text.to_string());
+            }
+            lash_core::SessionObservationEventPayload::QueueChanged { batch_ids, .. } => {
+                batches.extend(batch_ids.iter().cloned());
+            }
+            payload => panic!("only raced events are published, got {payload:?}"),
+        }
+    }
+    assert!(
+        positions.windows(2).all(|pair| pair[1] == pair[0] + 1),
+        "two replicas' writes share one contiguous position sequence: {positions:?}"
+    );
+    assert_eq!(
+        activities,
+        (0..RACED_EVENTS)
+            .map(|index| format!("activity {index}"))
+            .collect::<Vec<_>>(),
+        "the publisher's events keep its order"
+    );
+    assert_eq!(
+        batches,
+        (0..RACED_EVENTS)
+            .map(|index| format!("batch {index}"))
+            .collect::<Vec<_>>(),
+        "the observer replica's events keep its order"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_writers_on_two_replicas_share_one_gap_free_order_in_memory() -> Result<()> {
+    concurrent_writers_on_two_replicas_share_one_gap_free_order(in_memory()).await
+}
+
+/// A live replay store that decides a subscription only once the test lets
+/// it: a remote store answering its gap after a round trip.
+struct DeferredSubscribeStore {
+    inner: Arc<dyn LiveReplayStore>,
+    decide: tokio::sync::Semaphore,
+    asked: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl LiveReplayStore for DeferredSubscribeStore {
+    async fn publish(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+        events: Vec<lash_core::LiveReplayEventDraft>,
+    ) -> std::result::Result<Vec<Arc<lash_core::SessionObservationEvent>>, LiveReplayStoreError>
+    {
+        self.inner.publish(session_id, revision, events).await
+    }
+
+    async fn replay_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> std::result::Result<lash_core::LiveReplayOutcome, LiveReplayStoreError> {
+        self.inner.replay_after_cursor(cursor).await
+    }
+
+    async fn subscribe_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> std::result::Result<lash_core::LiveReplaySubscribeOutcome, LiveReplayStoreError> {
+        self.asked.notify_one();
+        self.decide
+            .acquire()
+            .await
+            .expect("the decision gate stays open")
+            .forget();
+        self.inner.subscribe_after_cursor(cursor).await
+    }
+
+    fn current_cursor(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.inner.current_cursor(session_id, revision)
+    }
+
+    async fn invalidate_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<(), LiveReplayStoreError> {
+        self.inner.invalidate_session(session_id).await
+    }
+
+    async fn trim_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<(), LiveReplayStoreError> {
+        self.inner.trim_session(session_id).await
+    }
+}
+
+/// A gap the store decides asynchronously reaches the feed as a typed gap
+/// whose replacement is the durable head, and the feed goes on from it
+/// (FIG-5099).
+#[tokio::test]
+async fn a_gap_the_store_decides_asynchronously_reaches_the_feed() -> Result<()> {
+    let deferred = Arc::new(DeferredSubscribeStore {
+        inner: in_memory(),
+        decide: tokio::sync::Semaphore::new(0),
+        asked: tokio::sync::Notify::new(),
+    });
+    let (publisher, observer) = replicas(in_memory(), deferred.clone()).await?;
+    let session_id = SessionId::from("replica-feed-deferred-gap");
+    let published = publisher
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let observed = observer.session(session_id).open().await?;
+    published
+        .send(TurnInput::text("before the deferred decision"))
+        .output()
+        .await?;
+    let elsewhere = snapshot(&published).await?.cursor;
+    let mut feed = observed.observe().subscribe_and_recover(elsewhere);
+
+    let mut next = feed.next();
+    tokio::select! {
+        biased;
+        item = &mut next => panic!("the feed answered before the store decided: {item:?}"),
+        () = deferred.asked.notified() => {}
+    }
+    deferred.decide.add_permits(1);
+    let item = tokio::time::timeout(FEED_DEADLINE, next)
+        .await
+        .expect("the feed answers once the store decides")
+        .expect("the feed stays open")?;
+    let crate::observe::SessionObservationStreamItem::Gap { observation, gap } = item else {
+        panic!("another store's cursor answers a typed gap, got {item:?}");
+    };
+    assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Unavailable);
+    assert!(
+        says(&observation.read_view, "echo: before the deferred decision"),
+        "the deferred gap's replacement is the durable head"
+    );
+
+    deferred.decide.add_permits(1);
+    observed
+        .runtime
+        .record_queue_changed(
+            lash_core::SessionQueueEventKind::Enqueued,
+            vec!["after the deferred gap".to_string()],
+        )
+        .await;
+    let item = tokio::time::timeout(FEED_DEADLINE, feed.next())
+        .await
+        .expect("the feed goes on from the gap's cursor")
+        .expect("the feed stays open")?;
+    let crate::observe::SessionObservationStreamItem::Event(event) = item else {
+        panic!("the feed continues after its gap, got {item:?}");
+    };
+    assert!(matches!(
+        &event.payload,
+        lash_core::SessionObservationEventPayload::QueueChanged { batch_ids, .. }
+            if batch_ids == &["after the deferred gap"]
+    ));
+    Ok(())
+}
+
+/// The raw cursor reads judge a cursor against the durable head, as the
+/// feed does: an observer whose resident trails another replica's commit
+/// continues a cursor from after it, a cursor past the head gaps to the
+/// head, and a malformed or foreign-session cursor is refused (FIG-5099).
+async fn raw_cursor_reads_judge_against_the_durable_head(
+    shared: Arc<dyn LiveReplayStore>,
+) -> Result<()> {
+    let (publisher, observer) = replicas(Arc::clone(&shared), shared).await?;
+    let session_id = SessionId::from("replica-feed-raw-reads");
+    let published = publisher
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let observed = observer.session(session_id.clone()).open().await?;
+    published
+        .send(TurnInput::text("committed on the publisher"))
+        .output()
+        .await?;
+    let after_commit = published.observe().snapshot().await?.cursor;
+    let head = after_commit
+        .parse_for_session(&session_id)
+        .expect("a snapshot cursor names its session");
+
+    assert!(
+        matches!(
+            observed.observe().resume_from_cursor(&after_commit).await?,
+            crate::observe::SessionResume::Replayed { .. }
+        ),
+        "a cursor at the durable head replays, however far the observer's resident trails"
+    );
+    assert!(matches!(
+        observed
+            .observe()
+            .subscribe_from_cursor(&after_commit)
+            .await?,
+        crate::observe::SessionObservationSubscription::Subscribed(_)
+    ));
+
+    let ahead = lash_core::SessionCursor::new(
+        head.replay_incarnation_id,
+        &session_id,
+        lash_core::SessionRevision::new(head.revision.as_u64() + 5),
+        head.live_position,
+    );
+    let crate::observe::SessionResume::Gap { observation, gap } =
+        observed.observe().resume_from_cursor(&ahead).await?
+    else {
+        panic!("a cursor past the durable head gaps");
+    };
+    assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Unavailable);
+    assert_eq!(gap.latest_revision, head.revision);
+    assert!(says(
+        &observation.read_view,
+        "echo: committed on the publisher"
+    ));
+    assert!(matches!(
+        observed.observe().subscribe_from_cursor(&ahead).await?,
+        crate::observe::SessionObservationSubscription::Gap { .. }
+    ));
+
+    let malformed: lash_core::SessionCursor =
+        serde_json::from_value(serde_json::json!("not-a-session-cursor"))
+            .expect("a cursor deserializes without validation");
+    let foreign = lash_core::SessionCursor::new(
+        head.replay_incarnation_id,
+        "another-session",
+        head.revision,
+        head.live_position,
+    );
+    for refused in [&malformed, &foreign] {
+        assert!(
+            observed
+                .observe()
+                .resume_from_cursor(refused)
+                .await
+                .is_err()
+        );
+        assert!(
+            observed
+                .observe()
+                .subscribe_from_cursor(refused)
+                .await
+                .is_err()
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn raw_cursor_reads_judge_against_the_durable_head_in_memory() -> Result<()> {
+    raw_cursor_reads_judge_against_the_durable_head(in_memory()).await
 }

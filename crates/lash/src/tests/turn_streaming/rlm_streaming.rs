@@ -1358,7 +1358,8 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
         Some(&serde_json::json!("done after continue_as"))
     );
 
-    let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor)? else {
+    let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor).await?
+    else {
         panic!("recent cursor should replay continue_as observation events");
     };
     assert!(

@@ -67,7 +67,7 @@ pub(crate) async fn execute_admitted_run_observed(
     {
         unsettled.settle();
     }
-    runtime.publish_from(&writer);
+    runtime.publish_from(&writer).await;
     end
 }
 
@@ -88,7 +88,7 @@ impl lash_core::shift::RunSettledSink for DepositSettledRun<'_> {
         runtime: &crate::support::LashRuntime,
         run: lash_core::shift::SettledRun<'_>,
     ) {
-        self.runtime.publish_from(runtime);
+        self.runtime.publish_from(runtime).await;
         crate::send::deposit_settled_run(self.binding, self.session, run, self.runtime);
     }
 }
@@ -122,7 +122,8 @@ impl TurnActivitySink for SessionObservationTurnActivitySink<'_> {
     async fn emit(&self, activity: TurnActivity) {
         let current = self.current_turn.lock_recover().clone();
         self.runtime
-            .record_turn_activity(current.as_ref(), activity.clone());
+            .record_turn_activity(current.as_ref(), activity.clone())
+            .await;
         if let Some(live) = self.live {
             live.emit(activity).await;
         }
@@ -131,7 +132,8 @@ impl TurnActivitySink for SessionObservationTurnActivitySink<'_> {
     async fn emit_for_turn(&self, turn_id: &TurnId, activity: TurnActivity) {
         *self.current_turn.lock_recover() = Some(turn_id.clone());
         self.runtime
-            .record_turn_activity(Some(turn_id), activity.clone());
+            .record_turn_activity(Some(turn_id), activity.clone())
+            .await;
         if let Some(live) = self.live {
             live.emit_for_turn(turn_id, activity).await;
         }

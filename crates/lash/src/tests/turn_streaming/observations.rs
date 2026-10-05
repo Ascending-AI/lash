@@ -785,7 +785,7 @@ pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_t
         .await?;
 
     let lash_core::facade_support::SessionResume::Replayed { events } =
-        session.observe().resume_from_cursor(&cursor)?
+        session.observe().resume_from_cursor(&cursor).await?
     else {
         panic!("fresh turn observation cursor should remain replayable");
     };
@@ -928,12 +928,17 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
         .snapshot()
         .await
         .expect("durable snapshot");
-    session.observe().runtime.record_queue_changed(
-        lash_core::SessionQueueEventKind::Enqueued,
-        vec!["unseen-batch".to_string()],
-    );
+    session
+        .observe()
+        .runtime
+        .record_queue_changed(
+            lash_core::SessionQueueEventKind::Enqueued,
+            vec!["unseen-batch".to_string()],
+        )
+        .await;
 
-    let SessionResume::Gap { gap, .. } = session.observe().resume_from_cursor(&stale_cursor)?
+    let SessionResume::Gap { gap, .. } =
+        session.observe().resume_from_cursor(&stale_cursor).await?
     else {
         panic!("the trimmed cursor must yield a replacement gap");
     };
@@ -943,8 +948,10 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
         "the replacement cursor must stay before auxiliary events absent from the projection"
     );
 
-    let SessionResume::Replayed { events } =
-        session.observe().resume_from_cursor(&gap.latest_cursor)?
+    let SessionResume::Replayed { events } = session
+        .observe()
+        .resume_from_cursor(&gap.latest_cursor)
+        .await?
     else {
         panic!("the replacement cursor must retain a replayable auxiliary suffix");
     };
@@ -975,9 +982,9 @@ pub(super) struct PublicationPause {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PublicationBoundary {
-    BeforeReservation,
-    AfterReservation,
-    AfterInstall,
+    /// Before the store assigns the commit's batch its positions.
+    BeforePublish,
+    /// After the batch is replay-visible, before its subscribers hear it.
     BeforeNotification,
 }
 
@@ -1003,14 +1010,15 @@ impl FailingAppendReplayStore {
     }
 }
 
+#[async_trait::async_trait]
 impl lash_core::LiveReplayStore for FailingAppendReplayStore {
-    fn prepare_publication(
+    async fn publish(
         &self,
         _session_id: &SessionId,
         _revision: lash_core::SessionRevision,
         _events: Vec<lash_core::LiveReplayEventDraft>,
     ) -> std::result::Result<
-        lash_core::PreparedLiveReplayPublication,
+        Vec<Arc<lash_core::SessionObservationEvent>>,
         lash_core::LiveReplayStoreError,
     > {
         Err(lash_core::LiveReplayStoreError::Store(
@@ -1018,29 +1026,19 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
         ))
     }
 
-    fn publish_prepared(
-        &self,
-        _prepared: lash_core::PreparedLiveReplayPublication,
-    ) -> std::result::Result<
-        Vec<Arc<lash_core::SessionObservationEvent>>,
-        lash_core::LiveReplayStoreError,
-    > {
-        unreachable!("failed preparations cannot be published")
-    }
-
-    fn replay_after_cursor(
+    async fn replay_after_cursor(
         &self,
         cursor: &lash_core::SessionCursor,
     ) -> std::result::Result<lash_core::LiveReplayOutcome, lash_core::LiveReplayStoreError> {
-        self.inner.replay_after_cursor(cursor)
+        self.inner.replay_after_cursor(cursor).await
     }
 
-    fn subscribe_after_cursor(
+    async fn subscribe_after_cursor(
         &self,
         cursor: &lash_core::SessionCursor,
     ) -> std::result::Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError>
     {
-        self.inner.subscribe_after_cursor(cursor)
+        self.inner.subscribe_after_cursor(cursor).await
     }
 
     fn current_cursor(
@@ -1051,18 +1049,18 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
         self.inner.current_cursor(session_id, revision)
     }
 
-    fn invalidate_session(
+    async fn invalidate_session(
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
-        self.inner.invalidate_session(session_id)
+        self.inner.invalidate_session(session_id).await
     }
 
-    fn trim_session(
+    async fn trim_session(
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
-        self.inner.trim_session(session_id)
+        self.inner.trim_session(session_id).await
     }
 }
 
@@ -1099,7 +1097,7 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
     );
 
     let SessionResume::Gap { observation, gap } =
-        session.observe().resume_from_cursor(&before.cursor)?
+        session.observe().resume_from_cursor(&before.cursor).await?
     else {
         panic!("a pre-commit cursor without replacement evidence must not replay cleanly");
     };
@@ -1112,8 +1110,10 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
         "the unchanged live position must still carry the new durable revision"
     );
 
-    let SessionObservationSubscription::Gap { observation, gap } =
-        session.observe().subscribe_from_cursor(&before.cursor)?
+    let SessionObservationSubscription::Gap { observation, gap } = session
+        .observe()
+        .subscribe_from_cursor(&before.cursor)
+        .await?
     else {
         panic!("a pre-commit cursor without replacement evidence must not subscribe cleanly");
     };
@@ -1177,9 +1177,7 @@ pub(super) async fn idle_session_reconnect_after_failed_append_yields_gap_withou
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
     for boundary in [
-        PublicationBoundary::BeforeReservation,
-        PublicationBoundary::AfterReservation,
-        PublicationBoundary::AfterInstall,
+        PublicationBoundary::BeforePublish,
         PublicationBoundary::BeforeNotification,
     ] {
         let replay_store = Arc::new(PausedCommitReplayStore::at(boundary));
@@ -1207,6 +1205,7 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
             replay_store.as_ref(),
             &before.cursor,
         )
+        .await
         .expect("boundary visibility probe must read replay")
         {
             lash_core::LiveReplayOutcome::Replayed(events) => events.iter().any(|event| {
@@ -1265,163 +1264,6 @@ pub(super) async fn incarnation_change_invalidates_cursor() {
     .await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-pub(super) async fn notification_observes_installed_projection() -> Result<()> {
-    let replay_store = Arc::new(PausedCommitReplayStore::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .live_replay_store(replay_store.clone())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session(
-            crate::SessionId::parse("notification-observes-installed-projection")
-                .expect("nonblank host identity"),
-        )
-        .created()
-        .await
-        .open()
-        .await?;
-    let cursor = session
-        .observe()
-        .snapshot()
-        .await
-        .expect("durable snapshot")
-        .cursor;
-    let SessionObservationSubscription::Subscribed(mut subscription) =
-        session.observe().subscribe_from_cursor(&cursor)?
-    else {
-        panic!("a fresh cursor must subscribe without a gap");
-    };
-
-    let turn_session = session.clone();
-    let turn = tokio::spawn(async move {
-        turn_session
-            .send(TurnInput::text("projection before notification"))
-            .output()
-            .await
-    });
-    replay_store.wait_for_commit_append().await;
-    let installed_before_notification = session
-        .observe()
-        .snapshot()
-        .await
-        .expect("durable snapshot");
-    let committed_escaped = tokio::time::timeout(std::time::Duration::from_millis(25), async {
-        loop {
-            let event = subscription
-                .next()
-                .await
-                .expect("notification subscription remains open")
-                .expect("notification before committed publication");
-            if matches!(
-                event.payload,
-                lash_core::SessionObservationEventPayload::Committed { .. }
-            ) {
-                return;
-            }
-        }
-    })
-    .await
-    .is_ok();
-    replay_store.release_commit_install();
-    let notification = loop {
-        let event = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.next())
-            .await
-            .expect("timed out waiting for committed notification")
-            .expect("notification subscription remains open")
-            .expect("committed notification");
-        if matches!(
-            &event.payload,
-            lash_core::SessionObservationEventPayload::Committed { .. }
-        ) {
-            break event;
-        }
-    };
-    let projection_at_notification = session
-        .observe()
-        .snapshot()
-        .await
-        .expect("durable snapshot");
-    turn.await.expect("join publishing turn")?;
-
-    assert_eq!(installed_before_notification.read_view.turn_index(), 1);
-    assert!(
-        installed_before_notification
-            .read_view
-            .messages()
-            .iter()
-            .any(|message| crate::message_text(message).contains("projection before notification")),
-        "the authoritative projection must be installed before publication enters notify"
-    );
-    assert!(
-        !committed_escaped,
-        "no committed notification may escape while publish_prepared is gated"
-    );
-    assert_eq!(
-        projection_at_notification.cursor, notification.cursor,
-        "a Committed notification must not be observable before its authoritative projection is installed"
-    );
-
-    replay_store.arm_pause();
-    let resident_cursor = projection_at_notification.cursor.clone();
-    let SessionObservationSubscription::Subscribed(mut resident_subscription) =
-        session.observe().subscribe_from_cursor(&resident_cursor)?
-    else {
-        panic!("the committed cursor must remain subscribable");
-    };
-    let resident_session = session.clone();
-    let resident = tokio::spawn(async move {
-        resident_session
-            .set_turn_phase_probe(Arc::new(NoopTurnPhaseProbe))
-            .await;
-    });
-    replay_store.wait_for_commit_append().await;
-    let installed_resident = session
-        .observe()
-        .snapshot()
-        .await
-        .expect("durable snapshot");
-    assert_eq!(
-        installed_resident.read_view.turn_index(),
-        projection_at_notification.read_view.turn_index(),
-        "resident publication must not claim a durable revision transition"
-    );
-    assert!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(25),
-            resident_subscription.next(),
-        )
-        .await
-        .is_err(),
-        "no resident notification may escape before its projection is installed"
-    );
-    replay_store.release_commit_install();
-    let resident_event = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        resident_subscription.next(),
-    )
-    .await
-    .expect("resident notification timeout")
-    .expect("resident subscription stays open")
-    .expect("resident notification");
-    resident.await.expect("join resident publication");
-    assert!(matches!(
-        resident_event.payload,
-        lash_core::SessionObservationEventPayload::ResidentChanged
-    ));
-    assert_eq!(
-        session
-            .observe()
-            .snapshot()
-            .await
-            .expect("durable snapshot")
-            .cursor,
-        resident_event.cursor,
-        "a resident notification must observe its installed projection"
-    );
-    Ok(())
-}
-
 #[tokio::test]
 pub(super) async fn payload_authority_matches_revision_transition() -> Result<()> {
     let core = standard_core().await;
@@ -1444,7 +1286,10 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
         .send(TurnInput::text("durable transition"))
         .output()
         .await?;
-    let committed = session.observe().resume_from_cursor(&initial.cursor)?;
+    let committed = session
+        .observe()
+        .resume_from_cursor(&initial.cursor)
+        .await?;
     let SessionResume::Replayed { events } = committed else {
         panic!("durable transition must replay its committed evidence");
     };
@@ -1479,8 +1324,10 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
     let committed_cursor = committed.cursor.clone();
     let probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe> = Arc::new(NoopTurnPhaseProbe);
     session.set_turn_phase_probe(Arc::clone(&probe)).await;
-    let SessionResume::Replayed { events } =
-        session.observe().resume_from_cursor(&committed_cursor)?
+    let SessionResume::Replayed { events } = session
+        .observe()
+        .resume_from_cursor(&committed_cursor)
+        .await?
     else {
         panic!("resident transition must remain replayable");
     };
@@ -1496,8 +1343,10 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
 
     let resident_cursor = events[0].cursor.clone();
     session.set_turn_phase_probe(probe).await;
-    let SessionResume::Replayed { events } =
-        session.observe().resume_from_cursor(&resident_cursor)?
+    let SessionResume::Replayed { events } = session
+        .observe()
+        .resume_from_cursor(&resident_cursor)
+        .await?
     else {
         panic!("a no-op publication must preserve clean continuity");
     };
@@ -1506,10 +1355,6 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
 }
 
 impl PausedCommitReplayStore {
-    fn new() -> Self {
-        Self::at(PublicationBoundary::AfterInstall)
-    }
-
     fn at(boundary: PublicationBoundary) -> Self {
         let pause = Arc::new(PublicationPause {
             boundary_reached: std::sync::atomic::AtomicBool::new(false),
@@ -1547,19 +1392,6 @@ impl PausedCommitReplayStore {
         })
     }
 
-    fn arm_pause(&self) {
-        self.pause
-            .release_boundary
-            .store(false, std::sync::atomic::Ordering::Release);
-        self.pause
-            .boundary_reached
-            .store(false, std::sync::atomic::Ordering::Release);
-    }
-
-    fn pause(&self) {
-        self.pause.pause();
-    }
-
     async fn wait_for_commit_append(&self) {
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             while !self
@@ -1571,7 +1403,7 @@ impl PausedCommitReplayStore {
             }
         })
         .await
-        .expect("turn never reached the post-append observation-install seam");
+        .expect("the turn never reached its commit's publication boundary");
     }
 
     fn release_commit_install(&self) {
@@ -1596,14 +1428,15 @@ impl PublicationPause {
     }
 }
 
+#[async_trait::async_trait]
 impl lash_core::LiveReplayStore for PausedCommitReplayStore {
-    fn prepare_publication(
+    async fn publish(
         &self,
         session_id: &SessionId,
         revision: lash_core::SessionRevision,
         events: Vec<lash_core::LiveReplayEventDraft>,
     ) -> std::result::Result<
-        lash_core::PreparedLiveReplayPublication,
+        Vec<Arc<lash_core::SessionObservationEvent>>,
         lash_core::LiveReplayStoreError,
     > {
         let authoritative = events.iter().any(|event| {
@@ -1613,45 +1446,28 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
                     | lash_core::SessionObservationEventPayload::ResidentChanged
             )
         });
-        if authoritative && self.boundary == PublicationBoundary::BeforeReservation {
-            self.pause();
+        if authoritative && self.boundary == PublicationBoundary::BeforePublish {
+            let pause = Arc::clone(&self.pause);
+            tokio::task::spawn_blocking(move || pause.pause())
+                .await
+                .expect("join the publication pause");
         }
-        let prepared = self
-            .inner
-            .prepare_publication(session_id, revision, events)?;
-        if authoritative && self.boundary == PublicationBoundary::AfterReservation {
-            self.pause();
-        }
-        Ok(prepared)
+        self.inner.publish(session_id, revision, events).await
     }
 
-    fn publish_prepared(
-        &self,
-        prepared: lash_core::PreparedLiveReplayPublication,
-    ) -> std::result::Result<
-        Vec<Arc<lash_core::SessionObservationEvent>>,
-        lash_core::LiveReplayStoreError,
-    > {
-        let pause = Self::is_authoritative_events(prepared.events());
-        if pause && self.boundary == PublicationBoundary::AfterInstall {
-            self.pause();
-        }
-        self.inner.publish_prepared(prepared)
-    }
-
-    fn replay_after_cursor(
+    async fn replay_after_cursor(
         &self,
         cursor: &lash_core::SessionCursor,
     ) -> std::result::Result<lash_core::LiveReplayOutcome, lash_core::LiveReplayStoreError> {
-        self.inner.replay_after_cursor(cursor)
+        self.inner.replay_after_cursor(cursor).await
     }
 
-    fn subscribe_after_cursor(
+    async fn subscribe_after_cursor(
         &self,
         cursor: &lash_core::SessionCursor,
     ) -> std::result::Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError>
     {
-        self.inner.subscribe_after_cursor(cursor)
+        self.inner.subscribe_after_cursor(cursor).await
     }
 
     fn current_cursor(
@@ -1662,18 +1478,18 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
         self.inner.current_cursor(session_id, revision)
     }
 
-    fn invalidate_session(
+    async fn invalidate_session(
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
-        self.inner.invalidate_session(session_id)
+        self.inner.invalidate_session(session_id).await
     }
 
-    fn trim_session(
+    async fn trim_session(
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
-        self.inner.trim_session(session_id)
+        self.inner.trim_session(session_id).await
     }
 }
 
@@ -1766,13 +1582,17 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         .await
         .expect("durable snapshot")
         .cursor;
-    first_session.observe().runtime.record_turn_activity(
-        Some(&TurnId::from("before-restart-turn")),
-        TurnActivity::independent(TurnEvent::AssistantProseDelta {
-            text: "before replay-store restart".into(),
-            block: bid(),
-        }),
-    );
+    first_session
+        .observe()
+        .runtime
+        .record_turn_activity(
+            Some(&TurnId::from("before-restart-turn")),
+            TurnActivity::independent(TurnEvent::AssistantProseDelta {
+                text: "before replay-store restart".into(),
+                block: bid(),
+            }),
+        )
+        .await;
     let mut first_stream = first_session
         .observe()
         .subscribe_recoverable_chat(initial_cursor);
@@ -1823,13 +1643,17 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         }
     ));
 
-    second_session.observe().runtime.record_turn_activity(
-        Some(&TurnId::from("after-restart-turn")),
-        TurnActivity::independent(TurnEvent::AssistantProseDelta {
-            text: "after replay-store restart".into(),
-            block: bid(),
-        }),
-    );
+    second_session
+        .observe()
+        .runtime
+        .record_turn_activity(
+            Some(&TurnId::from("after-restart-turn")),
+            TurnActivity::independent(TurnEvent::AssistantProseDelta {
+                text: "after replay-store restart".into(),
+                block: bid(),
+            }),
+        )
+        .await;
     let gap_continuation =
         tokio::time::timeout(std::time::Duration::from_millis(500), recovered.next())
             .await
@@ -1994,13 +1818,17 @@ pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues
     .expect("live receiver installation acknowledged");
 
     for text in ["lag one", "lag two", "lag three"] {
-        session.observe().runtime.record_turn_activity(
-            Some(&TurnId::from("lagged-turn")),
-            TurnActivity::independent(TurnEvent::AssistantProseDelta {
-                text: text.into(),
-                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-            }),
-        );
+        session
+            .observe()
+            .runtime
+            .record_turn_activity(
+                Some(&TurnId::from("lagged-turn")),
+                TurnActivity::independent(TurnEvent::AssistantProseDelta {
+                    text: text.into(),
+                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                }),
+            )
+            .await;
     }
 
     let gap = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
@@ -2018,13 +1846,17 @@ pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues
         }
     ));
 
-    session.observe().runtime.record_turn_activity(
-        Some(&TurnId::from("after-lag-turn")),
-        TurnActivity::independent(TurnEvent::AssistantProseDelta {
-            text: "after lag".into(),
-            block: bid(),
-        }),
-    );
+    session
+        .observe()
+        .runtime
+        .record_turn_activity(
+            Some(&TurnId::from("after-lag-turn")),
+            TurnActivity::independent(TurnEvent::AssistantProseDelta {
+                text: "after lag".into(),
+                block: bid(),
+            }),
+        )
+        .await;
     let continued = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
         .await
         .expect("post-lag continuation timed out")

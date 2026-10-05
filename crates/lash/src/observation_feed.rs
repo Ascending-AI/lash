@@ -24,11 +24,11 @@ use std::task::{Context, Poll};
 
 use futures_util::future::BoxFuture;
 use futures_util::{FutureExt as _, Stream, StreamExt as _};
-use lash_core::facade_support::LiveReplayGap;
+use lash_core::facade_support::{LiveReplayGap, SessionObservationSubscription, SessionResume};
 use lash_core::{
-    LiveReplayGapReason, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
-    LiveReplaySubscription, SessionObservationEvent, SessionObservationEventPayload,
-    SessionRevision,
+    LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, SessionObservationEvent,
+    SessionObservationEventPayload, SessionRevision,
 };
 use lash_sansio::SessionId;
 
@@ -124,6 +124,137 @@ impl FeedSource {
         let observation = self.resident.observe();
         (observation.session_revision() >= revision).then(|| observation.session_observation())
     }
+
+    /// The revision `cursor` names, refused when it is malformed or names
+    /// another session.
+    fn requested_revision(&self, cursor: &SessionCursor) -> Result<SessionRevision> {
+        Ok(cursor
+            .parse_for_session(&self.session_id)
+            .map_err(|error| live_replay_error(error.into()))?
+            .revision)
+    }
+
+    /// The live replay after `cursor`, judged against the durable head read
+    /// now: a cursor past the head, or behind it without a replayed
+    /// `Committed` bridging to it, is a gap rebuilt from the head.
+    pub(crate) async fn resume(&self, cursor: &SessionCursor) -> Result<SessionResume> {
+        let requested = self.requested_revision(cursor)?;
+        let durable = self.durable_revision().await?;
+        let reason = if requested > durable {
+            LiveReplayGapReason::Unavailable
+        } else {
+            match self
+                .live_replay
+                .replay_after_cursor(cursor)
+                .await
+                .map_err(live_replay_error)?
+            {
+                LiveReplayOutcome::Replayed(events)
+                    if requested == durable
+                        || events.iter().any(|event| bridges(event, durable)) =>
+                {
+                    return Ok(SessionResume::Replayed { events });
+                }
+                LiveReplayOutcome::Replayed(_) => LiveReplayGapReason::Unavailable,
+                LiveReplayOutcome::Gap(reason) => reason,
+            }
+        };
+        let (observation, gap) = self.gap(cursor, reason).await?;
+        Ok(SessionResume::Gap { observation, gap })
+    }
+
+    /// A live replay subscription after `cursor`, judged against the
+    /// durable head read now, as [`resume`](Self::resume) judges a replay.
+    pub(crate) async fn subscribe(
+        &self,
+        cursor: &SessionCursor,
+    ) -> Result<SessionObservationSubscription> {
+        let requested = self.requested_revision(cursor)?;
+        let durable = self.durable_revision().await?;
+        let reason = if requested > durable {
+            LiveReplayGapReason::Unavailable
+        } else {
+            match self
+                .live_replay
+                .subscribe_after_cursor(cursor)
+                .await
+                .map_err(live_replay_error)?
+            {
+                LiveReplaySubscribeOutcome::Subscribed(subscription)
+                    if requested == durable || subscription.bridges_to(durable) =>
+                {
+                    return Ok(SessionObservationSubscription::Subscribed(subscription));
+                }
+                LiveReplaySubscribeOutcome::Subscribed(_) => LiveReplayGapReason::Unavailable,
+                LiveReplaySubscribeOutcome::Gap(reason) => reason,
+            }
+        };
+        let (observation, gap) = self.gap(cursor, reason).await?;
+        Ok(SessionObservationSubscription::Gap { observation, gap })
+    }
+
+    /// A gap from `requested`: the durable head, and the cursor a reader
+    /// continues from.
+    async fn gap(
+        &self,
+        requested: &SessionCursor,
+        reason: LiveReplayGapReason,
+    ) -> Result<(SessionObservation, LiveReplayGap)> {
+        let snapshot = self.snapshot().await?;
+        let latest_revision = self.requested_revision(&snapshot.cursor)?;
+        let latest_cursor = self.fresh_cursor(requested, snapshot.cursor, latest_revision);
+        Ok((
+            SessionObservation {
+                read_view: snapshot.read_view,
+                cursor: latest_cursor.clone(),
+            },
+            LiveReplayGap {
+                session_id: self.session_id.clone(),
+                requested_cursor: requested.clone(),
+                latest_cursor,
+                latest_revision,
+                reason,
+            },
+        ))
+    }
+
+    /// The cursor a gap continues from: the snapshot's, or the live
+    /// replay's current one at the snapshot's revision when the snapshot's
+    /// is the position that gapped, whichever sits earlier.
+    fn fresh_cursor(
+        &self,
+        requested: &SessionCursor,
+        snapshot: SessionCursor,
+        revision: SessionRevision,
+    ) -> SessionCursor {
+        let session_id = &self.session_id;
+        let current = self.live_replay.current_cursor(session_id, revision);
+        match (
+            requested.parse_for_session(session_id),
+            snapshot.parse_for_session(session_id),
+            current.parse_for_session(session_id),
+        ) {
+            (Ok(requested), Ok(at_snapshot), Ok(at_current)) => [
+                (at_snapshot.live_position, &snapshot),
+                (at_current.live_position, &current),
+            ]
+            .into_iter()
+            .filter(|(position, _)| *position != requested.live_position)
+            .min_by_key(|(position, _)| *position)
+            .map_or_else(|| snapshot.clone(), |(_, cursor)| cursor.clone()),
+            _ => snapshot.clone(),
+        }
+    }
+}
+
+/// Whether `event` is a `Committed` at or after `revision`: the evidence
+/// that a replay from a cursor behind `revision` bridges to it.
+fn bridges(event: &SessionObservationEvent, revision: SessionRevision) -> bool {
+    event.revision() >= revision
+        && matches!(
+            event.payload,
+            SessionObservationEventPayload::Committed { .. }
+        )
 }
 
 async fn adopt_committed_head(resident: &mut lash_core::facade_support::LashRuntime) -> Result<()> {
@@ -282,40 +413,42 @@ impl FeedState {
     }
 
     /// Subscribe from the feed's cursor, judged against the durable head:
-    /// a cursor past it, or behind it without a replayed `Committed`
-    /// bridging to it, rebuilds from it.
+    /// a gap replaces the consumer's state with the head, and the feed
+    /// continues from the gap's cursor.
     async fn subscribe(&mut self) -> Result<Option<SessionObservationStreamItem>> {
-        let requested = self
-            .cursor
-            .parse_for_session(&self.source.session_id)
-            .map_err(|error| live_replay_error(error.into()))?
-            .revision;
-        let durable = self.source.durable_revision().await?;
-        if requested > durable {
-            return self
-                .rebuild(LiveReplayGapReason::Unavailable)
-                .await
-                .map(Some);
-        }
-        match self
-            .source
-            .live_replay
-            .subscribe_after_cursor(&self.cursor)
-            .map_err(live_replay_error)?
-        {
-            LiveReplaySubscribeOutcome::Subscribed(subscription)
-                if requested == durable || subscription.bridges_to(durable) =>
-            {
+        let requested = self.source.requested_revision(&self.cursor)?;
+        match self.source.subscribe(&self.cursor).await? {
+            SessionObservationSubscription::Subscribed(subscription) => {
                 self.delivered = Some(self.delivered.map_or(requested, |held| held.max(requested)));
                 self.set_live(Some(subscription));
                 Ok(None)
             }
-            LiveReplaySubscribeOutcome::Subscribed(_) => self
-                .rebuild(LiveReplayGapReason::Unavailable)
-                .await
-                .map(Some),
-            LiveReplaySubscribeOutcome::Gap(reason) => self.rebuild(reason).await.map(Some),
+            SessionObservationSubscription::Gap { observation, gap } => {
+                Ok(Some(self.adopt_gap(observation, gap)))
+            }
         }
+    }
+
+    /// Replace the consumer's state with the durable head: a gap item whose
+    /// cursor the feed continues from.
+    async fn rebuild(
+        &mut self,
+        reason: LiveReplayGapReason,
+    ) -> Result<SessionObservationStreamItem> {
+        let (observation, gap) = self.source.gap(&self.cursor, reason).await?;
+        Ok(self.adopt_gap(observation, gap))
+    }
+
+    /// Continue from `gap`'s cursor, holding its revision.
+    fn adopt_gap(
+        &mut self,
+        observation: SessionObservation,
+        gap: LiveReplayGap,
+    ) -> SessionObservationStreamItem {
+        self.delivered = Some(gap.latest_revision);
+        self.cursor = gap.latest_cursor.clone();
+        self.set_live(None);
+        SessionObservationStreamItem::Gap { observation, gap }
     }
 
     /// Deliver one live event. A `Committed` at or below the revision the
@@ -352,66 +485,6 @@ impl FeedState {
             delivered.max(at.revision),
             at.live_position,
         );
-    }
-
-    /// Replace the consumer's state with the durable head: a gap item whose
-    /// cursor the feed continues from.
-    async fn rebuild(
-        &mut self,
-        reason: LiveReplayGapReason,
-    ) -> Result<SessionObservationStreamItem> {
-        let requested_cursor = self.cursor.clone();
-        let snapshot = self.source.snapshot().await?;
-        let latest_revision = snapshot
-            .cursor
-            .parse_for_session(&self.source.session_id)
-            .map_err(|error| live_replay_error(error.into()))?
-            .revision;
-        let latest_cursor = self.fresh_cursor(&requested_cursor, snapshot.cursor, latest_revision);
-        self.delivered = Some(latest_revision);
-        self.cursor = latest_cursor.clone();
-        self.set_live(None);
-        Ok(SessionObservationStreamItem::Gap {
-            observation: SessionObservation {
-                read_view: snapshot.read_view,
-                cursor: latest_cursor.clone(),
-            },
-            gap: LiveReplayGap {
-                session_id: self.source.session_id.clone(),
-                requested_cursor,
-                latest_cursor,
-                latest_revision,
-                reason,
-            },
-        })
-    }
-
-    /// The cursor a gap continues from: the snapshot's, or the live
-    /// replay's current one at the snapshot's revision when the snapshot's
-    /// is the position that gapped, whichever sits earlier.
-    fn fresh_cursor(
-        &self,
-        requested: &SessionCursor,
-        snapshot: SessionCursor,
-        revision: SessionRevision,
-    ) -> SessionCursor {
-        let session_id = &self.source.session_id;
-        let current = self.source.live_replay.current_cursor(session_id, revision);
-        match (
-            requested.parse_for_session(session_id),
-            snapshot.parse_for_session(session_id),
-            current.parse_for_session(session_id),
-        ) {
-            (Ok(requested), Ok(at_snapshot), Ok(at_current)) => [
-                (at_snapshot.live_position, &snapshot),
-                (at_current.live_position, &current),
-            ]
-            .into_iter()
-            .filter(|(position, _)| *position != requested.live_position)
-            .min_by_key(|(position, _)| *position)
-            .map_or_else(|| snapshot.clone(), |(_, cursor)| cursor.clone()),
-            _ => snapshot.clone(),
-        }
     }
 }
 

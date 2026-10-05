@@ -975,7 +975,10 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
     );
     let SessionResume::Replayed {
         events: session_events,
-    } = session.observe().resume_from_cursor(&lifecycle_cursor)?
+    } = session
+        .observe()
+        .resume_from_cursor(&lifecycle_cursor)
+        .await?
     else {
         panic!("lifecycle should replay on the session stream")
     };

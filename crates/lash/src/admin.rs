@@ -261,7 +261,7 @@ impl SessionAdmin {
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
         let value = f(&mut runtime).await;
-        self.runtime.publish_from(&runtime);
+        self.runtime.publish_from(&runtime).await;
         value
     }
 
@@ -309,7 +309,7 @@ impl SessionAdmin {
             None => runtime.settle_session_command(receipt.clone()).await,
         }
         .map_err(EmbedError::from)?;
-        self.runtime.publish_from(&runtime);
+        self.runtime.publish_from(&runtime).await;
         Ok(settlement)
     }
 
@@ -537,28 +537,32 @@ impl SessionAdmin {
             .map_err(Into::into)
     }
 
-    fn record_plugin_operation_observations(
+    async fn record_plugin_operation_observations(
         &self,
         events: &[lash_core::facade_support::PluginOwned<lash_core::PluginRuntimeEvent>],
         pending_turn_inputs: &[lash_core::PendingTurnInput],
     ) {
         for owned in events {
-            self.runtime.record_turn_activity(
-                None,
-                lash_core::TurnActivity::independent(lash_core::TurnEvent::PluginRuntime {
-                    plugin_id: owned.plugin_id.clone(),
-                    event: owned.value.clone(),
-                }),
-            );
+            self.runtime
+                .record_turn_activity(
+                    None,
+                    lash_core::TurnActivity::independent(lash_core::TurnEvent::PluginRuntime {
+                        plugin_id: owned.plugin_id.clone(),
+                        event: owned.value.clone(),
+                    }),
+                )
+                .await;
         }
         if !pending_turn_inputs.is_empty() {
-            self.runtime.record_queue_changed(
-                lash_core::SessionQueueEventKind::Enqueued,
-                pending_turn_inputs
-                    .iter()
-                    .map(|input| input.input_id.to_string())
-                    .collect(),
-            );
+            self.runtime
+                .record_queue_changed(
+                    lash_core::SessionQueueEventKind::Enqueued,
+                    pending_turn_inputs
+                        .iter()
+                        .map(|input| input.input_id.to_string())
+                        .collect(),
+                )
+                .await;
         }
     }
 

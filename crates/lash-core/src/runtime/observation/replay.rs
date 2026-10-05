@@ -367,7 +367,8 @@ pub enum LiveReplaySubscribeOutcome {
     Gap(LiveReplayGapReason),
 }
 
-/// One event in a cursor batch reserved by [`LiveReplayStore::prepare_publication`].
+/// One event of a batch handed to [`LiveReplayStore::publish`], before the
+/// store assigns its position.
 #[derive(Clone, Debug)]
 pub struct LiveReplayEventDraft {
     pub turn_id: Option<TurnId>,
@@ -383,95 +384,6 @@ impl LiveReplayEventDraft {
         Self {
             turn_id: turn_id.map(Into::into),
             payload,
-        }
-    }
-}
-
-type AbandonReservation = Arc<dyn Fn(&str) + Send + Sync>;
-
-/// Opaque cursor reservation returned by [`LiveReplayStore::prepare_publication`].
-///
-/// Dropping an unpublished value invokes the store-provided retirement hook, so
-/// reconnects crossing an abandoned batch can return `Gap(Unavailable)` rather
-/// than mistaking missing history for a clean empty replay.
-pub struct PreparedLiveReplayPublication {
-    reservation_id: String,
-    events: Vec<Arc<SessionObservationEvent>>,
-    abandon: Option<AbandonReservation>,
-}
-
-impl PreparedLiveReplayPublication {
-    pub fn new(
-        reservation_id: impl Into<String>,
-        events: Vec<Arc<SessionObservationEvent>>,
-        abandon: impl Fn(&str) + Send + Sync + 'static,
-    ) -> Result<Self, LiveReplayStoreError> {
-        if events.is_empty() {
-            return Err(LiveReplayStoreError::Store(
-                "a prepared live replay publication must contain at least one event".to_string(),
-            ));
-        }
-        Ok(Self {
-            reservation_id: reservation_id.into(),
-            events,
-            abandon: Some(Arc::new(abandon)),
-        })
-    }
-
-    /// A publication that holds no events: `prepare_publication` returns
-    /// one when every draft redelivers an activity this buffer already
-    /// holds, so nothing is reserved, settled, or announced.
-    fn noop() -> Self {
-        Self {
-            reservation_id: String::new(),
-            events: Vec::new(),
-            abandon: None,
-        }
-    }
-
-    /// Inspect the events whose cursors are reserved by this publication.
-    ///
-    /// Integrator class (ADR 0051): **custom live-replay store implementors**.
-    pub fn events(&self) -> &[Arc<SessionObservationEvent>] {
-        &self.events
-    }
-
-    /// Integrator class (ADR 0051): **custom live-replay store implementors**.
-    #[expect(
-        clippy::expect_used,
-        reason = "a prepared publication holds at least one event"
-    )]
-    pub fn latest_cursor(&self) -> &SessionCursor {
-        &self
-            .events
-            .last()
-            .expect("prepared publications are non-empty")
-            .cursor
-    }
-
-    /// Consume the reservation for publication and disarm abandonment.
-    pub fn into_parts(mut self) -> (String, Vec<Arc<SessionObservationEvent>>) {
-        self.abandon = None;
-        (
-            std::mem::take(&mut self.reservation_id),
-            std::mem::take(&mut self.events),
-        )
-    }
-}
-
-impl fmt::Debug for PreparedLiveReplayPublication {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PreparedLiveReplayPublication")
-            .field("reservation_id", &self.reservation_id)
-            .field("event_count", &self.events.len())
-            .finish_non_exhaustive()
-    }
-}
-
-impl Drop for PreparedLiveReplayPublication {
-    fn drop(&mut self) {
-        if let Some(abandon) = self.abandon.take() {
-            abandon(&self.reservation_id);
         }
     }
 }
@@ -647,46 +559,85 @@ pub enum SessionObservationSubscription {
 /// the session's durable head either way, so the store decides freshness,
 /// never the snapshot's consistency.
 ///
-/// # The cursor contract
+/// # Publication
+///
+/// The store is each session's sequencer. [`publish`](Self::publish) hands it
+/// a batch; the store assigns the batch its positions, makes it visible, and
+/// answers the published events with their cursors. Lash installs the
+/// authoritative observation with the returned cursor only after that
+/// answer, so no position exists before it is visible, and a publication
+/// that fails leaves no hole: lash logs it and the observation takes the
+/// store's [`current_cursor`](Self::current_cursor).
+///
+/// Lash publishes off the turn: turn activity reaches the store from the
+/// turn's observation publisher, which drains outside the shift, so a slow
+/// store slows a feed, never a turn. A subscriber that falls behind ends with
+/// [`LiveReplayStoreError::SubscriberLagged`] and resubscribes from its cursor.
+///
+/// # Obligations
 ///
 /// A [`SessionCursor`] names an incarnation, a session, a revision and a
-/// live position. An implementation keeps these rules; the conformance laws
-/// in `lash-conformance` (`live_replay_tests!`) certify them.
+/// live position. An implementation keeps every rule below; the conformance
+/// laws in `lash-conformance` (`live_replay_tests!`) certify them.
 ///
-/// - **Incarnation is the publisher epoch.** Positions are ordered and
-///   comparable only within one incarnation. A cursor naming another
-///   incarnation answers [`LiveReplayGapReason::Unavailable`], never an
-///   empty replay. An implementation keeps an incarnation across a restart
-///   only when it keeps the history behind it.
-/// - **Ordered and exclusive.** Replay and subscription after a cursor yield
-///   exactly the session's retained events past its position, in
-///   publication order, each once, and never another session's events.
-///   A subscription yields its replayed prefix before any live event, with
-///   no event lost or repeated across that boundary.
-/// - **Gap-detectable.** A position that is trimmed answers
-///   [`LiveReplayGapReason::Trimmed`]; one past the tail, inside an
-///   abandoned reservation, or before an [`invalidate_session`](Self::invalidate_session)
-///   answers [`LiveReplayGapReason::Unavailable`]. A lagging or closed
-///   subscription ends with [`LiveReplayStoreError::SubscriberLagged`] or
+/// - **One position universe per session.** Every event published for a
+///   session, by any writer on any process, takes its position from one
+///   sequence, so an event a subscriber missed is always a detectable gap,
+///   never a silent loss.
+/// - **One total order across writers.** Concurrent publications to one
+///   session (the run's own runtime, queue changes on the process that
+///   accepted a send, process transitions, host handles) receive
+///   contiguous positions, and every reader sees them in position order.
+///   A batch's events are contiguous and in batch order.
+/// - **Incarnation is the publisher epoch, and lives as long as its
+///   history.** Positions are ordered and comparable only within one
+///   incarnation. A cursor naming another incarnation answers
+///   [`LiveReplayGapReason::Unavailable`], never an empty replay. An
+///   implementation keeps an incarnation across a restart only when it keeps
+///   the history behind it, and rotates it whenever that history is lost.
+/// - **Positions never repeat.** A session's positions stay monotone across
+///   retention, eviction and recreation of its buffer, so an old cursor can
+///   never name a new event.
+/// - **Replay and subscription are exact and linearizable.** Replay and
+///   subscription after a cursor yield exactly the session's retained events
+///   past its position, in position order, each once, and never another
+///   session's events. A subscription yields its replayed prefix before any
+///   live event, with no event lost or repeated across that boundary, even
+///   while publications race the subscribe.
+/// - **The window is bounded, and its gaps are typed.** A position that
+///   retention dropped answers [`LiveReplayGapReason::Trimmed`]; one past
+///   the tail, or before an [`invalidate_session`](Self::invalidate_session),
+///   answers [`LiveReplayGapReason::Unavailable`].
+/// - **A redelivered activity is published once.** A batch's
+///   `TurnActivity` whose id the session's window already holds is dropped,
+///   whichever process published the first copy: a redriven shift
+///   republishes what its first attempt delivered (FIG-3753).
+/// - **Lag means resubscribe.** A lagging or closed subscription ends with
+///   [`LiveReplayStoreError::SubscriberLagged`] or
 ///   [`LiveReplayStoreError::Closed`], after which the observer resubscribes
 ///   from its cursor.
+/// - **Invalidation reaches every subscriber.** After
+///   [`invalidate_session`](Self::invalidate_session), every existing cursor
+///   answers `Unavailable` and every live subscription to the session, on
+///   any process, closes.
 /// - **Current cursors stay behind newer revisions.**
 ///   [`current_cursor`](Self::current_cursor) at revision `N` sits before
 ///   every event at a revision past `N` that the store holds or will hold,
 ///   so a feed whose snapshot raced a newer commit replays that commit.
+///   Revisions are stamped by publishers and need not grow with position.
 ///
-/// Runtime turn execution calls this trait from synchronous boundary code. All
-/// methods must therefore be fast and nonblocking from the runtime's point of
-/// view. A custom external store should expose local or buffered behavior here,
-/// or offload blocking transport and durability work internally. Runtime turn
-/// execution must not wait for slow network or storage durability in this path.
-/// A subscription's tail is any stream ([`LiveReplaySubscription::new`]), so
-/// its waiting happens there, off the runtime's path.
+/// A subscription's tail is any stream ([`LiveReplaySubscription::new`]), and
+/// [`subscribe_after_cursor`](Self::subscribe_after_cursor) may take its time
+/// to decide between a subscription and a gap: the feed awaits both.
+#[async_trait::async_trait]
 pub trait LiveReplayStore: Send + Sync {
-    /// Reserve an ordered cursor batch without making it replay-visible.
+    /// Assign `events` the session's next positions, in order, make them
+    /// replay-visible, notify subscribers in position order, and answer the
+    /// published events. A `TurnActivity` the session's window already
+    /// holds is dropped from the batch, so the answer may be shorter than
+    /// `events`, or empty.
     ///
-    /// A `TurnActivity` draft whose id the session already holds is a
-    /// redelivery and reserves nothing. Ids that name observations
+    /// Ids that name observations
     /// ([`TurnActivityId::observed_span`](crate::TurnActivityId::observed_span))
     /// compare by the ordinals they cover, not literally: a draft inside the
     /// span of its replay key the session holds is dropped, one wholly
@@ -694,34 +645,23 @@ pub trait LiveReplayStore: Send + Sync {
     /// published and invalidates the session's continuity, as
     /// [`invalidate_session`](Self::invalidate_session) does, because its
     /// undelivered text cannot be cut from its delivered text (FIG-5098).
-    ///
-    /// This must be fast and nonblocking from the runtime's point of view.
-    fn prepare_publication(
+    async fn publish(
         &self,
         session_id: &SessionId,
         revision: SessionRevision,
         events: Vec<LiveReplayEventDraft>,
-    ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError>;
-
-    /// Make a prepared batch replay-visible and notify subscribers in cursor order.
-    ///
-    /// This must be called only after the authoritative projection carrying
-    /// `prepared.latest_cursor()` has been installed.
-    fn publish_prepared(
-        &self,
-        prepared: PreparedLiveReplayPublication,
     ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError>;
 
-    /// This must be fast and nonblocking from the runtime's point of view.
-    fn replay_after_cursor(
+    /// The session's retained events after `cursor`, or the gap that
+    /// prevents continuing from it.
+    async fn replay_after_cursor(
         &self,
         cursor: &SessionCursor,
     ) -> Result<LiveReplayOutcome, LiveReplayStoreError>;
 
-    /// Subscribe after `cursor`, replaying buffered events before live events.
-    ///
-    /// This must be fast and nonblocking from the runtime's point of view.
-    fn subscribe_after_cursor(
+    /// Subscribe after `cursor`, replaying retained events before live
+    /// events, or answer the gap that prevents continuing from it.
+    async fn subscribe_after_cursor(
         &self,
         cursor: &SessionCursor,
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError>;
@@ -730,19 +670,19 @@ pub trait LiveReplayStore: Send + Sync {
     /// publishing revision N+1. The returned cursor must remain before that
     /// newer event so replay reconciles the stale snapshot.
     ///
-    /// This must be fast and nonblocking from the runtime's point of view.
+    /// Lash calls this from synchronous code, so it answers from what the
+    /// store holds locally: a cursor earlier than the true tail only
+    /// replays more.
     fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor;
 
     /// Mark this session's replay continuity unavailable without inventing a
     /// revision. Existing cursors must return `Gap(Unavailable)` and active
     /// subscriptions must close so observers reload their authoritative snapshot.
     /// A cursor acquired after that snapshot establishes fresh continuity.
-    /// Pending publications must not restore continuity across this gap.
-    /// This must be fast and nonblocking from the runtime's point of view.
-    fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
+    async fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
 
-    /// This must be fast and nonblocking from the runtime's point of view.
-    fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
+    /// Apply retention to the session's window.
+    async fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
 }
 
 #[derive(Clone, Debug)]
@@ -751,7 +691,7 @@ pub struct InMemoryLiveReplayStoreConfig {
     pub max_age: Duration,
     /// Maximum resident session entries across this store.
     pub max_sessions: usize,
-    /// Maximum charged bytes across session metadata and reserved/retained events.
+    /// Maximum charged bytes across session metadata and retained events.
     pub max_retained_bytes: usize,
 }
 
@@ -806,8 +746,8 @@ impl InMemoryLiveReplayStore {
         }
     }
 
-    /// Release all entries idle beyond `max_age`, including reservations and
-    /// live channels. Hosts call this tick during traffic-free periods; normal
+    /// Release all entries idle beyond `max_age`, including their live
+    /// channels. Hosts call this tick during traffic-free periods; normal
     /// store calls also perform a bounded amount of global expiry work.
     pub fn expire_idle_sessions(&self) -> usize {
         self.sessions
@@ -863,16 +803,14 @@ struct LiveReplaySessionBuffer {
     retained_bytes: usize,
     channel_bytes: usize,
     events: VecDeque<StoredObservationEvent>,
+    /// The last position assigned: every position up to it is published.
     tail_position: u64,
-    settled_position: u64,
-    unavailable_through: u64,
-    reservations: BTreeMap<u64, ReservedPublication>,
     /// Delivered `TurnActivity` identities with the live position each holds
     /// in `events`. A replayed shift region or a journaled step re-executed
     /// after a mid-run suspension re-publishes the observations its first
-    /// attempt already delivered, framed alike or not; `prepare_publication`
-    /// collapses those redeliveries into the stored copies (FIG-3753), by the
-    /// ordinal ranges they cover (FIG-5098, `activity_spans`).
+    /// attempt already delivered, framed alike or not; `publish` collapses
+    /// those redeliveries into the stored copies (FIG-3753), by the ordinal
+    /// ranges they cover (FIG-5098, `activity_spans`).
     delivered_activities: DeliveredActivities,
     sender: Option<broadcast::Sender<ReplayNotification>>,
 }
@@ -887,37 +825,9 @@ impl LiveReplaySessionBuffer {
             channel_bytes: 0,
             events: VecDeque::new(),
             tail_position: first_position,
-            settled_position: first_position,
-            unavailable_through: 0,
-            reservations: BTreeMap::new(),
             delivered_activities: DeliveredActivities::default(),
             sender: None,
         }
-    }
-
-    /// How this activity identity meets those appended to `events`, carried
-    /// by an in-flight reservation, or `claimed` earlier in the same batch.
-    /// An `Abandoned` reservation never reached an observer, so it claims
-    /// nothing.
-    fn claim_turn_activity(
-        &self,
-        id: &crate::TurnActivityId,
-        claimed: &[crate::TurnActivityId],
-    ) -> Claim {
-        let reserved = self
-            .reservations
-            .values()
-            .flat_map(|reservation| match &reservation.state {
-                ReservedPublicationState::Pending(events)
-                | ReservedPublicationState::Ready(events) => events.as_slice(),
-                ReservedPublicationState::Abandoned => &[],
-            })
-            .filter_map(|event| match &event.payload {
-                SessionObservationEventPayload::TurnActivity(activity) => Some(&activity.id),
-                _ => None,
-            });
-        self.delivered_activities
-            .claim(id, reserved.chain(claimed.iter()))
     }
 
     /// Drop the oldest stored event and release the activity identity it
@@ -930,6 +840,28 @@ impl LiveReplaySessionBuffer {
                     .remove(&activity.id, stored.position);
             }
         }
+    }
+
+    /// Append one published event at `position`, claiming its activity
+    /// identity.
+    fn append(
+        &mut self,
+        event: &Arc<SessionObservationEvent>,
+        position: u64,
+        retained_bytes: usize,
+        now: Instant,
+    ) {
+        if let SessionObservationEventPayload::TurnActivity(activity) = &event.payload {
+            self.delivered_activities.insert(&activity.id, position);
+        }
+        self.retained_bytes += retained_bytes;
+        self.events.push_back(StoredObservationEvent {
+            retained_bytes,
+            position,
+            appended_at: now,
+            event: clone_event(event),
+        });
+        self.tail_position = position;
     }
 
     fn subscribe(
@@ -950,7 +882,7 @@ impl LiveReplaySessionBuffer {
     }
 
     #[expect(clippy::expect_used, reason = "store-created event cursors must parse")]
-    fn publish(&mut self, event: Arc<SessionObservationEvent>) {
+    fn notify(&mut self, event: &Arc<SessionObservationEvent>) {
         let Some(sender) = self.sender.as_ref() else {
             return;
         };
@@ -962,7 +894,7 @@ impl LiveReplaySessionBuffer {
         if sender
             .send(ReplayNotification {
                 position,
-                event: Arc::downgrade(&event),
+                event: Arc::downgrade(event),
             })
             .is_err()
         {
@@ -971,28 +903,6 @@ impl LiveReplaySessionBuffer {
             self.channel_bytes = 0;
         }
     }
-
-    fn reservation_mut(&mut self, reservation_id: &str) -> Option<&mut ReservedPublication> {
-        self.reservations
-            .values_mut()
-            .find(|reservation| reservation.reservation_id == reservation_id)
-    }
-}
-
-#[derive(Debug)]
-struct ReservedPublication {
-    retained_bytes: usize,
-    event_bytes: Vec<usize>,
-    reservation_id: String,
-    end_position: u64,
-    state: ReservedPublicationState,
-}
-
-#[derive(Debug)]
-enum ReservedPublicationState {
-    Pending(Vec<Arc<SessionObservationEvent>>),
-    Ready(Vec<Arc<SessionObservationEvent>>),
-    Abandoned,
 }
 
 #[derive(Clone, Debug)]
@@ -1004,67 +914,6 @@ struct StoredObservationEvent {
 }
 
 impl InMemoryLiveReplayStore {
-    #[expect(
-        clippy::expect_used,
-        reason = "the store writes cursors in the parsable form"
-    )]
-    fn settle_ready(
-        config: &InMemoryLiveReplayStoreConfig,
-        buffer: &mut LiveReplaySessionBuffer,
-        now: Instant,
-    ) -> Vec<Arc<SessionObservationEvent>> {
-        let mut notifications = Vec::new();
-        loop {
-            let next_position = buffer.settled_position.saturating_add(1);
-            let Some(mut reservation) = buffer.reservations.remove(&next_position) else {
-                break;
-            };
-            match reservation.state {
-                ReservedPublicationState::Pending(events) => {
-                    reservation.state = ReservedPublicationState::Pending(events);
-                    buffer.reservations.insert(next_position, reservation);
-                    break;
-                }
-                ReservedPublicationState::Ready(events) => {
-                    buffer.retained_bytes -= reservation.retained_bytes;
-                    for (event, retained_bytes) in events.into_iter().zip(reservation.event_bytes) {
-                        buffer.retained_bytes += retained_bytes;
-                        let position = event
-                            .cursor
-                            .parse()
-                            .expect("store-created cursor must parse")
-                            .live_position;
-                        if let SessionObservationEventPayload::TurnActivity(activity) =
-                            &event.payload
-                        {
-                            buffer.delivered_activities.insert(&activity.id, position);
-                        }
-                        buffer.events.push_back(StoredObservationEvent {
-                            retained_bytes,
-                            position,
-                            appended_at: now,
-                            event: clone_event(&event),
-                        });
-                        notifications.push(event);
-                    }
-                }
-                ReservedPublicationState::Abandoned => {
-                    buffer.retained_bytes -= reservation.retained_bytes;
-                    buffer.unavailable_through =
-                        buffer.unavailable_through.max(reservation.end_position);
-                    if buffer.tail_position == reservation.end_position {
-                        let retirement_position = reservation.end_position.saturating_add(1);
-                        buffer.tail_position = retirement_position;
-                        reservation.end_position = retirement_position;
-                    }
-                }
-            }
-            buffer.settled_position = reservation.end_position;
-        }
-        Self::trim_locked(config, buffer, now);
-        notifications
-    }
-
     fn trim_locked(
         config: &InMemoryLiveReplayStoreConfig,
         buffer: &mut LiveReplaySessionBuffer,
@@ -1089,11 +938,8 @@ impl InMemoryLiveReplayStore {
         if cursor_position < buffer.first_position || cursor_position > buffer.tail_position {
             return Some(LiveReplayGapReason::Unavailable);
         }
-        if buffer.unavailable_through > 0 && cursor_position <= buffer.unavailable_through {
-            return Some(LiveReplayGapReason::Unavailable);
-        }
         let Some(first) = buffer.events.front() else {
-            return (cursor_position < buffer.settled_position)
+            return (cursor_position < buffer.tail_position)
                 .then_some(LiveReplayGapReason::Trimmed);
         };
         if cursor_position + 1 < first.position {
@@ -1114,18 +960,47 @@ impl InMemoryLiveReplayStore {
             Some(LiveReplayGapReason::Unavailable)
         }
     }
+
+    /// Notify the session's subscribers of `events`, which the caller just
+    /// appended: refused when the session was evicted or recreated since.
+    fn notify_published(
+        sessions: &mut ReplayRetention,
+        session_id: &SessionId,
+        events: &[Arc<SessionObservationEvent>],
+        first_position: u64,
+    ) -> Result<(), LiveReplayStoreError> {
+        let disappeared = || {
+            LiveReplayStoreError::Store(
+                "published live replay session disappeared before notification".into(),
+            )
+        };
+        sessions
+            .update(session_id, |buffer| {
+                if buffer.replay_incarnation_id != events[0].replay_incarnation_id()
+                    || first_position < buffer.first_position
+                {
+                    return Err(disappeared());
+                }
+                for event in events {
+                    buffer.notify(event);
+                }
+                Ok(())
+            })
+            .ok_or_else(disappeared)?
+    }
 }
 
+#[async_trait::async_trait]
 impl LiveReplayStore for InMemoryLiveReplayStore {
-    fn prepare_publication(
+    async fn publish(
         &self,
         session_id: &SessionId,
         revision: SessionRevision,
         drafts: Vec<LiveReplayEventDraft>,
-    ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError> {
+    ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError> {
         if drafts.is_empty() {
             return Err(LiveReplayStoreError::Store(
-                "cannot reserve an empty live replay publication".to_string(),
+                "cannot publish an empty live replay batch".to_string(),
             ));
         }
         let now = self.clock.now();
@@ -1144,7 +1019,9 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                         else {
                             return true;
                         };
-                        let claim = buffer.claim_turn_activity(&activity.id, &claimed);
+                        let claim = buffer
+                            .delivered_activities
+                            .claim(&activity.id, claimed.iter());
                         claimed.push(activity.id.clone());
                         overlapping |= claim == Claim::Overlapping;
                         claim == Claim::Fresh
@@ -1161,26 +1038,24 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             sessions.remove(session_id);
             sessions.ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)?;
         }
-        let (drafts, start_position, end_position, incarnation) = sessions
+        let (start_position, incarnation) = sessions
             .update(session_id, |buffer| {
-                let start_position = buffer.tail_position.checked_add(1);
-                let end_position = u64::try_from(drafts.len())
-                    .ok()
-                    .and_then(|count| buffer.tail_position.checked_add(count));
                 (
-                    drafts,
-                    start_position,
-                    end_position,
+                    buffer.tail_position.checked_add(1),
                     buffer.replay_incarnation_id.clone(),
                 )
             })
             .ok_or_else(|| LiveReplayStoreError::Store("live replay session is missing".into()))?;
         if drafts.is_empty() {
-            return Ok(PreparedLiveReplayPublication::noop());
+            return Ok(Vec::new());
         }
         let start_position = start_position
-            .ok_or_else(|| LiveReplayStoreError::Store("live replay position overflow".into()))?;
-        let end_position = end_position
+            .filter(|start| {
+                u64::try_from(drafts.len())
+                    .ok()
+                    .and_then(|count| start.checked_add(count))
+                    .is_some()
+            })
             .ok_or_else(|| LiveReplayStoreError::Store("live replay position overflow".into()))?;
         let events = drafts
             .into_iter()
@@ -1199,146 +1074,48 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                 .map(Arc::new)
             })
             .collect::<Result<Vec<_>, SessionCursorError>>()?;
-        let event_bytes = match events
+        // An oversized batch is refused before it takes a position, and it
+        // retires the session's continuity: a cursor across the refused
+        // batch must not replay as a clean empty suffix.
+        let charged = events
             .iter()
             .map(|event| bytes::event_bytes(event, self.config.max_retained_bytes))
             .collect::<Result<Vec<_>, _>>()
-        {
-            Ok(bytes) => bytes,
+            .and_then(|event_bytes| {
+                let total = event_bytes
+                    .iter()
+                    .try_fold(0_usize, |total, bytes| total.checked_add(*bytes))
+                    .ok_or_else(|| {
+                        LiveReplayStoreError::Store("live replay byte count overflow".into())
+                    })?;
+                sessions.reserve_bytes(&self.config, session_id, total)?;
+                Ok(event_bytes)
+            });
+        let event_bytes = match charged {
+            Ok(event_bytes) => event_bytes,
             Err(error) => {
                 sessions.remove(session_id);
                 return Err(error);
             }
         };
-        let reservation_id = uuid::Uuid::new_v4().to_string();
-        let retained_bytes = event_bytes
-            .iter()
-            .try_fold(
-                std::mem::size_of::<ReservedPublication>() + reservation_id.len(),
-                |bytes, event| {
-                    bytes
-                        .checked_add(*event)?
-                        .checked_add(std::mem::size_of::<usize>())
-                },
-            )
-            .ok_or_else(|| LiveReplayStoreError::Store("live replay byte count overflow".into()))?;
-        if let Err(error) = sessions.reserve_bytes(&self.config, session_id, retained_bytes) {
-            sessions.remove(session_id);
-            return Err(error);
-        }
         sessions.update(session_id, |buffer| {
-            buffer.tail_position = end_position;
-            buffer.retained_bytes += retained_bytes;
-            buffer.reservations.insert(
-                start_position,
-                ReservedPublication {
-                    retained_bytes,
-                    event_bytes,
-                    reservation_id: reservation_id.clone(),
-                    end_position,
-                    state: ReservedPublicationState::Pending(events.clone()),
-                },
-            );
+            for (offset, (event, retained_bytes)) in events.iter().zip(event_bytes).enumerate() {
+                buffer.append(event, start_position + offset as u64, retained_bytes, now);
+            }
+            Self::trim_locked(&self.config, buffer, now);
         });
-        drop(sessions);
-
-        let sessions = Arc::downgrade(&self.sessions);
-        let config = self.config.clone();
-        let clock = Arc::clone(&self.clock);
-        let abandoned_session_id = session_id.clone();
-        PreparedLiveReplayPublication::new(reservation_id, events, move |reservation_id| {
-            let Some(sessions) = sessions.upgrade() else {
-                return;
-            };
-            let now = clock.now();
-            let mut sessions = sessions.lock_recover();
-            sessions.expire(&config, now, EXPIRY_WORK_PER_CALL);
-            sessions.update(&abandoned_session_id, |buffer| {
-                let Some(reservation) = buffer.reservation_mut(reservation_id) else {
-                    return;
-                };
-                reservation.state = ReservedPublicationState::Abandoned;
-                let notifications = InMemoryLiveReplayStore::settle_ready(&config, buffer, now);
-                for event in notifications {
-                    buffer.publish(event);
-                }
-            });
-        })
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "a prepared publication holds at least one event"
-    )]
-    fn publish_prepared(
-        &self,
-        prepared: PreparedLiveReplayPublication,
-    ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError> {
-        let now = self.clock.now();
-        let events = prepared.events.clone();
-        if events.is_empty() {
-            return Ok(events);
-        }
-        let session_id = events
-            .first()
-            .expect("prepared publications are non-empty")
-            .session_id();
-        let mut sessions = self.sessions.lock_recover();
-        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
-        let notifications = sessions
-            .update(&session_id, |buffer| {
-                let reservation = buffer
-                    .reservation_mut(&prepared.reservation_id)
-                    .ok_or_else(|| {
-                        LiveReplayStoreError::Store(
-                            "prepared live replay reservation is missing or retired".into(),
-                        )
-                    })?;
-                if !matches!(reservation.state, ReservedPublicationState::Pending(_)) {
-                    return Err(LiveReplayStoreError::Store(
-                        "prepared live replay reservation was already settled".into(),
-                    ));
-                }
-                reservation.state = ReservedPublicationState::Ready(events.clone());
-                Ok(Self::settle_ready(&self.config, buffer, now))
-            })
-            .ok_or_else(|| {
-                LiveReplayStoreError::Store("prepared live replay session is missing".into())
-            })??;
-        sessions.touch(&session_id, now);
+        sessions.touch(session_id, now);
         #[cfg(any(test, feature = "testing"))]
-        if let Some(gate) = self.before_notification_gate.as_ref()
-            && !notifications.is_empty()
-        {
+        if let Some(gate) = self.before_notification_gate.as_ref() {
             drop(sessions);
-            (gate.0)(&notifications);
+            (gate.0)(&events);
             sessions = self.sessions.lock_recover();
         }
-        sessions
-            .update(&session_id, |buffer| {
-                let position = events[0].cursor.parse()?.live_position;
-                if buffer.replay_incarnation_id != events[0].replay_incarnation_id()
-                    || position < buffer.first_position
-                {
-                    return Err(LiveReplayStoreError::Store(
-                        "published live replay session disappeared before notification".into(),
-                    ));
-                }
-                for event in notifications {
-                    buffer.publish(event);
-                }
-                Ok(())
-            })
-            .ok_or_else(|| {
-                LiveReplayStoreError::Store(
-                    "published live replay session disappeared before notification".into(),
-                )
-            })??;
-        let _ = prepared.into_parts();
+        Self::notify_published(&mut sessions, session_id, &events, start_position)?;
         Ok(events)
     }
 
-    fn replay_after_cursor(
+    async fn replay_after_cursor(
         &self,
         cursor: &SessionCursor,
     ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
@@ -1372,7 +1149,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         Ok(LiveReplayOutcome::Replayed(events))
     }
 
-    fn subscribe_after_cursor(
+    async fn subscribe_after_cursor(
         &self,
         cursor: &SessionCursor,
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
@@ -1459,14 +1236,14 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             })
     }
 
-    fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
+    async fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         let mut sessions = self.sessions.lock_recover();
         sessions.remove(session_id);
         sessions.expire(&self.config, self.clock.now(), EXPIRY_WORK_PER_CALL);
         Ok(())
     }
 
-    fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
+    async fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
         sessions.touch(session_id, now);

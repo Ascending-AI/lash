@@ -794,7 +794,7 @@ impl LashSession {
             let writer = self.runtime.writer();
             let mut runtime = writer.lock().await;
             let flushed = Box::pin(runtime.flush_for_park()).await;
-            self.runtime.publish_from(&runtime);
+            self.runtime.publish_from(&runtime).await;
             flushed
         };
         if let Err(error) = flushed {
@@ -1116,7 +1116,7 @@ impl LashSession {
         let mut runtime = writer.lock().await;
         let changed = runtime.set_turn_phase_probe_if_changed(probe);
         if changed {
-            self.runtime.publish_resident_from(&runtime);
+            self.runtime.publish_resident_from(&runtime).await;
         }
     }
 }
@@ -1127,11 +1127,12 @@ impl LashSession {
 /// The session feed is durable-anchored: [`snapshot`](Self::snapshot) is the
 /// durable head with a cursor bound to its revision, and
 /// [`subscribe_and_recover`](Self::subscribe_and_recover) tails every
-/// durable commit past a cursor, whichever process made it. The synchronous
-/// reads ([`read_view`](Self::read_view), [`tool_state`](Self::tool_state))
-/// and the raw cursor reads ([`resume_from_cursor`](Self::resume_from_cursor),
-/// [`subscribe_from_cursor`](Self::subscribe_from_cursor)) answer from this
-/// process's resident runtime and live replay, which trail a commit another
+/// durable commit past a cursor, whichever process made it. The raw cursor
+/// reads ([`resume_from_cursor`](Self::resume_from_cursor),
+/// [`subscribe_from_cursor`](Self::subscribe_from_cursor)) judge their cursor
+/// against the same durable head. The synchronous reads
+/// ([`read_view`](Self::read_view), [`tool_state`](Self::tool_state)) answer
+/// from this process's resident runtime, which trails a commit another
 /// process made until the resident adopts the durable head.
 pub struct ObservableSession {
     pub(crate) runtime: RuntimeHandle,
@@ -1162,30 +1163,30 @@ impl ObservableSession {
         Ok(RemoteSessionObservation::from_core(self.snapshot().await?))
     }
 
-    /// Resumes local observations from the supplied replay cursor.
-    pub fn resume_from_cursor(&self, cursor: &SessionCursor) -> Result<SessionResume> {
-        self.runtime
-            .resume_session_observation(cursor)
-            .map_err(live_replay_error)
+    /// The live replay after `cursor`, or a gap whose replacement is the
+    /// durable head when the cursor is past the head, or behind it without
+    /// a replayed `Committed` bridging to it.
+    pub async fn resume_from_cursor(&self, cursor: &SessionCursor) -> Result<SessionResume> {
+        self.feed_source().resume(cursor).await
     }
 
-    /// Subscribes to local observations from the supplied replay cursor.
-    pub fn subscribe_from_cursor(
+    /// A live replay subscription after `cursor`, judged against the durable
+    /// head as [`resume_from_cursor`](Self::resume_from_cursor) judges a
+    /// replay.
+    pub async fn subscribe_from_cursor(
         &self,
         cursor: &SessionCursor,
     ) -> Result<SessionObservationSubscription> {
-        self.runtime
-            .subscribe_session_observation(cursor)
-            .map_err(live_replay_error)
+        self.feed_source().subscribe(cursor).await
     }
 
-    pub fn subscribe_from_remote_cursor(
+    pub async fn subscribe_from_remote_cursor(
         &self,
         cursor: &RemoteSessionCursor,
     ) -> Result<RemoteSessionObservationSubscription> {
         cursor.validate()?;
         let cursor = lash_core::SessionCursor::try_from(cursor.clone())?;
-        match self.subscribe_from_cursor(&cursor)? {
+        match self.subscribe_from_cursor(&cursor).await? {
             SessionObservationSubscription::Subscribed(subscription) => {
                 Ok(RemoteSessionObservationSubscription::Subscribed(
                     RemoteSessionObservationEventStream::new(subscription),
@@ -1430,8 +1431,8 @@ mod observation_stream_tests {
             },
         };
         for (revision, activity) in [(1, activity1), (2, activity2)] {
-            let prepared = store
-                .prepare_publication(
+            store
+                .publish(
                     &SessionId::from("session-seq-test"),
                     lash_core::SessionRevision::new(revision),
                     vec![lash_core::LiveReplayEventDraft::new(
@@ -1439,11 +1440,14 @@ mod observation_stream_tests {
                         lash_core::SessionObservationEventPayload::TurnActivity(activity),
                     )],
                 )
-                .expect("prepare event");
-            store.publish_prepared(prepared).expect("publish event");
+                .await
+                .expect("publish event");
         }
 
-        let subscription = store.subscribe_after_cursor(&cursor).expect("subscribe");
+        let subscription = store
+            .subscribe_after_cursor(&cursor)
+            .await
+            .expect("subscribe");
         let lash_core::LiveReplaySubscribeOutcome::Subscribed(sub) = subscription else {
             panic!("expected subscribed");
         };

@@ -1,10 +1,9 @@
 use super::*;
 use std::io::{self, Write};
 
-/// Charge serialized payload bytes without allocating an encoded copy. Inline
-/// event/reservation descriptors are charged separately. An event is charged
-/// for its own payload only: a commit carries its rows delta, never the
-/// session's read view.
+/// Charge serialized payload bytes without allocating an encoded copy, plus
+/// the event's inline descriptors. An event is charged for its own payload
+/// only: a commit carries its rows delta, never the session's read view.
 pub(super) fn event_bytes(
     event: &SessionObservationEvent,
     limit: usize,

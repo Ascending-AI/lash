@@ -550,44 +550,38 @@ struct PublicationFailureStore {
     inner: lash_core::facade_support::InMemoryLiveReplayStore,
     failed: std::sync::atomic::AtomicBool,
 }
+#[async_trait::async_trait]
 impl lash_core::LiveReplayStore for PublicationFailureStore {
-    fn prepare_publication(
+    async fn publish(
         &self,
         session: &SessionId,
         revision: lash_core::SessionRevision,
         events: Vec<lash_core::LiveReplayEventDraft>,
-    ) -> Result<lash_core::PreparedLiveReplayPublication, lash_core::LiveReplayStoreError> {
-        self.inner.prepare_publication(session, revision, events)
-    }
-    fn publish_prepared(
-        &self,
-        prepared: lash_core::PreparedLiveReplayPublication,
     ) -> Result<Vec<Arc<lash_core::SessionObservationEvent>>, lash_core::LiveReplayStoreError> {
-        if prepared.events().iter().any(|event| {
+        if events.iter().any(|event| {
             matches!(
                 event.payload,
                 lash_core::SessionObservationEventPayload::Committed { .. }
             )
         }) && !self.failed.swap(true, std::sync::atomic::Ordering::SeqCst)
         {
-            drop(prepared);
             return Err(lash_core::LiveReplayStoreError::Store(
-                "post-prepare publication failure".into(),
+                "injected publication failure".into(),
             ));
         }
-        self.inner.publish_prepared(prepared)
+        self.inner.publish(session, revision, events).await
     }
-    fn replay_after_cursor(
+    async fn replay_after_cursor(
         &self,
         cursor: &lash_core::SessionCursor,
     ) -> Result<lash_core::LiveReplayOutcome, lash_core::LiveReplayStoreError> {
-        self.inner.replay_after_cursor(cursor)
+        self.inner.replay_after_cursor(cursor).await
     }
-    fn subscribe_after_cursor(
+    async fn subscribe_after_cursor(
         &self,
         cursor: &lash_core::SessionCursor,
     ) -> Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError> {
-        self.inner.subscribe_after_cursor(cursor)
+        self.inner.subscribe_after_cursor(cursor).await
     }
     fn current_cursor(
         &self,
@@ -596,14 +590,17 @@ impl lash_core::LiveReplayStore for PublicationFailureStore {
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session, revision)
     }
-    fn trim_session(&self, session: &SessionId) -> Result<(), lash_core::LiveReplayStoreError> {
-        self.inner.trim_session(session)
-    }
-    fn invalidate_session(
+    async fn trim_session(
         &self,
         session: &SessionId,
     ) -> Result<(), lash_core::LiveReplayStoreError> {
-        self.inner.invalidate_session(session)
+        self.inner.trim_session(session).await
+    }
+    async fn invalidate_session(
+        &self,
+        session: &SessionId,
+    ) -> Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.invalidate_session(session).await
     }
 }
 
@@ -654,21 +651,24 @@ async fn publication_failure_preserves_committed_turn_and_exposes_gap() {
         result.assistant_output.safe_text,
         "committed answer despite publication failure"
     );
-    handle.publish_from(&runtime);
+    handle.publish_from(&runtime).await;
     let durable = durable_state(store, "root").await;
     assert_eq!(durable.turn_index, 1);
     drop(runtime);
     assert!(replay.failed.load(std::sync::atomic::Ordering::SeqCst));
-    assert!(matches!(
-        handle.resume_session_observation(&cursor).unwrap(),
-        lash_core::facade_support::SessionResume::Gap {
-            gap: lash_core::facade_support::LiveReplayGap {
-                reason: lash_core::LiveReplayGapReason::Unavailable,
-                ..
-            },
-            ..
-        }
-    ));
+    // The failed publication took no position, so nothing after the
+    // pre-turn cursor bridges to the commit: a reader from it gaps.
+    let lash_core::LiveReplayOutcome::Replayed(events) =
+        lash_core::LiveReplayStore::replay_after_cursor(replay.as_ref(), &cursor)
+            .await
+            .unwrap()
+    else {
+        panic!("the pre-turn cursor stays inside the window");
+    };
+    assert!(!events.iter().any(|event| matches!(
+        event.payload,
+        lash_core::SessionObservationEventPayload::Committed { .. }
+    )));
     assert_eq!(handle.observe().read_view.turn_index(), 1);
     handler.close().await.unwrap();
 }

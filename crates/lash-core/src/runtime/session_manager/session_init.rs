@@ -1489,7 +1489,7 @@ async fn run_initialized_session_turn(
                 crate::PluginError::Session("agent frame run completed without a turn".to_string())
             })
         });
-    runtime.publish_from(&runtime_guard);
+    runtime.publish_from(&runtime_guard).await;
     result
 }
 

@@ -755,7 +755,8 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
         crate::PendingTurnInputCancelOutcome::Cancelled(_)
     ));
 
-    let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor)? else {
+    let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor).await?
+    else {
         panic!("the already-subscribed observer must replay the queue events");
     };
     assert!(
@@ -816,7 +817,8 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
         .await?;
 
     let reopened = retry_when_claim_frees(|| core.session(session_id.clone()).open()).await?;
-    let SessionResume::Replayed { events } = reopened.observe().resume_from_cursor(&cursor)? else {
+    let SessionResume::Replayed { events } = reopened.observe().resume_from_cursor(&cursor).await?
+    else {
         panic!("a cursor minted before the publication must replay it");
     };
     assert!(
@@ -1820,7 +1822,7 @@ async fn committed_row_deltas_transport_each_new_node_once() -> Result<()> {
             .cursor;
         session.send(TurnInput::text(input)).output().await?;
         let crate::observe::SessionResume::Replayed { events } =
-            session.observe().resume_from_cursor(&cursor)?
+            session.observe().resume_from_cursor(&cursor).await?
         else {
             panic!("the fresh observation cursor must replay");
         };

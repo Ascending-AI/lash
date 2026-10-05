@@ -52,31 +52,10 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::observe::LiveReplayEventDraft| {
         let _ = &value.turn_id;
     });
-    // W0013: lash::observe::LiveReplayStore::prepare_publication [function]
+    // W0013: lash::observe::LiveReplayStore::publish [function]
     fn meth_0013<T: lash::observe::LiveReplayStore>(_: &T) {
-        let _ = T::prepare_publication;
+        let _ = T::publish;
     }
-    // W0014: lash::observe::LiveReplayStore::publish_prepared [function]
-    fn meth_0014<T: lash::observe::LiveReplayStore>(_: &T) {
-        let _ = T::publish_prepared;
-    }
-    // W0015: lash::observe::PreparedLiveReplayPublication [struct]
-    type_witness::<lash::observe::PreparedLiveReplayPublication>();
-    // W0016: lash::observe::PreparedLiveReplayPublication::events [function]
-    let _ = lash::observe::PreparedLiveReplayPublication::events;
-    // W0017: lash::observe::PreparedLiveReplayPublication::into_parts [function]
-    let _ = lash::observe::PreparedLiveReplayPublication::into_parts;
-    // W0018: lash::observe::PreparedLiveReplayPublication::latest_cursor [function]
-    let _ = lash::observe::PreparedLiveReplayPublication::latest_cursor;
-    // W0019: lash::observe::PreparedLiveReplayPublication::new [function]
-    let _: fn(
-        String,
-        Vec<std::sync::Arc<lash::observe::SessionObservationEvent>>,
-        fn(&str),
-    ) -> Result<
-        lash::observe::PreparedLiveReplayPublication,
-        lash::observe::LiveReplayStoreError,
-    > = lash::observe::PreparedLiveReplayPublication::new;
     // W0020: lash::observe::LiveReplayStore::trim_session [function]
     fn meth_0020<T: lash::observe::LiveReplayStore>(_: &T) {
         let _ = T::trim_session;

@@ -246,8 +246,10 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         read_view.messages()[0].origin.as_ref(),
         Some(lash_core::MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == "test_compactor"
     ));
-    let SessionResume::Replayed { events } =
-        session.observe().resume_from_cursor(&observation_cursor)?
+    let SessionResume::Replayed { events } = session
+        .observe()
+        .resume_from_cursor(&observation_cursor)
+        .await?
     else {
         panic!("recent cursor should replay compaction observation events");
     };
@@ -536,7 +538,8 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     ));
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
 
-    let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor)? else {
+    let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor).await?
+    else {
         panic!("recent cursor should replay queue observation events");
     };
     assert!(events.iter().any(|event| matches!(
@@ -643,7 +646,8 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         )
         .await?;
 
-    let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor)? else {
+    let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor).await?
+    else {
         panic!("recent cursor should replay process observation events");
     };
     let durable = registry.recent_events(&process_id, 128).await?;
@@ -819,7 +823,10 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     registry_port.record_caller_departure(&departed_id).await?;
     let SessionResume::Replayed {
         events: terminal_events,
-    } = session.observe().resume_from_cursor(&terminal_cursor)?
+    } = session
+        .observe()
+        .resume_from_cursor(&terminal_cursor)
+        .await?
     else {
         panic!("terminal transitions should replay")
     };

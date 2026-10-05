@@ -142,7 +142,8 @@ impl SessionAdmin {
             self.record_plugin_operation_observations(
                 &receipt.events,
                 &receipt.pending_turn_inputs,
-            );
+            )
+            .await;
             return Ok(receipt);
         }
         let session_id = SessionId::from(self.runtime.observe().session_id());
@@ -231,7 +232,8 @@ impl SessionAdmin {
                 }
             }
         };
-        self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs);
+        self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs)
+            .await;
         Ok(receipt)
     }
 

@@ -4,24 +4,22 @@
 use super::*;
 
 impl InMemoryLiveReplayStore {
-    fn publish_test_event(
+    async fn publish_test_event(
         &self,
         session_id: &SessionId,
         revision: SessionRevision,
         turn_id: Option<&TurnId>,
         payload: SessionObservationEventPayload,
     ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
-        let prepared = self.prepare_publication(
+        self.publish(
             session_id,
             revision,
             vec![LiveReplayEventDraft::new(turn_id, payload)],
-        )?;
-        self.publish_prepared(prepared)?
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                LiveReplayStoreError::Store("published test batch was empty".to_string())
-            })
+        )
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| LiveReplayStoreError::Store("published test batch was empty".to_string()))
     }
 }
 
@@ -58,112 +56,12 @@ fn session_observation_event_constructor_rejects_malformed_cursor() {
     assert!(matches!(error, SessionCursorError::Malformed { .. }));
 }
 
-#[test]
-fn reserved_cursors_are_valid_until_publication_and_abandonment_forces_gap() {
-    let store = InMemoryLiveReplayStore::default();
-    let revision = SessionRevision::new(1);
-    let start = store.current_cursor(&SessionId::from("reserved"), revision);
-    let prepared = store
-        .prepare_publication(
-            &SessionId::from("reserved"),
-            revision,
-            vec![LiveReplayEventDraft::new(
-                None::<TurnId>,
-                activity("reserved"),
-            )],
-        )
-        .expect("reserve publication");
-    let reserved = prepared.latest_cursor().clone();
-
-    assert!(matches!(
-        store.replay_after_cursor(&reserved),
-        Ok(LiveReplayOutcome::Replayed(events)) if events.is_empty()
-    ));
-    assert!(matches!(
-        store.subscribe_after_cursor(&reserved),
-        Ok(LiveReplaySubscribeOutcome::Subscribed(_))
-    ));
-
-    drop(prepared);
-    assert!(matches!(
-        store.replay_after_cursor(&reserved),
-        Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
-    ));
-    assert!(matches!(
-        store.replay_after_cursor(&start),
-        Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
-    ));
-    assert!(matches!(
-        store.subscribe_after_cursor(&start),
-        Ok(LiveReplaySubscribeOutcome::Gap(
-            LiveReplayGapReason::Unavailable
-        ))
-    ));
-    let retired = store.current_cursor(&SessionId::from("reserved"), revision);
-    assert!(matches!(
-        store.replay_after_cursor(&retired),
-        Ok(LiveReplayOutcome::Replayed(events)) if events.is_empty()
-    ));
-}
-
-#[test]
-fn prepared_batches_become_visible_in_reserved_cursor_order() {
-    let store = InMemoryLiveReplayStore::default();
-    let revision = SessionRevision::new(1);
-    let start = store.current_cursor(&SessionId::from("ordered"), revision);
-    let first = store
-        .prepare_publication(
-            &SessionId::from("ordered"),
-            revision,
-            vec![LiveReplayEventDraft::new(None::<TurnId>, activity("first"))],
-        )
-        .expect("reserve first publication");
-    let second = store
-        .prepare_publication(
-            &SessionId::from("ordered"),
-            revision,
-            vec![LiveReplayEventDraft::new(
-                None::<TurnId>,
-                activity("second"),
-            )],
-        )
-        .expect("reserve second publication");
-
-    store
-        .publish_prepared(second)
-        .expect("mark second publication ready");
-    assert!(matches!(
-        store.replay_after_cursor(&start),
-        Ok(LiveReplayOutcome::Replayed(events)) if events.is_empty()
-    ));
-    store
-        .publish_prepared(first)
-        .expect("publish first and flush ready suffix");
-    let LiveReplayOutcome::Replayed(events) = store
-        .replay_after_cursor(&start)
-        .expect("replay ordered publications")
-    else {
-        panic!("ordered publications must remain replayable");
-    };
-    assert_eq!(events.len(), 2);
-    assert!(matches!(
-        &events[0].payload,
-        SessionObservationEventPayload::TurnActivity(activity)
-            if matches!(&activity.event, crate::TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == "first")
-    ));
-    assert!(matches!(
-        &events[1].payload,
-        SessionObservationEventPayload::TurnActivity(activity)
-            if matches!(&activity.event, crate::TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == "second")
-    ));
-}
-
 /// A journaled step re-executed after suspension re-publishes the
 /// activities its first attempt already delivered, under the same
 /// `{replay key}#{ordinal}` identities. The buffer keeps the first
 /// delivery of each identity and drops the redelivery (FIG-3753).
-#[test]
-fn a_redelivered_turn_activity_collapses_into_the_stored_copy() {
+#[tokio::test]
+async fn a_redelivered_turn_activity_collapses_into_the_stored_copy() {
     let store = InMemoryLiveReplayStore::default();
     let session = SessionId::from("deduped");
     let revision = SessionRevision::new(1);
@@ -171,10 +69,11 @@ fn a_redelivered_turn_activity_collapses_into_the_stored_copy() {
 
     store
         .publish_test_event(&session, revision, None, activity_with_id("key#3", "prose"))
+        .await
         .expect("first delivery");
 
-    let republished = store
-        .prepare_publication(
+    let published = store
+        .publish(
             &session,
             revision,
             vec![
@@ -182,9 +81,7 @@ fn a_redelivered_turn_activity_collapses_into_the_stored_copy() {
                 LiveReplayEventDraft::new(None::<TurnId>, activity_with_id("key#4", "tail")),
             ],
         )
-        .expect("prepare replayed batch");
-    let published = store
-        .publish_prepared(republished)
+        .await
         .expect("publish replayed batch");
     assert_eq!(
         published.len(),
@@ -192,7 +89,8 @@ fn a_redelivered_turn_activity_collapses_into_the_stored_copy() {
         "the already-delivered activity collapses"
     );
 
-    let LiveReplayOutcome::Replayed(events) = store.replay_after_cursor(&start).expect("replay")
+    let LiveReplayOutcome::Replayed(events) =
+        store.replay_after_cursor(&start).await.expect("replay")
     else {
         panic!("replay must succeed");
     };
@@ -207,11 +105,11 @@ fn a_redelivered_turn_activity_collapses_into_the_stored_copy() {
     ));
 }
 
-/// A batch whose every draft is a redelivery reserves no positions and
+/// A batch whose every draft is a redelivery takes no positions and
 /// announces nothing; the next distinct publication still lands on the
 /// position right behind what observers actually received.
-#[test]
-fn a_fully_redelivered_publication_reserves_nothing() {
+#[tokio::test]
+async fn a_fully_redelivered_publication_publishes_nothing() {
     let store = InMemoryLiveReplayStore::default();
     let session = SessionId::from("deduped-batch");
     let revision = SessionRevision::new(1);
@@ -219,9 +117,10 @@ fn a_fully_redelivered_publication_reserves_nothing() {
 
     store
         .publish_test_event(&session, revision, None, activity_with_id("key#0", "prose"))
+        .await
         .expect("first delivery");
-    let redelivery = store
-        .prepare_publication(
+    let published = store
+        .publish(
             &session,
             revision,
             vec![
@@ -229,16 +128,16 @@ fn a_fully_redelivered_publication_reserves_nothing() {
                 LiveReplayEventDraft::new(None::<TurnId>, activity_with_id("key#0", "prose")),
             ],
         )
-        .expect("prepare fully redelivered batch");
-    let published = store
-        .publish_prepared(redelivery)
+        .await
         .expect("publish redelivered batch");
     assert!(published.is_empty());
 
     store
         .publish_test_event(&session, revision, None, activity_with_id("key#1", "new"))
+        .await
         .expect("distinct activity still delivers");
-    let LiveReplayOutcome::Replayed(events) = store.replay_after_cursor(&start).expect("replay")
+    let LiveReplayOutcome::Replayed(events) =
+        store.replay_after_cursor(&start).await.expect("replay")
     else {
         panic!("replay must succeed");
     };
@@ -246,87 +145,6 @@ fn a_fully_redelivered_publication_reserves_nothing() {
     assert!(matches!(
         &events[1].payload,
         SessionObservationEventPayload::TurnActivity(activity) if activity.id == crate::TurnActivityId::new("key#1")
-    ));
-}
-
-/// The dedup identity is claimed when a batch is prepared, not when it
-/// settles: a second reservation for the same activity cannot sneak a
-/// duplicate in ahead of the first delivery.
-#[test]
-fn an_in_flight_reservation_dedupes_the_same_activity() {
-    let store = InMemoryLiveReplayStore::default();
-    let session = SessionId::from("deduped-pending");
-    let revision = SessionRevision::new(1);
-    let start = store.current_cursor(&session, revision);
-
-    let first = store
-        .prepare_publication(
-            &session,
-            revision,
-            vec![LiveReplayEventDraft::new(
-                None::<TurnId>,
-                activity_with_id("key#0", "a"),
-            )],
-        )
-        .expect("reserve first");
-    let second = store
-        .prepare_publication(
-            &session,
-            revision,
-            vec![LiveReplayEventDraft::new(
-                None::<TurnId>,
-                activity_with_id("key#0", "a"),
-            )],
-        )
-        .expect("reserve second");
-    assert!(
-        store
-            .publish_prepared(second)
-            .expect("publish second")
-            .is_empty()
-    );
-    store.publish_prepared(first).expect("publish first");
-
-    let LiveReplayOutcome::Replayed(events) = store.replay_after_cursor(&start).expect("replay")
-    else {
-        panic!("replay must succeed");
-    };
-    assert_eq!(events.len(), 1);
-}
-
-/// An abandoned reservation never delivered its activity to anyone, so
-/// it must not keep the identity claimed: the redelivery publishes.
-#[test]
-fn an_abandoned_reservation_releases_the_activity_identity() {
-    let store = InMemoryLiveReplayStore::default();
-    let session = SessionId::from("deduped-abandoned");
-    let revision = SessionRevision::new(1);
-
-    let prepared = store
-        .prepare_publication(
-            &session,
-            revision,
-            vec![LiveReplayEventDraft::new(
-                None::<TurnId>,
-                activity_with_id("key#0", "a"),
-            )],
-        )
-        .expect("reserve publication");
-    drop(prepared);
-    let after_abandon = store.current_cursor(&session, revision);
-
-    store
-        .publish_test_event(&session, revision, None, activity_with_id("key#0", "a"))
-        .expect("redelivery publishes");
-    let LiveReplayOutcome::Replayed(events) =
-        store.replay_after_cursor(&after_abandon).expect("replay")
-    else {
-        panic!("replay must succeed");
-    };
-    assert_eq!(events.len(), 1);
-    assert!(matches!(
-        &events[0].payload,
-        SessionObservationEventPayload::TurnActivity(activity) if activity.id == crate::TurnActivityId::new("key#0")
     ));
 }
 
@@ -348,8 +166,8 @@ fn activity_texts(events: &[Arc<SessionObservationEvent>]) -> Vec<String> {
 /// A redrive that republishes a frame's deltas unmerged, or frames them
 /// differently, names them inside the ranges already delivered: no text
 /// lands twice, none is lost, and what follows still lands (FIG-5098).
-#[test]
-fn a_redrive_framed_differently_adds_no_text_twice_and_loses_none() {
+#[tokio::test]
+async fn a_redrive_framed_differently_adds_no_text_twice_and_loses_none() {
     let store = InMemoryLiveReplayStore::default();
     let session = SessionId::from("framed-redrive");
     let revision = SessionRevision::new(1);
@@ -357,6 +175,7 @@ fn a_redrive_framed_differently_adds_no_text_twice_and_loses_none() {
     for (id, text) in [("k#0", "a"), ("k#1..3", "bcd"), ("k#5..6", "fg")] {
         store
             .publish_test_event(&session, revision, None, activity_with_id(id, text))
+            .await
             .expect("first delivery");
     }
 
@@ -364,7 +183,7 @@ fn a_redrive_framed_differently_adds_no_text_twice_and_loses_none() {
     for (id, text) in [("k#0", "a"), ("k#1", "b"), ("k#2", "c"), ("k#3", "d")] {
         assert!(
             store
-                .prepare_publication(
+                .publish(
                     &session,
                     revision,
                     vec![LiveReplayEventDraft::new(
@@ -372,14 +191,14 @@ fn a_redrive_framed_differently_adds_no_text_twice_and_loses_none() {
                         activity_with_id(id, text),
                     )],
                 )
-                .and_then(|prepared| store.publish_prepared(prepared))
+                .await
                 .expect("redeliver an unmerged original")
                 .is_empty(),
             "{id} lies inside a delivered frame"
         );
     }
     let reframed = store
-        .prepare_publication(
+        .publish(
             &session,
             revision,
             vec![
@@ -388,11 +207,12 @@ fn a_redrive_framed_differently_adds_no_text_twice_and_loses_none() {
                 LiveReplayEventDraft::new(None::<TurnId>, activity_with_id("k#7..8", "hi")),
             ],
         )
-        .and_then(|prepared| store.publish_prepared(prepared))
+        .await
         .expect("redeliver a different framing");
     assert_eq!(activity_texts(&reframed), vec!["k#7..8=hi"]);
 
-    let LiveReplayOutcome::Replayed(events) = store.replay_after_cursor(&start).expect("replay")
+    let LiveReplayOutcome::Replayed(events) =
+        store.replay_after_cursor(&start).await.expect("replay")
     else {
         panic!("replay must succeed");
     };
@@ -407,8 +227,8 @@ fn a_redrive_framed_differently_adds_no_text_twice_and_loses_none() {
 /// delivered part and dropping it would lose the rest unseen, so it is a
 /// gap: every cursor into the session reloads its snapshot, and the
 /// session's next activity starts fresh continuity (FIG-5098).
-#[test]
-fn a_redelivery_straddling_the_delivered_range_is_a_gap() {
+#[tokio::test]
+async fn a_redelivery_straddling_the_delivered_range_is_a_gap() {
     use futures_util::FutureExt as _;
     use futures_util::StreamExt as _;
 
@@ -419,16 +239,19 @@ fn a_redelivery_straddling_the_delivered_range_is_a_gap() {
     for (id, text) in [("k#0", "a"), ("k#1..2", "bc")] {
         store
             .publish_test_event(&session, revision, None, activity_with_id(id, text))
+            .await
             .expect("first delivery");
     }
-    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
-        store.subscribe_after_cursor(&start).expect("subscribe")
+    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = store
+        .subscribe_after_cursor(&start)
+        .await
+        .expect("subscribe")
     else {
         panic!("the cursor is within the window");
     };
 
     let straddling = store
-        .prepare_publication(
+        .publish(
             &session,
             revision,
             vec![LiveReplayEventDraft::new(
@@ -436,7 +259,7 @@ fn a_redelivery_straddling_the_delivered_range_is_a_gap() {
                 activity_with_id("k#2..4", "cde"),
             )],
         )
-        .and_then(|prepared| store.publish_prepared(prepared))
+        .await
         .expect("redeliver a straddling frame");
     assert!(
         straddling.is_empty(),
@@ -444,7 +267,7 @@ fn a_redelivery_straddling_the_delivered_range_is_a_gap() {
     );
 
     assert!(matches!(
-        store.replay_after_cursor(&start),
+        store.replay_after_cursor(&start).await,
         Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
     ));
     let mut delivered = Vec::new();
@@ -464,8 +287,10 @@ fn a_redelivery_straddling_the_delivered_range_is_a_gap() {
     let resumed = store.current_cursor(&session, revision);
     store
         .publish_test_event(&session, revision, None, activity_with_id("k#5..6", "fg"))
+        .await
         .expect("the next frame publishes");
-    let LiveReplayOutcome::Replayed(events) = store.replay_after_cursor(&resumed).expect("replay")
+    let LiveReplayOutcome::Replayed(events) =
+        store.replay_after_cursor(&resumed).await.expect("replay")
     else {
         panic!("continuity resumes after the gap");
     };
@@ -486,8 +311,8 @@ fn session_cursor_rejects_malformed_and_wrong_session() {
     ));
 }
 
-#[test]
-fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
+#[tokio::test]
+async fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
     let store = InMemoryLiveReplayStore::default();
     store
         .publish_test_event(
@@ -496,6 +321,7 @@ fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
             None,
             activity("worker commit"),
         )
+        .await
         .expect("append newer worker commit");
 
     // A runtime can finish loading durable revision 1 just before a separate
@@ -504,6 +330,7 @@ fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
     let stale_snapshot_cursor = store.current_cursor(&SessionId::from("s"), SessionRevision(1));
     let LiveReplayOutcome::Replayed(events) = store
         .replay_after_cursor(&stale_snapshot_cursor)
+        .await
         .expect("replay from stale snapshot")
     else {
         panic!("expected replay");
@@ -523,9 +350,12 @@ async fn in_memory_replay_subscription_yields_replay_then_live() {
             None,
             activity("a"),
         )
+        .await
         .expect("append a");
-    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
-        store.subscribe_after_cursor(&start).expect("subscribe")
+    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = store
+        .subscribe_after_cursor(&start)
+        .await
+        .expect("subscribe")
     else {
         panic!("expected subscription");
     };
@@ -541,6 +371,7 @@ async fn in_memory_replay_subscription_yields_replay_then_live() {
             None,
             activity("b"),
         )
+        .await
         .expect("append b");
     let second = futures_util::StreamExt::next(&mut subscription)
         .await
@@ -557,8 +388,8 @@ async fn in_memory_replay_subscription_yields_replay_then_live() {
     }
 }
 
-#[test]
-fn in_memory_replay_subscription_reports_gap_after_capacity_trim() {
+#[tokio::test]
+async fn in_memory_replay_subscription_reports_gap_after_capacity_trim() {
     let store = InMemoryLiveReplayStore::with_bounds(1, Duration::from_secs(120));
     let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
     store
@@ -568,6 +399,7 @@ fn in_memory_replay_subscription_reports_gap_after_capacity_trim() {
             None,
             activity("a"),
         )
+        .await
         .expect("append a");
     store
         .publish_test_event(
@@ -576,15 +408,19 @@ fn in_memory_replay_subscription_reports_gap_after_capacity_trim() {
             None,
             activity("b"),
         )
+        .await
         .expect("append b");
     assert!(matches!(
-        store.subscribe_after_cursor(&start).expect("subscribe"),
+        store
+            .subscribe_after_cursor(&start)
+            .await
+            .expect("subscribe"),
         LiveReplaySubscribeOutcome::Gap(LiveReplayGapReason::Trimmed)
     ));
 }
 
-#[test]
-fn in_memory_replay_subscription_reports_gap_after_ttl_trim() {
+#[tokio::test]
+async fn in_memory_replay_subscription_reports_gap_after_ttl_trim() {
     let store = InMemoryLiveReplayStore::with_bounds(16, Duration::from_millis(1));
     let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
     store
@@ -594,70 +430,16 @@ fn in_memory_replay_subscription_reports_gap_after_ttl_trim() {
             None,
             activity("a"),
         )
+        .await
         .expect("append a");
-    std::thread::sleep(Duration::from_millis(5));
+    tokio::time::sleep(Duration::from_millis(5)).await;
     assert!(matches!(
-        store.subscribe_after_cursor(&start).expect("subscribe"),
+        store
+            .subscribe_after_cursor(&start)
+            .await
+            .expect("subscribe"),
         LiveReplaySubscribeOutcome::Gap(LiveReplayGapReason::Trimmed)
     ));
-}
-
-#[tokio::test]
-async fn invalidation_fences_pending_publications_and_recovers_after_the_gap() {
-    use futures_util::StreamExt as _;
-    let store = InMemoryLiveReplayStore::default();
-    let session_id = SessionId::from("invalidation");
-    let revision = SessionRevision::new(7);
-    let start = store.current_cursor(&session_id, revision);
-    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
-        store.subscribe_after_cursor(&start).unwrap()
-    else {
-        panic!("healthy subscription");
-    };
-    let pending = store
-        .prepare_publication(
-            &session_id,
-            revision,
-            vec![LiveReplayEventDraft::new(
-                None::<TurnId>,
-                activity("pending"),
-            )],
-        )
-        .unwrap();
-    let reserved = pending.latest_cursor().clone();
-    store.invalidate_session(&session_id).unwrap();
-    assert!(store.publish_prepared(pending).is_err());
-    for cursor in [&start, &reserved] {
-        assert!(matches!(
-            store.replay_after_cursor(cursor),
-            Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
-        ));
-        assert!(matches!(
-            store.subscribe_after_cursor(cursor),
-            Ok(LiveReplaySubscribeOutcome::Gap(
-                LiveReplayGapReason::Unavailable
-            ))
-        ));
-    }
-    assert!(matches!(
-        subscription.next().await,
-        Some(Err(LiveReplayStoreError::Closed))
-    ));
-    let recovered = store.current_cursor(&session_id, revision);
-    let live = store
-        .prepare_publication(
-            &session_id,
-            revision,
-            vec![LiveReplayEventDraft::new(
-                None::<TurnId>,
-                activity("after-resync"),
-            )],
-        )
-        .unwrap();
-    store.publish_prepared(live).unwrap();
-    assert!(
-        matches!(store.replay_after_cursor(&recovered), Ok(LiveReplayOutcome::Replayed(events)) if events.len() == 1 && events[0].revision() == revision)
-    );
 }
 
 #[derive(Debug)]
@@ -688,8 +470,8 @@ impl crate::Clock for ReplayClock {
     }
 }
 
-#[test]
-fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
+#[tokio::test]
+async fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
     let clock = Arc::new(ReplayClock(StdMutex::new(Instant::now())));
     let store = InMemoryLiveReplayStore::with_clock(
         InMemoryLiveReplayStoreConfig {
@@ -705,6 +487,7 @@ fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
         let session = SessionId::fixture(format!("idle-{index}"));
         let event = store
             .publish_test_event(&session, SessionRevision(1), None, activity("idle"))
+            .await
             .expect("publish idle session");
         retained.push(Arc::downgrade(&event));
     }
@@ -731,8 +514,8 @@ fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
     );
 }
 
-#[test]
-fn deployment_session_capacity_evicts_with_a_gap() {
+#[tokio::test]
+async fn deployment_session_capacity_evicts_with_a_gap() {
     let store = InMemoryLiveReplayStore::default();
     let session = SessionId::from("capacity-victim");
     let old = store.current_cursor(&session, SessionRevision(1));
@@ -744,14 +527,16 @@ fn deployment_session_capacity_evicts_with_a_gap() {
                 None,
                 activity("pressure"),
             )
+            .await
             .expect("publish pressure");
     }
     store
         .publish_test_event(&session, SessionRevision(1), None, activity("recreated"))
+        .await
         .expect("recreate victim");
     assert!(
         matches!(
-            store.replay_after_cursor(&old),
+            store.replay_after_cursor(&old).await,
             Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
         ),
         "an evicted cursor replays a recreated session"
@@ -762,8 +547,8 @@ fn deployment_session_capacity_evicts_with_a_gap() {
     );
 }
 
-#[test]
-fn deployment_byte_capacity_evicts_with_a_gap() {
+#[tokio::test]
+async fn deployment_byte_capacity_evicts_with_a_gap() {
     let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig {
         max_events_per_session: 1,
         max_sessions: 100,
@@ -779,6 +564,7 @@ fn deployment_byte_capacity_evicts_with_a_gap() {
             None,
             activity(&"a".repeat(5000)),
         )
+        .await
         .expect("first payload");
     store
         .publish_test_event(
@@ -787,66 +573,25 @@ fn deployment_byte_capacity_evicts_with_a_gap() {
             None,
             activity(&"b".repeat(5000)),
         )
+        .await
         .expect("byte pressure");
     store
         .publish_test_event(&victim, SessionRevision(1), None, activity("recreated"))
+        .await
         .expect("recreate");
     assert!(
         matches!(
-            store.replay_after_cursor(&old),
+            store.replay_after_cursor(&old).await,
             Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
         ),
         "byte pressure replays a recreated session"
     );
     assert!(matches!(
-        store.subscribe_after_cursor(&old),
+        store.subscribe_after_cursor(&old).await,
         Ok(LiveReplaySubscribeOutcome::Gap(
             LiveReplayGapReason::Unavailable
         ))
     ));
-}
-
-#[test]
-fn capacity_eviction_retires_pending_reservations() {
-    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig {
-        max_sessions: 1,
-        ..InMemoryLiveReplayStoreConfig::default()
-    });
-    let victim = SessionId::from("pending-victim");
-    let old = store
-        .prepare_publication(
-            &victim,
-            SessionRevision(1),
-            vec![LiveReplayEventDraft::new(
-                None::<TurnId>,
-                activity("pending"),
-            )],
-        )
-        .expect("reserve");
-    let old_cursor = old.latest_cursor().clone();
-    store
-        .publish_test_event(
-            &SessionId::from("pending-pressure"),
-            SessionRevision(1),
-            None,
-            activity("pressure"),
-        )
-        .expect("pressure");
-    let fresh = store.current_cursor(&victim, SessionRevision(1));
-    assert!(
-        store.publish_prepared(old).is_err(),
-        "evicted reservation can still publish"
-    );
-    store
-        .publish_test_event(&victim, SessionRevision(1), None, activity("fresh"))
-        .expect("fresh publication");
-    assert!(matches!(
-        store.replay_after_cursor(&old_cursor),
-        Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
-    ));
-    assert!(
-        matches!(store.replay_after_cursor(&fresh), Ok(LiveReplayOutcome::Replayed(events)) if events.len() == 1)
-    );
 }
 
 #[tokio::test]
@@ -854,17 +599,23 @@ async fn invalidation_releases_events_queued_for_live_subscribers() {
     let store = InMemoryLiveReplayStore::default();
     let session = SessionId::from("queued-victim");
     let cursor = store.current_cursor(&session, SessionRevision(1));
-    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
-        store.subscribe_after_cursor(&cursor).expect("subscribe")
+    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = store
+        .subscribe_after_cursor(&cursor)
+        .await
+        .expect("subscribe")
     else {
         panic!("fresh cursor");
     };
     let event = store
         .publish_test_event(&session, SessionRevision(1), None, activity("queued"))
+        .await
         .expect("publish");
     let retained = Arc::downgrade(&event);
     drop(event);
-    store.invalidate_session(&session).expect("invalidate");
+    store
+        .invalidate_session(&session)
+        .await
+        .expect("invalidate");
     assert!(
         retained.upgrade().is_none(),
         "broadcast channel owns invalidated payloads"
@@ -873,8 +624,8 @@ async fn invalidation_releases_events_queued_for_live_subscribers() {
     assert!(matches!(subscription.next().await, Some(Err(_))));
 }
 
-#[test]
-fn an_oversized_publication_fences_continuity_without_reserving_positions() {
+#[tokio::test]
+async fn an_oversized_publication_fences_continuity_without_taking_positions() {
     let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig {
         max_events_per_session: 1,
         max_retained_bytes: 8192,
@@ -884,7 +635,7 @@ fn an_oversized_publication_fences_continuity_without_reserving_positions() {
     let before = store.current_cursor(&session, SessionRevision(1));
     assert!(
         store
-            .prepare_publication(
+            .publish(
                 &session,
                 SessionRevision(1),
                 vec![LiveReplayEventDraft::new(
@@ -892,14 +643,15 @@ fn an_oversized_publication_fences_continuity_without_reserving_positions() {
                     activity(&"x".repeat(20_000))
                 )]
             )
+            .await
             .is_err()
     );
     assert!(matches!(
-        store.replay_after_cursor(&before),
+        store.replay_after_cursor(&before).await,
         Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
     ));
     assert!(matches!(
-        store.subscribe_after_cursor(&before),
+        store.subscribe_after_cursor(&before).await,
         Ok(LiveReplaySubscribeOutcome::Gap(
             LiveReplayGapReason::Unavailable
         ))
@@ -911,64 +663,9 @@ fn an_oversized_publication_fences_continuity_without_reserving_positions() {
     );
     store
         .publish_test_event(&session, SessionRevision(1), None, activity("fits"))
+        .await
         .expect("fresh publication");
     assert!(
-        matches!(store.replay_after_cursor(&fresh), Ok(LiveReplayOutcome::Replayed(events)) if events.len() == 1)
+        matches!(store.replay_after_cursor(&fresh).await, Ok(LiveReplayOutcome::Replayed(events)) if events.len() == 1)
     );
-}
-
-#[test]
-fn pending_and_ready_publications_share_deployment_byte_capacity() {
-    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig {
-        max_events_per_session: 1,
-        max_retained_bytes: 16 * 1024,
-        ..InMemoryLiveReplayStoreConfig::default()
-    });
-    let victim = SessionId::from("reserved-byte-victim");
-    let first = store
-        .prepare_publication(
-            &victim,
-            SessionRevision(1),
-            vec![LiveReplayEventDraft::new(
-                None::<TurnId>,
-                activity(&"a".repeat(5000)),
-            )],
-        )
-        .expect("first reservation");
-    let old = first.latest_cursor().clone();
-    let second = store
-        .prepare_publication(
-            &victim,
-            SessionRevision(1),
-            vec![LiveReplayEventDraft::new(
-                None::<TurnId>,
-                activity(&"b".repeat(5000)),
-            )],
-        )
-        .expect("second reservation");
-    let ready_event = Arc::downgrade(&second.events()[0]);
-    store.publish_prepared(second).expect("ready suffix");
-    store
-        .publish_test_event(
-            &SessionId::from("reserved-byte-pressure"),
-            SessionRevision(1),
-            None,
-            activity(&"c".repeat(12_000)),
-        )
-        .expect("pressure");
-    assert!(
-        ready_event.upgrade().is_none(),
-        "ready reservation survives byte eviction"
-    );
-    assert!(
-        store.publish_prepared(first).is_err(),
-        "pending reservation survives byte eviction"
-    );
-    assert!(matches!(
-        store.replay_after_cursor(&old),
-        Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
-    ));
-    let retention = store.sessions.lock_recover();
-    assert!(retention.retained_bytes <= 16 * 1024);
-    assert_eq!(retention.expiry_entry_count(), retention.buffers.len());
 }

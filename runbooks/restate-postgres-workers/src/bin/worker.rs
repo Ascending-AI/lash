@@ -364,7 +364,7 @@ impl AppState {
         )
         .await?;
 
-        let replay_count = match session.replay_after_cursor(&cursor) {
+        let replay_count = match session.replay_after_cursor(&cursor).await {
             Ok(lash::persistence::LiveReplayOutcome::Replayed(events)) => events.len(),
             Ok(lash::persistence::LiveReplayOutcome::Gap(_)) => 0,
             Err(err) => {
