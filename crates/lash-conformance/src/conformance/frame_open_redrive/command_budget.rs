@@ -332,7 +332,9 @@ pub async fn an_over_budget_command_settles_failed_at_its_bare_commits_size(
         .unwrap_or_else(|looped| panic!("the head shift stops: {looped}"));
     assert!(refusals.is_empty(), "{:?}", refused_codes(&refusals));
     assert_eq!(stop, ShiftStop::Idle, "the head's append settles");
-    let command = queue_stranded_append(&parts).await;
+    // The append must exceed even the bare failure settlement, whose
+    // recorded head and admission can be larger than a short successful note.
+    let command = queue_append(&parts, "stranded", &STRANDED_NOTE.repeat(256)).await;
     let bare =
         assert_lowered_shift_refuses_once(&runner, &parts, &command, "budget-bare-measure").await;
     let bare_bytes = refused_commit_bytes(&bare.message);

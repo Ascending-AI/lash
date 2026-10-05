@@ -20,8 +20,6 @@ mod recorded_termination_redrive;
 #[cfg(test)]
 mod request_snapshot;
 #[cfg(test)]
-mod revision_pins;
-#[cfg(test)]
 mod tool_call_replay;
 
 pub mod artifacts;

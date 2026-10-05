@@ -166,7 +166,7 @@ async fn run_factory_contention_scenario(
     operations.push(competing_shift_seals(&session_id, Arc::clone(&store), reopened).await?);
 
     let store = open_store(Arc::clone(&factory), &session_id).await?;
-    operations.push(final_commit_retry_and_conflict_are_fenced(&session_id, store).await?);
+    operations.push(operation_commit_retry_and_conflict_are_fenced(&session_id, store).await?);
 
     let store = open_store(Arc::clone(&factory), &session_id).await?;
     operations.push(stale_head_transaction_is_rejected(&session_id, store).await?);
@@ -349,7 +349,7 @@ async fn stale_head_transaction_is_rejected(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-async fn final_commit_retry_and_conflict_are_fenced(
+async fn operation_commit_retry_and_conflict_are_fenced(
     session_id: &SessionId,
     store: Arc<dyn RuntimeStore>,
 ) -> Result<BackendContentionOperation, String> {
@@ -360,15 +360,17 @@ async fn final_commit_retry_and_conflict_are_fenced(
             lash_core::MaxToolCalls::new(1024),
         ))
     };
-    let operation =
-        lash_core::OperationId::turn(session_id, "backend-contention-final-turn", "final");
+    let operation = lash_core::OperationId::new(
+        lash_core::ExecutionScope::runtime_operation(format!("{session_id}:backend-contention")),
+        "commit",
+    );
     let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state)
         .with_operation(operation.clone())
-        .map_err(|err| format!("stamp final commit: {err}"))?;
+        .map_err(|err| format!("stamp operation commit: {err}"))?;
     let first = store
         .commit_runtime_state(stamped_commit.clone())
         .await
-        .map_err(|err| format!("first final commit failed: {err}"))?;
+        .map_err(|err| format!("first operation commit failed: {err}"))?;
     let retry = store
         .commit_runtime_state(stamped_commit)
         .await
@@ -387,22 +389,22 @@ async fn final_commit_retry_and_conflict_are_fenced(
     };
     let (changed_commit, _) = RuntimeCommit::persisted_state_for_test(&changed_state)
         .with_operation(operation)
-        .map_err(|err| format!("stamp changed final commit: {err}"))?;
+        .map_err(|err| format!("stamp changed operation commit: {err}"))?;
     let err = store
         .commit_runtime_state(changed_commit)
         .await
-        .expect_err("changed retry with same turn id must conflict");
+        .expect_err("changed retry with same operation id must conflict");
     if !matches!(err, StoreError::RuntimeTurnCommitConflict { .. }) {
         return Err(format!(
-            "changed duplicate final commit returned {err:?}, expected RuntimeTurnCommitConflict"
+            "changed duplicate operation commit returned {err:?}, expected RuntimeTurnCommitConflict"
         ));
     }
 
     Ok(BackendContentionOperation {
         operation_id: "runtime-persistence.idempotent-retry-and-stale-write-conflict",
         status: "passed",
-        production_api: "SessionCommitStore::commit_runtime_state + RuntimeTurnCommitStamp",
-        assertion: "duplicate delivery of the same final commit is idempotent, while a stale changed commit with the same turn id is rejected",
+        production_api: "SessionCommitStore::commit_runtime_state + OperationId",
+        assertion: "duplicate delivery of the same operation commit is idempotent, while a stale changed commit with the same operation id is rejected",
         evidence: json!({
             "session_id": session_id,
             "first_head_revision": first.head_revision,
@@ -410,7 +412,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
             "same_checkpoint_ref": retry.checkpoint_ref == first.checkpoint_ref,
             "duplicate_retry_idempotent": true,
             "changed_retry_error": "RuntimeTurnCommitConflict",
-            "turn_id": "backend-contention-final-turn",
+            "operation_scope": format!("{session_id}:backend-contention"),
         }),
     })
 }

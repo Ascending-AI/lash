@@ -154,7 +154,7 @@ async fn stage_scope_close_with_claim(
     seed: u64,
     claim_before_restart: bool,
 ) -> Result<Staged, String> {
-    let world = CrashWorld::new(seed, standard_core(), false).await?;
+    let world = CrashWorld::new(seed, standard_core(), true).await?;
     world.restart().await?;
     let session = session_name(Seam::ScopeClose, seed);
     let run = "in-0";
@@ -181,7 +181,10 @@ async fn stage_scope_close_with_claim(
             parent: scope.clone(),
         });
     }
-    let close_step = format!("lash:shift-close:{run}");
+    let close_step = format!(
+        "lash.effect.record:lash:{}",
+        lash_core::engine::shift_close_run_replay_key(&TurnId::fixture(run)),
+    );
     let notes = vec![format!("children={child_count}")];
     let origin_ms = match point {
         CrashPoint::AfterStateCommit => {

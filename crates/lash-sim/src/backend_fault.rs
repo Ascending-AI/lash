@@ -363,10 +363,11 @@ impl GeneratedBackendFaultHarness {
             ))
         };
         let (commit, _) = RuntimeCommit::persisted_state_for_test(&state)
-            .with_operation(OperationId::turn(
-                &session_id,
-                lash_core::TurnId::fixture(format!("generated-backend-fault-{attempt}")),
-                "final",
+            .with_operation(OperationId::new(
+                lash_core::ExecutionScope::runtime_operation(format!(
+                    "{session_id}:generated-backend-fault-{attempt}"
+                )),
+                "commit",
             ))
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let arms = self

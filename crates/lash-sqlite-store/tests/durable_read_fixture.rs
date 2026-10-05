@@ -13,7 +13,7 @@ use std::sync::Arc;
 use lash_core_execution::{
     DeploymentStore, ProcessContinuationStore, ProcessExecutionEnvStore, TriggerStore,
 };
-use lash_sqlite_store::{SqliteProcessRegistry, SqliteStore, SqliteTriggerStore};
+use lash_sqlite_store::{SqliteStoreSet, SqliteStoreSetOptions};
 use serde::{Deserialize, Serialize};
 
 #[path = "../../lash-core/tests/support/durable_read_fixture.rs"]
@@ -166,45 +166,43 @@ fn pin_release_stamp_instant(core_path: &Path, timestamp_ms: u64) {
 async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles {
     std::fs::create_dir_all(root).expect("create SQLite fixture root");
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
-    // Prime the durable core so its release stamp can be pinned before
-    // anything is written.
-    let core_path = root.join("durable-core.db");
-    let priming_runtime = SqliteStore::open_file_with_clock_for_testing(
-        &core_path,
+    // Prime and reopen one coherent substrate: process pruning also reads
+    // durable-core referrer fences through the registry's attached catalog.
+    let options = SqliteStoreSetOptions {
+        process_id_mint: lash_core_execution::ProcessIdMint::sequential_for_testing(),
+        ..SqliteStoreSetOptions::default()
+    };
+    let priming = SqliteStoreSet::open_with_options_and_clock(
+        root,
+        options.clone(),
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
     .await
-    .expect("prime SQLite durable-core fixture schema");
-    drop(priming_runtime);
-    pin_release_stamp_instant(&core_path, timestamp_ms);
+    .expect("prime SQLite fixture schemas");
+    drop(priming);
+    pin_release_stamp_instant(&root.join("durable-core.db"), timestamp_ms);
+    let stores = SqliteStoreSet::open_with_options_and_clock(
+        root,
+        options,
+        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+    )
+    .await
+    .expect("open the coherent SQLite fixture");
+    let runtime = stores.session_store_factory();
+    let processes = stores.process_registry();
+    let triggers = stores.trigger_store();
+    drop(stores);
+    // The file handles retain their attachments after the assembly is dropped;
+    // take ownership only to pin the fixture's otherwise random identities.
     let runtime = Arc::new(
-        SqliteStore::open_file_with_clock_for_testing(
-            &core_path,
-            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-        )
-        .await
-        .expect("open SQLite durable-core fixture")
-        .with_commit_count_seed_for_testing(0),
-    );
-    let processes = Arc::new(
-        SqliteProcessRegistry::open_standalone_with_clock_for_testing(
-            &root.join("processes.db"),
-            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-        )
-        .await
-        .expect("open SQLite process fixture")
-        .with_process_id_mint_for_testing(
-            lash_core_execution::ProcessIdMint::sequential_for_testing(),
-        ),
+        Arc::try_unwrap(runtime)
+            .unwrap_or_else(|_| panic!("fixture owns the durable-core handle"))
+            .with_commit_count_seed_for_testing(0),
     );
     let triggers = Arc::new(
-        SqliteTriggerStore::open_with_clock(
-            &root.join("triggers.db"),
-            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-        )
-        .await
-        .expect("open SQLite trigger fixture")
-        .with_incarnation_for_testing("durable-read-trigger-incarnation"),
+        Arc::try_unwrap(triggers)
+            .unwrap_or_else(|_| panic!("fixture owns the trigger handle"))
+            .with_incarnation_for_testing("durable-read-trigger-incarnation"),
     );
     fixture::FixtureHandles {
         clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,

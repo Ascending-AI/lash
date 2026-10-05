@@ -405,6 +405,28 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     let backend = LayeredBackend::over(backend)
         .map_session_store_factory(|_| Arc::new(child_factory.clone()))
         .into_backend();
+    let mut worker_factories = lash_core::testing::test_standard_protocol_factories();
+    worker_factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+        lash_core::plugin::PluginDeclaration::initial("test_tools"),
+        lash_core::facade_support::PluginSpec::new()
+            .with_tool_provider(Arc::new(FirstTurnProcessTool)),
+    )));
+    double.install_process_worker(
+        lash_core_worker::DurableProcessWorker::new(
+            lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
+                worker_factories,
+                lash_core::facade_support::RuntimeHostConfig::new(
+                    backend.clone(),
+                    lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                    lash_core::QueuedWorkBatchingConfig::new(1),
+                ),
+                backend.process_work(),
+                Arc::new(lash_core::NoSessionWork::new()),
+                lash_core::testing::runtime_lease_owner(),
+            ),
+        )
+        .expect("valid child process fixture worker"),
+    );
     let embedded = lash_core::facade_support::EmbeddedRuntimeHost::new(
         lash_core::facade_support::RuntimeHostConfig::new(
             backend.clone(),
