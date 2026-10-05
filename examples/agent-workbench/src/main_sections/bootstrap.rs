@@ -74,6 +74,8 @@ struct WorkbenchCorePlugins {
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
     approvals: approvals::WorkbenchApprovals,
     mcp: Arc<dyn PluginFactory>,
+    #[cfg(feature = "e2e-tools")]
+    operation: Arc<crate::e2e_operation::Controls>,
 }
 
 /// The builder behind every workbench Restate core: the selected protocol factory
@@ -94,6 +96,8 @@ async fn workbench_core_builder(
         deferred_tools,
         approvals,
         mcp,
+        #[cfg(feature = "e2e-tools")]
+        operation,
     } = plugins;
     let mut builder = match crate::session_protocol::selected()? {
         crate::session_protocol::SessionProtocol::Standard => {
@@ -127,6 +131,8 @@ async fn workbench_core_builder(
     }
     let shutdown_marker =
         shutdown_marker::factory_from_env("agent-workbench").map_err(anyhow::Error::msg)?;
+    #[cfg(feature = "e2e-tools")]
+    let operation_namespace = workbench_restate_namespace()?.as_str().to_owned();
     Ok(builder.configure_plugins(move |plugins| {
         configure_workbench_plugins(
             plugins,
@@ -136,6 +142,11 @@ async fn workbench_core_builder(
             approvals,
             mcp,
         );
+        #[cfg(feature = "e2e-tools")]
+        plugins.push(Arc::new(crate::e2e_operation::OperationPlugin::new(
+            operation,
+            operation_namespace,
+        )));
         if let Some(marker) = shutdown_marker {
             plugins.push(marker);
         }
@@ -173,6 +184,8 @@ pub(crate) async fn bound_workbench_engine(
             .context("open the registration core's scratch approval ledger")?,
         // Bind the same MCP declaration without starting another live peer.
         mcp: Arc::new(lash::mcp::McpPluginFactory::empty()),
+        #[cfg(feature = "e2e-tools")]
+        operation: Arc::new(crate::e2e_operation::Controls::default()),
     };
     let _core = workbench_core_builder(
         host_backend,
@@ -465,6 +478,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         Some(fixture) => Some(fixture.tools()?),
         None => tool_provider,
     };
+    #[cfg(feature = "e2e-tools")]
+    let operation_controls = Arc::new(crate::e2e_operation::Controls::default());
     let plugins = WorkbenchCorePlugins {
         tool_provider,
         mail_world: mail_world.clone(),
@@ -472,6 +487,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         deferred_tools,
         approvals: approvals.clone(),
         mcp: Arc::clone(&mcp_search) as Arc<dyn PluginFactory>,
+        #[cfg(feature = "e2e-tools")]
+        operation: operation_controls.clone(),
     };
     // Deployment policy example. Choose these limits for the host's workload
     // before build(); session settings instead use recorded config commands.
@@ -717,6 +734,13 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         } else {
             app
         };
+        #[cfg(feature = "e2e-tools")]
+        let app = app.merge(crate::e2e_operation::routes(
+            crate::e2e_operation::OperationState {
+                app: state.clone(),
+                controls: operation_controls.clone(),
+            },
+        ));
         #[cfg(feature = "provider-wire-fixtures")]
         let app = if dev_provider_scenario
             == Some(failure_provider::DevProviderScenario::ValidEmptyCompletion)

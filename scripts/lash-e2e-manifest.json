@@ -1743,9 +1743,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "No workbench product-host implementation: only the double row process::s17_operation_drop_and_follow_sqlite_memory exists; FIG-4934 deferred it; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "operation::s17_workbench_operation_drop_and_follow"
+          }
         },
         {
           "variant": "default",
@@ -1771,7 +1774,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No workbench product-host implementation: only the double row process::s17_operation_drop_and_follow_sqlite_memory exists; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the workbench case operation::s17_workbench_operation_drop_and_follow exists and FIG-4994 threads the permutation into it.",
           "registration": null
         },
         {
@@ -1798,7 +1801,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No workbench product-host implementation: only the double row process::s17_operation_drop_and_follow_sqlite_memory exists; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the workbench case operation::s17_workbench_operation_drop_and_follow exists and FIG-4994 threads the permutation into it.",
           "registration": null
         },
         {
@@ -1825,7 +1828,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No workbench product-host implementation: only the double row process::s17_operation_drop_and_follow_sqlite_memory exists; FIG-4934 deferred it; no owner ticket filed.",
+          "hold_reason": "Store/leg runner plumbing (Permutation, --store/--leg) lands with FIG-4994; the workbench case operation::s17_workbench_operation_drop_and_follow exists and FIG-4994 threads the permutation into it.",
           "registration": null
         },
         {
@@ -1858,7 +1861,7 @@
           }
         }
       ],
-      "setup": "Workbench plugin task issues a tool and returns completion; node::h3::double_fixture proves admission and follow on the server double.",
+      "setup": "Workbench e2e-tools plugin task issues a native tool and returns completion; node::h3::double_fixture proves admission and follow on the server double.",
       "fault": "Drop caller's handle, then reattach by recorded Run ID.",
       "observable": "Durable admission answers separately; operation completes/Closes only after issued work settles; follow/result match stored terminal.",
       "arc_guards": [],

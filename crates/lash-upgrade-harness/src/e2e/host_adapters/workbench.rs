@@ -1,5 +1,5 @@
 //! The real workbench HTTP and recoverable-chat observation transport.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -34,6 +34,7 @@ pub struct WorkbenchHost {
     cleanup: Vec<CleanupReceipt>,
     sessions: BTreeMap<String, String>,
     subjects: BTreeMap<String, String>,
+    operations: BTreeSet<String>,
     transcript: Vec<HostObservation>,
 }
 
@@ -58,6 +59,7 @@ impl WorkbenchHost {
             cleanup: Vec::new(),
             sessions: BTreeMap::new(),
             subjects: BTreeMap::new(),
+            operations: BTreeSet::new(),
             transcript: Vec::new(),
         })
     }
@@ -469,7 +471,27 @@ impl HostAdapter for WorkbenchHost {
                     }
                     json!({"session_id":session,"receipt":accepted})
                 }
+                HostCommand::Operation { session, input } => {
+                    let session = self.session(&session).await?;
+                    let receipt = self
+                        .control(
+                            reqwest::Method::POST,
+                            &format!("/api/e2e/sessions/{session}/operations"),
+                            Some(input),
+                        )
+                        .await?;
+                    work.run = receipt["run"]
+                        .as_str()
+                        .context("workbench operation returned no Run ID")?
+                        .to_owned();
+                    self.subjects.insert(work.run.clone(), session.clone());
+                    self.operations.insert(work.run.clone());
+                    json!({"session_id":session,"receipt":receipt})
+                }
                 HostCommand::Cancel { run } => {
+                    if self.operations.contains(&run) {
+                        bail!("workbench operations have no cancel route");
+                    }
                     let session = self
                         .subjects
                         .get(&run)
@@ -496,21 +518,32 @@ impl HostAdapter for WorkbenchHost {
                     let session = self
                         .subjects
                         .get(&run)
-                        .context("unknown workbench subject")?;
-                    work = self
-                        .transcript
-                        .iter()
-                        .find(|o| o.work.run == run)
-                        .context("unknown accepted run")?
-                        .work
+                        .context("unknown workbench subject")?
                         .clone();
-                    if self
-                        .environment
-                        .contains_key("AGENT_WORKBENCH_TOOL_FIXTURE")
-                    {
-                        json!({"outcome":self.control(reqwest::Method::GET, &format!("/api/e2e/sessions/{session}/inputs/{}",work.ingress),None).await?})
+                    if self.operations.contains(&run) {
+                        work.run = run.clone();
+                        self.control(
+                            reqwest::Method::GET,
+                            &format!("/api/e2e/sessions/{session}/operations/{run}"),
+                            None,
+                        )
+                        .await?
                     } else {
-                        json!({"snapshot":self.snapshot(session).await?})
+                        work = self
+                            .transcript
+                            .iter()
+                            .find(|o| o.work.run == run)
+                            .context("unknown accepted run")?
+                            .work
+                            .clone();
+                        if self
+                            .environment
+                            .contains_key("AGENT_WORKBENCH_TOOL_FIXTURE")
+                        {
+                            json!({"outcome":self.control(reqwest::Method::GET, &format!("/api/e2e/sessions/{session}/inputs/{}",work.ingress),None).await?})
+                        } else {
+                            json!({"snapshot":self.snapshot(&session).await?})
+                        }
                     }
                 }
                 HostCommand::Transfer { .. } => {
@@ -575,6 +608,32 @@ impl HostAdapter for WorkbenchHost {
                             reqwest::Method::GET,
                             &format!(
                                 "/api/sessions/{}/waits",
+                                input["session_id"]
+                                    .as_str()
+                                    .context("actual session required")?
+                            ),
+                            None,
+                        )
+                        .await?
+                    }
+                    "operation-bodies" => {
+                        self.control(reqwest::Method::GET, "/api/e2e/operations/bodies", None)
+                            .await?
+                    }
+                    "release-operation" => {
+                        let key = input["key"].as_str().context("release key required")?;
+                        self.control(
+                            reqwest::Method::POST,
+                            &format!("/api/e2e/operations/{key}/release"),
+                            None,
+                        )
+                        .await?
+                    }
+                    "admission" => {
+                        self.control(
+                            reqwest::Method::GET,
+                            &format!(
+                                "/api/e2e/sessions/{}/admission",
                                 input["session_id"]
                                     .as_str()
                                     .context("actual session required")?

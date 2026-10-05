@@ -1,4 +1,6 @@
 #[cfg(feature = "e2e-tools")]
+mod e2e_operation;
+#[cfg(feature = "e2e-tools")]
 mod e2e_receiver;
 #[cfg(feature = "e2e-tools")]
 #[path = "../../shared/h2_fixture.rs"]

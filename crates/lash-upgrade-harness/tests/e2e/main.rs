@@ -3,6 +3,7 @@
 mod cancel;
 mod fleet;
 mod h2;
+mod operation;
 mod plugin_upgrade;
 mod proposal;
 mod tools;
