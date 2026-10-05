@@ -61,8 +61,8 @@ macro_rules! admitted_head_redrive_tests {
     };
 }
 
-/// Register the turn-config laws (FIG-3600 S6, D3 §5.2; FIG-3838, FIG-3842): a run
-/// resolves its run spec against its session config once, as a recorded
+/// Register the turn-config laws (FIG-3600 S6, D3 §5.2; FIG-3838, FIG-3842,
+/// FIG-5093): a run resolves its run spec against its session config once, as a recorded
 /// step, and every replay of the run executes under that record. The fixture is the admitted-head one: a guard, a
 /// prefix, the tier's effect host, the store set under test and its
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
@@ -103,6 +103,12 @@ macro_rules! turn_config_tests {
             (a_batch_shares_one_spec_that_each_run_resolves_once, "run-spec-batch"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_batch_keeps_its_turn_lane_place_behind_the_command_lane, "run-spec-batch-order"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (runs_stating_different_tool_grants_each_run_under_their_own, "run-grants-own"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_runs_tool_grants_survive_its_crash_and_a_cold_reopen, "run-grants-reopen"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_tool_access_command_still_shapes_later_runs_that_state_no_grants, "run-grants-command"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_recovered_follow_on_inherits_its_runs_recorded_execution, "run-spec-follow-on-inherit"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;

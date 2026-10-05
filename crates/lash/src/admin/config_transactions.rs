@@ -44,14 +44,21 @@ pub enum ConfigSettlement {
 
 impl SessionConfigAdmin {
     /// The session's config revision: what a transaction written now is
-    /// written against.
+    /// written against. It is read from the durable head's metadata, which
+    /// is what the shift judges the transaction against, so it never waits
+    /// behind a run that holds the session's runtime.
     pub async fn revision(&self) -> Result<u64> {
-        self.control
-            .with_writer(async |runtime: &mut LashRuntime| {
-                runtime.reload_invalidated_resident_session_state().await?;
-                Ok(runtime.config_revision())
-            })
+        let context = self.control.target.context().await?;
+        let head = context
+            .parts
+            .store
+            .load_session_head_meta()
             .await
+            .map_err(EmbedError::Store)?
+            .ok_or_else(|| EmbedError::UnknownSession {
+                session_id: context.parts.session_id.clone(),
+            })?;
+        Ok(head.config.config_revision)
     }
 
     /// Every config command this session admits, generated from the

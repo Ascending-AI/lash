@@ -8,7 +8,11 @@ struct EmptyResolver {
 
 #[async_trait]
 impl DeferredToolResolver for EmptyResolver {
-    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, Resolution> {
+    async fn resolve(
+        &self,
+        _cx: &DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, Resolution> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.batches
             .lock_recover()

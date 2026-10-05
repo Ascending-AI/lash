@@ -469,9 +469,19 @@ Creation records them; commands change them at boundaries. The run records its
 resolved execution snapshot. Durable input may carry a `RunSpec` whose overrides
 apply to that run without overwriting the sticky session config.
 
+A run states its own tool grants the same way (FIG-5093): `RunOverrides::tool_access`
+is the run's tool authority, whole, recorded with its shape, so a replay or a
+cold reopen of the run sees the same grants. A toolbox switch is therefore an
+accepted input, never a config command that waits for the running run; the
+session's `SetToolAccess` stays the default for every run that states none.
+The capability refs a `RunSpec` names are recorded with the shape too, and
+reach the host's deferred tool resolver, with the session and the run, on
+every resolution the run asks for.
+
 Evidence: `crates/lash-core-store/src/session_policy.rs:125`,
-`crates/lash-core-store/src/run_spec.rs`, and
-`crates/lash-conformance/src/conformance/run_spec_shift.rs`.
+`crates/lash-core-store/src/run_spec.rs`,
+`crates/lash-conformance/src/conformance/run_spec_shift.rs`, and
+`crates/lash-conformance/src/conformance/run_spec_tool_access.rs`.
 
 ### A6. Everything on a sent input is durable data
 

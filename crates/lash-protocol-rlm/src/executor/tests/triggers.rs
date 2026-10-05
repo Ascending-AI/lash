@@ -56,7 +56,11 @@ struct MixedToolResolver;
 
 #[async_trait::async_trait]
 impl lash_lashlang_runtime::DeferredToolResolver for MixedToolResolver {
-    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+    async fn resolve(
+        &self,
+        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
         paths
             .iter()
             .map(|path| {

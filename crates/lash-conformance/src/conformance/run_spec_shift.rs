@@ -154,7 +154,7 @@ fn recorded(models: &Arc<std::sync::Mutex<Vec<String>>>) -> Vec<String> {
     clippy::expect_used,
     reason = "conformance-law fixture: the session store admits the row"
 )]
-async fn enqueue(
+pub(super) async fn enqueue(
     parts: &ShiftParts,
     text: &str,
     key: &str,
@@ -181,7 +181,7 @@ async fn enqueue(
     clippy::expect_used,
     reason = "conformance-law fixture: each shift runs to a stop"
 )]
-async fn shift(
+pub(super) async fn shift(
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     parts: &ShiftParts,
     id: &str,
@@ -200,7 +200,7 @@ async fn shift(
 
 /// The runs that ran turns, in admission order. A command run applies the
 /// command lane first (ADR 0101 §4) and runs no turn, so it is skipped.
-fn committed_runs(outcome: &ShiftOutcome) -> Vec<String> {
+pub(super) fn committed_runs(outcome: &ShiftOutcome) -> Vec<String> {
     outcome
         .ran
         .iter()
@@ -216,7 +216,7 @@ fn committed_runs(outcome: &ShiftOutcome) -> Vec<String> {
     clippy::expect_used,
     reason = "conformance-law fixture: the law's session committed"
 )]
-async fn head_config(parts: &ShiftParts) -> crate::PersistedSessionConfig {
+pub(super) async fn head_config(parts: &ShiftParts) -> crate::PersistedSessionConfig {
     parts
         .store
         .load_session_head_meta(&parts.session_id)
@@ -485,7 +485,7 @@ pub async fn a_config_command_after_a_pinned_run_resolves_over_the_sticky_config
 
 /// Crashes a run's execution after its shape is recorded and before its
 /// model call.
-struct CrashBeforeModelCall;
+pub(super) struct CrashBeforeModelCall;
 
 impl lash_core::runtime::RuntimeTurnPhaseProbe for CrashBeforeModelCall {
     fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {

@@ -44,6 +44,7 @@ pub use super::retention::*;
 pub use super::revision_pins::*;
 pub use super::run_answers_its_rows::*;
 pub use super::run_spec_shift::*;
+pub use super::run_spec_tool_access::*;
 pub use super::run_start_marker::*;
 pub use super::run_terminal::*;
 pub use super::runtime_persistence::*;

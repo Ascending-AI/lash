@@ -75,6 +75,10 @@ pub struct RuntimeExecutionContext<'run> {
     /// The admitted logical Run owning a foreground cell, independent of
     /// the effect scope of a process-owned session shift.
     logical_run: Option<crate::TurnAddress>,
+    /// The capability refs the logical Run's recorded shape names, by slot
+    /// (`RunSpec::capabilities`): empty outside a run, or for a run whose
+    /// spec names none.
+    run_capabilities: Arc<std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef>>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     process_execution: Option<RuntimeProcessExecution>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
@@ -457,6 +461,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             chronological_projection: Arc::clone(&self.chronological_projection),
             turn_context: self.turn_context.clone(),
             logical_run: self.logical_run.clone(),
+            run_capabilities: Arc::clone(&self.run_capabilities),
             execution_env_spec: self.execution_env_spec.clone(),
             process_execution: self.process_execution.clone(),
             parent_invocation: self.parent_invocation.clone(),
@@ -757,6 +762,22 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// The admitted logical Run authorized to resume this cell's continuation.
     pub fn logical_run(&self) -> Option<&crate::TurnAddress> {
         self.logical_run.as_ref()
+    }
+
+    /// Bind the capability refs the logical Run's recorded shape names.
+    pub fn with_run_capabilities(
+        mut self,
+        capabilities: std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef>,
+    ) -> Self {
+        self.run_capabilities = Arc::new(capabilities);
+        self
+    }
+
+    /// The capability refs the logical Run's recorded shape names, by slot.
+    pub fn run_capabilities(
+        &self,
+    ) -> &std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef> {
+        &self.run_capabilities
     }
 
     /// The complete turn-cancel trio for one wait built from this execution:

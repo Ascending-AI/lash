@@ -226,7 +226,11 @@ struct RetryOnceInstallResolver {
 
 #[async_trait::async_trait]
 impl lash_lashlang_runtime::DeferredToolResolver for RetryOnceInstallResolver {
-    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+    async fn resolve(
+        &self,
+        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         paths
             .iter()
@@ -288,7 +292,11 @@ fn ambient_definition(
 
 #[async_trait::async_trait]
 impl lash_lashlang_runtime::DeferredToolResolver for CountingDeferredResolver {
-    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+    async fn resolve(
+        &self,
+        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.batches
             .lock_recover()
@@ -424,7 +432,11 @@ pub(super) struct BindingDeferredResolver {
 
 #[async_trait::async_trait]
 impl lash_lashlang_runtime::DeferredToolResolver for BindingDeferredResolver {
-    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+    async fn resolve(
+        &self,
+        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         paths
             .iter()

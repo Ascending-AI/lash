@@ -164,7 +164,7 @@ impl SendContext {
 }
 
 impl SendTarget {
-    async fn context(&self) -> Result<SendContext> {
+    pub(crate) async fn context(&self) -> Result<SendContext> {
         match self {
             Self::Live(session) => Ok(SendContext {
                 parts: session.durable().send_parts().await?,
@@ -460,6 +460,17 @@ impl SendBuilder {
     /// the run's shape. Setting them again replaces them.
     pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
         self.run_spec.overrides.protocol_turn_options = Some(options);
+        self
+    }
+
+    /// The tool authority this input's run executes under, whole: the
+    /// tools it is granted and the names it hides, in place of the
+    /// session's for this run only. It is recorded with the run's shape, so
+    /// a replay or a cold reopen of the run sees the same grants, and it
+    /// never reaches the session config: a toolbox switch is a send, never
+    /// a config write that waits for the running turn.
+    pub fn tool_access(mut self, access: lash_core::SessionToolAccess) -> Self {
+        self.run_spec.overrides.tool_access = Some(access);
         self
     }
 

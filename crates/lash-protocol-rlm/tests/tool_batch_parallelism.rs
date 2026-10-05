@@ -61,6 +61,7 @@ struct GrantedLeaves;
 impl lash_lashlang_runtime::DeferredToolResolver for GrantedLeaves {
     async fn resolve(
         &self,
+        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
         paths: &[&str],
     ) -> std::collections::BTreeMap<String, lash_lashlang_runtime::Resolution> {
         paths

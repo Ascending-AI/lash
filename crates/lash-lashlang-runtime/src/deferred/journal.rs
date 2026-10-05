@@ -48,6 +48,9 @@ where
     let phase_context = ctx.clone();
     let resolver_for_resolution = resolver.cloned();
     let referenced_for_resolution = referenced.clone();
+    let owner = ctx.owner().clone();
+    let run = ctx.logical_run().cloned();
+    let capabilities = ctx.run_capabilities().clone();
     let journaled = ctx
         .journaled_deferred_resolution_with(effect_id, operation, move || async move {
             let ambient_paths = match ambient_paths() {
@@ -72,7 +75,8 @@ where
             if let Some(resolver) = resolver_for_resolution.as_ref()
                 && !unknown.is_empty()
             {
-                let mut resolved = resolver.resolve(&unknown).await;
+                let cx = crate::DeferredResolveContext::new(&owner, run.as_ref(), &capabilities);
+                let mut resolved = resolver.resolve(&cx, &unknown).await;
                 for path in unknown {
                     outcomes.insert(
                         path.to_string(),

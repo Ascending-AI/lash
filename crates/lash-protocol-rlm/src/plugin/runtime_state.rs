@@ -659,6 +659,7 @@ mod tests {
     impl lash_lashlang_runtime::DeferredToolResolver for ParkingResolver {
         async fn resolve(
             &self,
+            _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
             paths: &[&str],
         ) -> std::collections::BTreeMap<String, lash_lashlang_runtime::Resolution> {
             self.entered.fetch_add(1, Ordering::SeqCst);

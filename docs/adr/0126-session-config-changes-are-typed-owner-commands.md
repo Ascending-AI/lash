@@ -53,6 +53,9 @@ owner's `RunOptions` type (`RlmTurnOptions`, `StandardRunOptions`), which has
 no field for the prompt, the behaviour or a pin: a payload that names one
 does not decode and refuses the run's shape, whatever value it states
 (FIG-4652). An owner whose namespace no run overrides uses `NoRunOptions`.
+The core owner is one: a run states its core overrides (model, reasoning,
+generation and tool access) as `RunOverrides` fields, the one-shot forms of
+the core commands, which the run's shape records (FIG-5093).
 
 `SetLlmProfile` carries an opaque `LlmProfileKey` (FIG-4374). Its reducer is the one
 core reducer that reads more than the recorded namespace: it asks the host's
@@ -81,6 +84,9 @@ under a `ConfigWrite { id, expected_revision }`:
 
 - the id is stable, and a resubmission reuses it;
 - the expected revision is the config revision the host read.
+  `SessionConfigAdmin::revision` reads it from the durable head's metadata,
+  the value step 2 below checks, so reading it never waits behind a run
+  that holds the session's runtime (FIG-5093).
 
 **Ingress** decodes every entry against the installed registrations. An
 unknown owner or command, or arguments that do not decode, is refused as a

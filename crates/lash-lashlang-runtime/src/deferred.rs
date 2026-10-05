@@ -77,13 +77,46 @@ pub enum Resolution {
     NotAvailable,
 }
 
+/// Who one deferred resolution resolves for: the execution that links, the
+/// logical Run it belongs to, and the capability refs that Run's recorded
+/// shape names. A deployment-wide resolver grants by this, never by a
+/// resolver built for one turn.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct DeferredResolveContext<'a> {
+    /// The session frame or process whose cell links.
+    pub owner: &'a lash_core::ExecutionOwner,
+    /// The admitted logical Run whose cell links; `None` for a process cell.
+    pub run: Option<&'a lash_core_worker::TurnAddress>,
+    /// The capability refs the Run's recorded shape names, by slot
+    /// ([`RunSpec::capabilities`](lash_core::RunSpec::capabilities)): the
+    /// same refs on every replay and cold reopen of the Run. Empty for a
+    /// process cell or a Run whose spec names none.
+    pub capabilities: &'a BTreeMap<lash_core::SlotId, lash_core::CapabilityRef>,
+}
+
+impl<'a> DeferredResolveContext<'a> {
+    pub fn new(
+        owner: &'a lash_core::ExecutionOwner,
+        run: Option<&'a lash_core_worker::TurnAddress>,
+        capabilities: &'a BTreeMap<lash_core::SlotId, lash_core::CapabilityRef>,
+    ) -> Self {
+        Self {
+            owner,
+            run,
+            capabilities,
+        }
+    }
+}
+
 /// RLM-only, host-provided resolution of Lashlang call-paths absent from the
 /// link-time host environment. The resolver resolves on demand only.
 #[async_trait]
 pub trait DeferredToolResolver: Send + Sync {
     /// Resolve a deterministic batch of fully-qualified Lashlang call-paths
-    /// (e.g. `web.fetch`). The batch contains only paths not already provided
-    /// by the host environment or recorded for this link.
+    /// (e.g. `web.fetch`) for the execution `cx` names. The batch contains
+    /// only paths not already provided by the host environment or recorded
+    /// for this link.
     ///
     /// Resolution is non-transactional: every returned path has its own
     /// outcome, partial success is normal, and an input path omitted from the
@@ -94,7 +127,11 @@ pub trait DeferredToolResolver: Send + Sync {
     /// subscriptions or processes, or perform externally visible work. A
     /// precommit retry may call it again. Route mutation belongs exclusively
     /// in [`Self::install_recorded_grant`] after the outcome is journaled.
-    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, Resolution>;
+    async fn resolve(
+        &self,
+        cx: &DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, Resolution>;
 
     /// Install the process-local execution route for a journaled grant after
     /// its captured definition passes link-catalog validation. This is route
@@ -603,7 +640,11 @@ mod tests {
 
     #[async_trait]
     impl DeferredToolResolver for CountingResolver {
-        async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, Resolution> {
+        async fn resolve(
+            &self,
+            _cx: &DeferredResolveContext<'_>,
+            paths: &[&str],
+        ) -> BTreeMap<String, Resolution> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.batches
                 .lock_recover()
@@ -653,7 +694,11 @@ mod tests {
 
     #[async_trait]
     impl DeferredToolResolver for RevokedInstallResolver {
-        async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, Resolution> {
+        async fn resolve(
+            &self,
+            _cx: &DeferredResolveContext<'_>,
+            paths: &[&str],
+        ) -> BTreeMap<String, Resolution> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let current = self.current.lock_recover().clone();
             paths
@@ -683,7 +728,11 @@ mod tests {
 
     #[async_trait]
     impl DeferredToolResolver for TransientInstallResolver {
-        async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, Resolution> {
+        async fn resolve(
+            &self,
+            _cx: &DeferredResolveContext<'_>,
+            paths: &[&str],
+        ) -> BTreeMap<String, Resolution> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             paths
                 .iter()

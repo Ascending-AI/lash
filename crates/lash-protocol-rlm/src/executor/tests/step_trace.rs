@@ -43,7 +43,11 @@ struct InboxResolver;
 
 #[async_trait::async_trait]
 impl lash_lashlang_runtime::DeferredToolResolver for InboxResolver {
-    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+    async fn resolve(
+        &self,
+        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
         assert_eq!(paths, &["inbox.send_item"]);
         BTreeMap::from([("inbox.send_item".into(), lash_lashlang_runtime::Resolution::Resolved(Box::new(
             lash_lashlang_runtime::ToolGrant::new(lash_core::ToolDefinition::raw(

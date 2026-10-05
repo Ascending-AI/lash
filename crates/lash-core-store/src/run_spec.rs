@@ -172,6 +172,15 @@ pub struct RunOverrides {
     /// that records no protocol plugin refuses them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_turn_options: Option<ProtocolTurnOptions>,
+    /// The tool authority this run executes under, whole: the tools it is
+    /// granted ([`SessionToolAccess::restricted`](crate::SessionToolAccess::restricted))
+    /// and the names it hides, in place of the session's for this run only.
+    /// It is the one-shot form of the core `set_tool_access` command: it is
+    /// recorded with the run's shape, so every replay and a cold reopen of the
+    /// run see the same grants, and it never reaches the sticky config, so
+    /// a later run that states none runs under the session's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_access: Option<crate::SessionToolAccess>,
 }
 
 impl RunOverrides {
@@ -188,6 +197,7 @@ impl RunOverrides {
             && self.reasoning.is_none()
             && self.generation.is_none()
             && self.protocol_turn_options.is_none()
+            && self.tool_access.is_none()
     }
 
     /// Apply these overrides to `config`, the run's snapshot. An override
@@ -229,6 +239,9 @@ impl RunOverrides {
         }
         if let Some(generation) = &self.generation {
             config.generation = generation.clone();
+        }
+        if let Some(tool_access) = &self.tool_access {
+            config.tool_access = tool_access.clone();
         }
         Ok(())
     }
@@ -469,7 +482,9 @@ pub struct RunSpec {
     pub overrides: Box<RunOverrides>,
     /// Durable capability refs, keyed by the slot they fill (D5). They are
     /// recorded data: a worker binds them by exact id, and dynamic capability
-    /// calls arrive with their own journaled protocol.
+    /// calls arrive with their own journaled protocol. The run's recorded
+    /// refs reach the host's deferred tool resolver with every resolution
+    /// the run asks for, so it grants by the run, not the process.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
 }
@@ -567,6 +582,7 @@ impl RunSpec {
             reasoning: overrides.reasoning.clone().or(definition.reasoning),
             generation: overrides.generation.clone().or(definition.generation),
             protocol_turn_options: None,
+            tool_access: overrides.tool_access.clone().or(definition.tool_access),
         }
         .apply(&mut config, models)?;
         for options in [

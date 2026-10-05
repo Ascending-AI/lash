@@ -13,11 +13,11 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use lash::sync::MutexExt;
 use lash::tools::{
-    CataloguePreviewOptions, DeferredToolGrant, DeferredToolResolution, DeferredToolResolver,
-    RecordedGrantInstallError, SharedDeferredToolResolver, StaticToolExecute, StaticToolProvider,
-    ToolAttemptOutcome, ToolBinding, ToolBindingResolutionExt, ToolCall, ToolContract,
-    ToolDefinition, ToolDefinitionBindingExt, ToolId, ToolManifest, ToolManifestBindingExt,
-    ToolOutcome, ToolProvider,
+    CataloguePreviewOptions, DeferredResolveContext, DeferredToolGrant, DeferredToolResolution,
+    DeferredToolResolver, RecordedGrantInstallError, SharedDeferredToolResolver, StaticToolExecute,
+    StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolBindingResolutionExt, ToolCall,
+    ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolId, ToolManifest,
+    ToolManifestBindingExt, ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -158,7 +158,11 @@ struct WorkbenchDeferredToolResolver {
 
 #[async_trait]
 impl DeferredToolResolver for WorkbenchDeferredToolResolver {
-    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, DeferredToolResolution> {
+    async fn resolve(
+        &self,
+        _cx: &DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, DeferredToolResolution> {
         paths
             .iter()
             .map(|path| {
@@ -696,6 +700,24 @@ fn invalid_arguments(message: &str) -> ToolOutcome {
 mod tests {
     use super::*;
 
+    /// Resolve `paths` the way a process cell's link asks: no run, no
+    /// capability refs. The workbench grants by call path alone.
+    async fn resolve(
+        resolver: &WorkbenchDeferredToolResolver,
+        paths: &[&str],
+    ) -> BTreeMap<String, DeferredToolResolution> {
+        let owner = lash::tools::ExecutionOwner::Process {
+            process_id: lash::ProcessId::fixture("p_deferred"),
+        };
+        let capabilities = BTreeMap::new();
+        resolver
+            .resolve(
+                &DeferredResolveContext::new(&owner, None, &capabilities),
+                paths,
+            )
+            .await
+    }
+
     fn grant_for(catalogue: &DeferredCatalogue, call_path: &str) -> DeferredToolGrant {
         DeferredToolGrant::new(
             catalogue
@@ -722,7 +744,7 @@ mod tests {
             .grant("text.sha256", &grant)
             .expect("persist deferred grant");
 
-        let turn_two = first.resolver.resolve(&["text.sha256"]).await;
+        let turn_two = resolve(&first.resolver, &["text.sha256"]).await;
         assert!(matches!(
             turn_two.get("text.sha256"),
             Some(DeferredToolResolution::Resolved(_))
@@ -734,7 +756,7 @@ mod tests {
         drop(first);
 
         let reopened = WorkbenchDeferredTools::open(&path).expect("reopen SQLite grant store");
-        let after_restart = reopened.resolver.resolve(&["text.sha256"]).await;
+        let after_restart = resolve(&reopened.resolver, &["text.sha256"]).await;
         let restored = match after_restart.get("text.sha256") {
             Some(DeferredToolResolution::Resolved(grant)) => grant.as_ref(),
             other => panic!("expected restored grant, got {other:?}"),
@@ -770,10 +792,7 @@ mod tests {
     #[tokio::test]
     async fn unavailable_resolution_is_typed_and_deterministic() {
         let tools = WorkbenchDeferredTools::in_memory().expect("open deferred tools");
-        let outcomes = tools
-            .resolver
-            .resolve(&["text.sha256", "unknown.path"])
-            .await;
+        let outcomes = resolve(&tools.resolver, &["text.sha256", "unknown.path"]).await;
         assert!(matches!(
             outcomes.get("text.sha256"),
             Some(DeferredToolResolution::NotAvailable)

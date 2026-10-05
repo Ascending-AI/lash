@@ -137,6 +137,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             chronological_projection,
             turn_context,
             logical_run: None,
+            run_capabilities: Arc::default(),
             live_tool_catalog: None,
             // This build's own epoch until the caller binds its store's
             // recorded `F` with `with_fleet_format`, as every context over a

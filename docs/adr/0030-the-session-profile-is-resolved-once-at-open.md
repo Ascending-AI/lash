@@ -111,7 +111,7 @@ proceed (FIG-4404).
 Input admission does not select a model. Child-session execution and direct
 LLM requests have explicit model selection at their own boundaries. An input
 may carry a `RunSpec` whose recorded overrides — route, model, generation,
-prompt layer, protocol turn options — run that input's run under them without
+prompt layer, protocol turn options, tool access — run that input's run under them without
 changing the session's recorded configuration (ADR 0101 §A5): the override is
 durable input data the run's admission fixes, not a mutable overlay on
 session policy.

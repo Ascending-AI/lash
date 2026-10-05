@@ -865,3 +865,95 @@ finish({
         Ok(())
     })
 }
+
+/// What one deferred resolution was asked for: the owner's session, the
+/// run, and the capability refs.
+#[cfg(feature = "rlm")]
+type ResolvedFor = (
+    Option<SessionId>,
+    Option<TurnId>,
+    std::collections::BTreeMap<crate::SlotId, crate::CapabilityRef>,
+);
+
+/// [`FrameStateDeferredResolver`] that also records whom each resolution
+/// was for.
+#[cfg(feature = "rlm")]
+struct RecordingContextResolver {
+    resolved_for: Arc<StdMutex<Vec<ResolvedFor>>>,
+}
+
+#[cfg(feature = "rlm")]
+#[async_trait]
+impl lash_lashlang_runtime::DeferredToolResolver for RecordingContextResolver {
+    async fn resolve(
+        &self,
+        cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> std::collections::BTreeMap<String, lash_lashlang_runtime::Resolution> {
+        self.resolved_for.lock_recover().push((
+            cx.owner.require_session("deferred_resolve").ok().cloned(),
+            cx.run.map(|run| run.turn_id.clone()),
+            cx.capabilities.clone(),
+        ));
+        lash_lashlang_runtime::DeferredToolResolver::resolve(&FrameStateDeferredResolver, cx, paths)
+            .await
+    }
+}
+
+/// FIG-5093: a deployment-wide deferred resolver grants by the run that
+/// links. It is asked in the context of the session, the run, and the
+/// capability refs the run's spec named, which the run recorded with its
+/// shape.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+pub(super) async fn the_deferred_resolver_resolves_for_the_run_and_its_recorded_capabilities()
+-> Result<()> {
+    let resolved_for = Arc::new(StdMutex::new(Vec::new()));
+    let backend = double_backend().await;
+    let factory =
+        rlm_factory(&backend).with_deferred_tool_resolver(Arc::new(RecordingContextResolver {
+            resolved_for: Arc::clone(&resolved_for),
+        }));
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
+        .serve_test_llm_profile(
+            queued_text_provider(vec![typescript_block(
+                r#"const probed = await fixture.probe({});
+finish({ probed });"#,
+            )]),
+            mock_llm_profile_spec(),
+        )
+        .tools(Arc::new(FrameStateDeferredTools))
+        .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
+    let session_id = SessionId::from("deferred-resolve-context");
+    let session = core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let capabilities = std::collections::BTreeMap::from([(
+        crate::SlotId::new("toolbox"),
+        crate::CapabilityRef {
+            contract: crate::ContractRef::new("fixture.toolbox", 1),
+            binding: crate::BindingId::new("toolbox-a"),
+            args: serde_json::Value::Null,
+        },
+    )]);
+    let run = TurnId::fixture("deferred-resolve-context-run");
+    session
+        .send(TurnInput::text("probe through a deferred grant"))
+        .id(run.clone())
+        .run(crate::RunSpec {
+            capabilities: capabilities.clone(),
+            ..crate::RunSpec::default()
+        })
+        .output()
+        .await?;
+    assert_eq!(
+        resolved_for.lock_recover().clone(),
+        vec![(Some(session_id), Some(run), capabilities)],
+        "the resolver was asked once, for the session, the run and its recorded refs"
+    );
+    Ok(())
+}

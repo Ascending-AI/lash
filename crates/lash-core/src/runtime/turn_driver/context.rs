@@ -36,6 +36,13 @@ impl<'run> RuntimeTurnDriver<'run> {
             .turn_pipeline
             .state()
             .process_execution_env_spec(&self.policy.policy);
+        let run_capabilities = self
+            .turn_pipeline
+            .state()
+            .authority
+            .run_view()
+            .map(|view| view.run.capabilities.clone())
+            .unwrap_or_default();
         self.session
             .code_execution_context(
                 &self.session_id,
@@ -82,6 +89,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                                 .unwrap_or_else(|| self.turn_id.clone())
                         }),
                     ))
+                    .with_run_capabilities(run_capabilities)
                     .with_recorded_turn_cancel(
                         self.turn_cancel.is_some(),
                         Arc::clone(&self.turn_control),
