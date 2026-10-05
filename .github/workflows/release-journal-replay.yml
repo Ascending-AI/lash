@@ -44,6 +44,10 @@ jobs:
     if: needs.plan.outputs.release_journal_replay == 'true'
     # FIG-4097 enables the required gate at the cut. This separate workflow
     # reports failures without joining the required CI conclusion.
+    # Advisory until the 1.0 cut (FIG-4905/Z07 recaptures the corpus and flips
+    # this to required): journal shapes still change under the version freeze,
+    # so a stale corpus reports red without taking the board.
+    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: build-cache

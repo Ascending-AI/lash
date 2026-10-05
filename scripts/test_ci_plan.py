@@ -2056,7 +2056,9 @@ class ReleaseJournalReplaySelectionTests(unittest.TestCase):
         self.assertIn("pull_request", triggers)
         job = workflow["jobs"]["release-journal-replay"]
         self.assertIn("release_journal_replay", job["if"])
-        self.assertFalse(job.get("continue-on-error", False))
+        # FIG-4985: advisory until the cut; FIG-4905/Z07 flips it back to
+        # required when it recaptures the corpus.
+        self.assertTrue(job.get("continue-on-error", False))
         self.assertIn("FIG-4097", (ROOT / ".github/workflows/release-journal-replay.yml").read_text())
         self.assertEqual("crates/lash-restate/testdata/replay-corpus", job["env"]["LASH_REPLAY_CORPUS_ROOT"])
         commands = "\n".join(step.get("run", "") for step in job["steps"])
