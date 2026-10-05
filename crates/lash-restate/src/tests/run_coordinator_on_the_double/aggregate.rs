@@ -1785,9 +1785,19 @@ async fn l18_started_prepare_does_not_hold_other_attempt_decisions() {
     let independent = call("prepare-release", &Kind::IntentFree);
     let mut all = calls.as_ref().clone();
     all.push((independent.clone(), Kind::IntentFree));
-    let backend = lash_restate_test::backend(500918, ServerConfig::default().always_replay(true))
+    // An always-closed input cannot replay a result while sibling Runs
+    // execute: shared-core 7.0.3 refuses suspension and the SDK awaits every
+    // executing sibling. Use a durable cut with normal delivery instead.
+    let backend = lash_restate_test::backend(500918, ServerConfig::default())
         .await
         .unwrap();
+    let crashes = lash_restate_test::CrashCount::new();
+    assert!(backend.server().on_crash(crashes.listener()));
+    backend
+        .server()
+        .crash_on(CrashRule::new(CrashPoint::AfterRunResult {
+            name: name(&ids[0], "start:prepare"),
+        }));
     let mut probe = Probe::new(&all);
     probe.body_barrier = Some(Arc::new(tokio::sync::Barrier::new(3)));
     probe.parallel_order = ids.clone();
@@ -1858,6 +1868,7 @@ async fn l18_started_prepare_does_not_hold_other_attempt_decisions() {
     .await
     .expect("higher decisions release the blocked preparation")
     .unwrap();
+    assert_eq!(crashes.get(), 1);
     assert!(completed.load(Ordering::SeqCst));
     let seen = probe.seen();
     let lower = seen

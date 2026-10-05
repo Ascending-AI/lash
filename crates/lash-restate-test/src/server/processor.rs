@@ -901,26 +901,30 @@ impl State {
                         result: Some(result),
                     },
                 );
+                let encoded_notification = notification.encode();
+                self.store_notification(
+                    sh,
+                    key,
+                    notification,
+                    NotificationKey::Completion(completion_id),
+                    false,
+                );
+                let mut site = self.crash_site(key, &frame);
+                site.ty = MessageType::RunCompletionNotification;
+                if self.crash_plan.should_crash_after_run_result(&site) {
+                    self.crash(sh, key);
+                    return Ok(Flow::Stop);
+                }
                 match sh.config.protocol {
-                    ProtocolVersion::V6 => self.store_notification(
-                        sh,
-                        key,
-                        notification,
-                        NotificationKey::Completion(completion_id),
-                        true,
-                    ),
+                    ProtocolVersion::V6 => {
+                        if let Some(attempt) = self.running_attempt(key, number) {
+                            attempt.push(encoded_notification);
+                        }
+                    }
                     ProtocolVersion::V7 => {
                         // The SDK holds its own result and waits for the
                         // ack; the stored notification replaces the ack on
                         // replay. The ack itself is not journaled.
-                        self.store_notification(
-                            sh,
-                            key,
-                            notification,
-                            NotificationKey::Completion(completion_id),
-                            false,
-                        );
-                        let mut site = self.crash_site(key, &frame);
                         site.ty = MessageType::ProposeRunCompletionAck;
                         if self.crash_plan.should_crash_scripted(&site) {
                             self.crash(sh, key);

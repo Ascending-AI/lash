@@ -18,6 +18,8 @@ pub enum CrashPoint {
     /// Before the server stores the result of a `ctx.run` — the one named
     /// `name`, or any run when `None`.
     BeforeRunResult { name: Option<String> },
+    /// After the result is stored, before its result is delivered to the attempt.
+    AfterRunResult { name: String },
     /// A named family of run results, independent of the invocation admission.
     BeforeRunResultStarting { prefix: String },
     /// Before the server stores the result of the `ctx.run` whose command
@@ -142,6 +144,10 @@ impl CrashRule {
                     && name
                         .as_deref()
                         .is_none_or(|name| site.run_name.as_deref() == Some(name))
+            }
+            CrashPoint::AfterRunResult { name } => {
+                site.ty == MessageType::RunCompletionNotification
+                    && site.run_name.as_deref() == Some(name.as_str())
             }
             CrashPoint::BeforeRunResultAt { index } => {
                 site.ty == MessageType::ProposeRunCompletion && site.run_index == Some(*index)
@@ -276,6 +282,17 @@ impl CrashPlan {
             && draw % 1000 < u64::from(random.per_mille)
         {
             random.budget -= 1;
+            return true;
+        }
+        false
+    }
+
+    /// Named post-storage cuts do not reapply pre-storage frame rules.
+    pub(super) fn should_crash_after_run_result(&mut self, site: &CrashSite) -> bool {
+        if let Some(rule) = self.rules.iter_mut().find(|rule| {
+            matches!(rule.point, CrashPoint::AfterRunResult { .. }) && rule.matches(site)
+        }) {
+            rule.times -= 1;
             return true;
         }
         false

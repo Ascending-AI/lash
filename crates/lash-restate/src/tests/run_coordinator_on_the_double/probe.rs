@@ -51,6 +51,9 @@ impl Probe {
             presentation_failure: false,
             declaration_drift_on_replay: false,
             emitted: Mutex::new(Vec::new()),
+            always_replay: false,
+            gates: BTreeMap::new(),
+            script: None,
         }
     }
 
@@ -111,6 +114,9 @@ impl SingletonToolHandlers for Probe {
             .lock()
             .unwrap()
             .push((attempt.call_id.clone(), attempt.attempt));
+        if let Some(gate) = self.gates.get(attempt.call_id) {
+            gate.wait().await;
+        }
         if let Some(program) = &self.program_release
             && program.call_id == *attempt.call_id
         {

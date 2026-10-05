@@ -509,14 +509,23 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         step: crate::tool_dispatch::RunStartPrepareStep<'run>,
     ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_dispatch::RunStartPrepared> {
         drop(step);
+        let key_name = name.clone();
         crate::tool_dispatch::RunStepHandle {
             body: Box::pin(std::future::ready(())),
-            result: Box::pin(async move {
-                Err(RuntimeEffectControllerError::new(
-                    RuntimeErrorCode::EngineControlUnsupported,
-                    format!("this controller records no start preparation: {name}"),
-                ))
-            }),
+            result: crate::tool_dispatch::RunSelectable {
+                key: Box::pin(async move {
+                    Err(RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::EngineControlUnsupported,
+                        format!("this controller records no start preparation key: {key_name}"),
+                    ))
+                }),
+                value: Box::pin(async move {
+                    Err(RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::EngineControlUnsupported,
+                        format!("this controller records no start preparation: {name}"),
+                    ))
+                }),
+            },
         }
     }
 

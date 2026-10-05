@@ -55,8 +55,6 @@
 //! before releasing the consumer hold. Ordinary bodies retain their own
 //! timeout behavior and are never rerouted into this start path.
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use lash_sansio::{ToolCallId, ToolIntentKind};
@@ -705,16 +703,6 @@ pub struct RunAttemptHandle<'run> {
     pub result: RunSelectable<'run, crate::tool_run::RunAttemptEntry>,
 }
 
-/// The body and durable outcome of one eagerly registered Run step.
-pub struct RunStepHandle<'run, T> {
-    pub body: RunAttemptBody<'run>,
-    pub result: std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<T, RuntimeEffectControllerError>> + Send + 'run,
-        >,
-    >,
-}
-
 /// One acknowledged declared-start preparation. D folds these compact events
 /// at its own ordinal; a served preparation never re-reads the live gate.
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -726,34 +714,6 @@ pub struct RunStartPrepared {
 pub type RunStartPrepareStep<'run> = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<RunStartPrepared, String>> + Send + 'run>,
 >;
-
-/// The engine notification that completes one selectable source. Opaque to the
-/// coordinator; only the controller that issued it interprets it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct SelectKey(u32);
-impl SelectKey {
-    pub fn from_engine(raw: u32) -> Self {
-        Self(raw)
-    }
-    pub fn engine(self) -> u32 {
-        self.0
-    }
-}
-pub type RunSelectKey<'run> =
-    Pin<Box<dyn Future<Output = Result<SelectKey, RuntimeEffectControllerError>> + Send + 'run>>;
-pub type RunSelectValue<'run, T> =
-    Pin<Box<dyn Future<Output = Result<T, RuntimeEffectControllerError>> + Send + 'run>>;
-/// One VM-notified source a Run schedule can select (an X result, a retry or
-/// aggregate timer, a realization receipt, a start:prepare run).
-pub struct RunSelectable<'run, T> {
-    /// The engine notification identity. A future because a forwarding
-    /// controller (the executor's native Run task) learns it after queueing
-    /// the registration; the Restate controller answers it ready.
-    pub key: RunSelectKey<'run>,
-    /// The source's value. Awaited only after the combinator chose it (or for a
-    /// served D's recorded choice); never polled to race other sources.
-    pub value: RunSelectValue<'run, T>,
-}
 
 /// A durable backoff registered before its result is awaited.
 pub type RunRetryTimer<'run> = RunSelectable<'run, ()>;

@@ -117,19 +117,33 @@ where
         step: lash_core::tool_dispatch::RunStartPrepareStep<'run>,
     ) -> lash_core::tool_dispatch::RunStepHandle<'run, lash_core::tool_dispatch::RunStartPrepared>
     {
-        let (body, result) = self
+        let (body, key, result) = self
             .context
             .run_json_eager_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
                 serde_json::to_value(stamped(&step.await?)).map_err(|error| error.to_string())
             });
+        let key_name = name.clone();
         lash_core::tool_dispatch::RunStepHandle {
             body: Box::pin(body),
-            result: Box::pin(async move {
-                let Json(entry) = result.await.map_err(|error| {
-                    crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
-                })?;
-                decode_entry(&name, entry)
-            }),
+            result: lash_core::tool_dispatch::RunSelectable {
+                key: Box::pin(async move {
+                    key.map(lash_core::tool_dispatch::SelectKey::from_engine)
+                        .ok_or_else(|| {
+                            RuntimeEffectControllerError::new(
+                                RuntimeErrorCode::EngineEffectController,
+                                format!(
+                                    "Run preparation `{key_name}` registered without its engine key"
+                                ),
+                            )
+                        })
+                }),
+                value: Box::pin(async move {
+                    let Json(entry) = result.await.map_err(|error| {
+                        crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
+                    })?;
+                    decode_entry(&name, entry)
+                }),
+            },
         }
     }
 

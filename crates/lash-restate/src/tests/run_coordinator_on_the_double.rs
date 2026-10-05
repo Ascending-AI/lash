@@ -391,6 +391,30 @@ async fn drive(
                     })
                 });
                 if durable_final && (!probe.gate_after_crash || crash_count.get() > 0) {
+                    if probe.gate_after_crash {
+                        // A remains held until this snapshot validates the cut.
+                        let entries: Vec<_> = server.invocations().iter()
+                            .filter(|view| view.target.starts_with("LashTestHandlerHost/"))
+                            .flat_map(|view| server.journal(&view.id).unwrap()).collect();
+                        let held = probe.gate.as_ref().unwrap().0.clone();
+                        let issued = entries.iter().find(|entry|
+                            entry.ty == MessageType::RunCommand
+                                && entry.name.as_deref() == Some(name(&held, "attempt:1").as_str()))
+                            .expect("A1 was issued before the cut");
+                        let held_key = issued.completion_id().unwrap();
+                        assert!(!entries.iter().any(|entry| entry.completion_id() == Some(held_key)
+                            && entry.run_completion().is_some()), "A1 is unfinished at the cut");
+                        let final_record = entries.iter().filter_map(|entry| {
+                            let bytes = entry.run_completion()?.ok()?;
+                            let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+                            serde_json::from_value::<RunRecord>(value.get("record")?.clone()).ok()
+                        }).find(|record| record.events.iter().any(|event|
+                            matches!(event, RunEvent::Decided { call_id, decision: CallDecision::Final { .. }, .. }
+                                if *call_id == release))).expect("B's Final is durable at the cut");
+                        assert!(entries.iter().filter_map(|entry|
+                            entry.name.as_deref()?.strip_prefix("lash:run:schedule:")?.parse::<u64>().ok())
+                            .all(|ordinal| ordinal <= final_record.first.0), "no later D at the cut");
+                    }
                     if probe.cancel_at_gate {
                         probe.cancel.store(true, Ordering::SeqCst);
                     }
@@ -1188,8 +1212,10 @@ async fn l02_l17_replay_registers_b2_before_waiting_for_unfinished_a1() {
         Some(CrashPoint::BeforeRunResult {
             name: Some(name(&b, "attempt:2")),
         }),
-        Some(CrashPoint::BeforeRun {
-            name: "lash:run:schedule:6".to_owned(),
+        // The old BeforeRun(D6) held A1 behind a borrowed D. Short D6
+        // follows A1, so cut the same held-A1 window after B-final D4.
+        Some(CrashPoint::AfterRunResult {
+            name: "lash:run:schedule:4".to_owned(),
         }),
         Some(CrashPoint::BeforeRunResult {
             name: Some(name(&a, "attempt:2")),
@@ -1456,8 +1482,10 @@ async fn l19_only_the_durable_selected_final_publishes_body_commands_on_cold_rep
             probe.gate_after_crash = crash;
             probe.plugin_host = Some(Arc::new(host));
             let probe = Arc::new(probe);
-            let cut = crash.then(|| CrashPoint::BeforeRun {
-                name: "lash:run:schedule:3".to_owned(),
+            // The old BeforeRun(D3) existed while A1 was held. Short D3
+            // follows A1, so crash after B-final D1 while A1 is unfinished.
+            let cut = crash.then(|| CrashPoint::AfterRunResult {
+                name: "lash:run:schedule:1".to_owned(),
             });
             let driven = drive(
                 487919,
@@ -1540,8 +1568,8 @@ async fn l05_empty_and_cached_rounds_admit_every_operand_before_a_decision() {
 }
 
 mod aggregate;
-mod realization;
 mod cold_selection;
+mod realization;
 
 #[tokio::test]
 async fn l12_recorded_admission_ignores_live_isolation_drift() {

@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// selected alongside other work; V is issued after that result is accepted.
 pub(super) struct PendingPresentation<'a> {
     pub call_id: ToolCallId,
+    pub select_key: Option<parallel::KeyHandle<'a>>,
     pub handle: Option<parallel::Handle<'a>>,
     pub consume: bool,
     pub prepared: RunStartPrepared,
@@ -126,7 +127,8 @@ impl<'a> RunCoordinator<'a> {
                         call_id: call_id.clone(),
                         invocation_id: issued.invocation_id,
                     }]);
-                    journal
+                    self.register_realization(call_id.clone(), issued.receipt);
+                    self.journal
                         .append(
                             record_name(&call_id, "realization:issued"),
                             Box::pin(async move {
@@ -138,7 +140,6 @@ impl<'a> RunCoordinator<'a> {
                             }),
                         )
                         .await?;
-                    self.register_realization(call_id.clone(), issued.receipt);
                 }
             }
         }
@@ -200,6 +201,7 @@ impl<'a> RunCoordinator<'a> {
             return Ok(PendingPresentation {
                 call_id,
                 handle: None,
+                select_key: None,
                 owed,
                 consume,
                 fresh: std::sync::Arc::new(AtomicBool::new(false)),
@@ -229,7 +231,7 @@ impl<'a> RunCoordinator<'a> {
             SingletonCapture::Isolated { binding } => Some(binding.as_ref().clone()),
             _ => None,
         };
-        let handle = if let Some(obligation) = obligation {
+        let (select_key, handle) = if let Some(obligation) = obligation {
             let crate::tool_dispatch::RunStepHandle { body, result } = start::issue_prepare(
                 journal.scoped,
                 call_id.clone(),
@@ -239,20 +241,26 @@ impl<'a> RunCoordinator<'a> {
                 journal.ledger.lifecycle() == crate::tool_run::RunLifecycle::Closing,
             )?;
             self.bodies.issue(body);
-            Some(
-                async move {
-                    Ok(parallel::Ready::StartPrepared(std::sync::Arc::new(
-                        result.await?,
-                    )))
-                }
-                .boxed()
-                .shared(),
+            let key = result.key.shared();
+            journal.selection.pending.push(key.clone());
+            (
+                Some(key),
+                Some(
+                    async move {
+                        Ok(parallel::Ready::StartPrepared(std::sync::Arc::new(
+                            result.value.await?,
+                        )))
+                    }
+                    .boxed()
+                    .shared(),
+                ),
             )
         } else {
-            None
+            (None, None)
         };
         Ok(PendingPresentation {
             call_id,
+            select_key,
             handle,
             owed,
             consume,

@@ -8,6 +8,8 @@ impl<'a> RunCoordinator<'a> {
         call_id: ToolCallId,
         receipt: crate::tool_dispatch::RunSelectable<'a, RealizationReceipt>,
     ) {
+        let key = receipt.key.shared();
+        self.journal.selection.pending.push(key.clone());
         let handle = async move {
             Ok(parallel::Ready::Realization(std::sync::Arc::new(
                 receipt.value.await?,
@@ -15,13 +17,8 @@ impl<'a> RunCoordinator<'a> {
         }
         .boxed()
         .shared();
-        self.realizing.insert(
-            call_id.clone(),
-            parallel::Realizing {
-                key: receipt.key.shared(),
-                handle,
-            },
-        );
+        self.realizing
+            .insert(call_id.clone(), parallel::Realizing { key, handle });
     }
 
     /// Admit protected declarations at the open drain frontier without waiting

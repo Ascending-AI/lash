@@ -56,6 +56,65 @@ enum SelectedWork<'a> {
     },
 }
 
+impl SelectedWork<'_> {
+    fn recorded_by(&self, event: &RunEvent) -> bool {
+        match (self, event) {
+            (
+                Self::StartPrepared { call_id },
+                RunEvent::StartLaunched {
+                    call_id: recorded, ..
+                },
+            )
+            | (
+                Self::Realization { call_id },
+                RunEvent::Realized {
+                    call_id: recorded, ..
+                },
+            ) => call_id == recorded,
+            (
+                Self::AggregateTimer { key, leaf },
+                RunEvent::TimerElapsed {
+                    aggregate,
+                    leaf: recorded,
+                },
+            ) => key == aggregate && leaf == recorded,
+            (
+                Self::Call {
+                    work,
+                    ordinal,
+                    timer: false,
+                    ..
+                },
+                RunEvent::AttemptRecorded {
+                    call_id, attempt, ..
+                },
+            ) => work.call.call_id == *call_id && ordinal == attempt,
+            (
+                Self::Call {
+                    work,
+                    ordinal,
+                    timer: true,
+                    ..
+                },
+                RunEvent::RetryScheduled {
+                    call_id, failed, ..
+                },
+            ) => work.call.call_id == *call_id && ordinal == failed,
+            (
+                Self::Call {
+                    work, timer: true, ..
+                },
+                RunEvent::Decided {
+                    call_id,
+                    decision: CallDecision::Cancelled,
+                    ..
+                },
+            ) => work.call.call_id == *call_id,
+            _ => false,
+        }
+    }
+}
+
 struct Work<'a> {
     call: SingletonToolCall,
     member: AdmittedCall,
@@ -331,22 +390,24 @@ impl<'a> RunCoordinator<'a> {
             }));
             choices.extend(self.realizing.iter().map(|(call_id, realizing)| {
                 (
+                    realizing.key.clone(),
                     realizing.handle.clone(),
                     SelectedWork::Realization {
                         call_id: call_id.clone(),
                     },
                 )
             }));
-            let protected = presentation.as_ref().and_then(|pending| {
-                pending.handle.as_ref().map(|handle| {
-                    (
-                        handle.clone(),
-                        SelectedWork::StartPrepared {
-                            call_id: pending.call_id.clone(),
-                        },
-                    )
-                })
-            });
+            if let Some(pending) = presentation.as_ref()
+                && let (Some(key), Some(handle)) = (&pending.select_key, &pending.handle)
+            {
+                choices.push((
+                    key.clone(),
+                    handle.clone(),
+                    SelectedWork::StartPrepared {
+                        call_id: pending.call_id.clone(),
+                    },
+                ));
+            }
             let name = format!("lash:run:schedule:{}", record.first.0);
             let address = crate::EffectAddress::new(
                 self.journal.scoped.execution_scope().clone(),
@@ -563,6 +624,26 @@ impl<'a> RunCoordinator<'a> {
             });
             self.journal.selection.forget(chosen_key);
             let selected = self.journal.wait_record(name, step).await?;
+            let event = selected
+                .record
+                .events
+                .first()
+                .ok_or(RunEventRefusal::EmptyRecord)?;
+            let recorded = choices
+                .iter()
+                .position(|(_, _, work)| work.recorded_by(event))
+                .ok_or_else(|| selection_boundary("recorded selection has no issued source"))?;
+            if recorded != chosen {
+                // A non-Run await can leave a fresh unrecorded choice. The
+                // served D is authoritative; retain that other popped source
+                // for its next window, ahead of pops made while waiting on D.
+                self.journal
+                    .selection
+                    .pending
+                    .push(choices[chosen].0.clone());
+                self.journal.selection.acknowledged.push_front(chosen_key);
+            }
+            self.journal.selection.forget(keys[recorded]);
             if let Some(pending) = presentation.as_mut()
                 && selected.record.events.iter().any(|event| matches!(event, RunEvent::StartLaunched { call_id, .. } if *call_id == pending.call_id))
             {
@@ -574,6 +655,7 @@ impl<'a> RunCoordinator<'a> {
                     return Err(boundary(&pending.call_id));
                 }
                 self.journal.accept(selected)?;
+                pending.select_key = None;
                 pending.prepared = prepared.as_ref().clone();
                 return Ok(None);
             }
@@ -793,14 +875,8 @@ impl<'a> RunCoordinator<'a> {
                     let timer = controller.start_run_retry(delay);
                     let select_key = timer.key.shared();
                     self.journal.selection.pending.push(select_key.clone());
-                    let timer = crate::tool_dispatch::RunSelectable {
-                        key: Box::pin(select_key.clone()),
-                        value: timer.value,
-                    };
-                    let waiting_handlers = std::sync::Arc::clone(&handlers);
-                    let call_id = call.call_id.clone();
                     let handle = async move {
-                        timer.await?;
+                        timer.value.await?;
                         Ok(Ready::Timer)
                     }
                     .boxed()
@@ -1022,38 +1098,47 @@ impl RunJournal<'_> {
         step: crate::RunRecordStep<'_>,
     ) -> Result<RunJournalEntry, SingletonRunError> {
         self.scoped.admit_journal_write()?;
-        let crate::tool_dispatch::RunStepHandle { body, result } =
-            self.scoped.controller().start_run_record(name, step);
+        let crate::tool_dispatch::RunStepHandle { body, result } = self
+            .scoped
+            .controller()
+            .start_run_record(name.clone(), step);
         // This body belongs only to this record wait. A served record never
         // starts it, so returning the value can drop its unstarted body.
         let bodies = RunBodies::new();
         bodies.issue(body);
-        bodies
-            .beside(async {
-                let decision_key = result.key.await?;
-                let mut keys = Vec::with_capacity(self.selection.pending.len());
-                for source in &self.selection.pending {
-                    keys.push(source.clone().await?);
-                }
-                loop {
-                    let remaining: Vec<_> = keys
-                        .iter()
-                        .copied()
-                        .filter(|key| !self.selection.acknowledged.contains(key))
-                        .collect();
-                    let mut awaited = vec![decision_key];
-                    awaited.extend(remaining.iter().copied());
-                    let chosen = self.scoped.controller().select_run_sources(awaited).await?;
-                    if chosen == 0 {
-                        break;
+        let scoped = self.scoped;
+        Ok(scoped
+            .await_owner_step(
+                name,
+                bodies.beside(async {
+                    let decision_key = result.key.await?;
+                    let mut keys = Vec::with_capacity(self.selection.pending.len());
+                    for source in &self.selection.pending {
+                        keys.push(source.clone().await?);
                     }
-                    let key = remaining
-                        .get(chosen - 1)
-                        .ok_or_else(|| selection_boundary("record wait selected no source"))?;
-                    self.selection.acknowledged.push_back(*key);
-                }
-                Ok(result.value.await?)
-            })
-            .await
+                    loop {
+                        let remaining: Vec<_> = keys
+                            .iter()
+                            .copied()
+                            .filter(|key| !self.selection.acknowledged.contains(key))
+                            .collect();
+                        let mut awaited = vec![decision_key];
+                        awaited.extend(remaining.iter().copied());
+                        let chosen = self.scoped.controller().select_run_sources(awaited).await?;
+                        if chosen == 0 {
+                            break;
+                        }
+                        let key = remaining.get(chosen - 1).ok_or_else(|| {
+                            RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::EffectReplayDivergence,
+                                "record wait selected no source",
+                            )
+                        })?;
+                        self.selection.acknowledged.push_back(*key);
+                    }
+                    result.value.await
+                }),
+            )
+            .await?)
     }
 }
