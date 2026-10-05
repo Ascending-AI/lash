@@ -484,7 +484,7 @@ impl Shared {
                 .context("no replacing workbench generation")?
                 .control(
                     reqwest::Method::GET,
-                    &format!("/api/admin/generations/{generation}/drain"),
+                    &format!("/api/e2e/generations/{generation}/drain"),
                     None,
                 )
                 .await?;
@@ -715,7 +715,7 @@ impl HostAdapter for Host {
                 let output = next
                     .control(
                         reqwest::Method::POST,
-                        &format!("/api/admin/generations/{generation}/drain"),
+                        &format!("/api/e2e/generations/{generation}/drain"),
                         None,
                     )
                     .await?;

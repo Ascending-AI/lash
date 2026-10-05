@@ -189,6 +189,36 @@ async fn generation(State(state): State<ReceiverState>) -> Json<lash::BuildGener
     Json(state.app.core.build_generation().clone())
 }
 
+/// What `generation` still holds, read from the serving (replacing) build.
+async fn generation_drain_status(
+    State(state): State<ReceiverState>,
+    Path(generation): Path<lash::BuildGeneration>,
+) -> AppResult<Json<lash::GenerationDrainStatus>> {
+    Ok(Json(
+        state
+            .app
+            .core
+            .generation_drain_status(&generation)
+            .await
+            .map_err(error)?,
+    ))
+}
+
+/// Drain `generation` from this replacing build: mark it and request every
+/// active Run's cut, exactly as an operator's drain does.
+async fn drain_generation(
+    State(state): State<ReceiverState>,
+    Path(generation): Path<lash::BuildGeneration>,
+) -> AppResult<Json<serde_json::Value>> {
+    let changed = state
+        .app
+        .core
+        .drain_generation(&generation)
+        .await
+        .map_err(error)?;
+    Ok(Json(serde_json::json!({"changed": changed})))
+}
+
 pub(crate) fn routes(state: ReceiverState) -> Router {
     Router::new()
         .route(
@@ -197,6 +227,10 @@ pub(crate) fn routes(state: ReceiverState) -> Router {
         )
         .route("/api/e2e/completions", axum::routing::post(resolve))
         .route("/api/e2e/generation", axum::routing::get(generation))
+        .route(
+            "/api/e2e/generations/{generation}/drain",
+            axum::routing::get(generation_drain_status).post(drain_generation),
+        )
         .route("/api/e2e/receiver/{chat_id}", axum::routing::post(setup))
         .route(
             "/api/e2e/receiver/{process_id}/receipts",
