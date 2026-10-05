@@ -251,6 +251,9 @@ pub use lash_core::facade_support::{
 /// validated at compile time.
 pub use lash_core::hook_key;
 pub use lash_core::runtime::ExternalCompletionError;
+/// How a turn coalesces its stream deltas into frames for the live feed
+/// (`LashCoreBuilder::delta_coalescing`).
+pub use lash_core::runtime::{DeltaCoalescing, DeltaCoalescingError};
 /// The immediate delivery verdict carried by a session deletion's wait.
 pub use lash_core::shift::relay::RelayVerdict;
 pub use lash_core::store::{

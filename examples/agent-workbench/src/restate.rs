@@ -157,7 +157,7 @@ impl WorkbenchButtonTriggerWorkflow for WorkbenchButtonTriggerWorkflowImpl {
         );
         // The trigger's work reaches the session durably, and the session's
         // engine executes it.
-        run_button_trigger(self.state.clone(), request, &controller)
+        Box::pin(run_button_trigger(self.state.clone(), request, &controller))
             .await
             .map_err(terminal_handler_error)?;
         Ok(Json(()))
@@ -190,7 +190,7 @@ impl WorkbenchMailReceivedWorkflow for WorkbenchMailReceivedWorkflowImpl {
             configured_restate_authority_id()?,
             self.state.core.build_generation().clone(),
         );
-        run_mail_received(self.state.clone(), request, &controller)
+        Box::pin(run_mail_received(self.state.clone(), request, &controller))
             .await
             .map_err(terminal_handler_error)?;
         Ok(Json(()))

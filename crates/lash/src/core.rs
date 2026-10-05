@@ -869,6 +869,7 @@ pub struct LashCoreBuilder {
     termination: Option<TerminationPolicy>,
     tool_source_policy: Option<lash_core::ToolSourcePolicy>,
     abort_drain_grace: Option<std::time::Duration>,
+    delta_coalescing: Option<crate::DeltaCoalescing>,
     tool_providers: Vec<Arc<dyn ToolProvider>>,
     plugin_stack: PluginStack,
     recovery_lease: Option<lash_core::engine::RecoveryLeaseConfig>,
@@ -902,6 +903,7 @@ impl LashCoreBuilder {
             termination: None,
             tool_source_policy: None,
             abort_drain_grace: None,
+            delta_coalescing: None,
             tool_providers: Vec::new(),
             plugin_stack: PluginStack::default(),
             recovery_lease: None,
@@ -1124,6 +1126,21 @@ impl LashCoreBuilder {
     /// recorded attempt preserves that disposition. Defaults to 2 seconds.
     pub fn abort_drain_grace(mut self, grace: std::time::Duration) -> Self {
         self.abort_drain_grace = Some(grace);
+        self
+    }
+
+    /// Choose how a turn coalesces the prose and reasoning deltas of a
+    /// stream block into frames before they reach the session's live feed:
+    /// the frame interval, the frame size cap, whether a block's first delta
+    /// is published at once, or [`DeltaCoalescing::off`](crate::DeltaCoalescing::off)
+    /// for one event per delta. A frame is cut early by any other event, so
+    /// the live feed keeps its order. Each frame is one live replay event
+    /// named by the delta range it covers, so a redrive never duplicates or
+    /// loses streamed text. Applies whatever live replay store the core
+    /// uses. Defaults to [`DeltaCoalescing::default`]: 50 ms frames of at
+    /// most 8 KiB, with an immediate first delta.
+    pub fn delta_coalescing(mut self, coalescing: crate::DeltaCoalescing) -> Self {
+        self.delta_coalescing = Some(coalescing);
         self
     }
 

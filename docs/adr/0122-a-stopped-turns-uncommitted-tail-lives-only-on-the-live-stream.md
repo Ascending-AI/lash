@@ -23,12 +23,12 @@ and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors
    after it enters the graph, `AssistantOutput`, history or the store.
 
 2. **The live stream is the contract.** Every host-visible observation is
-   published in order on its lane. A host that lags more than 100 queued
-   events behind gets later deltas of the same block merged into the queued
-   one, never dropped, including across a cancellation: a stopped turn
-   delivers every delta it queued. The observer holds that backlog for as
-   long as the host's sink takes to drain it; a sink that blocks delays the
-   turn's `published()` barrier, until the backlog drains.
+   published in order on its lane. Stream deltas arrive in frames (ADR 0002):
+   a host that lags gets later deltas of a block coalesced into the frame it
+   has not taken yet, never dropped, including across a cancellation: a
+   stopped turn delivers every delta it queued. The observer holds that
+   backlog for as long as the host's sink takes to drain it; a sink that
+   blocks delays the turn's `published()` barrier, until the backlog drains.
 
 3. **The tail is found by the marker.** The tail of an `Immediate` stop is
    the prose and reasoning deltas after the turn's last
@@ -67,20 +67,20 @@ and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors
   host that reconnects after the window, or follows a turn another process
   runs, cannot recover it; neither can lash.
 - A lagging host sees a cancelled turn's result only after the backlog ahead
-  of it. Merging joins consecutive deltas of one block; alternating blocks
-  and non-delta events each keep their own entry, so the backlog is bounded
-  by what the turn published, not by a fixed size.
+  of it. Framing joins consecutive deltas of one block up to a size cap;
+  alternating blocks and non-delta events each keep their own entry, so the
+  backlog is bounded by what the turn published, not by a fixed size.
 - The laws `runtime::stop_publication` (a provider failure's error, an
   `Immediate` cancel's terminal and a refused commit) and the observer laws
-  (merge across a cancellation, an alternating-block backlog, hold and
-  release, abandon) enforce decisions 2 and 5.
+  (a frame delivered whole before a cancellation's terminal, frames cut at
+  every other event, hold and release, abandon) enforce decisions 2 and 5.
 - `docs/observing-turns.md` states the contract for hosts.
 
 ## Implementation
 
-- `crates/lash-core/src/runtime/turn_observer.rs:55` sets the lag budget;
-  `:433` merges only matching deltas at the lagging tail of a lane;
-  `:189` holds, releases and abandons terminal observations.
+- `crates/lash-core/src/runtime/turn_observer/framing.rs` frames each lane's
+  deltas; `crates/lash-core/src/runtime/turn_observer.rs` holds, releases and
+  abandons terminal observations.
 - `crates/lash-core/src/runtime/turn_loop/commit.rs:349` abandons held
   terminals on a failed commit. Its accepted-commit path releases them.
 - `crates/lash-core/src/runtime/observation/replay.rs:22` defines the
@@ -88,7 +88,7 @@ and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors
 - `crates/lash/src/send/follow.rs:52` bounds the pre-adoption buffer.
 - `crates/lash-core/tests/runtime/stop_publication.rs` pins terminal
   publication; `crates/lash-core/src/runtime/turn_observer/tests.rs` pins
-  backlog merge, hold, release and abandon.
+  framing, hold, release and abandon.
 
 A separate durable tail would need another write and retention contract for
 output the host already receives live. This design keeps the last committed

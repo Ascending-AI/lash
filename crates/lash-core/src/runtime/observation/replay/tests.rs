@@ -330,6 +330,148 @@ fn an_abandoned_reservation_releases_the_activity_identity() {
     ));
 }
 
+/// Each replayed activity as `id=text`.
+fn activity_texts(events: &[Arc<SessionObservationEvent>]) -> Vec<String> {
+    events
+        .iter()
+        .map(|event| match &event.payload {
+            SessionObservationEventPayload::TurnActivity(crate::TurnActivity {
+                id,
+                event: crate::TurnEvent::AssistantProseDelta { text, .. },
+                ..
+            }) => format!("{}={text}", id.0),
+            other => format!("{other:?}"),
+        })
+        .collect()
+}
+
+/// A redrive that republishes a frame's deltas unmerged, or frames them
+/// differently, names them inside the ranges already delivered: no text
+/// lands twice, none is lost, and what follows still lands (FIG-5098).
+#[test]
+fn a_redrive_framed_differently_adds_no_text_twice_and_loses_none() {
+    let store = InMemoryLiveReplayStore::default();
+    let session = SessionId::from("framed-redrive");
+    let revision = SessionRevision::new(1);
+    let start = store.current_cursor(&session, revision);
+    for (id, text) in [("k#0", "a"), ("k#1..3", "bcd"), ("k#5..6", "fg")] {
+        store
+            .publish_test_event(&session, revision, None, activity_with_id(id, text))
+            .expect("first delivery");
+    }
+
+    // The redrive: the frame's deltas unmerged, then framed another way.
+    for (id, text) in [("k#0", "a"), ("k#1", "b"), ("k#2", "c"), ("k#3", "d")] {
+        assert!(
+            store
+                .prepare_publication(
+                    &session,
+                    revision,
+                    vec![LiveReplayEventDraft::new(
+                        None::<TurnId>,
+                        activity_with_id(id, text),
+                    )],
+                )
+                .and_then(|prepared| store.publish_prepared(prepared))
+                .expect("redeliver an unmerged original")
+                .is_empty(),
+            "{id} lies inside a delivered frame"
+        );
+    }
+    let reframed = store
+        .prepare_publication(
+            &session,
+            revision,
+            vec![
+                LiveReplayEventDraft::new(None::<TurnId>, activity_with_id("k#1..2", "bc")),
+                LiveReplayEventDraft::new(None::<TurnId>, activity_with_id("k#3..6", "dfg")),
+                LiveReplayEventDraft::new(None::<TurnId>, activity_with_id("k#7..8", "hi")),
+            ],
+        )
+        .and_then(|prepared| store.publish_prepared(prepared))
+        .expect("redeliver a different framing");
+    assert_eq!(activity_texts(&reframed), vec!["k#7..8=hi"]);
+
+    let LiveReplayOutcome::Replayed(events) = store.replay_after_cursor(&start).expect("replay")
+    else {
+        panic!("replay must succeed");
+    };
+    assert_eq!(
+        activity_texts(&events),
+        vec!["k#0=a", "k#1..3=bcd", "k#5..6=fg", "k#7..8=hi"]
+    );
+}
+
+/// A redelivered frame that is only partly delivered cannot be split: its
+/// deltas' text carries no boundaries. Publishing it would repeat the
+/// delivered part and dropping it would lose the rest unseen, so it is a
+/// gap: every cursor into the session reloads its snapshot, and the
+/// session's next activity starts fresh continuity (FIG-5098).
+#[test]
+fn a_redelivery_straddling_the_delivered_range_is_a_gap() {
+    use futures_util::FutureExt as _;
+    use futures_util::StreamExt as _;
+
+    let store = InMemoryLiveReplayStore::default();
+    let session = SessionId::from("straddled-redrive");
+    let revision = SessionRevision::new(1);
+    let start = store.current_cursor(&session, revision);
+    for (id, text) in [("k#0", "a"), ("k#1..2", "bc")] {
+        store
+            .publish_test_event(&session, revision, None, activity_with_id(id, text))
+            .expect("first delivery");
+    }
+    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
+        store.subscribe_after_cursor(&start).expect("subscribe")
+    else {
+        panic!("the cursor is within the window");
+    };
+
+    let straddling = store
+        .prepare_publication(
+            &session,
+            revision,
+            vec![LiveReplayEventDraft::new(
+                None::<TurnId>,
+                activity_with_id("k#2..4", "cde"),
+            )],
+        )
+        .and_then(|prepared| store.publish_prepared(prepared))
+        .expect("redeliver a straddling frame");
+    assert!(
+        straddling.is_empty(),
+        "the straddling frame is not published"
+    );
+
+    assert!(matches!(
+        store.replay_after_cursor(&start),
+        Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
+    ));
+    let mut delivered = Vec::new();
+    let closed = loop {
+        match subscription.next().now_or_never() {
+            Some(Some(Ok(event))) => delivered.push(event),
+            Some(Some(Err(LiveReplayStoreError::Closed))) => break true,
+            _ => break false,
+        }
+    };
+    assert_eq!(activity_texts(&delivered), vec!["k#0=a", "k#1..2=bc"]);
+    assert!(
+        closed,
+        "the live subscription closes: its observer reloads the snapshot"
+    );
+
+    let resumed = store.current_cursor(&session, revision);
+    store
+        .publish_test_event(&session, revision, None, activity_with_id("k#5..6", "fg"))
+        .expect("the next frame publishes");
+    let LiveReplayOutcome::Replayed(events) = store.replay_after_cursor(&resumed).expect("replay")
+    else {
+        panic!("continuity resumes after the gap");
+    };
+    assert_eq!(activity_texts(&events), vec!["k#5..6=fg"]);
+}
+
 #[test]
 fn session_cursor_rejects_malformed_and_wrong_session() {
     let malformed = SessionCursor::from_raw_for_testing("bad");

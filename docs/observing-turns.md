@@ -62,9 +62,15 @@ checkpoint, and never feeds it back
   replay of the process the turn runs in. A replay gap, a follower that lags
   its subscription and jumps to the head, or a turn that runs on another
   process without a shared live replay store loses the tail, and nothing can
-  recover it. A slow sink loses nothing: deltas that queue more than 100
-  events behind it merge into the queued delta of the same block, including
-  across a cancellation.
+  recover it. A slow sink loses nothing: the deltas it has not taken yet pile
+  into the frame of their block, including across a cancellation.
+- **A delta is appended text, often several tokens.** By default the first
+  prose or reasoning delta of a block arrives at once, and the block's later
+  deltas arrive coalesced into frames of about 50 ms, cut early by any other
+  event. `LashCoreBuilder::delta_coalescing` sets the interval, the frame size
+  cap and the first-delta flush, or turns coalescing off. Append each delta's text to its block, as
+  for a single token. A frame's activity ID names the delta range it covers,
+  so a redrive never repeats or drops streamed text on the live stream.
 - **`Stopped` is published only after its commit.** A stopped turn's terminal
   (the `Done` a cancel records, an `Error`, `TurnOutcome { Stopped }` and the
   final `Done`) reaches you only once the turn's commit is accepted. A commit

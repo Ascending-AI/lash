@@ -93,6 +93,9 @@ impl LashCoreBuilder {
         if let Some(grace) = self.abort_drain_grace.take() {
             core.control.abort_drain_grace = grace;
         }
+        if let Some(coalescing) = self.delta_coalescing.take() {
+            core.control.delta_coalescing = coalescing;
+        }
         // The host's delivery bound is the one relay-policy source: the
         // recovery pass's relays and every immediate `deliver_now` derive
         // theirs from it (FIG-4246).

@@ -1265,12 +1265,47 @@ impl fmt::Debug for TurnContext {
 }
 
 /// Stable identifier for a semantic turn activity.
+///
+/// An activity a shift observation yields is named by the observation's
+/// replay key and ordinal, `{key}#{ordinal}`; a frame of coalesced stream
+/// deltas is named by the ordinal range it covers, `{key}#{first}..{last}`
+/// (FIG-5098). Both re-derive identically on a redrive, which is what lets a
+/// live replay store drop what it already delivered. Any other id is opaque.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct TurnActivityId(pub Arc<str>);
 impl TurnActivityId {
     pub fn new(id: impl Into<Arc<str>>) -> Self {
         Self(id.into())
+    }
+
+    /// The id of the activity observed under `key` at `ordinal`.
+    pub fn observed(key: impl fmt::Display, ordinal: u32) -> Self {
+        Self(format!("{key}#{ordinal}").into())
+    }
+
+    /// The id of a frame covering the observations of `key` from `first`
+    /// through `last`; a one-ordinal range is that observation's own id.
+    pub fn observed_range(key: impl fmt::Display, first: u32, last: u32) -> Self {
+        if first == last {
+            Self::observed(key, first)
+        } else {
+            Self(format!("{key}#{first}..{last}").into())
+        }
+    }
+
+    /// The replay key and ordinal range this id names, or `None` for an id
+    /// not minted from observations.
+    pub fn observed_span(&self) -> Option<(&str, std::ops::RangeInclusive<u32>)> {
+        let (key, ordinals) = self.0.rsplit_once('#')?;
+        let (first, last) = match ordinals.split_once("..") {
+            Some((first, last)) => (first.parse().ok()?, last.parse().ok()?),
+            None => {
+                let ordinal = ordinals.parse().ok()?;
+                (ordinal, ordinal)
+            }
+        };
+        (first <= last).then_some((key, first..=last))
     }
 }
 

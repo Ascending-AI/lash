@@ -333,8 +333,11 @@ impl LashRuntime {
             TurnAddress::new(&self.state.session_id, &run),
         )
         .await?;
-        let (observer, _observations) =
-            TurnObserver::open(opts.events_or_noop(), opts.turn_events_or_noop());
+        let (observer, _observations) = TurnObserver::open(
+            opts.events_or_noop(),
+            opts.turn_events_or_noop(),
+            self.delta_framing(),
+        );
         let admissions = LogicalTurnAdmissions::new(Vec::new(), Vec::new());
         let pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),

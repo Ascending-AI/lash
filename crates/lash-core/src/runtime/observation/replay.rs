@@ -2,7 +2,7 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex as StdMutex, Weak};
@@ -23,10 +23,13 @@ const DEFAULT_LIVE_REPLAY_CAPACITY: usize = 2048;
 const DEFAULT_LIVE_REPLAY_TTL: Duration = Duration::from_secs(120);
 const EXPIRY_WORK_PER_CALL: usize = 64;
 
+#[path = "replay/activity_spans.rs"]
+mod activity_spans;
 #[path = "replay/bytes.rs"]
 mod bytes;
 #[path = "replay/retention.rs"]
 mod retention;
+use activity_spans::{Claim, DeliveredActivities};
 use retention::ReplayRetention;
 
 #[derive(
@@ -677,6 +680,16 @@ pub enum SessionObservationSubscription {
 pub trait LiveReplayStore: Send + Sync {
     /// Reserve an ordered cursor batch without making it replay-visible.
     ///
+    /// A `TurnActivity` draft whose id the session already holds is a
+    /// redelivery and reserves nothing. Ids that name observations
+    /// ([`TurnActivityId::observed_span`](crate::TurnActivityId::observed_span))
+    /// compare by the ordinals they cover, not literally: a draft inside the
+    /// span of its replay key the session holds is dropped, one wholly
+    /// outside it is published, and one that straddles its edge is not
+    /// published and invalidates the session's continuity, as
+    /// [`invalidate_session`](Self::invalidate_session) does, because its
+    /// undelivered text cannot be cut from its delivered text (FIG-5098).
+    ///
     /// This must be fast and nonblocking from the runtime's point of view.
     fn prepare_publication(
         &self,
@@ -849,12 +862,13 @@ struct LiveReplaySessionBuffer {
     settled_position: u64,
     unavailable_through: u64,
     reservations: BTreeMap<u64, ReservedPublication>,
-    /// Delivered `TurnActivity` identities (`{replay key}#{ordinal}`) with
-    /// the live position each holds in `events`. A replayed shift region or
-    /// a journaled step re-executed after a mid-run suspension re-publishes
-    /// the observations its first attempt already delivered; `prepare_publication`
-    /// collapses those redeliveries into the stored copy (FIG-3753).
-    delivered_activity_positions: HashMap<crate::TurnActivityId, u64>,
+    /// Delivered `TurnActivity` identities with the live position each holds
+    /// in `events`. A replayed shift region or a journaled step re-executed
+    /// after a mid-run suspension re-publishes the observations its first
+    /// attempt already delivered, framed alike or not; `prepare_publication`
+    /// collapses those redeliveries into the stored copies (FIG-3753), by the
+    /// ordinal ranges they cover (FIG-5098, `activity_spans`).
+    delivered_activities: DeliveredActivities,
     sender: Option<broadcast::Sender<ReplayNotification>>,
 }
 
@@ -871,30 +885,34 @@ impl LiveReplaySessionBuffer {
             settled_position: first_position,
             unavailable_through: 0,
             reservations: BTreeMap::new(),
-            delivered_activity_positions: HashMap::new(),
+            delivered_activities: DeliveredActivities::default(),
             sender: None,
         }
     }
 
-    /// Whether this activity identity is already appended to `events` or
-    /// carried by an in-flight reservation. An `Abandoned` reservation never
-    /// reached an observer, so it does not claim the identity.
-    fn turn_activity_delivered(&self, id: &crate::TurnActivityId) -> bool {
-        self.delivered_activity_positions.contains_key(id)
-            || self.reservations.values().any(|reservation| {
-                let events = match &reservation.state {
-                    ReservedPublicationState::Pending(events)
-                    | ReservedPublicationState::Ready(events) => events,
-                    ReservedPublicationState::Abandoned => return false,
-                };
-                events.iter().any(|event| {
-                    matches!(
-                        &event.payload,
-                        SessionObservationEventPayload::TurnActivity(activity)
-                            if activity.id == *id
-                    )
-                })
+    /// How this activity identity meets those appended to `events`, carried
+    /// by an in-flight reservation, or `claimed` earlier in the same batch.
+    /// An `Abandoned` reservation never reached an observer, so it claims
+    /// nothing.
+    fn claim_turn_activity(
+        &self,
+        id: &crate::TurnActivityId,
+        claimed: &[crate::TurnActivityId],
+    ) -> Claim {
+        let reserved = self
+            .reservations
+            .values()
+            .flat_map(|reservation| match &reservation.state {
+                ReservedPublicationState::Pending(events)
+                | ReservedPublicationState::Ready(events) => events.as_slice(),
+                ReservedPublicationState::Abandoned => &[],
             })
+            .filter_map(|event| match &event.payload {
+                SessionObservationEventPayload::TurnActivity(activity) => Some(&activity.id),
+                _ => None,
+            });
+        self.delivered_activities
+            .claim(id, reserved.chain(claimed.iter()))
     }
 
     /// Drop the oldest stored event and release the activity identity it
@@ -902,10 +920,9 @@ impl LiveReplaySessionBuffer {
     fn drop_front(&mut self) {
         if let Some(stored) = self.events.pop_front() {
             self.retained_bytes -= stored.retained_bytes;
-            if let SessionObservationEventPayload::TurnActivity(activity) = &stored.event.payload
-                && self.delivered_activity_positions.get(&activity.id) == Some(&stored.position)
-            {
-                self.delivered_activity_positions.remove(&activity.id);
+            if let SessionObservationEventPayload::TurnActivity(activity) = &stored.event.payload {
+                self.delivered_activities
+                    .remove(&activity.id, stored.position);
             }
         }
     }
@@ -1015,9 +1032,7 @@ impl InMemoryLiveReplayStore {
                         if let SessionObservationEventPayload::TurnActivity(activity) =
                             &event.payload
                         {
-                            buffer
-                                .delivered_activity_positions
-                                .insert(activity.id.clone(), position);
+                            buffer.delivered_activities.insert(&activity.id, position);
                         }
                         buffer.events.push_back(StoredObservationEvent {
                             retained_bytes,
@@ -1112,10 +1127,11 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let mut sessions = self.sessions.lock_recover();
         sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
         sessions.ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)?;
-        let (drafts, start_position, end_position, incarnation) = sessions
+        let (drafts, overlapping) = sessions
             .update(session_id, |buffer| {
                 Self::trim_locked(&self.config, buffer, now);
-                let mut claimed_activity_ids = HashSet::new();
+                let mut claimed = Vec::new();
+                let mut overlapping = false;
                 let drafts = drafts
                     .into_iter()
                     .filter(|draft| {
@@ -1123,10 +1139,25 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                         else {
                             return true;
                         };
-                        claimed_activity_ids.insert(activity.id.clone())
-                            && !buffer.turn_activity_delivered(&activity.id)
+                        let claim = buffer.claim_turn_activity(&activity.id, &claimed);
+                        claimed.push(activity.id.clone());
+                        overlapping |= claim == Claim::Overlapping;
+                        claim == Claim::Fresh
                     })
                     .collect::<Vec<_>>();
+                (drafts, overlapping)
+            })
+            .ok_or_else(|| LiveReplayStoreError::Store("live replay session is missing".into()))?;
+        if overlapping {
+            // A redelivery that is only partly delivered is a gap: its
+            // undelivered text cannot be cut out of the delivered part, so
+            // continuity is invalidated rather than text duplicated or lost
+            // (`activity_spans`).
+            sessions.remove(session_id);
+            sessions.ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)?;
+        }
+        let (drafts, start_position, end_position, incarnation) = sessions
+            .update(session_id, |buffer| {
                 let start_position = buffer.tail_position.checked_add(1);
                 let end_position = u64::try_from(drafts.len())
                     .ok()

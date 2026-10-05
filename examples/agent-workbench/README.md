@@ -211,6 +211,12 @@ Configuration is read from `.env` or the process environment:
   workbench session, default `200000`. Values must be integers of at least
   `40000`, twice the plugin's compaction buffer (currently 20,000), so the
   threshold leaves a useful prompt band before compaction.
+- `AGENT_WORKBENCH_DELTA_FRAME_MS`, `AGENT_WORKBENCH_DELTA_FRAME_MAX_BYTES`,
+  `AGENT_WORKBENCH_DELTA_FIRST_IMMEDIATE`: how the live feed coalesces
+  streamed prose and reasoning deltas (`lash::DeltaCoalescing`). Defaults
+  `50`, `8192` and `true`: 50 ms frames of at most 8 KiB, with each block's
+  first delta sent at once. `AGENT_WORKBENCH_DELTA_FRAME_MS=off` (or `0`)
+  sends one event per delta. Out-of-range values refuse to start.
 - `AGENT_WORKBENCH_LEASE_HOST_ID`: identity of this workbench's PID namespace
   among every instance sharing the session store. Set it to a unique pod or
   container id when `/etc/machine-id` may be baked into the image; otherwise

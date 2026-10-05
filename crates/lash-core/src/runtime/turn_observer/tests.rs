@@ -1,11 +1,16 @@
 use std::future::Future;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
-use super::{LAG_BUDGET, ObservationSource, RuntimeStreamEvent, TurnObservations, TurnObserver};
+use lash_sansio::sync::MutexExt;
+
+use super::{DeltaFraming, ObservationSource, RuntimeStreamEvent, TurnObservations, TurnObserver};
 use crate::engine::{
     ObservationCursor, ObservationSink, ObservedEvent, ReplayKey, ShiftObservation,
 };
 use crate::llm::types::StreamBlockIdentity;
+use crate::runtime::{DeltaCoalescing, DeltaCoalescingError};
 use crate::session_model::SessionStreamEvent;
 use crate::{
     TurnActivity, TurnActivityId, TurnCancellationEvidence, TurnEvent, TurnOutcome, TurnStop,
@@ -56,39 +61,43 @@ fn delta(
 /// and a label.
 fn drain(observations: &mut TurnObservations) -> Vec<(String, String, String)> {
     std::iter::from_fn(|| observations.try_take())
-        .map(|event| match event {
-            RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content, block }) => {
-                ("session_text".into(), block.id, content)
-            }
-            RuntimeStreamEvent::Session(SessionStreamEvent::ReasoningDelta { content, block }) => {
-                ("session_reasoning".into(), block.id, content)
-            }
-            RuntimeStreamEvent::Turn(TurnActivity {
-                correlation_id,
-                event: TurnEvent::AssistantProseDelta { text, .. },
-                ..
-            }) => (
-                "turn_text".into(),
-                correlation_id.0.to_string(),
-                text.to_string(),
-            ),
-            RuntimeStreamEvent::Turn(TurnActivity {
-                correlation_id,
-                event: TurnEvent::ReasoningDelta { text, .. },
-                ..
-            }) => (
-                "turn_reasoning".into(),
-                correlation_id.0.to_string(),
-                text.to_string(),
-            ),
-            RuntimeStreamEvent::Session(other) => {
-                ("session".into(), String::new(), format!("{other:?}"))
-            }
-            RuntimeStreamEvent::Turn(other) => {
-                ("turn".into(), String::new(), format!("{:?}", other.event))
-            }
-        })
+        .map(describe)
         .collect()
+}
+
+fn describe(event: RuntimeStreamEvent) -> (String, String, String) {
+    match event {
+        RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content, block }) => {
+            ("session_text".into(), block.id, content)
+        }
+        RuntimeStreamEvent::Session(SessionStreamEvent::ReasoningDelta { content, block }) => {
+            ("session_reasoning".into(), block.id, content)
+        }
+        RuntimeStreamEvent::Turn(TurnActivity {
+            correlation_id,
+            event: TurnEvent::AssistantProseDelta { text, .. },
+            ..
+        }) => (
+            "turn_text".into(),
+            correlation_id.0.to_string(),
+            text.to_string(),
+        ),
+        RuntimeStreamEvent::Turn(TurnActivity {
+            correlation_id,
+            event: TurnEvent::ReasoningDelta { text, .. },
+            ..
+        }) => (
+            "turn_reasoning".into(),
+            correlation_id.0.to_string(),
+            text.to_string(),
+        ),
+        RuntimeStreamEvent::Session(other) => {
+            ("session".into(), String::new(), format!("{other:?}"))
+        }
+        RuntimeStreamEvent::Turn(other) => {
+            ("turn".into(), String::new(), format!("{:?}", other.event))
+        }
+    }
 }
 
 fn row(lane: &str, block: &str, text: &str) -> (String, String, String) {
@@ -107,64 +116,312 @@ fn marker(observer: &TurnObserver, cursor: &mut ObservationCursor, label: &str) 
     );
 }
 
-#[test]
-fn a_lagging_single_lane_host_gets_merged_deltas() {
-    // An activity-only host: session events are never queued, so no pairs.
-    let (observer, mut observations) = TurnObserver::with_quiet_lanes(true, false);
-    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
-    for index in 0..LAG_BUDGET {
-        marker(&observer, &mut cursor, &index.to_string());
+/// A clock the test moves by hand. A frame timer never fires on its own:
+/// the publisher sees a frame fall due only once the clock is advanced.
+#[derive(Debug)]
+struct HandClock {
+    start: Instant,
+    elapsed: Mutex<Duration>,
+}
+
+impl HandClock {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            start: Instant::now(),
+            elapsed: Mutex::new(Duration::ZERO),
+        })
     }
-    for index in 0..50 {
-        delta(&observer, &mut cursor, false, "A", &format!("<{index}>"));
+
+    fn advance(&self, by: Duration) {
+        *self.elapsed.lock_recover() += by;
     }
-    let rows = drain(&mut observations);
-    let text = (0..50)
-        .map(|index| format!("<{index}>"))
-        .collect::<String>();
-    assert_eq!(rows.len(), LAG_BUDGET + 1);
-    assert_eq!(rows[LAG_BUDGET], row("turn_text", "A", &text));
+}
+
+#[async_trait::async_trait]
+impl crate::Clock for HandClock {
+    fn now(&self) -> Instant {
+        self.start + *self.elapsed.lock_recover()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::UNIX_EPOCH
+    }
+
+    async fn sleep(&self, _duration: Duration) {
+        std::future::pending::<()>().await;
+    }
+
+    async fn sleep_until(&self, _deadline: Instant) {
+        std::future::pending::<()>().await;
+    }
+}
+
+const INTERVAL: Duration = DeltaCoalescing::DEFAULT_INTERVAL;
+const MAX_FRAME_BYTES: usize = DeltaCoalescing::DEFAULT_MAX_FRAME_BYTES;
+
+/// An observer whose host listens to both lanes, framing by default on
+/// `clock`.
+fn framed(clock: &Arc<HandClock>) -> (TurnObserver, TurnObservations) {
+    framed_with(clock, DeltaCoalescing::default(), false)
+}
+
+fn framed_with(
+    clock: &Arc<HandClock>,
+    coalescing: DeltaCoalescing,
+    quiet_sessions: bool,
+) -> (TurnObserver, TurnObservations) {
+    TurnObserver::with_quiet_lanes(
+        quiet_sessions,
+        false,
+        DeltaFraming {
+            clock: Arc::clone(clock) as Arc<dyn crate::Clock>,
+            coalescing,
+        },
+    )
+}
+
+/// What the publisher takes now, as `(lane, block, text)` rows, marking each
+/// taken event published.
+fn publish_ready(observations: &mut TurnObservations) -> Vec<(String, String, String)> {
+    let waker = std::task::Waker::noop();
+    let mut context = Context::from_waker(waker);
+    let mut taken = Vec::new();
+    while let Poll::Ready(Some(observation)) = observations.poll_next(&mut context) {
+        observations.published_one();
+        taken.push(observation.event);
+    }
+    taken.into_iter().map(describe).collect()
+}
+
+/// Each activity the queue holds, as its id and text.
+fn activity_ids(observations: &mut TurnObservations) -> Vec<(String, String)> {
+    std::iter::from_fn(|| observations.try_take())
+        .filter_map(|event| match event {
+            RuntimeStreamEvent::Turn(TurnActivity {
+                id,
+                event: TurnEvent::AssistantProseDelta { text, .. },
+                ..
+            }) => Some((id.0.to_string(), text.to_string())),
+            RuntimeStreamEvent::Turn(TurnActivity { id, .. }) => {
+                Some((id.0.to_string(), String::new()))
+            }
+            RuntimeStreamEvent::Session(_) => None,
+        })
+        .collect()
 }
 
 #[test]
-fn each_lane_merges_on_its_own_and_never_across_blocks_kinds_or_events() {
-    let (observer, mut observations) = TurnObserver::unread();
+fn the_first_delta_of_a_block_is_published_at_once_and_the_rest_when_the_frame_falls_due() {
+    let clock = HandClock::new();
+    let (observer, mut observations) = framed(&clock);
     let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
-    for index in 0..LAG_BUDGET {
-        marker(&observer, &mut cursor, &index.to_string());
+    delta(&observer, &mut cursor, false, "A", "first");
+    assert_eq!(
+        publish_ready(&mut observations),
+        vec![
+            row("session_text", "A", "first"),
+            row("turn_text", "A", "first")
+        ],
+        "time to first token never waits on a frame"
+    );
+
+    for text in ["a", "b", "c"] {
+        delta(&observer, &mut cursor, false, "A", text);
     }
-    // The first event beyond the budget is queued as it is; later ones merge.
-    delta(&observer, &mut cursor, false, "A", "a1");
-    delta(&observer, &mut cursor, false, "A", "a2");
-    delta(&observer, &mut cursor, false, "B", "b");
-    delta(&observer, &mut cursor, true, "B", "r1");
-    delta(&observer, &mut cursor, true, "B", "r2");
-    marker(&observer, &mut cursor, "semantic");
-    delta(&observer, &mut cursor, true, "B", "s");
+    clock.advance(INTERVAL - Duration::from_millis(1));
+    assert_eq!(publish_ready(&mut observations), Vec::new());
+    clock.advance(Duration::from_millis(1));
+    assert_eq!(
+        publish_ready(&mut observations),
+        vec![
+            row("session_text", "A", "abc"),
+            row("turn_text", "A", "abc")
+        ],
+        "the frame is due its interval after it opened"
+    );
+
+    // A host that has not taken the due frame keeps getting it extended.
+    delta(&observer, &mut cursor, false, "A", "d");
+    clock.advance(INTERVAL * 3);
+    delta(&observer, &mut cursor, false, "A", "e");
+    assert_eq!(
+        publish_ready(&mut observations),
+        vec![row("session_text", "A", "de"), row("turn_text", "A", "de")]
+    );
+}
+
+#[test]
+fn a_frame_is_cut_before_any_other_event_and_never_spans_blocks_kinds_or_turns() {
+    let clock = HandClock::new();
+    let (observer, mut observations) = framed(&clock);
+    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
+    for text in ["a1", "a2", "a3"] {
+        delta(&observer, &mut cursor, false, "A", text);
+    }
+    marker(&observer, &mut cursor, "tool");
+    for text in ["a4", "a5"] {
+        delta(&observer, &mut cursor, false, "A", text);
+    }
+    // Alternating blocks: each delta is the first of its block again.
+    delta(&observer, &mut cursor, false, "B", "b1");
+    delta(&observer, &mut cursor, false, "A", "a6");
+    delta(&observer, &mut cursor, true, "A", "r1");
+    delta(&observer, &mut cursor, true, "A", "r2");
+    // The same block on another physical turn is another frame.
+    let other_turn = observer.for_turn(&crate::TurnId::fixture("turn-2".to_string()));
+    delta(&other_turn, &mut cursor, true, "A", "r3");
     observer.publish(RuntimeStreamEvent::Session(SessionStreamEvent::Done));
-    delta(&observer, &mut cursor, true, "B", "t");
+
     let rows = drain(&mut observations);
-    let semantic = format!(
-        "{:?}",
-        TurnEvent::Error {
-            message: "semantic".into()
-        }
+    let lane_rows = |lane: &str| {
+        rows.iter()
+            .filter(|(row_lane, _, _)| row_lane.starts_with(lane))
+            .map(|(lane, block, text)| format!("{lane}:{block}:{text}"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        lane_rows("turn"),
+        vec![
+            "turn_text:A:a1",
+            "turn_text:A:a2a3",
+            "turn::Error { message: \"tool\" }",
+            "turn_text:A:a4a5",
+            "turn_text:B:b1",
+            "turn_text:A:a6",
+            "turn_reasoning:A:r1",
+            "turn_reasoning:A:r2",
+            "turn_reasoning:A:r3",
+        ]
     );
     assert_eq!(
-        rows[LAG_BUDGET..].to_vec(),
+        lane_rows("session"),
         vec![
-            row("session_text", "A", "a1a2"),
-            row("turn_text", "A", "a1a2"),
-            row("session_text", "B", "b"),
-            row("turn_text", "B", "b"),
-            // The activity lane's own event stops its merge; the session
-            // lane has none in between, so it keeps merging until `Done`.
-            row("session_reasoning", "B", "r1r2s"),
-            row("turn_reasoning", "B", "r1r2"),
-            row("turn", "", &semantic),
-            row("turn_reasoning", "B", "st"),
-            row("session", "", "Done"),
-            row("session_reasoning", "B", "t"),
+            "session_text:A:a1",
+            "session_text:A:a2a3",
+            "session_text:A:a4a5",
+            "session_text:B:b1",
+            "session_text:A:a6",
+            "session_reasoning:A:r1",
+            "session_reasoning:A:r2r3",
+            "session::Done",
+        ],
+        "any lane's event cuts every frame; session deltas carry no turn"
+    );
+}
+
+#[test]
+fn a_frame_names_the_observation_range_it_covers() {
+    let clock = HandClock::new();
+    // An activity-only host, as engine runs have.
+    let (observer, mut observations) = framed_with(&clock, DeltaCoalescing::default(), true);
+    let mut cursor = ObservationCursor::new(ReplayKey::new("k"));
+    for text in ["a", "b", "c", "d"] {
+        delta(&observer, &mut cursor, false, "A", text);
+    }
+    marker(&observer, &mut cursor, "tool");
+    delta(&observer, &mut cursor, false, "A", "e");
+    delta(&observer, &mut cursor, false, "A", "f");
+    assert_eq!(
+        activity_ids(&mut observations),
+        vec![
+            ("k#0".into(), "a".into()),
+            ("k#1..3".into(), "bcd".into()),
+            ("k#4".into(), String::new()),
+            ("k#5..6".into(), "ef".into()),
+        ]
+    );
+}
+
+#[test]
+fn a_hosts_coalescing_terms_take_effect() {
+    let clock = HandClock::new();
+    let mut cursor = ObservationCursor::new(ReplayKey::new("k"));
+
+    // A longer interval, a smaller cap and no immediate first delta.
+    let interval = Duration::from_millis(200);
+    let terms = DeltaCoalescing::new(interval, 4, false).expect("in range");
+    let (observer, mut observations) = framed_with(&clock, terms, true);
+    for text in ["ab", "cd"] {
+        delta(&observer, &mut cursor, false, "A", text);
+    }
+    clock.advance(INTERVAL);
+    assert_eq!(
+        publish_ready(&mut observations),
+        Vec::new(),
+        "even the first delta waits for its frame, due after the longer interval"
+    );
+    delta(&observer, &mut cursor, false, "A", "e");
+    assert_eq!(
+        publish_ready(&mut observations),
+        vec![row("turn_text", "A", "abcd")],
+        "the frame is cut at four bytes"
+    );
+    clock.advance(interval - INTERVAL);
+    assert_eq!(publish_ready(&mut observations), Vec::new());
+    clock.advance(INTERVAL);
+    assert_eq!(
+        publish_ready(&mut observations),
+        vec![row("turn_text", "A", "e")]
+    );
+
+    // Off: one event per delta, each under its own observation's id.
+    let (observer, mut observations) = framed_with(&clock, DeltaCoalescing::off(), true);
+    for text in ["f", "g", "h"] {
+        delta(&observer, &mut cursor, false, "A", text);
+    }
+    assert_eq!(
+        activity_ids(&mut observations),
+        vec![
+            ("k#3".into(), "f".into()),
+            ("k#4".into(), "g".into()),
+            ("k#5".into(), "h".into()),
+        ]
+    );
+    assert!(
+        DeltaCoalescing::new(Duration::ZERO, 1, true)
+            .expect("zero is off")
+            .is_off()
+    );
+}
+
+#[test]
+fn out_of_range_coalescing_terms_are_refused() {
+    assert!(matches!(
+        DeltaCoalescing::new(
+            DeltaCoalescing::MAX_INTERVAL + Duration::from_millis(1),
+            1,
+            true
+        ),
+        Err(DeltaCoalescingError::Interval { .. })
+    ));
+    for max_frame_bytes in [0, DeltaCoalescing::MAX_FRAME_BYTES + 1] {
+        assert!(matches!(
+            DeltaCoalescing::new(INTERVAL, max_frame_bytes, true),
+            Err(DeltaCoalescingError::MaxFrameBytes { .. })
+        ));
+    }
+}
+
+#[test]
+fn a_frame_is_cut_at_its_size_cap() {
+    let clock = HandClock::new();
+    let (observer, mut observations) = framed(&clock);
+    let mut cursor = ObservationCursor::new(ReplayKey::new("k"));
+    let chunk = "x".repeat(MAX_FRAME_BYTES / 2);
+    for _ in 0..6 {
+        delta(&observer, &mut cursor, false, "A", &chunk);
+    }
+    let sizes = activity_ids(&mut observations)
+        .into_iter()
+        .map(|(id, text)| (id, text.len()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sizes,
+        vec![
+            ("k#0".into(), MAX_FRAME_BYTES / 2),
+            ("k#1..2".into(), MAX_FRAME_BYTES),
+            ("k#3..4".into(), MAX_FRAME_BYTES),
+            ("k#5".into(), MAX_FRAME_BYTES / 2),
         ]
     );
 }
@@ -181,62 +438,55 @@ fn stopped_cancelled(observer: &TurnObserver, cursor: &mut ObservationCursor) {
 }
 
 #[test]
-fn a_cancellation_keeps_every_lagging_delta_merged() {
-    let (observer, mut observations) = TurnObserver::unread();
+fn a_cancellation_delivers_the_open_frame_whole_before_the_terminal() {
+    let clock = HandClock::new();
+    let (observer, mut observations) = framed(&clock);
     let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
-    for index in 0..LAG_BUDGET / 2 {
-        delta(&observer, &mut cursor, false, "A", &index.to_string());
-    }
-    marker(&observer, &mut cursor, "tool");
     for index in 0..40 {
-        delta(&observer, &mut cursor, false, "A", &format!("late{index}"));
+        delta(&observer, &mut cursor, false, "A", &format!("<{index}>"));
     }
     stopped_cancelled(&observer, &mut cursor);
     cursor.observe(&observer, ObservedEvent::Session(SessionStreamEvent::Done));
-    let rows = drain(&mut observations);
+    let rows = publish_ready(&mut observations);
 
-    assert_eq!(rows.len(), LAG_BUDGET + 5, "{:?}", &rows[LAG_BUDGET..]);
-    assert!(
-        rows[..LAG_BUDGET]
-            .iter()
-            .all(|(lane, _, _)| lane.ends_with("_text")),
-        "the deltas next in line for the host are kept"
-    );
-    let late = (0..40)
-        .map(|index| format!("late{index}"))
+    let tail = (1..40)
+        .map(|index| format!("<{index}>"))
         .collect::<String>();
-    let beyond = &rows[LAG_BUDGET..];
-    assert!(beyond[0].2.contains("\"tool\""), "{beyond:?}");
-    // The lagging tail survives the cancellation whole, merged per lane.
-    assert_eq!(beyond[1], row("session_text", "A", &late));
-    assert_eq!(beyond[2], row("turn_text", "A", &late));
-    assert!(beyond[3].2.contains("Cancelled"), "{beyond:?}");
-    assert_eq!(beyond[4].2, "Done");
+    assert_eq!(rows.len(), 6, "{rows:?}");
+    assert_eq!(rows[0], row("session_text", "A", "<0>"));
+    assert_eq!(rows[1], row("turn_text", "A", "<0>"));
+    assert_eq!(rows[2], row("session_text", "A", &tail));
+    assert_eq!(rows[3], row("turn_text", "A", &tail));
+    assert!(rows[4].2.contains("Cancelled"), "{rows:?}");
+    assert_eq!(rows[5].2, "Done");
 }
 
 #[test]
-fn a_cancellation_keeps_an_alternating_block_backlog_whole() {
-    // Blocks that alternate never merge, so the backlog grows past the
-    // budget one delta at a time on both lanes.
-    let (observer, mut observations) = TurnObserver::unread();
+fn awaiting_published_and_closing_cut_every_open_frame() {
+    let clock = HandClock::new();
+    let (observer, mut observations) = framed(&clock);
     let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
-    for index in 0..LAG_BUDGET {
-        marker(&observer, &mut cursor, &index.to_string());
-    }
-    let mut expected = Vec::new();
-    for index in 0..30 {
-        let block = if index % 2 == 0 { "A" } else { "B" };
-        let text = format!("<{index}>");
-        delta(&observer, &mut cursor, false, block, &text);
-        expected.push(row("session_text", block, &text));
-        expected.push(row("turn_text", block, &text));
-    }
-    stopped_cancelled(&observer, &mut cursor);
-    let rows = drain(&mut observations);
+    delta(&observer, &mut cursor, false, "A", "a");
+    delta(&observer, &mut cursor, false, "A", "b");
+    publish_ready(&mut observations);
+    let waker = std::task::Waker::noop();
+    let mut context = Context::from_waker(waker);
+    let mut published = std::pin::pin!(observer.published());
+    assert_eq!(published.as_mut().poll(&mut context), Poll::Pending);
+    assert_eq!(
+        publish_ready(&mut observations),
+        vec![row("session_text", "A", "b"), row("turn_text", "A", "b")],
+        "the turn's last frame never waits out its interval"
+    );
+    assert_eq!(published.as_mut().poll(&mut context), Poll::Ready(()));
 
-    assert_eq!(rows.len(), LAG_BUDGET + 61, "{:?}", &rows[LAG_BUDGET..]);
-    assert_eq!(rows[LAG_BUDGET..LAG_BUDGET + 60].to_vec(), expected);
-    assert!(rows[LAG_BUDGET + 60].2.contains("Cancelled"));
+    delta(&observer, &mut cursor, false, "A", "c");
+    observations.close();
+    assert_eq!(
+        publish_ready(&mut observations),
+        vec![row("session_text", "A", "c"), row("turn_text", "A", "c")],
+        "a closed queue keeps what it holds, open frames included"
+    );
 }
 
 #[test]

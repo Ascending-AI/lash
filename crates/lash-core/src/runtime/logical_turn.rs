@@ -456,6 +456,14 @@ impl LashRuntime {
         }
     }
 
+    /// How this runtime's turns frame their stream deltas for the host.
+    pub(super) fn delta_framing(&self) -> super::turn_observer::DeltaFraming {
+        super::turn_observer::DeltaFraming {
+            clock: std::sync::Arc::clone(&self.host.core.clock),
+            coalescing: self.host.core.control.delta_coalescing,
+        }
+    }
+
     /// Execute one logical turn while everything it publishes reaches the host
     /// sinks outside the shift.
     ///
@@ -476,7 +484,8 @@ impl LashRuntime {
         shift_fence: Option<&ShiftFence>,
         stopwatch: TurnStopwatch,
     ) -> Result<AgentFrameRun, RuntimeError> {
-        let (observer, mut observations) = TurnObserver::open(events, turn_events);
+        let (observer, mut observations) =
+            TurnObserver::open(events, turn_events, self.delta_framing());
         let shift = std::pin::pin!(self.execute_observed_logical_turn(
             start,
             &observer,

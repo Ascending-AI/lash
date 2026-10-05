@@ -41,26 +41,6 @@ fn terminal_attempt_position_tracks_observed_stream_state() {
     );
 }
 
-fn projected_delta(event: &RuntimeStreamEvent) -> Option<(&'static str, &str)> {
-    match event {
-        RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content, .. }) => {
-            Some(("session_text", content))
-        }
-        RuntimeStreamEvent::Session(SessionStreamEvent::ReasoningDelta { content, .. }) => {
-            Some(("session_reasoning", content))
-        }
-        RuntimeStreamEvent::Turn(TurnActivity {
-            event: TurnEvent::AssistantProseDelta { text, .. },
-            ..
-        }) => Some(("turn_text", text.as_ref())),
-        RuntimeStreamEvent::Turn(TurnActivity {
-            event: TurnEvent::ReasoningDelta { text, .. },
-            ..
-        }) => Some(("turn_reasoning", text.as_ref())),
-        _ => None,
-    }
-}
-
 fn session_delta(event: &RuntimeStreamEvent) -> Option<(&'static str, &str)> {
     match event {
         RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content, .. }) => {
@@ -127,14 +107,16 @@ fn provider_drain_never_waits_on_the_host() {
         );
     }
     drop(drain);
-    assert!(
-        host_rx.len() <= crate::runtime::turn_observer::LAG_BUDGET + 2,
-        "an unread host's queue stays bounded: its lagging deltas merge"
+    assert_eq!(
+        host_rx.len(),
+        4,
+        "an unread host's queue stays bounded: each lane holds its first delta \
+         and one frame the rest pile into"
     );
 }
 
 #[test]
-fn every_delta_is_published_on_both_lanes_in_order() {
+fn every_delta_reaches_both_lanes_in_order_framed() {
     let (host_tx, mut host_rx) = TurnObserver::unread();
     let mut forwarder = ProviderHostForwarder::new(
         &host_tx,
@@ -157,23 +139,25 @@ fn every_delta_is_published_on_both_lanes_in_order() {
     }
 
     let events = std::iter::from_fn(|| host_rx.try_take()).collect::<Vec<_>>();
-    let projected = events
-        .iter()
-        .filter_map(projected_delta)
-        .collect::<Vec<_>>();
+    let session = events.iter().filter_map(session_delta).collect::<Vec<_>>();
+    let turn = events.iter().filter_map(turn_delta).collect::<Vec<_>>();
+    // Each block's first delta on its own, the rest of the block framed.
     assert_eq!(
-        projected,
+        session,
         vec![
-            ("session_text", "alpha"),
-            ("turn_text", "alpha"),
-            ("session_text", "beta"),
-            ("turn_text", "beta"),
-            ("session_text", "gamma"),
-            ("turn_text", "gamma"),
-            ("session_reasoning", "why"),
-            ("turn_reasoning", "why"),
-            ("session_reasoning", "therefore"),
-            ("turn_reasoning", "therefore"),
+            ("text", "alpha"),
+            ("text", "betagamma"),
+            ("reasoning", "why"),
+            ("reasoning", "therefore"),
+        ]
+    );
+    assert_eq!(
+        turn,
+        vec![
+            ("text", "assistant", "alpha"),
+            ("text", "assistant", "betagamma"),
+            ("reasoning", "reasoning", "why"),
+            ("reasoning", "reasoning", "therefore"),
         ]
     );
 }

@@ -241,8 +241,8 @@ pub use error::{
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
-    EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeControlConfig, RuntimeDurabilityConfig,
-    RuntimeHostConfig, RuntimeProviderConfig,
+    DeltaCoalescing, DeltaCoalescingError, EmbeddedRuntimeHost, ProcessRuntimeHost,
+    RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeHostConfig, RuntimeProviderConfig,
 };
 use io::normalize_input_items;
 pub use lash_core_execution::runtime::DirectCompletionClient;

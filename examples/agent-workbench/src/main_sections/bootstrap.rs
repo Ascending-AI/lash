@@ -195,7 +195,8 @@ async fn workbench_core_builder(
     }
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .live_replay_store(WorkbenchLiveReplay::from_environment()?.store());
+    .live_replay_store(WorkbenchLiveReplay::from_environment()?.store())
+    .delta_coalescing(delta_coalescing_from_environment()?);
     if let Some(tool_provider) = tool_provider {
         builder = builder.tools(tool_provider);
     }
@@ -1006,6 +1007,54 @@ pub(crate) fn validate_provider_credentials(
         ));
     }
     Ok(())
+}
+
+pub(crate) fn delta_coalescing_from_environment() -> AnyhowResult<lash::DeltaCoalescing> {
+    delta_coalescing_from(|name| std::env::var(name))
+}
+
+/// The live feed's delta coalescing: `AGENT_WORKBENCH_DELTA_FRAME_MS` (`off`
+/// or `0` for one event per delta), `AGENT_WORKBENCH_DELTA_FRAME_MAX_BYTES`
+/// and `AGENT_WORKBENCH_DELTA_FIRST_IMMEDIATE` (`true` or `false`), each
+/// defaulting to Lash's default. An out-of-range value refuses to start.
+pub(crate) fn delta_coalescing_from(
+    read_env: impl Fn(&str) -> Result<String, std::env::VarError>,
+) -> AnyhowResult<lash::DeltaCoalescing> {
+    let read = |name: &str| match read_env(name) {
+        Ok(raw) => Ok(Some(raw.trim().to_owned())),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err(anyhow!("agent-workbench: {name} is not valid Unicode"))
+        }
+    };
+    let defaults = lash::DeltaCoalescing::default();
+    let interval = match read(AGENT_WORKBENCH_DELTA_FRAME_MS_ENV)? {
+        None => defaults.interval(),
+        Some(raw) if raw.eq_ignore_ascii_case("off") => std::time::Duration::ZERO,
+        Some(raw) => std::time::Duration::from_millis(raw.parse::<u64>().map_err(|_| {
+            anyhow!(
+                "agent-workbench: {AGENT_WORKBENCH_DELTA_FRAME_MS_ENV} must be `off` or a whole number of milliseconds"
+            )
+        })?),
+    };
+    let max_frame_bytes = match read(AGENT_WORKBENCH_DELTA_FRAME_MAX_BYTES_ENV)? {
+        None => defaults.max_frame_bytes(),
+        Some(raw) => raw.parse::<usize>().map_err(|_| {
+            anyhow!(
+                "agent-workbench: {AGENT_WORKBENCH_DELTA_FRAME_MAX_BYTES_ENV} must be a whole number of bytes"
+            )
+        })?,
+    };
+    let first_delta_immediate = match read(AGENT_WORKBENCH_DELTA_FIRST_IMMEDIATE_ENV)? {
+        None => defaults.first_delta_immediate(),
+        Some(raw) => raw.parse::<bool>().map_err(|_| {
+            anyhow!(
+                "agent-workbench: {AGENT_WORKBENCH_DELTA_FIRST_IMMEDIATE_ENV} must be `true` or `false`"
+            )
+        })?,
+    };
+    lash::DeltaCoalescing::new(interval, max_frame_bytes, first_delta_immediate)
+        .map_err(|error| anyhow!("agent-workbench: delta coalescing: {error}"))
 }
 
 pub(crate) fn context_window_tokens_from_environment() -> AnyhowResult<usize> {

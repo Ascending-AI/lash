@@ -16,8 +16,9 @@ use pretty_assertions::assert_eq;
 /// This suite covers the non-durable live observation contract used for host
 /// reconnects: cursors track per-session live positions, replay returns only
 /// events after the cursor, subscriptions deliver buffered events before live
-/// ones, malformed cursors fail before replay, and cursors ahead of the tail
-/// report a recoverable unavailable gap.
+/// ones, malformed cursors fail before replay, cursors ahead of the tail
+/// report a recoverable unavailable gap, and a redrive of streamed deltas,
+/// framed alike or not, adds no text twice and loses none silently.
 pub async fn live_replay_store<F>(make: F)
 where
     F: Fn() -> Arc<dyn LiveReplayStore>,
@@ -32,6 +33,7 @@ where
     live_replay_store_rejects_malformed_cursors(make()).await;
     empty_is_proven_continuity_not_missing_history(make()).await;
     replay_cut_and_live_registration_are_linearizable(&make).await;
+    a_redrive_adds_no_streamed_text_twice_and_loses_none(make()).await;
 }
 
 /// Sessions [`live_replay_store_burst`] publishes to at once.
@@ -670,6 +672,82 @@ async fn empty_is_proven_continuity_not_missing_history(store: Arc<dyn LiveRepla
         LiveReplayGapReason::Unavailable,
         "subscribe from cursor ahead of tail",
     );
+}
+
+/// A redrive republishes the activities its first attempt delivered under
+/// the ids the same observations derive: `{key}#{ordinal}` for one delta,
+/// `{key}#{first}..{last}` for a frame of them (FIG-5098). It may frame them
+/// differently. A store drops every redelivery inside what it delivered of
+/// that key, so no text lands twice; publishes what lies beyond it, so none
+/// is lost; and answers a frame straddling its edge, whose undelivered text
+/// cannot be cut from its delivered text, with a gap rather than either.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn a_redrive_adds_no_streamed_text_twice_and_loses_none(store: Arc<dyn LiveReplayStore>) {
+    let session = SessionId::from("framed-redrive");
+    let revision = SessionRevision::new(1);
+    let start = store.current_cursor(&session, revision);
+    let deliver = |drafts: &[(&str, &str)]| {
+        let drafts = drafts
+            .iter()
+            .map(|(id, text)| {
+                LiveReplayEventDraft::new(None::<TurnId>, framed_text_payload(id, text))
+            })
+            .collect();
+        store
+            .prepare_publication(&session, revision, drafts)
+            .and_then(|prepared| store.publish_prepared(prepared))
+            .expect("publish streamed deltas")
+            .iter()
+            .map(|event| live_replay_event_label(event))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        deliver(&[("k#0", "a"), ("k#1..3", "bcd")]),
+        vec!["text:a", "text:bcd"]
+    );
+    assert!(
+        deliver(&[("k#0", "a"), ("k#1", "b"), ("k#2", "c"), ("k#3", "d")]).is_empty(),
+        "the unmerged originals of a delivered frame are redeliveries"
+    );
+    assert!(
+        deliver(&[("k#1..2", "bc")]).is_empty(),
+        "a different framing inside the delivered range is a redelivery"
+    );
+    assert_eq!(
+        deliver(&[("k#3", "d"), ("k#4..5", "ef")]),
+        vec!["text:ef"],
+        "what lies beyond the delivered range is published"
+    );
+    let replayed = expect_live_replay_replayed(
+        store.replay_after_cursor(&start),
+        "replay after the redrive",
+    );
+    assert_live_replay_labels(&replayed, &["text:a", "text:bcd", "text:ef"]);
+
+    assert!(
+        deliver(&[("k#5..7", "fgh")]).is_empty(),
+        "a frame straddling the delivered range is not published"
+    );
+    expect_live_replay_gap(
+        store.replay_after_cursor(&start),
+        LiveReplayGapReason::Unavailable,
+        "replay across a straddling redelivery",
+    );
+}
+
+fn framed_text_payload(id: &str, text: &str) -> SessionObservationEventPayload {
+    SessionObservationEventPayload::TurnActivity(TurnActivity {
+        id: crate::TurnActivityId::new(id),
+        correlation_id: crate::TurnActivityId::new("text:0"),
+        event: TurnEvent::AssistantProseDelta {
+            text: text.into(),
+            block: crate::llm::types::StreamBlockIdentity::new("text:0", 0),
+        },
+    })
 }
 
 #[expect(

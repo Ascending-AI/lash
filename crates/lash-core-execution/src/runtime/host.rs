@@ -112,6 +112,128 @@ pub struct RuntimeProviderConfig {
 /// Default [`RuntimeControlConfig::abort_drain_grace`].
 pub const DEFAULT_ABORT_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_millis(2_000);
 
+/// How a turn coalesces the prose and reasoning deltas of a stream block
+/// before they reach the host sinks and the live replay store (FIG-5098).
+///
+/// While on, each lane holds one open frame of a block's deltas. A frame is
+/// published [`interval`](Self::interval) after it opened (later if the host
+/// is still taking events queued ahead of it, in which case it keeps
+/// absorbing deltas), and is cut early by any other event, by a delta of
+/// another block, and before it would pass
+/// [`max_frame_bytes`](Self::max_frame_bytes) of text. With
+/// [`first_delta_immediate`](Self::first_delta_immediate), the first delta of
+/// a block is published at once, so time to first token never waits on a
+/// frame. [`off`](Self::off) publishes one event per delta.
+///
+/// The defaults are a 50 ms interval, an 8 KiB frame cap and an immediate
+/// first delta. It is a runtime option, independent of the live replay store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeltaCoalescing {
+    /// Zero when coalescing is off.
+    interval: std::time::Duration,
+    max_frame_bytes: usize,
+    first_delta_immediate: bool,
+}
+
+/// A [`DeltaCoalescing`] value out of range.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum DeltaCoalescingError {
+    #[error(
+        "the delta frame interval must be at most {max:?} (zero turns coalescing off), not {interval:?}"
+    )]
+    Interval {
+        interval: std::time::Duration,
+        max: std::time::Duration,
+    },
+    #[error("the delta frame cap must be between 1 and {max} bytes, not {max_frame_bytes}")]
+    MaxFrameBytes { max_frame_bytes: usize, max: usize },
+}
+
+impl DeltaCoalescing {
+    /// The default frame interval.
+    pub const DEFAULT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+    /// The default frame cap, in bytes of text.
+    pub const DEFAULT_MAX_FRAME_BYTES: usize = 8 * 1024;
+    /// The longest frame interval: a frame must stay well inside the live
+    /// replay window.
+    pub const MAX_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+    /// The largest frame cap.
+    pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+
+    /// Coalescing on these terms. A zero `interval` turns coalescing off; an
+    /// interval past [`MAX_INTERVAL`](Self::MAX_INTERVAL), or a frame cap of
+    /// zero or past [`MAX_FRAME_BYTES`](Self::MAX_FRAME_BYTES), is refused.
+    pub fn new(
+        interval: std::time::Duration,
+        max_frame_bytes: usize,
+        first_delta_immediate: bool,
+    ) -> Result<Self, DeltaCoalescingError> {
+        if interval > Self::MAX_INTERVAL {
+            return Err(DeltaCoalescingError::Interval {
+                interval,
+                max: Self::MAX_INTERVAL,
+            });
+        }
+        if max_frame_bytes == 0 || max_frame_bytes > Self::MAX_FRAME_BYTES {
+            return Err(DeltaCoalescingError::MaxFrameBytes {
+                max_frame_bytes,
+                max: Self::MAX_FRAME_BYTES,
+            });
+        }
+        Ok(Self {
+            interval,
+            max_frame_bytes,
+            first_delta_immediate,
+        })
+    }
+
+    /// No coalescing: every delta is its own event.
+    #[must_use]
+    pub const fn off() -> Self {
+        Self {
+            interval: std::time::Duration::ZERO,
+            max_frame_bytes: Self::DEFAULT_MAX_FRAME_BYTES,
+            first_delta_immediate: true,
+        }
+    }
+
+    /// Whether every delta is its own event.
+    #[must_use]
+    pub fn is_off(&self) -> bool {
+        self.interval.is_zero()
+    }
+
+    /// How long a frame stays open; zero when coalescing is off.
+    #[must_use]
+    pub fn interval(&self) -> std::time::Duration {
+        self.interval
+    }
+
+    /// The most text one frame carries, in bytes.
+    #[must_use]
+    pub fn max_frame_bytes(&self) -> usize {
+        self.max_frame_bytes
+    }
+
+    /// Whether the first delta of a block is published at once rather than
+    /// opening a frame.
+    #[must_use]
+    pub fn first_delta_immediate(&self) -> bool {
+        self.first_delta_immediate
+    }
+}
+
+impl Default for DeltaCoalescing {
+    fn default() -> Self {
+        Self {
+            interval: Self::DEFAULT_INTERVAL,
+            max_frame_bytes: Self::DEFAULT_MAX_FRAME_BYTES,
+            first_delta_immediate: true,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
     pub effect_host: Arc<dyn EffectHost>,
@@ -129,6 +251,11 @@ pub struct RuntimeControlConfig {
     /// disposition (ADR 0031). Defaults to
     /// [`DEFAULT_ABORT_DRAIN_GRACE`] (2 s).
     pub abort_drain_grace: std::time::Duration,
+    /// How a turn coalesces its stream deltas into frames before they reach
+    /// the host sinks and the live replay store (FIG-5098). Defaults to
+    /// [`DeltaCoalescing::default`]: 50 ms frames of at most 8 KiB, the first
+    /// delta of a block published at once.
+    pub delta_coalescing: DeltaCoalescing,
     /// Host-selected boundary for process wakes entering the target session.
     pub process_wake_delivery_policy: crate::DeliveryPolicy,
     /// Optional narrow-only policy for the model-facing session process tools.
@@ -220,6 +347,7 @@ impl RuntimeHostConfig {
             control: RuntimeControlConfig {
                 termination: TerminationPolicy::default(),
                 abort_drain_grace: DEFAULT_ABORT_DRAIN_GRACE,
+                delta_coalescing: DeltaCoalescing::default(),
                 effect_host,
                 trigger_route_restorer: None,
                 process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
