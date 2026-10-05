@@ -56,10 +56,8 @@ pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_co
 pub use hooks::finalize_tool_result_with_execution_context;
 pub(crate) use hooks::{attempt_occurrence, deferred_occurrence};
 pub use intent_executor::IntentRealizationContext;
-#[cfg(feature = "testing")]
+// Cross-crate execution seam used by lash-core's production realization runtime.
 pub use intent_executor::execute_final_tool_intents;
-#[cfg(not(feature = "testing"))]
-pub(crate) use intent_executor::execute_final_tool_intents;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use preparation::dispatch_tool_call_with_execution_context;
 pub use preparation::resolve_callable_manifest_by_id;

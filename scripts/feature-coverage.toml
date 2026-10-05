@@ -281,6 +281,11 @@ features = [
   "lash-runtime/http-transport:off",
 ]
 commands = [
+  # Production host witnesses (FIG-5097): --lib excludes dev-dependencies,
+  # so neither the facade nor its dependency closure can acquire testing.
+  # Keep the default-features witness beside the existing default-off one;
+  # CI compiles both through //:feature_lane_compile.
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "testing", "--locked"],

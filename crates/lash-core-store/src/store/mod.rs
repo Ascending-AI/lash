@@ -240,7 +240,7 @@ pub use window_load::{
 };
 
 fn default_root_session_id() -> SessionId {
-    SessionId::from("root")
+    SessionId::parse("root").expect("the root session id is nonblank")
 }
 /// Version 9 combines full effect addresses and truthful attribution with
 /// explicit ambient-or-restricted resident-tool authority. Both version 8

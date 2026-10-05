@@ -719,7 +719,7 @@ pub struct RuntimeSessionState {
 impl RuntimeSessionState {
     pub fn new(policy: SessionPolicy) -> Self {
         Self {
-            session_id: SessionId::from("root"),
+            session_id: SessionId::parse("root").expect("the root session id is nonblank"),
             policy,
             agent_frames: Vec::new(),
             current_frame_node_id: None,

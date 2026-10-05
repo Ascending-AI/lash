@@ -114,7 +114,7 @@ pub async fn resolve_llm_request_attachments(
             }
         }
         let stored = store
-            .backend
+            .backend()
             .get(&id, low)
             .await
             .map_err(|error| match error {

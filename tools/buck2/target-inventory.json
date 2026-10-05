@@ -821,6 +821,7 @@
     "//crates/lash:lash__fv_d8fccfd8[static]",
     "//crates/lash:lash__fv_dc2a1082[static]",
     "//crates/lash:lash__fv_e78ce73b[static]",
+    "//crates/lash:lash__fv_eb179117[static]",
     "//crates/lash:lash__fv_f930d625[static]",
     "//crates/lash:lash__fv_fd7fdf62[static]",
     "//crates/lash:lash__fv_ff1f2173[static]",
@@ -1914,6 +1915,7 @@
     "//crates/lash:lash__fv_d8fccfd8[check]",
     "//crates/lash:lash__fv_dc2a1082[check]",
     "//crates/lash:lash__fv_e78ce73b[check]",
+    "//crates/lash:lash__fv_eb179117[check]",
     "//crates/lash:lash__fv_f930d625[check]",
     "//crates/lash:lash__fv_fd7fdf62[check]",
     "//crates/lash:lash__fv_ff1f2173[check]",
@@ -3007,6 +3009,7 @@
     "//crates/lash:lash__fv_d8fccfd8",
     "//crates/lash:lash__fv_dc2a1082",
     "//crates/lash:lash__fv_e78ce73b",
+    "//crates/lash:lash__fv_eb179117",
     "//crates/lash:lash__fv_f930d625",
     "//crates/lash:lash__fv_fd7fdf62",
     "//crates/lash:lash__fv_ff1f2173",
@@ -5617,6 +5620,18 @@
       "package": "lash-internal-core-effect"
     },
     {
+      "build_label": "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[static]",
+      "check_label": "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
+      "clippy_label": "//crates/lash-core-effect:lash-core-effect__fv_e38b9031__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-effect:lash-core-effect__fv_e38b9031",
+      "package": "lash-internal-core-effect"
+    },
+    {
       "build_label": "//crates/lash-core-effect:lash-core-effect__fv_f03fd92a[static]",
       "check_label": "//crates/lash-core-effect:lash-core-effect__fv_f03fd92a[check]",
       "clippy_label": "//crates/lash-core-effect:lash-core-effect__fv_f03fd92a__clippy[clippy.txt]",
@@ -6774,6 +6789,18 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-core-execution:lash-core-execution__fv_6c541243",
+      "package": "lash-internal-core-execution"
+    },
+    {
+      "build_label": "//crates/lash-core-execution:lash-core-execution__fv_7f1edba4[static]",
+      "check_label": "//crates/lash-core-execution:lash-core-execution__fv_7f1edba4[check]",
+      "clippy_label": "//crates/lash-core-execution:lash-core-execution__fv_7f1edba4__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-core-execution:lash-core-execution__fv_7f1edba4[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-execution:lash-core-execution__fv_7f1edba4",
       "package": "lash-internal-core-execution"
     },
     {
@@ -9504,6 +9531,18 @@
       "package": "lash-internal-core-ids"
     },
     {
+      "build_label": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f[static]",
+      "check_label": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f[check]",
+      "clippy_label": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f",
+      "package": "lash-internal-core-ids"
+    },
+    {
       "build_label": "//crates/lash-core-ids:lash-core-ids__fv_99cd6045[static]",
       "check_label": "//crates/lash-core-ids:lash-core-ids__fv_99cd6045[check]",
       "clippy_label": "//crates/lash-core-ids:lash-core-ids__fv_99cd6045__clippy[clippy.txt]",
@@ -10269,6 +10308,18 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-core-llm:lash-core-llm__fv_4f94c60c",
+      "package": "lash-internal-core-llm"
+    },
+    {
+      "build_label": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2[static]",
+      "check_label": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2[check]",
+      "clippy_label": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2",
       "package": "lash-internal-core-llm"
     },
     {
@@ -12859,6 +12910,18 @@
       "package": "lash-internal-core-store"
     },
     {
+      "build_label": "//crates/lash-core-store:lash-core-store__fv_191a0eea[static]",
+      "check_label": "//crates/lash-core-store:lash-core-store__fv_191a0eea[check]",
+      "clippy_label": "//crates/lash-core-store:lash-core-store__fv_191a0eea__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-core-store:lash-core-store__fv_191a0eea[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-store:lash-core-store__fv_191a0eea",
+      "package": "lash-internal-core-store"
+    },
+    {
       "build_label": "//crates/lash-core-store:lash-core-store__fv_21938a2e[static]",
       "check_label": "//crates/lash-core-store:lash-core-store__fv_21938a2e[check]",
       "clippy_label": "//crates/lash-core-store:lash-core-store__fv_21938a2e__clippy[clippy.txt]",
@@ -14600,6 +14663,18 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-core-worker:lash-core-worker__fv_3f508028",
+      "package": "lash-internal-core-worker"
+    },
+    {
+      "build_label": "//crates/lash-core-worker:lash-core-worker__fv_5b6fd542[static]",
+      "check_label": "//crates/lash-core-worker:lash-core-worker__fv_5b6fd542[check]",
+      "clippy_label": "//crates/lash-core-worker:lash-core-worker__fv_5b6fd542__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-core-worker:lash-core-worker__fv_5b6fd542[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-worker:lash-core-worker__fv_5b6fd542",
       "package": "lash-internal-core-worker"
     },
     {
@@ -16698,6 +16773,18 @@
       "package": "lash-internal-core"
     },
     {
+      "build_label": "//crates/lash-core:lash-core__fv_ce1b3031[static]",
+      "check_label": "//crates/lash-core:lash-core__fv_ce1b3031[check]",
+      "clippy_label": "//crates/lash-core:lash-core__fv_ce1b3031__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-core:lash-core__fv_ce1b3031[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core:lash-core__fv_ce1b3031",
+      "package": "lash-internal-core"
+    },
+    {
       "build_label": "//crates/lash-core:lash-core__fv_df0dc8d2[static]",
       "check_label": "//crates/lash-core:lash-core__fv_df0dc8d2[check]",
       "clippy_label": "//crates/lash-core:lash-core__fv_df0dc8d2__clippy[clippy.txt]",
@@ -17823,6 +17910,16 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-http-transport:lash-http-transport__fv_8af4df28",
+      "package": "lash-internal-http-transport"
+    },
+    {
+      "build_label": "//crates/lash-http-transport:lash-http-transport__fv_db75952d[static]",
+      "check_label": "//crates/lash-http-transport:lash-http-transport__fv_db75952d[check]",
+      "clippy_label": "//crates/lash-http-transport:lash-http-transport__fv_db75952d__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-http-transport:lash-http-transport__fv_db75952d[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-http-transport:lash-http-transport__fv_db75952d",
       "package": "lash-internal-http-transport"
     },
     {
@@ -20536,6 +20633,18 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_521f2d64",
+      "package": "lash-internal-plugin-process-controls"
+    },
+    {
+      "build_label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_535b45f4[static]",
+      "check_label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_535b45f4[check]",
+      "clippy_label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_535b45f4__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_535b45f4[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_535b45f4",
       "package": "lash-internal-plugin-process-controls"
     },
     {
@@ -23474,6 +23583,18 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-protocol-standard:lash-protocol-standard__fv_b0b6b48a",
+      "package": "lash-internal-protocol-standard"
+    },
+    {
+      "build_label": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be26e00d[static]",
+      "check_label": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be26e00d[check]",
+      "clippy_label": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be26e00d__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be26e00d[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be26e00d",
       "package": "lash-internal-protocol-standard"
     },
     {
@@ -27321,6 +27442,19 @@
       "package": "lash-internal-remote-protocol"
     },
     {
+      "build_label": "//crates/lash-remote-protocol:lash-remote-protocol__fv_f4b4f470[static]",
+      "check_label": "//crates/lash-remote-protocol:lash-remote-protocol__fv_f4b4f470[check]",
+      "clippy_label": "//crates/lash-remote-protocol:lash-remote-protocol__fv_f4b4f470__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-remote-protocol:lash-remote-protocol__fv_f4b4f470[doc]",
+      "features": [
+        "core-conversions",
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-remote-protocol:lash-remote-protocol__fv_f4b4f470",
+      "package": "lash-internal-remote-protocol"
+    },
+    {
       "build_label": "//crates/lash-remote-protocol:lash-remote-protocol__unit_test__fv_12d89d2a",
       "check_label": "//crates/lash-remote-protocol:lash-remote-protocol__unit_test__fv_12d89d2a[check]",
       "clippy_label": "//crates/lash-remote-protocol:lash-remote-protocol__unit_test__fv_12d89d2a__clippy[clippy.txt]",
@@ -27355,6 +27489,16 @@
       "kind": "bin-unit-test",
       "label": "//crates/lash-remote-protocol:remote_schema_generator__bin__unit_test__fv_12d89d2a",
       "package": "lash-internal-remote-protocol"
+    },
+    {
+      "build_label": "//crates/lash-render:lash-render[static]",
+      "check_label": "//crates/lash-render:lash-render[check]",
+      "clippy_label": "//crates/lash-render:lash-render__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-render:lash-render[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-render:lash-render",
+      "package": "lash-internal-render"
     },
     {
       "build_label": "//crates/lash-render:lash-render[static]",
@@ -32079,6 +32223,19 @@
       "package": "lash-internal-sansio"
     },
     {
+      "build_label": "//crates/lash-sansio:lash-sansio__fv_06c1377f[static]",
+      "check_label": "//crates/lash-sansio:lash-sansio__fv_06c1377f[check]",
+      "clippy_label": "//crates/lash-sansio:lash-sansio__fv_06c1377f__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-sansio:lash-sansio__fv_06c1377f[doc]",
+      "features": [
+        "default",
+        "schema-validation"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-sansio:lash-sansio__fv_06c1377f",
+      "package": "lash-internal-sansio"
+    },
+    {
       "build_label": "//crates/lash-sansio:lash-sansio__fv_09307e31[static]",
       "check_label": "//crates/lash-sansio:lash-sansio__fv_09307e31[check]",
       "clippy_label": "//crates/lash-sansio:lash-sansio__fv_09307e31__clippy[clippy.txt]",
@@ -34888,6 +35045,18 @@
       "package": "lash-internal-tool-support"
     },
     {
+      "build_label": "//crates/lash-tool-support:lash-tool-support__fv_3b2a16d8[static]",
+      "check_label": "//crates/lash-tool-support:lash-tool-support__fv_3b2a16d8[check]",
+      "clippy_label": "//crates/lash-tool-support:lash-tool-support__fv_3b2a16d8__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-tool-support:lash-tool-support__fv_3b2a16d8[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-tool-support:lash-tool-support__fv_3b2a16d8",
+      "package": "lash-internal-tool-support"
+    },
+    {
       "build_label": "//crates/lash-tool-support:lash-tool-support__fv_4ddbdd78[static]",
       "check_label": "//crates/lash-tool-support:lash-tool-support__fv_4ddbdd78[check]",
       "clippy_label": "//crates/lash-tool-support:lash-tool-support__fv_4ddbdd78__clippy[clippy.txt]",
@@ -36418,6 +36587,18 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-trace:lash-trace__fv_1503e00a",
+      "package": "lash-internal-trace"
+    },
+    {
+      "build_label": "//crates/lash-trace:lash-trace__fv_481e6e22[static]",
+      "check_label": "//crates/lash-trace:lash-trace__fv_481e6e22[check]",
+      "clippy_label": "//crates/lash-trace:lash-trace__fv_481e6e22__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-trace:lash-trace__fv_481e6e22[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-trace:lash-trace__fv_481e6e22",
       "package": "lash-internal-trace"
     },
     {
@@ -42024,6 +42205,16 @@
       "package": "lash-internal-vm-protocol"
     },
     {
+      "build_label": "//crates/lash-vm-protocol:lash-vm-protocol__fv_bd67633c[static]",
+      "check_label": "//crates/lash-vm-protocol:lash-vm-protocol__fv_bd67633c[check]",
+      "clippy_label": "//crates/lash-vm-protocol:lash-vm-protocol__fv_bd67633c__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-vm-protocol:lash-vm-protocol__fv_bd67633c[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-vm-protocol:lash-vm-protocol__fv_bd67633c",
+      "package": "lash-internal-vm-protocol"
+    },
+    {
       "build_label": "//crates/lash-vm-protocol:lash-vm-protocol__fv_fa269834[static]",
       "check_label": "//crates/lash-vm-protocol:lash-vm-protocol__fv_fa269834[check]",
       "clippy_label": "//crates/lash-vm-protocol:lash-vm-protocol__fv_fa269834__clippy[clippy.txt]",
@@ -44576,6 +44767,18 @@
       ],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_e78ce73b",
+      "package": "lash-runtime"
+    },
+    {
+      "build_label": "//crates/lash:lash__fv_eb179117[static]",
+      "check_label": "//crates/lash:lash__fv_eb179117[check]",
+      "clippy_label": "//crates/lash:lash__fv_eb179117__clippy[clippy.txt]",
+      "doc_label": "//crates/lash:lash__fv_eb179117[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_eb179117",
       "package": "lash-runtime"
     },
     {
@@ -49521,6 +49724,7 @@
       "//crates/lash:lash__fv_d3eef233",
       "//crates/lash:lash__fv_d8fccfd8",
       "//crates/lash:lash__fv_e78ce73b",
+      "//crates/lash:lash__fv_eb179117",
       "//crates/lash:lash__fv_fd7fdf62",
       "//crates/lash:lash__unit_test__fv_0e644d23",
       "//crates/lash:lash__unit_test__fv_113c8a42",
