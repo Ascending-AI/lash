@@ -4410,7 +4410,7 @@
 
     function syncCommandAvailability() {
       const unavailable = busy || modelEmpty() || attachmentUploadInFlight;
-      sendButton.disabled = promptInput.value.trim() === "/compact" ? compactionInFlight : unavailable;
+      sendButton.disabled = unavailable;
       attachButton.disabled = busy || attachmentUploadInFlight;
       injectNowButton.disabled = !busy || modelEmpty();
       queueNextButton.disabled = !busy || modelEmpty();
@@ -5688,41 +5688,12 @@
       if (busy) { event.preventDefault(); stopTurn(event.shiftKey ? "abort" : "stop"); }
     });
 
-    // BEGIN WORKBENCH_COMPACT_COMMAND
-    let compactionInFlight = false;
-    async function compactContext() {
-      if (compactionInFlight) return;
-      const sessionId = scopedSessionId;
-      compactionInFlight = true;
-      promptInput.value = "";
-      syncCommandAvailability();
-      try {
-        const response = await fetch("/api/compact", { method: "POST" });
-        const result = await response.json();
-        if (sessionId !== scopedSessionId) return;
-        if (!response.ok) throw new Error(result.error || "Context could not be compacted. Try again.");
-        renderNote(result.pending
-          ? "Context compaction queued; it will apply at the next turn boundary."
-          : result.opened ? "Context compacted." : "No context to compact yet.");
-      } catch (error) {
-        if (sessionId === scopedSessionId) renderNote(error.message || "Context could not be compacted. Try again.");
-      } finally {
-        compactionInFlight = false;
-        syncCommandAvailability();
-      }
-    }
-    // END WORKBENCH_COMPACT_COMMAND
-
     let lastUserText = "";
 
     composer.addEventListener("submit", async event => {
       event.preventDefault();
       const text = promptInput.value.trim();
       if (!text) return;
-      if (text === "/compact") {
-        await compactContext();
-        return;
-      }
       if (modelEmpty()) { validateModel(); modelInput.focus(); return; }
       lastUserText = text;
       promptInput.value = "";

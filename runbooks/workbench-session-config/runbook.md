@@ -58,7 +58,7 @@ let spec = lash::SessionSpec::new(
 ```
 
 The workbench is a chat product. Deployment recovery lives in `lashctl`:
-see [recovery commands](../../examples/agent-workbench/README.md#recovery-and-context-compaction).
+see [recovery commands](../../examples/agent-workbench/README.md#recovery).
 Recorded settings and session commands are product APIs for embedders; they
 have no workbench operator dialog or admin HTTP routes. Run config operations
 below in the host integration that owns `core` and `session`, or use the named

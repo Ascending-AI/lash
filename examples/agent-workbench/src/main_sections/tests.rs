@@ -2258,5 +2258,66 @@ mod observation_config_tests;
 #[path = "tests/reset_chat.rs"]
 mod reset_chat_tests;
 
-#[path = "tests/compact.rs"]
-mod compact_tests;
+/// FIG-5045: composer text always uses chat admission and model validation.
+#[test]
+fn slash_text_uses_chat_admission_and_model_validation() {
+    use std::io::Write;
+    let node = std::env::var_os("LASH_WORKBENCH_TEST_NODE").unwrap_or_else(|| "node".into());
+    let script = r#"
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const html = require('node:fs').readFileSync(0, 'utf8');
+const submit = html.split('composer.addEventListener("submit", async event => {')[1].split('\n    });')[0];
+const sends = [];
+let missingModel = false, validations = 0, focuses = 0;
+const context = vm.createContext({
+  promptInput: {value: ''}, selectedAttachment: {id: 'image'}, lastUserText: '',
+  modelEmpty: () => missingModel,
+  validateModel: () => validations++, modelInput: {focus: () => focuses++},
+  selectedModelPayload: () => ({model: 'selected-model'}),
+  postCommand: async (url, payload) => {sends.push({url, payload}); return {accepted: true};},
+  clearAttachment: () => {context.selectedAttachment = null;}, loadSessions: () => {},
+});
+vm.runInContext('async function submit(event) {' + submit + '\n}', context);
+(async () => {
+  for (const text of ['/compact', '/help', 'ordinary chat']) {
+    context.promptInput.value = text;
+    missingModel = true;
+    await context.submit({preventDefault() {}});
+    assert.equal(sends.length, validations - 1, 'no admission without a model');
+    assert.equal(context.promptInput.value, text, 'validation retains the draft');
+    assert.equal(focuses, validations);
+    missingModel = false;
+    context.selectedAttachment = {id: 'image'};
+    await context.submit({preventDefault() {}});
+    assert.equal(sends.at(-1).url, '/api/turn');
+    assert.equal(sends.at(-1).payload.text, text);
+    assert.equal(sends.at(-1).payload.attachment_id, 'image');
+    assert.equal(sends.at(-1).payload.model, 'selected-model');
+    assert.equal(context.promptInput.value, '');
+    assert.equal(context.selectedAttachment, null);
+  }
+  assert.equal(sends.length, 3);
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"#;
+    let mut child = std::process::Command::new(node)
+        .arg("-e")
+        .arg(script)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("run chat admission law");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(ui::INDEX_HTML.as_bytes())
+        .expect("send page");
+    let output = child.wait_with_output().expect("chat admission law exits");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

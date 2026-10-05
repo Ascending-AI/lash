@@ -793,7 +793,7 @@ leaves the authoritative message absent, disconnect-as-cancel prevents the turn
 from completing, lag without resync loses ordered product events, and raw
 failure text fails the safe-copy assertion.
 
-## Recovery and context compaction
+## Recovery
 
 Use `lashctl` for deployment operations. Set `LASH_SQLITE_DIR` to the
 workbench's `<data-dir>/lash-sessions`, or `LASH_POSTGRES_DATABASE_URL` for a
@@ -820,10 +820,8 @@ Recovery commands also accept `--sqlite-dir <path>` instead of `LASH_SQLITE_DIR`
 Page limits are nonzero and at most 200; retain `next` to read the next page.
 The standard lashctl JSON envelope and exit codes apply to every verb.
 
-Type `/compact` in the chat composer to compact the current session's context.
-One inline note reports whether context was compacted, was empty, or is queued
-for a turn boundary. This is the only slash command. Recorded settings and
-session command submission, settlement and withdrawal are embedder APIs on
+Lash automatically compacts context as needed. Recorded settings and session
+command submission, settlement and withdrawal are embedder APIs on
 `session.admin()`; the workbench has no deployment operator dialog.
 Usage is provider result data, metered at the host's provider seam (ADR 0127).
 
