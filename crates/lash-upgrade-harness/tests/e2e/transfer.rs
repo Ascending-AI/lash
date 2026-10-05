@@ -304,7 +304,7 @@ fn s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes() -> Result
             && finished[0].pinned_deployment_id.as_deref() == Some(n_deployment.as_str()),
         "the original journal did not finish on N: {finished:?}"
     );
-    live.journal(&pinned.id)?;
+    live.journal(&pinned.id, "s13-pinned", &run)?;
 
     live.h3(&n, &session, &drain(json!({"drain": "mark"}), None)?)?;
     let retired = live.h3(

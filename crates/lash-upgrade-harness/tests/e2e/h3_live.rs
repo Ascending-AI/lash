@@ -5,7 +5,7 @@ use anyhow::{Context, Result, ensure};
 use lash_core::tool_run::{SealOutcome, SourceSeal};
 use lash_upgrade_harness::e2e::{
     case::{ArtifactIdentity, CaseLease, CaseSpec},
-    control::{CleanupReceipt, ProcessReceipt},
+    control::{CleanupReceipt, ProcessReceipt, WorkIdentity},
     evidence::{CaseReceipt, Evidence, Verdict},
 };
 use lash_upgrade_harness::harness::{
@@ -23,6 +23,125 @@ pub struct Live {
     pub spec: CaseSpec,
     pub evidence: Evidence,
     controls: usize,
+}
+
+/// The H3 receipt must carry journal provenance that the runner can certify.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn journal_collection_retains_typed_v7_evidence() -> Result<()> {
+    use lash_upgrade_harness::e2e::case::StoreKind;
+    use lash_upgrade_harness::identity::BuildLabel;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let root = tempfile::tempdir()?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let admin_url = format!("http://{}", listener.local_addr()?);
+    let lease = CaseLease {
+        gate_id: "journal-law".into(),
+        namespace: "e2e-journal-law".into(),
+        authority: "journal-law".into(),
+        directory: root.path().into(),
+        postgres_url: None,
+        ports: Vec::new(),
+        deadline: std::time::Instant::now() + std::time::Duration::from_secs(5),
+        processes: Vec::new(),
+        cleanup: Vec::new(),
+    };
+    let case = Case::leased_sqlite(
+        "journal-law",
+        &Services {
+            ingress_url: admin_url.clone(),
+            admin_url: admin_url.clone(),
+            postgres_url: String::new(),
+        },
+        &lease,
+    )?;
+    async fn serve_queries(listener: tokio::net::TcpListener) -> Result<()> {
+        loop {
+            let (mut stream, _) = listener.accept().await?;
+            let mut request = Vec::new();
+            let body = loop {
+                let mut bytes = [0; 4096];
+                let read = stream.read(&mut bytes).await?;
+                ensure!(read > 0, "admin request ended before its body");
+                request.extend_from_slice(&bytes[..read]);
+                if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                    let headers = std::str::from_utf8(&request[..end])?;
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length: ")
+                                .map(str::to_owned)
+                        })
+                        .context("query body length")?
+                        .parse()?;
+                    if request.len() >= end + 4 + length {
+                        break serde_json::from_slice::<Value>(
+                            &request[end + 4..end + 4 + length],
+                        )?;
+                    }
+                }
+            };
+            let query = body["query"].as_str().context("admin SQL query")?;
+            let rows = if query.contains("FROM sys_invocation") {
+                json!([{"target_service_name":"e2e-journal-law.LashTurn_g1",
+                    "pinned_service_protocol_version":7}])
+            } else {
+                ensure!(
+                    query.contains("FROM sys_journal"),
+                    "unexpected query: {query}"
+                );
+                json!([{"index":0,"entry_type":"Input","name":null,"version":2,
+                    "entry_json":"{\"Command\":{\"Input\":{}}}"}])
+            };
+            let response = serde_json::to_vec(&json!({"rows":rows}))?;
+            stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", response.len()).as_bytes()).await?;
+            stream.write_all(&response).await?;
+        }
+    }
+    let server = tokio::spawn(serve_queries(listener));
+    let spec = super::process::s21_spec(StoreKind::SqliteFile, Vec::new());
+    let mut live = Live {
+        case,
+        lease,
+        builds: NodeBuilds {
+            n: NodeBinary::at(std::env::current_exe()?, BuildLabel::N),
+            next: NodeBinary::at(std::env::current_exe()?, BuildLabel::Next),
+        },
+        evidence: Evidence::empty(spec.id.clone()),
+        spec,
+        controls: 0,
+    };
+    let collected = tokio::task::spawn_blocking(move || {
+        live.journal(
+            "inv-journal-law",
+            "law-ingress",
+            &lash_core::TurnId::fixture("law-run"),
+        )?;
+        Ok::<_, anyhow::Error>(live.evidence)
+    })
+    .await?;
+    server.abort();
+    let evidence = collected?;
+    ensure!(
+        evidence.journals.len() == 1,
+        "H3 receipt lacks typed journal evidence"
+    );
+    let fact = &evidence.journals[0];
+    ensure!(fact.invocation == "inv-journal-law" && fact.index == 0);
+    ensure!(fact.protocol == 7 && fact.admin_url == admin_url);
+    ensure!(
+        fact.work
+            == WorkIdentity {
+                ingress: "law-ingress".into(),
+                run: "law-run".into(),
+                segment: "inv-journal-law".into(),
+                call: None,
+                ordinal: None,
+            }
+    );
+    ensure!(fact.value == json!({"Command":{"Input":{}}}));
+    Ok(())
 }
 
 fn services() -> Result<Services> {
@@ -328,21 +447,27 @@ impl Live {
         Ok((key, invocation))
     }
 
-    /// The journal rows of `invocation`, read verbatim from `sys_journal`.
-    pub fn journal(&mut self, invocation: &str) -> Result<()> {
-        let rows: Vec<Value> = block_on(self.case.view()?.query(&format!(
-            "SELECT index, entry_type, name, version, entry_json FROM sys_journal WHERE id = {} \
-             ORDER BY index",
-            sql(invocation)
-        )))?;
-        ensure!(!rows.is_empty(), "{invocation} has no journal rows");
+    /// The invocation's decoded journal, with verified V7 and admin provenance.
+    pub fn journal(
+        &mut self,
+        invocation: &str,
+        ingress: &str,
+        run: &lash_core::TurnId,
+    ) -> Result<()> {
+        let work = WorkIdentity {
+            ingress: ingress.into(),
+            run: run.to_string(),
+            segment: invocation.into(),
+            call: None,
+            ordinal: None,
+        };
+        let facts = block_on(self.case.view()?.journal(&work, invocation, 7))?;
+        ensure!(!facts.is_empty(), "{invocation} has no journal rows");
         self.record(
             &format!("journal-{invocation}.json"),
-            &Value::Array(rows.clone()),
+            &serde_json::to_value(&facts)?,
         )?;
-        self.evidence
-            .stores
-            .push(json!({"journal": invocation, "rows": rows}));
+        self.evidence.journals.extend(facts);
         Ok(())
     }
 

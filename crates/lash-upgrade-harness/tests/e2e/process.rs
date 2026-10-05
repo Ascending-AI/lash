@@ -731,7 +731,7 @@ fn s21_source_seal_stays_immutable_on_the_upgrade_node() -> Result<()> {
         },
         "the settled Run's source shows another seal: {sealed:?}"
     );
-    live.journal(&suspended.id)?;
+    live.journal(&suspended.id, "s21-resolved-run", &run)?;
     let invocations = live.run_invocations(&key)?;
     ensure!(
         invocations.len() == 1 && invocations[0].status == "completed",
@@ -849,7 +849,7 @@ fn s21_source_seal_stays_immutable_on_the_upgrade_node() -> Result<()> {
                 .all(|invocation| invocation.status == "completed"),
         "a late completion revived the cancelled Run: {revived:?}"
     );
-    live.journal(&suspended.id)?;
+    live.journal(&suspended.id, "s21-cancelled-run", &run)?;
     let view = live.case.view()?;
     let waits: Vec<serde_json::Value> = block_on(view.query(&format!(
         "SELECT id, status FROM sys_invocation WHERE target_service_name = '{}' AND status <> 'completed'",

@@ -1556,7 +1556,11 @@
           "server_nodes": 1,
           "binaries": [
             "host",
-            "vm_worker"
+            "vm_worker",
+            "synthetic_next_host",
+            "operator",
+            "synthetic_next_operator",
+            "synthetic_next_vm_worker"
           ],
           "artifacts": [
             "journal",
@@ -2449,7 +2453,11 @@
           "server_nodes": 1,
           "binaries": [
             "host",
-            "vm_worker"
+            "vm_worker",
+            "synthetic_next_host",
+            "operator",
+            "synthetic_next_operator",
+            "synthetic_next_vm_worker"
           ],
           "artifacts": [
             "journal",
@@ -2579,7 +2587,11 @@
           "server_nodes": 1,
           "binaries": [
             "host",
-            "vm_worker"
+            "vm_worker",
+            "synthetic_next_host",
+            "operator",
+            "synthetic_next_operator",
+            "synthetic_next_vm_worker"
           ],
           "artifacts": [
             "journal",

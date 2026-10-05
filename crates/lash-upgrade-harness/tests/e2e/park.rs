@@ -222,7 +222,7 @@ fn s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes() -> 
         ),
         "a stale redrive was not refused typed: {stale}"
     );
-    live.journal(&paused.id)?;
+    live.journal(&paused.id, gate, &parked_turn)?;
 
     // Operation owner: park after the Deferred attempt is durable, resolve
     // while parked, then race redrive and cancel.
@@ -351,7 +351,7 @@ fn s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes() -> 
         "s22-race.json",
         &json!({"redrive": redriven, "cancel": cancelled, "terminal": snapshot}),
     )?;
-    live.journal(&paused_op.id)?;
+    live.journal(&paused_op.id, "s22-op", &run)?;
 
     // No final binary routes recovery through a catalogue or child service.
     let targets: Vec<serde_json::Value> = block_on(view.query(&format!(
