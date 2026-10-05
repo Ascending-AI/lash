@@ -224,9 +224,10 @@ async fn a_readable_predecessor_root_converts_in_its_transition_before_running()
         )]),
     };
     if let Some(bytes) = state.plugin_admission_snapshot() {
-        let mut view = lash_core::plugin::PluginNativeView::decode(&bytes)?;
+        let mut view =
+            lash_core::plugin::PluginNativeView::decode(&bytes, lash_core::FleetFormat::current())?;
         view.state = old.clone();
-        state.set_plugin_admission_snapshot(view.encode()?);
+        state.set_plugin_admission_snapshot(view.encode(lash_core::FleetFormat::current())?);
     }
     state.set_plugin_state(Some(old));
     store
@@ -258,6 +259,7 @@ async fn a_readable_predecessor_root_converts_in_its_transition_before_running()
         &state
             .plugin_admission_snapshot()
             .expect("published native view"),
+        lash_core::FleetFormat::current(),
     )?;
     assert_eq!(
         view.state.plugins["admission_generation"]

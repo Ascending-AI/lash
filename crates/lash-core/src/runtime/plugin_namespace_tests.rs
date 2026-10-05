@@ -108,7 +108,7 @@ async fn runtime_open_defers_capabilities_until_recorded_publication() {
     state.session_id = id;
     state.set_plugin_state(Some(native_state));
     state.authority.plugin_config = native_config;
-    state.set_plugin_admission_snapshot(view.encode().unwrap());
+    state.set_plugin_admission_snapshot(view.encode(crate::FleetFormat::current()).unwrap());
     let runtime =
         crate::runtime::EmbeddedRuntimeBuilder::new(core, crate::testing::runtime_lease_owner())
             .with_initial_state(state)
@@ -329,7 +329,12 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     owned_child
         .adopt_plugin_transition(&transition("private-child", &owned_child.export_state()))
         .unwrap();
-    assert!(child.native_view().unwrap().is_none());
+    assert!(
+        child
+            .native_view(lash_core_store::store::FleetFormat::current())
+            .unwrap()
+            .is_none()
+    );
     assert!(child.export_state().plugins.is_empty());
     assert!(
         host.session(&SessionId::from("private-child"))
@@ -352,7 +357,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         crate::MaxToolCalls::new(1024),
     ));
     runtime_state
-        .capture_plugin_states(&child)
+        .capture_plugin_states(&child, lash_core_store::store::FleetFormat::current())
         .expect("the live plugin state is captured");
     assert!(
         runtime_state.plugin_state().unwrap().plugins["neighbor-secret-key"]

@@ -60,6 +60,7 @@ struct ProgressBoundarySnapshot<'a> {
 }
 
 pub(super) struct TurnBoundary {
+    fleet_format: crate::FleetFormat,
     /// `Some` at every point outside `final_state_mut`'s transition, which
     /// takes the stage, rewrites `Drafting` into `Finalized`, and puts it
     /// back. The transient `None` is the honest "in transit" reading: a
@@ -117,6 +118,10 @@ struct FinalizedTurnCommitStage {
 }
 
 impl TurnBoundary {
+    pub(super) fn with_fleet_format(mut self, fleet: crate::FleetFormat) -> Self {
+        self.fleet_format = fleet;
+        self
+    }
     pub(super) fn with_metrics(
         mut self,
         metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
@@ -185,6 +190,7 @@ impl TurnBoundary {
     ) -> Self {
         let draft_clock = Arc::clone(&clock);
         Self {
+            fleet_format: crate::FleetFormat::current(),
             stage: Some(TurnCommitStage::Drafting(Box::new(
                 TurnCommitDraft::from_state_with_graph_appends(
                     state,
@@ -296,6 +302,7 @@ impl TurnBoundary {
         messages: &MessageSequence,
         mut session: Option<&mut Session>,
     ) -> Result<(), StoreError> {
+        let fleet_format = self.fleet_format;
         if !crate::messages_are_prompt_resume_safe(messages.iter()) {
             return Ok(());
         }
@@ -314,7 +321,7 @@ impl TurnBoundary {
         state.turn_index = turn_index;
         if let Some(plugins) = plugins.as_ref() {
             state
-                .capture_plugin_states(plugins.as_ref())
+                .capture_plugin_states(plugins.as_ref(), fleet_format)
                 .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
                     error: Box::new(error),
                 })?;
@@ -357,6 +364,7 @@ impl TurnBoundary {
         &mut self,
         snapshot: ProgressBoundarySnapshot<'_>,
     ) -> Result<ProgressBoundaryResult, RuntimeError> {
+        let fleet_format = self.fleet_format;
         let ProgressBoundarySnapshot {
             policy,
             turn_index,
@@ -381,7 +389,7 @@ impl TurnBoundary {
                 .apply(state)
                 .map_err(super::runtime_error_from_store_commit)?;
             if let Some(plugins) = plugins {
-                state.capture_plugin_states(plugins)?;
+                state.capture_plugin_states(plugins, fleet_format)?;
             }
         }
         let protocol_events = self.apply_event_delta(event_delta);
@@ -690,6 +698,7 @@ impl TurnBoundary {
         &mut self,
         input: FinalCommitInput<'_>,
     ) -> FinalCommitResult {
+        let fleet_format = self.fleet_format;
         let FinalCommitInput {
             returned_state,
             tool_calls,
@@ -724,11 +733,11 @@ impl TurnBoundary {
         // §3). A store-less session keeps the same fact resident.
         state.pending_follow_on = pending_follow_on.map(Box::new);
         if let Some(plugins) = plugins {
-            state.capture_plugin_states(plugins).map_err(|error| {
-                StoreError::TurnOutcomeMaterializationRefused {
+            state
+                .capture_plugin_states(plugins, fleet_format)
+                .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
                     error: Box::new(error),
-                }
-            })?;
+                })?;
         }
         // The frame the turn was admitted on, which a switch this commit
         // opens ends (ADR 0113 §3.1), and what the switch carries out of it.

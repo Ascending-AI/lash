@@ -466,7 +466,9 @@ impl ProtocolDriverPlugin for MinimalProtocolDriver {
 impl ProtocolDriverHandle<HostTurnProtocol> for MinimalProtocolDriver {
     fn prepare_protocol_iteration(&self, context: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
-            request: context.project_llm_request(true),
+            request: context
+                .project_llm_request(true)
+                .expect("fixture history projects"),
             driver_state: None,
         })]
     }

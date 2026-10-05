@@ -10,9 +10,9 @@ pub struct RlmProjectedBindings {
     bindings: BTreeMap<String, FlowValue>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
-struct RecordedProjection(#[serde(with = "lashlang::effect_value")] FlowValue);
+pub(crate) struct RecordedProjection(#[serde(with = "lashlang::effect_value")] FlowValue);
 
 impl RlmProjectedBindings {
     pub(crate) async fn journaled(
@@ -56,23 +56,20 @@ impl RlmProjectedBindings {
     /// The bindings as a cell records them, for a segment boundary inside
     /// the cell: the successor segment links against these through
     /// [`Self::from_recorded`], never against its own live projections.
-    pub(crate) fn recorded(&self) -> Result<serde_json::Value, serde_json::Error> {
-        serde_json::to_value(
-            self.bindings
-                .iter()
-                .map(|(name, value)| (name.clone(), RecordedProjection(value.clone())))
-                .collect::<BTreeMap<_, _>>(),
-        )
+    pub(crate) fn recorded(&self) -> BTreeMap<String, RecordedProjection> {
+        self.bindings
+            .iter()
+            .map(|(name, value)| (name.clone(), RecordedProjection(value.clone())))
+            .collect()
     }
 
-    pub(crate) fn from_recorded(recorded: serde_json::Value) -> Result<Self, serde_json::Error> {
-        let bindings: BTreeMap<String, RecordedProjection> = serde_json::from_value(recorded)?;
-        Ok(Self {
+    pub(crate) fn from_recorded(bindings: BTreeMap<String, RecordedProjection>) -> Self {
+        Self {
             bindings: bindings
                 .into_iter()
                 .map(|(name, RecordedProjection(value))| (name, value))
                 .collect(),
-        })
+        }
     }
 
     pub fn new() -> Self {

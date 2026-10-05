@@ -32,11 +32,11 @@ use super::finish::{
 use super::stall::{
     LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE, native_reply_fingerprint, stalled_attempts,
 };
-use super::state::{
-    NATIVE_DRIVER_STATE_VERSION, RlmDriverState, RlmReasoningPart, decode_rlm_driver_state,
+use super::transport::NATIVE_TRANSPORT_VERSION;
+use crate::driver_state::{
+    RLM_DRIVER_STATE_VERSION, RlmDriverState, RlmReasoningPart, decode_rlm_driver_state,
     rlm_driver_state,
 };
-use super::transport::NATIVE_TRANSPORT_VERSION;
 use crate::protocol::actions::{invalid_driver_state_actions, invalid_turn_options_actions};
 use crate::protocol::stall::{ExtractionCounts, ExtractionDiagnostic};
 
@@ -84,13 +84,18 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                 "projection_rehydration",
                 serde_json::json!({"degraded_bindings": degraded_bindings}),
+                lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
             )]));
         }
+        let request = match ctx.project_llm_request(false) {
+            Ok(request) => request,
+            Err(error) => return lash_sansio::sansio::stored_history_refusal_actions(error),
+        };
         actions.push(DriverAction::Start(PendingWork::Llm {
-            request: ctx.project_llm_request(false),
+            request,
             driver_state: Some(rlm_driver_state(
                 RlmDriverState::default(),
-                lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
+                lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
             )),
         }));
         actions
@@ -158,6 +163,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     native_counts(self.dialect.language_id(), &prose, &action, &reasoning),
                 )
                 .payload(),
+                lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
             )]));
             let cap = ctx
                 .generation()
@@ -212,6 +218,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     parts,
                     copy,
                     lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
+                    lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                 ));
             }
             if let Err(error) = continue_or_stop_after_nonterminal(
@@ -249,6 +256,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 native_counts(self.dialect.language_id(), &prose, &action, &reasoning),
             )
             .payload(),
+            lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
         )]));
         match action {
             super::tool::NativeAction::Malformed { repair_copy, .. } => {
@@ -258,6 +266,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     parts,
                     repair_copy,
                     lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
+                    lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                 )];
                 if let Err(error) = continue_or_stop_after_nonterminal(
                     &ctx,
@@ -333,7 +342,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 };
                 let mut state = match decode_rlm_driver_state(
                     raw_state,
-                    lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
+                    lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
                 ) {
                     Ok(state) => state,
                     Err(error) => return invalid_driver_state_actions(error),
@@ -350,7 +359,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     code,
                     driver_state: rlm_driver_state(
                         state,
-                        lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
+                        lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
                     ),
                 }));
             }
@@ -374,7 +383,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
     ) -> Vec<DriverAction> {
         let mut state = match decode_rlm_driver_state(
             driver_state,
-            lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
+            lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
         ) {
             Ok(state) => state,
             Err(err) => return invalid_driver_state_actions(err),
@@ -407,6 +416,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         serde_json::json!({
                             "degraded_bindings": response.degraded_bindings,
                         }),
+                        lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                     )]));
                 }
                 let terminal_outcome = response
@@ -446,6 +456,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         &state,
                         None,
                         lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
+                        lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                     )));
                     actions.push(DriverAction::Start(PendingWork::Checkpoint {
                         checkpoint: CheckpointKind::BeforeCompletion,
@@ -489,6 +500,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                             .with_value_mismatch(error_text),
                         )),
                         lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
+                        lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
                         self.dialect.as_ref(),
@@ -510,6 +522,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     None => lash_core::OutputValue::Inline(finish_value.clone()),
                 })),
                 lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
+                lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
             )));
             actions.push(DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
@@ -531,6 +544,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 &state,
                 None,
                 lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
+                lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
             ),
             Vec::new(),
             if state.outcome.is_failed() {
@@ -580,7 +594,7 @@ fn continue_or_stop_after_nonterminal(
     }
 
     if progress == AttemptProgress::Stalled {
-        let attempts = stalled_attempts(ctx, actions);
+        let attempts = stalled_attempts(ctx, actions).map_err(|error| error.to_string())?;
         let budget = ctx.no_progress_budget();
         if budget.is_exhausted_by(attempts) {
             actions.push(DriverAction::AppendEvents(vec![
@@ -592,6 +606,7 @@ fn continue_or_stop_after_nonterminal(
                         "consecutive_attempts": attempts,
                         "max_attempts": budget.max_attempts(),
                     }),
+                    lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                 ),
                 conversation_event(no_progress_stop_message(
                     rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "no_progress"),
@@ -843,6 +858,7 @@ fn trajectory_events(
     state: &RlmDriverState,
     entry_outcome: Option<lash_rlm_types::HistoryCellOutcome>,
     transport_version: u32,
+    schema_version: u32,
 ) -> Vec<SessionHistoryRecord> {
     let entry = trajectory_entry(turn_id, protocol_iteration, state, entry_outcome);
     vec![
@@ -850,8 +866,9 @@ fn trajectory_events(
             entry.id.clone(),
             state.assistant_parts.clone(),
             transport_version,
+            schema_version,
         ),
-        trajectory_event(entry),
+        trajectory_event(entry, schema_version),
     ]
 }
 
@@ -859,19 +876,21 @@ fn conversation_event(message: Message) -> SessionHistoryRecord {
     SessionHistoryRecord::Conversation(ConversationRecord::from_message(message))
 }
 
-fn trajectory_event(entry: RlmTrajectoryEntry) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(
-        entry,
-    )))
+fn trajectory_event(entry: RlmTrajectoryEntry, schema_version: u32) -> SessionHistoryRecord {
+    SessionHistoryRecord::Protocol(rlm_protocol_event(
+        RlmProtocolEvent::RlmTrajectoryEntry(entry),
+        schema_version,
+    ))
 }
 
-fn diagnostic_event(phase: &str, payload: Value) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmDiagnostic(
-        RlmDiagnosticEvent {
+fn diagnostic_event(phase: &str, payload: Value, schema_version: u32) -> SessionHistoryRecord {
+    SessionHistoryRecord::Protocol(rlm_protocol_event(
+        RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
             phase: phase.to_string(),
             payload,
-        },
-    )))
+        }),
+        schema_version,
+    ))
 }
 
 /// A native reply says in two parts what a cell reply says in one, so

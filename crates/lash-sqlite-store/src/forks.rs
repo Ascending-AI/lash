@@ -250,7 +250,7 @@ pub(super) async fn fork_at_in_catalog(
                 })?;
                 // Namespaces are inherited; admission belongs to the parent.
                 // The child's drive records its transition before construction.
-                let inherited_admission = checkpoint.components.remove("plugin_admission").is_some();
+                let inherited_admission = checkpoint.components.remove(lash_core_store::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT).is_some();
                 if source_frame_ended {
                     checkpoint.components.retain(|key, _| {
                         key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT

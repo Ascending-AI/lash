@@ -671,7 +671,10 @@ impl lash_core::plugin::ContextPressureHook for SeedingPressureHook {
         Ok(lash_core::plugin::ContextPressureDecision::OpenFrame {
             records: Vec::new(),
             task: "pressure frame seeded with a definition".to_string(),
-            seed: lash_protocol_rlm::rlm_seed_initial_nodes(seed),
+            seed: lash_protocol_rlm::rlm_seed_initial_nodes(
+                seed,
+                lash_core::FleetFormat::current(),
+            ),
         })
     }
 }

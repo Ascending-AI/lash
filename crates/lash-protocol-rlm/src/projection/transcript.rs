@@ -32,86 +32,90 @@ impl TranscriptRowProjectorPlugin for RlmTranscriptProjector {
     fn project_event(
         &self,
         event: &lash_core::ProtocolEvent,
-    ) -> Option<TranscriptProjectionOutcome> {
+    ) -> Result<Option<TranscriptProjectionOutcome>, lash_core::StoredDataCorruption> {
         if event.plugin_id != crate::plugin::RLM_PROTOCOL_PLUGIN_ID {
-            return None;
+            return Ok(None);
         }
-        Some(match super::context::decode_rlm_protocol_event(event) {
-            Some(RlmProtocolEvent::RlmAssistantContent(content))
-                if !content.reasoning.trim().is_empty() =>
-            {
-                TranscriptProjectionOutcome::Render {
-                    kind: TranscriptRowKind::Reasoning,
-                    content: Box::new(RowContent {
-                        reasoning: vec![content.reasoning],
-                        ..Default::default()
-                    }),
-                }
-            }
-            Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) if !step.code.trim().is_empty() => {
-                let mut output = step
-                    .output_archive
-                    .as_ref()
-                    .map(|archive| archive.witness.clone())
-                    .unwrap_or_else(|| {
-                        step.output
-                            .iter()
-                            .map(|print| print.text.as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    });
-                if let Some(value) = step.outcome.terminal_value() {
-                    let terminal = match value {
-                        lash_core::OutputValue::Inline(value) => {
-                            serde_json::to_string_pretty(value)
-                                .unwrap_or_else(|_| value.to_string())
-                        }
-                        lash_core::OutputValue::Retained(value) => value.witness.clone(),
-                    };
-                    if !output.is_empty() {
-                        output.push('\n');
+        Ok(Some(
+            match super::context::decode_rlm_protocol_event(event)? {
+                Some(RlmProtocolEvent::RlmAssistantContent(content))
+                    if !content.reasoning.trim().is_empty() =>
+                {
+                    TranscriptProjectionOutcome::Render {
+                        kind: TranscriptRowKind::Reasoning,
+                        content: Box::new(RowContent {
+                            reasoning: vec![content.reasoning],
+                            ..Default::default()
+                        }),
                     }
-                    output.push_str(&terminal);
                 }
-                let success = !step.outcome.is_failed();
-                let error = step.outcome.error().map(|failure| failure.message.clone());
-                let tools = step
-                    .calls
-                    .into_iter()
-                    .map(|call| RowTool {
-                        operation: call.operation,
-                        status: match call.outcome {
-                            lash_rlm_types::RlmExecutedCallOutcome::Ok => "success",
-                            lash_rlm_types::RlmExecutedCallOutcome::Err => "failure",
+                Some(RlmProtocolEvent::RlmTrajectoryEntry(step))
+                    if !step.code.trim().is_empty() =>
+                {
+                    let mut output = step
+                        .output_archive
+                        .as_ref()
+                        .map(|archive| archive.witness.clone())
+                        .unwrap_or_else(|| {
+                            step.output
+                                .iter()
+                                .map(|print| print.text.as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        });
+                    if let Some(value) = step.outcome.terminal_value() {
+                        let terminal = match value {
+                            lash_core::OutputValue::Inline(value) => {
+                                serde_json::to_string_pretty(value)
+                                    .unwrap_or_else(|_| value.to_string())
+                            }
+                            lash_core::OutputValue::Retained(value) => value.witness.clone(),
+                        };
+                        if !output.is_empty() {
+                            output.push('\n');
                         }
-                        .into(),
-                    })
-                    .collect();
-                TranscriptProjectionOutcome::Render {
-                    kind: TranscriptRowKind::CodeBlock,
-                    content: Box::new(RowContent {
-                        language: Some("typescript".into()),
-                        code: Some(step.code),
-                        output: Some(output),
-                        success: Some(success),
-                        error,
-                        attachments: step.images,
-                        tools,
-                        tools_omitted: step.calls_omitted,
-                        ..Default::default()
-                    }),
+                        output.push_str(&terminal);
+                    }
+                    let success = !step.outcome.is_failed();
+                    let error = step.outcome.error().map(|failure| failure.message.clone());
+                    let tools = step
+                        .calls
+                        .into_iter()
+                        .map(|call| RowTool {
+                            operation: call.operation,
+                            status: match call.outcome {
+                                lash_rlm_types::RlmExecutedCallOutcome::Ok => "success",
+                                lash_rlm_types::RlmExecutedCallOutcome::Err => "failure",
+                            }
+                            .into(),
+                        })
+                        .collect();
+                    TranscriptProjectionOutcome::Render {
+                        kind: TranscriptRowKind::CodeBlock,
+                        content: Box::new(RowContent {
+                            language: Some("typescript".into()),
+                            code: Some(step.code),
+                            output: Some(output),
+                            success: Some(success),
+                            error,
+                            attachments: step.images,
+                            tools,
+                            tools_omitted: step.calls_omitted,
+                            ..Default::default()
+                        }),
+                    }
                 }
-            }
-            Some(
-                RlmProtocolEvent::RlmAssistantContent(_)
-                | RlmProtocolEvent::RlmTrajectoryEntry(_)
-                | RlmProtocolEvent::RlmGlobalsPatch(_)
-                | RlmProtocolEvent::RlmSeed(_)
-                | RlmProtocolEvent::RlmDiagnostic(_),
-            ) => TranscriptProjectionOutcome::Suppress(SuppressionReason::ProtocolInternal),
-            None => {
-                TranscriptProjectionOutcome::Suppress(SuppressionReason::UnrecognizedProtocolEvent)
-            }
-        })
+                Some(
+                    RlmProtocolEvent::RlmAssistantContent(_)
+                    | RlmProtocolEvent::RlmTrajectoryEntry(_)
+                    | RlmProtocolEvent::RlmGlobalsPatch(_)
+                    | RlmProtocolEvent::RlmSeed(_)
+                    | RlmProtocolEvent::RlmDiagnostic(_),
+                ) => TranscriptProjectionOutcome::Suppress(SuppressionReason::ProtocolInternal),
+                None => TranscriptProjectionOutcome::Suppress(
+                    SuppressionReason::UnrecognizedProtocolEvent,
+                ),
+            },
+        ))
     }
 }

@@ -374,7 +374,7 @@ impl LashRuntime {
         if let Some(bytes) = durable_state.plugin_admission_snapshot() {
             session
                 .plugins()
-                .adopt_native_view(&bytes)
+                .adopt_native_view(&bytes, session.fleet_format())
                 .map_err(|error| {
                     (
                         ResidentReloadStage::ProtocolSessionRestore,

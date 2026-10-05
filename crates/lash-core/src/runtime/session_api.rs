@@ -68,7 +68,8 @@ impl LashRuntime {
                 let snapshot = session.plugins().tool_registry().export_state();
                 self.state.set_tool_state_snapshot(Some(snapshot));
             }
-            self.state.capture_plugin_states(session.plugins())?;
+            self.state
+                .capture_plugin_states(session.plugins(), self.fleet_format())?;
         }
         Ok(())
     }
@@ -254,7 +255,7 @@ impl LashRuntime {
                 let snapshot = session.plugins().tool_registry().export_state();
                 state.set_tool_state_snapshot(Some(snapshot));
             }
-            state.capture_plugin_states(session.plugins())?;
+            state.capture_plugin_states(session.plugins(), self.fleet_format())?;
         }
         Ok(state)
     }
@@ -1245,7 +1246,7 @@ impl LashRuntime {
         let fleet_format = self.fleet_format();
         let commit_state = &mut self.state;
         if let Some(session) = self.session.as_ref() {
-            commit_state.capture_plugin_states(session.plugins())?;
+            commit_state.capture_plugin_states(session.plugins(), fleet_format)?;
         }
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(

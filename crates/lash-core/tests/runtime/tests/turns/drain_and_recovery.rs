@@ -1126,6 +1126,7 @@ pub(super) async fn a_fresh_storeless_runtime_materializes_its_first_turn() {
             .state()
             .plugin_admission_snapshot()
             .expect("recorded native view"),
+        lash_core::FleetFormat::current(),
     )
     .expect("decode the first turn's plugin transition");
     assert_eq!(view.request.target, admission);

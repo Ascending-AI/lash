@@ -124,8 +124,90 @@ fn a_wake_row_without_its_version_fails_decode() {
     assert!(error.contains("missing field `version`"), "{error}");
 }
 
+fn write_admission(fleet: FleetFormat) -> Vec<u8> {
+    let session = crate::SessionId::fixture("admission");
+    let view = crate::plugin::PluginNativeView {
+        request: crate::plugin::PluginTransitionRequest {
+            id: crate::plugin::PluginTransitionId(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn(&session, "run"),
+                    "plugin-transition",
+                )
+                .expect("address"),
+            ),
+            owner: crate::RuntimeOwner::Session(session),
+            base: crate::plugin::PluginTransitionBase::Session {
+                head: crate::store::SessionHeadRef {
+                    generation: 0,
+                    revision: 0,
+                    leaf: None,
+                    checkpoint: None,
+                },
+            },
+            target: Default::default(),
+        },
+        source: crate::BlobRef::for_content(b"native"),
+        generation: None,
+        state: Default::default(),
+        config: Default::default(),
+    };
+    view.encode(fleet).expect("encode admission").to_vec()
+}
+fn read_admission(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
+    crate::plugin::PluginNativeView::decode(bytes, fleet)
+        .map_err(|error| error.to_string())
+        .and_then(|view| serde_json::to_string(&view).map_err(|error| error.to_string()))
+}
+fn restamp_admission(bytes: &[u8], version: u32) -> Vec<u8> {
+    let mut value: serde_json::Value = rmp_serde::from_slice(bytes).expect("admission");
+    value["format"] = serde_json::json!(version);
+    rmp_serde::to_vec_named(&value).expect("restamp")
+}
+fn write_runtime_event(fleet: FleetFormat) -> Vec<u8> {
+    let event = crate::session_model::plugin_runtime_protocol_event(
+        "fixture",
+        crate::PluginRuntimeEvent::Status {
+            key: "status".into(),
+            label: "ready".into(),
+            detail: None,
+        },
+        fleet,
+    )
+    .expect("runtime event");
+    serde_json::to_vec(&event.payload).expect("JSON")
+}
+fn read_runtime_event(bytes: &[u8], _fleet: FleetFormat) -> Result<String, String> {
+    let event = crate::ProtocolEvent {
+        plugin_id: crate::session_model::PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID.into(),
+        payload: serde_json::from_slice(bytes).map_err(|error| error.to_string())?,
+    };
+    crate::session_model::plugin_runtime_event_from_protocol(&event)
+        .map_err(|error| error.to_string())
+        .and_then(|record| {
+            serde_json::to_string(&record.map(|record| record.event))
+                .map_err(|error| error.to_string())
+        })
+}
+fn restamp_format(bytes: &[u8], version: u32) -> Vec<u8> {
+    restamp(bytes, "format", version)
+}
+
 fn probes() -> Vec<SurfaceProbe> {
     vec![
+        SurfaceProbe {
+            constant: "PLUGIN_ADMISSION_CHECKPOINT_VERSION",
+            newest: crate::plugin::PLUGIN_ADMISSION_CHECKPOINT_VERSION,
+            write: write_admission,
+            read: read_admission,
+            restamp: restamp_admission,
+        },
+        SurfaceProbe {
+            constant: "PLUGIN_RUNTIME_EVENT_VERSION",
+            newest: crate::session_model::PLUGIN_RUNTIME_EVENT_VERSION,
+            write: write_runtime_event,
+            read: read_runtime_event,
+            restamp: restamp_format,
+        },
         SurfaceProbe {
             constant: "PROCESS_EVENT_VOCABULARY_VERSION",
             newest: PROCESS_EVENT_VOCABULARY_VERSION,

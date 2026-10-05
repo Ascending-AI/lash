@@ -1100,3 +1100,20 @@ mod tests {
         }
     }
 }
+
+/// The record kind and diagnostic retained when durable data cannot be decoded.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+    thiserror::Error,
+)]
+#[error("stored {record_kind} data is corrupt: {message}")]
+pub struct StoredDataCorruption {
+    pub record_kind: String,
+    pub message: String,
+}

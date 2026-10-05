@@ -28,4 +28,4 @@ error[E0609]: no field `tools` on type `&ContextPressureContext<'_>`
 16 |     let _ = &ctx.tools;
    |                  ^^^^^ unknown field
    |
-   = note: available fields are: `session_id`, `plugin_config`, `state`, `prompt_usage`, `max_context_tokens` ... and 4 others
+   = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `state`, `prompt_usage` ... and 5 others

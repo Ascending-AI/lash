@@ -1715,6 +1715,7 @@ async fn committed_row_deltas_transport_each_new_node_once() -> Result<()> {
     let mut seen = session
         .read_view()
         .transcript()
+        .expect("valid committed history")
         .into_records()
         .into_iter()
         .map(|row| row.row_id)
@@ -1754,7 +1755,11 @@ async fn committed_row_deltas_transport_each_new_node_once() -> Result<()> {
                 carried.push(row.clone());
             }
         }
-        let canonical = session.read_view().transcript().into_records();
+        let canonical = session
+            .read_view()
+            .transcript()
+            .expect("valid committed history")
+            .into_records();
         assert_eq!(
             seen.len(),
             canonical.len(),

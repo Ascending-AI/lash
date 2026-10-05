@@ -52,6 +52,7 @@ pub trait Capability: Send + Sync {
 
 /// State exposed to a `Capability` while it resolves a spawn.
 pub struct SubagentSpawnContext<'a> {
+    pub fleet_format: lash_core::FleetFormat,
     pub parent_session_id: &'a SessionId,
     pub parent_snapshot: &'a SessionSnapshot,
     pub session_spec: &'a SessionSpec,
@@ -131,7 +132,8 @@ impl SubagentSpawnContext<'_> {
                 .over(self.session_spec.plugin_options.clone()),
         );
 
-        let initial_nodes = lash_protocol_rlm::rlm_seed_initial_nodes(self.seed.clone());
+        let initial_nodes =
+            lash_protocol_rlm::rlm_seed_initial_nodes(self.seed.clone(), self.fleet_format);
         let request = SessionCreateRequest::child(
             self.parent_session_id,
             SessionStartPoint::Empty,

@@ -27,7 +27,9 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
         ..RuntimeSessionState::new(policy.clone())
     };
     let plugins = support::construct(&fixture.host(), id, None, Default::default()).await;
-    state.capture_plugin_states(&plugins).unwrap();
+    state
+        .capture_plugin_states(&plugins, lash_core::FleetFormat::current())
+        .unwrap();
     let hook_session = plugins.clone();
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),

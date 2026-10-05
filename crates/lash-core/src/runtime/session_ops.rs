@@ -35,7 +35,9 @@ impl LashRuntime {
         let mut installed_tool_restore = None;
         if let Some(session) = self.session.as_ref() {
             if let Some(bytes) = state.plugin_admission_snapshot() {
-                session.plugins().adopt_native_view(&bytes)?;
+                session
+                    .plugins()
+                    .adopt_native_view(&bytes, self.fleet_format())?;
                 state.authority.plugin_config =
                     (*session.plugins().admitted_plugin_config().config).clone();
             } else if let Some(reference) = state.plugin_state_ref()
@@ -381,13 +383,17 @@ impl LashRuntime {
             let nodes = owned_events
                 .iter()
                 .map(|owned| {
-                    crate::plugin_runtime_protocol_event(&owned.plugin_id, owned.value.clone())
-                        .map(crate::SessionAppendNode::protocol_event)
-                        .map_err(|err| {
-                            PluginOperationInvokeError::protocol(format!(
-                                "failed to encode plugin runtime event: {err}"
-                            ))
-                        })
+                    crate::plugin_runtime_protocol_event(
+                        &owned.plugin_id,
+                        owned.value.clone(),
+                        self.fleet_format(),
+                    )
+                    .map(crate::SessionAppendNode::protocol_event)
+                    .map_err(|err| {
+                        PluginOperationInvokeError::protocol(format!(
+                            "failed to encode plugin runtime event: {err}"
+                        ))
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let operation = boundary_operation(

@@ -158,6 +158,7 @@ pub(crate) enum ToolExecutionRoute {
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
+    fleet_format: crate::FleetFormat,
     /// Who the attempt runs for: a session on its admitted frame, or a
     /// process.
     owner: crate::ExecutionOwner,
@@ -210,6 +211,10 @@ pub struct AttemptContext<'run> {
 }
 
 impl<'run> AttemptContext<'run> {
+    pub fn fleet_format(&self) -> crate::FleetFormat {
+        self.fleet_format
+    }
+
     pub fn definition_engines(&self) -> &crate::ProcessEngineRegistry {
         &self.definition_engines
     }
@@ -244,6 +249,11 @@ impl<'run> AttemptContext<'run> {
             .as_ref()
             .and_then(crate::RuntimeExecutionContext::attempt_phase_probe);
         Self {
+            fleet_format: context
+                .runtime_execution_context
+                .as_ref()
+                .map(crate::RuntimeExecutionContext::fleet_format)
+                .unwrap_or_else(crate::FleetFormat::current),
             definition_engines: context
                 .runtime_dispatch
                 .as_ref()
@@ -1155,6 +1165,7 @@ impl ToolExecutionGrant {
 
 #[derive(Clone)]
 pub struct ToolPrepareContext {
+    fleet_format: crate::FleetFormat,
     owner: crate::RuntimeOwner,
     sessions: Arc<dyn SessionStateService>,
     /// The catalog the call is dispatched against: a process owner's catalog
@@ -1170,14 +1181,19 @@ pub struct ToolPrepareContext {
 }
 
 impl ToolPrepareContext {
+    pub fn fleet_format(&self) -> crate::FleetFormat {
+        self.fleet_format
+    }
     pub(crate) fn with_execution_binding(
         owner: crate::RuntimeOwner,
         sessions: Arc<dyn SessionStateService>,
         turn_context: crate::TurnContext,
         call_id: lash_sansio::ToolCallId,
         tool_execution_binding: serde_json::Value,
+        fleet_format: crate::FleetFormat,
     ) -> Self {
         Self {
+            fleet_format,
             owner,
             sessions,
             tool_catalog: None,
@@ -1210,6 +1226,7 @@ impl ToolPrepareContext {
             crate::TurnContext::default(),
             lash_sansio::ToolCallId::fixture("prepare-for-testing"),
             serde_json::Value::Null,
+            crate::FleetFormat::current(),
         )
         .with_process_originator(process_originator)
     }

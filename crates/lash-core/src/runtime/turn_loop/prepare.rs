@@ -170,6 +170,7 @@ impl LashRuntime {
                     self.state.turn_scope(&trace_turn_id),
                     self.host.core.durability.commit_budget,
                 )
+                .with_fleet_format(self.fleet_format())
                 .with_definition_engines(self.host.core.process_engines.clone())
                 .with_metrics(self.host.core.tracing.metrics().clone())
                 .with_trace_metadata(turn_trace_metadata(&self.state, input.items.len()))

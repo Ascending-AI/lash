@@ -300,7 +300,7 @@ async fn run_turn(
         .output_into(telemetry.as_ref())
         .await
         .context("run toolbench turn")?;
-    let decisions = lash::rlm::recorded_extraction_decisions(session.read_view().active_events());
+    let decisions = lash::rlm::recorded_extraction_decisions(session.read_view().active_events())?;
     Ok((
         lash::TurnOutput {
             result,

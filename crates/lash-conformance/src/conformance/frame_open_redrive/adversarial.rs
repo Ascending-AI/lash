@@ -360,7 +360,7 @@ pub(super) async fn overflow_recovery_crash_case(
         .expect("the session stands in its first frame");
     assert_eq!(
         recovery_records(&overflowed),
-        [serde_json::json!({"kind": "pending"})],
+        [serde_json::json!({"format": 1, "record": {"kind": "pending"}})],
         "the refused run leaves a typed recovery node outside conversation"
     );
     assert!(
@@ -377,8 +377,8 @@ pub(super) async fn overflow_recovery_crash_case(
     assert_eq!(
         recovery_records(&head),
         [
-            serde_json::json!({"kind": "pending"}),
-            serde_json::json!({"kind": "completed"}),
+            serde_json::json!({"format": 1, "record": {"kind": "pending"}}),
+            serde_json::json!({"format": 1, "record": {"kind": "completed"}}),
         ],
         "recovery records commit once and store each kind once"
     );
@@ -433,6 +433,7 @@ pub async fn an_overflow_recovery_summarizer_fault_aborts_without_a_record(
                 .expect("the overflow committed");
             let injected = code.clone();
             let ctx = crate::plugin::ContextPressureContext {
+                writer_formats: lash_sansio::build_newest_writer_formats(),
                 session_id: law.session_id.clone(),
                 plugin_config: state.admitted_plugin_config(),
                 state: state.read_view(),
@@ -476,8 +477,8 @@ pub async fn an_overflow_recovery_summarizer_fault_aborts_without_a_record(
     assert_eq!(
         recovery_records(&law.head().await),
         [
-            serde_json::json!({"kind": "pending"}),
-            serde_json::json!({"kind": "completed"}),
+            serde_json::json!({"format": 1, "record": {"kind": "pending"}}),
+            serde_json::json!({"format": 1, "record": {"kind": "completed"}}),
         ]
     );
 }

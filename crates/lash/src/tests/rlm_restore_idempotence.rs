@@ -146,7 +146,7 @@ fn seed(label: &str) -> RlmSeed {
 }
 
 fn seed_nodes(label: &str) -> Vec<SessionAppendNode> {
-    rlm_seed_initial_nodes(seed(label))
+    rlm_seed_initial_nodes(seed(label), lash_core::FleetFormat::current())
 }
 
 fn typescript_block(code: &str) -> String {

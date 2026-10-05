@@ -59,7 +59,9 @@ const LASH_BUILD_GENERATION_DOMAIN_VERSION: &str = "lash-build-generation/v1";
 
 use lash_core::engine::BuildGeneration;
 pub use lash_core::engine::UpgradePolicy;
+pub use lash_core::plugin::PLUGIN_ADMISSION_CHECKPOINT_VERSION;
 use lash_core::plugin::PluginComposition;
+pub use lash_core::session_model::PLUGIN_RUNTIME_EVENT_VERSION;
 use lash_core::store::SessionAdmissionWindow;
 use lash_sansio::core_support::Blake3DomainHasher;
 
@@ -78,7 +80,8 @@ pub use lash_core::{
 pub use lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION;
 #[cfg(feature = "rlm")]
 pub use lash_protocol_rlm::{
-    NATIVE_DRIVER_STATE_VERSION, NATIVE_TRANSPORT_VERSION, RLM_SNAPSHOT_VERSION,
+    NATIVE_TRANSPORT_VERSION, RLM_DRIVER_STATE_VERSION, RLM_PROTOCOL_EVENT_VERSION,
+    RLM_SNAPSHOT_VERSION,
 };
 #[cfg(feature = "restate")]
 pub use lash_restate::{
@@ -104,6 +107,12 @@ pub enum DurableFormat {
     /// The session checkpoint manifest: the keyed set of components a
     /// checkpoint root names.
     SessionCheckpointManifest,
+    /// The opaque plugin admission checkpoint body and native view.
+    PluginAdmissionCheckpoint,
+    /// A runtime-plugin event nested in session history.
+    PluginRuntimeEvent,
+    /// An RLM event nested in session history.
+    RlmProtocolEvent,
     /// The encoding of the logical bytes stored behind a checkpoint component
     /// descriptor.
     CheckpointComponentEncoding,
@@ -154,8 +163,8 @@ pub enum DurableFormat {
     WorkflowGraphSchema,
     /// The optional workflow type-facet projection a persisted graph carries.
     WorkflowTypeFacet,
-    /// The native RLM driver state parked in the protocol driver-state slot.
-    NativeRlmDriverState,
+    /// The RLM driver state parked in the protocol driver-state slot.
+    RlmDriverState,
     /// The native RLM provider-call and repair envelopes recorded in session
     /// history.
     NativeRlmTransport,
@@ -194,6 +203,9 @@ impl DurableFormat {
     /// The operator-facing name used in preflight reports.
     pub fn name(self) -> &'static str {
         match self {
+            DurableFormat::PluginAdmissionCheckpoint => "plugin admission checkpoint",
+            DurableFormat::PluginRuntimeEvent => "plugin runtime event",
+            DurableFormat::RlmProtocolEvent => "RLM protocol event",
             DurableFormat::ModuleArtifact => "module artifact",
             DurableFormat::SessionCheckpointManifest => "session checkpoint manifest",
             DurableFormat::CheckpointComponentEncoding => "checkpoint component encoding",
@@ -217,7 +229,7 @@ impl DurableFormat {
             DurableFormat::RlmSnapshotEnvelope => "RLM snapshot envelope",
             DurableFormat::WorkflowGraphSchema => "workflow graph schema",
             DurableFormat::WorkflowTypeFacet => "workflow type facet",
-            DurableFormat::NativeRlmDriverState => "native RLM driver state",
+            DurableFormat::RlmDriverState => "RLM driver state",
             DurableFormat::NativeRlmTransport => "native RLM transport",
             DurableFormat::Engine(format) => format.name,
             DurableFormat::VmAbi => "Lashlang VM ABI",
@@ -233,6 +245,9 @@ impl DurableFormat {
     /// answer here cannot drift from the declared upgrade path.
     pub fn upgrade_policy(self) -> UpgradePolicy {
         match self {
+            DurableFormat::PluginAdmissionCheckpoint => UpgradePolicy::Migrate,
+            DurableFormat::PluginRuntimeEvent => UpgradePolicy::Migrate,
+            DurableFormat::RlmProtocolEvent => UpgradePolicy::Migrate,
             DurableFormat::ModuleArtifact => UpgradePolicy::Coexist,
             DurableFormat::SessionCheckpointManifest => UpgradePolicy::Migrate,
             DurableFormat::CheckpointComponentEncoding => UpgradePolicy::Migrate,
@@ -256,7 +271,7 @@ impl DurableFormat {
             DurableFormat::RlmSnapshotEnvelope => UpgradePolicy::Migrate,
             DurableFormat::WorkflowGraphSchema => UpgradePolicy::Migrate,
             DurableFormat::WorkflowTypeFacet => UpgradePolicy::Migrate,
-            DurableFormat::NativeRlmDriverState => UpgradePolicy::Migrate,
+            DurableFormat::RlmDriverState => UpgradePolicy::Migrate,
             DurableFormat::NativeRlmTransport => UpgradePolicy::Migrate,
             DurableFormat::Engine(format) => format.upgrade_policy,
             DurableFormat::VmAbi => UpgradePolicy::Drain,
@@ -326,6 +341,28 @@ pub struct DurableFormatEntry {
 /// reads outward from the store.
 pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
     const FACADE_FORMATS: &[DurableFormatEntry] = &[
+        DurableFormatEntry {
+            format: DurableFormat::PluginAdmissionCheckpoint,
+            version: FormatVersion::Counter(PLUGIN_ADMISSION_CHECKPOINT_VERSION),
+            owning_crate: "lash-core-execution",
+            constant: "PLUGIN_ADMISSION_CHECKPOINT_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::PluginRuntimeEvent,
+            version: FormatVersion::Counter(PLUGIN_RUNTIME_EVENT_VERSION),
+            owning_crate: "lash-core-execution",
+            constant: "PLUGIN_RUNTIME_EVENT_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        #[cfg(feature = "rlm")]
+        DurableFormatEntry {
+            format: DurableFormat::RlmProtocolEvent,
+            version: FormatVersion::Counter(RLM_PROTOCOL_EVENT_VERSION),
+            owning_crate: "lash-protocol-rlm",
+            constant: "RLM_PROTOCOL_EVENT_VERSION",
+            probe: FormatProbe::Comparable,
+        },
         DurableFormatEntry {
             format: DurableFormat::ModuleArtifact,
             version: FormatVersion::Identity(LASHLANG_SEMANTIC_HASH_VERSION),
@@ -496,10 +533,10 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
         },
         #[cfg(feature = "rlm")]
         DurableFormatEntry {
-            format: DurableFormat::NativeRlmDriverState,
-            version: FormatVersion::Counter(NATIVE_DRIVER_STATE_VERSION),
+            format: DurableFormat::RlmDriverState,
+            version: FormatVersion::Counter(RLM_DRIVER_STATE_VERSION),
             owning_crate: "lash-protocol-rlm",
-            constant: "NATIVE_DRIVER_STATE_VERSION",
+            constant: "RLM_DRIVER_STATE_VERSION",
             probe: FormatProbe::Comparable,
         },
         #[cfg(feature = "rlm")]

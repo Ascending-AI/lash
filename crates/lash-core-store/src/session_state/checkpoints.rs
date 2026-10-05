@@ -258,11 +258,12 @@ impl RuntimeSessionState {
     pub fn capture_plugin_states(
         &mut self,
         plugins: &dyn SessionPluginStateSource,
+        fleet: crate::store::FleetFormat,
     ) -> Result<(), crate::RuntimeError> {
         // A native checkpoint is a cold-open record of the session. The
         // running Run's overrides belong only to its recorded admission.
         let config = crate::store::persisted_session_config_from_state(self).plugin_config;
-        let native = plugins.capture_plugin_admission(&config)?;
+        let native = plugins.capture_plugin_admission(&config, fleet)?;
         self.refresh_plugin_states_with(plugins, |source| source.capture_plugin_state())?;
         if let Some(bytes) = native {
             self.set_plugin_admission_snapshot(bytes);

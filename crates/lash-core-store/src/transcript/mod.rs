@@ -139,7 +139,10 @@ pub trait TranscriptRowProjectorPlugin: Send + Sync {
     fn project_message(&self, _message: &Message) -> Option<TranscriptProjectionOutcome> {
         None
     }
-    fn project_event(&self, event: &ProtocolEvent) -> Option<TranscriptProjectionOutcome>;
+    fn project_event(
+        &self,
+        event: &ProtocolEvent,
+    ) -> Result<Option<TranscriptProjectionOutcome>, crate::runtime_error::StoredDataCorruption>;
 }
 
 #[derive(Clone, Default)]
@@ -168,7 +171,7 @@ impl TranscriptProjection {
     pub fn from_read_state(
         view: &crate::SessionReadView,
         options: &TranscriptProjectionOptions,
-    ) -> Self {
+    ) -> Result<Self, crate::runtime_error::StoredDataCorruption> {
         use crate::session_graph::facade_ops::SessionGraphFacadeOps;
         Self::from_records(view.session_graph().active_path_nodes(), options)
     }
@@ -176,7 +179,7 @@ impl TranscriptProjection {
     pub fn from_records<'a>(
         records: impl IntoIterator<Item = &'a SessionNodeRecord>,
         options: &TranscriptProjectionOptions,
-    ) -> Self {
+    ) -> Result<Self, crate::runtime_error::StoredDataCorruption> {
         let mut current_turn = None;
         let rows = records
             .into_iter()
@@ -194,13 +197,16 @@ impl TranscriptProjection {
                     } => {
                         provenance.turn_id = current_turn.clone();
                         provenance.plugin_id = Some(event.plugin_id.clone());
-                        options
-                            .projectors
-                            .iter()
-                            .find_map(|p| p.project_event(event))
-                            .unwrap_or(TranscriptProjectionOutcome::Suppress(
-                                SuppressionReason::UnrecognizedProtocolEvent,
-                            ))
+                        let mut projected = None;
+                        for projector in &options.projectors {
+                            if let Some(outcome) = projector.project_event(event)? {
+                                projected = Some(outcome);
+                                break;
+                            }
+                        }
+                        projected.unwrap_or(TranscriptProjectionOutcome::Suppress(
+                            SuppressionReason::UnrecognizedProtocolEvent,
+                        ))
                     }
                     SessionNodePayload::Event {
                         event: SessionHistoryRecord::Conversation(record),
@@ -257,7 +263,7 @@ impl TranscriptProjection {
                         Some(reason),
                     ),
                 };
-                TranscriptRow {
+                Ok(TranscriptRow {
                     ordinal: RowOrdinal(index),
                     record: TranscriptRowRecord {
                         row_id: RowId(node.node_id.clone()),
@@ -267,10 +273,10 @@ impl TranscriptProjection {
                         timestamp: node.timestamp.clone(),
                         suppressed,
                     },
-                }
+                })
             })
-            .collect();
-        Self { rows }
+            .collect::<Result<Vec<_>, crate::runtime_error::StoredDataCorruption>>()?;
+        Ok(Self { rows })
     }
     pub fn rows(&self) -> &[TranscriptRow] {
         &self.rows

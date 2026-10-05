@@ -4,7 +4,10 @@ use crate::protocol::stall::reply_fingerprint;
 
 pub(super) const LLM_EXTRACTION_PHASE: &str = "native_extraction";
 pub(super) const NO_PROGRESS_BUDGET_PHASE: &str = "no_progress_budget";
-pub(super) fn stalled_attempts(ctx: &DriverContextView<'_>, actions: &[DriverAction]) -> usize {
+pub(super) fn stalled_attempts(
+    ctx: &DriverContextView<'_>,
+    actions: &[DriverAction],
+) -> Result<usize, lash_core::StoredDataCorruption> {
     crate::protocol::stall::stalled_attempts_in_phase(ctx, actions, LLM_EXTRACTION_PHASE)
 }
 

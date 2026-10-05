@@ -603,6 +603,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .expect("the session has committed state");
         let committed_agent_replies = committed
             .transcript()
+            .expect("valid committed history")
             .visible()
             .filter(|row| row.provenance.is_turn_reply && row.content.text.contains(WAKE_REPLY))
             .map(|row| {

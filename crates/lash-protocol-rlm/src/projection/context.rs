@@ -19,22 +19,66 @@ use lashlang::State as FlowState;
 use super::bindings::RlmProjectedBindings;
 use super::transport::json_to_flow_value;
 
+/// Version of the RLM payload nested in a session-history protocol event.
+/// version_surface = "migrate"
+/// format_manifest = "RlmProtocolEvent"
+/// version_guard(roots(RlmEventEnvelope))
+pub const RLM_PROTOCOL_EVENT_VERSION: u32 = 1;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RlmEventEnvelope {
+    format: u32,
+    event: RlmProtocolEvent,
+}
+
 #[expect(
     clippy::expect_used,
-    reason = "RlmProtocolEvent is a crate-owned enum, so serde_json encoding cannot fail"
+    reason = "the typed RLM history envelope serializes"
 )]
-pub fn rlm_protocol_event(event: RlmProtocolEvent) -> lash_core::ProtocolEvent {
-    lash_core::ProtocolEvent::typed(crate::plugin::RLM_PROTOCOL_PLUGIN_ID, event)
-        .expect("RLM protocol events serialize")
+pub fn rlm_protocol_event(
+    event: RlmProtocolEvent,
+    schema_version: u32,
+) -> lash_core::ProtocolEvent {
+    lash_core::ProtocolEvent::typed(
+        crate::plugin::RLM_PROTOCOL_PLUGIN_ID,
+        RlmEventEnvelope {
+            format: schema_version,
+            event,
+        },
+    )
+    .expect("RLM protocol events serialize")
 }
 
 pub(crate) fn decode_rlm_protocol_event(
     event: &lash_core::ProtocolEvent,
-) -> Option<RlmProtocolEvent> {
-    event
-        .decode(crate::plugin::RLM_PROTOCOL_PLUGIN_ID)
-        .ok()
-        .flatten()
+) -> Result<Option<RlmProtocolEvent>, lash_core::StoredDataCorruption> {
+    if event.plugin_id != crate::plugin::RLM_PROTOCOL_PLUGIN_ID {
+        return Ok(None);
+    }
+    let corrupt = |message: String| lash_core::StoredDataCorruption {
+        record_kind: "RLM protocol event".into(),
+        message,
+    };
+    #[derive(serde::Deserialize)]
+    struct Stamp {
+        format: u32,
+    }
+    let stamp: Stamp = serde_json::from_value(event.payload.clone())
+        .map_err(|error| corrupt(error.to_string()))?;
+    if !lash_core::store::upcast_chain_covers(
+        lash_core::surface_format!(RLM_PROTOCOL_EVENT_VERSION),
+        stamp.format,
+        RLM_PROTOCOL_EVENT_VERSION,
+    ) {
+        return Err(corrupt(format!(
+            "unsupported format {}, expected {RLM_PROTOCOL_EVENT_VERSION}",
+            stamp.format
+        )));
+    }
+    let envelope: RlmEventEnvelope = serde_json::from_value(event.payload.clone())
+        .map_err(|error| corrupt(error.to_string()))?;
+    Ok(Some(envelope.event))
 }
 
 #[derive(Clone, Debug)]
@@ -47,9 +91,9 @@ pub struct RlmHistoryProjection {
 impl RlmHistoryProjection {
     pub fn from_chronological(
         projection: &lash_core::facade_support::ChronologicalProjection,
-    ) -> Self {
+    ) -> Result<Self, lash_core::StoredDataCorruption> {
         let suppressed_chronological_indices =
-            completed_turn_internal_indices(projection.entries());
+            completed_turn_internal_indices(projection.entries())?;
         let mut history = Vec::with_capacity(projection.entries().len());
         let mut chronological_indices = BTreeMap::new();
         for entry in projection.entries() {
@@ -59,7 +103,7 @@ impl RlmHistoryProjection {
             let item = match &entry.payload {
                 ChronologicalPayload::Message(message) => history_item_from_message(message),
                 ChronologicalPayload::ProtocolEvent(event) => {
-                    match decode_rlm_protocol_event(event) {
+                    match decode_rlm_protocol_event(event)? {
                         Some(RlmProtocolEvent::RlmAssistantContent(content)) => {
                             Some(RlmHistoryItem::Message {
                                 id: content.id,
@@ -80,11 +124,11 @@ impl RlmHistoryProjection {
                 history.push(item);
             }
         }
-        Self {
+        Ok(Self {
             history,
             chronological_indices,
             suppressed_chronological_indices,
-        }
+        })
     }
 
     /// Return the compact semantic `history[N]` index for a retained source
@@ -129,7 +173,7 @@ impl RlmHistoryProjection {
 /// message, every terminal step remains unchanged.
 fn completed_turn_internal_indices(
     entries: &[lash_core::facade_support::ChronologicalEntry],
-) -> BTreeSet<usize> {
+) -> Result<BTreeSet<usize>, lash_core::StoredDataCorruption> {
     let mut suppressed = BTreeSet::new();
     let mut assistant_content_indices = Vec::new();
     let mut terminal_step = None;
@@ -153,7 +197,7 @@ fn completed_turn_internal_indices(
                 }
                 MessageRole::System => {}
             },
-            ChronologicalPayload::ProtocolEvent(event) => match decode_rlm_protocol_event(event) {
+            ChronologicalPayload::ProtocolEvent(event) => match decode_rlm_protocol_event(event)? {
                 Some(RlmProtocolEvent::RlmAssistantContent(_)) => {
                     assistant_content_indices.push(entry.index);
                 }
@@ -170,7 +214,7 @@ fn completed_turn_internal_indices(
         }
     }
 
-    suppressed
+    Ok(suppressed)
 }
 
 /// Whether a message is the RLM protocol's own durable output, judged by its
@@ -193,7 +237,7 @@ pub fn is_rlm_protocol_output(origin: Option<&lash_core::MessageOrigin>) -> bool
 
 pub fn rlm_history_projection(
     projection: &lash_core::facade_support::ChronologicalProjection,
-) -> RlmHistoryProjection {
+) -> Result<RlmHistoryProjection, lash_core::StoredDataCorruption> {
     RlmHistoryProjection::from_chronological(projection)
 }
 
@@ -208,9 +252,10 @@ pub(crate) fn projected_bindings(
             ProjectedValue::custom(
                 "history",
                 Arc::new(HistoryProjectedValue {
-                    projection: Arc::new(rlm_history_projection(
-                        ctx.chronological_projection().as_ref(),
-                    )),
+                    projection: Arc::new(
+                        rlm_history_projection(ctx.chronological_projection().as_ref())
+                            .map_err(|error| error.to_string())?,
+                    ),
                 }),
             ),
         )
@@ -467,6 +512,43 @@ fn attachment_summary(
 mod tests {
     use super::*;
 
+    #[test]
+    fn corrupt_rlm_history_refuses_projection_and_transcript() {
+        use lash_core::transcript::TranscriptRowProjectorPlugin as _;
+        let foreign = lash_core::ProtocolEvent {
+            plugin_id: "foreign".into(),
+            payload: serde_json::json!(null),
+        };
+        assert!(
+            decode_rlm_protocol_event(&foreign)
+                .expect("foreign event")
+                .is_none()
+        );
+        for payload in [
+            serde_json::json!({}),
+            serde_json::json!({"format": u32::MAX}),
+            serde_json::json!({"format": RLM_PROTOCOL_EVENT_VERSION, "event": null}),
+        ] {
+            let event = lash_core::ProtocolEvent {
+                plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.into(),
+                payload,
+            };
+            let error = decode_rlm_protocol_event(&event).expect_err("our corrupt event refuses");
+            assert_eq!(error.record_kind, "RLM protocol event");
+            let events = [lash_core::SessionHistoryRecord::Protocol(event.clone())];
+            let projection = lash_core::facade_support::ChronologicalProjection::from_turn_view(
+                &events,
+                &Default::default(),
+            );
+            assert!(rlm_history_projection(&projection).is_err());
+            assert!(
+                crate::projection::transcript::RlmTranscriptProjector
+                    .project_event(&event)
+                    .is_err()
+            );
+        }
+    }
+
     fn message(id: &str, role: MessageRole, text: &str) -> Message {
         Message {
             id: id.to_string(),
@@ -494,7 +576,12 @@ mod tests {
             outcome: lash_rlm_types::CellOutcome::Running,
         };
         let events = [lash_core::SessionHistoryRecord::Protocol(
-            rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(entry)),
+            rlm_protocol_event(
+                RlmProtocolEvent::RlmTrajectoryEntry(entry),
+                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    crate::RLM_PROTOCOL_EVENT_VERSION
+                )),
+            ),
         )];
         lash_core::facade_support::ChronologicalProjection::from_turn_view(
             &events,
@@ -549,12 +636,19 @@ mod tests {
         };
         let projection = lash_core::facade_support::ChronologicalProjection::from_turn_view(
             &[lash_core::SessionHistoryRecord::Protocol(
-                rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(entry)),
+                rlm_protocol_event(
+                    RlmProtocolEvent::RlmTrajectoryEntry(entry),
+                    lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                        crate::RLM_PROTOCOL_EVENT_VERSION
+                    )),
+                ),
             )],
             &Default::default(),
         );
         let value = HistoryProjectedValue {
-            projection: Arc::new(rlm_history_projection(&projection)),
+            projection: Arc::new(
+                rlm_history_projection(&projection).expect("valid history fixture"),
+            ),
         };
         let FlowValue::Record(step) = read_index(&value, 0).await else {
             panic!("history step");
@@ -611,7 +705,9 @@ mod tests {
             lashlang::ProjectedValue::custom(
                 "history",
                 Arc::new(HistoryProjectedValue {
-                    projection: Arc::new(rlm_history_projection(history)),
+                    projection: Arc::new(
+                        rlm_history_projection(history).expect("valid history fixture"),
+                    ),
                 }),
             ),
         );
@@ -662,7 +758,9 @@ mod tests {
     #[tokio::test]
     async fn history_contains_its_own_first_entry() {
         let value = HistoryProjectedValue {
-            projection: Arc::new(rlm_history_projection(&step_projection("only"))),
+            projection: Arc::new(
+                rlm_history_projection(&step_projection("only")).expect("valid history fixture"),
+            ),
         };
         let first = read_index(&value, 0).await;
         assert!(matches!(
@@ -696,7 +794,9 @@ mod tests {
     #[tokio::test]
     async fn history_answers_empty_at_the_descriptor_seam() {
         let populated = HistoryProjectedValue {
-            projection: Arc::new(rlm_history_projection(&step_projection("only"))),
+            projection: Arc::new(
+                rlm_history_projection(&step_projection("only")).expect("valid history fixture"),
+            ),
         };
         assert!(matches!(
             populated.read_one(ProjectedReadRequest::Empty),
@@ -794,9 +894,15 @@ mod tests {
                     reasoning: String::new(),
                     prose: "terminal prose".to_string(),
                 }),
+                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    crate::RLM_PROTOCOL_EVENT_VERSION
+                )),
             )),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
                 RlmProtocolEvent::RlmTrajectoryEntry(terminal),
+                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    crate::RLM_PROTOCOL_EVENT_VERSION
+                )),
             )),
             lash_core::SessionHistoryRecord::Conversation(
                 lash_core::facade_support::ConversationRecord::from_message(message(
@@ -814,13 +920,16 @@ mod tests {
             ),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
                 RlmProtocolEvent::RlmTrajectoryEntry(retained),
+                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    crate::RLM_PROTOCOL_EVENT_VERSION
+                )),
             )),
         ];
         let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
             &events,
             &lash_core::facade_support::MessageSequence::default(),
         );
-        let projection = rlm_history_projection(&chronological);
+        let projection = rlm_history_projection(&chronological).expect("valid history fixture");
 
         assert_eq!(projection.len(), 4);
         assert!(projection.suppresses_chronological(1));
@@ -878,12 +987,21 @@ mod tests {
                     reasoning: String::new(),
                     prose: "surviving prose".to_string(),
                 }),
+                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    crate::RLM_PROTOCOL_EVENT_VERSION
+                )),
             )),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
                 RlmProtocolEvent::RlmTrajectoryEntry(intermediate),
+                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    crate::RLM_PROTOCOL_EVENT_VERSION
+                )),
             )),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
                 RlmProtocolEvent::RlmTrajectoryEntry(terminal),
+                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    crate::RLM_PROTOCOL_EVENT_VERSION
+                )),
             )),
             lash_core::SessionHistoryRecord::Conversation(
                 lash_core::facade_support::ConversationRecord::from_message(message(
@@ -897,7 +1015,7 @@ mod tests {
             &events,
             &lash_core::facade_support::MessageSequence::default(),
         );
-        let projection = rlm_history_projection(&chronological);
+        let projection = rlm_history_projection(&chronological).expect("valid history fixture");
 
         assert!(projection.suppresses_chronological(1));
         assert!(!projection.suppresses_chronological(2));
@@ -946,7 +1064,7 @@ mod tests {
             &events,
             &lash_core::facade_support::MessageSequence::default(),
         );
-        let projection = rlm_history_projection(&chronological);
+        let projection = rlm_history_projection(&chronological).expect("valid history fixture");
 
         assert!(projection.suppresses_chronological(1));
         assert_eq!(projection.len(), 2);

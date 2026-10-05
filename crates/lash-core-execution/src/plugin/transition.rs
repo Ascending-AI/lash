@@ -205,33 +205,76 @@ pub struct PluginNativeView {
     pub config: PluginConfig,
 }
 
+/// Version of the opaque plugin admission checkpoint body (ADR 0078 §6).
+/// version_surface = "migrate"
+/// format_manifest = "PluginAdmissionCheckpoint"
+/// version_guard(roots(PluginAdmissionCheckpoint))
+pub const PLUGIN_ADMISSION_CHECKPOINT_VERSION: u32 = 1;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PluginAdmissionCheckpoint {
+    format: u32,
+    view: PluginNativeView,
+}
+
 impl PluginNativeView {
-    pub fn encode(&self) -> Result<Arc<[u8]>, PluginError> {
-        rmp_serde::to_vec_named(self)
-            .map(Arc::from)
-            .map_err(|error| PluginError::StoredDataCorrupt {
-                record_kind: "plugin_admission".into(),
-                message: error.to_string(),
-            })
-    }
-    pub fn decode(bytes: &[u8]) -> Result<Self, PluginError> {
-        rmp_serde::from_slice(bytes).map_err(|error| PluginError::StoredDataCorrupt {
-            record_kind: "plugin_admission".into(),
+    pub fn encode(&self, fleet: crate::FleetFormat) -> Result<Arc<[u8]>, PluginError> {
+        rmp_serde::to_vec_named(&PluginAdmissionCheckpoint {
+            format: fleet.writer_version(lash_core_store::surface_format!(
+                PLUGIN_ADMISSION_CHECKPOINT_VERSION
+            )),
+            view: self.clone(),
+        })
+        .map(Arc::from)
+        .map_err(|error| PluginError::StoredDataCorrupt {
+            record_kind: crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT.into(),
             message: error.to_string(),
         })
+    }
+    pub fn decode(bytes: &[u8], fleet: crate::FleetFormat) -> Result<Self, PluginError> {
+        #[derive(serde::Deserialize)]
+        struct Stamp {
+            format: u32,
+        }
+        let corrupt = |error: rmp_serde::decode::Error| PluginError::StoredDataCorrupt {
+            record_kind: crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT.into(),
+            message: error.to_string(),
+        };
+        let stamp: Stamp = rmp_serde::from_slice(bytes).map_err(corrupt)?;
+        if !fleet
+            .read_window(lash_core_store::surface_format!(
+                PLUGIN_ADMISSION_CHECKPOINT_VERSION
+            ))
+            .admits(stamp.format)
+        {
+            return Err(crate::StoreError::Incompatible {
+                refusal: crate::compat::CompatRefusal::UnknownVocabulary {
+                    surface: "plugin admission checkpoint format".into(),
+                    label: stamp.format.to_string(),
+                },
+            }
+            .into());
+        }
+        let record: PluginAdmissionCheckpoint = rmp_serde::from_slice(bytes).map_err(corrupt)?;
+        Ok(record.view)
     }
 }
 
 impl PluginSession {
-    pub fn adopt_native_view(&self, bytes: &[u8]) -> Result<(), PluginError> {
-        let view = PluginNativeView::decode(bytes)?;
+    pub fn adopt_native_view(
+        &self,
+        bytes: &[u8],
+        fleet: crate::FleetFormat,
+    ) -> Result<(), PluginError> {
+        let view = PluginNativeView::decode(bytes, fleet)?;
         if view.request.owner != self.owner {
             return Err(PluginStateError::EffectOwnerMismatch.into());
         }
         for admitted in view.request.target.plugins() {
             if !view.state.plugins.contains_key(&admitted.plugin) {
                 return Err(PluginError::StoredDataCorrupt {
-                    record_kind: "plugin_admission".into(),
+                    record_kind: crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT.into(),
                     message: format!(
                         "admitted plugin `{}` has no recorded namespace",
                         admitted.plugin
@@ -248,16 +291,17 @@ impl PluginSession {
         Ok(())
     }
 
-    pub fn native_view(&self) -> Result<Option<Arc<[u8]>>, PluginError> {
+    pub fn native_view(&self, fleet: crate::FleetFormat) -> Result<Option<Arc<[u8]>>, PluginError> {
         if !self.host.export_plugin_namespaces {
             return Ok(None);
         }
-        self.capture_native_view(None)
+        self.capture_native_view(None, fleet)
     }
 
     pub(super) fn capture_native_view(
         &self,
         config: Option<&PluginConfig>,
+        fleet: crate::FleetFormat,
     ) -> Result<Option<Arc<[u8]>>, PluginError> {
         let Some(mut view) = self.native_view.lock_recover().clone() else {
             return Ok(None);
@@ -277,6 +321,22 @@ impl PluginSession {
                 }
             }
         }
-        view.encode().map(Some)
+        view.encode(fleet).map(Some)
+    }
+}
+
+#[cfg(test)]
+mod nested_format_tests {
+    #[test]
+    fn admission_refuses_a_foreign_format_before_reading_the_view() {
+        let bytes =
+            rmp_serde::to_vec_named(&serde_json::json!({"format": u32::MAX})).expect("stamp");
+        let error = super::PluginNativeView::decode(&bytes, crate::FleetFormat::current())
+            .expect_err("foreign format");
+        assert!(error.to_string().contains("4294967295"), "{error}");
+        assert!(
+            !error.to_string().contains("missing field"),
+            "the stamp refuses before decoding: {error}"
+        );
     }
 }

@@ -1297,6 +1297,7 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() -> Result<()> {
     let tool_access = lash_core::SessionToolAccess::default();
     let child = tier
         .build_session_request(lash_subagents::SubagentSpawnContext {
+            fleet_format: lash_core::FleetFormat::current(),
             parent_session_id: &SessionId::from(session_id),
             parent_snapshot: &parent_snapshot,
             session_spec: &session_spec,

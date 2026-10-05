@@ -18,7 +18,8 @@ mod host_identity;
 pub use host_identity::LashlangHostIdentities;
 mod cell_bindings;
 pub use cell_bindings::{
-    CellBindingDrift, CellBindingDriftKind, CellToolBindings, journal_cell_tool_bindings,
+    CellBindingDrift, CellBindingDriftKind, CellToolBindings, RecordedCellToolBindings,
+    journal_cell_tool_bindings,
 };
 mod replay_commands;
 pub use replay_commands::{CommandInFlight, ReplayCommands, retype_replay_mismatch};

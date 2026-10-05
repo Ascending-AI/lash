@@ -22,8 +22,12 @@ fn runtime_feedback_projectors_trim_configured_instructions() {
             use_tools: false,
             environment: &environment,
         };
-        let rlm = projector(1000).project(context());
-        let chat = lash_core::sansio::ChatContextProjector.project(context());
+        let rlm = projector(1000)
+            .project(context())
+            .expect("valid history fixture");
+        let chat = lash_core::sansio::ChatContextProjector
+            .project(context())
+            .expect("valid history fixture");
         assert_eq!(rlm.instructions.as_deref(), expected);
         assert_eq!(chat.instructions.as_deref(), expected);
     }

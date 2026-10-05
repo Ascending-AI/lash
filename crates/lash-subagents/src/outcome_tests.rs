@@ -16,6 +16,7 @@ fn spawn_rejects_child_depth_past_limit() {
     ))
     .to_snapshot();
     let result = build_spawn_create_request(SpawnCreateRequestInput {
+        fleet_format: lash_core::FleetFormat::current(),
         registry: &registry,
         parent_session_id: &lash_core::SessionId::from("parent"),
         current_snapshot: snapshot,

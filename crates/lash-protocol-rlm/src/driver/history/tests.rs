@@ -63,6 +63,9 @@ fn step_event(code: &str) -> SessionHistoryRecord {
             calls_omitted: 0,
             outcome: lash_rlm_types::CellOutcome::Running,
         }),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
     ))
 }
 
@@ -97,6 +100,7 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
         budget_suffix: None,
         bound_variables: "",
     })
+    .expect("valid history fixture")
 }
 
 #[test]
@@ -226,6 +230,9 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
                 "read failed at secret.txt; cache failed at .cache/lash/state",
             )),
         }),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
     ));
 
     let messages = render(&[event]);
@@ -264,6 +271,9 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
             calls_omitted: 3,
             outcome: lash_rlm_types::CellOutcome::Running,
         }),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
     ));
 
     let messages = render(&[event]);
@@ -296,6 +306,9 @@ fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> Se
             calls_omitted: 0,
             outcome: lash_rlm_types::CellOutcome::Failed(failure),
         }),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
     ))
 }
 
@@ -537,7 +550,8 @@ fn history_teaching_follows_indexable_entries() {
             final_answer_format: None,
             budget_suffix: None,
             bound_variables: "",
-        });
+        })
+        .expect("valid history fixture");
         let tail = observation_text(messages.last().unwrap());
         assert_eq!(tail.matches("=== FINALIZATION ===").count(), 1);
         assert!(tail.contains("`history`: `HistoryItem[]`, read-only, 1 entry"));
@@ -590,7 +604,8 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .expect("valid history fixture");
 
     assert!(messages[0].starts_user_segment);
     assert!(!messages[1].starts_user_segment);

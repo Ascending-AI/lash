@@ -80,6 +80,9 @@ impl CellBindingDrift {
     }
 }
 
+/// The typed record a suspended cell retains from its journaled binding set.
+pub type RecordedCellToolBindings = BTreeMap<String, Option<lash_core::ToolDefinition>>;
+
 /// A cell's journaled binding set, compared against the live registry.
 #[derive(Clone, Debug, Default)]
 pub struct CellToolBindings {
@@ -99,21 +102,13 @@ impl CellToolBindings {
     /// The binding record this set was read from, for a segment boundary
     /// inside the cell: the successor segment links against the same record
     /// through [`Self::from_record`], judged against its own live registry.
-    pub fn record(&self) -> Result<serde_json::Value, serde_json::Error> {
-        self.recorded
-            .iter()
-            .map(|(path, definition)| Ok((path.clone(), serde_json::to_value(definition)?)))
-            .collect::<Result<serde_json::Map<_, _>, _>>()
-            .map(serde_json::Value::Object)
+    pub fn record(&self) -> RecordedCellToolBindings {
+        self.recorded.clone()
     }
 
-    /// The binding set a predecessor segment recorded, compared against the
-    /// registry live now.
-    pub fn from_record(
-        record: serde_json::Value,
-        live: &lash_core::ToolCatalog,
-    ) -> Result<Self, lash_core::RuntimeEffectControllerError> {
-        compare(record, live)
+    /// Compare a predecessor's typed record against the registry live now.
+    pub fn from_record(record: RecordedCellToolBindings, live: &lash_core::ToolCatalog) -> Self {
+        compare_typed(record, live)
     }
 
     #[cfg(test)]
@@ -222,9 +217,15 @@ fn compare(
             format!("journaled cell tool binding set is unreadable: {detail}"),
         )
     };
-    let serde_json::Value::Object(entries) = record else {
-        return Err(invalid("not an object".to_string()));
-    };
+    let entries: RecordedCellToolBindings =
+        serde_json::from_value(record).map_err(|error| invalid(error.to_string()))?;
+    Ok(compare_typed(entries, live))
+}
+
+fn compare_typed(
+    entries: RecordedCellToolBindings,
+    live: &lash_core::ToolCatalog,
+) -> CellToolBindings {
     let live_by_id = live
         .tools
         .iter()
@@ -232,12 +233,10 @@ fn compare(
         .collect::<BTreeMap<_, _>>();
     let mut bindings = CellToolBindings::default();
     for (path, value) in entries {
-        if value.is_null() {
+        let Some(recorded) = value else {
             bindings.recorded.insert(path, None);
             continue;
-        }
-        let recorded: lash_core::ToolDefinition =
-            serde_json::from_value(value.clone()).map_err(|error| invalid(error.to_string()))?;
+        };
         let kind = match live_by_id.get(&recorded.manifest.id) {
             None => Some(CellBindingDriftKind::Missing),
             // Drift is judged on what decides linking and dispatch; a reworded
@@ -259,7 +258,7 @@ fn compare(
         }
         bindings.recorded.insert(path, Some(recorded));
     }
-    Ok(bindings)
+    bindings
 }
 
 /// Journals the binding set a cell resolved from `catalog`, the turn's

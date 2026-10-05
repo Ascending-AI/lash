@@ -31,12 +31,6 @@ use lash_core::RuntimeExecutionContext;
 
 use super::host_bridge::CellHostLedgers;
 
-/// The envelope's own format.
-///
-/// version_surface = "coexist"
-/// version_guard(roots(CellSegmentState))
-pub(super) const CELL_SEGMENT_STATE_VERSION: u32 = 1;
-
 /// version_surface = "coexist"
 /// version_guard(items(LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION, code_digest))
 const LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-rlm-cell-segment-code/v1";
@@ -68,8 +62,8 @@ pub(super) struct RecordedPrint(#[serde(with = "lashlang::effect_value")] pub la
 
 /// A cell stopped at a segment boundary, as its successor segment resumes it.
 #[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CellSegmentState {
-    pub version: u32,
     /// The logical Run that owns this continuation across physical segments.
     pub owner: lash_core_worker::TurnAddress,
     /// The digest of the cell's source, checked after Run ownership.
@@ -85,11 +79,11 @@ pub(super) struct CellSegmentState {
     /// The namespace the run's projection tokens name.
     pub projection_namespace: Option<String>,
     /// The session's projected bindings as the cell recorded them.
-    pub projected_bindings: serde_json::Value,
+    pub projected_bindings: BTreeMap<String, crate::projection::bindings::RecordedProjection>,
     /// The host environment the cell linked against.
     pub host_environment: lashlang::LashlangHostEnvironment,
     /// The cell's journaled ambient binding set (FIG-3587).
-    pub cell_bindings: serde_json::Value,
+    pub cell_bindings: lash_lashlang_runtime::RecordedCellToolBindings,
     /// The grants the cell's deferred resolutions recorded.
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
     pub prints: Vec<RecordedPrint>,
@@ -116,17 +110,33 @@ impl CellSegmentState {
         code: &str,
     ) -> Result<Option<Self>, String> {
         let state: Self = rmp_serde::from_slice(bytes).map_err(|error| error.to_string())?;
-        if state.version != CELL_SEGMENT_STATE_VERSION {
-            return Err(format!(
-                "suspended cell state version {} is not version {CELL_SEGMENT_STATE_VERSION}",
-                state.version
-            ));
-        }
         Ok((owner == Some(&state.owner) && state.code == Self::code_digest(code)).then_some(state))
     }
 
     /// The parent ledgers of `ctx` a boundary hands over.
     pub(super) fn restore_context(&self, ctx: &RuntimeExecutionContext<'_>) {
         ctx.restore_started_process_ids(&self.started_process_ids);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn segment_bindings_refuse_untyped_payloads() {
+        for value in [
+            serde_json::json!(42),
+            serde_json::json!({"tool": {"invented": true}}),
+        ] {
+            assert!(
+                serde_json::from_value::<lash_lashlang_runtime::RecordedCellToolBindings>(value)
+                    .is_err()
+            );
+        }
+        assert!(
+            serde_json::from_value::<
+                std::collections::BTreeMap<String, crate::projection::bindings::RecordedProjection>,
+            >(serde_json::json!({"binding": false}))
+            .is_err()
+        );
     }
 }

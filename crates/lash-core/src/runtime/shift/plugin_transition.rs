@@ -178,7 +178,7 @@ impl LashRuntime {
         })?;
         self.services
             .plugins
-            .adopt_native_view(&bytes)
+            .adopt_native_view(&bytes, self.fleet_format())
             .map_err(|error| {
                 crate::RuntimeEffectControllerError::from(error).into_runtime_error()
             })?;
@@ -284,7 +284,7 @@ impl RuntimeEffectLocalRunner for PluginTransitionRunner {
                     "the run's advanced head has no published plugin transition",
                 )
             })?;
-            let view = crate::plugin::PluginNativeView::decode(&bytes)?;
+            let view = crate::plugin::PluginNativeView::decode(&bytes, self.store.fleet_format())?;
             let same_base = matches!(
                 (&view.request.base, &request.base),
                 (
@@ -373,7 +373,7 @@ impl RuntimeEffectLocalRunner for PluginTransitionRunner {
         }
         let native = state
             .plugin_admission_snapshot()
-            .map(|bytes| crate::plugin::PluginNativeView::decode(&bytes))
+            .map(|bytes| crate::plugin::PluginNativeView::decode(&bytes, self.store.fleet_format()))
             .transpose()?;
         let native = native.filter(|view| {
             self.host
@@ -402,7 +402,7 @@ impl RuntimeEffectLocalRunner for PluginTransitionRunner {
                 state: native_state.clone(),
                 config: native_config.clone(),
             };
-            state.set_plugin_admission_snapshot(view.encode()?);
+            state.set_plugin_admission_snapshot(view.encode(self.store.fleet_format())?);
             let writers = record.request.target.writers();
             state.set_plugin_state(Some(self.host.encode_state(&native_state, &writers)?));
             state.authority.plugin_config = self.host.encode_config(&native_config, &writers)?;

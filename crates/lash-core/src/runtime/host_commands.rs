@@ -464,13 +464,17 @@ impl LashRuntime {
             let nodes = events
                 .iter()
                 .map(|event| {
-                    crate::plugin_runtime_protocol_event(&plugin_id, event.clone())
-                        .map(crate::SessionAppendNode::protocol_event)
-                        .map_err(|err| {
-                            PluginOperationInvokeError::protocol(format!(
-                                "failed to encode plugin runtime event: {err}"
-                            ))
-                        })
+                    crate::plugin_runtime_protocol_event(
+                        &plugin_id,
+                        event.clone(),
+                        self.fleet_format(),
+                    )
+                    .map(crate::SessionAppendNode::protocol_event)
+                    .map_err(|err| {
+                        PluginOperationInvokeError::protocol(format!(
+                            "failed to encode plugin runtime event: {err}"
+                        ))
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let events_operation = crate::OperationId::new(
@@ -714,7 +718,8 @@ impl LashRuntime {
             |stamp| stamp.operation.clone(),
         );
         if let Some(session) = self.session.as_ref() {
-            self.state.capture_plugin_states(session.plugins())?;
+            self.state
+                .capture_plugin_states(session.plugins(), self.fleet_format())?;
         }
         let fleet_format = self.fleet_format();
         let (mut commit, persisted_node_ids) =

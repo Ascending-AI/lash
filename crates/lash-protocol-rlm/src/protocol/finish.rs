@@ -4,7 +4,7 @@ use lash_core::session_model::{Message, MessageRole, Part, shared_parts};
 use lash_sansio::TurnId;
 use serde_json::Value;
 
-use super::state::RlmReasoningPart;
+use crate::driver_state::RlmReasoningPart;
 
 #[cfg(feature = "testing")]
 pub(super) fn internal_assistant_prose_message(

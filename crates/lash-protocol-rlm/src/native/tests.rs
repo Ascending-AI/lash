@@ -287,7 +287,9 @@ fn run(
             let lash_core::SessionHistoryRecord::Protocol(event) = record else {
                 return None;
             };
-            match crate::projection::decode_rlm_protocol_event(event) {
+            match crate::projection::decode_rlm_protocol_event(event)
+                .expect("valid history fixture")
+            {
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => Some(step),
                 _ => None,
             }
@@ -676,7 +678,9 @@ fn native_normalization_covers_every_schema_refusal() {
                 let lash_core::SessionHistoryRecord::Protocol(event) = event else {
                     return None;
                 };
-                match crate::projection::decode_rlm_protocol_event(event) {
+                match crate::projection::decode_rlm_protocol_event(event)
+                    .expect("valid history fixture")
+                {
                     Some(RlmProtocolEvent::RlmDiagnostic(d)) if d.phase == "native_extraction" => {
                         Some(d.payload["decision"].clone())
                     }
@@ -1014,7 +1018,9 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
             .iter()
             .filter_map(|record| match record {
                 lash_core::SessionHistoryRecord::Protocol(event) => {
-                    match crate::projection::decode_rlm_protocol_event(event) {
+                    match crate::projection::decode_rlm_protocol_event(event)
+                        .expect("valid history fixture")
+                    {
                         Some(RlmProtocolEvent::RlmDiagnostic(d))
                             if d.phase == "native_extraction" =>
                         {
@@ -1155,7 +1161,9 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
         .iter()
         .filter_map(|record| match record {
             lash_core::SessionHistoryRecord::Protocol(event) => {
-                match crate::projection::decode_rlm_protocol_event(event) {
+                match crate::projection::decode_rlm_protocol_event(event)
+                    .expect("valid history fixture")
+                {
                     Some(RlmProtocolEvent::RlmDiagnostic(d)) if d.phase == "llm_extraction" => {
                         Some(d.payload["decision"].clone())
                     }
@@ -1423,7 +1431,9 @@ fn native_extraction_payloads(machine: &TurnMachine) -> Vec<serde_json::Value> {
             let lash_core::SessionHistoryRecord::Protocol(event) = event else {
                 return None;
             };
-            match crate::projection::decode_rlm_protocol_event(event) {
+            match crate::projection::decode_rlm_protocol_event(event)
+                .expect("valid history fixture")
+            {
                 Some(RlmProtocolEvent::RlmDiagnostic(d)) if d.phase == "native_extraction" => {
                     Some(d.payload)
                 }
@@ -1548,7 +1558,7 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
                 .iter()
                 .any(|effect| matches!(effect, Effect::LlmCall { .. } | Effect::ExecCode { .. }))
         );
-        assert!(!machine.events().iter().any(|event| matches!(event, lash_core::SessionHistoryRecord::Protocol(event) if matches!(crate::projection::decode_rlm_protocol_event(event), Some(RlmProtocolEvent::RlmTrajectoryEntry(_))))));
+        assert!(!machine.events().iter().any(|event| matches!(event, lash_core::SessionHistoryRecord::Protocol(event) if matches!(crate::projection::decode_rlm_protocol_event(event).expect("valid history fixture"), Some(RlmProtocolEvent::RlmTrajectoryEntry(_))))));
     }
 }
 

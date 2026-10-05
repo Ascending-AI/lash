@@ -324,39 +324,45 @@ fn io_failure(what: impl std::fmt::Display, error: io::Error) -> Stop {
     Stop::Failed(storage(format!("{what}: {error}")))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 enum BackupState {
     /// Copies are being taken; the store is unchanged.
-    BackingUp,
+    BackingUp {},
     /// The backup is complete; the store may be partly migrated.
-    Migrating,
+    Migrating {},
     /// The migration completed.
-    Migrated,
+    Migrated {},
     /// The store is being restored from the backup.
-    Restoring,
+    Restoring { failure: String },
     /// The store was restored from the backup.
-    Restored,
+    Restored { failure: String },
 }
 
 impl BackupState {
-    fn finished(self) -> bool {
-        matches!(self, Self::Migrated | Self::Restored)
+    fn finished(&self) -> bool {
+        matches!(self, Self::Migrated {} | Self::Restored { .. })
     }
 }
 
 /// A backup's `manifest.json`: which store it holds, what the migration it
 /// belongs to was doing, and each database's copy.
+/// The migration backup's self-describing recovery record.
+/// version_surface = "migrate"
+/// version_unguarded = "backend-private recovery file decoded before the store catalog can admit its FleetFormat; exact bootstrap reader until the release cut"
+/// format_outside_manifest = "backend-private backup manifest read before store admission"
+/// version_guard(roots(Manifest))
+pub const SQLITE_MIGRATION_BACKUP_VERSION: u32 = 1;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Manifest {
+    format: u32,
     /// The store's identity ([`SqliteLocation::identity`]).
     store: String,
+    #[serde(flatten)]
     state: BackupState,
     taken_at_ms: u64,
     databases: Vec<BackedUpDatabase>,
-    /// Why the migration failed, once a restore began.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    failure: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -502,16 +508,13 @@ impl Migration<'_> {
     async fn run_exclusive(&self, identity: String) -> Result<(), Stop> {
         let stamps = self.stamps().await?;
         if let Some(pending) = self.pending(&identity)? {
-            match pending.manifest.state {
-                BackupState::Restoring => {
-                    let failure = pending.manifest.failure.clone().unwrap_or_else(|| {
-                        "an earlier open's migration failed and its restore was interrupted"
-                            .to_owned()
-                    });
+            match &pending.manifest.state {
+                BackupState::Restoring { failure } => {
+                    let failure = failure.clone();
                     return self.restore(pending, failure, &identity).await;
                 }
-                BackupState::BackingUp => remove_directory(&pending.directory)?,
-                BackupState::Migrating if self.owns(&pending)? => {
+                BackupState::BackingUp {} => remove_directory(&pending.directory)?,
+                BackupState::Migrating {} if self.owns(&pending)? => {
                     if self.advanced(&pending, &stamps)? {
                         return self.advance(pending, None).await;
                     }
@@ -522,8 +525,8 @@ impl Migration<'_> {
                 }
                 // Another build's migration: this build cannot complete it,
                 // and the set check refuses a partial set.
-                BackupState::Migrating => return Ok(()),
-                BackupState::Migrated | BackupState::Restored => {}
+                BackupState::Migrating {} => return Ok(()),
+                BackupState::Migrated {} | BackupState::Restored { .. } => {}
             }
         }
         match self.plan(&stamps)? {
@@ -628,7 +631,7 @@ impl Migration<'_> {
         let sealed = (|| {
             self.probe.at(SqliteMigrationStep::BackupStarted)?;
             let copied = self.copy_all(&mut backup)?;
-            backup.record(BackupState::Migrating)?;
+            backup.record(BackupState::Migrating {})?;
             self.probe.at(SqliteMigrationStep::BackupSealed)?;
             Ok(copied)
         })();
@@ -711,7 +714,7 @@ impl Migration<'_> {
         .await;
         match result {
             Ok(()) => {
-                backup.record(BackupState::Migrated)?;
+                backup.record(BackupState::Migrated {})?;
                 self.probe.at(SqliteMigrationStep::Completed)?;
                 self.prune(&backup.manifest.store);
                 Ok(())
@@ -863,14 +866,19 @@ impl Migration<'_> {
             directory,
             sequence,
             manifest: Manifest {
+                format: lash_core_store::store::FleetFormat::seed(
+                    lash_core_store::store::FLEET_WRITABLE_RANGE,
+                )
+                .writer_version(lash_core_store::surface_format!(
+                    SQLITE_MIGRATION_BACKUP_VERSION
+                )),
                 store,
-                state: BackupState::BackingUp,
+                state: BackupState::BackingUp {},
                 taken_at_ms: self.clock.timestamp_ms(),
                 databases,
-                failure: None,
             },
         };
-        backup.record(BackupState::BackingUp)?;
+        backup.record(BackupState::BackingUp {})?;
         Ok(backup)
     }
 
@@ -884,8 +892,9 @@ impl Migration<'_> {
         failure: String,
         identity: &str,
     ) -> Result<(), Stop> {
-        backup.manifest.failure = Some(failure.clone());
-        backup.record(BackupState::Restoring)?;
+        backup.record(BackupState::Restoring {
+            failure: failure.clone(),
+        })?;
         self.probe.at(SqliteMigrationStep::RestoreStarted)?;
         for database in SqliteDatabase::ALL {
             self.own(database).await?;
@@ -916,7 +925,9 @@ impl Migration<'_> {
             sync_directory(self.root)?;
             self.probe.at(SqliteMigrationStep::Restored(database))?;
         }
-        backup.record(BackupState::Restored)?;
+        backup.record(BackupState::Restored {
+            failure: failure.clone(),
+        })?;
         self.probe.at(SqliteMigrationStep::RestoreCompleted)?;
         self.prune(identity);
         Err(Stop::Failed(storage(format!(
@@ -947,16 +958,50 @@ impl Migration<'_> {
         Ok(directories)
     }
 
-    /// This store's backups whose manifests read, oldest first.
+    /// This store's readable backups, oldest first; unreadable recovery records refuse.
     fn store_backups(&self, identity: &str) -> Result<Vec<Backup>, Stop> {
         let mut backups = Vec::new();
         for (sequence, directory) in self.backup_directories()? {
-            let Ok(bytes) = read_file(&directory.join(MANIFEST)) else {
+            let path = directory.join(MANIFEST);
+            // An absent manifest is an unsealed directory; an unreadable one
+            // may own an interrupted restore and must refuse admission.
+            if !path
+                .try_exists()
+                .map_err(|error| io_failure(path.display(), error))?
+            {
                 continue;
-            };
-            let Ok(manifest) = serde_json::from_slice::<Manifest>(&bytes) else {
-                continue;
-            };
+            }
+            let bytes = read_file(&path).map_err(|error| io_failure(path.display(), error))?;
+            #[derive(Deserialize)]
+            struct Stamp {
+                format: u32,
+            }
+            let stamp: Stamp = serde_json::from_slice(&bytes).map_err(|error| {
+                Stop::Failed(StoreError::Incompatible {
+                    refusal: lash_core_execution::compat::CompatRefusal::MalformedStamp {
+                        component: path.display().to_string(),
+                        detail: error.to_string(),
+                        writing_release: None,
+                    },
+                })
+            })?;
+            if stamp.format != SQLITE_MIGRATION_BACKUP_VERSION {
+                return Err(Stop::Failed(StoreError::Incompatible {
+                    refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary {
+                        surface: format!("SQLite migration backup format at {}", path.display()),
+                        label: stamp.format.to_string(),
+                    },
+                }));
+            }
+            let manifest = serde_json::from_slice::<Manifest>(&bytes).map_err(|error| {
+                Stop::Failed(StoreError::Incompatible {
+                    refusal: lash_core_execution::compat::CompatRefusal::MalformedStamp {
+                        component: path.display().to_string(),
+                        detail: error.to_string(),
+                        writing_release: None,
+                    },
+                })
+            })?;
             if manifest.store == identity {
                 backups.push(Backup {
                     directory,
@@ -1147,3 +1192,84 @@ fn sync_directory(path: &Path) -> Result<(), Stop> {
 #[cfg(all(test, feature = "synthetic-next"))]
 #[path = "migration_tests.rs"]
 mod laws;
+
+#[cfg(test)]
+mod nested_format_tests {
+    #[test]
+    fn only_failed_backup_states_carry_failure_data() {
+        for state in [
+            super::BackupState::BackingUp {},
+            super::BackupState::Migrating {},
+            super::BackupState::Migrated {},
+            super::BackupState::Restoring {
+                failure: "failed".into(),
+            },
+            super::BackupState::Restored {
+                failure: "failed".into(),
+            },
+        ] {
+            let manifest = super::Manifest {
+                format: super::SQLITE_MIGRATION_BACKUP_VERSION,
+                store: "store".into(),
+                state,
+                taken_at_ms: 0,
+                databases: Vec::new(),
+            };
+            let encoded = serde_json::to_vec(&manifest).expect("manifest");
+            assert!(serde_json::from_slice::<super::Manifest>(&encoded).is_ok());
+        }
+        for state in ["restoring", "restored"] {
+            assert!(
+                serde_json::from_value::<super::BackupState>(serde_json::json!({"state":state}))
+                    .is_err()
+            );
+            assert!(
+                serde_json::from_value::<super::BackupState>(
+                    serde_json::json!({"state":state, "failure":"failed"})
+                )
+                .is_ok()
+            );
+        }
+        for state in ["backing_up", "migrating", "migrated"] {
+            assert!(
+                serde_json::from_value::<super::BackupState>(
+                    serde_json::json!({"state":state, "failure":"failed"})
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the law corrupts its own backup manifest"
+    )]
+    async fn unreadable_backup_manifest_refuses_open() {
+        let root = tempfile::tempdir().expect("store root");
+        drop(
+            crate::SqliteStoreSet::open(root.path())
+                .await
+                .expect("provision"),
+        );
+        let backup = crate::location::canonical_path(root.path())
+            .join("migration-backups/sqlite-backup-000001");
+        std::fs::create_dir_all(&backup).expect("backup directory");
+        std::fs::write(backup.join("manifest.json"), b"{").expect("torn manifest");
+        for bytes in [
+            b"{".as_slice(),
+            br#"{"format":4294967295}"#.as_slice(),
+            br#"{"format":1,"state":"restoring"}"#.as_slice(),
+        ] {
+            std::fs::write(backup.join("manifest.json"), bytes).expect("unreadable manifest");
+            let error = match crate::SqliteStoreSet::open(root.path()).await {
+                Err(error) => crate::sqlite_async_error(error),
+                Ok(_) => panic!("unreadable recovery record was admitted"),
+            };
+            assert!(
+                matches!(error, crate::StoreError::Incompatible { .. }),
+                "{error}"
+            );
+        }
+    }
+}

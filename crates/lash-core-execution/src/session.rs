@@ -1348,6 +1348,7 @@ mod tool_catalog_cache_tests {
             crate::TurnContext::default(),
             crate::ToolCallId::fixture("reassigned-call"),
             serde_json::json!({}),
+            crate::FleetFormat::current(),
         );
         old.tools()
             .prepare_tool_call(crate::ToolPrepareCall {

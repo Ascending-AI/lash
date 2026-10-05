@@ -753,8 +753,12 @@ impl ContextPressureHook for StandardCompactionPressureHook {
         // terminal records say whether recovery is pending; a completed or
         // exhausted record below the marker closes it.
         let recovery_state = OverflowRecoveryState::derive(
-            history_recovery_records(&ctx.state)
-                .map_err(|error| ContextError::Session(error.to_string()))?,
+            history_recovery_records(&ctx.state).map_err(|error| {
+                ContextError::Plugin(PluginError::StoredDataCorrupt {
+                    record_kind: error.record_kind,
+                    message: error.message,
+                })
+            })?,
         );
         if recovery_state.pending() {
             return overflow_recovery_decision(ctx, recovery_state).await;

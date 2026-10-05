@@ -60,6 +60,8 @@ pub const CHECKPOINT_COMPONENT_ENCODING_VERSION: u32 = 3;
 pub const TOOL_STATE_CHECKPOINT_COMPONENT: &str = "tool_state";
 /// Well-known component key used by the runtime's plugin-session snapshot.
 pub const PLUGIN_STATE_CHECKPOINT_COMPONENT: &str = "plugin_state";
+/// Well-known component key for the recorded plugin admission and native view.
+pub const PLUGIN_ADMISSION_CHECKPOINT_COMPONENT: &str = "plugin_admission";
 /// Well-known component key used by protocol-owned execution state.
 pub const EXECUTION_STATE_CHECKPOINT_COMPONENT: &str = "execution_state";
 

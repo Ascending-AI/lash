@@ -45,7 +45,10 @@ pub(super) const NO_PROGRESS_BUDGET_PHASE: &str = "no_progress_budget";
 /// decides an effect later — and a count that reads only committed history
 /// would be one short on exactly one of them.
 ///
-pub(super) fn stalled_attempts(ctx: &DriverContextView<'_>, actions: &[DriverAction]) -> usize {
+pub(super) fn stalled_attempts(
+    ctx: &DriverContextView<'_>,
+    actions: &[DriverAction],
+) -> Result<usize, lash_core::StoredDataCorruption> {
     stalled_attempts_in_phase(ctx, actions, LLM_EXTRACTION_PHASE)
 }
 
@@ -53,7 +56,7 @@ pub(crate) fn stalled_attempts_in_phase(
     ctx: &DriverContextView<'_>,
     actions: &[DriverAction],
     extraction_phase: &str,
-) -> usize {
+) -> Result<usize, lash_core::StoredDataCorruption> {
     let turn_id = ctx.turn_id();
     let trajectory_prefix = trajectory_entry_turn_prefix(turn_id);
     let mut attempts = 0;
@@ -61,7 +64,7 @@ pub(crate) fn stalled_attempts_in_phase(
         let SessionHistoryRecord::Protocol(event) = record else {
             continue;
         };
-        match crate::projection::decode_rlm_protocol_event(event) {
+        match crate::projection::decode_rlm_protocol_event(event)? {
             Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
                 if diagnostic.phase == extraction_phase =>
             {
@@ -85,8 +88,8 @@ pub(crate) fn stalled_attempts_in_phase(
             _ => {}
         }
     }
-    count_pending_attempts(actions, &trajectory_prefix, &mut attempts, extraction_phase);
-    attempts
+    count_pending_attempts(actions, &trajectory_prefix, &mut attempts, extraction_phase)?;
+    Ok(attempts)
 }
 
 /// Apply the not-yet-committed action batch to `attempts`, forwards, since the
@@ -96,7 +99,7 @@ fn count_pending_attempts(
     trajectory_prefix: &str,
     attempts: &mut usize,
     extraction_phase: &str,
-) {
+) -> Result<(), lash_core::StoredDataCorruption> {
     for action in actions {
         let DriverAction::AppendEvents(records) = action else {
             continue;
@@ -105,7 +108,7 @@ fn count_pending_attempts(
             let SessionHistoryRecord::Protocol(event) = record else {
                 continue;
             };
-            match crate::projection::decode_rlm_protocol_event(event) {
+            match crate::projection::decode_rlm_protocol_event(event)? {
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
                     if entry.outcome.error().is_none()
                         && entry.id.starts_with(trajectory_prefix) =>
@@ -121,6 +124,7 @@ fn count_pending_attempts(
             }
         }
     }
+    Ok(())
 }
 
 fn trajectory_entry_turn_prefix(turn_id: &TurnId) -> String {

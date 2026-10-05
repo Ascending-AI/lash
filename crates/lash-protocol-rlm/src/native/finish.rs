@@ -3,7 +3,7 @@ use lash_core::facade_support::reasoning_part;
 use lash_core::session_model::{Message, MessageRole, Part, shared_parts};
 use lash_sansio::TurnId;
 
-use super::state::RlmReasoningPart;
+use crate::driver_state::RlmReasoningPart;
 
 pub(super) fn internal_assistant_prose_message_for_turn(
     turn_id: &TurnId,

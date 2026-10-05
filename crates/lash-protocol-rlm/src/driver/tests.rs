@@ -26,8 +26,8 @@ fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
 }
 
 fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(
-        RlmTrajectoryEntry {
+    SessionHistoryRecord::Protocol(rlm_protocol_event(
+        RlmProtocolEvent::RlmTrajectoryEntry(RlmTrajectoryEntry {
             output_archive: None,
             id: format!("lashlang_step_{protocol_iteration}"),
             protocol_iteration,
@@ -41,8 +41,11 @@ fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHis
             calls: Vec::new(),
             calls_omitted: 0,
             outcome: lash_rlm_types::CellOutcome::Running,
-        },
-    )))
+        }),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
+    ))
 }
 
 fn terminal_step_event(
@@ -52,8 +55,8 @@ fn terminal_step_event(
     images: Vec<lash_core::AttachmentRef>,
     final_output: serde_json::Value,
 ) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(
-        RlmTrajectoryEntry {
+    SessionHistoryRecord::Protocol(rlm_protocol_event(
+        RlmProtocolEvent::RlmTrajectoryEntry(RlmTrajectoryEntry {
             output_archive: None,
             id: format!("lashlang_step_{protocol_iteration}"),
             protocol_iteration,
@@ -63,18 +66,24 @@ fn terminal_step_event(
             calls: Vec::new(),
             calls_omitted: 0,
             outcome: lash_rlm_types::CellOutcome::Finished(final_output.into()),
-        },
-    )))
+        }),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
+    ))
 }
 
 fn assistant_content_event(id: &str, prose: &str) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmAssistantContent(
-        lash_rlm_types::RlmAssistantContent {
+    SessionHistoryRecord::Protocol(rlm_protocol_event(
+        RlmProtocolEvent::RlmAssistantContent(lash_rlm_types::RlmAssistantContent {
             id: id.to_string(),
             reasoning: String::new(),
             prose: prose.to_string(),
-        },
-    )))
+        }),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
+    ))
 }
 
 fn assistant_prose_event(id: &str, text: &str) -> SessionHistoryRecord {
@@ -169,19 +178,21 @@ fn project_iteration_request_with_inputs(
     projector_turn_inputs: &lash_core::sansio::ProjectorTurnInputs,
 ) -> Arc<LlmRequest> {
     let config = projection_test_config(model, generation, max_context_tokens);
-    projector.project(ProjectorContext {
-        config: &config,
-        messages: &lash_core::facade_support::MessageSequence::default(),
-        events,
-        turn_causes: &[],
-        protocol_iteration,
-        use_tools: false,
-        environment: &lash_core::sansio::ExecutionEnvironmentSync {
-            system_prompt: Arc::from(TEST_SYSTEM_PROMPT),
-            projector_turn_inputs: projector_turn_inputs.clone(),
-            ..Default::default()
-        },
-    })
+    projector
+        .project(ProjectorContext {
+            config: &config,
+            messages: &lash_core::facade_support::MessageSequence::default(),
+            events,
+            turn_causes: &[],
+            protocol_iteration,
+            use_tools: false,
+            environment: &lash_core::sansio::ExecutionEnvironmentSync {
+                system_prompt: Arc::from(TEST_SYSTEM_PROMPT),
+                projector_turn_inputs: projector_turn_inputs.clone(),
+                ..Default::default()
+            },
+        })
+        .expect("valid history fixture")
 }
 
 #[test]
@@ -299,7 +310,8 @@ fn folded_step_renders_as_emission_cell_not_history_echo() {
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .expect("valid history fixture");
 
     let assistant_texts = messages
         .iter()
@@ -364,7 +376,8 @@ fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .expect("valid history fixture");
     let rendered = messages
         .iter()
         .map(message_text)
@@ -455,7 +468,8 @@ fn natural_prose_history_is_byte_unchanged() {
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .expect("valid history fixture");
 
     assert_eq!(messages.len(), 2);
     assert_eq!(message_text(&messages[0]), "Tell me naturally.");
@@ -493,7 +507,8 @@ fn committed_transcript_remains_the_rolling_cache_fence() {
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .expect("valid history fixture");
 
     assert!(matches!(
         messages[1].blocks.first(),
@@ -605,7 +620,8 @@ fn process_wake_history_renders_as_chronological_event_context() {
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .expect("valid history fixture");
     let history = projector.format_history(&events);
 
     assert!(history.contains("Background process wake"));
@@ -646,7 +662,8 @@ fn active_turn_causes_render_in_current_turn_events_without_history_duplication(
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .expect("valid history fixture");
 
     let combined = rendered
         .iter()
@@ -693,6 +710,9 @@ fn printed_images_render_as_llm_image_blocks() {
             calls_omitted: 0,
             outcome: lash_rlm_types::CellOutcome::Running,
         }),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
     ));
     let events = [event];
 
@@ -709,7 +729,8 @@ fn printed_images_render_as_llm_image_blocks() {
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .expect("valid history fixture");
 
     let attachments = messages
         .iter()
@@ -754,7 +775,8 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .expect("valid history fixture");
 
     // user turn, assistant cell, user observation, volatile current-iteration tail.
     assert_eq!(messages.len(), 4);
@@ -930,7 +952,8 @@ fn rlm_prompt_renders_required_output_block_when_schema_present() {
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .expect("valid history fixture");
 
     let tail = messages
         .last()

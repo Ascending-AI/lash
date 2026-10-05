@@ -532,7 +532,7 @@ async fn append_conformance_runtime(
         .materialize_transition_candidate(&transition)
         .expect("materialize the append fixture's recorded plugin view");
     state
-        .capture_plugin_states(plugins.as_ref())
+        .capture_plugin_states(plugins.as_ref(), lash_core::FleetFormat::current())
         .expect("capture the append fixture's native view");
     commit_conformance_state(store, &mut state)
         .await

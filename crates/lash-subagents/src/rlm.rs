@@ -89,6 +89,7 @@ impl RlmSubagentToolsProvider {
             .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
         let parent_session_id = parent.session_id;
         let mut create_request = build_spawn_create_request(SpawnCreateRequestInput {
+            fleet_format: context.fleet_format(),
             registry: &self.registry,
             parent_session_id: &parent_session_id,
             current_snapshot,

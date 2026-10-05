@@ -39,9 +39,13 @@ fn pair(step: RlmTrajectoryEntry) -> Vec<SessionHistoryRecord> {
             step.id.clone(),
             parts,
             crate::native::transport::NATIVE_TRANSPORT_VERSION,
+            crate::RLM_PROTOCOL_EVENT_VERSION,
         ),
         SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
             RlmProtocolEvent::RlmTrajectoryEntry(step),
+            lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                crate::RLM_PROTOCOL_EVENT_VERSION
+            )),
         )),
     ]
 }
@@ -65,6 +69,7 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<LlmMessage> {
         budget_suffix: None,
         bound_variables: "",
     })
+    .expect("valid history fixture")
 }
 fn ids(messages: &[LlmMessage]) -> (Vec<String>, Vec<String>) {
     let mut calls = Vec::new();
@@ -207,7 +212,8 @@ fn second_round_history_teaches_images_only_when_enabled() {
             final_answer_format: None,
             budget_suffix: None,
             bound_variables: "",
-        });
+        })
+        .expect("valid history fixture");
         let tail = messages
             .last()
             .unwrap()
@@ -230,6 +236,9 @@ fn native_envelope(payload: serde_json::Value) -> SessionHistoryRecord {
             phase: "native_transport".into(),
             payload,
         }),
+        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
     ))
 }
 
@@ -237,7 +246,9 @@ fn envelope_payload(event: &SessionHistoryRecord) -> serde_json::Value {
     let SessionHistoryRecord::Protocol(event) = event else {
         panic!("expected protocol event");
     };
-    let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) = decode_rlm_protocol_event(event) else {
+    let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
+        decode_rlm_protocol_event(event).expect("valid history fixture")
+    else {
         panic!("expected diagnostic");
     };
     diagnostic.payload
@@ -292,6 +303,7 @@ fn repair_with_raw_step_id_is_skipped_only_when_valid() {
         serde_json::from_value(envelope_payload(&execution[0])["parts"].clone()).unwrap(),
         "repair feedback".into(),
         crate::native::transport::NATIVE_TRANSPORT_VERSION,
+        crate::RLM_PROTOCOL_EVENT_VERSION,
     );
     let mut payload = envelope_payload(&repair);
     payload["step_id"] = "execution".into();
@@ -362,7 +374,7 @@ fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
         panic!("trajectory event")
     };
     let Some(RlmProtocolEvent::RlmTrajectoryEntry(restored)) =
-        crate::projection::decode_rlm_protocol_event(event)
+        crate::projection::decode_rlm_protocol_event(event).expect("valid history fixture")
     else {
         panic!("decoded trajectory")
     };

@@ -110,17 +110,22 @@ pub(crate) fn displayed_messages(
 pub(crate) fn republish_committed_ingress_messages(
     state: &AppState,
     session: &lash::LashSession,
-) -> Result<(), serde_json::Error> {
+) -> Result<(), crate::AppError> {
     let session_id = session.session_id();
     let product = product_chat_messages(state, &session_id);
     let mut covered = BTreeSet::new();
-    for row in session.read_view().transcript().visible() {
+    for row in session
+        .read_view()
+        .transcript()
+        .map_err(crate::AppError::internal)?
+        .visible()
+    {
         if row.kind != TranscriptRowKind::User {
             continue;
         }
         if let Some(turn_id) = &row.provenance.turn_id && covered.insert(turn_id.clone())
             && product.iter().any(|message| matches!(&message.provenance, Some(ChatMessageProvenance::TurnInput { turn_id: owner }) if owner == turn_id)) { continue; }
-        if let Some(message) = chat_message_from_row(row)? {
+        if let Some(message) = chat_message_from_row(row).map_err(crate::AppError::internal)? {
             state.publish_for_session_identified(
                 &session_id,
                 format!("message:{}", message.id),

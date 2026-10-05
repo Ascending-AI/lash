@@ -5,14 +5,16 @@
 //! Recovery replays only that decision, under the same store ownership and
 //! database locks as finalize, before migration or ordinary set admission.
 
+use std::collections::BTreeMap;
 use std::io::{self, Write as _};
 use std::path::Path;
 use std::time::Duration;
 
 use lash_core_execution::compat::{CompatStamp, VersionRange};
+use lash_core_execution::engine::BuildGeneration;
 use lash_core_execution::store::fleet_finalize::{FinalizeError, FinalizeRefusal, FleetEpochFlip};
 use lash_core_execution::store::generation_drain::GenerationDrainStatus;
-use lash_core_execution::store::plugin_writers::{PluginWriterRanges, PluginWriterRegistration};
+use lash_core_execution::store::plugin_writers::PluginWriterRegistration;
 use lash_core_execution::{FleetFormat, StoreError};
 use serde::{Deserialize, Serialize};
 
@@ -22,37 +24,86 @@ use crate::{SqliteDatabase, SqliteLocation};
 const INTENT: &str = "lash-finalize.json";
 const STAGING: &str = "lash-finalize.json.staging";
 
+/// The durable authorization file consumed before SQLite store admission.
+/// version_surface = "migrate"
+/// version_unguarded = "backend-private recovery file decoded before the store catalog can admit its FleetFormat; exact bootstrap reader until the release cut"
+/// format_outside_manifest = "backend-private recovery intent read before the store set opens"
+/// version_guard(roots(AuthorizedFinalize))
+pub const SQLITE_FINALIZE_INTENT_VERSION: u32 = 1;
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AuthorizedFinalize {
+    format: u32,
     store: String,
-    retired: GenerationDrainStatus,
+    retired: DrainedGeneration,
     from: u32,
     target: u32,
     /// In `SqliteDatabase::ALL` order, read under all three exclusive locks.
     stamps: [CompatStamp; 3],
-    /// The plugin writer ranges this finalize moves or provisions in the
-    /// durable core, as they were recorded when it was sealed (FIG-4746). A
-    /// plugin absent here and present in `plugin_writers` had no range.
-    plugin_writers_from: PluginWriterRanges,
-    /// The ranges those plugins record once the durable core commits. The
-    /// recovering open holds no registrations, so the intent carries them.
-    plugin_writers: PluginWriterRanges,
+    /// Each plugin's source and target are one authorized move.
+    moves: BTreeMap<String, WriterMove>,
 }
 
-/// The durable core's side of a finalize: the plugin writer ranges it found
-/// and the ones it records with `F` (FIG-4746).
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DrainedGeneration {
+    generation: BuildGeneration,
+    draining_since_ms: u64,
+}
+
+impl DrainedGeneration {
+    fn from_status(status: GenerationDrainStatus) -> rusqlite::Result<Self> {
+        if !status.drained() {
+            return Err(invalid("the retiring generation has not drained"));
+        }
+        Ok(Self {
+            generation: status.generation,
+            draining_since_ms: status
+                .draining_since_ms
+                .ok_or_else(|| invalid("the retiring generation is not marked draining"))?,
+        })
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(try_from = "WriterMoveWire")]
+struct WriterMove {
+    from: Option<VersionRange>,
+    to: VersionRange,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WriterMoveWire {
+    from: Option<VersionRange>,
+    to: VersionRange,
+}
+
+impl TryFrom<WriterMoveWire> for WriterMove {
+    type Error = &'static str;
+    fn try_from(wire: WriterMoveWire) -> Result<Self, Self::Error> {
+        Self::new(wire.from, wire.to)
+    }
+}
+
+impl WriterMove {
+    fn new(from: Option<VersionRange>, to: VersionRange) -> Result<Self, &'static str> {
+        if from == Some(to) {
+            return Err("a plugin writer move must change its range");
+        }
+        Ok(Self { from, to })
+    }
+}
+
+/// The durable core's side of a finalize (FIG-4746).
 #[derive(Default)]
 struct PluginWriterMove {
-    from: PluginWriterRanges,
-    target: PluginWriterRanges,
-    /// Plugins whose recorded range the move changes; a newly provisioned
-    /// plugin is not one.
+    moves: BTreeMap<String, WriterMove>,
     changed: Vec<String>,
 }
 
 impl PluginWriterMove {
-    /// The move a fresh finalize by a build holding `registrations` makes.
     fn fresh(
         tx: &rusqlite::Transaction<'_>,
         registrations: &[PluginWriterRegistration],
@@ -60,53 +111,44 @@ impl PluginWriterMove {
         let recorded = crate::compat::read_plugin_writers(tx)?;
         let finalized = recorded.finalized(registrations);
         let changed = recorded.changed_in(&finalized);
-        let mut from = std::collections::BTreeMap::new();
-        let mut target = std::collections::BTreeMap::new();
+        let mut moves = BTreeMap::new();
         for (plugin, range) in finalized.iter() {
             let before = recorded.permitted_writer(plugin).ok();
             if before != Some(range) {
-                if let Some(before) = before {
-                    from.insert(plugin.to_owned(), before);
-                }
-                target.insert(plugin.to_owned(), range);
+                moves.insert(
+                    plugin.to_owned(),
+                    WriterMove::new(before, range).map_err(invalid)?,
+                );
             }
         }
-        Ok(Self {
-            from: PluginWriterRanges::default().with(from),
-            target: PluginWriterRanges::default().with(target),
-            changed,
-        })
+        Ok(Self { moves, changed })
     }
 
-    /// The move a sealed intent authorized: each plugin it names still
-    /// records its source range, or already records its target.
+    /// Replays the sealed move only while every range still names its source or target.
     fn authorized(
         tx: &rusqlite::Transaction<'_>,
         intent: &AuthorizedFinalize,
     ) -> rusqlite::Result<Self> {
         let recorded = crate::compat::read_plugin_writers(tx)?;
-        for (plugin, target) in intent.plugin_writers.iter() {
+        for (plugin, transition) in &intent.moves {
             let found = recorded.permitted_writer(plugin).ok();
-            let source = intent.plugin_writers_from.permitted_writer(plugin).ok();
-            if found != source && found != Some(target) {
+            if found != transition.from && found != Some(transition.to) {
                 return Err(invalid(format!(
-                    "the writer range of plugin `{plugin}` changed outside the authorized \
-                     transition"
+                    "the writer range of plugin `{plugin}` changed outside the authorized transition"
                 )));
             }
         }
         Ok(Self {
-            from: intent.plugin_writers_from.clone(),
-            target: intent.plugin_writers.clone(),
+            moves: intent.moves.clone(),
             changed: Vec::new(),
         })
     }
 
     fn record(&self, tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
         let entries = self
-            .target
+            .moves
             .iter()
-            .map(|(plugin, range)| (plugin.to_owned(), range))
+            .map(|(plugin, transition)| (plugin.to_owned(), transition.to))
             .collect();
         crate::compat::record_plugin_writers(tx, &entries)
     }
@@ -145,7 +187,6 @@ fn io_error(error: io::Error) -> rusqlite::Error {
 impl AuthorizedFinalize {
     fn validate(&self, location: &SqliteLocation, writable: VersionRange) -> rusqlite::Result<()> {
         if self.store != location.identity()
-            || !self.retired.drained()
             || self.from >= self.target
             || !crate::compat::stamps_agree(&self.stamps)?
         {
@@ -167,9 +208,25 @@ fn read(location: &SqliteLocation) -> rusqlite::Result<Option<AuthorizedFinalize
         return Ok(None);
     };
     match std::fs::read(root.join(INTENT)) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|error| invalid(error.to_string())),
+        Ok(bytes) => {
+            #[derive(Deserialize)]
+            struct Stamp {
+                format: u32,
+            }
+            let stamp: Stamp =
+                serde_json::from_slice(&bytes).map_err(|error| invalid(error.to_string()))?;
+            if stamp.format != SQLITE_FINALIZE_INTENT_VERSION {
+                return Err(crate::sqlite_conversion_error(StoreError::Incompatible {
+                    refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary {
+                        surface: "SQLite finalize intent format".into(),
+                        label: stamp.format.to_string(),
+                    },
+                }));
+            }
+            serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|error| invalid(error.to_string()))
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(io_error(error)),
     }
@@ -344,18 +401,23 @@ fn advance(
                 }
                 if lowest != target {
                     let intent = AuthorizedFinalize {
+                        format: lash_core_store::store::FleetFormat::from_version(lowest)
+                            .writer_version(lash_core_store::surface_format!(
+                                SQLITE_FINALIZE_INTENT_VERSION
+                            )),
                         store: location.identity(),
-                        retired: retired
-                            .take()
-                            .ok_or_else(|| invalid("no retirement authorization"))?,
+                        retired: DrainedGeneration::from_status(
+                            retired
+                                .take()
+                                .ok_or_else(|| invalid("no retirement authorization"))?,
+                        )?,
                         from: lowest,
                         target,
                         stamps: stamps
                             .as_slice()
                             .try_into()
                             .map_err(|_| invalid("incomplete stamp set"))?,
-                        plugin_writers_from: plugin_writers.from.clone(),
-                        plugin_writers: plugin_writers.target.clone(),
+                        moves: plugin_writers.moves.clone(),
                     };
                     intent.validate(location, writable)?;
                     seal(location, &intent)?;
@@ -374,4 +436,66 @@ fn advance(
             to: target,
         }
     })
+}
+
+#[cfg(test)]
+mod nested_format_tests {
+    use super::*;
+
+    #[test]
+    fn authorization_requires_a_marked_and_drained_generation() {
+        let status = |marked: bool, in_flight_turns: u64| GenerationDrainStatus {
+            generation: BuildGeneration::for_test("retired"),
+            draining_since_ms: marked.then_some(5),
+            live_processes: 0,
+            parked_processes: 0,
+            parked_turns: 0,
+            in_flight_turns,
+            closing_sessions: 0,
+            unfinished_invocations: 0,
+            stalled_obligations: BTreeMap::new(),
+            checked_at: 9,
+        };
+        assert!(DrainedGeneration::from_status(status(false, 0)).is_err());
+        assert!(DrainedGeneration::from_status(status(true, 1)).is_err());
+        assert!(DrainedGeneration::from_status(status(true, 0)).is_ok());
+    }
+
+    #[test]
+    fn a_writer_move_cannot_repeat_its_source_range() {
+        let range = VersionRange::exactly(1);
+        assert!(WriterMove::new(Some(range), range).is_err());
+        assert!(
+            serde_json::from_value::<WriterMove>(serde_json::json!({
+                "from": range, "to": range,
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the law writes its own finalize intent"
+    )]
+    fn a_foreign_intent_is_refused_before_decoding_its_authorization() {
+        let root = tempfile::tempdir().expect("root");
+        std::fs::write(root.path().join(INTENT), br#"{"format":4294967295}"#).expect("intent");
+        let location = SqliteLocation::File {
+            root: root.path().to_path_buf(),
+        };
+        let error = match read(&location) {
+            Err(error) => crate::sqlite_error(error),
+            Ok(_) => panic!("foreign intent was admitted"),
+        };
+        assert!(
+            matches!(
+                error,
+                StoreError::Incompatible {
+                    refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary { .. }
+                }
+            ),
+            "{error}"
+        );
+    }
 }

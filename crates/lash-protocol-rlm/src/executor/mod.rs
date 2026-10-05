@@ -434,29 +434,14 @@ async fn execute_code_in_worker_scope(
     let (session_projected_bindings, cell_bindings, host_environment) = if let Some(resumed) =
         &resumed
     {
-        let linked = crate::projection::RlmProjectedBindings::from_recorded(
+        let projected = crate::projection::RlmProjectedBindings::from_recorded(
             resumed.projected_bindings.clone(),
-        )
-        .map_err(|error| error.to_string())
-        .and_then(|projected| {
-            lash_lashlang_runtime::CellToolBindings::from_record(
-                resumed.cell_bindings.clone(),
-                ctx.live_tool_catalog().as_ref(),
-            )
-            .map(|bindings| (projected, bindings))
-            .map_err(|error| error.message)
-        });
-        match linked {
-            Ok((projected, bindings)) => (projected, bindings, resumed.host_environment.clone()),
-            Err(error) => {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    format!("the suspended cell cannot be resumed: {error}"),
-                );
-            }
-        }
+        );
+        let bindings = lash_lashlang_runtime::CellToolBindings::from_record(
+            resumed.cell_bindings.clone(),
+            ctx.live_tool_catalog().as_ref(),
+        );
+        (projected, bindings, resumed.host_environment.clone())
     } else {
         // A frame handoff changes the session's live projections. Re-execution
         // links against this cell's recorded inputs, under the exec_code address
@@ -1153,8 +1138,8 @@ async fn suspend_cell(
     code: &str,
     vm: lash_vm_protocol::OpaqueVmState,
     linked: (
-        Result<serde_json::Value, serde_json::Error>,
-        Result<serde_json::Value, serde_json::Error>,
+        BTreeMap<String, crate::projection::bindings::RecordedProjection>,
+        lash_lashlang_runtime::RecordedCellToolBindings,
         lashlang::LashlangHostEnvironment,
     ),
     deferred_execution_grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
@@ -1165,7 +1150,6 @@ async fn suspend_cell(
     hold_continuation_definitions(ctx, &vm).await?;
     let ctx = host.ctx();
     let segment = cell_segment::CellSegmentState {
-        version: cell_segment::CELL_SEGMENT_STATE_VERSION,
         owner: ctx
             .logical_run()
             .cloned()
@@ -1181,9 +1165,9 @@ async fn suspend_cell(
             .ok_or_else(|| "a suspended cell has no execution identity".to_owned())?
             .to_owned(),
         projection_namespace: host.hand_over_gate().projection_namespace(),
-        projected_bindings: projected_bindings.map_err(|error| error.to_string())?,
+        projected_bindings,
         host_environment,
-        cell_bindings: cell_bindings.map_err(|error| error.to_string())?,
+        cell_bindings,
         deferred_execution_grants,
         prints: prints
             .lock()

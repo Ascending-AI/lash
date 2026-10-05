@@ -9,6 +9,7 @@ pub trait SessionPluginStateSource {
     fn capture_plugin_admission(
         &self,
         config: &crate::PluginConfig,
+        fleet: crate::store::FleetFormat,
     ) -> Result<Option<std::sync::Arc<[u8]>>, crate::RuntimeError>;
 
     /// Current tool-registry generation.
@@ -40,8 +41,9 @@ where
     fn capture_plugin_admission(
         &self,
         config: &crate::PluginConfig,
+        fleet: crate::store::FleetFormat,
     ) -> Result<Option<std::sync::Arc<[u8]>>, crate::RuntimeError> {
-        T::capture_plugin_admission(self, config)
+        T::capture_plugin_admission(self, config, fleet)
     }
 
     fn tool_state_generation(&self) -> u64 {

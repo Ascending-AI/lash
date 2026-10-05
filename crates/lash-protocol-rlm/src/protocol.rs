@@ -4,7 +4,6 @@ mod driver;
 pub(crate) mod finish;
 pub(crate) mod prompt;
 pub(crate) mod stall;
-mod state;
 #[cfg(test)]
 mod tests;
 

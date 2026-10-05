@@ -84,6 +84,7 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     let committed_agent_replies = session
         .read_view()
         .transcript()
+        .expect("valid committed history")
         .visible()
         .filter(|row| {
             row.provenance.is_turn_reply

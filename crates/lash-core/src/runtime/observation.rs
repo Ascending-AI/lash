@@ -416,6 +416,10 @@ impl RuntimeHandle {
         self.observation.store(Arc::new(next));
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "resident history was validated on restore and emitted through typed writers"
+    )]
     fn publish_from_inner(&self, runtime: &LashRuntime, force_resident: bool) {
         let revision = SessionRevision::from_runtime(runtime);
         let previous = self.observation.load_full();
@@ -435,12 +439,14 @@ impl RuntimeHandle {
             let previous_rows = previous
                 .read_view
                 .transcript()
+                .expect("resident history is valid")
                 .into_records()
                 .into_iter()
                 .map(|row| row.row_id)
                 .collect::<std::collections::HashSet<_>>();
             let rows = read_view
                 .transcript()
+                .expect("resident history is valid")
                 .into_records()
                 .into_iter()
                 .filter(|row| !previous_rows.contains(&row.row_id))

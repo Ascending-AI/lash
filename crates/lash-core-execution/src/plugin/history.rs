@@ -106,6 +106,8 @@ pub struct CompactionContext<'run> {
 /// a [`ContextPressureDecision`] and core writes it.
 #[derive(Clone)]
 pub struct ContextPressureContext<'run> {
+    /// Writer versions selected by this attempt's admitted fleet.
+    pub writer_formats: Arc<dyn lash_sansio::WriterFormats>,
     pub session_id: SessionId,
     /// The plugin configuration this hook runs under (FIG-4379): the
     /// running run's admitted configuration and its revision.

@@ -60,7 +60,9 @@ fn plan() -> ToolExpansionPlan {
 impl ProtocolDriverHandle for ExpandingDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
-            request: ctx.project_llm_request(true),
+            request: ctx
+                .project_llm_request(true)
+                .expect("fixture history projects"),
             driver_state: None,
         })]
     }

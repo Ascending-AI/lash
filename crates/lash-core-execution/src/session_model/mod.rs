@@ -21,8 +21,16 @@ pub const PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID: &str = "lash.plugin_runtime";
 
 pub use lash_core_llm::session_model::ChargeSafetyPolicy;
 
+/// Version of runtime-plugin events nested in session history.
+/// version_surface = "migrate"
+/// format_manifest = "PluginRuntimeEvent"
+/// version_guard(roots(PersistedPluginRuntimeEvent))
+pub const PLUGIN_RUNTIME_EVENT_VERSION: u32 = 1;
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PersistedPluginRuntimeEvent {
+    pub format: u32,
     pub plugin_id: String,
     pub event: crate::PluginRuntimeEvent,
 }
@@ -30,10 +38,14 @@ pub struct PersistedPluginRuntimeEvent {
 pub fn plugin_runtime_protocol_event(
     plugin_id: impl Into<String>,
     event: crate::PluginRuntimeEvent,
+    fleet: crate::FleetFormat,
 ) -> Result<ProtocolEvent, serde_json::Error> {
     ProtocolEvent::typed(
         PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID,
         PersistedPluginRuntimeEvent {
+            format: fleet.writer_version(lash_core_store::surface_format!(
+                PLUGIN_RUNTIME_EVENT_VERSION
+            )),
             plugin_id: plugin_id.into(),
             event,
         },
@@ -42,8 +54,33 @@ pub fn plugin_runtime_protocol_event(
 
 pub fn plugin_runtime_event_from_protocol(
     event: &ProtocolEvent,
-) -> Result<Option<PersistedPluginRuntimeEvent>, serde_json::Error> {
-    event.decode(PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID)
+) -> Result<Option<PersistedPluginRuntimeEvent>, crate::StoredDataCorruption> {
+    if event.plugin_id != PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID {
+        return Ok(None);
+    }
+    let corrupt = |message: String| crate::StoredDataCorruption {
+        record_kind: "plugin runtime event".into(),
+        message,
+    };
+    #[derive(serde::Deserialize)]
+    struct Stamp {
+        format: u32,
+    }
+    let stamp: Stamp = serde_json::from_value(event.payload.clone())
+        .map_err(|error| corrupt(error.to_string()))?;
+    if !lash_core_store::store::upcast_chain_covers(
+        lash_core_store::surface_format!(PLUGIN_RUNTIME_EVENT_VERSION),
+        stamp.format,
+        PLUGIN_RUNTIME_EVENT_VERSION,
+    ) {
+        return Err(corrupt(format!(
+            "unsupported plugin runtime event format {}",
+            stamp.format
+        )));
+    }
+    serde_json::from_value(event.payload.clone())
+        .map(Some)
+        .map_err(|error| corrupt(error.to_string()))
 }
 
 pub(crate) use lash_core_store::message_projection::plugin_message_to_message;

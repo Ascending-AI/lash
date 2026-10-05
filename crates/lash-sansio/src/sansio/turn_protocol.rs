@@ -771,7 +771,10 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
 }
 
 impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
-    pub fn project_llm_request(&self, use_tools: bool) -> Arc<LlmRequest> {
+    pub fn project_llm_request(
+        &self,
+        use_tools: bool,
+    ) -> Result<Arc<LlmRequest>, crate::StoredDataCorruption> {
         self.config.projector.project(ProjectorContext {
             config: self.config,
             messages: self.prompt_messages,
@@ -862,14 +865,20 @@ pub struct ProjectorContext<'a, M: TurnProtocol = UnitTurnProtocol> {
 /// recorded inputs and must reach the same decision. Interior mutability in
 /// an implementor is a contract violation.
 pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
-    fn project(&self, ctx: ProjectorContext<'_, M>) -> Arc<LlmRequest>;
+    fn project(
+        &self,
+        ctx: ProjectorContext<'_, M>,
+    ) -> Result<Arc<LlmRequest>, crate::StoredDataCorruption>;
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct ChatContextProjector;
 
 impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
-    fn project(&self, ctx: ProjectorContext<'_, M>) -> Arc<LlmRequest> {
+    fn project(
+        &self,
+        ctx: ProjectorContext<'_, M>,
+    ) -> Result<Arc<LlmRequest>, crate::StoredDataCorruption> {
         let rendered_prompt = render_messages_for_projector(ctx.messages, ctx.turn_causes);
         let mut messages = rendered_prompt.messages;
         if let Some(turn_events) = render_turn_causes_prompt(ctx.turn_causes) {
@@ -879,7 +888,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             ));
         }
 
-        Arc::new(LlmRequest {
+        Ok(Arc::new(LlmRequest {
             instructions: (!ctx.environment.system_prompt.trim().is_empty())
                 .then(|| Arc::from(ctx.environment.system_prompt.trim())),
             model: ctx.config.model.clone(),
@@ -908,7 +917,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             output_spec: None,
             stream_events: None,
             provider_trace: None,
-        })
+        }))
     }
 }
 
@@ -1106,6 +1115,23 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     /// here rather than at build time.
     pub writer_formats: Arc<dyn crate::WriterFormats>,
     pub termination: M::Termination,
+}
+
+/// Stop before a provider request when its durable history cannot be projected.
+pub fn stored_history_refusal_actions<M: TurnProtocol>(
+    error: crate::StoredDataCorruption,
+) -> Vec<DriverAction<M>> {
+    vec![
+        DriverAction::Emit(crate::session_model::make_error_event(
+            crate::TurnFailureKind::Runtime,
+            Some(crate::FailureCode::lash(crate::TurnFailureCode::Other(
+                "stored_data_corrupt".into(),
+            ))),
+            error.to_string(),
+            Some(error.to_string()),
+        )),
+        DriverAction::Finish(crate::TurnOutcome::Stopped(crate::TurnStop::RuntimeError)),
+    ]
 }
 
 #[cfg(test)]

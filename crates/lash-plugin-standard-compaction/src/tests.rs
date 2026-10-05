@@ -147,6 +147,7 @@ fn build_pressure_ctx(
     direct_completions: lash_core::facade_support::DirectCompletionClient<'static>,
 ) -> ContextPressureContext<'static> {
     ContextPressureContext {
+        writer_formats: lash_sansio::build_newest_writer_formats(),
         session_id: SessionId::from("root"),
         state: state.read_view(),
         prompt_usage,
@@ -689,7 +690,11 @@ async fn recovery_refusal_causes_are_distinct_durable_values() {
         if cause == "nothing_to_summarize" {
             state = snapshot_with_nodes(&[
                 conversation_node(text_message("s", MessageRole::System, "policy")),
-                recovery_record_node(OverflowRecoveryRecord::Pending {}).expect("pending record"),
+                recovery_record_node(
+                    OverflowRecoveryRecord::Pending {},
+                    super::recovery::OVERFLOW_RECOVERY_FORMAT_VERSION,
+                )
+                .expect("pending record"),
             ]);
         }
         let mut ctx = recovery_ctx(
@@ -724,7 +729,7 @@ async fn recovery_refusal_causes_are_distinct_durable_values() {
             serde_json::to_value(&nodes).unwrap(),
             json!([{
                 "kind": "plugin", "plugin_type": "standard_compaction.overflow_recovery",
-                "body": {"kind": "failed", "attempt": 1, "cause": expected},
+                "body": {"format": super::recovery::OVERFLOW_RECOVERY_FORMAT_VERSION, "record": {"kind": "failed", "attempt": 1, "cause": expected}},
             }]),
             "{cause}"
         );
@@ -746,6 +751,7 @@ fn recovery_ctx(
     max_context_tokens: usize,
 ) -> ContextPressureContext<'static> {
     ContextPressureContext {
+        writer_formats: lash_sansio::build_newest_writer_formats(),
         session_id: SessionId::from("root"),
         state: state.read_view(),
         prompt_usage: None,
@@ -778,7 +784,8 @@ fn decided_record_kinds(nodes: &[lash_core::SessionAppendNode]) -> Vec<OverflowR
                 panic!("a recovery record is a plugin node: {node:?}");
             };
             assert_eq!(plugin_type, OVERFLOW_RECOVERY_PLUGIN_TYPE);
-            serde_json::from_value(body.clone()).expect("a decided recovery record parses")
+            super::recovery::decode_recovery_body(body.clone())
+                .expect("a decided recovery record parses")
         })
         .collect()
 }
@@ -853,7 +860,13 @@ fn recovery_history(pending: bool) -> (Vec<lash_core::SessionAppendNode>, Sessio
         conversation_node(text_message("t1", MessageRole::User, &oversized)),
     ];
     if pending {
-        nodes.push(recovery_record_node(OverflowRecoveryRecord::Pending {}).expect("pending node"));
+        nodes.push(
+            recovery_record_node(
+                OverflowRecoveryRecord::Pending {},
+                super::recovery::OVERFLOW_RECOVERY_FORMAT_VERSION,
+            )
+            .expect("pending node"),
+        );
     }
     let state = snapshot_with_nodes(&nodes);
     (nodes, state)
@@ -863,7 +876,10 @@ fn history_with_record(
     nodes: &mut Vec<lash_core::SessionAppendNode>,
     record: OverflowRecoveryRecord,
 ) {
-    nodes.push(recovery_record_node(record).expect("recovery node"));
+    nodes.push(
+        recovery_record_node(record, super::recovery::OVERFLOW_RECOVERY_FORMAT_VERSION)
+            .expect("recovery node"),
+    );
 }
 
 #[tokio::test]
@@ -872,6 +888,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
     let sessions: Arc<dyn SessionReadService> = manager.clone();
 
     let overflow = lash_core::plugin::TurnResultHookContext {
+        writer_formats: lash_sansio::build_newest_writer_formats(),
         session_id: SessionId::from("root"),
         turn: overflow_turn_report(lash_core::facade_support::TurnOutcome::Stopped(
             lash_core::facade_support::TurnStop::ContextOverflow,
@@ -885,10 +902,14 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
     assert_eq!(contributions.records.len(), 1);
     let record = &contributions.records[0];
     assert_eq!(record.plugin_type, OVERFLOW_RECOVERY_PLUGIN_TYPE);
-    assert_eq!(record.body, json!({"kind": "pending"}));
+    assert_eq!(
+        super::recovery::decode_recovery_body(record.body.clone()).expect("marker"),
+        OverflowRecoveryRecord::Pending {}
+    );
 
     // The control row: a plain provider error names no recovery trigger.
     let provider_error = lash_core::plugin::TurnResultHookContext {
+        writer_formats: lash_sansio::build_newest_writer_formats(),
         session_id: SessionId::from("root"),
         turn: overflow_turn_report(lash_core::facade_support::TurnOutcome::Stopped(
             lash_core::facade_support::TurnStop::ProviderError,
@@ -908,6 +929,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
     // is not an overflow, so no marker is queued.
     let frame_key = lash_core::FrameKey::from_caller_material("continue-as").expect("non-empty");
     let guided = lash_core::plugin::TurnResultHookContext {
+        writer_formats: lash_sansio::build_newest_writer_formats(),
         session_id: SessionId::from("root"),
         turn: overflow_turn_report(lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
             frame_key,
@@ -938,8 +960,11 @@ fn recovery_records_roundtrip_and_refuse_missing_or_corrupt_causes() {
         },
         OverflowRecoveryRecord::Exhausted {},
     ] {
-        let state =
-            snapshot_with_nodes(&[recovery_record_node(record.clone()).expect("typed node")]);
+        let state = snapshot_with_nodes(&[recovery_record_node(
+            record.clone(),
+            super::recovery::OVERFLOW_RECOVERY_FORMAT_VERSION,
+        )
+        .expect("typed node")]);
         assert!(state.read_view().messages().is_empty());
         assert_eq!(
             history_recovery_records(&state.read_view()).expect("record parses"),
@@ -954,7 +979,7 @@ fn recovery_records_roundtrip_and_refuse_missing_or_corrupt_causes() {
     ] {
         let state = snapshot_with_nodes(&[lash_core::SessionAppendNode::plugin(
             OVERFLOW_RECOVERY_PLUGIN_TYPE,
-            body,
+            json!({"format": super::recovery::OVERFLOW_RECOVERY_FORMAT_VERSION, "record": body}),
         )]);
         assert!(history_recovery_records(&state.read_view()).is_err());
     }
@@ -1149,9 +1174,19 @@ async fn recovery_does_not_restart_after_completion_or_exhaustion() {
         let captured = Arc::new(RecordingLlmCompletions::default());
         let (mut messages, _) = recovery_history(false);
         messages.push(
-            recovery_record_node(OverflowRecoveryRecord::Pending {}).expect("pending record"),
+            recovery_record_node(
+                OverflowRecoveryRecord::Pending {},
+                super::recovery::OVERFLOW_RECOVERY_FORMAT_VERSION,
+            )
+            .expect("pending record"),
         );
-        messages.push(recovery_record_node(terminal.clone()).expect("terminal record"));
+        messages.push(
+            recovery_record_node(
+                terminal.clone(),
+                super::recovery::OVERFLOW_RECOVERY_FORMAT_VERSION,
+            )
+            .expect("terminal record"),
+        );
 
         assert_eq!(
             decide_recovery(&recovery_ctx(

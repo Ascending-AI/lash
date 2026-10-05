@@ -598,8 +598,13 @@ fn plugin_formats_convert_only_in_recorded_transition() {
         );
         assert_eq!(decoded_config.revision, 3);
         assert_eq!(decoded.plugins["format-probe"].generation, 8);
-        let bytes = session.native_view().unwrap().unwrap();
-        session.adopt_native_view(&bytes).unwrap();
+        let bytes = session
+            .native_view(crate::FleetFormat::current())
+            .unwrap()
+            .unwrap();
+        session
+            .adopt_native_view(&bytes, crate::FleetFormat::current())
+            .unwrap();
         assert_eq!(session.export_state(), decoded);
         results.push(rmp_serde::to_vec_named(&(decoded, decoded_config)).unwrap());
     }
@@ -1226,7 +1231,7 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
         state: record.candidate().unwrap().0,
         config: record.candidate().unwrap().1,
     }
-    .encode()
+    .encode(crate::FleetFormat::current())
     .unwrap();
     for callback in ["initial-construction", "cold-construction"] {
         let session = host
@@ -1236,7 +1241,9 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
                 Default::default(),
             ))
             .unwrap();
-        session.adopt_native_view(&view).unwrap();
+        session
+            .adopt_native_view(&view, crate::FleetFormat::current())
+            .unwrap();
         session.materialize().unwrap();
         assert_eq!(
             session.export_state().plugins["read-only"].generation,

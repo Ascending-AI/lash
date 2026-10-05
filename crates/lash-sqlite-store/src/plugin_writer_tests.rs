@@ -954,7 +954,7 @@ async fn a_run_admitted_before_finalize_and_retried_after_it_keeps_its_recorded_
             plugins.adopt_plugin_admission(admission);
             let mut state = state(session);
             state
-                .capture_plugin_states(&plugins)
+                .capture_plugin_states(&plugins, lash_core_store::store::FleetFormat::current())
                 .expect("capture the plugin state");
             let committed = state
                 .plugin_state()

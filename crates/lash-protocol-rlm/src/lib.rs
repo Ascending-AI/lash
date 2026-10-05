@@ -7,14 +7,13 @@ mod cell_scan;
 mod control_tools;
 mod dialect;
 mod driver;
+mod driver_state;
+pub use driver_state::RLM_DRIVER_STATE_VERSION;
 mod executor;
 mod feedback;
 mod native;
 mod plugin;
-pub use native::{
-    NATIVE_DRIVER_STATE_VERSION, NATIVE_EXECUTE_TOOL_NAME, NATIVE_TRANSPORT_VERSION,
-    RlmNativeToolPlugin,
-};
+pub use native::{NATIVE_EXECUTE_TOOL_NAME, NATIVE_TRANSPORT_VERSION, RlmNativeToolPlugin};
 mod projection;
 mod protocol;
 mod system_prompt;
@@ -58,8 +57,8 @@ pub use plugin::{
     UnsetBound, UnsetChannel, rlm_lashlang_surface, rlm_protocol_config, rlm_session_config,
 };
 pub use projection::{
-    RlmHistoryProjection, RlmSeed, is_rlm_protocol_output, rlm_history_projection,
-    rlm_protocol_event, rlm_seed_initial_nodes,
+    RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, RlmSeed, is_rlm_protocol_output,
+    rlm_history_projection, rlm_protocol_event, rlm_seed_initial_nodes,
 };
 pub use projection::{RlmProjectedBindings, rlm_session_projection_extension};
 #[cfg(feature = "testing")]

@@ -270,7 +270,9 @@ struct TestDriver;
 impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
-            request: ctx.project_llm_request(true),
+            request: ctx
+                .project_llm_request(true)
+                .expect("fixture history projects"),
             driver_state: None,
         })]
     }
@@ -565,7 +567,9 @@ struct EndsWithoutDoneDriver;
 impl ProtocolDriverHandle<crate::HostTurnProtocol> for EndsWithoutDoneDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
-            request: ctx.project_llm_request(true),
+            request: ctx
+                .project_llm_request(true)
+                .expect("fixture history projects"),
             driver_state: None,
         })]
     }

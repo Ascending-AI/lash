@@ -42,7 +42,7 @@ const fn predecessor(constant: &'static str) -> u32 {
 
 const PROCESS_EVENT_VOCABULARY_NEXT: u32 = predecessor("PROCESS_EVENT_VOCABULARY_VERSION") + 1;
 const SCOPE_STORAGE_PAYLOAD_NEXT: u32 = predecessor("SCOPE_STORAGE_PAYLOAD_VERSION") + 1;
-const NATIVE_DRIVER_STATE_NEXT: u32 = predecessor("NATIVE_DRIVER_STATE_VERSION") + 1;
+const RLM_DRIVER_STATE_NEXT: u32 = predecessor("RLM_DRIVER_STATE_VERSION") + 1;
 
 /// A tree lift that moves the record's version `field` to `to`.
 fn restamp(
@@ -118,13 +118,13 @@ fn lift_scope_storage_payload(value: &mut serde_json::Value) -> Result<(), crate
     )
 }
 
-/// `NATIVE_DRIVER_STATE_VERSION` N+1.
+/// `RLM_DRIVER_STATE_VERSION` N+1.
 fn lift_native_driver_state(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
     restamp(
         value,
         "native driver state",
         "schema_version",
-        NATIVE_DRIVER_STATE_NEXT,
+        RLM_DRIVER_STATE_NEXT,
     )
 }
 
@@ -214,7 +214,7 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
     owner_decoder("LASHLANG_SNAPSHOT_VERSION"),
     owner_decoder("RLM_SNAPSHOT_VERSION"),
     owner_decoder("NATIVE_TRANSPORT_VERSION"),
-    owner_tree("NATIVE_DRIVER_STATE_VERSION", lift_native_driver_state),
+    owner_tree("RLM_DRIVER_STATE_VERSION", lift_native_driver_state),
     owner_decoder("SQLITE_BLOB_ENVELOPE_VERSION"),
     owner_tree("DURABLE_WAIT_REGISTRY_FORMAT_VERSION", lift_object_body),
     owner_tree("LASH_TURN_OUTCOME_FORMAT_VERSION", lift_object_body),
@@ -274,7 +274,7 @@ pub(super) const WRITER_PINS: &[WriterPin] = &[
     owner_pin("WORKFLOW_GRAPH_SCHEMA_VERSION"),
     owner_pin("RLM_SNAPSHOT_VERSION"),
     owner_pin("NATIVE_TRANSPORT_VERSION"),
-    owner_pin("NATIVE_DRIVER_STATE_VERSION"),
+    owner_pin("RLM_DRIVER_STATE_VERSION"),
     owner_pin("SQLITE_BLOB_ENVELOPE_VERSION"),
     owner_pin("DURABLE_WAIT_REGISTRY_FORMAT_VERSION"),
     owner_pin("LASH_TURN_OUTCOME_FORMAT_VERSION"),

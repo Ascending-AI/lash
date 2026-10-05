@@ -203,6 +203,14 @@ const PRIMARY_FORMATS: [DurableFormat; 6] = [
 /// The single format-to-surface relation used by the preflight.
 fn format_surface(format: DurableFormat) -> SurfaceRelation {
     match format {
+        DurableFormat::PluginAdmissionCheckpoint => SurfaceRelation::Unwalkable(
+            "opaque checkpoint component; decoded and refused at session admission",
+        ),
+        DurableFormat::PluginRuntimeEvent | DurableFormat::RlmProtocolEvent => {
+            SurfaceRelation::Unwalkable(
+                "plugin-owned session-history payload; refused by its decoder",
+            )
+        }
         DurableFormat::ModuleArtifact => SurfaceRelation::Walk {
             surface: DurableSurface::ModuleArtifact,
             primary: true,
@@ -286,9 +294,8 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "no bounded surface: the type facet rides the projected graph a host stores, so the \
              bytes this version gates live outside lash's own store",
         ),
-        DurableFormat::NativeRlmDriverState => SurfaceRelation::Unwalkable(
-            "no bounded surface: parked in each session's protocol driver-state slot, refused \
-             when the driver resumes rather than at rest",
+        DurableFormat::RlmDriverState => SurfaceRelation::Unwalkable(
+            "no bounded surface: carried by TurnCheckpoint and PendingFollowOn.suspended_cell.driver_state; refused when either RLM channel resumes",
         ),
         DurableFormat::NativeRlmTransport => SurfaceRelation::Unwalkable(
             "no bounded surface: one session-history record per provider exchange, refused at \

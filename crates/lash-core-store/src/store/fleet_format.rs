@@ -379,6 +379,26 @@ pub struct GuardedSurface {
 /// first version at the cut.
 pub const GUARDED_SURFACES: &[GuardedSurface] = &[
     GuardedSurface {
+        constant: "OVERFLOW_RECOVERY_FORMAT_VERSION",
+        owner: "lash-plugin-standard-compaction",
+        reads: SurfaceReads::History { floor: 1 },
+    },
+    GuardedSurface {
+        constant: "PLUGIN_ADMISSION_CHECKPOINT_VERSION",
+        owner: "lash-core-execution",
+        reads: SurfaceReads::Mutable,
+    },
+    GuardedSurface {
+        constant: "PLUGIN_RUNTIME_EVENT_VERSION",
+        owner: "lash-core-execution",
+        reads: SurfaceReads::History { floor: 1 },
+    },
+    GuardedSurface {
+        constant: "RLM_PROTOCOL_EVENT_VERSION",
+        owner: "lash-protocol-rlm",
+        reads: SurfaceReads::History { floor: 1 },
+    },
+    GuardedSurface {
         constant: "SESSION_NODE_BODY_SCHEMA_VERSION",
         owner: "lash-core-store",
         reads: SurfaceReads::History { floor: 1 },
@@ -449,7 +469,7 @@ pub const GUARDED_SURFACES: &[GuardedSurface] = &[
         reads: SurfaceReads::History { floor: 1 },
     },
     GuardedSurface {
-        constant: "NATIVE_DRIVER_STATE_VERSION",
+        constant: "RLM_DRIVER_STATE_VERSION",
         owner: "lash-protocol-rlm",
         reads: SurfaceReads::Mutable,
     },

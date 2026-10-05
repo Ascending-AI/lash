@@ -556,7 +556,7 @@ mod tests {
         );
 
         let read_view = turn.result.state.read_view();
-        let transcript = read_view.transcript();
+        let transcript = read_view.transcript().expect("valid committed history");
         assert_eq!(
             transcript
                 .visible()
@@ -575,7 +575,8 @@ mod tests {
             "the final value has exactly one committed marked reply"
         );
         let extraction_decisions =
-            lash_protocol_rlm::recorded_extraction_decisions(read_view.active_events());
+            lash_protocol_rlm::recorded_extraction_decisions(read_view.active_events())
+                .expect("valid committed history");
         assert_eq!(extraction_decisions, vec!["execute_typescript"]);
         assert_eq!(
             extraction_decisions

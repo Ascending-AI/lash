@@ -342,6 +342,7 @@ impl LashRuntime {
             self.state.turn_scope(&run),
             self.host.core.durability.commit_budget,
         )
+        .with_fleet_format(self.fleet_format())
         .with_metrics(self.host.core.tracing.metrics().clone())
         .with_trace(
             self.host
@@ -740,6 +741,9 @@ impl LashRuntime {
         // journal on replay, and no callback runs again (K10).
         let recorded = if plugins.has_after_turn_hooks() {
             let hook_context = crate::plugin::TurnResultHookContext {
+                writer_formats: Arc::new(crate::protocol_build::FleetWriterFormats(
+                    self.fleet_format(),
+                )),
                 session_id: assembled.state.session_id.clone(),
                 plugin_config: plugins.admitted_plugin_config(),
                 turn: Arc::new(crate::plugin::TurnHookReport::from_assembled(&assembled)),
@@ -1151,6 +1155,7 @@ impl LashRuntime {
             self.state.turn_scope(&trace_turn_id),
             self.host.core.durability.commit_budget,
         )
+        .with_fleet_format(self.fleet_format())
         .with_definition_engines(self.host.core.process_engines.clone())
         .with_metrics(self.host.core.tracing.metrics().clone())
         .with_trace(self.host.core.tracing.shift(

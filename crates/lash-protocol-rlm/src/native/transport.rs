@@ -52,6 +52,8 @@ pub(crate) enum DecodeError {
     OlderVersion { found: u32, supported: u32 },
     #[error("malformed native transport envelope: {0}")]
     Malformed(#[from] serde_json::Error),
+    #[error(transparent)]
+    History(#[from] lash_core::StoredDataCorruption),
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -66,7 +68,7 @@ struct Envelope {
     clippy::expect_used,
     reason = "the envelope carries a u32 schema version and crate-owned transport data, so serde_json encoding cannot fail"
 )]
-fn event(transport: Transport, schema_version: u32) -> SessionHistoryRecord {
+fn event(transport: Transport, schema_version: u32, history_version: u32) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
         RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
             phase: PHASE.to_string(),
@@ -76,6 +78,7 @@ fn event(transport: Transport, schema_version: u32) -> SessionHistoryRecord {
             })
             .expect("native envelope serializes"),
         }),
+        history_version,
     ))
 }
 
@@ -83,8 +86,13 @@ pub(crate) fn execution_event(
     step_id: String,
     parts: Vec<Part>,
     schema_version: u32,
+    history_version: u32,
 ) -> SessionHistoryRecord {
-    event(Transport::Execution { step_id, parts }, schema_version)
+    event(
+        Transport::Execution { step_id, parts },
+        schema_version,
+        history_version,
+    )
 }
 pub(super) fn repair_event(
     turn_id: &TurnId,
@@ -92,6 +100,7 @@ pub(super) fn repair_event(
     parts: Vec<Part>,
     text: String,
     schema_version: u32,
+    history_version: u32,
 ) -> SessionHistoryRecord {
     event(
         Transport::Repair {
@@ -101,11 +110,12 @@ pub(super) fn repair_event(
             text,
         },
         schema_version,
+        history_version,
     )
 }
 fn decode(event: &lash_core::ProtocolEvent) -> Result<Option<Transport>, DecodeError> {
     let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
-        crate::projection::decode_rlm_protocol_event(event)
+        crate::projection::decode_rlm_protocol_event(event)?
     else {
         return Ok(None);
     };
@@ -166,10 +176,15 @@ impl NativeTransportIndex {
             else {
                 continue;
             };
-            let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
-                crate::projection::decode_rlm_protocol_event(event)
-            else {
-                continue;
+            let diagnostic = match crate::projection::decode_rlm_protocol_event(event) {
+                Ok(Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))) => diagnostic,
+                Ok(_) => continue,
+                Err(error) => {
+                    index
+                        .envelopes
+                        .insert(entry.index, Err(DecodeError::History(error)));
+                    continue;
+                }
             };
             if diagnostic.phase != PHASE {
                 continue;
@@ -284,20 +299,28 @@ pub(super) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output
 mod tests {
     use super::*;
     fn recorded(payload: serde_json::Value) -> lash_core::ProtocolEvent {
-        crate::projection::rlm_protocol_event(RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
-            phase: "native_transport".into(),
-            payload,
-        }))
+        crate::projection::rlm_protocol_event(
+            RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
+                phase: "native_transport".into(),
+                payload,
+            }),
+            lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                crate::RLM_PROTOCOL_EVENT_VERSION
+            )),
+        )
     }
     #[test]
     fn envelope_version_pin_and_refusal_witness() {
-        let SessionHistoryRecord::Protocol(event) =
-            execution_event("step".into(), Vec::new(), NATIVE_TRANSPORT_VERSION)
-        else {
+        let SessionHistoryRecord::Protocol(event) = execution_event(
+            "step".into(),
+            Vec::new(),
+            NATIVE_TRANSPORT_VERSION,
+            crate::RLM_PROTOCOL_EVENT_VERSION,
+        ) else {
             panic!()
         };
         let Some(RlmProtocolEvent::RlmDiagnostic(d)) =
-            crate::projection::decode_rlm_protocol_event(&event)
+            crate::projection::decode_rlm_protocol_event(&event).expect("valid history fixture")
         else {
             panic!()
         };

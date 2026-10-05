@@ -179,7 +179,7 @@ impl RlmRuntimeState {
         }
         for event in &state.active_events {
             if let SessionHistoryRecord::Protocol(event) = event
-                && let Some(event) = decode_rlm_protocol_event(event)
+                && let Some(event) = decode_rlm_protocol_event(event).map_err(history_corruption)?
             {
                 self.apply_seed_or_globals_event(execution, event, &protected_names)
                     .await?;
@@ -198,7 +198,7 @@ impl RlmRuntimeState {
         execution.prune_protected_globals(&protected_names).await?;
         for node in nodes {
             if let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node
-                && let Some(event) = decode_rlm_protocol_event(event)
+                && let Some(event) = decode_rlm_protocol_event(event).map_err(history_corruption)?
             {
                 self.apply_seed_or_globals_event(execution, event, &protected_names)
                     .await?;
@@ -388,7 +388,7 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
         _successor: &lash_core::FrameNodeId,
         initial_nodes: &[lash_core::SessionAppendNode],
     ) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
-        Ok(frame_switch_carries(initial_nodes))
+        frame_switch_carries(initial_nodes)
     }
 
     fn executable_generation(&self) -> Option<lash_core::ExecutableGeneration> {
@@ -452,13 +452,15 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
 /// a value in the switch's seed and globals events references. Only these
 /// survive into the successor frame; the ended frame's other modules are
 /// severed once the switching turn settles.
-fn frame_switch_carries(nodes: &[lash_core::SessionAppendNode]) -> Vec<lash_core::ArtifactName> {
+fn frame_switch_carries(
+    nodes: &[lash_core::SessionAppendNode],
+) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
     let mut definitions = BTreeSet::new();
     for node in nodes {
         let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node else {
             continue;
         };
-        let values = match decode_rlm_protocol_event(event) {
+        let values = match decode_rlm_protocol_event(event).map_err(history_corruption)? {
             Some(RlmProtocolEvent::RlmSeed(seed)) => serde_json::to_value(&seed),
             Some(RlmProtocolEvent::RlmGlobalsPatch(patch)) => serde_json::to_value(&patch),
             _ => continue,
@@ -471,13 +473,13 @@ fn frame_switch_carries(nodes: &[lash_core::SessionAppendNode]) -> Vec<lash_core
             ));
         }
     }
-    definitions
+    Ok(definitions
         .into_iter()
         .map(|id| lash_core::ArtifactName {
             store: lash_core::ArtifactStoreId::ProcessDefinition,
             artifact_ref: id.to_string(),
         })
-        .collect()
+        .collect())
 }
 
 pub(crate) fn reject_reserved_projected_binding_names(
@@ -489,6 +491,13 @@ pub(crate) fn reject_reserved_projected_binding_names(
         ));
     }
     Ok(())
+}
+
+fn history_corruption(error: lash_core::StoredDataCorruption) -> SessionError {
+    SessionError::Plugin(lash_core::PluginError::StoredDataCorrupt {
+        record_kind: error.record_kind,
+        message: error.message,
+    })
 }
 
 #[cfg(test)]
@@ -1053,7 +1062,7 @@ mod tests {
                 "value": label
             })),
         );
-        crate::projection::rlm_seed_initial_nodes(seed)
+        crate::projection::rlm_seed_initial_nodes(seed, lash_core::FleetFormat::current())
     }
 
     /// The value `finish baton` yields on the state's live execution.
@@ -1077,7 +1086,7 @@ mod tests {
                 "value": label
             })),
         );
-        crate::projection::rlm_seed_initial_nodes(seed)
+        crate::projection::rlm_seed_initial_nodes(seed, lash_core::FleetFormat::current())
     }
 
     fn projected_binding_names(declaration: &Option<String>) -> Vec<String> {
@@ -1336,19 +1345,23 @@ mod tests {
             "projected_definition".to_string(),
             lash_rlm_types::RlmProjectedSeedEntry::Materialized(projected_value),
         );
-        let mut nodes = crate::projection::rlm_seed_initial_nodes(seed);
+        let mut nodes =
+            crate::projection::rlm_seed_initial_nodes(seed, lash_core::FleetFormat::current());
         // A globals patch in the initial nodes is replayed into the new
         // frame too, so what it names is carried.
         let (patched, patched_value) = definition_json("patched");
         nodes.push(lash_core::SessionAppendNode::protocol_event(
-            crate::projection::rlm_protocol_event(RlmProtocolEvent::RlmGlobalsPatch(
-                RlmGlobalsPatchPluginBody {
+            crate::projection::rlm_protocol_event(
+                RlmProtocolEvent::RlmGlobalsPatch(RlmGlobalsPatchPluginBody {
                     set_default: serde_json::Map::from_iter([(
                         "patched".to_string(),
                         patched_value,
                     )]),
-                },
-            )),
+                }),
+                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    crate::RLM_PROTOCOL_EVENT_VERSION
+                )),
+            ),
         ));
 
         let mut expected = [carried, projected, patched]
@@ -1359,7 +1372,14 @@ mod tests {
             })
             .collect::<Vec<_>>();
         expected.sort();
-        assert_eq!(frame_switch_carries(&nodes), expected);
-        assert!(frame_switch_carries(&[]).is_empty());
+        assert_eq!(
+            frame_switch_carries(&nodes).expect("valid history fixture"),
+            expected
+        );
+        assert!(
+            frame_switch_carries(&[])
+                .expect("valid history fixture")
+                .is_empty()
+        );
     }
 }

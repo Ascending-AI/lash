@@ -903,8 +903,12 @@ fn refused_tool_call_completion(
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
+        let request = match ctx.project_llm_request(true) {
+            Ok(request) => request,
+            Err(error) => return lash_sansio::sansio::stored_history_refusal_actions(error),
+        };
         vec![DriverAction::Start(PendingWork::Llm {
-            request: ctx.project_llm_request(true),
+            request,
             driver_state: None,
         })]
     }

@@ -717,6 +717,7 @@ async fn durable_browser_projection_fixture()
                 images: printed_images,
                 ..lash::rlm::RlmTrajectoryEntry::default()
             }),
+            lash::formats::RLM_PROTOCOL_EVENT_VERSION,
         ));
     session
         .admin()
@@ -733,6 +734,7 @@ async fn durable_browser_projection_fixture()
     let committed_message = session
         .read_view()
         .transcript()
+        .expect("valid committed history")
         .visible()
         .filter_map(|row| chat_message_from_row(row).expect("project canonical row"))
         .find(|message| !message.attachments.is_empty())

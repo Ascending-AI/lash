@@ -29,6 +29,7 @@ pub(crate) fn build_session_request(
     let session_spec = SessionSpec::inherit();
     let tool_access = SessionToolAccess::default();
     build_spawn_create_request(SpawnCreateRequestInput {
+        fleet_format: lash_core::FleetFormat::current(),
         registry,
         parent_session_id: &SessionId::from("root"),
         current_snapshot,
@@ -44,6 +45,7 @@ pub(crate) fn build_session_request(
 }
 
 pub(crate) struct SpawnCreateRequestInput<'a> {
+    pub(crate) fleet_format: lash_core::FleetFormat,
     pub(crate) registry: &'a CapabilityRegistry,
     pub(crate) parent_session_id: &'a SessionId,
     pub(crate) current_snapshot: SessionSnapshot,
@@ -61,6 +63,7 @@ pub(crate) fn build_spawn_create_request(
     input: SpawnCreateRequestInput<'_>,
 ) -> Result<SessionCreateRequest, String> {
     let SpawnCreateRequestInput {
+        fleet_format,
         registry,
         parent_session_id,
         current_snapshot,
@@ -77,6 +80,7 @@ pub(crate) fn build_spawn_create_request(
         .get(capability_name)
         .ok_or_else(|| unknown_capability_message(capability_name, registry))?;
     capability.build_session_request(SubagentSpawnContext {
+        fleet_format,
         parent_session_id,
         parent_snapshot: &current_snapshot,
         session_spec,

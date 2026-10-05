@@ -145,7 +145,7 @@ impl crate::runtime::LashRuntime {
             plugins.adopt_plugin_transition(&record).map_err(|error| {
                 crate::RuntimeEffectControllerError::from(error).into_runtime_error()
             })?;
-            if let Some(bytes) = plugins.native_view().map_err(|error| {
+            if let Some(bytes) = plugins.native_view(self.fleet_format()).map_err(|error| {
                 crate::RuntimeEffectControllerError::from(error).into_runtime_error()
             })? {
                 self.state.set_plugin_admission_snapshot(bytes);

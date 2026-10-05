@@ -9,8 +9,8 @@ use lash_core::FleetFormat;
 use lash_core_store::testing::guarded_surfaces::{self as laws, SurfaceProbe};
 
 use super::{RLM_SNAPSHOT_VERSION, RlmExecutionState, RlmSnapshotRoot};
-use crate::native::state::{
-    NATIVE_DRIVER_STATE_VERSION, RlmDriverState, decode_rlm_driver_state, rlm_driver_state,
+use crate::driver_state::{
+    RLM_DRIVER_STATE_VERSION, RlmDriverState, decode_rlm_driver_state, rlm_driver_state,
 };
 use crate::native::transport::{NATIVE_TRANSPORT_VERSION, decode_payload, execution_event};
 
@@ -77,11 +77,14 @@ fn write_transport(fleet: FleetFormat) -> Vec<u8> {
         "step".to_owned(),
         Vec::new(),
         fleet.writer_version(lash_core::surface_format!(NATIVE_TRANSPORT_VERSION)),
+        fleet.writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
     ) else {
         panic!("a transport envelope is a protocol event");
     };
     let Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
-        crate::projection::decode_rlm_protocol_event(&event)
+        crate::projection::decode_rlm_protocol_event(&event).expect("valid history fixture")
     else {
         panic!("a transport envelope is an RLM diagnostic");
     };
@@ -95,12 +98,12 @@ fn read_transport(bytes: &[u8], _fleet: FleetFormat) -> Result<String, String> {
         .and_then(|transport| serde_json::to_string(&transport).map_err(|e| e.to_string()))
 }
 
-// --- NATIVE_DRIVER_STATE_VERSION: the parked native driver state. ---
+// --- RLM_DRIVER_STATE_VERSION: the parked native driver state. ---
 
 fn write_driver_state(fleet: FleetFormat) -> Vec<u8> {
     let state = rlm_driver_state(
         RlmDriverState::default(),
-        fleet.writer_version(lash_core::surface_format!(NATIVE_DRIVER_STATE_VERSION)),
+        fleet.writer_version(lash_core::surface_format!(RLM_DRIVER_STATE_VERSION)),
     );
     serde_json::to_vec(&state.payload).expect("encode the driver state")
 }
@@ -110,7 +113,7 @@ fn read_driver_state(bytes: &[u8], fleet: FleetFormat) -> Result<String, String>
     let state = lash_core::ProtocolDriverState::new(crate::plugin::RLM_PROTOCOL_PLUGIN_ID, payload);
     decode_rlm_driver_state(
         state,
-        fleet.writer_version(lash_core::surface_format!(NATIVE_DRIVER_STATE_VERSION)),
+        fleet.writer_version(lash_core::surface_format!(RLM_DRIVER_STATE_VERSION)),
     )
     .and_then(|state| serde_json::to_string(&state).map_err(|error| error.to_string()))
 }
@@ -121,8 +124,39 @@ fn restamp_schema_version(bytes: &[u8], version: u32) -> Vec<u8> {
     serde_json::to_vec(&value).expect("encode")
 }
 
+fn write_history(fleet: FleetFormat) -> Vec<u8> {
+    let event = crate::projection::rlm_protocol_event(
+        lash_rlm_types::RlmProtocolEvent::RlmSeed(Default::default()),
+        fleet.writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        )),
+    );
+    serde_json::to_vec(&event.payload).expect("history envelope")
+}
+fn read_history(bytes: &[u8], _fleet: FleetFormat) -> Result<String, String> {
+    let event = lash_core::ProtocolEvent {
+        plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.into(),
+        payload: serde_json::from_slice(bytes).map_err(|error| error.to_string())?,
+    };
+    crate::projection::decode_rlm_protocol_event(&event)
+        .map_err(|error| error.to_string())
+        .and_then(|event| serde_json::to_string(&event).map_err(|error| error.to_string()))
+}
+fn restamp_history(bytes: &[u8], version: u32) -> Vec<u8> {
+    let mut value: serde_json::Value = serde_json::from_slice(bytes).expect("history");
+    value["format"] = serde_json::json!(version);
+    serde_json::to_vec(&value).expect("restamp")
+}
+
 fn probes() -> Vec<SurfaceProbe> {
     vec![
+        SurfaceProbe {
+            constant: "RLM_PROTOCOL_EVENT_VERSION",
+            newest: crate::RLM_PROTOCOL_EVENT_VERSION,
+            write: write_history,
+            read: read_history,
+            restamp: restamp_history,
+        },
         SurfaceProbe {
             constant: "RLM_SNAPSHOT_VERSION",
             newest: RLM_SNAPSHOT_VERSION,
@@ -138,8 +172,8 @@ fn probes() -> Vec<SurfaceProbe> {
             restamp: restamp_schema_version,
         },
         SurfaceProbe {
-            constant: "NATIVE_DRIVER_STATE_VERSION",
-            newest: NATIVE_DRIVER_STATE_VERSION,
+            constant: "RLM_DRIVER_STATE_VERSION",
+            newest: RLM_DRIVER_STATE_VERSION,
             write: write_driver_state,
             read: read_driver_state,
             restamp: restamp_schema_version,

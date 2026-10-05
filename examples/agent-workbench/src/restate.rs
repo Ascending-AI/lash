@@ -1046,7 +1046,10 @@ pub(crate) async fn record_turn_output_for_profile(
         turn_state.settle_terminal();
         streamed_prose
     };
-    let projection = session.read_view().transcript();
+    let projection = session
+        .read_view()
+        .transcript()
+        .map_err(AppError::internal)?;
     let assistant_text = projection
         .reply(identity.durable_turn_id)
         .map(|row| row.content.text.clone())

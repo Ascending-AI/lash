@@ -202,6 +202,21 @@ impl LashRuntime {
             state.authority.tool_access = services.plugins.tool_access();
             state.authority.subagent = services.plugins.subagent_context();
         }
+        {
+            use crate::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
+            for node in state.session_graph.active_path_nodes() {
+                if let Some(crate::SessionHistoryRecord::Protocol(event)) = node.event() {
+                    crate::session_model::plugin_runtime_event_from_protocol(event).map_err(
+                        |error| {
+                            SessionError::Plugin(crate::PluginError::StoredDataCorrupt {
+                                record_kind: error.record_kind,
+                                message: error.message,
+                            })
+                        },
+                    )?;
+                }
+            }
+        }
         state.ensure_agent_frame_initialized();
         if state.effective_policy().model.is_none() {
             return Err(SessionError::LlmProfileUnconfigured {
@@ -257,7 +272,14 @@ impl LashRuntime {
         let mut tool_restore_report = None;
         let mut admitted_capabilities = false;
         if let Some(bytes) = state.plugin_admission_snapshot() {
-            match services.plugins.adopt_native_view(&bytes) {
+            match services.plugins.adopt_native_view(
+                &bytes,
+                services
+                    .store
+                    .as_ref()
+                    .map(crate::store::SessionStore::fleet_format)
+                    .unwrap_or_else(crate::FleetFormat::current),
+            ) {
                 Ok(()) => {
                     admitted_capabilities =
                         services

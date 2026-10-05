@@ -228,6 +228,7 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
     let tool_access = lash_core::SessionToolAccess::default();
 
     let request = build_spawn_create_request(SpawnCreateRequestInput {
+        fleet_format: lash_core::FleetFormat::current(),
         registry: &registry,
         parent_session_id: &SessionId::from("root"),
         current_snapshot: current_snapshot.to_snapshot(),
@@ -272,6 +273,7 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
     );
 
     let structured_request = build_spawn_create_request(SpawnCreateRequestInput {
+        fleet_format: lash_core::FleetFormat::current(),
         registry: &registry,
         parent_session_id: &SessionId::from("root"),
         current_snapshot: rlm_parent_snapshot(&current_snapshot),

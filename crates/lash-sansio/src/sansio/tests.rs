@@ -333,7 +333,9 @@ struct ProseDriver;
 impl ProtocolDriverHandle for ProseDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
-            request: ctx.project_llm_request(false),
+            request: ctx
+                .project_llm_request(false)
+                .expect("fixture history projects"),
             driver_state: None,
         })]
     }
@@ -406,15 +408,17 @@ fn chat_context_projector_projects_event_context_as_user_messages() {
     let messages = MessageSequence::from(vec![cause.to_event_message()]);
     let config = test_config(Arc::new(ProseDriver));
 
-    let active_request = ChatContextProjector.project(ProjectorContext {
-        config: &config,
-        messages: &messages,
-        events: &[],
-        turn_causes: std::slice::from_ref(&cause),
-        protocol_iteration: 0,
-        use_tools: false,
-        environment: &ExecutionEnvironmentSync::default(),
-    });
+    let active_request = ChatContextProjector
+        .project(ProjectorContext {
+            config: &config,
+            messages: &messages,
+            events: &[],
+            turn_causes: std::slice::from_ref(&cause),
+            protocol_iteration: 0,
+            use_tools: false,
+            environment: &ExecutionEnvironmentSync::default(),
+        })
+        .expect("fixture history projects");
     assert_eq!(active_request.scope.agent_frame_id, "test-frame");
     assert!(active_request.messages.iter().any(|message| {
         message.role == crate::llm::types::LlmRole::User
@@ -435,15 +439,17 @@ fn chat_context_projector_projects_event_context_as_user_messages() {
         "active turn events must not duplicate history"
     );
 
-    let history_request = ChatContextProjector.project(ProjectorContext {
-        config: &config,
-        messages: &messages,
-        events: &[],
-        turn_causes: &[],
-        protocol_iteration: 1,
-        use_tools: false,
-        environment: &ExecutionEnvironmentSync::default(),
-    });
+    let history_request = ChatContextProjector
+        .project(ProjectorContext {
+            config: &config,
+            messages: &messages,
+            events: &[],
+            turn_causes: &[],
+            protocol_iteration: 1,
+            use_tools: false,
+            environment: &ExecutionEnvironmentSync::default(),
+        })
+        .expect("fixture history projects");
     assert!(history_request.messages.iter().any(|message| {
         message.role == crate::llm::types::LlmRole::User
             && message_text(message).contains("Runtime event:")
@@ -514,7 +520,9 @@ struct SyncThenAdvanceDriver;
 impl ProtocolDriverHandle for SyncThenAdvanceDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
-            request: ctx.project_llm_request(true),
+            request: ctx
+                .project_llm_request(true)
+                .expect("fixture history projects"),
             driver_state: None,
         })]
     }
@@ -564,7 +572,9 @@ struct CellEveryIterationDriver;
 impl ProtocolDriverHandle for CellEveryIterationDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
-            request: ctx.project_llm_request(false),
+            request: ctx
+                .project_llm_request(false)
+                .expect("fixture history projects"),
             driver_state: None,
         })]
     }
@@ -753,7 +763,9 @@ impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         if ctx.protocol_iteration() == 0 {
             return vec![DriverAction::Start(PendingWork::Llm {
-                request: ctx.project_llm_request(false),
+                request: ctx
+                    .project_llm_request(false)
+                    .expect("fixture history projects"),
                 driver_state: None,
             })];
         }
@@ -866,7 +878,9 @@ struct ToolBatchDriver;
 impl ProtocolDriverHandle for ToolBatchDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
-            request: ctx.project_llm_request(true),
+            request: ctx
+                .project_llm_request(true)
+                .expect("fixture history projects"),
             driver_state: None,
         })]
     }

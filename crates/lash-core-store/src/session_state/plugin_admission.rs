@@ -5,7 +5,7 @@ impl RuntimeSessionState {
     /// The recorded native plugin view published with the current checkpoint.
     pub fn plugin_admission_snapshot(&self) -> Option<std::sync::Arc<[u8]>> {
         self.checkpoint_components
-            .component("plugin_admission")
+            .component(crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT)
             .and_then(ResidentCheckpointComponent::opaque_body)
     }
 
@@ -13,11 +13,11 @@ impl RuntimeSessionState {
     pub fn clear_plugin_admission_snapshot(&mut self) {
         self.checkpoint_components
             .entries
-            .remove("plugin_admission");
+            .remove(crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT);
     }
 
     pub fn set_plugin_admission_snapshot(&mut self, bytes: std::sync::Arc<[u8]>) {
-        let key = "plugin_admission".to_owned();
+        let key = crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT.to_owned();
         let previous = self.checkpoint_components.entries.get(&key);
         if previous
             .and_then(ResidentCheckpointComponent::opaque_body)

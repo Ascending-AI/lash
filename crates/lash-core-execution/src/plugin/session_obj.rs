@@ -1431,8 +1431,9 @@ impl lash_core_store::session_state::SessionPluginStateSource for PluginSession 
     fn capture_plugin_admission(
         &self,
         config: &PluginConfig,
+        fleet: crate::FleetFormat,
     ) -> Result<Option<Arc<[u8]>>, crate::RuntimeError> {
-        self.capture_native_view(Some(config))
+        self.capture_native_view(Some(config), fleet)
             .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
     }
 

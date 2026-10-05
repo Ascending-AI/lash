@@ -45,7 +45,10 @@ use super::stall::{
     ExtractionCounts, ExtractionDiagnostic, LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE,
     reply_fingerprint, stalled_attempts,
 };
-use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rlm_driver_state};
+use crate::driver_state::{
+    RLM_DRIVER_STATE_VERSION, RlmDriverState, RlmReasoningPart, decode_rlm_driver_state,
+    rlm_driver_state,
+};
 
 #[derive(Clone)]
 pub struct RlmDriver {
@@ -212,6 +215,7 @@ impl RlmDriver {
                 retry.termination,
                 prose_only_counts(self.dialect.language_id(), retry.raw_text, retry.reasoning),
             ),
+            lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
         )]));
         let mut retry_events = Vec::new();
         if let Some((prose, purpose)) = retry.prompt.assistant_message
@@ -253,9 +257,16 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         if let Err(err) = decode_rlm_termination_options(ctx.termination()) {
             return invalid_turn_options_actions(err);
         }
+        let request = match ctx.project_llm_request(false) {
+            Ok(request) => request,
+            Err(error) => return lash_sansio::sansio::stored_history_refusal_actions(error),
+        };
         vec![DriverAction::Start(PendingWork::Llm {
-            request: ctx.project_llm_request(false),
-            driver_state: Some(rlm_driver_state(RlmDriverState::default())),
+            request,
+            driver_state: Some(rlm_driver_state(
+                RlmDriverState::default(),
+                lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
+            )),
         })]
     }
 
@@ -406,6 +417,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         &termination,
                         prose_only_counts(self.dialect.language_id(), &assistant_text, &reasoning),
                     ),
+                    lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                 )]));
                 if !reasoning.is_empty() {
                     actions.push(DriverAction::AppendEvents(vec![conversation_event(
@@ -447,18 +459,26 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &cell,
                 ),
             ),
+            lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
         )]));
 
         let Some(raw_state) = driver_state else {
             return invalid_driver_state_actions("missing RLM driver state".to_string());
         };
-        let mut state = match decode_rlm_driver_state(raw_state) {
+        let mut state = match decode_rlm_driver_state(
+            raw_state,
+            lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
+        ) {
             Ok(state) => state,
             Err(err) => return invalid_driver_state_actions(err),
         };
         state.code = cell.code.clone();
         state.reasoning = reasoning;
-        state.prose = cell.prose.clone();
+        state.assistant_parts = vec![lash_core::Part::text(
+            rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "prose"),
+            cell.prose.clone(),
+            None,
+        )];
 
         // Emit the raw cell source as a `Message` with kind `code` so the
         // CLI can reveal it in the full-expand view (Alt+O) above the tool
@@ -470,7 +490,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         actions.push(DriverAction::Start(PendingWork::Exec {
             language: self.dialect.language_id().to_string(),
             code: cell.code,
-            driver_state: rlm_driver_state(state),
+            driver_state: rlm_driver_state(
+                state,
+                lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
+            ),
         }));
         actions
     }
@@ -489,7 +512,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         driver_state: lash_core::ProtocolDriverState,
         result: Result<ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
-        let mut state = match decode_rlm_driver_state(driver_state) {
+        let mut state = match decode_rlm_driver_state(
+            driver_state,
+            lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
+        ) {
             Ok(state) => state,
             Err(err) => return invalid_driver_state_actions(err),
         };
@@ -521,6 +547,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         serde_json::json!({
                             "degraded_bindings": response.degraded_bindings,
                         }),
+                        lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                     )]));
                 }
                 let terminal_outcome = response
@@ -559,6 +586,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         ctx.protocol_iteration(),
                         &state,
                         None,
+                        lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                     )));
                     actions.push(DriverAction::Start(PendingWork::Checkpoint {
                         checkpoint: CheckpointKind::BeforeCompletion,
@@ -601,6 +629,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                             )
                             .with_value_mismatch(error_text),
                         )),
+                        lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
                         self.dialect.as_ref(),
@@ -621,6 +650,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     Some(retained) => lash_core::OutputValue::Retained(retained),
                     None => lash_core::OutputValue::Inline(finish_value.clone()),
                 })),
+                lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
             )));
             actions.push(DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
@@ -636,7 +666,13 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         if let Err(err) = continue_or_stop_after_nonterminal(
             &ctx,
             &mut actions,
-            trajectory_events(ctx.turn_id(), ctx.protocol_iteration(), &state, None),
+            trajectory_events(
+                ctx.turn_id(),
+                ctx.protocol_iteration(),
+                &state,
+                None,
+                lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
+            ),
             Vec::new(),
             if state.outcome.is_failed() {
                 AttemptProgress::Stalled
@@ -805,7 +841,7 @@ fn continue_or_stop_after_nonterminal(
     }
 
     if progress == AttemptProgress::Stalled {
-        let attempts = stalled_attempts(ctx, actions);
+        let attempts = stalled_attempts(ctx, actions).map_err(|error| error.to_string())?;
         let budget = ctx.no_progress_budget();
         if budget.is_exhausted_by(attempts) {
             actions.push(DriverAction::AppendEvents(vec![
@@ -817,6 +853,7 @@ fn continue_or_stop_after_nonterminal(
                         "consecutive_attempts": attempts,
                         "max_attempts": budget.max_attempts(),
                     }),
+                    lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                 ),
                 conversation_event(no_progress_stop_message(
                     rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "no_progress"),
@@ -1067,19 +1104,26 @@ fn trajectory_events(
     protocol_iteration: usize,
     state: &RlmDriverState,
     entry_outcome: Option<lash_rlm_types::HistoryCellOutcome>,
+    schema_version: u32,
 ) -> Vec<SessionHistoryRecord> {
     let mut events = Vec::new();
-    if let Some(event) =
-        assistant_content_event(turn_id, protocol_iteration, &state.reasoning, &state.prose)
-    {
-        events.push(event);
-    }
-    events.push(trajectory_event(trajectory_entry(
+    if let Some(event) = assistant_content_event(
         turn_id,
         protocol_iteration,
-        state,
-        entry_outcome,
-    )));
+        &state.reasoning,
+        &state
+            .assistant_parts
+            .iter()
+            .filter_map(lash_core::Part::text_content)
+            .collect::<Vec<_>>()
+            .join(""),
+    ) {
+        events.push(event);
+    }
+    events.push(trajectory_event(
+        trajectory_entry(turn_id, protocol_iteration, state, entry_outcome),
+        schema_version,
+    ));
     events
 }
 
@@ -1105,19 +1149,21 @@ fn conversation_event(message: Message) -> SessionHistoryRecord {
     SessionHistoryRecord::Conversation(ConversationRecord::from_message(message))
 }
 
-fn trajectory_event(entry: RlmTrajectoryEntry) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(
-        entry,
-    )))
+fn trajectory_event(entry: RlmTrajectoryEntry, schema_version: u32) -> SessionHistoryRecord {
+    SessionHistoryRecord::Protocol(rlm_protocol_event(
+        RlmProtocolEvent::RlmTrajectoryEntry(entry),
+        schema_version,
+    ))
 }
 
-fn diagnostic_event(phase: &str, payload: Value) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmDiagnostic(
-        RlmDiagnosticEvent {
+fn diagnostic_event(phase: &str, payload: Value, schema_version: u32) -> SessionHistoryRecord {
+    SessionHistoryRecord::Protocol(rlm_protocol_event(
+        RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
             phase: phase.to_string(),
             payload,
-        },
-    )))
+        }),
+        schema_version,
+    ))
 }
 
 fn prose_only_counts<'a>(

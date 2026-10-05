@@ -139,10 +139,16 @@ impl DurableSession {
             }
         }
         records.reverse();
-        Ok(crate::transcript::TranscriptProjection::from_records(
+        crate::transcript::TranscriptProjection::from_records(
             records.iter(),
             &self.transcript_options,
-        ))
+        )
+        .map_err(|error| {
+            crate::EmbedError::Plugin(lash_core::PluginError::StoredDataCorrupt {
+                record_kind: error.record_kind,
+                message: error.message,
+            })
+        })
     }
 
     #[allow(

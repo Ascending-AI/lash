@@ -1195,7 +1195,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ThirdPartyDriver {
         use lash_core::sansio::{CheckpointResumeAction, PendingToolCall, PendingWork};
         let work = match self.0 {
             PublicWork::Model => PendingWork::Llm {
-                request: ctx.project_llm_request(true),
+                request: match ctx.project_llm_request(true) {
+                    Ok(request) => request,
+                    Err(error) => {
+                        return lash_sansio::sansio::stored_history_refusal_actions(error);
+                    }
+                },
                 driver_state: None,
             },
             PublicWork::Tool => PendingWork::WaitingForToolResults {

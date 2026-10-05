@@ -69,7 +69,10 @@ async fn catalog_fork_records_child_admission(storage: Storage) -> Result<()> {
     let parent_bytes = parent
         .plugin_admission_snapshot()
         .expect("parent admission");
-    let parent_view = lash_core::plugin::PluginNativeView::decode(&parent_bytes)?;
+    let parent_view = lash_core::plugin::PluginNativeView::decode(
+        &parent_bytes,
+        lash_core::FleetFormat::current(),
+    )?;
     assert_eq!(
         parent_view.request.owner,
         lash_core::RuntimeOwner::Session(parent_id.clone())
@@ -118,7 +121,7 @@ async fn catalog_fork_records_child_admission(storage: Storage) -> Result<()> {
         lash_core::plugin::PluginSessionRequest::creation(child_id.clone(), Default::default()),
     )?;
     assert!(matches!(
-        plugins.adopt_native_view(&parent_bytes),
+        plugins.adopt_native_view(&parent_bytes, lash_core::FleetFormat::current()),
         Err(lash_core::PluginError::State(
             lash_core::PluginStateError::EffectOwnerMismatch
         ))
@@ -133,6 +136,7 @@ async fn catalog_fork_records_child_admission(storage: Storage) -> Result<()> {
     let child = loaded(&core, &child_id).await?;
     let child_view = lash_core::plugin::PluginNativeView::decode(
         &child.plugin_admission_snapshot().expect("child admission"),
+        lash_core::FleetFormat::current(),
     )?;
     assert_eq!(
         child_view.request.owner,

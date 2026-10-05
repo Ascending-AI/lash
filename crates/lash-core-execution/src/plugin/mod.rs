@@ -3,8 +3,8 @@ mod transition;
 use std::future::Future;
 use std::sync::Arc;
 pub use transition::{
-    PluginNativeView, PluginTransitionBase, PluginTransitionId, PluginTransitionRecord,
-    PluginTransitionRequest,
+    PLUGIN_ADMISSION_CHECKPOINT_VERSION, PluginNativeView, PluginTransitionBase,
+    PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
 };
 
 use crate::runtime::AssembledTurn;

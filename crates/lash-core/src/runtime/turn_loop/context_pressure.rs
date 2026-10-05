@@ -189,6 +189,9 @@ impl LashRuntime {
             })
         };
         let ctx = crate::plugin::ContextPressureContext {
+            writer_formats: Arc::new(crate::protocol_build::FleetWriterFormats(
+                self.fleet_format(),
+            )),
             session_id: self.state.session_id.clone(),
             plugin_config: self.state.admitted_plugin_config(),
             state: read_view,

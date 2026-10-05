@@ -668,6 +668,7 @@ async fn single_provider_source_refuses_unknown_id_without_calling_the_provider(
         crate::TurnContext::default(),
         crate::ToolCallId::fixture("unknown-call"),
         json!({}),
+        crate::FleetFormat::current(),
     );
     let refusal = source
         .prepare_tool_call(crate::ToolPrepareCall {
@@ -908,6 +909,7 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
         crate::TurnContext::default(),
         crate::ToolCallId::fixture("grant-call"),
         grant.execution_binding.clone(),
+        crate::FleetFormat::current(),
     )
     .with_granted_source_id(grant.source_id.clone());
     let prepared = registry

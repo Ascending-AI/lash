@@ -65,10 +65,10 @@ async fn install_rlm_session_projection(runtime: &mut BenchmarkRuntime) -> anyho
         .state()
         .append_session_nodes(lash::plugins::AppendSessionNodesRequest {
             operation_id: "runtime-perf-rlm-projection".into(),
-            nodes: lash_protocol_rlm::rlm_seed_initial_nodes(rlm_perf_projected_seed(
-                RuntimePerfScenario::RlmGlobals,
-                0,
-            )?),
+            nodes: lash_protocol_rlm::rlm_seed_initial_nodes(
+                rlm_perf_projected_seed(RuntimePerfScenario::RlmGlobals, 0)?,
+                lash_core::FleetFormat::current(),
+            ),
             requires_ancestor_node_id: None,
         })
         .await?;

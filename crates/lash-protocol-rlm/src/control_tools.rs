@@ -200,7 +200,7 @@ fn continue_as_switch_frame(
             .map_err(|err| format!("continue_as {err}"))?,
         context.call_id(),
     );
-    let initial_nodes = crate::rlm_seed_initial_nodes(seed);
+    let initial_nodes = crate::rlm_seed_initial_nodes(seed, context.fleet_format());
 
     Ok(ContinueAsResult {
         value: json!({
@@ -513,11 +513,14 @@ mod tests {
     #[tokio::test]
     async fn continue_as_creates_empty_rlm_frame_with_seed_and_task() {
         let mut session_graph = lash_core::SessionGraph::default();
-        session_graph.append_protocol_event(rlm_protocol_event(RlmProtocolEvent::RlmGlobalsPatch(
-            lash_rlm_types::RlmGlobalsPatchPluginBody {
+        session_graph.append_protocol_event(rlm_protocol_event(
+            RlmProtocolEvent::RlmGlobalsPatch(lash_rlm_types::RlmGlobalsPatchPluginBody {
                 set_default: serde_json::Map::from_iter([("diary".to_string(), json!([]))]),
-            },
-        )));
+            }),
+            lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                crate::RLM_PROTOCOL_EVENT_VERSION
+            )),
+        ));
         let manager = Arc::new(BatonManager {
             snapshot: {
                 let mut snapshot = RuntimeSessionState {
@@ -596,7 +599,8 @@ mod tests {
         else {
             panic!("expected seed globals event");
         };
-        let Some(RlmProtocolEvent::RlmSeed(seed)) = decode_rlm_protocol_event(protocol_event)
+        let Some(RlmProtocolEvent::RlmSeed(seed)) =
+            decode_rlm_protocol_event(protocol_event).expect("valid history fixture")
         else {
             panic!("expected RlmSeed");
         };
@@ -723,7 +727,8 @@ mod tests {
         else {
             panic!("expected seed globals event");
         };
-        let Some(RlmProtocolEvent::RlmSeed(seed)) = decode_rlm_protocol_event(protocol_event)
+        let Some(RlmProtocolEvent::RlmSeed(seed)) =
+            decode_rlm_protocol_event(protocol_event).expect("valid history fixture")
         else {
             panic!("expected RlmSeed");
         };
@@ -785,7 +790,8 @@ mod tests {
         else {
             panic!("expected seed globals event");
         };
-        let Some(RlmProtocolEvent::RlmSeed(seed)) = decode_rlm_protocol_event(protocol_event)
+        let Some(RlmProtocolEvent::RlmSeed(seed)) =
+            decode_rlm_protocol_event(protocol_event).expect("valid history fixture")
         else {
             panic!("expected RlmSeed");
         };

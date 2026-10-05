@@ -1,11 +1,12 @@
-mod bindings;
+pub(crate) mod bindings;
 mod context;
 pub(crate) mod transcript;
 mod transport;
 
 pub use bindings::{RlmProjectedBindings, rlm_session_projection_extension};
 pub use context::{
-    RlmHistoryProjection, is_rlm_protocol_output, rlm_history_projection, rlm_protocol_event,
+    RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, is_rlm_protocol_output,
+    rlm_history_projection, rlm_protocol_event,
 };
 pub use transport::{RlmSeed, rlm_seed_initial_nodes};
 

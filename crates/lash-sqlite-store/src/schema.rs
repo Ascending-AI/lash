@@ -118,7 +118,8 @@ CREATE TABLE IF NOT EXISTS checkpoint_blob_refs (
     checkpoint_ref TEXT NOT NULL,
     blob_ref       TEXT NOT NULL,
     PRIMARY KEY (checkpoint_ref, blob_ref),
-    FOREIGN KEY (checkpoint_ref) REFERENCES blobs(hash) ON DELETE CASCADE
+    FOREIGN KEY (checkpoint_ref) REFERENCES blobs(hash) ON DELETE CASCADE,
+    FOREIGN KEY (blob_ref) REFERENCES blobs(hash)
 );
 CREATE INDEX IF NOT EXISTS idx_checkpoint_blob_refs_blob_ref
     ON checkpoint_blob_refs(blob_ref, checkpoint_ref);
@@ -1484,3 +1485,43 @@ mod check_constraint_tests;
 #[cfg(test)]
 #[path = "schema_obligation_constraint_tests.rs"]
 mod obligation_constraint_tests;
+
+#[cfg(test)]
+mod nested_format_tests {
+    #[test]
+    fn checkpoint_edges_require_a_component_blob() {
+        let connection = rusqlite::Connection::open_in_memory().expect("SQLite");
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON")
+            .expect("foreign keys");
+        connection.execute_batch(super::SCHEMA).expect("schema");
+        connection
+            .execute(
+                "INSERT INTO blobs(hash, content) VALUES ('root', X'00')",
+                [],
+            )
+            .expect("root");
+        assert!(connection.execute(
+            "INSERT INTO checkpoint_blob_refs(checkpoint_ref, blob_ref) VALUES ('root', 'missing')", []
+        ).is_err(), "a checkpoint edge cannot name a missing component");
+        connection
+            .execute(
+                "INSERT INTO blobs(hash, content) VALUES ('component', X'01')",
+                [],
+            )
+            .expect("component");
+        connection.execute("INSERT INTO checkpoint_blob_refs(checkpoint_ref, blob_ref) VALUES ('root', 'component')", []).expect("edge");
+        assert!(
+            connection
+                .execute("DELETE FROM blobs WHERE hash = 'component'", [])
+                .is_err(),
+            "a rooted component cannot be deleted"
+        );
+        connection
+            .execute("DELETE FROM blobs WHERE hash = 'root'", [])
+            .expect("root deletion cascades its edges");
+        connection
+            .execute("DELETE FROM blobs WHERE hash = 'component'", [])
+            .expect("an unreferenced component can be deleted");
+    }
+}

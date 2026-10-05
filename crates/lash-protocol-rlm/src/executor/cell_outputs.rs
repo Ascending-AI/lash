@@ -58,7 +58,20 @@ pub(super) async fn record_cell_outputs(
     };
     let renderer = Arc::clone(&code_renderer.0);
     let history_index =
-        crate::projection::rlm_history_projection(ctx.chronological_projection().as_ref()).len();
+        match crate::projection::rlm_history_projection(ctx.chronological_projection().as_ref()) {
+            Ok(history) => history.len(),
+            Err(corruption) => {
+                let mut error = lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                    corruption.to_string(),
+                );
+                error.cause = Some(lash_core::RuntimeErrorCause::StoredDataCorrupt {
+                    corruption: Box::new(corruption),
+                });
+                fail_cell_on_nested_error(ctx, response, error);
+                return;
+            }
+        };
     let namespace = cell
         .identities()
         .namespace()

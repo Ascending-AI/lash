@@ -49,11 +49,63 @@ pub(crate) enum OverflowRecoveryRecord {
     Exhausted {},
 }
 
+/// Version of immutable standard-compaction recovery markers in history.
+/// version_surface = "migrate"
+/// format_outside_manifest = "optional standard-compaction plugin history; its plugin crate owns the decoder and guarded-surface probes independently of the facade feature set"
+/// version_guard(roots(RecoveryEnvelope))
+pub(crate) const OVERFLOW_RECOVERY_FORMAT_VERSION: u32 = 1;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryEnvelope {
+    format: u32,
+    record: OverflowRecoveryRecord,
+}
+
+fn recovery_body(
+    record: OverflowRecoveryRecord,
+    schema_version: u32,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serde_json::to_value(RecoveryEnvelope {
+        format: schema_version,
+        record,
+    })
+}
+
+pub(crate) fn decode_recovery_body(
+    body: serde_json::Value,
+) -> Result<OverflowRecoveryRecord, lash_core::StoredDataCorruption> {
+    let corrupt = |message: String| lash_core::StoredDataCorruption {
+        record_kind: OVERFLOW_RECOVERY_PLUGIN_TYPE.into(),
+        message,
+    };
+    #[derive(serde::Deserialize)]
+    struct Stamp {
+        format: u32,
+    }
+    let stamp: Stamp =
+        serde_json::from_value(body.clone()).map_err(|error| corrupt(error.to_string()))?;
+    if !lash_core::store::upcast_chain_covers(
+        lash_core::surface_format!(OVERFLOW_RECOVERY_FORMAT_VERSION),
+        stamp.format,
+        OVERFLOW_RECOVERY_FORMAT_VERSION,
+    ) {
+        return Err(corrupt(format!(
+            "unsupported recovery format {}",
+            stamp.format
+        )));
+    }
+    serde_json::from_value::<RecoveryEnvelope>(body)
+        .map(|envelope| envelope.record)
+        .map_err(|error| corrupt(error.to_string()))
+}
+
 pub(crate) fn recovery_record_node(
     record: OverflowRecoveryRecord,
+    schema_version: u32,
 ) -> Result<lash_core::SessionAppendNode, ContextError> {
-    let body =
-        serde_json::to_value(record).map_err(|error| ContextError::Session(error.to_string()))?;
+    let body = recovery_body(record, schema_version)
+        .map_err(|error| ContextError::Session(error.to_string()))?;
     Ok(lash_core::SessionAppendNode::plugin(
         OVERFLOW_RECOVERY_PLUGIN_TYPE,
         body,
@@ -112,7 +164,7 @@ impl OverflowRecoveryState {
 
 pub(crate) fn history_recovery_records(
     state: &lash_core::plugin::SessionReadView,
-) -> Result<Vec<OverflowRecoveryRecord>, serde_json::Error> {
+) -> Result<Vec<OverflowRecoveryRecord>, lash_core::StoredDataCorruption> {
     use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
     state
         .session_graph()
@@ -121,7 +173,7 @@ pub(crate) fn history_recovery_records(
         .filter_map(|node| {
             let (plugin_type, body) = node.plugin()?;
             (plugin_type == OVERFLOW_RECOVERY_PLUGIN_TYPE)
-                .then(|| serde_json::from_value(body.clone()))
+                .then(|| decode_recovery_body(body.clone()))
         })
         .collect()
 }
@@ -211,6 +263,7 @@ fn recovery_failure_decision(
     trace_context: lash_core::TraceContext,
     attempt_no: usize,
     cause: RecoveryFailureCause,
+    schema_version: u32,
 ) -> Result<ContextPressureDecision, ContextError> {
     let exhausted = attempt_no >= OVERFLOW_RECOVERY_MAX_ATTEMPTS;
     let outcome = if exhausted {
@@ -225,12 +278,18 @@ fn recovery_failure_decision(
         None,
         Some(outcome.as_str()),
     );
-    let mut nodes = vec![recovery_record_node(OverflowRecoveryRecord::Failed {
-        attempt: attempt_no as u32,
-        cause,
-    })?];
+    let mut nodes = vec![recovery_record_node(
+        OverflowRecoveryRecord::Failed {
+            attempt: attempt_no as u32,
+            cause,
+        },
+        schema_version,
+    )?];
     if exhausted {
-        nodes.push(recovery_record_node(OverflowRecoveryRecord::Exhausted {})?);
+        nodes.push(recovery_record_node(
+            OverflowRecoveryRecord::Exhausted {},
+            schema_version,
+        )?);
     }
     Ok(ContextPressureDecision::Record { nodes })
 }
@@ -285,6 +344,10 @@ pub(crate) async fn overflow_recovery_decision(
             trace_context,
             attempt_no,
             RecoveryFailureCause::NothingToSummarize,
+            ctx.writer_formats.writer_version(
+                "OVERFLOW_RECOVERY_FORMAT_VERSION",
+                OVERFLOW_RECOVERY_FORMAT_VERSION,
+            ),
         );
     }
 
@@ -321,6 +384,10 @@ pub(crate) async fn overflow_recovery_decision(
             trace_context,
             attempt_no,
             RecoveryFailureCause::RequestExceedsWindow,
+            ctx.writer_formats.writer_version(
+                "OVERFLOW_RECOVERY_FORMAT_VERSION",
+                OVERFLOW_RECOVERY_FORMAT_VERSION,
+            ),
         );
     }
 
@@ -350,6 +417,10 @@ pub(crate) async fn overflow_recovery_decision(
                 trace_context,
                 attempt_no,
                 RecoveryFailureCause::EmptySummary,
+                ctx.writer_formats.writer_version(
+                    "OVERFLOW_RECOVERY_FORMAT_VERSION",
+                    OVERFLOW_RECOVERY_FORMAT_VERSION,
+                ),
             );
         }
         Err(error) if error.aborts_invocation() => return Err(error),
@@ -363,6 +434,10 @@ pub(crate) async fn overflow_recovery_decision(
                         .into_turn_failure(lash_core::RuntimeErrorCode::ContextCompaction)
                         .code,
                 },
+                ctx.writer_formats.writer_version(
+                    "OVERFLOW_RECOVERY_FORMAT_VERSION",
+                    OVERFLOW_RECOVERY_FORMAT_VERSION,
+                ),
             );
         }
     };
@@ -378,7 +453,13 @@ pub(crate) async fn overflow_recovery_decision(
     // summary seeds the recovery frame, a compaction frame core opens before
     // this turn runs and commits with it.
     Ok(ContextPressureDecision::OpenFrame {
-        records: vec![recovery_record_node(OverflowRecoveryRecord::Completed {})?],
+        records: vec![recovery_record_node(
+            OverflowRecoveryRecord::Completed {},
+            ctx.writer_formats.writer_version(
+                "OVERFLOW_RECOVERY_FORMAT_VERSION",
+                OVERFLOW_RECOVERY_FORMAT_VERSION,
+            ),
+        )?],
         task: OVERFLOW_RECOVERY_TASK.to_string(),
         seed: vec![compaction_summary_seed(&summary)],
     })
@@ -396,8 +477,14 @@ pub(crate) async fn overflow_recovery_after_turn(
     ) {
         return Ok(AfterTurnContributions::default());
     }
-    let body = serde_json::to_value(OverflowRecoveryRecord::Pending {})
-        .map_err(|error| PluginError::Invoke(error.to_string()))?;
+    let body = recovery_body(
+        OverflowRecoveryRecord::Pending {},
+        ctx.writer_formats.writer_version(
+            "OVERFLOW_RECOVERY_FORMAT_VERSION",
+            OVERFLOW_RECOVERY_FORMAT_VERSION,
+        ),
+    )
+    .map_err(|error| PluginError::Invoke(error.to_string()))?;
     Ok(AfterTurnContributions {
         events: vec![lash_core::PluginRuntimeEvent::Custom {
             name: TRACE_OVERFLOW_RECOVERY_TRIGGER.to_string(),
@@ -409,4 +496,53 @@ pub(crate) async fn overflow_recovery_after_turn(
         }],
         ..AfterTurnContributions::default()
     })
+}
+
+#[cfg(test)]
+mod guarded_surface_tests {
+    use super::*;
+    use lash_core::testing::guarded_surfaces::{self as laws, SurfaceProbe};
+    const OWNER: &str = "lash-plugin-standard-compaction";
+    fn write(fleet: lash_core::FleetFormat) -> Vec<u8> {
+        let node = recovery_record_node(
+            OverflowRecoveryRecord::Pending {},
+            fleet.writer_version(lash_core::surface_format!(OVERFLOW_RECOVERY_FORMAT_VERSION)),
+        )
+        .expect("recovery marker");
+        let lash_core::SessionAppendNode::Plugin { body, .. } = node else {
+            panic!("plugin marker")
+        };
+        serde_json::to_vec(&body).expect("JSON")
+    }
+    fn read(bytes: &[u8], _fleet: lash_core::FleetFormat) -> Result<String, String> {
+        decode_recovery_body(serde_json::from_slice(bytes).map_err(|error| error.to_string())?)
+            .map(|record| format!("{record:?}"))
+            .map_err(|error| error.to_string())
+    }
+    fn restamp(bytes: &[u8], version: u32) -> Vec<u8> {
+        let mut value: serde_json::Value = serde_json::from_slice(bytes).expect("JSON");
+        value["format"] = serde_json::json!(version);
+        serde_json::to_vec(&value).expect("JSON")
+    }
+    fn probes() -> Vec<SurfaceProbe> {
+        vec![SurfaceProbe {
+            constant: "OVERFLOW_RECOVERY_FORMAT_VERSION",
+            newest: OVERFLOW_RECOVERY_FORMAT_VERSION,
+            write,
+            read,
+            restamp,
+        }]
+    }
+    #[test]
+    fn every_guarded_surface_decodes_its_supported_range() {
+        laws::every_guarded_surface_decodes_its_supported_range(OWNER, &probes());
+    }
+    #[test]
+    fn unknown_version_is_refused_with_zero_mutation() {
+        laws::unknown_version_is_refused_with_zero_mutation(OWNER, &probes());
+    }
+    #[test]
+    fn upcast_preserves_immutable_bytes_and_hashes() {
+        laws::upcast_preserves_immutable_bytes_and_hashes(OWNER, &probes());
+    }
 }

@@ -342,7 +342,7 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             after = baseline.inventory(repo)
             self.assertEqual(baseline.table_mismatches(repo, after), [])
             pins = (repo / baseline.PREDECESSOR_TABLE).read_text()
-            for name in ("LASHLANG_SNAPSHOT_VERSION", "RLM_SNAPSHOT_VERSION", "NATIVE_DRIVER_STATE_VERSION",
+            for name in ("LASHLANG_SNAPSHOT_VERSION", "RLM_SNAPSHOT_VERSION", "RLM_DRIVER_STATE_VERSION",
                          "SCOPE_STORAGE_PAYLOAD_VERSION", "WORKFLOW_GRAPH_SCHEMA_VERSION"):
                 self.assertIn(f'("{name}", 1),', pins)
             by_name = {row["key"].rsplit(":", 1)[1]: row["default"] for row in after}

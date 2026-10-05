@@ -51,15 +51,15 @@ struct PendingProse {
 
 pub(super) fn build_rlm_history_messages_from_turn(
     input: RlmHistoryRenderInput<'_>,
-) -> Vec<LlmMessage> {
-    let mut messages = render_history_messages(&input);
+) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
+    let mut messages = render_history_messages(&input)?;
     let saw_history = !messages.is_empty();
     let history = rlm_history_projection(
         &lash_core::facade_support::ChronologicalProjection::from_turn_view(
             input.events,
             input.turn_messages,
         ),
-    );
+    )?;
     let history_len = history.len();
     let history_has_structure = history.history().iter().any(|item| match item {
         lash_rlm_types::RlmHistoryItem::LashlangStep { .. } => true,
@@ -93,19 +93,25 @@ pub(super) fn build_rlm_history_messages_from_turn(
             bound_variables: input.bound_variables,
         },
     );
-    messages
+    Ok(messages)
 }
 
 /// The history portion only (no current-iteration tail): each prior step as an
 /// assistant tool-call message + matching tool results, projected atomically.
-pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<LlmMessage> {
+#[expect(
+    clippy::expect_used,
+    reason = "the fallible history projection validates every event before the visitors run"
+)]
+pub(super) fn render_history_messages(
+    input: &RlmHistoryRenderInput<'_>,
+) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
     let mut messages = Vec::new();
     let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
         input.events,
         input.turn_messages,
     );
     let transport = super::transport::NativeTransportIndex::new(&chronological);
-    let history_projection = rlm_history_projection(&chronological);
+    let history_projection = rlm_history_projection(&chronological)?;
     let active_cause_ids = input
         .turn_causes
         .iter()
@@ -152,7 +158,9 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
                     super::transport::append_pair(&mut messages, parts, repair);
                     return;
                 }
-                let Some(event) = decode_rlm_protocol_event(event) else {
+                let Some(event) = decode_rlm_protocol_event(event)
+                    .expect("history projection validated every RLM event")
+                else {
                     return;
                 };
                 let step = match event {
@@ -194,7 +202,7 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
                     ));
                 }
                 if let Some(message) = messages.last_mut() {
-                    append_borrowed_entry_image_blocks(entry, Arc::make_mut(&mut message.blocks));
+                    append_step_image_blocks(&step, Arc::make_mut(&mut message.blocks));
                 }
             }
             BorrowedChronologicalPayload::Message(message) => {
@@ -229,13 +237,17 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
         }
     });
     flush_pending_prose(&mut messages, &mut pending);
-    messages
+    Ok(messages)
 }
 
 /// Failed semantic steps and repair envelopes superseded by a later success
 /// in the same turn. Execution envelopes render only at their semantic step,
 /// so removing that step removes its entire provider exchange atomically.
 /// Host-authored system messages are preserved by provenance.
+#[expect(
+    clippy::expect_used,
+    reason = "the caller validated every event with the fallible history projection"
+)]
 fn superseded_failure_indices(
     events: &[lash_core::SessionHistoryRecord],
     turn_messages: &lash_core::facade_support::MessageSequence,
@@ -279,7 +291,9 @@ fn superseded_failure_indices(
                     pending_failure_entries.push(entry.index);
                     any_failure_pending = true;
                 }
-                match decode_rlm_protocol_event(event) {
+                match decode_rlm_protocol_event(event)
+                    .expect("history projection validated every RLM event")
+                {
                     Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(_)) => {
                         prose_entries.push(entry.index);
                     }
@@ -419,30 +433,27 @@ fn append_borrowed_entry_image_blocks(
     entry: BorrowedChronologicalEntry<'_>,
     blocks: &mut Vec<LlmContentBlock>,
 ) {
-    match entry.payload {
-        BorrowedChronologicalPayload::Message(message) => {
-            for source in message
-                .parts
-                .iter()
-                .flat_map(|part| part.attachment_sources())
-            {
-                blocks.push(LlmContentBlock::Attachment {
-                    source: Box::new(source.clone()),
-                });
-            }
+    if let BorrowedChronologicalPayload::Message(message) = entry.payload {
+        for source in message
+            .parts
+            .iter()
+            .flat_map(|part| part.attachment_sources())
+        {
+            blocks.push(LlmContentBlock::Attachment {
+                source: Box::new(source.clone()),
+            });
         }
-        BorrowedChronologicalPayload::ProtocolEvent(event) => {
-            if let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry)) =
-                decode_rlm_protocol_event(event)
-            {
-                for image in &entry.images {
-                    let source = AttachmentSource::stored(image.clone());
-                    blocks.push(LlmContentBlock::Attachment {
-                        source: Box::new(source),
-                    });
-                }
-            }
-        }
+    }
+}
+
+fn append_step_image_blocks(
+    step: &lash_rlm_types::RlmTrajectoryEntry,
+    blocks: &mut Vec<LlmContentBlock>,
+) {
+    for image in &step.images {
+        blocks.push(LlmContentBlock::Attachment {
+            source: Box::new(AttachmentSource::stored(image.clone())),
+        });
     }
 }
 

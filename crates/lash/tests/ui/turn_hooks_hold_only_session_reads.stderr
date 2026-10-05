@@ -28,7 +28,7 @@ error[E0609]: no field `session_graph` on type `&TurnResultHookContext`
 9 |     let _ = &ctx.session_graph;
   |                  ^^^^^^^^^^^^^ unknown field
   |
-  = note: available fields are: `session_id`, `plugin_config`, `turn`, `sessions`
+  = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `turn`, `sessions`
 
 error[E0599]: no method named `set_tool_membership` found for struct `Arc<(dyn SessionReadService + 'static)>` in the current scope
   --> tests/ui/turn_hooks_hold_only_session_reads.rs:12:26

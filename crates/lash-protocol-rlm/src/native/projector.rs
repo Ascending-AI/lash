@@ -46,7 +46,10 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
         clippy::expect_used,
         reason = "recorded turn options are validated by the plugin at session open; decode_rlm_options only errs on options that validation already refused"
     )]
-    fn project(&self, ctx: ProjectorContext<'_>) -> Arc<LlmRequest> {
+    fn project(
+        &self,
+        ctx: ProjectorContext<'_>,
+    ) -> Result<Arc<LlmRequest>, lash_core::StoredDataCorruption> {
         let options = decode_rlm_options(&ctx.config.termination)
             .expect("RLM turn options are validated before prompt projection");
         let termination = options.effective_termination();
@@ -87,14 +90,14 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
                 budget_suffix: budget_suffix.as_deref(),
                 bound_variables: bound_variables_prompt,
             },
-        ));
+        )?);
 
         let mut generation = ctx.config.generation.clone();
         // Both channels execute complete programs. A host's text stop must
         // not truncate a program argument or change the paired sampling cohort.
         generation.suppress_stop_sequences_for_protocol();
 
-        Arc::new(LlmRequest {
+        Ok(Arc::new(LlmRequest {
             model: ctx.config.model.clone(),
             instructions: (!ctx.environment.system_prompt.trim().is_empty())
                 .then(|| Arc::from(ctx.environment.system_prompt.trim())),
@@ -115,7 +118,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             stream_events: None,
             generation,
             provider_trace: None,
-        })
+        }))
     }
 }
 

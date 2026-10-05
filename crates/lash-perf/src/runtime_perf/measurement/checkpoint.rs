@@ -432,7 +432,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         match self {
             Self::Llm => vec![DriverAction::Start(PendingWork::Llm {
-                request: ctx.project_llm_request(false),
+                request: match ctx.project_llm_request(false) {
+                    Ok(request) => request,
+                    Err(error) => {
+                        return lash_sansio::sansio::stored_history_refusal_actions(error);
+                    }
+                },
                 driver_state: None,
             })],
             Self::Tools => vec![DriverAction::Start(PendingWork::WaitingForToolResults {

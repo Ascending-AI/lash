@@ -6,8 +6,8 @@ error[E0425]: cannot find value `decode_rlm_protocol_event` in module `lash::rlm
   |
  ::: $WORKSPACE/crates/lash-protocol-rlm/src/projection/context.rs
   |
-  | pub fn rlm_protocol_event(event: RlmProtocolEvent) -> lash_core::ProtocolEvent {
-  | ------------------------------------------------------------------------------ similarly named function `rlm_protocol_event` defined here
+  | pub fn rlm_protocol_event(event: RlmProtocolEvent, schema_version: u32) -> lash_core::ProtocolEvent {
+  | --------------------------------------------------------------------------------------------------- similarly named function `rlm_protocol_event` defined here
   |
 help: a function with a similar name exists
   |

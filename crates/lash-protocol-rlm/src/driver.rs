@@ -109,7 +109,10 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         clippy::expect_used,
         reason = "recorded turn options are validated by the plugin at session open; decode_rlm_options only errs on options that validation already refused"
     )]
-    fn project(&self, ctx: ProjectorContext<'_>) -> Arc<LlmRequest> {
+    fn project(
+        &self,
+        ctx: ProjectorContext<'_>,
+    ) -> Result<Arc<LlmRequest>, lash_core::StoredDataCorruption> {
         let options = decode_rlm_options(&ctx.config.termination)
             .expect("RLM turn options are validated before prompt projection");
         let termination = options.effective_termination();
@@ -153,7 +156,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
                 budget_suffix: budget_suffix.as_deref(),
                 bound_variables: bound_variables_prompt,
             },
-        ));
+        )?);
 
         let mut generation = ctx.config.generation.clone();
         // The paired-tag grammar is RLM's response boundary. Provider wire
@@ -162,7 +165,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         // the dialect's, but no dialect hands it to the provider as a stop.
         generation.suppress_stop_sequences_for_protocol();
 
-        Arc::new(LlmRequest {
+        Ok(Arc::new(LlmRequest {
             instructions: (!ctx.environment.system_prompt.trim().is_empty())
                 .then(|| Arc::from(ctx.environment.system_prompt.trim())),
             model: ctx.config.model.clone(),
@@ -183,7 +186,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             stream_events: None,
             generation,
             provider_trace: None,
-        })
+        }))
     }
 }
 
@@ -252,7 +255,8 @@ impl RlmContextProjector {
             final_answer_format: None,
             budget_suffix: None,
             bound_variables: "",
-        });
+        })
+        .expect("valid history fixture");
         messages
             .iter()
             .flat_map(|message| message.blocks.iter())
@@ -292,7 +296,8 @@ pub(crate) fn render_conformance_history_message(
         final_answer_format: None,
         budget_suffix: None,
         bound_variables: "",
-    });
+    })
+    .map_err(|error| error.to_string())?;
     let attachment_count = rendered
         .iter()
         .flat_map(|message| message.blocks.iter())

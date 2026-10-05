@@ -168,14 +168,7 @@ pub enum RuntimeErrorCause {
     },
 }
 
-/// The record kind and diagnostic retained when durable data cannot be decoded.
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct StoredDataCorruption {
-    pub record_kind: String,
-    pub message: String,
-}
+pub use lash_sansio::StoredDataCorruption;
 
 impl RuntimeErrorCause {
     /// The fenced referrer `cause` names, if it is an ended-referrer refusal.

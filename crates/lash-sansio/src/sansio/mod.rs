@@ -46,6 +46,7 @@ pub use turn_protocol::{
     ExpandedWrapper, LlmCallError, LogEvent, ModelToolCalls, PendingToolCall, PendingWork,
     ProjectorContext, ProjectorTurnInputs, ProtocolDriverHandle, Response, ResponseToolCalls,
     SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachineConfig, render_turn_causes_prompt,
+    stored_history_refusal_actions,
 };
 mod machine_state;
 use machine_state::{EffectDeliveryStatus, MachineState, RunAbort};

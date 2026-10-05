@@ -60,14 +60,20 @@ impl RlmSeed {
     }
 }
 
-pub fn rlm_seed_initial_nodes(seed: RlmSeed) -> Vec<SessionAppendNode> {
+pub fn rlm_seed_initial_nodes(
+    seed: RlmSeed,
+    fleet: lash_core::FleetFormat,
+) -> Vec<SessionAppendNode> {
     if seed.is_empty() {
         return Vec::new();
     }
     vec![SessionAppendNode::protocol_event(
-        super::context::rlm_protocol_event(lash_rlm_types::RlmProtocolEvent::RlmSeed(
-            seed.into_event_body(),
-        )),
+        super::context::rlm_protocol_event(
+            lash_rlm_types::RlmProtocolEvent::RlmSeed(seed.into_event_body()),
+            fleet.writer_version(lash_core::surface_format!(
+                crate::RLM_PROTOCOL_EVENT_VERSION
+            )),
+        ),
     )]
 }
 
