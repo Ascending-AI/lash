@@ -37,7 +37,7 @@ impl Clone for ScopedEffectControllerInner<'_> {
     }
 }
 
-/// The per-run ordinals of a [`ScopedEffectController`].
+/// The per-run ordinals and effect count of a [`ScopedEffectController`].
 #[derive(Debug, Default)]
 pub(in crate::runtime::effect::executor) struct ReplayOrdinals {
     /// Keyless host starts keyed ([`ScopedEffectController::next_keyless_start_key`]).
@@ -48,6 +48,12 @@ pub(in crate::runtime::effect::executor) struct ReplayOrdinals {
     /// Reads of the session's command lane recorded
     /// ([`ScopedEffectController::next_command_run_ordinal`]).
     command_runs: AtomicU32,
+    /// How many effects the controller has executed: what a turn weighs
+    /// against its invocation's journal budget at a quiet point (FIG-4739).
+    /// A handler re-runs from the top on every replay and issues the same
+    /// effects, so the count at one quiet point is the same on every replay
+    /// ([`ScopedEffectController::effects_executed`]).
+    effects: AtomicU64,
 }
 
 /// Scoped low-level controller plus the admitted execution scope it is
@@ -64,16 +70,11 @@ pub struct ScopedEffectController<'run> {
     /// serves, when it serves one (FIG-3586). Every journal write made
     /// through this controller asks it first.
     pub(in crate::runtime::effect::executor) journal_guard: Option<Arc<CommandJournalGuard>>,
-    /// The ordinals this controller has handed out, shared by its clones. A
-    /// handler re-runs from the top on every replay with a fresh controller,
-    /// so the nth of each kind in one run is keyed the same on every replay.
+    /// The ordinals this controller has handed out and the effects it has
+    /// executed, shared by its clones. A handler re-runs from the top on
+    /// every replay with a fresh controller, so the nth of each kind in one
+    /// run is keyed the same on every replay.
     pub(in crate::runtime::effect::executor) ordinals: Arc<ReplayOrdinals>,
-    /// How many effects this controller has executed, shared by its clones:
-    /// what a turn weighs against its invocation's journal budget at a quiet
-    /// point (FIG-4739). A handler re-runs from the top on every replay and
-    /// issues the same effects, so the count at one quiet point is the same
-    /// on every replay ([`Self::effects_executed`]).
-    pub(in crate::runtime::effect::executor) effects: Arc<AtomicU64>,
     /// Where the shift issuing steps through this controller stands relative
     /// to its journal, shared by its clones. A handler re-runs from the top
     /// on every replay with a fresh controller, so the frontier starts
@@ -82,6 +83,14 @@ pub struct ScopedEffectController<'run> {
     pub(in crate::runtime::effect::executor) frontier: Arc<DriveFrontier>,
     pub(in crate::runtime::effect::executor) trace_scope:
         Option<Arc<lash_trace::DurableTraceScope>>,
+    /// The physical turn of the admitted logical Run this controller
+    /// executes, when the turn driver bound one ([`Self::for_physical_turn`]).
+    /// Every physical turn of a Run runs under the Run's own turn scope, but
+    /// each has its own cancellation gate: a cancel of the Run resolves its
+    /// running physical turn's gate, and a turn that ends at a segment
+    /// boundary seals its own. Waits built from this controller race that
+    /// gate ([`Self::turn_cancel_scope`]).
+    pub(in crate::runtime::effect::executor) physical_turn: Option<Arc<TurnId>>,
 }
 
 /// A replayed language command's say over the journal writes made under it
@@ -469,9 +478,9 @@ impl<'run> ScopedEffectController<'run> {
             admitted,
             journal_guard: None,
             ordinals: Arc::default(),
-            effects: Arc::default(),
             frontier: Arc::default(),
             trace_scope: None,
+            physical_turn: None,
         })
     }
 
@@ -488,9 +497,9 @@ impl<'run> ScopedEffectController<'run> {
             admitted,
             journal_guard: None,
             ordinals: Arc::default(),
-            effects: Arc::default(),
             frontier: Arc::default(),
             trace_scope: None,
+            physical_turn: None,
         })
     }
 
@@ -508,9 +517,9 @@ impl<'run> ScopedEffectController<'run> {
             admitted,
             journal_guard: None,
             ordinals: Arc::default(),
-            effects: Arc::default(),
             frontier: Arc::default(),
             trace_scope: None,
+            physical_turn: None,
         })
     }
 
@@ -549,7 +558,7 @@ impl<'run> ScopedEffectController<'run> {
             envelope.command,
             crate::RuntimeEffectCommand::TraceBoundary { .. }
         ) {
-            self.effects.fetch_add(1, Ordering::SeqCst);
+            self.ordinals.effects.fetch_add(1, Ordering::SeqCst);
         }
         // Boxed: it waits across the engine's execution of the effect.
         let publication = local_executor.plugin_state_session().map(|plugins| {
@@ -601,7 +610,7 @@ impl<'run> ScopedEffectController<'run> {
 
     /// How many effects this controller and its clones have executed.
     pub fn effects_executed(&self) -> u64 {
-        self.effects.load(Ordering::SeqCst)
+        self.ordinals.effects.load(Ordering::SeqCst)
     }
 
     /// Asks this controller's command guard to admit `envelope`, and marks
@@ -678,7 +687,27 @@ impl<'run> ScopedEffectController<'run> {
     /// bodies instead build one unobserved trio at their execution boundary and
     /// carry it through retry sleeps and deferred-tool awaits whole.
     pub(crate) fn turn_cancel_wait(&self, cancellation: CancellationToken) -> TurnCancelWait {
-        TurnCancelWait::observing(cancellation, self.admitted.scope().clone())
+        TurnCancelWait::observing(cancellation, self.turn_cancel_scope())
+    }
+
+    /// Binds this controller to the physical turn of its admitted Run that
+    /// it executes: waits built from it, and from every clone of it, race
+    /// that turn's cancellation gate rather than the Run's first turn's.
+    #[must_use]
+    pub fn for_physical_turn(mut self, turn: TurnId) -> Self {
+        self.physical_turn = Some(Arc::new(turn));
+        self
+    }
+
+    /// The scope whose turn-cancel gate this controller's waits race: the
+    /// bound physical turn of a turn scope, otherwise the admitted scope.
+    fn turn_cancel_scope(&self) -> ExecutionScope {
+        match (self.physical_turn.as_ref(), self.admitted.scope()) {
+            (Some(turn), ExecutionScope::Turn { session_id, .. }) => {
+                ExecutionScope::turn(session_id.clone(), TurnId::clone(turn))
+            }
+            (_, scope) => scope.clone(),
+        }
     }
 
     pub fn to_static(&self) -> Option<ScopedEffectController<'static>> {
@@ -690,9 +719,9 @@ impl<'run> ScopedEffectController<'run> {
             admitted: self.admitted.clone(),
             journal_guard: self.journal_guard.clone(),
             ordinals: Arc::clone(&self.ordinals),
-            effects: Arc::clone(&self.effects),
             frontier: self.frontier.clone(),
             trace_scope: self.trace_scope.clone(),
+            physical_turn: self.physical_turn.clone(),
         })
     }
 

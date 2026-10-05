@@ -291,6 +291,43 @@ impl TurnWorkDriver {
         Arc::clone(&self.effect_host)
     }
 
+    /// The latest physical turn of the logical Run `run` names: the turn a
+    /// cancel of the Run addresses. A Run that ended a physical turn at a
+    /// segment boundary or a frame switch goes on in the next one, each with
+    /// its own cancellation gate; the next one exists once it committed or
+    /// the session head owes it. A settled Run answers its last committed
+    /// turn, whose gate is sealed.
+    pub async fn running_turn(&self, run: &TurnAddress) -> Result<TurnAddress, RuntimeError> {
+        let store = self.store_for(run).await?;
+        let fault = |err: crate::StoreError| {
+            RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+        };
+        let turn = |ordinal| {
+            TurnAddress::new(
+                run.session_id.clone(),
+                crate::store::PhysicalTurn::derive_turn_id(&run.turn_id, ordinal),
+            )
+        };
+        let mut ordinal = 0_u64;
+        while store
+            .turn_is_committed(&turn(ordinal))
+            .await
+            .map_err(fault)?
+        {
+            let next = turn(ordinal.saturating_add(1));
+            let owed = store
+                .load_pending_follow_on(&run.session_id)
+                .await
+                .map_err(fault)?
+                .is_some_and(|owed| owed.is_turn(&next.turn_id));
+            if !owed && !store.turn_is_committed(&next).await.map_err(fault)? {
+                break;
+            }
+            ordinal = ordinal.saturating_add(1);
+        }
+        Ok(turn(ordinal))
+    }
+
     pub async fn request_cancel(
         &self,
         request: TurnCancelRequest,

@@ -1148,3 +1148,198 @@ fn retained_native_cut(value: &serde_json::Value) -> bool {
         _ => false,
     }
 }
+
+/// A deferring tool whose call parks on its durable completion key.
+struct HeldSource {
+    executed: Arc<std::sync::atomic::AtomicUsize>,
+    key: Arc<std::sync::Mutex<Option<lash_core::AwaitEventKey>>>,
+    dispatched: Arc<tokio::sync::Notify>,
+}
+
+fn held_source_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:held_source",
+        "held_source",
+        "a deferred source",
+        serde_json::json!({"type":"object","additionalProperties":false}),
+        serde_json::json!({"type":"string"}),
+    )
+    .unwrap()
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["held"], "source"))
+    .with_declaration(lash_core::ToolDeclaration::deferring())
+}
+
+#[async_trait]
+impl ToolProvider for HeldSource {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![held_source_definition().manifest()]
+    }
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "held_source").then(|| Arc::new(held_source_definition().contract()))
+    }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.executed
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        *self.key.lock_recover() = Some(call.context.completion_key().expect("a durable key"));
+        self.dispatched.notify_one();
+        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new()).into()
+    }
+}
+
+/// S12/L09: a cell that awaits a Deferred tool's value directly parks on the
+/// Run's source wait. The accepted drain hands that wait over (it is not a
+/// fault of the call): N+1 resumes the cell from its captured state, the
+/// same source seals once after N is gone, and the cell finishes with the
+/// exact value and its locals, with neither the tool nor the model run again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn l09_a_direct_deferred_call_parked_on_its_source_hands_over() {
+    let world = double_world(Storage::SqliteMemory).await;
+    let Engine::Double(double) = &world.engine else {
+        unreachable!()
+    };
+    let requests = Arc::default();
+    let code = typescript_block(
+        "let local = 20; const value = await held.source({}); finish({value, local: local + 22});",
+    );
+    let executed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let key = Arc::new(std::sync::Mutex::new(None));
+    let dispatched = Arc::new(tokio::sync::Notify::new());
+    let tools = Arc::new(HeldSource {
+        executed: Arc::clone(&executed),
+        key: Arc::clone(&key),
+        dispatched: Arc::clone(&dispatched),
+    });
+    let provider = cell_provider(code, &requests);
+    let deployed = |backend: lash_core::Backend, work: Arc<dyn lash_core::SessionWorkEngine>| {
+        let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
+            .with_session_work(work)
+            .into_backend();
+        rlm_core_builder_over(backend)
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(
+                crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
+            )
+            .serve_test_llm_profile(provider.clone(), mock_llm_profile_spec())
+            .tools(tools.clone())
+            .build(crate::testing::runtime_lease_owner())
+            .unwrap()
+    };
+    let core = deployed(world.engine.old_backend(), world.engine.old_work());
+    let session = lash_core::SessionId::fixture("direct-deferred-handover");
+    let handle = core
+        .session(session.clone())
+        .created()
+        .await
+        .open()
+        .await
+        .unwrap()
+        .send(TurnInput::text("await a deferred source"))
+        .id(crate::TurnId::parse(RUN).expect("nonblank host identity"))
+        .await
+        .unwrap();
+    tokio::time::timeout(WEDGE, dispatched.notified())
+        .await
+        .expect("the source deferred");
+    let first = parked(double.server(), &session).await;
+    let old = core.build_generation().clone();
+    let next = BuildGeneration::for_test("direct-deferred-next");
+    let successor = double
+        .add_separate_build(next.clone(), "direct-deferred-next", Default::default())
+        .await
+        .unwrap();
+    let admin = deployed(
+        successor.lash_backend(),
+        successor.explicit_reconcile_session_work(),
+    );
+    assert!(admin.drain_generation(&old).await.unwrap());
+    // N ends its invocation at the handover; a cell that failed instead
+    // answers its turn on N and leaves N+1 nothing to resume.
+    tokio::time::timeout(WEDGE, async {
+        while !double
+            .server()
+            .invocations()
+            .iter()
+            .any(|view| view.id == first.id && view.status == "completed")
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("N ends its invocation at the drain");
+    let store = lash_core::runtime::live_session_view(&core.store_factory, &session)
+        .await
+        .unwrap()
+        .unwrap();
+    let owed = store.load_pending_follow_on().await.unwrap();
+    assert!(
+        owed.as_ref()
+            .and_then(|owed| owed.owes.continuation())
+            .is_some_and(|continuation| continuation.cell.is_some()),
+        "the cell failed on N instead of handing its source wait over: {:?}",
+        double.server().outcome(&first.id)
+    );
+    // N+1 resumes the cell and parks on the same source, still unresolved:
+    // the wait races its own turn's cancellation gate, not the one N sealed.
+    let resumed = parked(double.server(), &session).await;
+    assert_ne!(first.pinned_deployment_id, resumed.pinned_deployment_id);
+    let completion = key.lock_recover().clone().expect("the source's key");
+    core.completions()
+        .resolve(
+            completion.clone(),
+            lash_core::Resolution::Ok(serde_json::json!("retained")),
+        )
+        .await
+        .unwrap();
+    let output = tokio::time::timeout(WEDGE, handle.output())
+        .await
+        .expect("the Run answers")
+        .unwrap();
+    assert_eq!(
+        output.final_value(),
+        Some(&serde_json::json!({"value":"retained","local":42})),
+        "{:?}",
+        output.result.outcome
+    );
+    let runs: Vec<_> = double
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|view| view.target.starts_with("LashTurn/") && view.target.ends_with("/run"))
+        .filter(|view| {
+            double
+                .server()
+                .journal(&view.id)
+                .unwrap_or_default()
+                .iter()
+                .any(|entry| {
+                    entry
+                        .name
+                        .as_deref()
+                        .is_some_and(|name| name.contains("lash:run:"))
+                })
+        })
+        .collect();
+    assert_eq!(runs.len(), 2, "N and N+1 each own the Run once: {runs:#?}");
+    assert_ne!(runs[0].pinned_deployment_id, runs[1].pinned_deployment_id);
+    assert_eq!(
+        requests.lock_recover().len(),
+        1,
+        "resume never asks the model again"
+    );
+    assert_eq!(
+        executed.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "handover never redispatches the source"
+    );
+    let late = core
+        .completions()
+        .resolve(
+            completion,
+            lash_core::Resolution::Ok(serde_json::json!("late")),
+        )
+        .await;
+    assert!(
+        !matches!(late, Ok(lash_core::ResolveOutcome::Accepted)),
+        "the source seals once across the boundary: {late:?}"
+    );
+}

@@ -64,9 +64,9 @@ impl<'run> ScopedEffectController<'run> {
                 admitted: self.admitted,
                 journal_guard: self.journal_guard,
                 ordinals: self.ordinals,
-                effects: self.effects,
                 frontier: self.frontier,
                 trace_scope: self.trace_scope,
+                physical_turn: self.physical_turn,
             }),
         }
     }

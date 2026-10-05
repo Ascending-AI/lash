@@ -280,3 +280,9 @@ reads = 0
 outputs = 1
 kind = "output-read"
 reason = "K6/L09 checks the exact native Run result and VM locals after a generation drain transfers ownership."
+
+[sites."crates/lash/src/tests/drain_hand_over/cell_segment/native_run.rs#l09_a_direct_deferred_call_parked_on_its_source_hands_over"]
+reads = 0
+outputs = 1
+kind = "output-read"
+reason = "S12/L09 checks the exact value a transferred Deferred source returns to the cell resumed on the newest build."

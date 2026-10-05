@@ -273,6 +273,11 @@ impl LashRuntime {
             mut initial_admissions,
             shift_fence,
         } = context;
+        // A later physical turn runs under its Run's turn scope; its waits
+        // race this turn's own cancellation gate, the one a cancel of the
+        // Run resolves while it runs (an earlier turn sealed its own).
+        let scoped_effect_controller =
+            scoped_effect_controller.for_physical_turn(trace_turn_id.clone());
         let turn_observer = logical_observer.for_turn(&trace_turn_id);
         let observer = &turn_observer;
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);

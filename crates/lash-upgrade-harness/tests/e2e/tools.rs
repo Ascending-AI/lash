@@ -263,13 +263,21 @@ impl Scenario<'_> {
             .ok_or_else(|| anyhow!("accepted cancel has no native stored request"))?;
         let record: lash_core::TurnCancelRequestRecord =
             serde_json::from_value(stored["record"].clone())?;
+        // A Run's cancel is recorded on its running physical turn: the Run
+        // itself until it crosses a segment boundary, a later turn after.
+        let run = lash_core::TurnId::parse(&self.work()?.run)?;
         ensure!(
-            record.request.address.turn_id.as_str() == self.work()?.run
+            lash_core::store::PhysicalTurn::physical_ordinal_of(
+                &run,
+                &record.request.address.turn_id
+            )
+            .is_some()
                 && record.request.address.session_id.as_str()
                     == receipt["address"]["session_id"]
                         .as_str()
                         .unwrap_or_default()
-                && receipt["address"]["turn_id"].as_str() == Some(self.work()?.run.as_str()),
+                && receipt["address"]["turn_id"].as_str()
+                    == Some(record.request.address.turn_id.as_str()),
             "cancel receipt and stored request address another subject"
         );
         ensure!(

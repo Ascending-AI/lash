@@ -9,7 +9,6 @@ use lash_core::facade_support::{
 use lash_core::runtime::{
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
 };
-use lash_core::store::PhysicalTurn;
 use lash_core::{InputId, TurnId};
 
 use super::resolve::{self, Resolution};
@@ -146,37 +145,24 @@ async fn cancel_run(
             request,
         });
     }
-    // The cancel addresses the run's running physical turn: the first of its
-    // turns that has not committed.
-    let mut ordinal = 0_u64;
-    let turn = loop {
-        let turn = PhysicalTurn::derive_turn_id(run, ordinal);
-        let committed = parts
-            .store
-            .turn_is_committed(&TurnAddress::new(parts.session_id.clone(), turn.clone()))
-            .await
-            .unwrap_or(false);
-        if !committed {
-            break turn;
-        }
-        ordinal = ordinal.saturating_add(1);
-    };
-    let mut cancel = TurnCancelRequest::new(
-        TurnAddress::new(parts.session_id.clone(), turn),
-        request_id,
-        request.origin,
-    )
-    .undelivered(request.undelivered)
-    .mode(request.mode);
-    cancel.reason = request.reason;
-    let receipt = TurnWorkDriver::for_session(
+    let driver = TurnWorkDriver::for_session(
         std::sync::Arc::clone(&parts.effect_host),
         parts.session_id.to_string(),
         std::sync::Arc::clone(parts.store.store()),
-    )
-    .request_cancel(cancel)
-    .await
-    .map_err(EmbedError::Runtime)?;
+    );
+    // The cancel addresses the run's running physical turn.
+    let turn = driver
+        .running_turn(&TurnAddress::new(parts.session_id.clone(), run.clone()))
+        .await
+        .map_err(EmbedError::Runtime)?;
+    let mut cancel = TurnCancelRequest::new(turn, request_id, request.origin)
+        .undelivered(request.undelivered)
+        .mode(request.mode);
+    cancel.reason = request.reason;
+    let receipt = driver
+        .request_cancel(cancel)
+        .await
+        .map_err(EmbedError::Runtime)?;
     Ok(CancelReceipt::Requested {
         run: run.clone(),
         receipt: Box::new(receipt),

@@ -153,6 +153,14 @@ the history the boundary committed; it owes an admitted round its settled
 cursor, and the successor awaits it. The model call that asked for the round
 is never repeated. Every other refusal keeps its own handling.
 
+A Run parked on a source wait hands over through the drain's wake instead: the
+wait answers `TurnWaitHandedOver` live, and an aggregate's caller takes it as
+the hand-over, never as a nested fault of the cell (FIG-5078). Each physical
+turn of a Run owns its cancellation gate, and the turn that ends at a boundary
+seals its own when it commits. The successor's waits race the gate of the
+physical turn running them, and a cancel of the Run, from its send handle or a
+host's `TurnWorkDriver::running_turn`, addresses that same latest physical turn.
+
 The plugin registrar mints every callback key from `CallbackSlot`, so a
 callback slot cannot exist without its key prefix and its state authority.
 

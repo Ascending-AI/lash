@@ -246,8 +246,24 @@ impl Shared {
         let session = lash::SessionId::parse(chat)?;
         let run = lash::TurnId::parse(&work.run)?;
         let store = self.stores.session_store_factory();
-        let address = lash::TurnAddress::new(session, run);
-        if let Some(record) = store.turn_cancel_request(&address).await? {
+        // The cancel is recorded on the physical turn of the Run that was
+        // running when it landed: the first one with a request, before the
+        // first that has not committed.
+        let mut ordinal = 0;
+        let found = loop {
+            let address = lash::TurnAddress::new(
+                session.clone(),
+                lash_core::store::PhysicalTurn::derive_turn_id(&run, ordinal),
+            );
+            if let Some(record) = store.turn_cancel_request(&address).await? {
+                break Some(record);
+            }
+            if !store.turn_is_committed(&address).await? {
+                break None;
+            }
+            ordinal += 1;
+        };
+        if let Some(record) = found {
             let artifact = self.directory.join("native-cancel-request.json");
             super::write(&artifact, &record)?;
             evidence

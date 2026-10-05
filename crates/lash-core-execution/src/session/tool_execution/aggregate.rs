@@ -222,12 +222,18 @@ impl RuntimeExecutionContext<'_> {
     /// redriven, rather than committing an outcome whose aggregate never
     /// answered (FIG-3528's rule for the batch surface). A journaled error is a
     /// recorded terminal replaying, and answers on the channel alone.
+    ///
+    /// A wait handed to the Run's successor segment (FIG-4739) is neither: a
+    /// source wait that took the drain's wake answers it live, yet it is no
+    /// fault. Like a handed-over process await, nothing of the call is
+    /// recorded; the caller takes the hand-over and stops on it.
     fn aggregate_host_control(
         &self,
         error: crate::RuntimeEffectControllerError,
     ) -> ToolAggregateOutcome {
         if error.code == crate::RuntimeErrorCode::TurnWaitHandedOver {
             self.record_wait_handed_over();
+            return ToolAggregateOutcome::HostControl(error.to_string());
         }
         if let Some(exceeded) = error.tool_call_limit_exceeded() {
             return ToolAggregateOutcome::ToolCallLimitExceeded(exceeded);

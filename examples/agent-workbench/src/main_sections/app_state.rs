@@ -387,7 +387,15 @@ impl AppState {
         // receipts stay a list because that is what this returns to its
         // callers and what the traces are shaped around.
         let mut receipts = Vec::with_capacity(active.iter().len());
-        if let Some(ActiveTurn { address, .. }) = active {
+        if let Some(ActiveTurn { address: run, .. }) = active {
+            // The claim names the logical Run; a Run that went on past a
+            // segment boundary (a generation drain's hand-over) runs in a
+            // later physical turn with a cancellation gate of its own.
+            let address = driver
+                .running_turn(&run)
+                .await
+                // Audited: the running-turn read fails only on a store fault, an untyped control error here.
+                .map_err(|err| AppError::internal(err.to_string()))?;
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
             let cancel = driver
                 .request_cancel(
@@ -443,8 +451,7 @@ impl AppState {
                 match self.lash_turn_is_active(&address).await {
                     Ok(true) => true,
                     Ok(false) => {
-                        self.active_turns
-                            .remove(&address.session_id, &address.turn_id);
+                        self.active_turns.remove(&run.session_id, &run.turn_id);
                         false
                     }
                     Err(err) => {
@@ -461,8 +468,7 @@ impl AppState {
                     }
                 }
             } else {
-                self.active_turns
-                    .remove(&address.session_id, &address.turn_id);
+                self.active_turns.remove(&run.session_id, &run.turn_id);
                 false
             };
             let recorded_request_id = match &receipt {
