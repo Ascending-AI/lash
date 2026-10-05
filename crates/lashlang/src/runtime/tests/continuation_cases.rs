@@ -1359,3 +1359,222 @@ async fn a_continuation_resumes_only_the_executable_that_parked_it() {
         uninterrupted_continuation_result(&parked_by).await
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn continuation_profile_preserves_counts_and_refuses_malformed_vectors() {
+    let program = compile_program_for_tests(three_echo_chain());
+    let mut vm = continuation_test_vm(&program, &Host);
+    vm.enable_profile();
+    vm.suspend_after_effects(1);
+    vm.run_for_mode().await.expect("park profiled run");
+    let continuation = vm.suspend().expect("profile captures");
+    let expected = vm.take_profile();
+    assert!(
+        expected
+            .instruction_stats()
+            .iter()
+            .any(|stat| stat.count > 0)
+    );
+    let encoded = serde_json::to_vec(&continuation).expect("encode profiled continuation");
+    let decoded = serde_json::from_slice(&encoded).expect("decode profiled continuation");
+    let mut resumed = Vm::resume_from(decoded, &program, &Host).expect("resume profile");
+    let actual = resumed.take_profile();
+    for (actual, expected) in [
+        (actual.instruction_stats(), expected.instruction_stats()),
+        (actual.builtin_stats(), expected.builtin_stats()),
+    ] {
+        assert_eq!(
+            actual
+                .iter()
+                .map(|s| (s.name, s.count, s.total_ns))
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|s| (s.name, s.count, s.total_ns))
+                .collect::<Vec<_>>()
+        );
+    }
+    for field in 0..4 {
+        let mut invalid = continuation.clone();
+        let profile = invalid.profile.as_mut().expect("profile exists");
+        match field {
+            0 => profile.instruction_counts.clear(),
+            1 => profile.instruction_times.clear(),
+            2 => profile.builtin_counts.clear(),
+            _ => profile.builtin_times.clear(),
+        }
+        assert!(matches!(
+            Vm::resume_from(invalid, &program, &Host),
+            Err(ContinuationError::ProfileShapeMismatch)
+        ));
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn continuation_resume_admits_exact_frame_and_instruction_limits() {
+    let mut authored = builders::program(vec![builders::function_call("outer", vec![])]);
+    authored.declarations = vec![
+        builders::function_decl(
+            "outer",
+            vec![],
+            TypeExpr::Any,
+            builders::function_call("inner", vec![]),
+        ),
+        builders::function_decl(
+            "inner",
+            vec![],
+            TypeExpr::Any,
+            builders::block(vec![
+                builders::print(builders::string("park")),
+                builders::num(7.0),
+            ]),
+        ),
+    ];
+    let program = compile_program(&authored);
+    let mut vm = continuation_test_vm(&program, &Host);
+    vm.suspend_after_effects(1);
+    vm.run_for_mode().await.expect("park inside nested frames");
+    let continuation = vm.suspend().expect("capture frames");
+    assert_eq!(continuation.frame_stack.len(), 2);
+    let instructions = continuation.instructions_executed;
+    for (frame_limit, instruction_limit, expected) in [
+        (1, instructions, "frame"),
+        (2, instructions - 1, "instructions"),
+        (2, instructions, "admit"),
+        (3, instructions + 1, "admit"),
+    ] {
+        let host = BoundedContinuationHost {
+            bounds: ExecutionBounds::new(
+                ExecutionBound::instructions(instruction_limit),
+                ExecutionBound::Unbounded,
+            )
+            .with_max_frame_depth(std::num::NonZeroU64::new(frame_limit).expect("nonzero depth")),
+        };
+        let result = Vm::resume_from(continuation.clone(), &program, &host);
+        match expected {
+            "frame" => assert!(matches!(
+                result,
+                Err(ContinuationError::FrameDepthExceeded { limit: 1 })
+            )),
+            "instructions" => assert!(matches!(
+                result,
+                Err(ContinuationError::InstructionBudgetExceeded { .. })
+            )),
+            _ => {
+                result.expect("the inclusive limits admit the continuation");
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fresh_vm_imports_initial_compounds_under_the_hosts_memory_limit() {
+    let program = compile_program(&builders::program(vec![builders::finish(
+        builders::binary(
+            builders::var("left"),
+            CoercingBinaryOp::StrictEqual,
+            builders::var("right"),
+        ),
+    )]));
+    for (limit, admitted) in [(32, true), (31, false)] {
+        let host = BoundedContinuationHost {
+            bounds: ExecutionBounds::new(
+                ExecutionBound::Unbounded,
+                ExecutionBound::logical_bytes(limit),
+            ),
+        };
+        let mut globals = Record::new();
+        globals.insert("left".into(), Value::Record(Arc::new(Record::new())));
+        globals.insert("right".into(), Value::Record(Arc::new(Record::new())));
+        let slots = SlotState::from_globals(
+            globals,
+            &program.chunk.slot_names,
+            &program.chunk.private_slots,
+            &ProjectedBindings::new(),
+            vec![],
+        );
+        let mut vm = Vm::new(&program, slots, &host, None, ExecutionMode::Foreground);
+        let result = vm.run_for_mode().await;
+        if admitted {
+            assert_eq!(
+                result.expect("two host records fit exactly"),
+                ExecutionOutcome::Finished(Value::Bool(false))
+            );
+        } else {
+            assert!(
+                matches!(result, Err(RuntimeError::MemoryLimitExceeded { .. })),
+                "{result:?}"
+            );
+            // Fresh-state memory admission precedes guest dispatch, rather
+            // than reporting the same bound only after the guest has run.
+            assert_eq!(vm.instructions_executed(), 0);
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn traced_loop_restores_bindings_at_termination_but_preserves_them_at_a_park() {
+    let program = compile_program(&builders::program(vec![
+        builders::assign("item", builders::string("outer")),
+        builders::for_in(
+            "item",
+            builders::list(vec![builders::num(1.0), builders::num(2.0)]),
+            builders::block(vec![
+                builders::print(builders::var("item")),
+                builders::finish(builders::var("item")),
+            ]),
+        ),
+    ]));
+    for park in [false, true] {
+        let mut vm = continuation_test_vm(&program, &Host);
+        if park {
+            vm.suspend_after_effects(1);
+        }
+        let outcome = vm.run_traced_for_mode().await.expect("traced loop runs");
+        if park {
+            assert_eq!(outcome, ExecutionOutcome::Continued);
+            let continuation = vm.suspend().expect("park keeps the iterator");
+            assert_eq!(continuation.iterator_stack.len(), 1);
+            assert_eq!(
+                round_trip_and_resume(&program, continuation).await,
+                ExecutionOutcome::Finished(Value::Number(1.0))
+            );
+        } else {
+            assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(1.0)));
+            assert_eq!(
+                vm.into_globals().expect("export globals").get("item"),
+                Some(&Value::String("outer".into()))
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn root_fallthrough_does_not_charge_or_execute_uncalled_function_code() {
+    let mut authored = builders::program(vec![builders::num(7.0)]);
+    authored.declarations.push(builders::function_decl(
+        "unused",
+        vec![],
+        TypeExpr::Any,
+        builders::print(builders::string("must not run")),
+    ));
+    let program = compile_program(&authored);
+    let host = BoundedContinuationHost {
+        bounds: ExecutionBounds::new(
+            ExecutionBound::instructions(program.chunk.root_code_len as u64),
+            ExecutionBound::Unbounded,
+        ),
+    };
+    let mut state = State::new();
+    let mut vm = Vm::from_state(&program, &mut state, &host).expect("install state");
+    assert_eq!(
+        vm.run_for_mode()
+            .await
+            .expect("root consumes only its own budget"),
+        ExecutionOutcome::Continued
+    );
+    assert_eq!(
+        vm.instructions_executed(),
+        program.chunk.root_code_len as u64
+    );
+}

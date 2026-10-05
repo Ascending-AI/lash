@@ -480,3 +480,127 @@ fn loop_carried_mutation_is_widened_after_one_forward_pass() {
         Err(LinkError::IncompatibleOperationInput { actual, .. }) if actual.contains("str") && actual.contains("int")
     ));
 }
+
+#[test]
+fn await_refuses_settled_literals_even_when_their_inferred_type_is_uncertain() {
+    for (expr, kind) in [
+        (Expr::Absent, "undefined"),
+        (
+            builders::list(vec![builders::num(1.0), builders::bool_lit(true)]),
+            "list",
+        ),
+        (builders::list(vec![Expr::Null, builders::num(1.0)]), "list"),
+        (
+            builders::list(vec![builders::string("text"), builders::num(1.0)]),
+            "list",
+        ),
+        (
+            builders::list(vec![
+                builders::labelled(builders::label("number", None), builders::num(1.0)),
+                builders::bool_lit(true),
+            ]),
+            "list",
+        ),
+        (builders::record(vec![("missing", Expr::Absent)]), "record"),
+        (
+            builders::labelled(builders::label("settled", None), Expr::Absent),
+            "undefined",
+        ),
+    ] {
+        let program = builders::program(vec![Expr::Await(Box::new(expr))]);
+        assert!(
+            matches!(LinkedModule::link(program, full_label_environment()), Err(LinkError::AwaitedSettledExpression { actual, .. }) if actual == kind),
+            "await must refuse a settled {kind}"
+        );
+    }
+}
+
+#[test]
+fn await_refuses_computed_settled_shapes_but_admits_operation_outputs() {
+    for (ty, kind) in [
+        (TypeExpr::Int, "number"),
+        (TypeExpr::Float, "number"),
+        (TypeExpr::Str, "string"),
+        (TypeExpr::Enum(vec!["x".into()]), "string"),
+        (TypeExpr::Bool, "bool"),
+        (TypeExpr::Null, "null"),
+        (TypeExpr::List(Box::new(TypeExpr::Int)), "list"),
+        (
+            TypeExpr::Object(vec![builders::type_field("x", TypeExpr::Bool, false)]),
+            "record",
+        ),
+    ] {
+        let (ty, expr) = match ty {
+            TypeExpr::List(item) => (*item, builders::list(vec![builders::var("value")])),
+            TypeExpr::Object(_) => (
+                TypeExpr::Bool,
+                builders::record(vec![("x", builders::var("value"))]),
+            ),
+            ty => (ty, builders::var("value")),
+        };
+        let program = builders::module(
+            vec![builders::process(
+                "wait",
+                vec![builders::param("value", ty)],
+                builders::block(vec![Expr::Await(Box::new(expr))]),
+            )],
+            vec![],
+        );
+        assert!(
+            matches!(LinkedModule::link(program, full_host_environment()), Err(LinkError::AwaitedSettledExpression { actual, .. }) if actual == kind),
+            "computed settled {kind} must be refused"
+        );
+    }
+    LinkedModule::link(
+        builders::program(vec![builders::module_call(
+            &["tools"],
+            "read_file",
+            vec![builders::record(vec![("path", builders::string("readme"))])],
+        )]),
+        full_host_environment(),
+    )
+    .expect("an operation's string output does not make its await input settled");
+}
+
+#[test]
+fn try_output_includes_catch_fallthrough_and_finally_overrides_terminals() {
+    for (body, expected) in [
+        (
+            builders::try_expr(
+                builders::finish(builders::bool_lit(true)),
+                Some(builders::catch("error", Expr::Null)),
+                None,
+            ),
+            TypeExpr::union(vec![TypeExpr::Bool, TypeExpr::Null]),
+        ),
+        (
+            builders::try_expr(
+                builders::finish(builders::bool_lit(true)),
+                None,
+                Some(builders::finish(builders::string("cleanup"))),
+            ),
+            TypeExpr::Str,
+        ),
+        (
+            builders::try_expr(
+                builders::finish(builders::bool_lit(true)),
+                None,
+                Some(Expr::Null),
+            ),
+            TypeExpr::Bool,
+        ),
+    ] {
+        let linked = LinkedModule::link(
+            builders::module(vec![builders::process("done", vec![], body)], vec![]),
+            full_host_environment(),
+        )
+        .expect("try process links");
+        let Some(TypeExpr::Process(ty)) = linked.artifact.process_type("done") else {
+            panic!("process signature")
+        };
+        assert_eq!(
+            ty.as_signature().expect("complete signature").output(),
+            &expected
+        );
+    }
+}

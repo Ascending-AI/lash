@@ -828,7 +828,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 };
                 Ok(Value::String(regexp_string(regexp).into()))
             }
-            "valueOf" => Ok(Value::Ref(receiver)),
             _ => Err(RuntimeError::ValidationFailed {
                 reason: format!("TS_METHOD_UNSUPPORTED: RegExp.prototype.{name}"),
             }),
@@ -866,7 +865,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .into(),
                 ))
             }
-            "valueOf" => Ok(receiver.clone()),
             _ => Err(RuntimeError::ValidationFailed {
                 reason: format!("TS_METHOD_UNSUPPORTED: Error.prototype.{name}"),
             }),
@@ -972,6 +970,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // The iterable sources keep each element's identity — Map/Set/
         // URLSearchParams iterate their entry lists, and an array copies
         // shallowly as `Array.from` does.
+        // Call opcodes pass already-imported compounds as heap references.
         let iterable: Option<Vec<Value>> = match &items {
             Value::Ref(id) => match self.heap.get(*id)? {
                 HeapObject::List { items, .. } | HeapObject::Tuple(items) => Some(items.clone()),
@@ -997,7 +996,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 ),
                 _ => None,
             },
-            Value::List(items) | Value::Tuple(items) => Some(items.to_vec()),
             Value::String(text) => Some(
                 text.chars()
                     .map(|character| Value::String(character.to_string().into()))
@@ -1116,7 +1114,6 @@ fn undefined_receiver_message(prototype: BuiltinPrototype, name: &str, receiver:
                     crate::runtime::value_type_name(receiver)
                 )
             }
-            "toJSON" => TO_OBJECT.to_string(),
             _ => "this is not a Date object.".to_string(),
         },
         BuiltinPrototype::Map
@@ -1156,12 +1153,6 @@ fn incompatible_receiver_message(
             format!("Boolean.prototype.{name} requires that 'this' be a Boolean")
         }
         BuiltinPrototype::Date => "this is not a Date object.".to_string(),
-        BuiltinPrototype::Map | BuiltinPrototype::Set | BuiltinPrototype::RegExp => {
-            format!(
-                "Method {}.prototype.{name} called on incompatible receiver {text}",
-                prototype.name()
-            )
-        }
         BuiltinPrototype::Url => {
             format!("Method 'URL.prototype.{name}' called on incompatible receiver {text}")
         }

@@ -214,3 +214,544 @@ fn inherited_reads_follow_ecma_identity() {
         Some((BuiltinPrototype::String, "localeCompare"))
     );
 }
+
+// ECMA detached calls must use the same receiver, iterable and error contracts
+// as member calls. These laws pin the gaps found in Confidence 37336144906.
+fn global_builtin(name: &str) -> Expr {
+    builders::builtin(
+        "__lashlang_stdlib",
+        vec![builders::string("Lash.Builtin"), builders::string(name)],
+    )
+}
+
+fn prototype_method(owner: &str, name: &str) -> Expr {
+    builders::field(builders::field(global_builtin(owner), "prototype"), name)
+}
+
+fn call_with_receiver(method: Expr, receiver: Expr, args: Vec<Expr>) -> Expr {
+    Expr::MethodCall {
+        receiver: Box::new(method),
+        method: crate::MethodKey::Field("call".into()),
+        args: std::iter::once(receiver).chain(args).collect(),
+    }
+}
+
+fn exotic(kind: &str, args: Vec<Expr>) -> Expr {
+    builders::builtin(
+        "__lashlang_heap_new",
+        std::iter::once(builders::string(kind))
+            .chain(args)
+            .collect(),
+    )
+}
+
+async fn detached_result(expr: Expr) -> Result<ExecutionOutcome, RuntimeError> {
+    let program = compile_program(&builders::program(vec![builders::finish(expr)]));
+    execute_compiled(&program, &mut State::new(), &Host).await
+}
+
+async fn detached_error_message(expr: Expr) -> String {
+    let caught = super::exception_cases::exception_try(
+        expr,
+        Some((
+            "error",
+            builders::list(vec![
+                builders::field(builders::var("error"), "name"),
+                builders::field(builders::var("error"), "message"),
+            ]),
+        )),
+        None,
+    );
+    let ExecutionOutcome::Finished(Value::List(parts)) = detached_result(caught)
+        .await
+        .expect("catch returns the error")
+    else {
+        panic!("the detached call must throw");
+    };
+    assert_eq!(parts[0], Value::String("TypeError".into()));
+    let Value::String(message) = &parts[1] else {
+        panic!("message must be text")
+    };
+    message.to_string()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn detached_regexp_and_error_methods_preserve_results_and_identity() {
+    let program = compile_program(&builders::program(vec![
+        builders::assign(
+            "regexp",
+            exotic("RegExp", vec![builders::string("a"), builders::string("g")]),
+        ),
+        builders::assign("error", exotic("Error", vec![builders::string("broken")])),
+        builders::finish(builders::list(vec![
+            call_with_receiver(
+                prototype_method("RegExp", "test"),
+                builders::var("regexp"),
+                vec![builders::string("cat")],
+            ),
+            call_with_receiver(
+                prototype_method("RegExp", "test"),
+                builders::var("regexp"),
+                vec![builders::string("zzz")],
+            ),
+            call_with_receiver(
+                prototype_method("RegExp", "exec"),
+                builders::var("regexp"),
+                vec![builders::string("cat")],
+            ),
+            call_with_receiver(
+                prototype_method("RegExp", "toString"),
+                builders::var("regexp"),
+                vec![],
+            ),
+            call_with_receiver(
+                prototype_method("Error", "toString"),
+                builders::record(vec![
+                    ("name", builders::string("Oops")),
+                    ("message", builders::string("broken")),
+                ]),
+                vec![],
+            ),
+            strict_equal(
+                call_with_receiver(
+                    prototype_method("Object", "valueOf"),
+                    builders::var("error"),
+                    vec![],
+                ),
+                builders::var("error"),
+            ),
+            strict_equal(
+                call_with_receiver(
+                    prototype_method("Object", "valueOf"),
+                    builders::var("regexp"),
+                    vec![],
+                ),
+                builders::var("regexp"),
+            ),
+        ])),
+    ]));
+    let ExecutionOutcome::Finished(Value::List(values)) =
+        execute_compiled(&program, &mut State::new(), &Host)
+            .await
+            .expect("detached exotic methods run")
+    else {
+        panic!("expected results")
+    };
+    assert_eq!(values[0], Value::Bool(true));
+    assert_eq!(values[1], Value::Bool(false));
+    let Value::List(found) = &values[2] else {
+        panic!("exec returns a match")
+    };
+    assert_eq!(found[0], Value::String("a".into()));
+    assert_eq!(
+        &values[3..],
+        &[
+            Value::String("/a/g".into()),
+            Value::String("Oops: broken".into()),
+            Value::Bool(true),
+            Value::Bool(true)
+        ]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn detached_collection_methods_validate_kind_and_return_values() {
+    for (owner, other, method, source, expected) in [
+        (
+            "Map",
+            "Set",
+            "get",
+            builders::list(vec![builders::list(vec![
+                builders::string("key"),
+                builders::num(7.0),
+            ])]),
+            Value::Number(7.0),
+        ),
+        (
+            "Set",
+            "Map",
+            "has",
+            builders::list(vec![builders::string("key")]),
+            Value::Bool(true),
+        ),
+    ] {
+        assert_eq!(
+            detached_result(call_with_receiver(
+                prototype_method(owner, method),
+                exotic(owner, vec![source]),
+                vec![builders::string("key")]
+            ))
+            .await
+            .expect("matching collection"),
+            ExecutionOutcome::Finished(expected)
+        );
+        let message = detached_error_message(call_with_receiver(
+            prototype_method(owner, method),
+            exotic(other, vec![]),
+            vec![builders::string("key")],
+        ))
+        .await;
+        assert_eq!(
+            message,
+            format!("Method {owner}.prototype.{method} called on incompatible receiver #<{other}>")
+        );
+    }
+    // A value-only callback cannot start a nested collection driver.
+    let expr = call_with_receiver(
+        prototype_method("Array", "map"),
+        builders::list(vec![exotic("Map", vec![])]),
+        vec![prototype_method("Map", "forEach"), exotic("Map", vec![])],
+    );
+    assert!(
+        matches!(detached_result(expr).await, Err(RuntimeError::ValidationFailed { reason }) if reason.starts_with("TS_NESTED_DRIVER_UNSUPPORTED"))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn detached_receiver_errors_keep_family_specific_messages() {
+    for (owner, method, expected) in [
+        (
+            "String",
+            "toString",
+            "String.prototype.toString requires that 'this' be a String",
+        ),
+        (
+            "String",
+            "trimEnd",
+            "String.prototype.trimRight called on null or undefined",
+        ),
+        (
+            "String",
+            "trimStart",
+            "String.prototype.trimLeft called on null or undefined",
+        ),
+        (
+            "Array",
+            "concat",
+            "Array.prototype.concat called on null or undefined",
+        ),
+        (
+            "Date",
+            "toString",
+            "Method Date.prototype.toString called on incompatible receiver undefined",
+        ),
+        (
+            "Date",
+            "toISOString",
+            "Method Date.prototype.toISOString called on incompatible receiver undefined",
+        ),
+        (
+            "Date",
+            "toJSON",
+            "Cannot convert undefined or null to object",
+        ),
+    ] {
+        assert_eq!(
+            detached_error_message(builders::call(prototype_method(owner, method), vec![])).await,
+            expected
+        );
+    }
+    for (owner, method, receiver, expected) in [
+        (
+            "String",
+            "toString",
+            builders::record(vec![]),
+            "String.prototype.toString requires that 'this' be a String",
+        ),
+        (
+            "Number",
+            "valueOf",
+            builders::record(vec![]),
+            "Number.prototype.valueOf requires that 'this' be a Number",
+        ),
+        (
+            "Boolean",
+            "valueOf",
+            builders::record(vec![]),
+            "Boolean.prototype.valueOf requires that 'this' be a Boolean",
+        ),
+        (
+            "Date",
+            "getTime",
+            builders::list(vec![]),
+            "this is not a Date object.",
+        ),
+        (
+            "RegExp",
+            "exec",
+            builders::list(vec![]),
+            "Method RegExp.prototype.exec called on incompatible receiver [object Array]",
+        ),
+        (
+            "URL",
+            "toString",
+            builders::record(vec![]),
+            "Method 'URL.prototype.toString' called on incompatible receiver #<Object>",
+        ),
+        (
+            "URLSearchParams",
+            "toString",
+            builders::bool_lit(false),
+            "Value of \"this\" must be of type URLSearchParams",
+        ),
+    ] {
+        assert_eq!(
+            detached_error_message(call_with_receiver(
+                prototype_method(owner, method),
+                receiver,
+                vec![]
+            ))
+            .await,
+            expected
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn builtin_objects_keep_ecma_to_string_tags() {
+    for (owner, expected) in [
+        ("Array", "Array"),
+        ("String", "String"),
+        ("Number", "Number"),
+        ("Boolean", "Boolean"),
+        ("Map", "Map"),
+        ("Set", "Set"),
+        ("URL", "URL"),
+        ("URLSearchParams", "URLSearchParams"),
+        ("Date", "Object"),
+    ] {
+        assert_eq!(
+            detached_result(call_with_receiver(
+                prototype_method("Object", "toString"),
+                builders::field(global_builtin(owner), "prototype"),
+                vec![]
+            ))
+            .await
+            .expect("prototype tag"),
+            ExecutionOutcome::Finished(Value::String(format!("[object {expected}]").into()))
+        );
+    }
+    for owner in ["Math", "JSON"] {
+        let tag = if owner == "JSON" { "JSON" } else { "Math" };
+        assert_eq!(
+            detached_result(call_with_receiver(
+                prototype_method("Object", "toString"),
+                global_builtin(owner),
+                vec![]
+            ))
+            .await
+            .expect("namespace tag"),
+            ExecutionOutcome::Finished(Value::String(format!("[object {tag}]").into()))
+        );
+    }
+}
+
+fn array_from(items: Expr, mapfn: Option<Expr>) -> Expr {
+    call_with_receiver(
+        builders::field(global_builtin("Array"), "from"),
+        Expr::Null,
+        std::iter::once(items).chain(mapfn).collect(),
+    )
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn detached_array_from_copies_iterables_and_drives_callable_mappers() {
+    for (source, expected) in [
+        (
+            builders::list(vec![builders::num(2.0), builders::num(3.0)]),
+            vec![Value::Number(2.0), Value::Number(3.0)],
+        ),
+        (
+            builders::string("a😀"),
+            vec![Value::String("a".into()), Value::String("😀".into())],
+        ),
+        (
+            exotic(
+                "Set",
+                vec![builders::list(vec![
+                    builders::num(2.0),
+                    builders::num(2.0),
+                    builders::num(3.0),
+                ])],
+            ),
+            vec![Value::Number(2.0), Value::Number(3.0)],
+        ),
+        (
+            exotic(
+                "Map",
+                vec![builders::list(vec![builders::list(vec![
+                    builders::string("x"),
+                    builders::num(7.0),
+                ])])],
+            ),
+            vec![Value::List(
+                vec![Value::String("x".into()), Value::Number(7.0)].into(),
+            )],
+        ),
+        (
+            exotic("URLSearchParams", vec![builders::string("x=1&x=2")]),
+            vec![
+                Value::List(vec![Value::String("x".into()), Value::String("1".into())].into()),
+                Value::List(vec![Value::String("x".into()), Value::String("2".into())].into()),
+            ],
+        ),
+        (
+            call_with_receiver(
+                prototype_method("RegExp", "exec"),
+                exotic("RegExp", vec![builders::string("(a)")]),
+                vec![builders::string("cat")],
+            ),
+            vec![Value::String("a".into()), Value::String("a".into())],
+        ),
+        (
+            builders::record(vec![
+                ("length", builders::num(2.0)),
+                ("0", builders::string("x")),
+            ]),
+            vec![Value::String("x".into()), Value::Undefined],
+        ),
+    ] {
+        assert_eq!(
+            detached_result(array_from(source, None))
+                .await
+                .expect("copy source"),
+            ExecutionOutcome::Finished(Value::List(expected.into()))
+        );
+    }
+    let program = compile_program(&builders::program(vec![builders::finish(array_from(
+        builders::var("tuple"),
+        None,
+    ))]));
+    let mut state = State::new();
+    state
+        .insert_global(
+            "tuple",
+            Value::Tuple(vec![Value::Number(5.0), Value::String("x".into())].into()),
+        )
+        .expect("seed an IR tuple");
+    assert_eq!(
+        execute_compiled(&program, &mut state, &Host)
+            .await
+            .expect("copy an IR tuple"),
+        ExecutionOutcome::Finished(Value::List(
+            vec![Value::Number(5.0), Value::String("x".into())].into()
+        ))
+    );
+    let mapper = builders::closure(
+        None,
+        &["value", "index"],
+        &[],
+        builders::binary(
+            builders::var("value"),
+            CoercingBinaryOp::Add,
+            builders::var("index"),
+        ),
+    );
+    assert_eq!(
+        detached_result(array_from(
+            builders::list(vec![builders::num(2.0), builders::num(3.0)]),
+            Some(mapper)
+        ))
+        .await
+        .expect("mapper drives"),
+        ExecutionOutcome::Finished(Value::List(
+            vec![Value::Number(2.0), Value::Number(4.0)].into()
+        ))
+    );
+    assert_eq!(
+        detached_error_message(array_from(
+            builders::list(vec![]),
+            Some(builders::record(vec![]))
+        ))
+        .await,
+        "#<Object> is not a function"
+    );
+    assert_eq!(
+        detached_result(array_from(
+            builders::list(vec![builders::num(2.0)]),
+            Some(Expr::Absent)
+        ))
+        .await
+        .expect("undefined mapper is omitted"),
+        ExecutionOutcome::Finished(Value::List(vec![Value::Number(2.0)].into()))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn detached_array_from_distinguishes_array_length_from_memory_limits() {
+    let host = super::continuation_cases::HeapConformanceHost {
+        stress_gc: false,
+        memory_limit: ExecutionBound::logical_bytes(4096),
+    };
+    for (length, range_error) in [(4_294_967_295.0, false), (4_294_967_296.0, true)] {
+        let program = compile_program(&builders::program(vec![builders::finish(array_from(
+            builders::record(vec![("length", builders::num(length))]),
+            None,
+        ))]));
+        let error = execute_compiled(&program, &mut State::new(), &host)
+            .await
+            .expect_err("allocation is refused before walking");
+        if range_error {
+            assert!(
+                matches!(error, RuntimeError::UncaughtException { value } if value.as_record().is_some_and(|record| record.get("name") == Some(&Value::String("RangeError".into()))))
+            );
+        } else {
+            assert!(
+                matches!(error, RuntimeError::MemoryLimitExceeded { .. }),
+                "{error:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn detached_array_from_maps_iterables_before_charging_a_dense_result() {
+    // Array.from's iterable path starts with an empty output, rather than
+    // allocating the source's length before calling the first mapper. A mapper
+    // that throws must keep that throw even when a full copy would exceed the
+    // memory bound (ECMA-262 Array.from, iterable branch).
+    let host = super::continuation_cases::HeapConformanceHost {
+        stress_gc: false,
+        memory_limit: ExecutionBound::logical_bytes(120_000),
+    };
+    let numbers = || builders::list((0..1_000).map(|_| builders::num(1.0)).collect());
+    let regexp_match = call_with_receiver(
+        prototype_method("RegExp", "exec"),
+        exotic("RegExp", vec![builders::string(&"(a)".repeat(1_000))]),
+        vec![builders::string(&"a".repeat(1_000))],
+    );
+    for (source_kind, source) in [
+        ("array", numbers()),
+        ("tuple", builders::var("tuple")),
+        ("match", regexp_match),
+    ] {
+        let mapper = builders::closure(
+            None,
+            &["value"],
+            &[],
+            Expr::Throw(Box::new(builders::num(7.0))),
+        );
+        let program = compile_program(&builders::program(vec![builders::finish(array_from(
+            source,
+            Some(mapper),
+        ))]));
+        let mut state = State::new();
+        if matches!(source_kind, "tuple") {
+            state
+                .insert_global(
+                    "tuple",
+                    Value::Tuple(vec![Value::Number(1.0); 1_000].into()),
+                )
+                .expect("seed a tuple source");
+        }
+        assert!(
+            matches!(
+                execute_compiled(&program, &mut state, &host).await,
+                Err(RuntimeError::UncaughtException {
+                    value: Value::Number(7.0)
+                })
+            ),
+            "{source_kind}: the mapper's throw precedes dense-result allocation"
+        );
+    }
+}
