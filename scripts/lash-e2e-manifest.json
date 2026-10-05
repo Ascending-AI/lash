@@ -990,9 +990,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing replay registration: cancel::s09_after_intent exercises the sqlite_file/live leg only; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s09_after_intent_replay"
+          }
         },
         {
           "variant": "before-intent",
@@ -1047,9 +1050,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL registration: cancel::s09_after_intent exercises the sqlite_file/live leg only; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s09_after_intent_postgresql"
+          }
         },
         {
           "variant": "before-intent",
@@ -1104,9 +1110,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay registration: cancel::s09_after_intent exercises the sqlite_file/live leg only; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s09_after_intent_postgresql_replay"
+          }
         }
       ],
       "setup": "D final durable; declaration blocked, then presentation.",

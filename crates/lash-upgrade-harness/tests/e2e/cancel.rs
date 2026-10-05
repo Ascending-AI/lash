@@ -35,6 +35,14 @@ h2_case!(
     Replay
 );
 h2_case!(s09_after_intent, AfterIntent, SqliteFile, Live);
+h2_case!(s09_after_intent_replay, AfterIntent, SqliteFile, Replay);
+h2_case!(s09_after_intent_postgresql, AfterIntent, PostgreSql, Live);
+h2_case!(
+    s09_after_intent_postgresql_replay,
+    AfterIntent,
+    PostgreSql,
+    Replay
+);
 h2_case!(s10_empty_middle_rank, Ranks, SqliteFile, Live);
 h2_case!(s10_empty_middle_rank_replay, Ranks, SqliteFile, Replay);
 h2_case!(s10_empty_middle_rank_postgresql, Ranks, PostgreSql, Live);
