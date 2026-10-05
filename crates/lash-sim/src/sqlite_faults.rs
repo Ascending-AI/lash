@@ -964,10 +964,13 @@ fn stamped_commit(
     operation_suffix: &str,
 ) -> Result<RuntimeCommit, ScenarioFailure> {
     RuntimeCommit::persisted_state_for_test(state)
-        .with_operation(OperationId::turn(
-            &state.session_id,
-            lash_core::TurnId::fixture(format!("{}-fault-{operation_suffix}", backend.name())),
-            "final",
+        .with_operation(OperationId::new(
+            lash_core::ExecutionScope::runtime_operation(format!(
+                "{}:{}-fault-{operation_suffix}",
+                state.session_id,
+                backend.name()
+            )),
+            "commit",
         ))
         .map(|(commit, _)| commit)
         .map_err(|err| ScenarioFailure::harness(backend, format!("stamp runtime commit: {err}")))

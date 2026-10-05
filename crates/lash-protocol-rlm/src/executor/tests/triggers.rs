@@ -4,6 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
 
 const SEED: u64 = 0x5_2c0b;
 
@@ -1263,8 +1264,13 @@ async fn execute_trigger_process_with_originator(
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(table.double(), &handler),
-        Arc::new(ProcessControlToolProvider),
-        process_control_tool_catalog(),
+        process_definition_tool_provider(
+            Arc::new(ProcessControlToolProvider),
+            surface.clone(),
+            lash_vm_client::service::Service::default()
+                .with_recovery_store(table.backend().worker_recovery()),
+        ),
+        process_definition_tool_catalog(),
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
@@ -1272,6 +1278,27 @@ async fn execute_trigger_process_with_originator(
             session_policy,
         ),
     );
+    // A host-origin process starts its child under the same host authority.
+    // The recorded start reads dispatch provenance, rather than a service override.
+    let (ctx, parent_id) = if let Some(originator) = &originator_override {
+        let parent = lash_core::ProcessRegistration::new(
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::ProcessProvenance::new(originator.clone()),
+            lash_core::Lifetime::Detached,
+        );
+        let record =
+            lash_core::ProcessRegistrar::register_process(registry.as_ref(), parent.clone())
+                .await
+                .expect("register the host-origin parent");
+        (
+            ctx.with_process_execution(record.id.clone(), &parent, None),
+            Some(record.id),
+        )
+    } else {
+        (ctx, None)
+    };
     let mut state = if language == "typescript" {
         RlmExecutionState::for_engine("typescript")
     } else {
@@ -1299,26 +1326,42 @@ async fn execute_trigger_process_with_originator(
         "process start must finish"
     );
 
-    table.admit_pending().await;
     let records = registry
-        .list_observed_by(
-            &SessionId::from("test-session"),
-            &lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                ..Default::default()
-            },
-        )
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..Default::default()
+        })
         .await
-        .expect("list trigger process");
+        .expect("list trigger process")
+        .into_iter()
+        .filter(|record| Some(&record.id) != parent_id.as_ref())
+        .collect::<Vec<_>>();
     let [record] = records.as_slice() else {
         panic!("expected exactly one trigger process, got {records:?}");
     };
     assert_eq!(
         record.provenance.originator,
         originator_override.unwrap_or_else(|| {
-            lash_core::ProcessOriginator::session(lash_core::SessionScope::new("test-session"))
+            lash_core::ProcessOriginator::session(lash_core::SessionScope::for_agent_frame(
+                "test-session",
+                lash_core::FrameNodeId::new("test-frame").expect("fixture frame"),
+            ))
         })
     );
+    // Deliver this fixture's start, rather than scanning every native Run's
+    // obligations while their own-commit deliveries are settling.
+    let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
+        table
+            .backend()
+            .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+        registry.clone(),
+        Arc::clone(table.backend().process_work().port()),
+        Arc::new(lash_core::facade_support::SystemClock),
+    );
+    relay
+        .deliver_start(&record.id)
+        .await
+        .expect("deliver the trigger process start");
     let terminal = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         table.await_terminal(&record.id),
@@ -1384,7 +1427,10 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
         let result = execute_trigger_process_with_originator(
             "typescript",
             r#"
-                const registrar = async () => await triggers.list({});
+                const registrar = await processes.create({
+                  dialect: "typescript",
+                  source: 'const registrar = async () => await triggers.list({});'
+                });
                 const handle = await processes.start({ definition: registrar });
                 finish(handle.process_id);
             "#,
@@ -1410,7 +1456,10 @@ pub(super) fn typescript_process_body_uses_trigger_command_handler() {
         let result = execute_trigger_process(
             "typescript",
             r#"
-                const registrar = async () => await triggers.list({});
+                const registrar = await processes.create({
+                  dialect: "typescript",
+                  source: 'const registrar = async () => await triggers.list({});'
+                });
                 const handle = await processes.start({ definition: registrar });
                 finish(handle.process_id);
             "#,
@@ -1444,10 +1493,13 @@ pub(super) fn typescript_process_local_helper_reaches_trigger_command_handler() 
         let result = execute_trigger_process(
             "typescript",
             r#"
-                const registrar = async () => {
-                  const listRegistrations = () => triggers.list({});
-                  return await listRegistrations();
-                };
+                const registrar = await processes.create({
+                  dialect: "typescript",
+                  source: `const registrar = async () => {
+                    const listRegistrations = () => triggers.list({});
+                    return await listRegistrations();
+                  };`
+                });
                 const handle = await processes.start({ definition: registrar });
                 finish(handle.process_id);
             "#,

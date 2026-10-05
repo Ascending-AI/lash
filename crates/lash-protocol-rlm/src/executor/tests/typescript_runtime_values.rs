@@ -72,8 +72,13 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(table.double(), &handler),
-        Arc::new(ProcessControlToolProvider),
-        process_control_tool_catalog(),
+        process_definition_tool_provider(
+            Arc::new(ProcessControlToolProvider),
+            surface.clone(),
+            lash_vm_client::service::Service::default()
+                .with_recovery_store(table.backend().worker_recovery()),
+        ),
+        process_definition_tool_catalog(),
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
@@ -87,12 +92,15 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         ctx.clone(),
         ExecRequest {
             code: r#"
-                    const worker = async () => {
-                      const stamp = new Date().toISOString();
-                      const ms = Date.now();
-                      const roll = Math.random();
-                      return { stamp: stamp, ms: ms, roll: roll };
-                    };
+                    const worker = await processes.create({
+                      dialect: "typescript",
+                      source: `const worker = async () => {
+                        const stamp = new Date().toISOString();
+                        const ms = Date.now();
+                        const roll = Math.random();
+                        return { stamp: stamp, ms: ms, roll: roll };
+                      };`
+                    });
                     await processes.start({ definition: worker });
                     finish("started");
                 "#

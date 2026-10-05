@@ -43,6 +43,11 @@ def plan(repo: Path):
                 continue
             old = match["value"].strip()
             target = default if baseline.enabled(match["attrs"], False) else synthetic
+            typed = baseline.typed_version(old)
+            if typed is not None:
+                changes[match.span("value")] = (f"{typed[0]}::ONE" if target == 1
+                                                else f"{typed[0]}::new({target}).unwrap()")
+                continue
             if re.fullmatch(r"[A-Z][A-Z0-9_]*(?:\s*\+\s*1)?", old):
                 alias = old.split()[0]
                 constant(path, alias, default, default)

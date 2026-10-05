@@ -108,9 +108,10 @@ fn assert_exact_globals(state: &RlmExecutionState, names: &[&str], after: &str) 
 /// ports under `handler`, with the process service journaling its env and
 /// signal routes on the double's deployment host.
 async fn process_context<'h>(
-    double: &lash_restate_test::RestateTestBackend,
+    table: &crate::testing::DoubleProcesses,
     handler: &'h lash_restate_test::OpenHandler,
 ) -> lash_core::RuntimeExecutionContext<'h> {
+    let double = table.double();
     let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::sqlite_memory_artifact_store().await;
     let backend = double.lash_backend();
@@ -131,6 +132,24 @@ async fn process_context<'h>(
             lash_core::MaxToolCalls::new(1024),
         )
     };
+    let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+        backend.clone(),
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                process_engine_surface(LashlangSurface::default()),
+                backend.worker_recovery(),
+            ),
+        ),
+    );
+    table.install_worker(
+        lash_core::testing::test_code_protocol_factories(),
+        runtime_host,
+    );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         hand_over_awaits: None,
         registry: backend.process_registry(),
@@ -141,8 +160,13 @@ async fn process_context<'h>(
     });
     lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(double, handler),
-        Arc::new(ProcessControlToolProvider),
-        process_control_tool_catalog(),
+        process_definition_tool_provider(
+            Arc::new(ProcessControlToolProvider),
+            LashlangSurface::default(),
+            lash_vm_client::service::Service::default()
+                .with_recovery_store(backend.worker_recovery()),
+        ),
+        process_definition_tool_catalog(),
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
@@ -190,10 +214,10 @@ const CELL_2_GLOBALS: &[&str] = &[
 fn session_globals_survive_cells_and_reload_and_private_slots_never_do() {
     block_on(async {
         let mut state = RlmExecutionState::for_engine("typescript");
-        let process_double =
-            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let table = crate::testing::DoubleProcesses::new(SEED).await;
+        let process_double = table.double();
         let first = run(
-            &process_double,
+            process_double,
             &mut state,
             r#"let answer = 41;
 const box = { n: 1 };
@@ -226,13 +250,16 @@ const total = [1, 2, 3].map((value) => value * 2).length;"#,
             .expect("open the process cell's handler");
         let second = run_in(
             &mut state,
-            process_context(&process_double, &process_handler).await,
+            process_context(&table, &process_handler).await,
             r#"let reader = null;
 if (counter > 0) {
   let answer = 5;
   reader = () => answer;
 }
-const worker = async () => await waitSignal("ready");
+const worker = await processes.create({
+  dialect: "typescript",
+  source: 'const worker = async () => await waitSignal("ready");'
+});
 const handle = await processes.start({ definition: worker });
 const later = reader() + answer;
 const from_host = host_config.label;"#,
@@ -250,7 +277,7 @@ const from_host = host_config.label;"#,
         // Cell 3's block shadow lowers to the same generated slot cell 2's
         // did; neither survives its cell, so nothing stale collides.
         let third = run(
-            &process_double,
+            process_double,
             &mut state,
             r#"if (counter > 0) {
   let answer = 7;

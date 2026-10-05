@@ -86,8 +86,12 @@ async fn run_one_slot_process_await() {
         .await;
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(table.double(), &handler),
-        Arc::new(ProcessControlToolProvider),
-        process_control_tool_catalog(),
+        process_definition_tool_provider(
+            Arc::new(ProcessControlToolProvider),
+            surface.clone(),
+            workers.clone(),
+        ),
+        process_definition_tool_catalog(),
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
@@ -105,7 +109,10 @@ async fn run_one_slot_process_await() {
                     ctx,
                     ExecRequest {
                         code: r#"
-                            const worker = async () => { return "done"; };
+                            const worker = await processes.create({
+                        dialect: "typescript",
+                        source: 'const worker = async () => { return "done"; };'
+                    });
                             const handle = await processes.start({ definition: worker });
                             finish(await handle);
                         "#

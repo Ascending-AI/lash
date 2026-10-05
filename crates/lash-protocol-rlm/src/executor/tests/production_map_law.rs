@@ -359,6 +359,7 @@ fn production_rlm_map_is_the_compiled_inventory_for_every_loop_kind() {
 /// braced and an unbraced arm, a callback, a labelled effect, and a literal
 /// nested in it that it starts in turn.
 const PROCESS_CORPUS: &str = r#"
+const worker = await processes.create({ dialect: "typescript", source: `
 const worker = async (limit: number) => {
   const box = { value: 0 };
   for (const step of [1, 2]) {
@@ -373,16 +374,12 @@ const worker = async (limit: number) => {
   const doubled = [1, 2].map((item) => item * 2);
   /** @label Labelled emit */
   await processes.emit({ value: doubled });
-  const inner = async () => {
-    for (const round of [1]) {
-      await processes.emit({ value: round });
-      await processes.emit({ value: "inner" });
-    }
-    return 1;
-  };
+  const inner = await processes.create({ dialect: "typescript",
+    source: 'const inner = async () => { for (const round of [1]) { await processes.emit({ value: round }); await processes.emit({ value: "inner" }); } return 1; };'
+  });
   const nested = await processes.start({ definition: inner });
   return box.value;
-};
+};` });
 const started = await processes.start({ definition: worker, args: { limit: 3 } });
 finish("started");
 "#;
@@ -390,6 +387,63 @@ finish("started");
 #[tokio::test]
 async fn production_process_map_is_the_compiled_inventory_after_a_store_round_trip() {
     process_map_fixture(lash_vm_client::service::Service::default()).await;
+}
+
+// Definitions and their module manifests are acquired atomically in the
+// double's store set. Publish the same bytes to the separately opened file
+// store the traced engine decodes, retaining both parts of the fixture.
+struct ProcessMapModuleStore {
+    definitions: Arc<dyn lash_core::ModuleArtifactStore>,
+    decoded: Arc<dyn lash_core::ModuleArtifactStore>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ModuleArtifactStore for ProcessMapModuleStore {
+    fn durability_tier(&self) -> lash_core::DurabilityTier {
+        self.decoded.durability_tier()
+    }
+
+    async fn publish_module_artifact(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        module_ref: &str,
+        bytes: &[u8],
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        self.definitions
+            .publish_module_artifact(claim, module_ref, bytes)
+            .await?;
+        self.decoded
+            .publish_module_artifact(claim, module_ref, bytes)
+            .await
+    }
+
+    async fn acquire_module_artifact(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        self.definitions
+            .acquire_module_artifact(claim, module_ref)
+            .await?;
+        self.decoded
+            .acquire_module_artifact(claim, module_ref)
+            .await
+    }
+
+    async fn end_module_referrer(
+        &self,
+        cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        self.definitions.end_module_referrer(cleanup).await?;
+        self.decoded.end_module_referrer(cleanup).await
+    }
+
+    async fn get_module_artifact(
+        &self,
+        module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
+        self.decoded.get_module_artifact(module_ref).await
+    }
 }
 
 async fn process_map_fixture(workers: lash_vm_client::service::Service) {
@@ -446,10 +500,14 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
         )
         .with_worker_service(workers.clone())
     };
-    let module_store = Arc::clone(engine_store.store());
+    let module_store: Arc<dyn lash_core::ModuleArtifactStore> = Arc::new(ProcessMapModuleStore {
+        definitions: table.backend().module_artifacts(),
+        decoded: Arc::clone(cell_store.store()),
+    });
+    let worker_modules = Arc::clone(&module_store);
     let worker_backend =
         lash_core::testing::runtime_helpers::LayeredBackend::over(table.backend().clone())
-            .map_module_artifacts(move |_| module_store)
+            .map_module_artifacts(move |_| worker_modules)
             .into_backend();
     let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         worker_backend,
@@ -465,6 +523,16 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
     table.install_worker(
         {
             let mut factories = lash_core::testing::test_code_protocol_factories();
+            factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("process-map-create"),
+                lash_core::plugin::PluginSpec::new().with_tool_provider(Arc::new(
+                    lash_lashlang_runtime::process_create_tool_provider(
+                        "typescript",
+                        surface.clone(),
+                        workers.clone(),
+                    ),
+                )),
+            )));
             factories.push(Arc::new(
                 lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                     lash_core::lifetime::session_or_starter,
@@ -490,10 +558,19 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
                 )),
         ),
     });
+    let mut cell_ports = crate::testing::double_ports(table.double(), &handler)
+        .with_module_artifact_store(table.backend(), module_store);
+    cell_ports.process_engines = lash_core::ProcessEngineRegistry::new().with_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(traced_engine()),
+    );
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
-        crate::testing::double_ports(table.double(), &handler),
-        Arc::new(ProcessControlToolProvider),
-        process_control_tool_catalog(),
+        cell_ports,
+        process_definition_tool_provider(
+            Arc::new(ProcessControlToolProvider),
+            surface.clone(),
+            workers.clone(),
+        ),
+        process_definition_tool_catalog(),
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(

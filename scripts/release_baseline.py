@@ -2,8 +2,8 @@
 """Inventory source-declared constants, check the 1.0 baseline,
 or write the value tables generated from the inventory.
 
-The resolver accepts literal counters, string identities and local constant
-aliases with integer addition/subtraction. It evaluates cfg(feature =
+The resolver accepts literal counters, typed FormatVersion values, string
+identities and local constant aliases with integer addition/subtraction. It evaluates cfg(feature =
 "synthetic-next") in both tiers. Unsupported expressions, missing definitions,
 duplicate active definitions and unregistered versions fail closed.
 """
@@ -78,6 +78,21 @@ def definitions(text: str):
     return list(CONST.finditer(without_comments(text)))
 
 
+def typed_version(expression: str):
+    """A FormatVersion constructor's qualified type and nonzero u32 value."""
+    match = re.fullmatch(
+        r"(?P<type>(?:[A-Za-z_][A-Za-z0-9_]*::)*FormatVersion)::"
+        r"(?:ONE|new\((?P<value>[0-9][0-9_]*)\)\.unwrap\(\))",
+        re.sub(r"\s+", "", expression),
+    )
+    if match is None:
+        return None
+    version = 1 if match["value"] is None else int(match["value"].replace("_", ""))
+    if not 0 < version <= 0xFFFF_FFFF:
+        raise BaselineError(f"FormatVersion must be a nonzero u32: {expression!r}")
+    return match["type"], version
+
+
 def resolve(text: str, name: str, synthetic: bool):
     constants = {}
     for match in definitions(text):
@@ -90,6 +105,9 @@ def resolve(text: str, name: str, synthetic: bool):
         if len(candidates) != 1:
             raise BaselineError(f"{symbol}: expected one active definition, found {len(candidates)}")
         expression = candidates[0]["value"].strip()
+        typed = typed_version(expression)
+        if typed is not None:
+            return typed[1]
         expression = re.sub(r"\b(\d[\d_]*)(?:u(?:8|16|32|64|128|size)|i(?:8|16|32|64|128|size))\b", r"\1", expression)
         try:
             node = ast.parse(expression, mode="eval").body

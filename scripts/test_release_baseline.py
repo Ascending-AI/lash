@@ -236,6 +236,40 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
             with self.subTest(text=text), self.assertRaises(baseline.BaselineError):
                 baseline.resolve(text, name, False)
 
+    def test_typed_format_versions_resolve_and_reset_as_typed_constants(self):
+        for expression, expected in [
+            ("FormatVersion::ONE", 1),
+            ("lash_core::FormatVersion::ONE", 1),
+            ("crate::FormatVersion::new(4_294_967_295).unwrap()", 0xFFFF_FFFF),
+            ("lash_core :: FormatVersion :: new(7).unwrap()", 7),
+        ]:
+            with self.subTest(expression=expression):
+                text = f"const ERROR_VERSION: FormatVersion = {expression};"
+                self.assertEqual(baseline.resolve(text, "ERROR_VERSION", False), expected)
+                self.assertEqual(baseline.resolve(text, "ERROR_VERSION", True), expected)
+        for expression in ["FormatVersion::new(0).unwrap()",
+                           "FormatVersion::new(4_294_967_296).unwrap()",
+                           "FormatVersion::new(next()).unwrap()"]:
+            with self.subTest(expression=expression), self.assertRaises(baseline.BaselineError):
+                baseline.resolve(f"const V: FormatVersion = {expression};", "V", False)
+
+        scratch_root = ROOT / ".kiln/FIG-5043/release-baseline-tests"
+        scratch_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch_root) as temporary:
+            repo = Path(temporary)
+            self.scratch(repo)
+            source = repo / "crates/lash-upgrade-harness/src/node/h3.rs"
+            source.write_text(source.read_text().replace(
+                "lash_core::FormatVersion::ONE;", "lash_core::FormatVersion::new(7).unwrap();"))
+            _, edits = reset.plan(repo)
+            self.assertIn("const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;",
+                          edits[source])
+            for path, text in edits.items():
+                path.write_text(text)
+            values = {row["key"]: (row["default"], row["synthetic"])
+                      for row in baseline.inventory(repo)}
+            self.assertEqual(values["crates/lash-upgrade-harness/src/node/h3.rs:ERROR_VERSION"], (1, 1))
+
     def test_comments_cannot_supply_constants_or_hide_cfg(self):
         text = '''
 // const V: u32 = 99;

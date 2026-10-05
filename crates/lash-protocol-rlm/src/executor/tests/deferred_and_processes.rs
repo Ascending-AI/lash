@@ -1438,6 +1438,56 @@ pub(super) fn process_control_tool_catalog() -> lash_core::ToolCatalog {
     lash_core::ToolCatalog::from_tool_definitions(process_control_tool_definitions())
 }
 
+/// Cell fixtures publish an immutable definition through the shipped create tool.
+pub(super) fn process_definition_tool_provider(
+    inner: Arc<dyn lash_core::ToolProvider>,
+    surface: LashlangSurface,
+    workers: lash_vm_client::service::Service,
+) -> Arc<dyn lash_core::ToolProvider> {
+    Arc::new(ProcessDefinitionToolProvider {
+        inner,
+        create: Arc::new(lash_lashlang_runtime::process_create_tool_provider(
+            "typescript",
+            surface,
+            workers,
+        )),
+    })
+}
+
+pub(super) fn process_definition_tool_catalog() -> lash_core::ToolCatalog {
+    let mut definitions = process_control_tool_definitions();
+    definitions.push(lash_lashlang_runtime::process_create_tool_definition());
+    lash_core::ToolCatalog::from_tool_definitions(definitions)
+}
+
+struct ProcessDefinitionToolProvider {
+    inner: Arc<dyn lash_core::ToolProvider>,
+    create: Arc<dyn lash_core::ToolProvider>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for ProcessDefinitionToolProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        let mut manifests = self.inner.tool_manifests();
+        manifests.extend(self.create.tool_manifests());
+        manifests
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        self.create
+            .resolve_contract(name)
+            .or_else(|| self.inner.resolve_contract(name))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() == "create_process" {
+            self.create.execute(call).await
+        } else {
+            self.inner.execute(call).await
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ProcessControlToolProvider {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
@@ -1918,8 +1968,13 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         .await;
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(table.double(), &handler),
-        Arc::new(ProcessControlToolProvider),
-        process_control_tool_catalog(),
+        process_definition_tool_provider(
+            Arc::new(ProcessControlToolProvider),
+            surface.clone(),
+            lash_vm_client::service::Service::default()
+                .with_recovery_store(table.backend().worker_recovery()),
+        ),
+        process_definition_tool_catalog(),
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
@@ -1933,7 +1988,10 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         ctx.clone(),
         ExecRequest {
             code: r#"
-                    const worker = async () => await waitSignal("ready");
+                    const worker = await processes.create({
+                        dialect: "typescript",
+                        source: 'const worker = async () => await waitSignal("ready");'
+                    });
                     const handle = await processes.start({ definition: worker });
                     await processes.signal({ handle: handle, name: "ready", payload: { ok: true } });
                     finish("signal-sent");
@@ -2060,8 +2118,13 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         .await;
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(table.double(), &handler),
-        Arc::new(ProcessControlToolProvider),
-        process_control_tool_catalog(),
+        process_definition_tool_provider(
+            Arc::new(ProcessControlToolProvider),
+            surface.clone(),
+            lash_vm_client::service::Service::default()
+                .with_recovery_store(table.backend().worker_recovery()),
+        ),
+        process_definition_tool_catalog(),
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
@@ -2075,7 +2138,10 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         ctx.clone(),
         ExecRequest {
             code: r#"
-                    const worker = async () => { return "done"; };
+                    const worker = await processes.create({
+                        dialect: "typescript",
+                        source: 'const worker = async () => { return "done"; };'
+                    });
                     const handle = await processes.start({ definition: worker });
                     finish("started");
                 "#
@@ -2152,11 +2218,30 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
     });
     let mut catalog_definitions = vec![status_inspect_definition()];
     catalog_definitions.extend(process_control_tool_definitions());
+    catalog_definitions.push(lash_lashlang_runtime::process_create_tool_definition());
     let tool_catalog = lash_core::ToolCatalog::from_tool_definitions(catalog_definitions);
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
         lashlang::LashlangHostCatalog::new(),
+    );
+    let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+        table.backend().clone(),
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                process_engine_surface(surface.clone()),
+                table.backend().worker_recovery(),
+            ),
+        ),
+    );
+    table.install_worker(
+        lash_core::testing::test_code_protocol_factories(),
+        runtime_host,
     );
     let session_policy = lash_core::SessionPolicy {
         model: Some(lash_core::LlmProfileConfig::new(
@@ -2186,7 +2271,12 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         .await;
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         crate::testing::double_ports(table.double(), &handler),
-        tool_provider,
+        process_definition_tool_provider(
+            tool_provider,
+            surface.clone(),
+            lash_vm_client::service::Service::default()
+                .with_recovery_store(table.backend().worker_recovery()),
+        ),
         tool_catalog,
         None,
         processes,
@@ -2200,7 +2290,10 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         ctx,
         ExecRequest {
             code: r#"
-                    const worker = async () => { return "done"; };
+                    const worker = await processes.create({
+                        dialect: "typescript",
+                        source: 'const worker = async () => { return "done"; };'
+                    });
                     const handle = await processes.start({ definition: worker });
                     const processId = handle.process_id;
                     const status = await status_tool.inspect({ process_id: processId });
