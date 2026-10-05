@@ -369,14 +369,19 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         &'run self,
         effect_name: String,
         future: Fut,
-    ) -> impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+    ) -> (
+        impl std::future::Future<Output = ()> + Send + 'run,
+        impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
+    )
     where
         'ctx: 'run,
         T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>> + Send + 'run,
     {
         let context = Arc::clone(self);
-        async move { context.run_json_or_retry_send(effect_name, future).await }
+        (std::future::ready(()), async move {
+            context.run_json_or_retry_send(effect_name, future).await
+        })
     }
 
     fn run_json_schedule_or_retry_send<'run, T, Fut>(
@@ -1183,14 +1188,19 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         &'run self,
         effect_name: String,
         future: Fut,
-    ) -> impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+    ) -> (
+        impl std::future::Future<Output = ()> + Send + 'run,
+        impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
+    )
     where
         'ctx: 'run,
         T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>> + Send + 'run,
     {
         let context = Arc::clone(self);
-        async move { context.run_json_or_retry_send(effect_name, future).await }
+        (std::future::ready(()), async move {
+            context.run_json_or_retry_send(effect_name, future).await
+        })
     }
 
     fn run_json_schedule_or_retry_send<'run, T, Fut>(

@@ -1374,7 +1374,8 @@ pub mod durability {
         JournalReplay, ProcessDriveStep, RecordedJournal, RecordedKeyRange, RunRecordStep,
     };
     pub use lash_core::tool_dispatch::{
-        RunAttemptHandle, RunAttemptStep, RunRetryTimer, RunRetryWake,
+        RunAttemptBody, RunAttemptHandle, RunAttemptResult, RunAttemptStep, RunRetryTimer,
+        RunRetryWake,
     };
     pub use lash_core::{
         EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,
@@ -1395,10 +1396,10 @@ pub mod runtime {
     pub use lash_core::tool_dispatch::{
         BeforeCheckReply, DecidedCall, DeclaredStartObligation, DeclaredStartObligationRefusal,
         IsolatedProcessDescriptor, IsolatedStartRefusal, IsolatedToolStart, RecordedIsolatedStart,
-        RunAggregateOutcome, RunCoordinator, RunCutRefusal, SingletonAttempt, SingletonBodyOutcome,
-        SingletonCapture, SingletonDrift, SingletonPreparedRequest, SingletonPresentationError,
-        SingletonRunError, SingletonStart, SingletonTerminal, SingletonToolCall,
-        SingletonToolHandlers,
+        RunAggregateOutcome, RunBodies, RunCoordinator, RunCutRefusal, SingletonAttempt,
+        SingletonBodyOutcome, SingletonCapture, SingletonDrift, SingletonPreparedRequest,
+        SingletonPresentationError, SingletonRunError, SingletonStart, SingletonTerminal,
+        SingletonToolCall, SingletonToolHandlers,
     };
     pub use lash_core::tool_run::{
         AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AggregateConsumer, AggregateLeaf,

@@ -104,11 +104,12 @@ in written order. Duplicate operands execute and consume one unique call.
 An empty race and a pending Deferred source carry no fabricated result.
 
 `consume_aggregate` exposes only the values selected by that consumer. Losing
-calls remain Live under the Run. `beside` polls issued X handles alongside a
-program effect, and protected presentation polls those handles while it drains.
-`drain_protected` records presentation and incorporation without consumption;
-a later consumer records its own `Consumed` fact. Coordination retains material
-references, rather than storing another copy of the loser's output.
+calls remain Live under the Run. `RunBodies` polls issued X bodies beside every
+owner wait — the program, its requests and each coordinator frame — while
+their results are awaited only inside those frames. `drain_protected` records
+presentation and incorporation without consumption; a later consumer records
+its own `Consumed` fact. Coordination retains material references, rather than
+storing another copy of the loser's output.
 
 The aggregate owner supplies its clock. Timer admission records the original
 instant; recovery registers the remaining wait through the existing Restate

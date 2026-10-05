@@ -54,45 +54,6 @@ pub(super) struct Pending<'a> {
     handle: Handle<'a>,
 }
 
-impl<'a> Pending<'a> {
-    pub(super) fn handle(&self) -> Handle<'a> {
-        self.handle.clone()
-    }
-}
-
-/// Poll the already issued X handles alongside a program effect or protected
-/// drain. Readiness never decides a call: only its recorded schedule does.
-pub(super) async fn poll_beside<F: std::future::Future>(
-    handles: &[Handle<'_>],
-    future: F,
-) -> Result<F::Output, RuntimeEffectControllerError> {
-    tokio::pin!(future);
-    let mut handles: Vec<_> = handles.iter().cloned().map(Some).collect();
-    std::future::poll_fn(|context| {
-        // Issue the program command first on every replay. Once that future
-        // returns, its context may have failed; do not poll another SDK wait.
-        if let std::task::Poll::Ready(output) = future.as_mut().poll(context) {
-            return std::task::Poll::Ready(Ok(output));
-        }
-        for handle in &mut handles {
-            let Some(active) = handle else {
-                continue;
-            };
-            match std::pin::Pin::new(active).poll(context) {
-                std::task::Poll::Ready(Err(error)) => {
-                    return std::task::Poll::Ready(Err(error));
-                }
-                // This polling clone is done. The coordinator still owns
-                // its unpolled clone and accepts the receipt in the schedule.
-                std::task::Poll::Ready(Ok(_)) => *handle = None,
-                std::task::Poll::Pending => {}
-            }
-        }
-        std::task::Poll::Pending
-    })
-    .await
-}
-
 fn captured(
     entry: &RunAttemptEntry,
     owner: &MaterialOwner,
@@ -133,7 +94,9 @@ impl<'a> RunCoordinator<'a> {
     ) -> Result<Vec<(ToolCallId, DecidedCall)>, SingletonRunError> {
         self.begin_frame()?;
         let result = self
-            .start_round_inner(calls, capacity, handlers, retry, None)
+            .bodies
+            .clone()
+            .beside(self.start_round_inner(calls, capacity, handlers, retry, None))
             .await;
         self.active_frame = false;
         self.note_fault(&result);
@@ -275,7 +238,7 @@ impl<'a> RunCoordinator<'a> {
         &mut self,
     ) -> Result<Option<(ToolCallId, DecidedCall)>, SingletonRunError> {
         self.begin_frame()?;
-        let result = self.progress_inner().await;
+        let result = self.bodies.clone().beside(self.progress_inner()).await;
         self.active_frame = false;
         self.note_fault(&result);
         result
@@ -859,17 +822,14 @@ impl<'a> RunCoordinator<'a> {
             .collect()
     }
 
-    fn issue_attempt<'run>(
+    fn issue_attempt(
         &self,
         call: &SingletonToolCall,
         member: &AdmittedCall,
         request: &SingletonPreparedRequest,
         handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         ordinal: AttemptOrdinal,
-    ) -> Result<Handle<'run>, SingletonRunError>
-    where
-        'a: 'run,
-    {
+    ) -> Result<Handle<'a>, SingletonRunError> {
         self.journal.scoped.admit_journal_write()?;
         let owner = self.journal.materials.owner.clone();
         let name = record_name(&call.call_id, &format!("attempt:{ordinal}"));
@@ -895,9 +855,11 @@ impl<'a> RunCoordinator<'a> {
             .await
         });
         let controller = self.journal.scoped.controller();
-        let attempt = controller.start_run_attempt(name, step);
+        let crate::tool_dispatch::RunAttemptHandle { body, result } =
+            controller.start_run_attempt(name, step);
+        self.bodies.issue(body);
         let handle = async move {
-            let entry = attempt.await?;
+            let entry = result.await?;
             Ok(Ready::Attempt(std::sync::Arc::new(entry)))
         }
         .boxed()

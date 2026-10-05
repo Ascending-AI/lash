@@ -418,79 +418,78 @@ async fn l06_race_returns_before_inline_loser_and_keeps_it_unconsumed() {
     let backend = lash_restate_test::backend(4882, ServerConfig::default())
         .await
         .unwrap();
-    let attempt: lash_restate_test::HandlerAttempt =
-        {
-            let returned = Arc::clone(&returned);
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let returned = Arc::clone(&returned);
+        let probe = Arc::clone(&probe);
+        Arc::new(move |scoped| {
+            let calls = Arc::clone(&calls);
             let probe = Arc::clone(&probe);
-            Arc::new(move |scoped| {
-                let calls = Arc::clone(&calls);
-                let probe = Arc::clone(&probe);
-                let returned = Arc::clone(&returned);
-                Box::pin(async move {
-                    let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
-                    let mut run =
-                        RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
-                    let plan = aggregate_plan("early-race", &round, vec![0, 1]);
-                    run.start_aggregate(
-                        &plan,
-                        &round,
-                        lash_core::tool_run::CapacityScope::Held,
-                        Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
-                        Default::default(),
-                        &SystemClock,
-                    )
+            let returned = Arc::clone(&returned);
+            Box::pin(async move {
+                let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+                let mut run =
+                    RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                let plan = aggregate_plan("early-race", &round, vec![0, 1]);
+                run.start_aggregate(
+                    &plan,
+                    &round,
+                    lash_core::tool_run::CapacityScope::Held,
+                    Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                    Default::default(),
+                    &SystemClock,
+                )
+                .await
+                .unwrap();
+                let selected = run
+                    .consume_aggregate(&plan.key, AggregateConsumer::Race)
                     .await
                     .unwrap();
-                    let selected = run
-                        .consume_aggregate(&plan.key, AggregateConsumer::Race)
-                        .await
-                        .unwrap();
-                    assert!(matches!(
-                        selected,
-                        RunAggregateOutcome::Selected {
-                            operand: 0,
-                            fulfilled: true,
-                            reply: Some(_)
-                        }
-                    ));
-                    assert_eq!(run.lifecycle(), RunLifecycle::Live);
-                    assert!(!probe.gate_open.load(Ordering::SeqCst));
-                    assert!(probe.cancelled_calls.lock().unwrap().is_empty());
-                    run.beside(scoped.controller().record_run_record(
+                assert!(matches!(
+                    selected,
+                    RunAggregateOutcome::Selected {
+                        operand: 0,
+                        fulfilled: true,
+                        reply: Some(_)
+                    }
+                ));
+                assert_eq!(run.lifecycle(), RunLifecycle::Live);
+                assert!(!probe.gate_open.load(Ordering::SeqCst));
+                assert!(probe.cancelled_calls.lock().unwrap().is_empty());
+                run.bodies()
+                    .beside(scoped.controller().record_run_record(
                         UNRELATED.to_owned(),
                         unrelated_record(Arc::clone(&probe)),
                     ))
                     .await
-                    .unwrap()
                     .unwrap();
-                    assert!(probe.unrelated.load(Ordering::SeqCst));
-                    returned.store(true, Ordering::SeqCst);
-                    probe.gate_open.store(true, Ordering::SeqCst);
-                    probe.gate_wake.notify_waiters();
-                    run.progress().await.unwrap();
-                    run.drain_protected().await.unwrap();
-                    let consumed: Vec<_> = run
-                        .records()
-                        .iter()
-                        .flat_map(|record| &record.events)
-                        .filter_map(|event| match event {
-                            RunEvent::Consumed { call_id } => Some(call_id.clone()),
-                            _ => None,
-                        })
-                        .collect();
-                    assert_eq!(consumed, vec![round[0].call_id.clone()]);
-                    assert!(
-                        probe
-                            .presentations
-                            .lock()
-                            .unwrap()
-                            .contains(&round[1].call_id)
-                    );
-                    run.close().await.unwrap();
-                    assert_eq!(run.lifecycle(), RunLifecycle::Settled);
-                })
+                assert!(probe.unrelated.load(Ordering::SeqCst));
+                returned.store(true, Ordering::SeqCst);
+                probe.gate_open.store(true, Ordering::SeqCst);
+                probe.gate_wake.notify_waiters();
+                run.progress().await.unwrap();
+                run.drain_protected().await.unwrap();
+                let consumed: Vec<_> = run
+                    .records()
+                    .iter()
+                    .flat_map(|record| &record.events)
+                    .filter_map(|event| match event {
+                        RunEvent::Consumed { call_id } => Some(call_id.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(consumed, vec![round[0].call_id.clone()]);
+                assert!(
+                    probe
+                        .presentations
+                        .lock()
+                        .unwrap()
+                        .contains(&round[1].call_id)
+                );
+                run.close().await.unwrap();
+                assert_eq!(run.lifecycle(), RunLifecycle::Settled);
             })
-        };
+        })
+    };
     backend
         .run_in_handler(AdmittedScope::turn("session", "turn"), attempt)
         .await
@@ -1413,60 +1412,59 @@ async fn l06_l16_worker_loss_recovers_the_loser_without_closing_or_consuming_it(
     let crashes = lash_restate_test::CrashCount::new();
     assert!(backend.server().on_crash(crashes.listener()));
     let snapshots = Arc::new(Mutex::new(Vec::new()));
-    let attempt: lash_restate_test::HandlerAttempt =
-        {
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let probe = Arc::clone(&probe);
+        let snapshots = Arc::clone(&snapshots);
+        Arc::new(move |scoped| {
+            let calls = Arc::clone(&calls);
             let probe = Arc::clone(&probe);
             let snapshots = Arc::clone(&snapshots);
-            Arc::new(move |scoped| {
-                let calls = Arc::clone(&calls);
-                let probe = Arc::clone(&probe);
-                let snapshots = Arc::clone(&snapshots);
-                Box::pin(async move {
-                    let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
-                    let plan = aggregate_plan("replay", &round, vec![0, 1]);
-                    let mut run =
-                        RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
-                    run.start_aggregate(
-                        &plan,
-                        &round,
-                        lash_core::tool_run::CapacityScope::Held,
-                        Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
-                        Default::default(),
-                        &SystemClock,
-                    )
-                    .await
-                    .unwrap();
-                    assert!(matches!(
-                        run.consume_aggregate(&plan.key, AggregateConsumer::Race)
-                            .await
-                            .unwrap(),
-                        RunAggregateOutcome::Selected { operand: 0, .. }
-                    ));
-                    run.beside(scoped.controller().record_run_record(
+            Box::pin(async move {
+                let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+                let plan = aggregate_plan("replay", &round, vec![0, 1]);
+                let mut run =
+                    RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                run.start_aggregate(
+                    &plan,
+                    &round,
+                    lash_core::tool_run::CapacityScope::Held,
+                    Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                    Default::default(),
+                    &SystemClock,
+                )
+                .await
+                .unwrap();
+                assert!(matches!(
+                    run.consume_aggregate(&plan.key, AggregateConsumer::Race)
+                        .await
+                        .unwrap(),
+                    RunAggregateOutcome::Selected { operand: 0, .. }
+                ));
+                run.bodies()
+                    .beside(scoped.controller().record_run_record(
                         UNRELATED.to_owned(),
                         unrelated_record(Arc::clone(&probe)),
                     ))
                     .await
-                    .unwrap()
                     .unwrap();
-                    assert!(probe.cancelled_calls.lock().unwrap().is_empty());
-                    assert_eq!(
-                        run.request_cut(lash_core::BoundaryReason::JournalBudget)
-                            .phase,
-                        lash_core::tool_run::CutPhase::Quiescing
-                    );
-                    assert!(matches!(
-                        run.capture_cut(),
-                        Err(lash_core::tool_dispatch::RunCutRefusal::NotQuiescent)
-                    ));
-                    probe.gate_open.store(true, Ordering::SeqCst);
-                    probe.gate_wake.notify_waiters();
-                    let snapshot = run.quiesce().await.unwrap();
-                    assert_eq!(run.lifecycle(), RunLifecycle::Live);
-                    snapshots.lock().unwrap().push(snapshot);
-                })
+                assert!(probe.cancelled_calls.lock().unwrap().is_empty());
+                assert_eq!(
+                    run.request_cut(lash_core::BoundaryReason::JournalBudget)
+                        .phase,
+                    lash_core::tool_run::CutPhase::Quiescing
+                );
+                assert!(matches!(
+                    run.capture_cut(),
+                    Err(lash_core::tool_dispatch::RunCutRefusal::NotQuiescent)
+                ));
+                probe.gate_open.store(true, Ordering::SeqCst);
+                probe.gate_wake.notify_waiters();
+                let snapshot = run.quiesce().await.unwrap();
+                assert_eq!(run.lifecycle(), RunLifecycle::Live);
+                snapshots.lock().unwrap().push(snapshot);
             })
-        };
+        })
+    };
     tokio::time::timeout(
         Duration::from_secs(10),
         backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
@@ -1654,15 +1652,13 @@ async fn l05_l06_l09_generic_timer_and_admitted_handles_share_the_run() {
                 assert_eq!(run.lifecycle(), RunLifecycle::Live);
                 assert!(!probe.gate_open.load(Ordering::SeqCst));
                 assert!(probe.cancelled_calls.lock().unwrap().is_empty());
-                run.beside(
-                    scoped.controller().record_run_record(
+                run.bodies()
+                    .beside(scoped.controller().record_run_record(
                         UNRELATED.to_owned(),
                         unrelated_record(Arc::clone(&probe)),
-                    ),
-                )
-                .await
-                .unwrap()
-                .unwrap();
+                    ))
+                    .await
+                    .unwrap();
                 assert!(probe.unrelated.load(Ordering::SeqCst));
                 probe.gate_open.store(true, Ordering::SeqCst);
                 probe.gate_wake.notify_waiters();

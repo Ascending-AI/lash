@@ -308,12 +308,15 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     effect_name: String,
                     future: Fut,
-                ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+                ) -> (
+                    impl Future<Output = ()> + Send + 'run,
+                    impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
+                )
                 where 'ctx: 'run,
                       T: Serialize + DeserializeOwned + Send + 'static,
                       Fut: Future<Output = Result<T, String>> + Send + 'run,
                 {
-                    run_bridge::register(self, effect_name, None, future)
+                    run_bridge::issue(self, effect_name, None, future)
                 }
 
                 fn run_json_schedule_or_retry_send<'run, T, Fut>(

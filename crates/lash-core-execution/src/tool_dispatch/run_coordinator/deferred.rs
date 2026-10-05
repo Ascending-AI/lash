@@ -281,19 +281,16 @@ impl<'a> RunCoordinator<'a> {
                     .journal
                     .scoped
                     .turn_cancel_wait(tokio_util::sync::CancellationToken::new());
-                let handles = self
-                    .pending
-                    .iter()
-                    .map(super::parallel::Pending::handle)
-                    .collect::<Vec<_>>();
-                match super::parallel::poll_beside(
-                    &handles,
-                    self.journal
-                        .scoped
-                        .controller()
-                        .await_run_sources(subscriptions, cancel),
-                )
-                .await?
+                match self
+                    .bodies
+                    .clone()
+                    .beside(
+                        self.journal
+                            .scoped
+                            .controller()
+                            .await_run_sources(subscriptions, cancel),
+                    )
+                    .await
                 {
                     Ok(selected) => selected,
                     Err(error)

@@ -25,13 +25,16 @@ pub use pending_resolver::{
     consumer_hold_owner, discharge_abandoned_call, finish_parked_wait,
     model_visible_intent_outcomes,
 };
-pub use run_coordinator::{DecidedCall, RunAggregateOutcome, RunCoordinator, RunCutRefusal};
+pub use run_coordinator::{
+    DecidedCall, RunAggregateOutcome, RunBodies, RunCoordinator, RunCutRefusal,
+};
 pub use singleton_run::{
-    BeforeCheckReply, IsolatedProcessDescriptor, RecordedIsolatedStart, RunAttemptHandle,
-    RunAttemptStep, RunRetryTimer, RunRetryWake, SingletonAttempt, SingletonBodyOutcome,
-    SingletonCapture, SingletonDrift, SingletonPreparedRequest, SingletonPresentationError,
-    SingletonRunError, SingletonRunOutcome, SingletonStart, SingletonTerminal, SingletonToolCall,
-    SingletonToolHandlers, run_singleton_tool,
+    BeforeCheckReply, IsolatedProcessDescriptor, RecordedIsolatedStart, RunAttemptBody,
+    RunAttemptHandle, RunAttemptResult, RunAttemptStep, RunRetryTimer, RunRetryWake,
+    SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
+    SingletonPreparedRequest, SingletonPresentationError, SingletonRunError, SingletonRunOutcome,
+    SingletonStart, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
+    run_singleton_tool,
 };
 
 pub(crate) use atomic_attempt::AtomicToolAttempt;

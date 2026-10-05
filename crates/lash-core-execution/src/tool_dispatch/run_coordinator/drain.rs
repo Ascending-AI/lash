@@ -29,7 +29,7 @@ impl<'a> RunCoordinator<'a> {
         &mut self,
     ) -> Result<Vec<(ToolCallId, SingletonTerminal)>, SingletonRunError> {
         self.begin_frame()?;
-        let result = self.drain_inner().await;
+        let result = self.bodies.clone().beside(self.drain_inner()).await;
         self.active_frame = false;
         self.note_fault(&result);
         result
@@ -54,12 +54,7 @@ impl<'a> RunCoordinator<'a> {
         owed: Owed<'a>,
         consume: bool,
     ) -> Result<SingletonTerminal, SingletonRunError> {
-        let handles = self
-            .pending
-            .iter()
-            .map(parallel::Pending::handle)
-            .collect::<Vec<_>>();
-        parallel::poll_beside(&handles, self.present_inner(rank, owed, consume)).await?
+        self.present_inner(rank, owed, consume).await
     }
 
     async fn present_inner(

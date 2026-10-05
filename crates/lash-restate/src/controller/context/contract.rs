@@ -55,13 +55,17 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// runs it again (FIG-3683). The fault's text is all the engine keeps of
     /// the attempt, and nothing after the step runs in it: the returned
     /// future never resolves to the fault.
-    /// Register X before waiting. The SDK owns a value callback and the returned
-    /// handle keeps its borrowed body under the logical Run owner.
+    /// Register X before waiting. The SDK owns a value callback; the pair
+    /// splits X's borrowed body from its result. The owner polls the body
+    /// half beside its waits and awaits the result half only in a frame.
     fn run_json_eager_or_retry_send<'run, T, Fut>(
         &'run self,
         effect_name: String,
         future: Fut,
-    ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+    ) -> (
+        impl Future<Output = ()> + Send + 'run,
+        impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run,
+    )
     where
         'ctx: 'run,
         T: Serialize + DeserializeOwned + Send + 'static,

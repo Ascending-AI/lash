@@ -679,8 +679,15 @@ pub type RunAttemptStep<'run> = std::pin::Pin<
     >,
 >;
 
-/// An independently registered X; awaiting it does not register another command.
-pub type RunAttemptHandle<'run> = std::pin::Pin<
+/// The borrowed body of one issued X. It progresses only after the engine
+/// starts X's callback and completes once the body finished (its value
+/// submitted) or X settled without running it. It never awaits an
+/// unfinished X result, so the logical owner polls it beside every wait.
+pub type RunAttemptBody<'run> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'run>>;
+
+/// X's durable result; only a coordinator frame awaits it.
+pub type RunAttemptResult<'run> = std::pin::Pin<
     Box<
         dyn std::future::Future<
                 Output = Result<crate::tool_run::RunAttemptEntry, RuntimeEffectControllerError>,
@@ -688,6 +695,14 @@ pub type RunAttemptHandle<'run> = std::pin::Pin<
             + 'run,
     >,
 >;
+
+/// An independently registered X; awaiting it does not register another command.
+pub struct RunAttemptHandle<'run> {
+    /// The borrowed body half the owner polls beside its waits.
+    pub body: RunAttemptBody<'run>,
+    /// The result half a coordinator frame awaits.
+    pub result: RunAttemptResult<'run>,
+}
 
 /// A durable backoff registered before its result is awaited.
 pub type RunRetryTimer<'run> = std::pin::Pin<

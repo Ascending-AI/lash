@@ -105,12 +105,16 @@ impl EffectLayer for NativeCapture {
         name: String,
         step: lash_core::tool_dispatch::RunAttemptStep<'run>,
     ) -> lash_core::tool_dispatch::RunAttemptHandle<'run> {
-        let acknowledged = inner.start_run_attempt(name.clone(), step);
-        Box::pin(async move {
-            let entry = acknowledged.await?;
-            self.retain(name, DecodedRecord::Attempt(entry.clone()))?;
-            Ok(entry)
-        })
+        let lash_core::tool_dispatch::RunAttemptHandle { body, result } =
+            inner.start_run_attempt(name.clone(), step);
+        lash_core::tool_dispatch::RunAttemptHandle {
+            body,
+            result: Box::pin(async move {
+                let entry = result.await?;
+                self.retain(name, DecodedRecord::Attempt(entry.clone()))?;
+                Ok(entry)
+            }),
+        }
     }
 }
 

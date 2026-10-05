@@ -39,6 +39,7 @@
 use std::collections::BTreeMap;
 
 mod aggregate;
+mod bodies;
 mod capture;
 use capture::capture_attempt;
 mod continuation;
@@ -49,6 +50,7 @@ mod start;
 use start::{bind_start, discharge_start, drain_start, launch_start, recorded_obligation};
 
 pub use aggregate::RunAggregateOutcome;
+pub use bodies::RunBodies;
 
 use lash_sansio::ToolCallId;
 
@@ -732,6 +734,8 @@ struct PresentedCall {
 /// The calls of one logical Run, recorded in its opener journal.
 pub struct RunCoordinator<'a> {
     journal: RunJournal<'a>,
+    /// The issued X bodies every wait of this Run drives beside it.
+    bodies: RunBodies<'a>,
     /// Decided calls whose presentation is owed, by rank.
     owed: BTreeMap<u64, Owed<'a>>,
     pending: Vec<parallel::Pending<'a>>,
@@ -851,6 +855,11 @@ impl<'a> RunCoordinator<'a> {
     pub(crate) fn owner(&self) -> &EffectOpener {
         &self.journal.owner
     }
+    /// The issued bodies; the owner drives them beside waits outside
+    /// coordinator frames.
+    pub fn bodies(&self) -> RunBodies<'a> {
+        self.bodies.clone()
+    }
     pub(crate) fn segment(&self) -> SegmentOrdinal {
         self.journal.segment
     }
@@ -879,6 +888,7 @@ impl<'a> RunCoordinator<'a> {
                 records: Vec::new(),
                 entries: Vec::new(),
             },
+            bodies: RunBodies::new(),
             owed: BTreeMap::new(),
             pending: Vec::new(),
             attempts: Vec::new(),
@@ -929,7 +939,11 @@ impl<'a> RunCoordinator<'a> {
         handlers: &'a dyn SingletonToolHandlers,
     ) -> Result<DecidedCall, SingletonRunError> {
         self.begin_frame()?;
-        let result = self.decide_inner(call, handlers).await;
+        let result = self
+            .bodies
+            .clone()
+            .beside(self.decide_inner(call, handlers))
+            .await;
         self.active_frame = false;
         self.note_fault(&result);
         result

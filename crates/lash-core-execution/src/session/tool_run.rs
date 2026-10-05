@@ -1,5 +1,5 @@
 //! The invocation that owns a logical Run serves calls from every cell.
-//! Requests carry values; the borrowed coordinator and issued X handles stay
+//! Requests carry values; the borrowed coordinator and issued X bodies stay
 //! on the owner's stack until Closing or a retained physical cut.
 
 use std::sync::Arc;
@@ -230,73 +230,87 @@ impl<'run> RuntimeExecutionContext<'run> {
                 .await
                 .map_err(SingletonRunError::into_controller_error)?
                 .with_admitted_environment(environment);
+            let bodies = run.bodies();
             let (send, mut receive) = channel();
             let mut context = self.clone();
             context.tool_run = Some(ToolRunChannel(send));
             let future = program(context);
             tokio::pin!(future);
             let mut closed = false;
-            loop {
-                // The VM worker can enqueue its next request asynchronously.
-                // Do not await X while waiting for that request: replay must
-                // register its command prefix before awaiting an older X.
-                let event = select(future.as_mut(), Box::pin(receive.recv())).await;
-                match event {
-                    Either::Left((output, _)) => return Ok(output),
-                    Either::Right((
-                        Some(Request::Admit {
-                            request,
-                            parent,
-                            environment,
-                            attribution,
-                            reply,
-                        }),
-                        _,
-                    )) => {
-                        let result = handlers
-                            .admit_aggregate(
-                                &mut run,
-                                request,
-                                parent.map(|parent| *parent),
-                                *environment,
-                                *attribution,
-                            )
-                            .await;
-                        let _ = reply.send(result);
-                    }
-                    Either::Right((
-                        Some(Request::Consume {
-                            cursor,
-                            consumer,
-                            wait,
-                            host_control,
-                            reply,
-                        }),
-                        _,
-                    )) => {
-                        let result = handlers
-                            .consume_aggregate(&mut run, cursor, consumer, wait, host_control)
-                            .await;
-                        let _ = reply.send(result);
-                    }
-                    Either::Right((Some(Request::Capture { reason, reply }), _)) => {
-                        let result = match materials.as_deref() {
-                            Some(materials) => state.capture_run(&mut run, reason, materials).await,
-                            None => Err(ContinuationRefusal::UnretainedMaterial.into()),
-                        };
-                        let _ = reply.send(result);
-                    }
-                    Either::Right((Some(Request::Close(reply)), _)) => {
-                        let result = if closed { Ok(()) } else { run.close().await };
-                        closed = result.is_ok();
-                        if result.is_ok() {
-                            state.finish_run();
+            bodies
+                .beside(async {
+                    loop {
+                        // Bodies of issued X progress beside the program and
+                        // every request; their results are awaited only inside
+                        // coordinator frames, so replay registers its command
+                        // prefix before awaiting any unfinished X.
+                        let event = select(future.as_mut(), Box::pin(receive.recv())).await;
+                        match event {
+                            Either::Left((output, _)) => break Ok(output),
+                            Either::Right((
+                                Some(Request::Admit {
+                                    request,
+                                    parent,
+                                    environment,
+                                    attribution,
+                                    reply,
+                                }),
+                                _,
+                            )) => {
+                                let result = handlers
+                                    .admit_aggregate(
+                                        &mut run,
+                                        request,
+                                        parent.map(|parent| *parent),
+                                        *environment,
+                                        *attribution,
+                                    )
+                                    .await;
+                                let _ = reply.send(result);
+                            }
+                            Either::Right((
+                                Some(Request::Consume {
+                                    cursor,
+                                    consumer,
+                                    wait,
+                                    host_control,
+                                    reply,
+                                }),
+                                _,
+                            )) => {
+                                let result = handlers
+                                    .consume_aggregate(
+                                        &mut run,
+                                        cursor,
+                                        consumer,
+                                        wait,
+                                        host_control,
+                                    )
+                                    .await;
+                                let _ = reply.send(result);
+                            }
+                            Either::Right((Some(Request::Capture { reason, reply }), _)) => {
+                                let result = match materials.as_deref() {
+                                    Some(materials) => {
+                                        state.capture_run(&mut run, reason, materials).await
+                                    }
+                                    None => Err(ContinuationRefusal::UnretainedMaterial.into()),
+                                };
+                                let _ = reply.send(result);
+                            }
+                            Either::Right((Some(Request::Close(reply)), _)) => {
+                                let result = if closed { Ok(()) } else { run.close().await };
+                                closed = result.is_ok();
+                                if result.is_ok() {
+                                    state.finish_run();
+                                }
+                                let _ = reply.send(result);
+                            }
+                            Either::Right((None, _)) => break Err(owner_gone()),
                         }
-                        let _ = reply.send(result);
                     }
-                    Either::Right((None, _)) => return Err(owner_gone()),
-                }
-            }
+                })
+                .await
         })
     }
 }

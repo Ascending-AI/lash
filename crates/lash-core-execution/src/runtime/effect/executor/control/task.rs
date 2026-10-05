@@ -107,9 +107,13 @@ impl EffectControllerTaskRequest {
                 response,
             } => {
                 // Register in request order, before polling any response.
-                let attempt = controller.start_run_attempt(name, step);
+                let crate::tool_dispatch::RunAttemptHandle { body, result } =
+                    controller.start_run_attempt(name, step);
                 Box::pin(async move {
-                    let _ = response.send(attempt.await);
+                    futures_util::future::join(body, async move {
+                        let _ = response.send(result.await);
+                    })
+                    .await;
                 })
             }
             Self::StartRunRetry {
@@ -484,13 +488,25 @@ impl RuntimeEffectController for EffectTaskController {
             })
             .is_err()
         {
-            return Box::pin(async {
-                Err(native_run_task_closed(
-                    "native Run controller task is no longer running",
-                ))
-            });
+            return crate::tool_dispatch::RunAttemptHandle {
+                body: Box::pin(std::future::ready(())),
+                result: Box::pin(async {
+                    Err(native_run_task_closed(
+                        "native Run controller task is no longer running",
+                    ))
+                }),
+            };
         }
-        Box::pin(finish_native_run_step(step, execute, response_rx))
+        crate::tool_dispatch::RunAttemptHandle {
+            // A replay drops the remote step without asking, closing
+            // `execute`, so the body ends; a served record never runs it.
+            body: Box::pin(async move {
+                if let Ok(reply) = execute.await {
+                    let _ = reply.send(step.await);
+                }
+            }),
+            result: Box::pin(native_run_response(response_rx)),
+        }
     }
 
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {

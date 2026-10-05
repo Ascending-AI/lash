@@ -462,12 +462,15 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         step: crate::tool_dispatch::RunAttemptStep<'run>,
     ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
         drop(step);
-        Box::pin(async move {
-            Err(RuntimeEffectControllerError::new(
-                RuntimeErrorCode::EngineControlUnsupported,
-                format!("this controller records no Run attempt: {name}"),
-            ))
-        })
+        crate::tool_dispatch::RunAttemptHandle {
+            body: Box::pin(std::future::ready(())),
+            result: Box::pin(async move {
+                Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::EngineControlUnsupported,
+                    format!("this controller records no Run attempt: {name}"),
+                ))
+            }),
+        }
     }
 
     /// Register a durable retry backoff now, preserving its deadline on replay.

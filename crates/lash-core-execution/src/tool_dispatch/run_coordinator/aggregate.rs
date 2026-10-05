@@ -67,30 +67,33 @@ impl<'a> RunCoordinator<'a> {
             plan: plan.clone(),
             admitted_at_ms: clock.timestamp_ms(),
         }]);
-        let result = async {
-            let mut ledger = self.journal.ledger.clone();
-            ledger.append(self.journal.segment, &record)?;
-            self.journal
-                .append(
-                    format!("lash:run:aggregate:{}:admit", plan.key),
-                    Box::pin(async move {
-                        Ok(RunJournalEntry {
-                            record,
-                            materials: Vec::new(),
-                            state: Vec::new(),
-                        })
-                    }),
-                )
-                .await?;
-            if self.aggregate_plan(&plan.key)? != *plan {
-                return Err(RunEventRefusal::AggregateShape {
-                    key: plan.key.clone(),
+        let result = self
+            .bodies
+            .clone()
+            .beside(async {
+                let mut ledger = self.journal.ledger.clone();
+                ledger.append(self.journal.segment, &record)?;
+                self.journal
+                    .append(
+                        format!("lash:run:aggregate:{}:admit", plan.key),
+                        Box::pin(async move {
+                            Ok(RunJournalEntry {
+                                record,
+                                materials: Vec::new(),
+                                state: Vec::new(),
+                            })
+                        }),
+                    )
+                    .await?;
+                if self.aggregate_plan(&plan.key)? != *plan {
+                    return Err(RunEventRefusal::AggregateShape {
+                        key: plan.key.clone(),
+                    }
+                    .into());
                 }
-                .into());
-            }
-            self.register_aggregate_timers(plan, clock)
-        }
-        .await;
+                self.register_aggregate_timers(plan, clock)
+            })
+            .await;
         self.active_frame = false;
         self.note_fault(&result);
         result
@@ -132,7 +135,9 @@ impl<'a> RunCoordinator<'a> {
         }
         self.begin_frame()?;
         let result = self
-            .start_round_inner(calls, capacity, handlers, retry, Some((plan, clock)))
+            .bodies
+            .clone()
+            .beside(self.start_round_inner(calls, capacity, handlers, retry, Some((plan, clock))))
             .await
             .map(|_| ());
         self.active_frame = false;
@@ -173,7 +178,9 @@ impl<'a> RunCoordinator<'a> {
     ) -> Result<RunAggregateOutcome, SingletonRunError> {
         self.begin_frame()?;
         let result = self
-            .consume_aggregate_inner(key, consumer, host_control)
+            .bodies
+            .clone()
+            .beside(self.consume_aggregate_inner(key, consumer, host_control))
             .await;
         self.active_frame = false;
         self.note_fault(&result);
@@ -325,29 +332,6 @@ impl<'a> RunCoordinator<'a> {
         Ok(())
     }
 
-    /// Poll issued attempts beside a program effect without consuming any
-    /// result or selecting by future readiness. A dropped frame is a fault.
-    ///
-    /// # Errors
-    /// A typed fault from an issued attempt.
-    pub async fn beside<F: std::future::Future>(
-        &mut self,
-        effect: F,
-    ) -> Result<F::Output, SingletonRunError> {
-        self.begin_frame()?;
-        let handles = self
-            .pending
-            .iter()
-            .map(parallel::Pending::handle)
-            .collect::<Vec<_>>();
-        let result = parallel::poll_beside(&handles, effect)
-            .await
-            .map_err(Into::into);
-        self.active_frame = false;
-        self.note_fault(&result);
-        result
-    }
-
     /// Finish committed protected work without giving a consumer any value
     /// or possession. Bodies of outstanding losers progress alongside it.
     ///
@@ -355,7 +339,11 @@ impl<'a> RunCoordinator<'a> {
     /// A typed protected-drain or journal refusal.
     pub async fn drain_protected(&mut self) -> Result<(), SingletonRunError> {
         self.begin_frame()?;
-        let result = self.drain_through(u64::MAX, &BTreeSet::new()).await;
+        let result = self
+            .bodies
+            .clone()
+            .beside(self.drain_through(u64::MAX, &BTreeSet::new()))
+            .await;
         self.active_frame = false;
         self.note_fault(&result);
         result
@@ -395,7 +383,7 @@ impl<'a> RunCoordinator<'a> {
     /// A typed execution, cancellation or protected-drain refusal.
     pub async fn close(&mut self) -> Result<(), SingletonRunError> {
         self.begin_frame()?;
-        let result = self.close_inner().await;
+        let result = self.bodies.clone().beside(self.close_inner()).await;
         self.active_frame = false;
         self.note_fault(&result);
         result
@@ -448,14 +436,8 @@ impl<'a> RunCoordinator<'a> {
         let record = self.journal.record(vec![RunEvent::CancelDischarged {
             call_id: call_id.clone(),
         }]);
-        let handles = self
-            .pending
-            .iter()
-            .map(parallel::Pending::handle)
-            .collect::<Vec<_>>();
-        parallel::poll_beside(
-            &handles,
-            self.journal.append(
+        self.journal
+            .append(
                 record_name(call_id, "cancel"),
                 Box::pin(async move {
                     handlers.cancel_call(call_id, source).await?;
@@ -465,9 +447,8 @@ impl<'a> RunCoordinator<'a> {
                         state: Vec::new(),
                     })
                 }),
-            ),
-        )
-        .await??;
+            )
+            .await?;
         if !self.presented.contains_key(call_id) {
             handlers.restore_cancel(call_id);
         }
