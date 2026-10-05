@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail, ensure};
 use lash_core::tool_dispatch::{IsolatedProcessDescriptor, ProcessExecutionBoundary};
 use lash_core::tool_run::RunEvent;
-use lash_remote_protocol::{RemoteToolCallOutcome, RemoteTurnReport, RemoteTurnStatus};
+use lash_remote_protocol::{RemoteTurnReport, RemoteTurnStatus};
 use lash_upgrade_harness::e2e::{
     case::{CaseLease, Leg, Permutation, StoreKind},
     cluster::{ClusterControl, LocalCluster},
@@ -322,8 +322,8 @@ async fn s20(case: &mut Case) -> Result<()> {
     case.kill(held).await?;
     case.release(&leg, BarrierKind::VProposed)?;
     case.restart().await?;
-    let report = case.settled(&leg).await?;
-    let descriptor = presented_descriptor(&report)?;
+    case.settled(&leg).await?;
+    let descriptor = case.presented_descriptor(&leg).await?;
     let starts = case.starts(&leg).await?;
     ensure!(
         matches!(
@@ -360,7 +360,7 @@ async fn s20(case: &mut Case) -> Result<()> {
     case.hold(&leg, BarrierKind::XProposed).await?;
     let cancel = case.cancel(&leg).await?;
     case.release(&leg, BarrierKind::XProposed)?;
-    case.release(&leg, BarrierKind::BeforeAck)?;
+    case.release_ack(&leg, BarrierKind::XProposed)?;
     let report = case.settled(&leg).await?;
     ensure!(
         report.status() == RemoteTurnStatus::Cancelled,
@@ -402,24 +402,6 @@ fn finished_descriptor(report: &RemoteTurnReport) -> Result<IsolatedProcessDescr
         );
     };
     serde_json::from_value(value.clone()).context("the final value is not an isolated descriptor")
-}
-
-/// The descriptor the isolated call presented, from the settled report.
-fn presented_descriptor(report: &RemoteTurnReport) -> Result<IsolatedProcessDescriptor> {
-    let record = report
-        .tool_calls
-        .iter()
-        .find(|record| record.tool_name.contains("isolated"))
-        .with_context(|| format!("the turn records no isolated call: {report:?}"))?;
-    let RemoteToolCallOutcome::Success(value) = &record.output.outcome else {
-        bail!("the isolated call presented no descriptor: {record:?}");
-    };
-    let value = match value {
-        Value::String(text) => serde_json::from_str(text)?,
-        value => value.clone(),
-    };
-    serde_json::from_value(value)
-        .with_context(|| format!("the isolated call presented no descriptor: {record:?}"))
 }
 
 /// The declared start's preparation a held launch-record proposal carries,
@@ -792,6 +774,15 @@ impl Case {
         self.barriers.release(&Self::barrier(leg, kind))
     }
 
+    /// Release the ACK hold armed with the cut of `kind`: an X cut's names
+    /// the first attempt, as its proposal does.
+    fn release_ack(&self, leg: &Run, kind: BarrierKind) -> Result<()> {
+        self.barriers.release(&Barrier {
+            work: Self::barrier(leg, kind).work,
+            kind: BarrierKind::BeforeAck,
+        })
+    }
+
     async fn journal(&self, leg: &Run) -> Result<Vec<JournalFact>> {
         self.view.journal(&leg.work, &leg.work.segment, 7).await
     }
@@ -807,6 +798,50 @@ impl Case {
             })
             .flatten()
             .collect())
+    }
+
+    /// The descriptor the isolated call presented: the presentation
+    /// material of its V record in the leg's own journal. A cancelled turn's
+    /// cold attach need not reproduce the call's transient tool record; V is
+    /// durable.
+    async fn presented_descriptor(&self, leg: &Run) -> Result<IsolatedProcessDescriptor> {
+        use lash_core::tool_run::MaterialEntry;
+        let journal = self.journal(leg).await?;
+        let entries: Vec<_> = journal
+            .iter()
+            .filter_map(|fact| match &fact.decoded {
+                Some(DecodedRecord::Run(entry)) => Some(entry),
+                _ => None,
+            })
+            .collect();
+        let events = || entries.iter().flat_map(|entry| &entry.record.events);
+        let call = events()
+            .find_map(|event| match event {
+                RunEvent::StartLaunched { call_id, .. } => Some(call_id),
+                _ => None,
+            })
+            .context("the leg's Run launched no start")?;
+        let presentation = events()
+            .find_map(|event| match event {
+                RunEvent::Presented {
+                    call_id,
+                    presentation: Some(presentation),
+                    ..
+                } if call_id == call => Some(presentation),
+                _ => None,
+            })
+            .with_context(|| format!("the isolated call {call} presented nothing"))?;
+        let text = entries
+            .iter()
+            .flat_map(|entry| &entry.materials)
+            .find_map(|material| match material {
+                MaterialEntry::Available { reference, payload } if reference == presentation => {
+                    Some(&payload.text)
+                }
+                _ => None,
+            })
+            .with_context(|| format!("the isolated call {call}'s presentation is not journaled"))?;
+        serde_json::from_str(text).context("the isolated call presented no descriptor")
     }
 
     async fn starts(&mut self, leg: &Run) -> Result<Vec<RunEvent>> {

@@ -870,6 +870,64 @@ impl ProcessCapability {
             .await
     }
 
+    /// A Run's declared-start discharge (FIG-5080). It runs inside the owner
+    /// step whose `StartDischarged` record carries it, so like
+    /// [`ProcessCommandRunner::start_in_run`] it writes only the registry and
+    /// the engine's keyed delivery, never a journal command of its own: an
+    /// SDK command nested in that step cannot replay an unfinished body.
+    #[expect(
+        clippy::expect_used,
+        reason = "execution scopes are plain string identities"
+    )]
+    pub(in crate::runtime::session_manager) async fn cancel_bound_process(
+        &self,
+        current: &CurrentOwnerCapability,
+        process_id: &ProcessId,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        let (Some(registry), Some(delivery)) =
+            (current.host.process_registry(), current.host.process_work())
+        else {
+            return Err(crate::PluginError::Session(
+                "processes are unavailable in this runtime".to_owned(),
+            ));
+        };
+        let requester = serde_json::to_string(scope.effect_controller.execution_scope())
+            .expect("execution scopes contain only serializable identities");
+        let record = match registry
+            .request_process_cancel(
+                process_id,
+                crate::CancelOrigin::OperatorRequested,
+                requester,
+                None,
+            )
+            .await
+        {
+            Ok(record) => record,
+            // A process that ended, took another requester's cancel, or was
+            // pruned once ended needs nothing more: the first request
+            // stands (ADR 0094).
+            Err(
+                crate::PluginError::ProcessAlreadyTerminal { .. }
+                | crate::PluginError::ProcessCancelConflict { .. }
+                | crate::PluginError::ProcessNoLongerRetained { .. },
+            ) => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        let request = record.cancel_request.ok_or_else(|| {
+            crate::PluginError::Session(format!(
+                "process `{process_id}` accepted a cancel without recording it"
+            ))
+        })?;
+        delivery
+            .deliver_cancel(
+                process_id,
+                &request,
+                &format!("run-start-discharge:{process_id}"),
+            )
+            .await
+    }
+
     pub(in crate::runtime::session_manager) async fn cancel_recorded_intent(
         &self,
         current: &CurrentOwnerCapability,

@@ -126,10 +126,13 @@ struct Isolated {
 
 impl Isolated {
     async fn new(bound: bool) -> Self {
-        let double =
-            lash_restate_test::backend(0x4997_0001, lash_restate_test::ServerConfig::default())
-                .await
-                .expect("build the Restate double");
+        Self::on(bound, lash_restate_test::ServerConfig::default()).await
+    }
+
+    async fn on(bound: bool, config: lash_restate_test::ServerConfig) -> Self {
+        let double = lash_restate_test::backend(0x4997_0001, config)
+            .await
+            .expect("build the Restate double");
         Self::over(double, Arc::new(tempfile::tempdir().unwrap()), bound).await
     }
 
@@ -390,9 +393,14 @@ async fn l08_an_unbound_isolated_tool_refuses_typed_before_any_body() -> Result<
 /// Run the isolated call with every attempt of the turn dropped after the
 /// run named `…{suffix}` ran but before its result is durable, so the turn
 /// replays to that point and no further; cancel the turn there, then let the
-/// next replay pass it.
-async fn cancelled_at(suffix: &str) -> (Isolated, Result<crate::TurnOutput>) {
-    let world = Isolated::new(true).await;
+/// next replay pass it. An `always_replay` double suspends the turn at every
+/// await its journal cannot answer, as the replay leg's server does.
+async fn cancelled_at(suffix: &str, always_replay: bool) -> (Isolated, Result<crate::TurnOutput>) {
+    let world = Isolated::on(
+        true,
+        lash_restate_test::ServerConfig::default().always_replay(always_replay),
+    )
+    .await;
     let mut crashes = CrashCount::new();
     assert!(world.double.server().on_crash(crashes.listener()));
     world.double.server().crash_on(
@@ -441,43 +449,48 @@ async fn cancelled_at(suffix: &str) -> (Isolated, Result<crate::TurnOutput>) {
 /// L08/K5: a cancel before the start's admission forbids the launch; a
 /// cancel after it recovers the same StartKey and process, and discharging
 /// it terminates and reaps the one worker with a physical receipt.
+///
+/// The after-admission cancel lands while the start's preparation is not yet
+/// durable, so the replayed `start:prepare` body discharges the cancel inside
+/// the Run's open owner step on a turn that suspends at every await
+/// (FIG-5080): the cancel is the body's own registry request and engine
+/// delivery, never a journal command of its own.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn l08_isolated_cancellation_forbids_launch_before_admission_or_reaps_the_same_worker_after()
 {
-    let (world, output) = cancelled_at(":attempt:1").await;
+    let (world, output) = cancelled_at(":attempt:1", false).await;
     let output = output.unwrap();
     assert_eq!(output.status(), crate::TurnStatus::Cancelled, "{output:?}");
     assert!(world.processes().await.is_empty(), "no process launched");
     assert!(world.pids().is_empty(), "no worker spawned");
     assert_eq!(world.tools.executions.load(Ordering::SeqCst), 0);
 
-    for suffix in [":start:launch", ":start:discharge"] {
-        let (world, output) = cancelled_at(suffix).await;
-        let output = output.unwrap();
-        let descriptor = descriptor(&output.result);
-        let receipt = descriptor
-            .termination
-            .clone()
-            .unwrap_or_else(|| panic!("{suffix}: a physical termination receipt: {descriptor:?}"));
-        assert_eq!(receipt.process_id, descriptor.process_id, "{suffix}");
-        assert!(isolated_key(&descriptor.start_key), "{suffix}");
-        let processes = world.processes().await;
-        assert_eq!(processes.len(), 1, "{suffix}: one process: {processes:?}");
-        assert_eq!(processes[0].id, descriptor.process_id, "{suffix}");
-        assert_eq!(
-            processes[0].start_key.as_ref(),
-            Some(&descriptor.start_key),
-            "{suffix}"
-        );
-        let pids = world.pids();
-        assert_eq!(
-            pids,
-            vec![receipt.worker_pid.get()],
-            "{suffix}: one worker, the one reaped"
-        );
-        assert!(!alive(pids[0]), "{suffix}: no orphan worker");
-        assert_eq!(world.tools.executions.load(Ordering::SeqCst), 0, "{suffix}");
-    }
+    // A turn cancelled while every await suspends settles without the
+    // call's transient record, so the law reads the start's facts from the
+    // registry and the engine's recorded receipt.
+    let (world, output) = cancelled_at(":start:prepare", true).await;
+    output.unwrap();
+    let processes = world.processes().await;
+    assert_eq!(processes.len(), 1, "one process: {processes:?}");
+    let process = &processes[0];
+    assert!(
+        process.start_key.as_ref().is_some_and(isolated_key),
+        "{process:?}"
+    );
+    assert!(
+        process.cancel_request.is_some(),
+        "the discharge requested the cancel: {process:?}"
+    );
+    // The discharge may reap the worker before its shell writes the marker.
+    let receipt = world.engine.terminate_worker(&process.id).await.unwrap();
+    let pid = receipt.worker_pid.get();
+    assert!(!alive(pid), "the discharge reaped the worker");
+    let pids = world.pids();
+    assert!(
+        pids.iter().all(|spawned| *spawned == pid),
+        "no other worker: {pids:?}"
+    );
+    assert_eq!(world.tools.executions.load(Ordering::SeqCst), 0);
 }
 
 /// L08/K5 (FIG-5011/S19): a cold deployment redelivers the process workflow

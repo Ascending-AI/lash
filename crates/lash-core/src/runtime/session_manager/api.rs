@@ -229,6 +229,17 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
+    async fn cancel_bound(
+        &self,
+        process_id: &ProcessId,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        self.services
+            .processes
+            .cancel_bound_process(&self.services.current, process_id, scope)
+            .await
+    }
+
     async fn start(
         &self,
         session_id: &SessionId,

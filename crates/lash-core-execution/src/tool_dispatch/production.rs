@@ -1170,11 +1170,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             self.context
                 .dispatch()
                 .processes
-                .cancel(
-                    &self.context.dispatch().owner.runtime_owner(),
-                    process_id,
-                    self.context.process_scope(None),
-                )
+                .cancel_bound(process_id, self.context.process_scope(None))
                 .await
                 .map_err(|error| error.to_string())?;
         }

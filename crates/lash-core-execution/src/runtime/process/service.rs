@@ -90,6 +90,23 @@ pub trait ProcessService: Send + Sync {
         ))
     }
 
+    /// Cancel the process a logical Run's declared start launched, as that
+    /// start's discharge: the registry's cancel request and its delivery to
+    /// the process's live execution, and no journal command. The discharge
+    /// runs inside the owner step that records it, and repeats on every
+    /// replay that reaches it, so both writes are idempotent; a process that
+    /// already ended, took another cancel, or was pruned needs nothing more.
+    async fn cancel_bound(
+        &self,
+        process_id: &ProcessId,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<(), PluginError> {
+        let _ = (process_id, scope);
+        Err(PluginError::Session(
+            "bound process cancellation is unavailable in this runtime".to_owned(),
+        ))
+    }
+
     async fn start(
         &self,
         session_id: &SessionId,

@@ -2495,9 +2495,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Product red on both stores (FIG-5057 run, SQLite file and PostgreSQL): workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_replay exceeds its deadline in the cancel leg. With a cancel requested, the declared start's start:prepare discharge calls processes.cancel (crates/lash-core-execution/src/tool_dispatch/production.rs:1172), journaling lash:process:cancel inside the open start:prepare owner step; the Run never proposes the prepare result, so the VProposed cut is never reached. Register workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_replay once that is fixed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_replay"
+          }
         },
         {
           "variant": "default",
@@ -2522,9 +2525,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Product red on both stores: with a cancel requested, the declared start's start:prepare discharge calls processes.cancel (crates/lash-core-execution/src/tool_dispatch/production.rs:1167), which registers a journal command while D's lash:run:schedule owner step awaits the preparation. FIG-5009's guard refuses it (journal_write_during_owner_step), so the invocation retries, diverges and parks. Register workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_postgresql (FIG-5048) once that is fixed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_postgresql"
+          }
         },
         {
           "variant": "default",
@@ -2549,9 +2555,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Product red on both stores (FIG-5057 run, SQLite file and PostgreSQL): workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_postgresql_replay exceeds its deadline in the cancel leg. With a cancel requested, the declared start's start:prepare discharge calls processes.cancel (crates/lash-core-execution/src/tool_dispatch/production.rs:1172), journaling lash:process:cancel inside the open start:prepare owner step; the Run never proposes the prepare result, so the VProposed cut is never reached. Register workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_postgresql_replay once that is fixed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench_postgresql_replay"
+          }
         }
       ],
       "setup": "Real isolated worker with retained consumer hold.",
