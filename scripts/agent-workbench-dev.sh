@@ -3439,8 +3439,19 @@ validate_reset_ownership() {
 # The Buck2 label that builds this launcher's host binary. `--config=judged`
 # selects the target platform with Cargo's `[profile.judged]` geometry.
 workbench_buck2_label='//examples/agent-workbench:agent-workbench'
+worker_buck2_label='//crates/lash-vm-worker:lash-vm-worker__bin'
 
-# Build the host binary and leave its path in `workbench_bin`.
+require_workbench_worker() {
+  local worker="${LASH_VM_WORKER:-${workbench_bin%/*}/lash-vm-worker}"
+  worker="$(realpath -m -- "$worker")"
+  [[ -f "$worker" && -x "$worker" ]] \
+    || die "VM worker $worker is not an executable file; ship lash-vm-worker beside agent-workbench or set LASH_VM_WORKER to an executable worker"
+  if [[ -n "${LASH_VM_WORKER:-}" ]]; then
+    export LASH_VM_WORKER="$worker"
+  fi
+}
+
+# Build the host and VM worker together and leave the host in `workbench_bin`.
 #
 # Two things about this are load bearing beyond what it builds.
 #
@@ -3464,6 +3475,7 @@ prepare_workbench_binary() {
     workbench_bin="$(realpath -m -- "$AGENT_WORKBENCH_BIN")"
     [[ -f "$workbench_bin" && -x "$workbench_bin" ]] \
       || die "AGENT_WORKBENCH_BIN=$AGENT_WORKBENCH_BIN is not an executable file"
+    require_workbench_worker
     log "launching prebuilt agent-workbench binary $workbench_bin"
     return 0
   fi
@@ -3475,7 +3487,7 @@ prepare_workbench_binary() {
       || die "resolving the provider-wire-fixtures workbench target failed"
   fi
 
-  log "building agent-workbench ($build_label, --config=judged)"
+  log "building agent-workbench and VM worker ($build_label, $worker_buck2_label, --config=judged)"
   local build_report="$launcher_lock_root/$launcher_lock_hash-build-report.json"
   # `kiln build` is the warm path, and it is only a path at all inside a kiln
   # fork: it identifies the checkout from the kiln configuration and then runs
@@ -3494,13 +3506,17 @@ prepare_workbench_binary() {
     build_command=("$repo_root/scripts/hermetic-build.sh" --local build)
   fi
   "${build_command[@]}" --config=judged --materializations final \
-    --build-report "$build_report" "$build_label" \
-    || die "building $build_label --config=judged failed"
-  local built
+    --build-report "$build_report" "$build_label" "$worker_buck2_label" \
+    || die "building $build_label and $worker_buck2_label --config=judged failed"
+  local built built_worker
   built="$(python3 "$repo_root/tools/buck2/outputs.py" \
     --report "$build_report" --label "$build_label" --single)" \
     || die "resolving $build_label output failed"
   [[ -x "$built" ]] || die "the judged build produced no binary at $built"
+  built_worker="$(python3 "$repo_root/tools/buck2/outputs.py" \
+    --report "$build_report" --label "$worker_buck2_label" --single)" \
+    || die "resolving $worker_buck2_label output failed"
+  [[ -x "$built_worker" ]] || die "the judged build produced no VM worker at $built_worker"
 
   # Launch a private copy rather than the Buck2 output itself. This keeps the
   # executable stable across daemon cleanup and concurrent builds of another
@@ -3515,11 +3531,18 @@ prepare_workbench_binary() {
     || die "unsafe launcher binary directory $bin_dir"
   workbench_bin="$bin_dir/agent-workbench"
   local staged="$bin_dir/.agent-workbench.$$"
+  local staged_worker="$bin_dir/.lash-vm-worker.$$"
   cp -f -- "$built" "$staged" \
     || die "could not stage the judged binary in $bin_dir"
-  chmod 700 -- "$staged"
+  cp -f -- "$built_worker" "$staged_worker" \
+    || die "could not stage the judged VM worker in $bin_dir"
+  chmod 700 -- "$staged" "$staged_worker"
+  # Publish the worker first: a newly published host always has its helper.
+  mv -f -- "$staged_worker" "$bin_dir/lash-vm-worker" \
+    || die "could not publish the judged VM worker in $bin_dir"
   mv -f -- "$staged" "$workbench_bin" \
     || die "could not publish the judged binary at $workbench_bin"
+  require_workbench_worker
 }
 
 start_detached() {

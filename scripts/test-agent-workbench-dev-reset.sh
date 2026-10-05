@@ -233,16 +233,19 @@ MOCK
 # in a kiln fork and `scripts/hermetic-build.sh --local build` in any other
 # checkout both end in `python3 <repo>/tools/buck2/driver.py`, which the
 # python3 mock below hands to this stand-in. It counts the build, writes the
-# workbench binary and the build report the launcher resolves that binary from.
+# host/worker binaries and the one build report the launcher resolves them from.
 cat > "$mock_bin/mock-buck2-driver" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
-label="${@: -1}"
+label=""
 report=""
 args=("$@")
 for ((i = 0; i < ${#args[@]}; i++)); do
   if [[ "${args[$i]}" = --build-report ]]; then
     report="${args[$((i + 1))]}"
+  fi
+  if [[ "${args[$i]}" = //examples/agent-workbench:* ]]; then
+    label="${args[$i]}"
   fi
 done
 [[ " $* " = *' build '* && " $* " = *' --config=judged '* \
@@ -283,7 +286,9 @@ printf 'attempt application state\n' > "$AGENT_WORKBENCH_DATA_DIR/attempt-app-st
 while :; do sleep 1; done
 BIN
 chmod +x "$MOCK_BUILD_DIR/buck-out/agent-workbench"
-printf '{"project_root":"%s","results":{"root%s":{"success":"SUCCESS","outputs":{"DEFAULT":["buck-out/agent-workbench"]}}}}\n' \
+printf '#!/bin/sh\nexit 0\n' > "$MOCK_BUILD_DIR/buck-out/lash-vm-worker"
+chmod +x "$MOCK_BUILD_DIR/buck-out/lash-vm-worker"
+printf '{"project_root":"%s","results":{"root%s":{"success":"SUCCESS","outputs":{"DEFAULT":["buck-out/agent-workbench"]}},"root//crates/lash-vm-worker:lash-vm-worker__bin":{"success":"SUCCESS","outputs":{"DEFAULT":["buck-out/lash-vm-worker"]}}}}\n' \
   "$MOCK_BUILD_DIR" "$label" > "$report"
 if [[ "${MOCK_BLOCK_PID_PUBLICATION:-0}" = 1 ]]; then
   mkdir -p "$MOCK_PID_FILE"

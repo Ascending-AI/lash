@@ -64,10 +64,35 @@ fn workbench_rlm_channel() -> AnyhowResult<lash::rlm::RlmChannel> {
     }
 }
 
+/// Refuse a broken deployment before any session can admit a turn. Starting
+/// the real pool also checks the worker handshake, not just file existence.
+fn prewarm_workbench_worker(
+    workers: lash::rlm::WorkerService,
+) -> AnyhowResult<lash::rlm::WorkerService> {
+    workers.pool().context(
+        "agent-workbench VM worker deployment is unavailable; ship lash-vm-worker beside the host or set LASH_VM_WORKER",
+    )?;
+    Ok(workers)
+}
+
+fn workbench_rlm_workers() -> AnyhowResult<Option<lash::rlm::WorkerService>> {
+    if matches!(
+        crate::session_protocol::selected()?,
+        crate::session_protocol::SessionProtocol::Standard
+    ) {
+        return Ok(None);
+    }
+    let workers = std::env::var_os("LASH_VM_WORKER")
+        .map(lash::rlm::WorkerService::subprocess)
+        .unwrap_or_default();
+    prewarm_workbench_worker(workers).map(Some)
+}
+
 /// Everything the workbench plugin stack is configured with, shared by the
 /// serving engine and the `register-deployment` engine so both compute the
 /// same plugin composition — and the same bound build generation.
 struct WorkbenchCorePlugins {
+    rlm_workers: Option<lash::rlm::WorkerService>,
     tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
     mail_world: mail::MailWorld,
     subagent_registry: Arc<lash::subagents::CapabilityRegistry>,
@@ -93,6 +118,7 @@ async fn workbench_core_builder(
     plugins: WorkbenchCorePlugins,
 ) -> AnyhowResult<lash::LashCoreBuilder> {
     let WorkbenchCorePlugins {
+        rlm_workers,
         tool_provider,
         mail_world,
         subagent_registry,
@@ -125,6 +151,7 @@ async fn workbench_core_builder(
                 std::sync::Arc::new(lash::rlm::TypescriptDialect),
                 &host_backend,
             )
+            .with_worker_service(rlm_workers.context("RLM worker was not prewarmed")?)
             .with_deferred_tool_resolver(deferred_tools.resolver());
             LashCore::rlm_builder(host_backend, factory)
         }
@@ -171,6 +198,7 @@ async fn workbench_core_builder(
 pub(crate) async fn bound_workbench_engine(
     config: lash::restate::RestateConfig,
 ) -> AnyhowResult<Arc<WorkbenchRestateBackend>> {
+    let rlm_workers = workbench_rlm_workers()?;
     let stores = lash::sqlite::SqliteStoreSet::memory()
         .await
         .context("open the registration engine's scratch store set")?;
@@ -186,6 +214,7 @@ pub(crate) async fn bound_workbench_engine(
         None => tool_provider,
     };
     let plugins = WorkbenchCorePlugins {
+        rlm_workers,
         tool_provider,
         mail_world: mail::MailWorld::new(),
         subagent_registry: Arc::new(lash::subagents::default_registry(&BTreeMap::new())),
@@ -259,6 +288,7 @@ pub(crate) async fn register_deployment_command(endpoint_url: &str) -> AnyhowRes
 pub(crate) async fn async_main() -> AnyhowResult<()> {
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt::init();
+    let rlm_workers = workbench_rlm_workers()?;
     let context_window_tokens = context_window_tokens_from_environment()?;
     WORKBENCH_CONTEXT_WINDOW_TOKENS
         .set(context_window_tokens)
@@ -509,6 +539,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     #[cfg(feature = "e2e-tools")]
     let operation_controls = Arc::new(crate::e2e_operation::Controls::default());
     let plugins = WorkbenchCorePlugins {
+        rlm_workers,
         tool_provider,
         mail_world: mail_world.clone(),
         subagent_registry,
@@ -847,6 +878,32 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             println!("agent-workbench shutdown complete");
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod worker_deployment_tests {
+    use super::*;
+
+    #[test]
+    fn missing_vm_worker_refuses_startup_with_typed_deployment_fault() {
+        let directory = tempfile::tempdir().expect("worker fixture directory");
+        let executable = directory.path().join("lash-vm-worker");
+        let result = prewarm_workbench_worker(lash::rlm::WorkerService::subprocess(&executable));
+        let error = result.err().expect("a missing worker must refuse startup");
+        let cause = error
+            .downcast_ref::<lash::rlm::PoolError>()
+            .expect("startup refusal retains the typed pool fault");
+        assert!(matches!(
+            cause,
+            lash::rlm::PoolError::Infrastructure(
+                lash::rlm::InfrastructureOutcome::WorkerDeployment {
+                    executable: path,
+                    fault: lash::rlm::WorkerDeploymentFault::NotFound,
+                }
+            ) if path == &executable
+        ));
+        assert!(error.to_string().contains("VM worker deployment"));
     }
 }
 
