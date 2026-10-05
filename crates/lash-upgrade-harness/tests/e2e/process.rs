@@ -193,6 +193,114 @@ async fn s21_cancelled_source_refuses_revival_sqlite_memory() -> Result<()> {
     Ok(())
 }
 
+/// S21/L07: a host's cancel of an operation Run suspended on its Deferred
+/// source reaches the Run's source wait: the command settles Cancelled and
+/// the Run ends with its one store terminal (FIG-5006).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s21_cancel_reaches_a_suspended_deferred_operation_sqlite_memory() -> Result<()> {
+    let (core, double) = double_fixture(0x495006).await?;
+    let session_id = lash::SessionId::fixture("s21-cancel-deferred");
+    core.session(session_id.clone())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "upgrade-harness-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(8),
+        )))
+        .await?;
+    let session = core.session(session_id.clone()).open().await?;
+    let handle = session
+        .plugin_operations()
+        .start_task_raw(
+            "e2e.h3.deferred",
+            serde_json::json!("s21-cancel-deferred"),
+            "s21-cancel-deferred",
+        )
+        .await?;
+    let run = handle.run().clone();
+    drop(handle);
+    tokio::time::timeout(std::time::Duration::from_secs(10), double.server().settle()).await?;
+    let invocation =
+        lash_upgrade_harness::node::h3::operation_invocation(&double, &session_id, &run).await?;
+    ensure!(
+        invocation.status != "completed",
+        "deferred operation settled without its source: {invocation:?}"
+    );
+    ensure!(
+        double
+            .stores()
+            .session_store_factory()
+            .run_terminal(&session_id, &run)
+            .await?
+            .is_none(),
+        "suspended operation already has a terminal"
+    );
+    let receipt = session.run(run.clone()).cancel().await?;
+    ensure!(
+        matches!(
+            receipt,
+            lash::CancelReceipt::OperationRequested {
+                request: lash::PluginTaskCancelRequest::Requested,
+                ..
+            }
+        ),
+        "public cancellation did not reach the admitted operation's signal: {receipt:?}"
+    );
+    let outcome = match tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        session.durable().run(run.clone()).outcome(),
+    )
+    .await
+    {
+        Ok(outcome) => outcome?,
+        Err(_) => {
+            let invocation =
+                lash_upgrade_harness::node::h3::operation_invocation(&double, &session_id, &run)
+                    .await?;
+            anyhow::bail!(
+                "cancelled Deferred operation never settled; invocation: {}",
+                invocation.status
+            );
+        }
+    };
+    ensure!(
+        outcome.run() == Some(&run) && outcome.status() == lash::TurnStatus::Cancelled,
+        "cancelled operation did not settle its own Run: {outcome:?}"
+    );
+    let terminal = double
+        .stores()
+        .session_store_factory()
+        .run_terminal(&session_id, &run)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("cancelled operation has no store terminal"))?;
+    // An operation Run admits no turn: its one terminal is the command run's
+    // `CommandsApplied` end, and how the task ended is the command's
+    // settlement, which `outcome` above already answered Cancelled (K8).
+    ensure!(
+        terminal.run == run
+            && terminal.cause == lash_core::store::RunTerminalCause::CommandsApplied,
+        "cancelled operation's terminal is not its command-run end: {terminal:?}"
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(10), double.server().settle()).await?;
+    let pending: Vec<_> = double
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|candidate| {
+            (candidate.id == invocation.id || candidate.target.contains("LashDurableWaitIndex"))
+                && candidate.status != "completed"
+        })
+        .collect();
+    ensure!(
+        pending.is_empty(),
+        "cancel retained operation/registry waits: {pending:?}"
+    );
+    ensure!(
+        session.durable().unfinished_run().await?.is_none(),
+        "cancel retained admission"
+    );
+    Ok(())
+}
+
 /// S18/L07: cancellation wakes a real suspended application timer without
 /// firing it. Both an active follower and a late follower read the same store
 /// terminal; the exact final wait-routing claim is guarded by FIG-4897.
@@ -670,9 +778,42 @@ fn s21_source_seal_stays_immutable_on_the_upgrade_node() -> Result<()> {
     let terminal: lash_core::store::RunTerminal =
         serde_json::from_value(snapshot["terminal"].clone())?;
     ensure!(
-        terminal.run == run && terminal.kind() == lash_core::store::RunTerminalKind::Cancelled,
-        "cancel did not settle its own Run: {snapshot}"
+        terminal.run == run
+            && terminal.cause == lash_core::store::RunTerminalCause::CommandsApplied,
+        "cancel did not end its own operation Run: {snapshot}"
     );
+    // Operation Runs end CommandsApplied; cancellation is the task's
+    // command outcome in the same durable settling commit (ADR 0101).
+    let completion = block_on(async {
+        use lash_core::store::QueuedWorkStore as _;
+        let directory = live
+            .case
+            .sqlite_dir()
+            .ok_or_else(|| anyhow::anyhow!("S21 requires its SQLite store"))?;
+        let stores = lash::sqlite::SqliteStoreSet::open(directory).await?;
+        let store = stores.open_store().await?;
+        store
+            .queued_work_batch_completion(&lash::SessionId::fixture(session.clone()), &operation)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("cancelled operation has no command settlement"))
+    })?;
+    ensure!(
+        completion.command_outcomes.iter().any(|(batch, outcome)| {
+            batch.as_str() == operation
+                && matches!(
+                    outcome,
+                    lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                        outcome: lash_core::runtime::PluginOperationCommandOutcome::Cancelled
+                    }
+                )
+        }),
+        "cancel did not settle its own task Cancelled: {completion:?}"
+    );
+    live.evidence.stores.push(json!({
+        "kind": "cancelled_operation_settlement",
+        "run": run,
+        "receipt": completion,
+    }));
     live.quiesce()?;
     let before = live.run_invocations(&key)?;
     let late = live.complete(&n, &session, &operation, "s21-too-late")?;

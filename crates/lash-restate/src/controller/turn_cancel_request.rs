@@ -45,19 +45,28 @@ fn restate_turn_cancel_wait_request(
     restate_turn_cancel_gate_request(authority_id, scope).map(Some)
 }
 
-/// A Run source wait observes a turn gate only for a turn scope.
-/// Process waits use the workflow cancellation promise.
-pub(super) fn restate_run_turn_cancel_wait_request(
+/// The durable cancel gate a Run source wait races: a turn scope's
+/// turn-cancel gate, or a session operation's cancel signal, which a host's
+/// cancel of the admitted plugin task resolves (FIG-4391, FIG-5006). Process
+/// waits race the workflow cancellation promise instead.
+pub(super) fn restate_run_cancel_gate_request(
     authority_id: &RestateAuthorityId,
     turn_cancel: &lash_core::TurnCancelWait,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
-    let Some(scope @ ExecutionScope::Turn { .. }) = turn_cancel.observed_scope() else {
-        return Ok(None);
+    let (scope, wait) = match turn_cancel.observed_scope() {
+        Some(scope @ ExecutionScope::Turn { .. }) => {
+            (scope, AwaitEventWaitIdentity::TurnCancelGate)
+        }
+        Some(scope @ ExecutionScope::SessionOperation { .. }) => {
+            (scope, AwaitEventWaitIdentity::SessionCommandCancelSignal)
+        }
+        _ => return Ok(None),
     };
     scope
         .validate()
         .map_err(RuntimeEffectControllerError::from)?;
-    restate_turn_cancel_gate_request(authority_id, scope).map(Some)
+    let key = restate_await_event_key_for_authority(authority_id, scope, wait)?;
+    Ok(Some(RestateDurableWaitAwaitRequest { key }))
 }
 
 /// The durable-wait request for the turn-cancel gate of a validated turn

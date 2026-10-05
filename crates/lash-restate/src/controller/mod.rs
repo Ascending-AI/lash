@@ -24,7 +24,7 @@ pub(crate) use turn_cancel_request::{
     restate_await_event_turn_cancel_wait_request, restate_timer_turn_cancel_wait_request,
 };
 use turn_cancel_request::{
-    restate_process_turn_cancel_wait_request, restate_run_turn_cancel_wait_request,
+    restate_process_turn_cancel_wait_request, restate_run_cancel_gate_request,
 };
 
 use lash_core::facade_support::trace_context_for_runtime_effect_invocation;
@@ -723,16 +723,23 @@ where
         }) {
             return Err(restate_unknown_or_revoked().into());
         }
-        // A process scope has no session turn gate. Its source wait races
-        // the process workflow's cancel promise, as other Run waits do.
-        let turn_cancel = restate_run_turn_cancel_wait_request(&self.authority_id, &cancel)?;
+        // A process scope has no session turn gate: its source wait races the
+        // process workflow's cancel promise. An operation Run's wait races its
+        // cancel signal (FIG-5006). Only a turn's gate entry takes its
+        // generation's drain wake (FIG-4739); an operation Run stays pinned.
+        let turn_cancel = restate_run_cancel_gate_request(&self.authority_id, &cancel)?;
+        let generation = (!matches!(
+            cancel.observed_scope(),
+            Some(ExecutionScope::SessionOperation { .. })
+        ))
+        .then(|| self.build_generation.clone());
         let outcome = self
             .context
             .await_run_sources(
                 &self.namespace,
                 subscriptions,
                 turn_cancel,
-                Some(self.build_generation.clone()),
+                generation,
                 self.options.process_cancel,
             )
             .await
