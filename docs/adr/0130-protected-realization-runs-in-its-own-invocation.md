@@ -115,6 +115,15 @@ fresh realization. No native future or VM notification key crosses the cut.
   owns its journal, but it is a model-visible value with its own owner, lineage,
   wake and retention. Every intent would realize under the process's owner
   instead of the session's, changing identities and lineage.
+## Integration with declared preparation
+
+The landed start:prepare cut (FIG-5009) removes P and its receipt hand-off.
+The drain selects start preparation and the child realization receipt as
+independent outcomes. It issues V directly at the frontier after preparation
+is acknowledged and Realized has been accepted and adopted. No receipt signal
+or presentation future is raced beside the schedule. The pinned key/value
+receipt remains intact for FIG-4998's single combinator and value demand gate.
+
 ## Evidence
 
 The laws are in `crates/lash-restate/src/tests/run_coordinator_on_the_double/realization.rs`.

@@ -6,6 +6,7 @@ use lash_core::facade_support::SystemClock;
 use lash_core::tool_dispatch::RunAggregateOutcome;
 use lash_core::tool_run::{AggregateConsumer, RunTransfer};
 use lash_restate_test::JournalEntryView;
+use std::sync::atomic::AtomicUsize;
 
 /// A flag a journaled step, a body or a watching task waits on.
 struct Gate {

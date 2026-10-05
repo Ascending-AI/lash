@@ -214,8 +214,8 @@ async fn l18_all_drains_a_committed_operand_before_the_remaining_bodies_finish()
             "cut={cut:?}: the named boundary must execute"
         );
         if cut.is_none() {
-            // Cut each V boundary selected by the recorded schedule. V has
-            // no separate callback command which could serialize later D.
+            // Cut each direct V boundary after the independent realization
+            // receipt was selected and adopted.
             for view in backend.server().invocations() {
                 for entry in backend.server().journal(&view.id).unwrap() {
                     let Some(Ok(bytes)) = entry.run_completion() else {
@@ -226,12 +226,10 @@ async fn l18_all_drains_a_committed_operand_before_the_remaining_bodies_finish()
                         continue;
                     };
                     let record: RunRecord = serde_json::from_value(record.clone()).unwrap();
-                    if record
-                        .events
-                        .iter()
-                        .any(|event| matches!(event, RunEvent::Presented { .. }))
-                    {
-                        cuts.push(Some(format!("lash:run:schedule:{}", record.first.0)));
+                    for event in &record.events {
+                        if let RunEvent::Presented { call_id, .. } = event {
+                            cuts.push(Some(name(call_id, "present")));
+                        }
                     }
                 }
             }

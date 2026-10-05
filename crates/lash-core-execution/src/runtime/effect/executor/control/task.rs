@@ -34,7 +34,7 @@ pub enum EffectControllerTaskRequest {
     },
     IssueRunRealization {
         invocation: oneshot::Sender<Result<String, RuntimeEffectControllerError>>,
-        request: crate::tool_dispatch::RealizationRequest,
+        request: Box<crate::tool_dispatch::RealizationRequest>,
         key: oneshot::Sender<Result<crate::tool_dispatch::SelectKey, RuntimeEffectControllerError>>,
         value: oneshot::Sender<
             Result<crate::tool_dispatch::RealizationReceipt, RuntimeEffectControllerError>,
@@ -167,7 +167,7 @@ impl EffectControllerTaskRequest {
                 // the returned selectable resolve inside the task and answer
                 // their own channel.
                 Box::pin(async move {
-                    match controller.issue_run_realization(request).await {
+                    match controller.issue_run_realization(*request).await {
                         Ok(issued) => {
                             let _ = invocation.send(Ok(issued.invocation_id));
                             let selectable = issued.receipt;
@@ -655,7 +655,7 @@ impl RuntimeEffectController for EffectTaskController {
         self.requests
             .send(EffectControllerTaskRequest::IssueRunRealization {
                 invocation: invocation_tx,
-                request,
+                request: Box::new(request),
                 key: key_tx,
                 value: value_tx,
             })

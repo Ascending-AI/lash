@@ -758,12 +758,12 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
             name(&ids[0], "realization:issued"),
             // Each child receipt is accepted before V settles its declarations.
             schedule(12),
-            schedule(13),
-            schedule(17),
+            name(&ids[0], "present"),
+            name(&ids[1], "present"),
             name(&ids[2], "declare"),
             name(&ids[2], "realization:issued"),
             schedule(23),
-            schedule(24),
+            name(&ids[2], "present"),
         ];
         if cancel_after_rank_3 {
             program.push(Step::Cancel);
@@ -775,7 +775,7 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
                 name(&ids[3], "admit"),
                 name(&ids[3], "attempt:1"),
                 schedule(29),
-                schedule(31),
+                name(&ids[3], "present"),
             ]);
         }
         let program = Arc::new(program);

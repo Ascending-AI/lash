@@ -33,7 +33,7 @@
 //!
 //! A final's declared process start (K5, FIG-4884) is protected work of the
 //! same drain: admitted in its `declare` record, registered under its key
-//! (`start:launch`) and discharged (`start:discharge`) before its
+//! (`start:prepare`) with launch and discharge in one durable step before
 //! presentation settles the declarations.
 //!
 //! A final's declared intents are admitted with its declarations and

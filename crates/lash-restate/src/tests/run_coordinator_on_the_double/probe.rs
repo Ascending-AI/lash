@@ -417,8 +417,6 @@ impl SingletonToolHandlers for Probe {
     }
 }
 
-/// One step of a law's program.
-
 impl Probe {
     pub(super) async fn record_intents(
         &self,
