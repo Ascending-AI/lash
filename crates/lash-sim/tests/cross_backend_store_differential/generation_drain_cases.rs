@@ -124,12 +124,14 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
     // The in-flight turn count (FIG-3884, FIG-3927 N8): a run admits under
     // the generation its shift carried and stays in flight until it ends.
     // ia (input-headed) and qa (queued-headed) stay unfinished under a, qb
-    // ends under a before the read, qc stays unfinished under b.
-    for (name, stamp, batch_head, end) in [
-        ("ia", &a, false, false),
-        ("qa", &a, true, false),
-        ("qb", &a, true, true),
-        ("qc", &b, true, false),
+    // ends under a before the read, qc stays unfinished under b. A park
+    // counts in the generation stamped on it (FIG-3795, FIG-5076): qc parks
+    // stamped b, and a stamp-less re-park keeps the stamp.
+    for (name, stamp, batch_head, end, park) in [
+        ("ia", &a, false, false, false),
+        ("qa", &a, true, false, false),
+        ("qb", &a, true, true, false),
+        ("qc", &b, true, false, true),
     ] {
         let session_id = SessionId::fixture(format!("{nonce}-drain-{name}"));
         let store = admit_test_session(
@@ -196,6 +198,24 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
             .await
             .expect("admit the run")
             .expect("the run reaches its head");
+        if park {
+            for build_generation in [Some(stamp.clone()), None] {
+                store
+                    .record_turn_park(&lash_core::store::TurnParkWrite {
+                        build_generation,
+                        ..lash_core::store::TurnParkWrite::refusal(
+                            session_id.clone(),
+                            run.clone(),
+                            lash_core::store::ParkReason::ReplayDivergence {
+                                message: "drain".into(),
+                            },
+                            T0,
+                        )
+                    })
+                    .await
+                    .expect("park the run");
+            }
+        }
         if end {
             stores
                 .session_store_factory()
@@ -375,7 +395,7 @@ pub(super) async fn compare_generation_drains(
             "mark b -> true",
             &format!("marks -> [\"a@{T0}\", \"b@{}\"]", T0 + 1),
             "work a -> GenerationWork { live_processes: 2, parked_processes: 0, parked_turns: 0, in_flight_turns: 2 }",
-            "work b -> GenerationWork { live_processes: 1, parked_processes: 0, parked_turns: 0, in_flight_turns: 1 }",
+            "work b -> GenerationWork { live_processes: 1, parked_processes: 0, parked_turns: 1, in_flight_turns: 1 }",
             "page of a -> 1",
             "page of a -> 1",
             "page of a -> 0",
