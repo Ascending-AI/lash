@@ -862,30 +862,13 @@ impl FleetFixture for RuntimeFixture {
                 self.directory.join("primary"),
                 self.directory.join("follower"),
             ])?;
-            let after_fault = !self
-                .faults
-                .lock()
-                .map_err(|_| anyhow::anyhow!("fault receipts poisoned"))?
-                .is_empty();
-            for node in nodes
-                .into_iter()
-                .filter(|node| !after_fault && Some(node.node) != excluded_node)
-            {
-                let mut reader = RestateEvidenceReader::new(
-                    "fleet".into(),
-                    RestateView::new(&node.admin_url, &self.namespace)?,
-                    7,
-                );
-                reader.bind(work, work.segment.clone())?;
-                evidence
-                    .journals
-                    .extend(reader.collect(work).await?.journals);
-            }
             evidence.faults = self
                 .faults
                 .lock()
                 .map_err(|_| anyhow::anyhow!("fault receipts poisoned"))?
                 .clone();
+            let after_fault = !evidence.faults.is_empty();
+            capture_journals(&mut evidence, &nodes, &self.namespace, work, excluded_node).await?;
             evidence.outputs.extend(self.primary.transcript()?);
             evidence.outputs.extend(self.follower.transcript()?);
             evidence.effects = self
@@ -1284,4 +1267,149 @@ fn setup(name: &str, leg: Leg) -> Result<(CaseLease, LocalCluster, ArtifactIdent
         LocalCluster::new(base, deadline).with_leg(leg),
         binary,
     ))
+}
+
+// Query each available member independently, retaining its admin provenance.
+async fn capture_journals(
+    evidence: &mut Evidence,
+    nodes: &[NodeReceipt],
+    namespace: &str,
+    work: &WorkIdentity,
+    excluded_node: Option<u32>,
+) -> Result<()> {
+    for node in nodes.iter().filter(|node| Some(node.node) != excluded_node) {
+        let mut reader = RestateEvidenceReader::new(
+            evidence.case.clone(),
+            RestateView::new(&node.admin_url, namespace)?,
+            7,
+        );
+        reader.bind(work, work.segment.clone())?;
+        evidence
+            .journals
+            .extend(reader.collect(work).await?.journals);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+    use tokio::io::AsyncReadExt;
+
+    async fn admin_queries(listener: tokio::net::TcpListener) -> Result<()> {
+        loop {
+            let (mut stream, _) = listener.accept().await?;
+            let mut request = Vec::new();
+            let body = loop {
+                let mut bytes = [0; 4096];
+                let read = stream.read(&mut bytes).await?;
+                ensure!(read > 0, "admin request ended before its body");
+                request.extend_from_slice(&bytes[..read]);
+                if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                    let headers = std::str::from_utf8(&request[..end])?;
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length: ")
+                                .map(str::to_owned)
+                        })
+                        .context("query body length")?
+                        .parse()?;
+                    if request.len() >= end + 4 + length {
+                        break serde_json::from_slice::<Value>(
+                            &request[end + 4..end + 4 + length],
+                        )?;
+                    }
+                }
+            };
+            let query = body["query"].as_str().context("admin SQL query")?;
+            ensure!(
+                query.contains("'inv-fleet-law'"),
+                "query changed invocation: {query}"
+            );
+            let rows = if query.contains("FROM sys_invocation") {
+                json!([{"target_service_name":"e2e-fleet-law.LashTurn_g1",
+                    "pinned_service_protocol_version":7}])
+            } else {
+                ensure!(
+                    query.contains("FROM sys_journal"),
+                    "unexpected query: {query}"
+                );
+                json!([{"index":0,"entry_type":"Input","name":null,"version":2,
+                    "entry_json":"{\"Command\":{\"Input\":{}}}"}])
+            };
+            let response = serde_json::to_vec(&json!({"rows":rows}))?;
+            stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", response.len()).as_bytes()).await?;
+            stream.write_all(&response).await?;
+        }
+    }
+
+    /// FIG-5041: a recorded fault cannot erase the available members' journals.
+    #[tokio::test]
+    async fn after_fault_capture_retains_each_available_nodes_journal() -> Result<()> {
+        let work = WorkIdentity {
+            ingress: "fleet-input".into(),
+            run: "fleet-run".into(),
+            segment: "inv-fleet-law".into(),
+            call: None,
+            ordinal: None,
+        };
+        let mut nodes = Vec::new();
+        let mut servers = Vec::new();
+        for node in 1..=3 {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            nodes.push(NodeReceipt {
+                node,
+                admin_url: format!("http://{}", listener.local_addr()?),
+                ingress_url: String::new(),
+                peer_address: String::new(),
+                data_directory: String::new(),
+                incarnation: 1,
+            });
+            servers.push(tokio::spawn(admin_queries(listener)));
+        }
+        let mut evidence = Evidence::empty("fleet".into());
+        evidence.faults.push(FaultReceipt {
+            fault: Fault::PartitionLink { from: 1, to: 2 },
+            proof: BarrierProof {
+                barrier: Barrier {
+                    work: work.clone(),
+                    kind: BarrierKind::TransportConnected,
+                },
+                artifact: "partition-1-2.json".into(),
+                journal_index: None,
+            },
+            target_incarnation: 1,
+        });
+        capture_journals(&mut evidence, &nodes, "e2e-fleet-law", &work, Some(1)).await?;
+        ensure!(
+            evidence.journals.len() == 2,
+            "post-fault receipt lacks majority journal evidence"
+        );
+        ensure!(
+            evidence.faults.len() == 1,
+            "journal capture erased the fault"
+        );
+        for (fact, node) in evidence.journals.iter().zip(&nodes[1..]) {
+            ensure!(fact.admin_url == node.admin_url && fact.protocol == 7);
+            ensure!(fact.work == work && fact.invocation == work.segment);
+            ensure!(fact.index == 0 && fact.value == json!({"Command":{"Input":{}}}));
+        }
+        evidence.journals.clear();
+        capture_journals(&mut evidence, &nodes, "e2e-fleet-law", &work, None).await?;
+        ensure!(
+            evidence.journals.len() == 3,
+            "healed receipt lacks a member's journal evidence"
+        );
+        for (fact, node) in evidence.journals.iter().zip(&nodes) {
+            ensure!(fact.admin_url == node.admin_url && fact.protocol == 7);
+            ensure!(fact.work == work && fact.invocation == work.segment);
+        }
+        for server in servers {
+            server.abort();
+        }
+        Ok(())
+    }
 }
