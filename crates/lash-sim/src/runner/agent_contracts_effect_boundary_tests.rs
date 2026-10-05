@@ -25,74 +25,82 @@ fn process_effect_outcome_contract_normalizes_only_opaque_replay_identity() {
     );
 }
 
+// FIG-1863 (c932ead875) moved provider execution from ToolAttempt envelopes
+// into native X. Compare the acknowledged X identities, not the retired seam.
 #[derive(Default)]
 struct ToolAttemptInvariantRecorder {
-    tool_attempt_envelopes: Mutex<Vec<String>>,
-    provider_body_invocations: Mutex<Vec<String>>,
+    recorded_attempts: Mutex<Vec<(lash_core::ToolCallId, u32)>>,
+    provider_body_invocations: Mutex<Vec<(lash_core::ToolCallId, u32, String)>>,
 }
 
 impl ToolAttemptInvariantRecorder {
-    fn record_tool_attempt(&self, tool_name: &str) {
-        self.tool_attempt_envelopes
+    fn record_tool_attempt(&self, call_id: lash_core::ToolCallId, attempt: u32) {
+        self.recorded_attempts
             .lock_recover()
-            .push(tool_name.to_string());
+            .push((call_id, attempt));
     }
 
-    fn record_provider_body_invocation(&self, tool_name: &str) {
-        self.provider_body_invocations
-            .lock_recover()
-            .push(tool_name.to_string());
+    fn record_provider_body_invocation(&self, call: &lash_core::ToolCall<'_>) {
+        self.provider_body_invocations.lock_recover().push((
+            call.context.call_id().clone(),
+            call.context.attempt_number(),
+            call.name().to_string(),
+        ));
     }
 
-    /// `provider_tools` names the tools this recorder's `ToolProvider` owns.
-    /// Plugin tools -- `start_process` and friends, which the process surface
-    /// installs -- cross the same effect boundary but execute inside the
-    /// runtime, so they carry a ToolAttempt envelope with no provider body.
-    /// Scoping the comparison to the provider's own tools keeps the invariant
-    /// exact in both directions for every tool it can actually speak for.
-    fn assert_every_provider_invocation_has_tool_attempt_envelope(&self, provider_tools: &[&str]) {
-        let counts = |values: &Mutex<Vec<String>>| {
-            let mut counts = HashMap::new();
-            for value in values.lock_recover().iter() {
-                if !provider_tools.contains(&value.as_str()) {
-                    continue;
-                }
-                *counts.entry(value.clone()).or_insert(0usize) += 1;
+    /// Plugin-owned calls also record X. Restrict both sides to the admitted
+    /// call identities the provider owns, retaining an exact comparison in
+    /// both directions for each call and attempt ordinal.
+    fn assert_every_provider_invocation_has_recorded_attempt(&self, provider_tools: &[&str]) {
+        let mut provider_body_invocations = HashMap::new();
+        for (call_id, attempt, name) in self.provider_body_invocations.lock_recover().iter() {
+            if provider_tools.contains(&name.as_str()) {
+                *provider_body_invocations
+                    .entry((call_id.clone(), *attempt))
+                    .or_insert(0usize) += 1;
             }
-            counts
-        };
-        let provider_body_invocations = counts(&self.provider_body_invocations);
-        let tool_attempt_envelopes = counts(&self.tool_attempt_envelopes);
+        }
+        let mut recorded_attempts = HashMap::new();
+        for key in self.recorded_attempts.lock_recover().iter() {
+            if provider_body_invocations.keys().any(|(id, _)| id == &key.0) {
+                *recorded_attempts.entry(key.clone()).or_insert(0usize) += 1;
+            }
+        }
         assert!(
             !provider_body_invocations.is_empty(),
             "the probe must invoke at least one provider tool body, or the invariant is vacuous"
         );
         assert_eq!(
-            tool_attempt_envelopes, provider_body_invocations,
-            "every provider-body invocation must have a corresponding ToolAttempt envelope; \
+            recorded_attempts, provider_body_invocations,
+            "every provider-body invocation must have a corresponding recorded X attempt; \
              provider_body_invocations={provider_body_invocations:?}, \
-             tool_attempt_envelopes={tool_attempt_envelopes:?}"
+             recorded_attempts={recorded_attempts:?}"
         );
     }
 }
 
-/// Records every tool attempt that crosses the contract world's effect boundary.
+/// Records acknowledged X attempts through the contract world's host layer.
 struct ToolAttemptRecordingLayer {
     recorder: Arc<ToolAttemptInvariantRecorder>,
 }
 
-#[async_trait::async_trait]
 impl lash_core::testing::EffectLayer for ToolAttemptRecordingLayer {
-    async fn execute_effect(
-        &self,
-        inner: &dyn lash_core::RuntimeEffectController,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        if let lash_core::RuntimeEffectCommand::ToolAttempt { call, .. } = &envelope.command {
-            self.recorder.record_tool_attempt(&call.tool_name);
+    fn start_run_attempt<'run>(
+        &'run self,
+        inner: &'run dyn lash_core::RuntimeEffectController,
+        name: String,
+        step: lash_core::tool_dispatch::RunAttemptStep<'run>,
+    ) -> lash_core::tool_dispatch::RunAttemptHandle<'run> {
+        let handle = inner.start_run_attempt(name, step);
+        lash_core::tool_dispatch::RunAttemptHandle {
+            body: handle.body,
+            result: Box::pin(async move {
+                let entry = handle.result.await?;
+                self.recorder
+                    .record_tool_attempt(entry.call_id.clone(), entry.attempt.get());
+                Ok(entry)
+            }),
         }
-        inner.execute_effect(envelope, local_executor).await
     }
 }
 
@@ -112,7 +120,7 @@ impl lash_core::ToolProvider for RecordingToolProvider {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        self.recorder.record_provider_body_invocation(call.name());
+        self.recorder.record_provider_body_invocation(&call);
         self.delegate.execute(call).await
     }
 }
@@ -167,7 +175,7 @@ impl lash_core::ToolProvider for BatchEnvelopeProbeTools {
 }
 
 #[tokio::test]
-async fn scalar_lashlang_pending_provider_invocation_crosses_tool_attempt_effect_boundary() {
+async fn scalar_lashlang_pending_provider_invocation_crosses_native_recorded_attempt_boundary() {
     let recorder = Arc::new(ToolAttemptInvariantRecorder::default());
     let (key_tx, mut key_rx) =
         tokio::sync::oneshot::channel::<Result<lash_core::AwaitEventKey, String>>();
@@ -186,11 +194,11 @@ async fn scalar_lashlang_pending_provider_invocation_crosses_tool_attempt_effect
     .await
     .expect("existing scalar Lashlang Pending contract");
 
-    recorder.assert_every_provider_invocation_has_tool_attempt_envelope(&["mock_input_request"]);
+    recorder.assert_every_provider_invocation_has_recorded_attempt(&["mock_input_request"]);
 }
 
 #[tokio::test]
-async fn batched_lashlang_provider_invocations_cross_tool_attempt_effect_boundary() {
+async fn batched_lashlang_provider_invocations_cross_native_recorded_attempt_boundary() {
     let recorder = Arc::new(ToolAttemptInvariantRecorder::default());
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(RecordingToolProvider {
         recorder: Arc::clone(&recorder),
@@ -200,13 +208,13 @@ async fn batched_lashlang_provider_invocations_cross_tool_attempt_effect_boundar
         "lash_runtime batched tool attempt envelope",
         vec![
             r#"<typescript>
-const collect = async () => {
+const collect = await processes.create({ dialect: "typescript", source: `const collect = async () => {
   const [first, second] = await Promise.all([
     tools.envelope_probe({ value: "a" }),
     tools.envelope_probe({ value: "b" })
   ]);
   return { first: first, second: second };
-};
+};` });
 const handle = await processes.start({ definition: collect });
 finish(await handle);
 </typescript>"#,
@@ -239,14 +247,14 @@ finish(await handle);
         result.is_success(),
         "batch envelope contract failed: {result:?}"
     );
-    recorder.assert_every_provider_invocation_has_tool_attempt_envelope(&["envelope_probe"]);
+    recorder.assert_every_provider_invocation_has_recorded_attempt(&["envelope_probe"]);
 }
 
 /// A scalar tool call inside a process runs on the segment's own controller,
-/// which the engine's handler minted: it crosses the host layer only because
+/// which the engine's handler minted: its X crosses the host layer because
 /// the durable worker routes that controller through the host (FIG-3738).
 #[tokio::test]
-async fn scalar_lashlang_process_segment_tool_call_crosses_tool_attempt_effect_boundary() {
+async fn scalar_lashlang_process_segment_tool_call_crosses_native_recorded_attempt_boundary() {
     let recorder = Arc::new(ToolAttemptInvariantRecorder::default());
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(RecordingToolProvider {
         recorder: Arc::clone(&recorder),
@@ -256,10 +264,10 @@ async fn scalar_lashlang_process_segment_tool_call_crosses_tool_attempt_effect_b
         "lash_runtime process segment tool attempt envelope",
         vec![
             r#"<typescript>
-const collect = async () => {
+const collect = await processes.create({ dialect: "typescript", source: `const collect = async () => {
   const first = await tools.envelope_probe({ value: "a" });
   return { first: first };
-};
+};` });
 const handle = await processes.start({ definition: collect });
 finish(await handle);
 </typescript>"#,
@@ -292,7 +300,7 @@ finish(await handle);
         result.is_success(),
         "segment envelope contract failed: {result:?}"
     );
-    recorder.assert_every_provider_invocation_has_tool_attempt_envelope(&["envelope_probe"]);
+    recorder.assert_every_provider_invocation_has_recorded_attempt(&["envelope_probe"]);
 }
 
 /// A race whose tool wins ends its turn cleanly on Restate.

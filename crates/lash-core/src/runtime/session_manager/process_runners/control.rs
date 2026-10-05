@@ -59,7 +59,9 @@ impl<'scope> ProcessCommandRunner<'scope> {
         observers: Vec<SessionId>,
         execution_context: crate::ProcessExecutionContext,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.scoped_effect_controller.admit_journal_write()?;
+        // The owner admitted its launch/prepare record before running this body.
+        // This executor only writes the registry and outbox; asking to admit
+        // another journal command here rejects that owner step (FIG-5009).
         let execution = self
             .local_executor(self.scoped_effect_controller.owned_controller())
             .into_process()?;

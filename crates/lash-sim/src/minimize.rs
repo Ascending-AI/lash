@@ -291,8 +291,13 @@ pub fn minimize_trace(
     }
     if !refresh_trace_verdicts(&mut best, Some(target))? {
         return Err(MinimizeError::Target(format!(
-            "final candidate did not preserve target `{}` with status {:?} and reason `{}`; no minimized package was written",
-            target.oracle_id, target.status, target.reason
+            "final candidate did not preserve target `{}` with status {:?} and reason `{}`; observed `{}` with status {:?} and reason `{}`; no minimized package was written",
+            target.oracle_id,
+            target.status,
+            target.reason,
+            best.oracle.oracle_id,
+            best.oracle.status,
+            best.oracle.message
         )));
     }
 
@@ -664,7 +669,14 @@ fn retain_causally_supported_checkpoint_writes(trace: &mut SimulationTrace) {
     trace.durable_writes.retain(|write| {
         admitted_sessions.contains(write.attributed_session())
             && write.attribution.as_ref().map_or_else(
-                || retained_runtime_turns.contains(&(write.attributed_session(), write.turn_index)),
+                || {
+                    // Ingress creates the session's initial checkpoint before
+                    // any provider turn. Later graph appends depend on those
+                    // rows, so retaining ingress must retain that causal root.
+                    write.turn_index == 0
+                        || retained_runtime_turns
+                            .contains(&(write.attributed_session(), write.turn_index))
+                },
                 |attribution| {
                     retained_boundary_ids.contains(attribution.cause_boundary_id.as_str())
                 },

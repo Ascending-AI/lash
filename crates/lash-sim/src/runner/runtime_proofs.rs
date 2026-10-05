@@ -622,24 +622,42 @@ pub(super) async fn prove_final_value_semantic_channel()
     let final_value_events = events.final_value_events().await;
     let assistant_prose_delta_count = events.assistant_prose_delta_count().await;
     let facts = runtime_final_value_invariant_facts(&result, &recorded);
-    let transcript_text = result
-        .state
-        .read_view()
+    // FIG-1493 (01b5274f02) commits one marked reply for value-terminated
+    // turns. Its rendered text coexists with the typed outcome and event;
+    // it does not replace either semantic channel.
+    let read_view = result.state.read_view();
+    let replies = read_view
         .messages()
         .iter()
-        .flat_map(|message| message.parts.iter())
-        .map(|part| part.content())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let transcript_contains_final_value =
-        transcript_text.contains("semantic-channel") || transcript_text.contains("\"count\"");
+        .filter_map(|message| {
+            message
+                .reply_marker
+                .as_ref()
+                .map(|marker| (message, marker))
+        })
+        .collect::<Vec<_>>();
+    let [(reply, marker)] = replies.as_slice() else {
+        return Err(FixedScriptRunnerError::Assertion(format!(
+            "final-value proof expected one committed reply, observed {}",
+            replies.len()
+        )));
+    };
+    require(
+        reply.role == lash_core::MessageRole::Assistant
+            && marker.turn_id() == lash::TurnId::from("sim-final-value-turn")
+            && reply
+                .parts
+                .iter()
+                .find(|part| part.id() == marker.part_id())
+                .is_some_and(|part| part.content() == final_value.to_string()),
+        "final-value proof did not commit a marked assistant reply rendering the final value",
+    )?;
     let semantic_ok = facts.passed()
         && facts.outcome_kind == "final_value"
         && facts.semantic_value.as_ref() == Some(&final_value)
         && final_value_events.iter().any(|value| value == &final_value)
         && !facts.transcript_inference_required()
-        && result.assistant_message().is_none()
-        && !transcript_contains_final_value;
+        && result.assistant_message().is_none();
     require(
         semantic_ok,
         "final-value proof did not observe a semantic TurnOutcome and FinalValue event",

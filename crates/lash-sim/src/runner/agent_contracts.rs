@@ -1,7 +1,10 @@
 use super::*;
+
+mod process_fixtures;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+use process_fixtures::*;
 
 thread_local! {
     static CONTRACT_CHECKPOINT_COLLECTOR:
@@ -317,121 +320,6 @@ finish(value);
     Ok(result)
 }
 
-async fn agent_started_process_tool_call_graph_execution() -> Result<Value, FixedScriptRunnerError>
-{
-    let expected = json!({ "ok": true });
-    let result = facade_agent_process_execution(
-        "lash_runtime agent started process tool",
-        &SessionId::from("sim-agent-started-process-tool-contract"),
-        "Start a process that calls the app lookup tool.",
-        vec![
-            r#"<typescript>
-const lookup = async () => {
-  /** @label Lookup app state in process */
-  const value = await tools.app_lookup({});
-  return value;
-};
-const handle = await processes.start({ definition: lookup });
-const result = await handle;
-finish(result);
-</typescript>"#,
-        ],
-        &expected,
-        Some(Arc::new(ContractAppTools) as Arc<dyn lash_core::ToolProvider>),
-    )
-    .await?;
-    Ok(result)
-}
-
-async fn agent_durable_input_suspension_resolution_execution()
--> Result<Value, FixedScriptRunnerError> {
-    let result = facade_agent_durable_input_execution().await?;
-    Ok(result)
-}
-
-async fn agent_nested_process_start_await_execution() -> Result<Value, FixedScriptRunnerError> {
-    let expected = json!({ "parent": "done" });
-    let result = facade_agent_process_execution(
-        "lash_runtime agent nested process",
-        &SessionId::from("sim-agent-nested-process-contract"),
-        "Start a parent process that starts and awaits a child process.",
-        vec![
-            r#"<typescript>
-const child = async () => {
-  return { child: "done" };
-};
-const parent = async () => {
-  /** @label Start nested child process */
-  const inner = await (await processes.start({ definition: child }));
-  return { parent: inner.child };
-};
-const handle = await processes.start({ definition: parent });
-const result = await handle;
-finish(result);
-</typescript>"#,
-        ],
-        &expected,
-        None,
-    )
-    .await?;
-    Ok(result)
-}
-
-async fn agent_started_process_subagent_spawn_execution() -> Result<Value, FixedScriptRunnerError> {
-    let expected = json!({ "len": 2 });
-    let result = facade_agent_process_execution_with_options(
-        "lash_runtime agent started process subagent",
-        &SessionId::from("sim-agent-started-process-subagent-contract"),
-        "Run a Lashlang process that spawns a subagent and returns its value.",
-        vec![
-            r#"<typescript>
-const spawnChild = async () => {
-  /** @label Spawn subagent with web search */
-  const result = await agents.spawn({
-    capability: "default",
-    task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
-    seed: { chunk: ["a", "b"] },
-    output: { len: "int" }
-  });
-  return result;
-};
-const handle = await processes.start({ definition: spawnChild });
-const result = await handle;
-finish(result);
-</typescript>"#,
-            r#"<typescript>
-finish({ len: chunk.length });
-</typescript>"#,
-        ],
-        &expected,
-        None,
-        true,
-        None,
-    )
-    .await?;
-    Ok(result)
-}
-
-async fn agent_session_turn_process_child_execution() -> Result<Value, FixedScriptRunnerError> {
-    let expected = json!({ "child": "done" });
-    let result = facade_final_value_execution_with_process_surface(
-        "lash_runtime agent session-turn process child",
-        &SessionId::from("sim-agent-session-turn-process-child-contract"),
-        "Start a child process and await its result.",
-        r#"<typescript>
-const child = async () => {
-  return { child: "done" };
-};
-const handle = await processes.start({ definition: child });
-const result = await handle;
-finish(result);
-</typescript>"#,
-        &expected,
-    )
-    .await?;
-    Ok(result)
-}
-
 async fn agent_failed_child_preserves_failure_graph_execution()
 -> Result<Value, FixedScriptRunnerError> {
     let (core, graph_store, engine) = agent_process_contract_core_with_options(
@@ -506,30 +394,6 @@ await task.fail({ reason: "parent observed child failure" });
         "failure": failure,
     });
     Ok(payload)
-}
-
-async fn agent_parallel_spawn_and_join_execution() -> Result<Value, FixedScriptRunnerError> {
-    let expected = json!({ "joined": ["left", "right"] });
-    let result = facade_final_value_execution_with_process_surface(
-        "lash_runtime agent parallel process join",
-        &SessionId::from("sim-agent-parallel-spawn-join-contract"),
-        "Start two processes, await both, and finish their joined result.",
-        r#"<typescript>
-const child = async (value) => {
-  return value;
-};
-/** @label Start left process */
-const left = await processes.start({ definition: child, args: { value: "left" } });
-/** @label Start right process */
-const right = await processes.start({ definition: child, args: { value: "right" } });
-const leftValue = await left;
-const rightValue = await right;
-finish({ joined: [leftValue, rightValue] });
-</typescript>"#,
-        &expected,
-    )
-    .await?;
-    Ok(result)
 }
 
 async fn facade_final_value_execution(
@@ -812,10 +676,10 @@ async fn facade_agent_durable_input_execution_with(
         "lash_runtime agent durable input",
         vec![
             r#"<typescript>
-const requestAnswer = async () => {
+const requestAnswer = await processes.create({ dialect: "typescript", source: `const requestAnswer = async () => {
   const result = await tools.mock_input_request({ question: "Need input?" });
   return result;
-};
+};` });
 const handle = await processes.start({ definition: requestAnswer });
 const result = await handle;
 finish(result.answer);

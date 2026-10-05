@@ -38,9 +38,9 @@ async fn lifted_process_display_name_does_not_change_the_oracle_verdict() {
         "Start a process under a declared display label and return its value.",
         vec![
             r#"<typescript>
-const lookup = async () => {
+const lookup = await processes.create({ dialect: "typescript", source: `const lookup = async () => {
   return { ok: true };
-};
+};` });
 const handle = await processes.start({ definition: lookup, label: "renamed display label" });
 const result = await handle;
 finish(result);
