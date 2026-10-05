@@ -322,9 +322,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Not implemented: the proposal/ACK-drop choreography was deferred by FIG-4932; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "proposal::s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery"
+          }
         },
         {
           "variant": "default",
@@ -350,7 +353,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: the proposal/ACK-drop choreography was deferred by FIG-4932; no owner ticket filed.",
+          "hold_reason": "Missing replay oracle: proposal::s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery proves the sqlite_file/live leg only; FIG-4993 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -377,7 +380,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: the proposal/ACK-drop choreography was deferred by FIG-4932; no owner ticket filed.",
+          "hold_reason": "Missing postgresql/live leg: proposal::s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery proves the sqlite_file/live leg only; FIG-4993 deferred this leg; no owner ticket filed.",
           "registration": null
         },
         {
@@ -404,7 +407,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: the proposal/ACK-drop choreography was deferred by FIG-4932; no owner ticket filed.",
+          "hold_reason": "Missing postgresql/replay oracle: proposal::s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery proves the sqlite_file/live leg only; FIG-4993 deferred this leg; no owner ticket filed.",
           "registration": null
         }
       ],

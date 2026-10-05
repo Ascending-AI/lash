@@ -14,7 +14,7 @@ use lash_upgrade_harness::identity::BuildLabel;
 use lash_upgrade_harness::node::plugin_upgrade::{Entry, OTHER, PLUGIN};
 use serde_json::{Value, json};
 
-fn services() -> Result<Services> {
+pub(super) fn services() -> Result<Services> {
     Ok(Services {
         ingress_url: std::env::var("RESTATE_INGRESS_URL")
             .context("private live Restate ingress")?,
@@ -83,7 +83,7 @@ fn setup(id: &str, terminal: &str, builds: &NodeBuilds) -> Result<(Case, CaseLea
     Ok((case, lease, spec))
 }
 
-fn note_process(
+pub(super) fn note_process(
     lease: &mut CaseLease,
     node: &lash_upgrade_harness::harness::ServingNode,
     role: &str,
@@ -106,7 +106,7 @@ fn note_process(
     Ok(())
 }
 
-fn stopped(lease: &mut CaseLease, role: &str) {
+pub(super) fn stopped(lease: &mut CaseLease, role: &str) {
     lease
         .cleanup
         .push(lash_upgrade_harness::e2e::control::CleanupReceipt {
@@ -156,7 +156,7 @@ fn finish(case: &Case, lease: &CaseLease, spec: &CaseSpec) -> Result<()> {
     .reconcile()
 }
 
-fn entries(case: &Case) -> Result<Vec<Entry>> {
+pub(super) fn entries(case: &Case) -> Result<Vec<Entry>> {
     let path = case.gate_dir().join("entries.jsonl");
     match std::fs::read_to_string(path) {
         Ok(text) => text
@@ -168,7 +168,7 @@ fn entries(case: &Case) -> Result<Vec<Entry>> {
     }
 }
 
-fn control(
+pub(super) fn control(
     node: &NodeBinary,
     case: &Case,
     action: &str,
@@ -197,7 +197,7 @@ fn control(
     Ok(output)
 }
 
-fn quiesce(case: &Case) -> Result<()> {
+pub(super) fn quiesce(case: &Case) -> Result<()> {
     let view = case.view()?;
     wait_for("the plugin Run and its close to settle", || {
         Ok(block_on(view.open_invocations())?.is_empty().then_some(()))
@@ -211,17 +211,17 @@ fn counts(case: &Case, build: BuildLabel, phase: &str) -> Result<usize> {
         .count())
 }
 
-fn state_value(state: &Value, plugin: &str, key: &str) -> Option<String> {
+pub(super) fn state_value(state: &Value, plugin: &str, key: &str) -> Option<String> {
     state["state"][plugin]["values"][key]
         .as_str()
         .map(str::to_owned)
 }
 
-fn frontier(state: &Value, plugin: &str) -> Result<lash_core::tool_run::StateFrontier> {
+pub(super) fn frontier(state: &Value, plugin: &str) -> Result<lash_core::tool_run::StateFrontier> {
     serde_json::from_value(state["state"][plugin]["publication"].clone()).map_err(Into::into)
 }
 
-fn record(case: &Case, name: &str, value: &Value) -> Result<()> {
+pub(super) fn record(case: &Case, name: &str, value: &Value) -> Result<()> {
     std::fs::write(
         case.gate_dir().join(name),
         serde_json::to_vec_pretty(value)?,
@@ -229,14 +229,18 @@ fn record(case: &Case, name: &str, value: &Value) -> Result<()> {
     Ok(())
 }
 
-fn barriers(case: &Case) -> Result<FileBarriers> {
+pub(super) fn barriers(case: &Case) -> Result<FileBarriers> {
     FileBarriers::new(
         case.gate_dir().to_owned(),
         std::time::Instant::now() + std::time::Duration::from_secs(120),
     )
 }
 
-fn work_of(case: &Case, accepted: &Value, body: &Value) -> Result<(WorkIdentity, String)> {
+pub(super) fn work_of(
+    case: &Case,
+    accepted: &Value,
+    body: &Value,
+) -> Result<(WorkIdentity, String)> {
     let input = accepted["input_id"].as_str().context("accepted ingress")?;
     let view = case.view()?;
     let (segment, invocation) = wait_for("the body's actual Run invocation", || {
@@ -263,7 +267,7 @@ fn work_of(case: &Case, accepted: &Value, body: &Value) -> Result<(WorkIdentity,
     ))
 }
 
-fn bind_held_body(case: &Case, accepted: &Value, body: &Value) -> Result<Barrier> {
+pub(super) fn bind_held_body(case: &Case, accepted: &Value, body: &Value) -> Result<Barrier> {
     let (work, _) = work_of(case, accepted, body)?;
     let barrier = Barrier {
         work,
@@ -319,7 +323,7 @@ fn b_controller(case: &Case, accepted: &Value) -> Result<(CoreControl, BarrierPr
     Ok((control, proof))
 }
 
-fn same_terminal(first: &Value, replayed: &Value) -> Result<()> {
+pub(super) fn same_terminal(first: &Value, replayed: &Value) -> Result<()> {
     let first: lash::SendOutcome = serde_json::from_value(first.clone())?;
     let replayed: lash::SendOutcome = serde_json::from_value(replayed.clone())?;
     ensure!(first.status() == replayed.status() && first.run() == replayed.run());
@@ -378,7 +382,7 @@ fn s24_plugin_revision_rolls_back_without_reentering_completed_work() -> Result<
     let builds = NodeBuilds::from_env()?;
     let (case, mut lease, mut spec) = setup("s24", "Answered", &builds)?;
     let session = case.session_id("plugin");
-    let n = builds.n.serve_plugin_upgrade(&case, None)?;
+    let n = builds.n.serve_plugin_upgrade(&case, None, None)?;
     note_process(&mut lease, &n, "candidate", 1)?;
     spec.artifacts[0].generation = n.generation()?.into();
     let n_generation = n.generation()?.to_owned();
@@ -414,7 +418,7 @@ fn s24_plugin_revision_rolls_back_without_reentering_completed_work() -> Result<
         &serde_json::to_value(b_durable)?,
     )?;
     // Keep the predecessor deployment while the successor becomes newest.
-    let next = builds.next.serve_plugin_upgrade(&case, None)?;
+    let next = builds.next.serve_plugin_upgrade(&case, None, None)?;
     note_process(&mut lease, &next, "successor", 1)?;
     spec.artifacts[1].generation = next.generation()?.into();
     barriers(&case)?.release(&a_barrier)?;
@@ -477,7 +481,7 @@ fn s24_plugin_revision_rolls_back_without_reentering_completed_work() -> Result<
         "redeploy reentered predecessor callbacks"
     );
 
-    let rollback = builds.n.serve_plugin_upgrade(&case, None)?;
+    let rollback = builds.n.serve_plugin_upgrade(&case, None, None)?;
     note_process(&mut lease, &rollback, "candidate", 2)?;
     ensure!(
         rollback.generation()? == n_generation
@@ -520,7 +524,7 @@ fn s25_cold_reopen(
     spec: &mut CaseSpec,
 ) -> Result<()> {
     let session = case.session_id(variant);
-    let node = builds.n.serve_plugin_upgrade(case, None)?;
+    let node = builds.n.serve_plugin_upgrade(case, None, None)?;
     note_process(lease, &node, "candidate", 1)?;
     spec.artifacts[0].generation = node.generation()?.into();
     let bind = node.bind()?;
@@ -557,11 +561,11 @@ fn s25_cold_reopen(
 
     // The successor controls cancellation. The predecessor keeps its drain
     // lane to finish its own journal, rather than decoding it as a new Run.
-    let cancellation_host = builds.next.serve_plugin_upgrade(case, None)?;
+    let cancellation_host = builds.next.serve_plugin_upgrade(case, None, None)?;
     note_process(lease, &cancellation_host, "successor", 1)?;
     spec.artifacts[1].generation = cancellation_host.generation()?.into();
     control(&builds.next, case, "cancel", &session, &["--input", input])?;
-    let predecessor = builds.n.serve_plugin_upgrade(case, Some(&bind))?;
+    let predecessor = builds.n.serve_plugin_upgrade(case, Some(&bind), None)?;
     note_process(lease, &predecessor, "candidate", 2)?;
     // Public cancel has written its intent. Observe A's actual recorded-step
     // stop before release, so a ready body cannot win before the stop watch.
@@ -589,7 +593,7 @@ fn s25_cold_reopen(
     stopped(lease, "predecessor-drain");
     cancellation_host.stop()?;
     stopped(lease, "cancellation-host");
-    let successor = builds.next.serve_plugin_upgrade(case, None)?;
+    let successor = builds.next.serve_plugin_upgrade(case, None, None)?;
     note_process(lease, &successor, "successor", 2)?;
     let state = control(&builds.next, case, "read", &session, &[])?;
     let b_plugin = if variant == "namespace" {

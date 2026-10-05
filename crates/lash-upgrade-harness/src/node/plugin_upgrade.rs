@@ -43,13 +43,17 @@ pub struct PluginUpgradeArgs {
     pub controls: PathBuf,
     #[arg(long, default_value = "plugin-upgrade")]
     pub session: String,
-    /// `same`, `disjoint`, `namespace` or `single`.
+    /// `same`, `disjoint`, `namespace`, `proposal` or `single`.
     #[arg(long, default_value = "single")]
     pub variant: String,
     #[arg(long)]
     pub input: Option<lash_core::InputId>,
     #[arg(long, default_value = "127.0.0.1:0")]
     pub bind: std::net::SocketAddr,
+    /// The URI the serve action registers instead of the bound one, so a
+    /// transport proxy can sit between Restate and this endpoint.
+    #[arg(long)]
+    pub advertise: Option<String>,
     #[arg(long)]
     pub ready_file: Option<PathBuf>,
 }
@@ -397,7 +401,7 @@ fn calls(variant: &str) -> Vec<lash_core::LlmOutputPart> {
             "B"
         },
         if variant == "disjoint" { "b" } else { "value" },
-        false,
+        variant == "proposal",
         variant == "namespace",
     )];
     if variant != "single" {
@@ -466,7 +470,7 @@ fn core(
                         })
                     });
                 let message = super::provider::newest_message(&request);
-                let variant = ["single", "same", "disjoint", "namespace"]
+                let variant = ["single", "same", "disjoint", "namespace", "proposal"]
                     .into_iter()
                     .find(|variant| message.split_whitespace().any(|word| word == *variant))
                     .unwrap_or("single");
@@ -514,7 +518,7 @@ fn core(
 pub async fn run(args: PluginUpgradeArgs) -> Result<()> {
     std::fs::create_dir_all(&args.controls)?;
     ensure!(
-        ["single", "same", "disjoint", "namespace"].contains(&args.variant.as_str()),
+        ["single", "same", "disjoint", "namespace", "proposal"].contains(&args.variant.as_str()),
         "unknown state variant"
     );
     let stores = super::open_stores(&args.store).await?;
@@ -550,7 +554,9 @@ pub async fn run(args: PluginUpgradeArgs) -> Result<()> {
             )
             .await;
         });
-        engine.register_deployment(&uri).await?;
+        engine
+            .register_deployment(args.advertise.as_deref().unwrap_or(&uri))
+            .await?;
         super::write_atomically(
             &args.ready_file.context("serve requires --ready-file")?,
             &serde_json::to_vec(&super::ServeReady {

@@ -328,6 +328,20 @@ impl CoreControl {
             .map(|(_, proxy)| proxy)
             .ok_or_else(|| anyhow::anyhow!("transport target is not owned"))
     }
+    /// Take an owned process back out for an orderly teardown stop.
+    pub fn take_process(&mut self, target: &str) -> anyhow::Result<crate::harness::ServingNode> {
+        self.processes
+            .remove(target)
+            .map(|(_, process)| process)
+            .ok_or_else(|| anyhow::anyhow!("process target is not owned"))
+    }
+    /// Take an owned transport target back out for an orderly finish.
+    pub fn take_proxy(&mut self, target: &str) -> anyhow::Result<transport::V7Proxy> {
+        self.proxies
+            .remove(target)
+            .map(|(_, proxy)| proxy)
+            .ok_or_else(|| anyhow::anyhow!("transport target is not owned"))
+    }
 }
 impl Control for CoreControl {
     fn await_barrier<'a>(&'a mut self, barrier: &'a Barrier) -> Step<'a, BarrierProof> {

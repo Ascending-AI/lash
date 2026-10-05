@@ -294,7 +294,14 @@ impl NodeBinary {
     }
 
     /// Serve H5's plugin fixture using the existing ready, kill and reap owner.
-    pub fn serve_plugin_upgrade(&self, case: &Case, bind: Option<&str>) -> Result<ServingNode> {
+    /// `advertise`, when given, is the deployment URI the node registers
+    /// instead of its bound address, so a proxy can hold the stream.
+    pub fn serve_plugin_upgrade(
+        &self,
+        case: &Case,
+        bind: Option<&str>,
+        advertise: Option<&str>,
+    ) -> Result<ServingNode> {
         let ready_file = case.gate_dir().join(format!(
             "plugin-{}-{}.json",
             self.label(),
@@ -307,6 +314,9 @@ impl NodeBinary {
             .args(["--action", "serve"])
             .arg("--ready-file")
             .arg(&ready_file);
+        if let Some(advertise) = advertise {
+            command.arg("--advertise").arg(advertise);
+        }
         let bind = bind
             .map(str::to_owned)
             .map_or_else(|| unregistered_address(case), Ok)?;
