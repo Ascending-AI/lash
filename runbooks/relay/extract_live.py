@@ -5,10 +5,11 @@ Writes stepN-prompt.json (the full LlmRequest), stepN-response.json, a
 readable transcript.md with each step's context blocks, harness message,
 reply and tool calls, and usage.md: one row per provider request with its
 cache breakpoints and the provider-reported uncached input, cache-read,
-cache-write and output tokens. The usage table is also printed.
+cache-write and output tokens, and the upstream provider OpenRouter routed it
+to. The usage table is also printed.
 With several turn ids, steps are numbered across them in trace order.
 """
-import json, sys, pathlib
+import json, re, sys, pathlib
 trace, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 turns = sys.argv[3:]
 out.mkdir(parents=True, exist_ok=True)
@@ -59,6 +60,11 @@ for line in trace.open():
             md.append("### Context blocks\n(empty)")
         md.append(f"\nCache breakpoints (message.block): {rows[call]['breakpoints']}")
         md.append("\n### Harness message\n```\n" + harness + "\n```")
+    elif t == "provider_stream_event" and call in rows:
+        # OpenRouter names the upstream that served the call on its chunks.
+        for upstream in re.findall(r'"provider":\s*"([^"]+)"', json.dumps(e.get("event", {})).replace('\\"', '"')):
+            if upstream != "openai_compatible":
+                rows[call].setdefault("upstreams", set()).add(upstream)
     elif t == "llm_attempt_completed" and call in rows:
         attempt = e.get("attempt", {})
         usage = attempt.get("usage") or {}
@@ -80,11 +86,12 @@ for line in trace.open():
         body = strip(e)
         md.append("\n### Tool call\n```json\n" + json.dumps(body)[:1500] + "\n```")
 (out / "transcript.md").write_text("\n".join(md))
-header = "| # | turn | iter | harness | ctx entries | breakpoints (msg.block) | system hash | uncached in | cache read | cache write | output | ms |"
-table = [header, "|" + "---|" * 12]
+header = "| # | turn | iter | harness | ctx entries | breakpoints (msg.block) | system hash | upstream | uncached in | cache read | cache write | output | ms |"
+table = [header, "|" + "---|" * 13]
 for call in order:
     r = rows[call]
-    table.append("| {step} | {turn} | {iteration} | {harness} | {entries} | {breakpoints} | {system} | {input} | {cache_read} | {cache_write} | {output} | {ms} |".format(
+    r = {**r, "upstream": ",".join(sorted(r.get("upstreams", ()))) or "?"}
+    table.append("| {step} | {turn} | {iteration} | {harness} | {entries} | {breakpoints} | {system} | {upstream} | {input} | {cache_read} | {cache_write} | {output} | {ms} |".format(
         **{"input": "-", "cache_read": "-", "cache_write": "-", "output": "-", "ms": "-", **r}))
 (out / "usage.md").write_text("\n".join(table) + "\n")
 print("\n".join(table))

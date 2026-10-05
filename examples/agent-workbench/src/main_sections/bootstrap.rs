@@ -388,7 +388,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         reqwest::Url::parse(&provider_url).context("invalid AGENT_WORKBENCH_PROVIDER_URL")?;
         ProviderHandle::new(crate::e2e_live_budget::install(
             OpenAiCompatibleProvider::new(api_key, provider_url)
-                .with_compat(OpenAiCompat::openrouter())
+                .with_compat(openrouter_compat_from(|name| std::env::var(name))?)
                 .into_components(),
         )?)
     };
@@ -994,6 +994,35 @@ pub(crate) fn rlm_policy_from(
     }
 }
 
+/// The OpenRouter route: its endpoint facts, plus routing restricted to the
+/// upstream slugs `AGENT_WORKBENCH_OPENROUTER_PROVIDER` names. Unset or empty
+/// leaves routing to OpenRouter.
+pub(crate) fn openrouter_compat_from(
+    read_env: impl FnOnce(&str) -> Result<String, std::env::VarError>,
+) -> AnyhowResult<OpenAiCompat> {
+    let only = match read_env(AGENT_WORKBENCH_OPENROUTER_PROVIDER_ENV) {
+        Err(std::env::VarError::NotPresent) => Vec::new(),
+        Ok(raw) => raw
+            .split(',')
+            .map(str::trim)
+            .filter(|slug| !slug.is_empty())
+            .map(str::to_string)
+            .collect(),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(anyhow!(
+                "agent-workbench: {AGENT_WORKBENCH_OPENROUTER_PROVIDER_ENV} is not valid Unicode"
+            ));
+        }
+    };
+    Ok(OpenAiCompat {
+        provider_routing: (!only.is_empty()).then(|| lash::openai::ProviderRoutingPrefs {
+            only,
+            ..Default::default()
+        }),
+        ..OpenAiCompat::openrouter()
+    })
+}
+
 pub(crate) fn continue_as_warn_tokens_from_environment(
     context_window_tokens: usize,
 ) -> AnyhowResult<Option<usize>> {
@@ -1172,5 +1201,42 @@ mod startup_tests {
                 .starts_with("agent-workbench: OPENROUTER_API_KEY is not set"),
             "unexpected startup refusal: {error:#}"
         );
+    }
+}
+
+#[cfg(test)]
+mod openrouter_pin_tests {
+    use super::*;
+
+    fn compat(value: Option<&str>) -> OpenAiCompat {
+        openrouter_compat_from(|name| {
+            assert_eq!(name, AGENT_WORKBENCH_OPENROUTER_PROVIDER_ENV);
+            value
+                .map(str::to_string)
+                .ok_or(std::env::VarError::NotPresent)
+        })
+        .expect("compat")
+    }
+
+    /// A named upstream becomes the request's `provider` object, restricted
+    /// to that slug; unset or blank sends none and leaves routing to
+    /// OpenRouter. The adapter puts `provider_routing` on the body verbatim.
+    #[test]
+    fn openrouter_provider_pin_sets_the_routing_object_only_when_named() {
+        let pinned = compat(Some(" z-ai "));
+        assert_eq!(
+            serde_json::to_value(&pinned.provider_routing).expect("routing json"),
+            serde_json::json!({ "require_parameters": false, "only": ["z-ai"] })
+        );
+        assert_eq!(
+            compat(Some("z-ai, deepinfra"))
+                .provider_routing
+                .map(|routing| routing.only),
+            Some(vec!["z-ai".to_string(), "deepinfra".to_string()])
+        );
+        for unpinned in [compat(None), compat(Some("")), compat(Some(" , "))] {
+            assert_eq!(unpinned, OpenAiCompat::openrouter());
+            assert!(unpinned.provider_routing.is_none());
+        }
     }
 }

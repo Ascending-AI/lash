@@ -85,6 +85,9 @@ const AGENT_WORKBENCH_DELTA_FRAME_MAX_BYTES_ENV: &str = "AGENT_WORKBENCH_DELTA_F
 const AGENT_WORKBENCH_DELTA_FIRST_IMMEDIATE_ENV: &str = "AGENT_WORKBENCH_DELTA_FIRST_IMMEDIATE";
 /// Selects the RLM execution policy: `chronological` (default) or `relay`.
 const AGENT_WORKBENCH_RLM_POLICY_ENV: &str = "AGENT_WORKBENCH_RLM_POLICY";
+/// Pins OpenRouter to these upstream provider slugs (comma-separated), with
+/// no fallback to others: provider prompt caches are per upstream.
+const AGENT_WORKBENCH_OPENROUTER_PROVIDER_ENV: &str = "AGENT_WORKBENCH_OPENROUTER_PROVIDER";
 /// The smallest context window the workbench accepts. The workbench is an
 /// RLM host: its sessions switch frames through the model-driven
 /// `continue_as` below this window, never through standard compaction.

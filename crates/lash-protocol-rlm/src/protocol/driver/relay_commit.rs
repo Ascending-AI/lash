@@ -1,17 +1,28 @@
 //! The relay driver's two decisions (FIG-4441): what a reply without a cell
 //! gets, and whether an executed step commits.
 
+use std::fmt::Write as _;
+
 use super::*;
 
 use crate::relay::{NEXT_TOOL, RelayNext, RelaySettings, SEND_USER_OUTPUT_TOOL};
 
+/// The most prose a refused reply hands back inside its ready-to-send cell.
+const PROSE_REPLY_ECHO_CHARS: usize = 2_000;
+
 /// A relay reply's class. A cell runs; anything else is a repair round whose
 /// prose is not kept, because prose is never relay output.
+///
+/// A reply that is prose only was, in the live runs, the model answering the
+/// user directly; told only how to answer, a weaker model answered in prose
+/// again and again. The note hands that prose back inside the exact cell
+/// that sends it, so sending it is a copy.
 pub(super) fn classify_relay_reply<'a>(
     dialect: &SessionDialect,
     attempt: &AttemptContext<'_>,
     extraction: Result<Option<CellExtraction>, CellExtractionError>,
     terminal_reason: LlmTerminalReason,
+    prose: &str,
 ) -> ReplyClass<'a> {
     let tags = dialect.cell_tags();
     let (decision, copy) = match extraction {
@@ -30,10 +41,7 @@ pub(super) fn classify_relay_reply<'a>(
         ),
         Ok(None) => (
             "relay_request_cell",
-            format!(
-                "No program ran, so this step committed nothing. Every step is one program between `{}` and `{}` on their own lines, ending with `await control.next({{ context, vars }})`. Prose outside it is never shown to the user. To answer, ask a question or say you are blocked, send it with `control.send_user_output` and end the step with `await control.next({{ context, final: true }})`.",
-                tags.open, tags.close
-            ),
+            prose_reply_note(tags.open, tags.close, prose),
         ),
     };
     ReplyClass::Repair(Box::new(RepairPrompt {
@@ -41,6 +49,25 @@ pub(super) fn classify_relay_reply<'a>(
         assistant_message: None,
         correction: relay_note(attempt.message_id("relay_no_cell"), copy),
     }))
+}
+
+fn prose_reply_note(open: &str, close: &str, prose: &str) -> String {
+    let mut note = format!(
+        "No program ran, so this step committed nothing. Every step is one program between `{open}` and `{close}` on their own lines, ending with `await control.next({{ context, vars }})`. Prose outside it is never shown to the user."
+    );
+    let prose = prose.trim();
+    if prose.is_empty() {
+        note.push_str(" To answer, ask a question or say you are blocked, send it with `control.send_user_output` and end the step with `await control.next({ context, final: true })`.");
+        return note;
+    }
+    let (prose, _) = lash_core::facade_support::head_tail_truncate(prose, PROSE_REPLY_ECHO_CHARS);
+    // A JSON string is a valid string literal in the cell language.
+    let text = serde_json::Value::String(prose).to_string();
+    let _ = write!(
+        note,
+        " If that reply was your answer or your question to the user, send it: reply with exactly this program.\n{open}\nawait control.send_user_output({{ text: {text} }});\nawait control.next({{ context, final: true }});\n{close}\nIf there is still work to do, send the program that does it instead."
+    );
+    note
 }
 
 /// One committed step: its baton and the outputs it delivers.

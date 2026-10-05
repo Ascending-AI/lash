@@ -394,6 +394,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 &attempt,
                 extraction,
                 terminal_reason,
+                &visible_prose,
             ),
             None => self.classify_reply(
                 &attempt,

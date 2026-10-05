@@ -10,6 +10,9 @@ use super::*;
 
 const SEED: u64 = 0x4441_0001;
 
+/// A script answer starting with this is sent as bare prose, not as a cell.
+const PROSE_REPLY: &str = "prose:";
+
 /// Every request the model served, in order.
 type Served = Arc<StdMutex<Vec<LlmRequest>>>;
 
@@ -78,7 +81,10 @@ fn relay_provider(served: &Served, script: Script) -> ProviderHandle {
             let program = script(&RelayRequest::of(&request));
             async move {
                 served.lock_recover().push(request);
-                Ok(text_response(&typescript_block(&program)))
+                Ok(text_response(&match program.strip_prefix(PROSE_REPLY) {
+                    Some(prose) => prose.to_string(),
+                    None => typescript_block(&program),
+                }))
             }
         })
         .build()
@@ -746,5 +752,49 @@ await control.next({ context, final: true });"#
             "request {index}'s system prompt or tools differ from the first's"
         );
     }
+    Ok(())
+}
+
+/// A reply in bare prose commits nothing, and the next harness hands that
+/// prose back inside the exact cell that would send it to the user; the
+/// model copying it ends the turn with the prose as the reply.
+#[tokio::test]
+async fn a_prose_reply_comes_back_as_the_cell_that_sends_it() -> Result<()> {
+    let served = Served::default();
+    let (_core, session) = relay_session(
+        double_backend().await,
+        "relay-prose-reply",
+        &served,
+        script(|request| {
+            let cell = request
+                .harness
+                .split_once("reply with exactly this program.\n<typescript>\n")
+                .and_then(|(_, rest)| rest.split_once("\n</typescript>"))
+                .map(|(cell, _)| cell.to_string());
+            match cell {
+                Some(cell) => cell,
+                None => format!("{PROSE_REPLY}There is no \"Q3\" message; which inbox?"),
+            }
+        }),
+        no_tools(),
+        None,
+    )
+    .await?;
+
+    let output = session.send(TurnInput::text("find Q3")).output().await?;
+
+    assert_eq!(
+        output.assistant_message(),
+        Some("There is no \"Q3\" message; which inbox?")
+    );
+    let requests = requests(&served);
+    assert_eq!(requests.len(), 2, "the copied cell ends the turn");
+    assert!(
+        requests[1].harness.contains(
+            "await control.send_user_output({ text: \"There is no \\\"Q3\\\" message; which inbox?\" });\nawait control.next({ context, final: true });"
+        ),
+        "{}",
+        requests[1].harness
+    );
     Ok(())
 }
