@@ -1293,10 +1293,7 @@ fn l05_middle_preparation_failure_keeps_survivor_source_pairing() {
                     assert_eq!(record.call_id, identities.child_call_id(1, leaf));
                     assert_eq!(record.args["text"], source);
                 }
-                close
-                    .close_opener_groups()
-                    .await
-                    .expect("close logical owner");
+                close.close_tool_run().await.expect("close logical owner");
             })
             .await
             .expect("logical owner");
@@ -1377,10 +1374,7 @@ fn l05_unavailable_member_keeps_native_completion_and_source_slots() {
                         other => panic!("wrong source {index}: {other:?}"),
                     }
                 }
-                context
-                    .close_opener_groups()
-                    .await
-                    .expect("logical closing");
+                context.close_tool_run().await.expect("logical closing");
             })
             .await
             .expect("owned program");
@@ -1451,7 +1445,7 @@ fn l06_race_loser_stays_owned_across_cells_until_logical_closing() {
             }
             assert_eq!(completed.load(Ordering::SeqCst), 2, "later program effect runs while loser is unfinished");
             release.notify_one();
-            context.close_opener_groups().await.expect("close logical owner");
+            context.close_tool_run().await.expect("close logical owner");
             assert_eq!(completed.load(Ordering::SeqCst), 3, "closing drains the retained loser");
         }).await.expect("owned program");
         drop(context);
@@ -1542,10 +1536,7 @@ fn l12_reused_call_identity_refuses_argument_drift_before_execution() {
                             if **drift == lash_core::tool_run::SingletonDrift::Arguments
                     ));
                 }
-                context
-                    .close_opener_groups()
-                    .await
-                    .expect("logical closing");
+                context.close_tool_run().await.expect("logical closing");
             })
             .await
             .expect("owned program");
@@ -1631,10 +1622,7 @@ fn cell_limit_counts_an_owned_promise_once() {
                 };
                 assert_eq!(refusal.tool_call_limit_exceeded(), Some(expected));
                 assert_eq!(context.tool_call_limit_refusal(), Some(expected));
-                context
-                    .close_opener_groups()
-                    .await
-                    .expect("logical closing");
+                context.close_tool_run().await.expect("logical closing");
             })
             .await
             .expect("owned program");

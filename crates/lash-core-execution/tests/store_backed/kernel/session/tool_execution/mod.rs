@@ -1,3 +1,4 @@
+mod check_contributions;
 mod loser_progress;
 mod native_cancel;
 mod output_retention;

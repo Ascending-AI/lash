@@ -1,6 +1,6 @@
 //! The crash-matrix seam controllers: recording and crash-injecting
 //! doubles that wrap the fixture's real controller and forward
-//! every group operation to it, so durable effect-group state stays in the
+//! every operation to it, so durable Run state stays in the
 //! substrate under test.
 
 use std::sync::Arc;
@@ -19,8 +19,8 @@ use crate::{
 /// The crash matrix's effect seam: an [`EffectLayer`](crate::testing::EffectLayer)
 /// that records the turn's effect, group and turn-control operations on its
 /// [`SeamControl`], counts external executions, and crashes or fails them where
-/// the control is armed. Every group operation lands on the controller it
-/// layers, so durable effect-group state stays in the substrate under test.
+/// the control is armed. Every operation lands on the controller it
+/// layers, so durable Run state stays in the substrate under test.
 ///
 /// [`SeamLayer::over_scoped`] layers the controller a tier's turn runner lends,
 /// which on Restate is borrowed from the turn's handler.
@@ -159,12 +159,7 @@ impl crate::testing::EffectLayer for SeamLayer {
 
 /// The one layered host a runner-driven crash law builds all its runtimes on.
 ///
-/// A runtime installs its tool-child host on the tier's host get-or-init, and
-/// that tool-child host holds the effect host it routes group children through
-/// weakly. So the first runtime's layered host routes every later runtime's
-/// children, and a law that layered the tier's host afresh for each execution
-/// would strand them once that first layered host dropped. The law layers the
-/// tier's host once, holds it for its whole run, and points the layer at the
+/// The law layers the tier's host once, holds it for its whole run, and points the layer at the
 /// seam of the execution that runs now ([`LawSeamHost::route_to`]).
 #[derive(Clone)]
 pub(crate) struct LawSeamHost {

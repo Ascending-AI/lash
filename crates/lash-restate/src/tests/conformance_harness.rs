@@ -22,10 +22,10 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-/// The endpoint's process runner for the tool-child laws: a tool child's
+/// The endpoint's process runner for the tool laws: a tool call's
 /// declared starts record through the Restate process surface, so the
-/// service must exist for the submission to be a legal command. What runs the segment is not under test — the same role
-/// `ConformanceExecutors` plays for group children — so the runner settles
+/// service must exist for the submission to be a legal command. What runs
+/// the segment is not under test, so the runner settles
 /// every submitted process successfully and lets the workflow write the
 /// terminal into the law's registry.
 struct ToolProcessRunner;

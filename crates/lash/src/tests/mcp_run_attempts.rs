@@ -7,9 +7,9 @@ use lash_core::ToolProvider;
 use lash_core::plugin::{BehaviorRevision, PluginRevision};
 use lash_core::store::plugin_writers::PluginCallbackIdentity;
 use lash_core::tool_dispatch::{
-    BeforeCheckReply, DeclaredStartObligation, SingletonAttempt, SingletonBodyOutcome,
-    SingletonCapture, SingletonPreparedRequest, SingletonTerminal, SingletonToolCall,
-    SingletonToolHandlers, run_singleton_tool,
+    BeforeCheckReply, DeclaredStartObligation, RunCoordinator, SingletonAttempt,
+    SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest, SingletonTerminal,
+    SingletonToolCall, SingletonToolHandlers,
 };
 use lash_core::tool_run::{
     AdmittedBinding, AfterCheckVerdict, AttributedVerdict, CallDecision, ExternalCancelPolicy,
@@ -242,7 +242,12 @@ async fn drive(
         backend
             .server()
             .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
-                name: Some(format!("lash:run:{}:{step}", call.call_id)),
+                // A one-member round records its decision in the schedule
+                // record named by its first event ordinal.
+                name: Some(match step {
+                    "decide" => "lash:run:schedule:1".to_owned(),
+                    step => format!("lash:run:{}:{step}", call.call_id),
+                }),
             }));
     }
     let returned = Arc::new(Mutex::new(None));
@@ -253,10 +258,26 @@ async fn drive(
             let call = call.clone();
             let returned = returned.clone();
             Box::pin(async move {
-                let outcome = run_singleton_tool(&scoped, &call, probe.as_ref())
+                let mut run = RunCoordinator::open(
+                    &scoped,
+                    call.owner.clone(),
+                    call.segment,
+                    call.available.clone(),
+                );
+                let decided = run
+                    .start_round(
+                        std::slice::from_ref(&call),
+                        lash_core::tool_run::CapacityScope::Held,
+                        Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                        Default::default(),
+                    )
                     .await
                     .unwrap();
-                *returned.lock().unwrap() = Some(outcome.terminal);
+                if decided.is_empty() {
+                    while run.progress().await.unwrap().is_none() {}
+                }
+                let (_, terminal) = run.drain().await.unwrap().pop().unwrap();
+                *returned.lock().unwrap() = Some(terminal);
             })
         })
     };

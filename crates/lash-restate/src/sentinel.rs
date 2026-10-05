@@ -1,8 +1,7 @@
 //! The generation sentinel (ADR 0106 §1, FIG-3795).
 //!
 //! Every lash handler whose journal only its own build may replay — the
-//! process segment workflow, the effect-group dispatcher's run and children,
-//! and the `SessionShifts`'s `LashSession` and `LashTurn` — records the
+//! process segment workflow and the `SessionShifts`'s `LashSession` and `LashTurn` — records the
 //! executing build's drain generation `G` as its journal's first command: a
 //! `ctx.run` step named [`GENERATION_SENTINEL`] whose recorded output is
 //! the generation as a JSON string.

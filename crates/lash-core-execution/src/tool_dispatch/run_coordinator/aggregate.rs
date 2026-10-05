@@ -104,7 +104,7 @@ impl<'a> RunCoordinator<'a> {
                     }
                     .into());
                 }
-                self.register_aggregate_timers(plan, clock)
+                self.register_aggregate_timers(plan, clock, &BTreeSet::new())
             })
             .await;
         self.active_frame = false;

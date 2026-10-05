@@ -118,7 +118,7 @@ impl<'a> RunCoordinator<'a> {
         for call in calls {
             self.handlers.insert(
                 call.call_id.clone(),
-                Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                Handlers(std::sync::Arc::clone(&handlers)),
             );
         }
         // Even an immediate/cached winner cannot bypass registration of a
@@ -147,7 +147,7 @@ impl<'a> RunCoordinator<'a> {
             }
         }
         if let Some((plan, clock)) = aggregate {
-            self.register_aggregate_timers(plan, clock)?;
+            self.register_aggregate_timers(plan, clock, &std::collections::BTreeSet::new())?;
         }
         for (index, (member, _)) in admitted.iter().enumerate() {
             if member.selection() == BeforeSelection::Execute {
@@ -173,7 +173,7 @@ impl<'a> RunCoordinator<'a> {
             let decision = self
                 .decide_candidate(
                     &calls[index],
-                    Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                    Handlers(std::sync::Arc::clone(&handlers)),
                     member,
                     candidate,
                 )
@@ -187,6 +187,7 @@ impl<'a> RunCoordinator<'a> {
         &mut self,
         plan: &crate::tool_run::AggregatePlan,
         clock: &dyn crate::Clock,
+        elapsed: &std::collections::BTreeSet<(String, u32)>,
     ) -> Result<(), SingletonRunError> {
         let admitted_at_ms = self
             .journal
@@ -204,7 +205,9 @@ impl<'a> RunCoordinator<'a> {
                 key: plan.key.clone(),
             })?;
         for (index, leaf) in plan.leaves.iter().enumerate() {
-            if let crate::tool_run::AggregateLeaf::Timer { duration_ms } = leaf {
+            if let crate::tool_run::AggregateLeaf::Timer { duration_ms } = leaf
+                && !elapsed.contains(&(plan.key.clone(), index as u32))
+            {
                 let deadline = admitted_at_ms.saturating_add(*duration_ms);
                 self.journal.scoped.admit_journal_write()?;
                 let timer = self
@@ -651,7 +654,7 @@ impl<'a> RunCoordinator<'a> {
                         .accept_pending(
                             call,
                             member.clone(),
-                            Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                            Handlers(std::sync::Arc::clone(&handlers)),
                             ordinal,
                             PendingAttempt {
                                 source: source.clone(),
@@ -676,7 +679,7 @@ impl<'a> RunCoordinator<'a> {
                     let terminal = self.queue_deferred_start(
                         call,
                         member.clone(),
-                        Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                        Handlers(std::sync::Arc::clone(&handlers)),
                         ordinal,
                         source.clone(),
                         SingletonStart {
@@ -697,7 +700,7 @@ impl<'a> RunCoordinator<'a> {
                         Waiting {
                             call: call.clone(),
                             member: member.clone(),
-                            handlers: Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                            handlers: Handlers(std::sync::Arc::clone(&handlers)),
                             attempt: ordinal,
                             start: None,
                         },
@@ -753,26 +756,13 @@ impl<'a> RunCoordinator<'a> {
                         handle,
                     });
                 }
-                [
-                    RunEvent::AttemptRecorded { .. },
-                    RunEvent::Decided {
-                        rank,
-                        decision: recorded_decision,
-                        ..
-                    },
-                ]
-                | [
-                    RunEvent::Decided {
-                        rank,
-                        decision: recorded_decision,
-                        ..
-                    },
-                ] => {
+                events => {
+                    let (rank, recorded_decision) = recorded_decision(events, &call.call_id)?;
                     self.owed.insert(
-                        *rank,
+                        rank,
                         Owed {
                             call_id: call.call_id.clone(),
-                            handlers: Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                            handlers: Handlers(std::sync::Arc::clone(&handlers)),
                             decision: recorded_decision.clone(),
                             capture,
                         },
@@ -780,46 +770,14 @@ impl<'a> RunCoordinator<'a> {
                     decision = Some((
                         call.call_id.clone(),
                         DecidedCall::Ranked {
-                            rank: *rank,
+                            rank,
                             decision: recorded_decision.clone(),
                         },
                     ));
                 }
-                _ => return Err(boundary(&call.call_id)),
             }
         }
         Ok(decision)
-    }
-
-    /// Admit and decide every call of this round in the recorded K9 schedule.
-    /// Existing pending calls also progress; their decisions remain in the Run.
-    ///
-    /// # Errors
-    /// A typed admission, journal, material or Run-fold refusal.
-    pub async fn decide_round(
-        &mut self,
-        calls: &[SingletonToolCall],
-        handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
-        retry: RecordedRetryPolicy,
-    ) -> Result<Vec<DecidedCall>, SingletonRunError> {
-        let mut decisions: BTreeMap<_, _> = self
-            .start_round(calls, crate::tool_run::CapacityScope::Held, handlers, retry)
-            .await?
-            .into_iter()
-            .collect();
-        while !self.pending.is_empty() {
-            if let Some((call_id, decision)) = self.progress().await? {
-                decisions.insert(call_id, decision);
-            }
-        }
-        calls
-            .iter()
-            .map(|call| {
-                decisions
-                    .remove(&call.call_id)
-                    .ok_or_else(|| boundary(&call.call_id))
-            })
-            .collect()
     }
 
     fn issue_attempt(

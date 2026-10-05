@@ -91,7 +91,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// Close the logical Run, drain its accepted finals and incorporate them
     /// into this opener's ledger before the owner finishes.
-    pub async fn close_opener_groups(&self) -> Result<(), RuntimeEffectControllerError> {
+    pub async fn close_tool_run(&self) -> Result<(), RuntimeEffectControllerError> {
         if let Some(run) = &self.tool_run {
             run.close().await?;
         } else if self.opener_state().holds_tool_run() {

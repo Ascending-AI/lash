@@ -61,10 +61,10 @@ pub fn admitted_turn_cancel_scope(
 /// cancel disposition is fenced on.
 ///
 /// A newtype rather than a bare `String` because it is retained in a durable
-/// shape (ADR 0099 §3's tool-child request) and a frozen format may not carry
+/// shape and a frozen format may not carry
 /// an unvalidated string: an empty or whitespace binding would name an
 /// authority that cannot exist, and would be discovered at the moment a
-/// recovered child tried to honour a cancellation rather than when it was
+/// recovered call tried to honour a cancellation rather than when it was
 /// written. Live in-process plumbing still passes `&str`; this type is the
 /// boundary where the value becomes a durable fact.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]

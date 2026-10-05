@@ -1,7 +1,7 @@
 //! The singleton Run route (FIG-4877) through a real handler on the
 //! in-process Restate server double.
 //!
-//! Each law runs one tool call through `run_singleton_tool` inside a
+//! Each law runs one tool call as a one-member round inside a
 //! `LashTestHandlerHost` handler. The handler's own journal holds the Run's
 //! records: admission (A), attempt (X), decision (D), the declaration boundary
 //! when a final declares, and presentation with its incorporation (V). A crash
@@ -19,8 +19,7 @@ use lash_core::store::plugin_writers::PluginCallbackIdentity;
 use lash_core::tool_dispatch::{
     BeforeCheckReply, DeclaredStartObligation, SingletonAttempt, SingletonBodyOutcome,
     SingletonCapture, SingletonDrift, SingletonPreparedRequest, SingletonRunError,
-    SingletonRunOutcome, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
-    run_singleton_tool,
+    SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
 };
 use lash_core::tool_run::{
     AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict,
@@ -31,6 +30,8 @@ use lash_core::{AdmittedScope, EffectOpener, ToolCallId};
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use lash_sansio::ToolIntentKind;
+
+use super::{SingletonRunOutcome, run_singleton};
 
 /// Q2/K3: singleton, parallel and deferred tools settle in their operation Run on replay.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -69,10 +70,13 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
                     EffectOpener::session_operation(session_id.clone(), operation_id.clone());
                 if label == "singleton" {
                     // Admission, decision and presentation borrow their call and handlers.
-                    let result =
-                        run_singleton_tool(&ctx.scoped_effect_controller, &call, probe.as_ref())
-                            .await
-                            .map_err(|error| error.to_string())?;
+                    let result = run_singleton(
+                        &ctx.scoped_effect_controller,
+                        &call,
+                        Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
                     assert!(matches!(result.terminal, SingletonTerminal::Final { .. }));
                 } else {
                     use lash_core::tool_dispatch::RunCoordinator;
@@ -89,9 +93,14 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
                     if label == "parallel" {
                         let mut sibling = call.clone();
                         sibling.call_id = ToolCallId::fixture("parallel-sibling");
-                        run.decide_round(&[call, sibling], probe, RecordedRetryPolicy::Never)
-                            .await
-                            .map_err(|error| error.to_string())?;
+                        super::decide_round(
+                            &mut run,
+                            &[call, sibling],
+                            probe,
+                            RecordedRetryPolicy::Never,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
                         ctx.scoped_effect_controller
                             .controller()
                             .start_run_retry(1)
@@ -119,7 +128,8 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
                             },
                             CancelAt::Never,
                         );
-                        run.decide_round(
+                        super::decide_round(
+                            &mut run,
                             std::slice::from_ref(&call),
                             deferred,
                             RecordedRetryPolicy::Never,
@@ -292,8 +302,7 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
             "operation Run uses the turn service: {journal:?}"
         );
         let steps = match label {
-            "singleton" => &["admit", "attempt", "decide", "present"][..],
-            "parallel" => &["admit", "attempt", "schedule", "present"][..],
+            "singleton" | "parallel" => &["admit", "attempt", "schedule", "present"][..],
             "deferred" => &["admit", "attempt", "schedule"][..],
             _ => unreachable!(),
         };
@@ -460,9 +469,13 @@ async fn logical_receipts_follow_recorded_admission_and_protected_presentation()
                             (*scoped).clone()
                         };
                         tracing.turn_execution(&scoped);
-                        run_singleton_tool(&scoped, &call, probe.as_ref())
-                            .await
-                            .unwrap();
+                        run_singleton(
+                            &scoped,
+                            &call,
+                            Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                        )
+                        .await
+                        .unwrap();
                     })
                 })
             };
@@ -1329,7 +1342,12 @@ async fn drive(
             let probe = Arc::clone(&probe);
             let returned = Arc::clone(&returned);
             Box::pin(async move {
-                let outcome = run_singleton_tool(&scoped, &call, probe.as_ref()).await;
+                let outcome = run_singleton(
+                    &scoped,
+                    &call,
+                    Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                )
+                .await;
                 returned.lock().unwrap().push(outcome);
             })
         })
@@ -1345,10 +1363,15 @@ async fn drive(
     Driven { backend, returned }
 }
 
+/// The record names of `steps`. A one-member round records its decision
+/// in the Run's schedule record, named by its first event ordinal.
 fn names(call_id: &ToolCallId, steps: &[&str]) -> Vec<String> {
     steps
         .iter()
-        .map(|step| format!("lash:run:{call_id}:{step}"))
+        .map(|step| match *step {
+            "decide" => "lash:run:schedule:1".to_owned(),
+            step => format!("lash:run:{call_id}:{step}"),
+        })
         .collect()
 }
 
@@ -1401,8 +1424,9 @@ fn decision(records: &[RunRecord]) -> Vec<CallDecision> {
         .collect()
 }
 
-/// L02 and L15: a simple Done call is four records — A, X, D and V with its
-/// incorporation — and a lost proposal at any of them, or a crash before the
+/// L02 and L15: a simple Done call is four journal records — A, X, D (its Run
+/// record folds the recorded X) and V with its incorporation — and a lost
+/// proposal at any of them, or a crash before the
 /// handler's output, reruns only that record's step under the same call id
 /// and attempt ordinal. A durable record never runs its step again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1474,8 +1498,7 @@ async fn a_done_singleton_is_four_records_and_reruns_only_unrecorded_work_at_eve
             events(&records),
             vec![
                 vec!["admitted"],
-                vec!["attempt"],
-                vec!["decided"],
+                vec!["attempt", "decided"],
                 vec!["presented", "consumed", "incorporated"],
             ]
         );
@@ -1625,8 +1648,7 @@ async fn a_final_settles_its_declarations_before_presentation_at_every_cut() {
             events(&records),
             vec![
                 vec!["admitted"],
-                vec!["attempt"],
-                vec!["decided"],
+                vec!["attempt", "decided"],
                 vec!["declarations_issued"],
                 vec![
                     "declarations_settled",
@@ -1967,7 +1989,7 @@ async fn l04_a_journaled_intent_replays_before_its_protected_presentation() {
                     probe,
                     mutations,
                 };
-                let result = run_singleton_tool(&scoped, &call, &handlers).await;
+                let result = run_singleton(&scoped, &call, Arc::new(handlers)).await;
                 returned.lock().unwrap().push(result);
             })
         })

@@ -390,8 +390,8 @@ pub enum RuntimeErrorCode {
     /// commands the journal holds, so it refuses to run rather than dispatch
     /// blind (FIG-3586).
     RecordedJournalReadUnsupported,
-    /// A redriven effect's reconstructed envelope, or an effect group's
-    /// reopened shape, differs from the one its engine journal recorded. The
+    /// A redriven effect's reconstructed envelope differs from the one its
+    /// engine journal recorded. The
     /// engine-neutral divergence code for journals the engine owns (the SQL
     /// hosts keep their store-qualified hash-conflict codes). Nothing was
     /// dispatched; the turn parks and the engine keeps the journal until an

@@ -22,7 +22,7 @@ pub trait AwaitEventResolver: Send + Sync {
     /// this resolver. Durable turn-control composition uses this to prevent a
     /// host label from being paired with another owner's controller and keys.
     ///
-    /// Every resolver answers explicitly: turn control and durable tool-child
+    /// Every resolver answers explicitly: turn control and durable tool
     /// completion refuse a resolver that names no authority, so a forwarding
     /// layer must pass its inner answer through rather than inherit `None`.
     fn await_event_authority_binding_id(&self) -> Option<String>;

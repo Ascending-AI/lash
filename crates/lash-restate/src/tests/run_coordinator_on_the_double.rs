@@ -894,7 +894,6 @@ async fn drive(
                     *probe.plugins.lock().unwrap() = Some(session);
                 }
                 let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
-                let handlers: &dyn SingletonToolHandlers = probe.as_ref();
                 let mut run = RunCoordinator::open(
                     &scoped,
                     owner(),
@@ -907,33 +906,40 @@ async fn drive(
                 let mut outcome = Ok(());
                 for step in program.iter() {
                     outcome = match step {
-                        Step::Decide(index) => {
-                            run.decide(&calls[*index].0, handlers).await.map(|decided| {
-                                if let DecidedCall::Deferred { source } = decided {
+                        Step::Decide(index) => super::decide_round(
+                            &mut run,
+                            std::slice::from_ref(&calls[*index].0),
+                            Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                            Default::default(),
+                        )
+                        .await
+                        .map(|decided| {
+                            if let Some(DecidedCall::Deferred { source }) =
+                                decided.into_iter().next()
+                            {
+                                terminals.lock().unwrap().insert(
+                                    calls[*index].0.call_id.clone(),
+                                    SingletonTerminal::Deferred { source },
+                                );
+                            }
+                        }),
+                        Step::Concurrent => super::decide_round(
+                            &mut run,
+                            &round,
+                            Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                            probe.retry.clone(),
+                        )
+                        .await
+                        .map(|decisions| {
+                            for (call, decision) in round.iter().zip(decisions) {
+                                if let DecidedCall::Deferred { source } = decision {
                                     terminals.lock().unwrap().insert(
-                                        calls[*index].0.call_id.clone(),
+                                        call.call_id.clone(),
                                         SingletonTerminal::Deferred { source },
                                     );
                                 }
-                            })
-                        }
-                        Step::Concurrent => run
-                            .decide_round(
-                                &round,
-                                Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
-                                probe.retry.clone(),
-                            )
-                            .await
-                            .map(|decisions| {
-                                for (call, decision) in round.iter().zip(decisions) {
-                                    if let DecidedCall::Deferred { source } = decision {
-                                        terminals.lock().unwrap().insert(
-                                            call.call_id.clone(),
-                                            SingletonTerminal::Deferred { source },
-                                        );
-                                    }
-                                }
-                            }),
+                            }
+                        }),
                         Step::Cancel => {
                             probe.cancel.store(true, Ordering::SeqCst);
                             Ok(())
@@ -983,6 +989,12 @@ async fn drive(
 
 fn name(call_id: &ToolCallId, step: &str) -> String {
     format!("lash:run:{call_id}:{step}")
+}
+
+/// The schedule record that decides a call of a one-member round, named by
+/// its first event ordinal.
+fn schedule(first: u64) -> String {
+    format!("lash:run:schedule:{first}")
 }
 
 /// The ported oracle: every violation of the Run's drain order in `records`.
@@ -1122,13 +1134,13 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
         let mut steps = vec![
             name(&ids[0], "admit"),
             name(&ids[0], "attempt:1"),
-            name(&ids[0], "decide"),
+            schedule(1),
             name(&ids[1], "admit"),
             name(&ids[1], "attempt:1"),
-            name(&ids[1], "decide"),
+            schedule(4),
             name(&ids[2], "admit"),
             name(&ids[2], "attempt:1"),
-            name(&ids[2], "decide"),
+            schedule(7),
             UNRELATED.to_owned(),
             name(&ids[0], "declare"),
             name(&ids[0], "present"),
@@ -1145,7 +1157,7 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
             steps.extend([
                 name(&ids[3], "admit"),
                 name(&ids[3], "attempt:1"),
-                name(&ids[3], "decide"),
+                schedule(23),
                 name(&ids[3], "present"),
             ]);
         }
@@ -1871,15 +1883,18 @@ async fn l12_recorded_admission_ignores_live_isolation_drift() {
     let probe = Arc::new(probe);
     let driven = drive(
         492601,
-        vec![CrashPoint::BeforeRun {
-            name: name(&calls[0].0.call_id, "decide"),
+        // X is durable once its schedule record runs; lose that record's
+        // result so replay decides again from the recorded admission.
+        vec![CrashPoint::BeforeRunResult {
+            name: Some(schedule(1)),
         }],
         Arc::clone(&calls),
         Arc::new(vec![Step::Decide(0), Step::Drain]),
         Arc::clone(&probe),
     )
     .await;
-    assert_eq!(driven.records().len(), 4);
+    // A, then X folded into its deciding schedule record, then V.
+    assert_eq!(driven.records().len(), 3);
     assert_eq!(probe.executions_of(&calls[0].0.call_id), 1);
 }
 
@@ -2057,8 +2072,16 @@ async fn l03_deferred_replay_after_cancel_keeps_the_subscription_and_source_winn
                     let mut run =
                         RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
                     assert!(matches!(
-                        run.decide(&call, probe.as_ref()).await.unwrap(),
-                        DecidedCall::Deferred { .. }
+                        super::decide_round(
+                            &mut run,
+                            std::slice::from_ref(&call),
+                            Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                            Default::default(),
+                        )
+                        .await
+                        .unwrap()
+                        .as_slice(),
+                        [DecidedCall::Deferred { .. }]
                     ));
                     run.await_deferred().await.unwrap();
                     run.drain().await.unwrap();
@@ -2241,9 +2264,14 @@ async fn l02_a_schedule_suspends_until_its_owned_attempt_is_acknowledged() {
             Box::pin(async move {
                 let mut run =
                     RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
-                run.decide_round(std::slice::from_ref(&call), probe, Default::default())
-                    .await
-                    .unwrap();
+                super::decide_round(
+                    &mut run,
+                    std::slice::from_ref(&call),
+                    probe,
+                    Default::default(),
+                )
+                .await
+                .unwrap();
                 let terminals = run.drain().await.unwrap();
                 assert_eq!(terminals.len(), 1);
                 assert!(matches!(terminals[0].1, SingletonTerminal::Final { .. }));

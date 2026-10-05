@@ -389,8 +389,7 @@ impl HandoverCut {
                 name: Some(HANDOVER_STEP.to_owned()),
             },
             // The successor's send is the segment's one one-way call: its
-            // tool children run through the effect-group dispatcher's
-            // request-response calls.
+            // tool calls are recorded attempts in the process's own journal.
             Self::SuccessorSend => CrashPoint::BeforeFrame {
                 ty: MessageType::OneWayCallCommand,
             },

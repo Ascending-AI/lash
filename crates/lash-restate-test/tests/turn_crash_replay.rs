@@ -5,7 +5,7 @@
 //! and executed by the engine: the session's `LashSession` shift admits it and
 //! executes its run in a `LashTurn` workflow. A clean run fixes the reference:
 //! its journals and its answer. Then, for every journal point of the shift,
-//! of the run's workflow and of the tool child's dispatch handler, a fresh
+//! and of the run's workflow, which records the tool Run, a fresh
 //! backend under the same seed drops the handler just before the server
 //! stores that frame on the first attempt that reaches it, including after
 //! suspension, and replays the invocation. Every crash must reach the

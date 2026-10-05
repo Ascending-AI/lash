@@ -47,7 +47,15 @@ impl RestateProcessRunner for Runner {
             let mut call = self.call.clone();
             call.owner = owner.clone();
             let mut run = RunCoordinator::open(&scoped, owner, segment, call.available.clone());
-            run.decide(&call, self.starter.as_ref()).await.unwrap();
+            crate::tests::decide_round(
+                &mut run,
+                std::slice::from_ref(&call),
+                std::sync::Arc::clone(&self.starter)
+                    as std::sync::Arc<dyn lash_core::tool_dispatch::SingletonToolHandlers>,
+                Default::default(),
+            )
+            .await
+            .unwrap();
             if self.launched_before_cut {
                 run.drain().await.unwrap();
             }

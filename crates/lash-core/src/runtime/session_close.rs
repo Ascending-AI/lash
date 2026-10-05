@@ -95,8 +95,7 @@ pub enum SessionCloseError {
 /// Close the session `context` deletes (FIG-3600 S7, FIG-3607 item 7).
 ///
 /// 1. Every refusal first, with nothing closed yet: a pending turn-cancel
-///    closure pins the session, and so does an effect group that is live or
-///    closing (ADR 0099 §7 / W16). A deletion retried after its close
+///    closure pins the session. A deletion retried after its close
 ///    committed asks none of them: it only replays the step below.
 /// 2. The recorded `BeginSessionClose` step runs the close's store half
 ///    ([`ControlIntentStore::begin_session_close`](crate::store::ControlIntentStore::begin_session_close)):

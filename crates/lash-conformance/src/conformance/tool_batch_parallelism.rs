@@ -1453,10 +1453,7 @@ async fn execute_turn(
         })
         .build();
     // The tier's host is the law backend's effect host rather than a field
-    // overwritten later: `RuntimeHostConfig::new` installs the tool-child
-    // resolver on the effect host it is given, and a later
-    // `control.effect_host` swap would leave the resolver registered on the
-    // discarded host.
+    // overwritten later, so the runtime and the law share one host.
     let mut law_backend =
         crate::LawBackend::over_stores(Arc::clone(&world.stores), Arc::clone(&world.effect_host));
     if let Some(registry) = world.process_registry.as_ref() {

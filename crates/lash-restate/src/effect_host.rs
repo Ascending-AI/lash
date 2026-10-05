@@ -133,8 +133,8 @@ impl RestateEffectHost {
     }
 
     /// The deployment's durable-authority identity: what the endpoint binds a
-    /// tool child's handler-scoped controller with, and what await-event keys
-    /// and cancellation bindings derive from.
+    /// handler-scoped controller with, and what await-event keys and
+    /// cancellation bindings derive from.
     pub fn authority_id(&self) -> &RestateAuthorityId {
         &self.controller.authority_id
     }

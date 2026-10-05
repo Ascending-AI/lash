@@ -211,9 +211,8 @@ impl RestateHttpError {
     ///
     /// Restate answers an invocation addressed to a service no registered
     /// deployment binds, or to a handler a bound service does not declare, with
-    /// `404`. That is a deterministic contract failure and the engine tier's
-    /// form of the routing fact ADR 0065 names on the effect-group seam: *a
-    /// child with no runner*. It is classified rather than folded into "some
+    /// `404`. That is a deterministic contract failure: an invocation with no
+    /// bound runner. It is classified rather than folded into "some
     /// HTTP status came back" because the two call for opposite handling — a
     /// transport fault is worth retrying and an unbound service is not, and no
     /// amount of retrying makes a service somebody forgot to `bind` appear.

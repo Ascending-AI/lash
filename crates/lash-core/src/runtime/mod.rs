@@ -198,7 +198,7 @@ pub use causal::{CommandReplayKey, command_invocation};
 pub use clock::{Clock, ClockWallTime, SystemClock};
 pub use durable_queue::{DurableSessionOps, EMPTY_HEAD_REVISION};
 pub use effect::TurnCancelWait;
-/// Tool-child, presentation and attempt-stream vocabulary the effect
+/// Presentation and attempt-stream vocabulary the effect
 /// contracts below name.
 pub use effect::{
     ATTEMPT_STREAM_BYTE_BUDGET, AdmittedHeadVerdict, AttemptStream, AttemptStreamBuilder,

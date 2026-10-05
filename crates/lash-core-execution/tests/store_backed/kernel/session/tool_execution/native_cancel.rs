@@ -211,7 +211,7 @@ async fn cancelled_sibling_with_delivery(disjoint: bool, await_delivery: bool) {
     let run = context.drive_tool_run(None, |context| async move {
         let replies = context.call_tool_batch(calls).await;
         assert!(!context.has_nested_effect_error());
-        context.close_opener_groups().await.unwrap();
+        context.close_tool_run().await.unwrap();
         replies
     });
     let cancel = async {
@@ -390,7 +390,7 @@ async fn l03_accepted_cancel_survives_crash_before_retry_wake_without_second_bod
                     .collect();
                 let drive = context.drive_tool_run(None, |context| async move {
                     let replies = context.call_tool_batch(calls).await;
-                    context.close_opener_groups().await.unwrap();
+                    context.close_tool_run().await.unwrap();
                     replies
                 });
                 let cancel_or_wake = async {
@@ -628,7 +628,7 @@ async fn l03_native_cancel_replays_before_the_inline_loser_ack() {
                             outcome,
                             ToolAggregateOutcome::Selected { leaf: 1, .. }
                         ));
-                        context.close_opener_groups().await.unwrap();
+                        context.close_tool_run().await.unwrap();
                     })
                     .await
                     .unwrap();
@@ -833,7 +833,7 @@ async fn closing_race(cooperative: bool) -> (lash_restate_test::RestateTestBacke
                 outcome,
                 ToolAggregateOutcome::Selected { leaf: 1, .. }
             ));
-            context.close_opener_groups().await.unwrap();
+            context.close_tool_run().await.unwrap();
         }),
     )
     .await
@@ -986,7 +986,7 @@ async fn l17_closing_cuts_a_loser_in_retry_backoff_promptly() {
                 outcome,
                 ToolAggregateOutcome::Selected { leaf: 1, .. }
             ));
-            context.close_opener_groups().await.unwrap();
+            context.close_tool_run().await.unwrap();
         }),
     )
     .await
@@ -1072,7 +1072,7 @@ async fn l17_a_stop_cut_backoff_is_decided_and_replay_never_awaits_its_sleep() {
                 ];
                 let drive = context.drive_tool_run(None, |context| async move {
                     let replies = context.call_tool_batch(calls).await;
-                    context.close_opener_groups().await.unwrap();
+                    context.close_tool_run().await.unwrap();
                     replies
                 });
                 let first = crashes.get() == 0;

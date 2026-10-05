@@ -723,7 +723,8 @@ async fn l13_k6_old_cut_replays_after_successor_material_retirement() {
                 let store = probe.materials.as_ref().unwrap();
                 let mut run =
                     RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
-                run.decide_round(
+                crate::tests::decide_round(
+                    &mut run,
                     std::slice::from_ref(&call),
                     probe.clone(),
                     Default::default(),
@@ -762,7 +763,8 @@ async fn l13_k6_old_cut_replays_after_successor_material_retirement() {
                     ));
                 }
                 assert!(matches!(
-                    run.decide_round(
+                    crate::tests::decide_round(
+                        &mut run,
                         std::slice::from_ref(&call),
                         probe.clone(),
                         Default::default()

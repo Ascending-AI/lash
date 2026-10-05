@@ -175,8 +175,8 @@ enum Command {
     },
     DrainStatus {
         generation: BuildGeneration,
-        /// The engine's admin API: the committed effect-group children still
-        /// owed a drain on the generation's lane are read there (FIG-4454).
+        /// The engine's admin API: the unfinished invocations still pinned
+        /// to the generation's deployments are read there (FIG-4454).
         restate_admin_url: String,
     },
     EndDrain {

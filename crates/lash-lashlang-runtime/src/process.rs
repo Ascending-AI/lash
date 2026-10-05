@@ -522,16 +522,16 @@ async fn run_lashlang_process_scoped(
                     adopt_held_attachments(&host, output).await?;
                 }
             }
-            // A process terminal is the process opener's end (ADR 0099 §7): every
-            // effect group it still holds is closed and finalized, and its losers'
-            // settled facts incorporated, before the terminal is handed back to be
-            // committed. A segment boundary is not an end — the successor reattaches
-            // the cursors the handover carried. A failed close leaves `closing`
+            // A process terminal is the process opener's end (ADR 0099 §7): its
+            // tool Run is closed and its accepted finals, losers' included, are
+            // incorporated before the terminal is handed back to be committed. A
+            // segment boundary is not an end — the successor adopts the Run the
+            // handover carried. A failed close leaves `closing`
             // recorded and surfaces as infrastructure, so the run is retried rather
             // than committing a terminal whose accounting was never incorporated.
             if output.is_terminal() && !refused && host_failure.is_none() {
                 let _phase = host.ctx.named_phase("rlm_process.close_groups");
-                host.ctx.close_opener_groups().await.map_err(|error| {
+                host.ctx.close_tool_run().await.map_err(|error| {
                     lash_core::ProcessInfraError::new(
                         lash_core::PluginError::RuntimeEffectController(error),
                     )

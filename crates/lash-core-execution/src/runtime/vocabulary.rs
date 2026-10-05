@@ -587,7 +587,7 @@ pub async fn admit_session_view(
 /// A turn meets the generation fence when it claims its lane
 /// ([`SessionCommitStore::admit_session_state`](crate::store::SessionCommitStore::admit_session_state)).
 /// Work a durable engine runs as a separate invocation on the session's
-/// behalf, such as a Restate effect-group child, may be routed to a newer
+/// behalf, such as a process segment, may be routed to a newer
 /// deployment than the turn that opened it, and never claims that lane. It
 /// calls this at invocation entry, before it reads a journal or derives an
 /// effect key: the owning session's physical marker is classified by the

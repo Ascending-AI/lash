@@ -1,18 +1,17 @@
-//! A turn's end for the effect groups it opened (ADR 0099 §7; FIG-3397).
+//! A turn's end for the tool Run it opened (ADR 0099 §7).
 //!
 //! Every final exit of a turn's effect loop — success, failure and
-//! cancellation — closes the groups the turn still holds and finalizes them
-//! with the turn's own execution context before the turn's outcome and
-//! accounting commit. Worker loss is not an exit: a dead worker never reaches
-//! this code, and the redriven turn closes the same groups when *it* exits.
-//! A physical segment boundary transfers the logical opener to its
-//! continuation; its groups stay live. An abort is not an exit either: a turn
-//! that aborts on a live fault or a park records nothing and is redriven, so
-//! its groups stay live for the redrive exactly as a dead worker's do.
+//! cancellation — closes the turn's logical Run and drains its accepted
+//! finals with the turn's own execution context before the turn's outcome
+//! commits. Worker loss is not an exit: a dead worker never reaches this
+//! code, and the redriven turn closes the same Run when *it* exits. A
+//! physical segment boundary transfers the logical Run to its continuation;
+//! it stays live. An abort is not an exit either: a turn that aborts on a
+//! live fault or a park records nothing and is redriven, so its Run stays
+//! live for the redrive exactly as a dead worker's does.
 //!
-//! The end runs while the logical Run owner is still live, because
-//! finalization's first step may have to run a child no process is running,
-//! and a child resolves its executor through its opener's live registration.
+//! The end runs while the logical Run owner is still live, because closing
+//! drains protected work the owner's issued attempts still hold.
 
 use super::*;
 
@@ -27,7 +26,7 @@ impl OpenerForCommit<'_> {
     pub(in crate::runtime) async fn close(self) -> Result<Vec<crate::PluginMessage>, RuntimeError> {
         if let Some(context) = self.context {
             context
-                .close_opener_groups()
+                .close_tool_run()
                 .await
                 .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
         }
@@ -114,7 +113,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                         session_id = %self.session_id,
                         turn_id = %self.turn_id,
                         error = %error,
-                        "closing a failed turn's effect groups failed; `closing` stays recorded for the retry",
+                        "closing a failed turn's tool Run failed; `closing` stays recorded for the retry",
                     );
                     Err(original)
                 }
@@ -140,7 +139,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                 )
             })?;
         context
-            .close_opener_groups()
+            .close_tool_run()
             .await
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
         Ok(())

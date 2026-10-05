@@ -254,11 +254,9 @@ pub(super) async fn test_host() -> (
     (double, host)
 }
 
-/// [`test_host`] with the double backend's effect host under `layer`: the
-/// first host config installs the host's one tool-child resolver, and a
-/// batch's group children mint their own controllers through the host, so
-/// they reach their controllers through the layer only when the backend's
-/// host is layered (D1 F2 keeps the rest of the layering on the lent scope).
+/// [`test_host`] with the double backend's effect host under `layer`, so
+/// every controller the host mints is reached through the layer (D1 F2 keeps
+/// the rest of the layering on the lent scope).
 pub(super) async fn layered_test_host(
     layer: Arc<dyn lash_core::testing::EffectLayer>,
 ) -> (

@@ -55,7 +55,7 @@ pub(crate) fn execute_code_with_channel_and_bounds_with_trigger_resolver(
                 .await;
                 if !response.suspended
                     && !closing.has_nested_effect_error()
-                    && let Err(error) = closing.close_opener_groups().await
+                    && let Err(error) = closing.close_tool_run().await
                 {
                     fail_cell_on_nested_error(&closing, &mut response, error);
                 }

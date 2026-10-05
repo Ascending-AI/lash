@@ -56,7 +56,7 @@ opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-conformance.workspace = true
-# The in-process Restate server double the effect-group suites run on. Only
+# The in-process Restate server double the live conformance suites run on. Only
 # its server (endpoint-agnostic) is used here, so the second copy of this
 # crate it links for its own backend never meets these tests' types.
 lash-restate-test.workspace = true

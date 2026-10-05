@@ -211,6 +211,86 @@ pub(super) async fn reconcile_parked_processes(
     .expect("reconcile paused processes")
 }
 
+/// Admit `calls` as one round of `run`, as production admits every tool
+/// call (a singleton is a one-member round), and progress the round's
+/// recorded schedule until each call has decided or parked on its Deferred
+/// source. Decisions return in `calls` order.
+pub(super) async fn decide_round<'a>(
+    run: &mut lash_core::tool_dispatch::RunCoordinator<'a>,
+    calls: &[lash_core::tool_dispatch::SingletonToolCall],
+    handlers: Arc<dyn lash_core::tool_dispatch::SingletonToolHandlers + 'a>,
+    retry: lash_core::tool_run::RecordedRetryPolicy,
+) -> Result<Vec<lash_core::tool_dispatch::DecidedCall>, lash_core::tool_dispatch::SingletonRunError>
+{
+    let mut decisions: std::collections::BTreeMap<_, _> = run
+        .start_round(
+            calls,
+            lash_core::tool_run::CapacityScope::Held,
+            handlers,
+            retry,
+        )
+        .await?
+        .into_iter()
+        .collect();
+    while calls
+        .iter()
+        .any(|call| !decisions.contains_key(&call.call_id))
+    {
+        if let Some((call_id, decision)) = run.progress().await? {
+            decisions.insert(call_id, decision);
+        }
+    }
+    Ok(calls
+        .iter()
+        .filter_map(|call| decisions.remove(&call.call_id))
+        .collect())
+}
+
+/// How a one-member round ended, with the records its Run holds.
+#[derive(Clone, Debug)]
+pub(super) struct SingletonRunOutcome {
+    pub terminal: lash_core::tool_dispatch::SingletonTerminal,
+    pub records: Vec<lash_core::tool_run::RunRecord>,
+}
+
+/// Run `call` as a one-member round of its own Run, then drain its
+/// presentation; a Deferred call ends parked on its source.
+pub(super) async fn run_singleton<'a>(
+    scoped: &'a lash_core::ScopedEffectController<'a>,
+    call: &lash_core::tool_dispatch::SingletonToolCall,
+    handlers: Arc<dyn lash_core::tool_dispatch::SingletonToolHandlers + 'a>,
+) -> Result<SingletonRunOutcome, lash_core::tool_dispatch::SingletonRunError> {
+    use lash_core::tool_dispatch::{DecidedCall, RunCoordinator, SingletonTerminal};
+    let mut run = RunCoordinator::open(
+        scoped,
+        call.owner.clone(),
+        call.segment,
+        call.available.clone(),
+    );
+    let decided = decide_round(
+        &mut run,
+        std::slice::from_ref(call),
+        handlers,
+        Default::default(),
+    )
+    .await?;
+    let terminal = match decided.into_iter().next() {
+        Some(DecidedCall::Deferred { source }) => SingletonTerminal::Deferred { source },
+        _ => run
+            .drain()
+            .await?
+            .pop()
+            .map(|(_, terminal)| terminal)
+            .ok_or_else(|| lash_core::tool_run::RunEventRefusal::BoundaryOrder {
+                call_id: call.call_id.clone(),
+            })?,
+    };
+    Ok(SingletonRunOutcome {
+        terminal,
+        records: run.into_records(),
+    })
+}
+
 /// The view of `session_id` on `store`, a catalog store.
 pub(super) fn session_view(
     store: Arc<dyn lash_core::RuntimeStore>,

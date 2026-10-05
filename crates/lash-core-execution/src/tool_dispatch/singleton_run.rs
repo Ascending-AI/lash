@@ -19,9 +19,9 @@
 //! and every material reference it names is verified against its canonical
 //! bytes.
 //!
-//! [`run_singleton_tool`] runs one call alone in its Run. The
-//! [`RunCoordinator`](super::RunCoordinator) runs several in one Run, ranks
-//! their decisions and drains their protected work in rank order (FIG-4880).
+//! The [`RunCoordinator`](super::RunCoordinator) admits a singleton as a
+//! one-member round of its Run, ranks the round's decisions and drains their
+//! protected work in rank order (FIG-4880).
 //!
 //! Reported retries (K9) are the Run coordinator's schedule (FIG-4879); a
 //! singleton admits no retry policy. A Deferred attempt hands its call to the
@@ -57,20 +57,18 @@ use std::sync::Arc;
 use lash_sansio::{ToolCallId, ToolIntentKind};
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::effect::{AttemptStream, AttemptStreamRecorder, ScopedEffectController};
+use crate::runtime::effect::{AttemptStream, AttemptStreamRecorder};
 use crate::runtime::process::{DeclaredStartObligation, DeclaredStartObligationRefusal};
 use crate::store::plugin_writers::PluginRevision;
 use crate::tool_run::{
     AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict,
     CallDecision, DeclarationRefusal, ExternalCancelPolicy, HookCause, MaterialRef, ResultSource,
-    RunEventRefusal, RunRecord, SegmentOrdinal, ToolDeclaration,
+    RunEventRefusal, SegmentOrdinal, ToolDeclaration,
 };
 use crate::{
     AwaitEventKey, EffectOpener, ProcessExecutionEnvRef, ProcessId, ProcessStartRegistration,
     RuntimeEffectControllerError, StartKey,
 };
-
-use super::run_coordinator::{DecidedCall, RunCoordinator};
 
 /// One tool call to run as a singleton in its owning Run.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -597,12 +595,6 @@ pub enum SingletonTerminal {
 }
 
 /// A finished singleton: how it ended and the records its Run holds.
-#[derive(Clone, Debug)]
-pub struct SingletonRunOutcome {
-    pub terminal: SingletonTerminal,
-    pub records: Vec<RunRecord>,
-}
-
 pub use crate::tool_run::SingletonDrift;
 
 /// Why a singleton stopped before it ended. None of these runs a body.
@@ -634,40 +626,6 @@ pub enum SingletonRunError {
     /// its typed cause.
     #[error(transparent)]
     Controller(#[from] RuntimeEffectControllerError),
-}
-
-/// Run `call` alone in its owning Run, recording A, X, D and V in the opener
-/// journal `scoped` serves.
-///
-/// # Errors
-///
-/// A typed [`SingletonRunError`]; none of them executes a body.
-pub async fn run_singleton_tool(
-    scoped: &ScopedEffectController<'_>,
-    call: &SingletonToolCall,
-    handlers: &dyn SingletonToolHandlers,
-) -> Result<SingletonRunOutcome, SingletonRunError> {
-    let mut run = RunCoordinator::open(
-        scoped,
-        call.owner.clone(),
-        call.segment,
-        call.available.clone(),
-    );
-    let terminal = match run.decide(call, handlers).await? {
-        DecidedCall::Deferred { source } => SingletonTerminal::Deferred { source },
-        DecidedCall::Ranked { .. } => run
-            .drain()
-            .await?
-            .pop()
-            .map(|(_, terminal)| terminal)
-            .ok_or_else(|| RunEventRefusal::BoundaryOrder {
-                call_id: call.call_id.clone(),
-            })?,
-    };
-    Ok(SingletonRunOutcome {
-        terminal,
-        records: run.into_records(),
-    })
 }
 
 /// The body of one independently recorded X receipt.

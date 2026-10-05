@@ -124,9 +124,23 @@ pub(super) fn plugin(namespace: &str) -> Arc<StaticPluginFactory> {
                     call.segment,
                     vec![revision],
                 );
-                run.decide(&call, &handlers)
+                let decided = run
+                    .start_round(
+                        std::slice::from_ref(&call),
+                        lash_core::tool_run::CapacityScope::Held,
+                        Arc::new(handlers),
+                        Default::default(),
+                    )
                     .await
                     .map_err(|error| error.to_string())?;
+                if decided.is_empty() {
+                    while run
+                        .progress()
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .is_none()
+                    {}
+                }
                 run.close().await.map_err(|error| error.to_string())?;
                 Ok(lash_core::plugin::PluginOperationOutcome::new(output))
             }

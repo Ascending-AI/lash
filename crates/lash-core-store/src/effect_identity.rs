@@ -112,7 +112,7 @@ pub enum RuntimeEffectKind {
     BeginSessionClose,
     Checkpoint,
     SyncExecutionEnvironment,
-    /// The recorded read of a tool child's execution environment (FIG-3683):
+    /// The recorded read of an execution environment (FIG-3683):
     /// the store is read once and every replay serves the recorded spec.
     LoadExecutionEnv,
     Sleep,

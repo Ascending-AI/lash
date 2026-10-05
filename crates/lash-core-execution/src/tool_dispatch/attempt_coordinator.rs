@@ -14,12 +14,9 @@ use super::{
 /// Every attempt and retry sleep of a call is keyed by the call's
 /// [`ToolCallId`](lash_sansio::ToolCallId) and the attempt number (ADR 0117
 /// §6): `{call_id}:attempt:{n}` and `{call_id}:attempt:{n}:sleep`, under the
-/// parent invocation when the call has one — a group's, a command's, a
-/// process body's — and under `tool:` when it has none. The call id is
+/// parent invocation when the call has one — a command's or a process
+/// body's — and under `tool:` when it has none. The call id is
 /// unique per logical call, so no second formula names an attempt.
-///
-/// Serializable because a group child retains it: ADR 0099 §3 requires a tool
-/// child of an effect group to be reconstructible from the journal alone.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ToolAttemptLineage {
     #[serde(default, skip_serializing_if = "Option::is_none")]

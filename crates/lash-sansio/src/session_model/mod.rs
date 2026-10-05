@@ -710,10 +710,6 @@ pub enum StreamMessageKind {
     /// dialect, shown above the tool activity it produces.
     #[serde(rename = "code")]
     Code,
-    /// A recorded tool child's stream outgrew its recording budget and its
-    /// later events were dropped.
-    #[serde(rename = "child_stream_truncated")]
-    ChildStreamTruncated,
 }
 
 impl StreamMessageKind {
@@ -721,7 +717,6 @@ impl StreamMessageKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Code => "code",
-            Self::ChildStreamTruncated => "child_stream_truncated",
         }
     }
 }

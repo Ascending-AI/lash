@@ -24,9 +24,23 @@ pub(super) fn register(spec: PluginSpec) -> PluginSpec {
             call.segment,
             call.available.clone(),
         );
-        run.decide(&call, &handlers)
+        let decided = run
+            .start_round(
+                std::slice::from_ref(&call),
+                lash_core::tool_run::CapacityScope::Held,
+                Arc::new(handlers),
+                Default::default(),
+            )
             .await
             .map_err(|error| error.to_string())?;
+        if decided.is_empty() {
+            while run
+                .progress()
+                .await
+                .map_err(|error| error.to_string())?
+                .is_none()
+            {}
+        }
         run.await_deferred()
             .await
             .map_err(|error| error.to_string())?;

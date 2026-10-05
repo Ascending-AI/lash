@@ -302,8 +302,8 @@ impl LashCore {
     /// What `generation` still holds (FIG-3799): whether it is marked
     /// draining, its live processes, the parked processes and turns its
     /// checkpoints hold, the turns its shifts admitted that have not settled
-    /// (FIG-3884), the closing sessions every drain waits on, the committed
-    /// effect-group children still owed a drain on its lane (FIG-4454), and
+    /// (FIG-3884), the closing sessions every drain waits on, the unfinished
+    /// invocations still pinned to its deployments (FIG-4454), and
     /// the stalled obligations, which it counts but does not wait on
     /// (FIG-4076).
     ///

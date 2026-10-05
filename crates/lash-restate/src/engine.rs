@@ -200,7 +200,7 @@ impl RestateEngine {
     /// bound: the durable-wait workflow and index, the
     /// process workflow over `processes` (a [`DurableProcessWorker`], or a
     /// [`RestateProcessServing`] that also sets the segment policy), and the
-    /// effect-group index, payload and dispatcher, and the `SessionShifts`
+    /// `SessionShifts`
     /// (`LashSession`, `LashTurn`) that runs every session's turns. The host
     /// binds only its own services — its triggers and cron — on the builder,
     /// then builds it and serves it with [`crate::serve_endpoint`].
@@ -218,16 +218,12 @@ impl RestateEngine {
     /// and under this build's generation name (`LashProcessWorkflow_g<G>`),
     /// which only builds of this engine's
     /// [`build_generation`](Self::build_generation) serve, so work pinned to
-    /// this build — an effect group's children, a redrive, a successor a
+    /// this build — a redrive, a successor a
     /// newer build refused — still reaches it after a newer build registers.
     /// Restate pins an invocation to the deployment URI it started on, so
     /// each build must register its endpoint under a URI of its own:
     /// [`deployment_path`] names one. Registering, retiring and ordering the
     /// deployments stay with the host (FIG-3794).
-    ///
-    /// Effect-group children route through the resolver registered on this
-    /// backend's effect host, and a session-scope child checks its
-    /// session's state generation in this engine's session catalog.
     ///
     /// # Errors
     /// [`GenerationUnbound`] before a core was built over this engine's

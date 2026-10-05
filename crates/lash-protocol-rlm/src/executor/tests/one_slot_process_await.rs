@@ -402,9 +402,7 @@ async fn saturated_process_create_retries_without_recording_a_tool_refusal() {
                         .lock()
                         .expect("tool observations")
                         .push(reply.output);
-                    ctx.close_opener_groups()
-                        .await
-                        .expect("close the create Run");
+                    ctx.close_tool_run().await.expect("close the create Run");
                 })
                 .await
                 .expect("drive the create Run");

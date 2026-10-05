@@ -705,7 +705,7 @@ impl Provider for ScriptedProvider {
 struct TraceTool {
     control: SeamControl,
     /// How many times the tool body ran: the external effect every tier runs
-    /// in process, wherever its engine dispatches the tool child.
+    /// in process, whichever engine records its attempt.
     executed: Arc<std::sync::atomic::AtomicUsize>,
 }
 

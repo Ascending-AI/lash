@@ -2,9 +2,8 @@ mod settlement_order_journal_tests {
     use lash_core_execution::RuntimeEffectOutcome;
 
     /// A journaled tool-batch outcome is refused (FIG-3397): the batch command
-    /// is gone, a batch is a durable effect group of tool-invocation children,
-    /// and an entry recorded before that cutover must not decode into any
-    /// current outcome.
+    /// is gone, a batch is one round of its Run, and an entry recorded before
+    /// that cutover must not decode into any current outcome.
     #[test]
     fn a_retired_tool_batch_outcome_does_not_decode() {
         let legacy = serde_json::json!({

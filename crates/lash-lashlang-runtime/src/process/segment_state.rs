@@ -211,15 +211,6 @@ pub(super) struct LashlangSegmentState {
     /// outcome class (FIG-3464). A successor segment keeps counting from here
     /// and the run's terminal omission record carries the total.
     pub(super) effect_omissions: BTreeMap<String, lash_core::ProcessEffectOmittedCounts>,
-    /// The effect groups this process still holds after an aggregate stopped
-    /// consuming early (ADR 0099 §8, §9): each group's key, child count and
-    /// consumed cursor. A boundary is never declined because a loser is
-    /// unsettled; the successor segment reattaches these cursors and the
-    /// process terminal closes them.
-    /// The tool calls each held group counts against the session's
-    /// `max_tool_calls` (FIG-4546), by group key. The successor segment is
-    /// the same process, so it holds the same calls: it reuses these
-    /// reservations rather than counting the groups again or not at all.
     /// The complete tool Run, sealed after local durable acceptance.
     #[serde(deserialize_with = "deserialize_tool_run")]
     pub(super) tool_run: Option<Box<lash_core::tool_run::RunTransfer>>,

@@ -260,7 +260,6 @@ impl<'a> RunCoordinator<'a> {
         clock: &dyn crate::Clock,
     ) -> Result<Self, SingletonRunError> {
         use crate::tool_run::{Cut, MaterialHolder, RunLifecycle};
-        use futures_util::FutureExt;
         transfer.check_capture(&Cut::request(transfer.reason).observe(0))?;
         let ledger = transfer.ledger()?;
         let transfer = transfer.adopt(&owner, ledger.lifecycle(), successor)?;
@@ -349,7 +348,7 @@ impl<'a> RunCoordinator<'a> {
                         members.insert(member.call_id.clone(), member.clone());
                         run.handlers.insert(
                             member.call_id.clone(),
-                            Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                            Handlers(std::sync::Arc::clone(&handlers)),
                         );
                     }
                 }
@@ -474,7 +473,7 @@ impl<'a> RunCoordinator<'a> {
                         *rank,
                         Owed {
                             call_id: id.clone(),
-                            handlers: Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                            handlers: Handlers(std::sync::Arc::clone(&handlers)),
                             decision: decision.clone(),
                             capture,
                         },
@@ -522,7 +521,7 @@ impl<'a> RunCoordinator<'a> {
                 let waiting = Waiting {
                     call,
                     member,
-                    handlers: Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                    handlers: Handlers(std::sync::Arc::clone(&handlers)),
                     attempt: *attempt,
                     start,
                 };
@@ -547,36 +546,9 @@ impl<'a> RunCoordinator<'a> {
             }
         }
         if run.journal.ledger.lifecycle() == RunLifecycle::Live {
-            for event in events {
-                if let RunEvent::AggregateAdmitted {
-                    plan,
-                    admitted_at_ms,
-                } = event
-                {
-                    for (leaf, operand) in plan.leaves.iter().enumerate() {
-                        let leaf = leaf as u32;
-                        if let crate::tool_run::AggregateLeaf::Timer { duration_ms } = operand
-                            && !elapsed.contains(&(plan.key.clone(), leaf))
-                        {
-                            scoped.admit_journal_write()?;
-                            let timer = scoped.controller().start_run_retry(
-                                admitted_at_ms
-                                    .saturating_add(*duration_ms)
-                                    .saturating_sub(clock.timestamp_ms()),
-                            );
-                            let handle = async move {
-                                timer.await?;
-                                Ok(parallel::Ready::Timer)
-                            }
-                            .boxed()
-                            .shared();
-                            run.timers.push(parallel::AggregateTimer {
-                                key: plan.key.clone(),
-                                leaf,
-                                handle,
-                            });
-                        }
-                    }
+            for event in &events {
+                if let RunEvent::AggregateAdmitted { plan, .. } = event {
+                    run.register_aggregate_timers(plan, clock, &elapsed)?;
                 }
             }
         }

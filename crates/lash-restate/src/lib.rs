@@ -37,8 +37,7 @@
 //!         let authority_id = lash_restate::RestateAuthorityId::new(
 //!             "production-restate-authority",
 //!         ).map_err(TerminalError::from_error)?;
-//!         // The deployment's build: the lanes its endpoint binds, where the
-//!         // effect groups this controller opens dispatch (FIG-4454).
+//!         // The deployment's build: the lanes its endpoint binds (FIG-4454).
 //!         let effect_controller = RestateRuntimeEffectController::new(
 //!             ctx,
 //!             authority_id,
@@ -61,8 +60,8 @@
 //! atomic Lash effects in immediately awaited
 //! `ctx.run(...).name(lash:<replay_key>)` calls. Composite exec-code
 //! interpreters are rebuilt on every handler attempt while their nested atomic
-//! effects retain stable replay keys; a tool batch is a durable effect group
-//! whose children run in their own dispatch invocations. Sleep commands map to
+//! effects retain stable replay keys; a tool batch is one round of the
+//! turn's Run, each call a recorded attempt in the same journal. Sleep commands map to
 //! Restate's durable timer, and process commands call Restate workflow
 //! scheduling directly through idempotent registry/workflow operations.
 //! Substrate-native Restate turns do not use store-side in-flight replay rows;

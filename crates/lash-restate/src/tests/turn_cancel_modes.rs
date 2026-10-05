@@ -9,7 +9,7 @@
 //! unwinds the wait at its wake.
 //!
 //! The full-turn versions of these laws — a retry sleep and a follow-on
-//! frame's pending tool, both of which now run as effect-group children —
+//! frame's pending tool, both recorded in the turn's Run —
 //! are catalogue laws (`lash_conformance::turn_runner_tests!`) that Restate
 //! runs on the live harness (FIG-3397).
 

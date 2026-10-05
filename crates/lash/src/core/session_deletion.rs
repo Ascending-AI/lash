@@ -28,7 +28,6 @@ impl LashCore {
     /// After `TurnCancelClosureLifecyclePinned`, wait here before another
     /// close attempt. Reads do not repeat deletion or change the session.
     /// A new closure can race a later close; every close still checks its pins.
-    /// This does not wait for effect-group lifecycle pins.
     ///
     /// # Errors
     ///

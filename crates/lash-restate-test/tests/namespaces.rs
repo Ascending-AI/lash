@@ -11,7 +11,7 @@
 //! `namespaces` Restate suite):
 //!
 //! * Cores in distinct namespaces on one server run a session turn with a
-//!   tool call (an effect group), and a process, side by side under the
+//!   tool call (a recorded attempt of its turn's Run), and a process, side by side under the
 //!   very same session id, turn id and minted process id, and nothing
 //!   crosses: each turn answers from its own model and runs its own tool,
 //!   each process runs in its own engine, and every invocation of a
@@ -374,7 +374,7 @@ impl Core {
     }
 
     /// The session turn: one model call that asks for the tool, the tool as
-    /// an effect-group child, and a second call that answers.
+    /// a recorded attempt of the turn's Run, and a second call that answers.
     async fn run_turn(&self, session: &lash::LashSession) -> String {
         let output = tokio::time::timeout(
             Duration::from_secs(60),
@@ -486,7 +486,7 @@ async fn run_side_by_side(cores: &[Arc<Core>]) {
         assert_eq!(
             core.witness.tool_calls.load(Ordering::SeqCst),
             1,
-            "core `{label}`'s tool ran once, for its own turn's effect group"
+            "core `{label}`'s tool ran once, for its own turn's Run"
         );
         assert_eq!(
             terminal,
@@ -512,7 +512,7 @@ async fn run_side_by_side(cores: &[Arc<Core>]) {
     // On the double's clock each core minted its process id on its own
     // stores from the same sequence: the ids collide, and only the namespace
     // keeps the process workflows apart. A live server's cores mint from the
-    // wall clock, so there only the session, turn and effect-group keys,
+    // wall clock, so there only the session, turn and tool-call keys,
     // which every core shares by construction, collide.
     if cores
         .iter()
@@ -530,7 +530,7 @@ async fn run_side_by_side(cores: &[Arc<Core>]) {
 // ---------------------------------------------------------------------------
 
 /// Cores in the default namespace and two named ones share one server
-/// double: sessions, effect groups and processes under identical ids run
+/// double: sessions, tool Runs and processes under identical ids run
 /// side by side, and every invocation of a namespace was pinned to that
 /// namespace's deployment.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -708,7 +708,7 @@ async fn live_backend(
 }
 
 /// Two cores in distinct namespaces on one live server run sessions,
-/// effect groups and processes side by side under identical ids, and each
+/// tool Runs and processes side by side under identical ids, and each
 /// sees only its own work.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs a live restate-server: the `namespaces` Restate suite runs it"]

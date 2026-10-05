@@ -23,8 +23,8 @@ use lash_core::tool_dispatch::{
     BeforeCheckReply, DeclaredStartObligation, DeclaredStartObligationRefusal,
     IsolatedProcessDescriptor, IsolatedStartRefusal, IsolatedToolStart, PhysicalProcessWorker,
     ProcessExecutionBoundary, SingletonAttempt, SingletonBodyOutcome, SingletonCapture,
-    SingletonPreparedRequest, SingletonRunError, SingletonRunOutcome, SingletonTerminal,
-    SingletonToolCall, SingletonToolHandlers, WorkerTerminationReceipt, run_singleton_tool,
+    SingletonPreparedRequest, SingletonRunError, SingletonTerminal, SingletonToolCall,
+    SingletonToolHandlers, WorkerTerminationReceipt,
 };
 use lash_core::tool_run::{
     AdmittedBinding, AfterCheckVerdict, AttributedVerdict, CallDecision, DeclarationRefusal,
@@ -39,6 +39,8 @@ use lash_core::{
 use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use lash_sansio::ToolIntentKind;
 use lash_sqlite_store::{SqliteDatabase, SqliteProcessRegistry, SqliteStoreSet};
+
+use super::{SingletonRunOutcome, decide_round, run_singleton};
 
 const PLUGIN: &str = "fig4884-tools";
 const OUTPUT: &str = "fig4884 started";
@@ -660,7 +662,13 @@ async fn drive_with_replay(
                             call.segment,
                             call.available.clone(),
                         );
-                        run.decide(&call, starter.as_ref()).await?;
+                        decide_round(
+                            &mut run,
+                            std::slice::from_ref(&call),
+                            Arc::clone(&starter) as Arc<dyn SingletonToolHandlers>,
+                            Default::default(),
+                        )
+                        .await?;
                         run.await_deferred().await?;
                         let terminal = run
                             .drain()
@@ -680,7 +688,12 @@ async fn drive_with_replay(
                     }
                     .await
                 } else {
-                    run_singleton_tool(&scoped, &call, starter.as_ref()).await
+                    run_singleton(
+                        &scoped,
+                        &call,
+                        Arc::clone(&starter) as Arc<dyn SingletonToolHandlers>,
+                    )
+                    .await
                 };
                 returned.lock().unwrap().push(outcome);
             })
@@ -697,10 +710,15 @@ async fn drive_with_replay(
     Driven { backend, returned }
 }
 
+/// The record names of `steps`. A one-member round records its decision
+/// in the Run's schedule record, named by its first event ordinal.
 fn names(call_id: &ToolCallId, steps: &[&str]) -> Vec<String> {
     steps
         .iter()
-        .map(|step| format!("lash:run:{call_id}:{step}"))
+        .map(|step| match *step {
+            "decide" => "lash:run:schedule:1".to_owned(),
+            step => format!("lash:run:{call_id}:{step}"),
+        })
         .collect()
 }
 

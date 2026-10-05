@@ -7,8 +7,8 @@
 //! to [`LiveTurnRunner`], which parks the law's attempt factory in a
 //! process-local table and invokes [`ConformanceTurnProbe`] through ingress;
 //! the handler looks the factory up and runs a fresh attempt on its own
-//! controller. The tool calls of that turn open real Restate effect groups
-//! whose children run in the endpoint's dispatch invocations.
+//! controller. The tool calls of that turn record their attempts in the
+//! turn's own Run journal.
 //!
 //! Restate runs the handler again from the top on every replay of the
 //! invocation (after a suspension or a failed attempt), so the table never

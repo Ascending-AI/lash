@@ -48,13 +48,6 @@ pub enum SettlementSource {
     /// A scalar or batch tool call the opener admitted live, named by its
     /// lash-minted identity.
     Invocation { call_id: lash_sansio::ToolCallId },
-    /// Rank `rank` of durable effect group `group_key`, settled by child
-    /// `child_replay_key`.
-    GroupRank {
-        group_key: String,
-        rank: u64,
-        child_replay_key: String,
-    },
 }
 
 /// What the opener has incorporated so far: the once-only set. Travels with

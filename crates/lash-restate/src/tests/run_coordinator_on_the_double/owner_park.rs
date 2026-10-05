@@ -82,15 +82,19 @@ impl SessionShifts for OwnerDriver {
                     SegmentOrdinal(0),
                     vec![revision()],
                 );
-                coordinator
-                    .decide_round(&self.calls, self.probe.clone(), Default::default())
-                    .await
-                    .map_err(|error| {
-                        ShiftAbort::Retry(lash_core::RuntimeError::new(
-                            lash_core::RuntimeErrorCode::RuntimeStore,
-                            error.to_string(),
-                        ))
-                    })?;
+                crate::tests::decide_round(
+                    &mut coordinator,
+                    &self.calls,
+                    self.probe.clone(),
+                    Default::default(),
+                )
+                .await
+                .map_err(|error| {
+                    ShiftAbort::Retry(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::RuntimeStore,
+                        error.to_string(),
+                    ))
+                })?;
                 coordinator.await_deferred().await.map_err(|error| {
                     ShiftAbort::Retry(lash_core::RuntimeError::new(
                         lash_core::RuntimeErrorCode::RuntimeStore,
@@ -871,7 +875,7 @@ impl crate::RestateProcessRunner for ProcessAttempts {
             .collect();
         let mut run = RunCoordinator::open(&scoped, owner, SegmentOrdinal(0), vec![revision()]);
         let attempt = async {
-            run.decide_round(&calls, self.probe.clone(), Default::default())
+            crate::tests::decide_round(&mut run, &calls, self.probe.clone(), Default::default())
                 .await?;
             run.close().await
         };

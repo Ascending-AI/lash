@@ -927,9 +927,8 @@ async fn promise_all_reports_the_first_settled_rejection(tier: &JournaledTier) -
 
 /// A terminal leaf settles ahead of a held source-earlier leaf.
 ///
-/// Under ADR 0099 §5 the batch is a durable effect group: a child commits its
-/// final record and settles in commit order, not source order, so the held
-/// source-first leaf no longer blocks a later sibling's terminal. The second
+/// The Run decides its calls in recorded completion order, not source order,
+/// so the held source-first leaf does not block a later sibling's terminal. The second
 /// leaf's rejection is therefore the settlement the aggregate's first-settled
 /// selection reports.
 ///

@@ -25,9 +25,8 @@ pub fn backend_with_effect_layer(
 
 /// A test host config over `backend` whose effect host is `backend`'s under
 /// `layer`. The config is built over the layered backend rather than swapping
-/// the host in afterwards: the first host config over a backend installs the
-/// backend's one tool-child host, and a tool child must reach its effect
-/// controller through the layer too.
+/// the host in afterwards, so every controller it mints is reached through
+/// the layer.
 pub fn runtime_host_config_with_effect_layer(
     backend: &lash_core::Backend,
     layer: Arc<dyn lash_core::testing::EffectLayer>,

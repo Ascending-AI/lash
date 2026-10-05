@@ -37,9 +37,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
     F: Fn(&str) -> Arc<S>,
     S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
-    // One layered host for the whole law: a runtime installs its tool-child
-    // host get-or-init, so a host layered afresh per execution would strand
-    // every later execution's group children (see `LawSeamHost`).
+    // One layered host for the whole law (see `LawSeamHost`).
     let host = LawSeamHost::over(host);
     let scenario = "direct-acceptance-after-store-commit";
     let make = |scenario: &str| make(scenario) as Arc<dyn RuntimeStore>;

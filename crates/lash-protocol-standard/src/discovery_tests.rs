@@ -328,8 +328,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
             .as_nanos()
     ));
     // The turn's scope is lent by a handler on the Restate double (D1 F2):
-    // group opens issued by the turn and the tool-child resolver
-    // `RuntimeHostConfig::new` installs meet on that scope.
+    // the turn's tool Run records in that scope's journal.
     let (double, mut host) = super::tests::test_host().await;
     host.providers.models = lash_core::testing::standard_test_llm_profiles(provider_handle);
     host.tracing = host.tracing.clone().with_trace_sink(Arc::new(

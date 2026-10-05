@@ -308,9 +308,9 @@ mod recorded_execution_controls_live {
     }; (a_redrive_calls_the_model_with_the_request_defaults_its_run_recorded, "turn-config-recorded-request-defaults-redrive"));
 }
 
-// The turn runs inside a live handler: its tool call opens a real Restate
-// effect group whose child runs in the endpoint's dispatch invocation, which
-// the recording contexts cannot serve (FIG-3397).
+// The turn runs inside a live handler: its tool calls record their
+// attempts in that handler's journal, which the recording contexts cannot
+// serve (FIG-3397).
 lash_conformance::turn_runner_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
@@ -493,8 +493,8 @@ lash_conformance::declared_start_tests!(
 
 // The barrier laws (FIG-3400, ADR 0116 §7.1) on live Restate. Each
 // scenario's turn runs in a live handler, and every member of its step's tool
-// group — native calls, `batch` members and `Promise.all` leaves alike — is a
-// child invocation of one durable effect group. The process-bridge producer
+// round — native calls, `batch` members and `Promise.all` leaves alike — is a
+// recorded attempt of the turn's one Run. The process-bridge producer
 // executes its worker in the test process and stays on the in-process tiers.
 lash_conformance::tool_batch_parallelism_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
@@ -743,11 +743,6 @@ lash_conformance::wake_delivery_conflict_tests!({
     )
 });
 
-// A Restate host resolves its group children at the endpoint, so it is never
-// an unregistered host: `effect_group_unwired_host_tests!` does not apply.
-
-// A close racing its own children's settlements seats one terminal per child.
-
 // The session-config settlement laws on the Restate backend: its engine host
 // over one SQLite memory store set per law.
 lash_conformance::session_config_settlement_tests!(
@@ -795,7 +790,7 @@ lash_conformance::effect_host_await_event_witness_tests!(
     }
 );
 
-/// The live effect-group suites above, on the in-process `lash-restate-test`
+/// The live suites above, on the in-process `lash-restate-test`
 /// server double: the same endpoint and the same laws, with the Restate
 /// server simulated in process — no sockets, no Docker, virtual time.
 mod on_the_server_double {
@@ -871,9 +866,8 @@ mod on_the_server_double {
         (harness, prefix, effect_host, stores, turn_runner)
     });
 
-    // A cancelled turn drops its tool child even when the tool ignores the
-    // cancellation: on Restate the child's dispatch invocation is cancelled
-    // and its handler future dropped.
+    // A cancelled turn drops its tool body even when the tool ignores the
+    // cancellation: the Run decides the call cancelled and drops the body.
 
     lash_conformance::effect_host_await_event_witness_tests!({
         let harness = Arc::new(LiveConformanceHarness::start_on(HarnessServer::in_process()).await);

@@ -181,7 +181,7 @@ async fn loser_beside_sleep(crash: bool) {
                         )
                         .await
                         .unwrap();
-                    context.close_opener_groups().await.unwrap();
+                    context.close_tool_run().await.unwrap();
                 });
                 let observe = async {
                     if !redrive {

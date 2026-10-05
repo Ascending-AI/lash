@@ -694,17 +694,11 @@ pub enum DecidedCall {
 }
 
 #[derive(Clone)]
-enum Handlers<'a> {
-    Borrowed(&'a dyn SingletonToolHandlers),
-    Owned(std::sync::Arc<dyn SingletonToolHandlers + 'a>),
-}
+struct Handlers<'a>(std::sync::Arc<dyn SingletonToolHandlers + 'a>);
 
 impl Handlers<'_> {
     fn get(&self) -> &dyn SingletonToolHandlers {
-        match self {
-            Self::Borrowed(handlers) => *handlers,
-            Self::Owned(handlers) => handlers.as_ref(),
-        }
+        self.0.as_ref()
     }
 }
 
@@ -927,161 +921,6 @@ impl<'a> RunCoordinator<'a> {
     #[must_use]
     pub fn into_records(self) -> Vec<RunRecord> {
         self.journal.records
-    }
-
-    /// Admit `call` as a singleton round, run its attempt and record its one
-    /// decision (A, X, D). Its presentation is owed to [`Self::drain`].
-    ///
-    /// # Errors
-    ///
-    /// A typed [`SingletonRunError`]; none of them executes a body.
-    pub async fn decide(
-        &mut self,
-        call: &'a SingletonToolCall,
-        handlers: &'a dyn SingletonToolHandlers,
-    ) -> Result<DecidedCall, SingletonRunError> {
-        self.begin_frame()?;
-        let result = self
-            .bodies
-            .clone()
-            .beside(self.decide_inner(call, handlers))
-            .await;
-        self.active_frame = false;
-        self.note_fault(&result);
-        result
-    }
-
-    async fn decide_inner(
-        &mut self,
-        call: &'a SingletonToolCall,
-        handlers: &'a dyn SingletonToolHandlers,
-    ) -> Result<DecidedCall, SingletonRunError> {
-        let (member, request) = self
-            .admit(call, handlers, crate::tool_run::RecordedRetryPolicy::Never)
-            .await?;
-        self.handlers
-            .insert(call.call_id.clone(), Handlers::Borrowed(handlers));
-        let journal = &mut self.journal;
-
-        // The result candidate the decision checks, and where it came from.
-        let candidate = match member.selection() {
-            BeforeSelection::Execute => {
-                match attempt(
-                    journal,
-                    call,
-                    &member,
-                    &request,
-                    handlers,
-                    self.sources.get(&call.call_id).map(|source| &source.source),
-                    self.process_sources.get(&call.call_id),
-                )
-                .await?
-                {
-                    AttemptCaptured::Captured(capture) => {
-                        let recorded = match &capture {
-                            SingletonCapture::Isolated { binding } => Some(binding.as_ref()),
-                            _ => None,
-                        };
-                        if recorded != request.isolation.as_ref() {
-                            return Err(SingletonRunError::Drift {
-                                call_id: call.call_id.clone(),
-                                drift: SingletonDrift::IsolationBinding,
-                            });
-                        }
-                        Some((
-                            ResultSource::Attempt {
-                                attempt: AttemptOrdinal::FIRST,
-                            },
-                            capture,
-                        ))
-                    }
-                    AttemptCaptured::Pending {
-                        source,
-                        metadata,
-                        start,
-                    } => {
-                        return self
-                            .accept_pending(
-                                call,
-                                member,
-                                Handlers::Borrowed(handlers),
-                                AttemptOrdinal::FIRST,
-                                PendingAttempt {
-                                    source,
-                                    metadata: &metadata,
-                                    start: start.as_deref(),
-                                },
-                            )
-                            .await;
-                    }
-                    AttemptCaptured::DeferredStart { source, start } => {
-                        return Ok(self.queue_deferred_start(
-                            call,
-                            member,
-                            Handlers::Borrowed(handlers),
-                            AttemptOrdinal::FIRST,
-                            source,
-                            *start,
-                        ));
-                    }
-                    AttemptCaptured::Deferred(source) => {
-                        self.waiting.insert(
-                            call.call_id.clone(),
-                            Waiting {
-                                call: call.clone(),
-                                member,
-                                handlers: Handlers::Borrowed(handlers),
-                                attempt: AttemptOrdinal::FIRST,
-                                start: None,
-                            },
-                        );
-                        return Ok(DecidedCall::Deferred { source });
-                    }
-                }
-            }
-            BeforeSelection::Cached => {
-                let Some(BeforeCheckVerdict::Cached { result }) =
-                    member.checks.winner().map(|reply| &reply.verdict)
-                else {
-                    return Err(RunEventRefusal::DecisionUnsupported {
-                        call_id: call.call_id.clone(),
-                    }
-                    .into());
-                };
-                Some((
-                    ResultSource::Cached,
-                    if member.declaration.isolated {
-                        SingletonCapture::Refused {
-                            refusal: DeclarationRefusal::InlineOutcomeFromIsolated,
-                        }
-                    } else {
-                        journal.materials.decode(result)?
-                    },
-                ))
-            }
-            BeforeSelection::Deny | BeforeSelection::Cancel | BeforeSelection::AbortRun => None,
-        };
-
-        self.decide_candidate(call, Handlers::Borrowed(handlers), &member, candidate)
-            .await
-    }
-
-    async fn admit(
-        &mut self,
-        call: &SingletonToolCall,
-        handlers: &dyn SingletonToolHandlers,
-        retry: crate::tool_run::RecordedRetryPolicy,
-    ) -> Result<(AdmittedCall, SingletonPreparedRequest), SingletonRunError> {
-        self.admit_round(
-            std::slice::from_ref(call),
-            handlers,
-            retry,
-            None,
-            crate::tool_run::CapacityScope::Held,
-        )
-        .await?
-        .pop()
-        .ok_or_else(|| boundary(&call.call_id))
     }
 
     async fn admit_round(
@@ -1404,15 +1243,9 @@ impl<'a> RunCoordinator<'a> {
         if let Some(publication) = publication {
             publication.publish_run(state)?;
         }
-        let Some(RunEvent::Decided { rank, decision, .. }) = decided
-            .events
-            .iter()
-            .find(|event| matches!(event, RunEvent::Decided { .. }))
-        else {
-            return Err(boundary(&call.call_id));
-        };
+        let (rank, decision) = recorded_decision(&decided.events, &call.call_id)?;
         self.owed.insert(
-            *rank,
+            rank,
             Owed {
                 call_id: call.call_id.clone(),
                 handlers,
@@ -1421,10 +1254,35 @@ impl<'a> RunCoordinator<'a> {
             },
         );
         Ok(DecidedCall::Ranked {
-            rank: *rank,
+            rank,
             decision: decision.clone(),
         })
     }
+}
+
+/// The one decision a D record carries for `call_id`, classified by event
+/// kind: a leading recorded attempt, the after-check contributions recorded
+/// with it, and exactly one `Decided`. Anything else is out of order.
+fn recorded_decision<'r>(
+    events: &'r [RunEvent],
+    call_id: &ToolCallId,
+) -> Result<(u64, &'r CallDecision), SingletonRunError> {
+    let mut decided = None;
+    for (index, event) in events.iter().enumerate() {
+        match event {
+            RunEvent::AttemptRecorded { call_id: id, .. } if index == 0 && id == call_id => {}
+            RunEvent::CheckContributions { call_id: id, .. }
+                if id == call_id && decided.is_none() => {}
+            RunEvent::Decided {
+                call_id: id,
+                rank,
+                decision,
+                ..
+            } if id == call_id && decided.is_none() => decided = Some((*rank, decision)),
+            _ => return Err(boundary(call_id)),
+        }
+    }
+    decided.ok_or_else(|| boundary(call_id))
 }
 
 fn boundary(call_id: &ToolCallId) -> SingletonRunError {
@@ -1432,20 +1290,6 @@ fn boundary(call_id: &ToolCallId) -> SingletonRunError {
         call_id: call_id.clone(),
     }
     .into()
-}
-
-enum AttemptCaptured {
-    Captured(SingletonCapture),
-    Pending {
-        source: AwaitEventKey,
-        metadata: Box<MaterialRef>,
-        start: Option<Box<crate::tool_run::PendingStart>>,
-    },
-    Deferred(AwaitEventKey),
-    DeferredStart {
-        source: AwaitEventKey,
-        start: Box<SingletonStart>,
-    },
 }
 
 struct PendingAttempt<'a> {
@@ -1457,97 +1301,6 @@ struct PendingAttempt<'a> {
 struct AttemptSources<'a> {
     completion: Option<&'a AwaitEventKey>,
     process: Option<&'a AwaitEventKey>,
-}
-
-/// X: attempt 1 of the body, checked against the recorded declaration
-/// before its record admits anything it declared. The stream the body emits
-/// is recorded, bounded, in the same capture.
-async fn attempt(
-    journal: &mut RunJournal<'_>,
-    call: &SingletonToolCall,
-    member: &AdmittedCall,
-    request: &SingletonPreparedRequest,
-    handlers: &dyn SingletonToolHandlers,
-    completion_key: Option<&AwaitEventKey>,
-    process_source: Option<&AwaitEventKey>,
-) -> Result<AttemptCaptured, SingletonRunError> {
-    let record = journal.record(Vec::new());
-    let owner = journal.materials.owner.clone();
-    let step = Box::pin(async move {
-        let captured = capture_attempt(
-            owner,
-            call,
-            member,
-            request,
-            handlers,
-            AttemptOrdinal::FIRST,
-            AttemptSources {
-                completion: completion_key,
-                process: process_source,
-            },
-        )
-        .await?;
-        let result = captured.result;
-        let materials = captured.materials;
-        Ok(RunJournalEntry {
-            state: Vec::new(),
-            record: RunRecord {
-                events: vec![RunEvent::AttemptRecorded {
-                    call_id: call.call_id.clone(),
-                    attempt: AttemptOrdinal::FIRST,
-                    result,
-                }],
-                ..record
-            },
-            materials,
-        })
-    });
-    journal.scoped.admit_journal_write()?;
-    let entry = journal
-        .scoped
-        .controller()
-        .record_run_record(record_name(&call.call_id, "attempt:1"), step)
-        .await?;
-    let recorded = journal.accept(entry)?;
-    match recorded.events.first() {
-        Some(RunEvent::AttemptRecorded {
-            result:
-                AttemptResult::Pending {
-                    source,
-                    metadata,
-                    start,
-                },
-            ..
-        }) => Ok(AttemptCaptured::Pending {
-            source: source.clone(),
-            metadata: Box::new(metadata.clone()),
-            start: start.clone(),
-        }),
-        Some(RunEvent::AttemptRecorded {
-            result:
-                AttemptResult::DeferredStart {
-                    source,
-                    start_key,
-                    obligation,
-                },
-            ..
-        }) => Ok(AttemptCaptured::DeferredStart {
-            source: source.clone(),
-            start: Box::new(SingletonStart {
-                start_key: start_key.clone(),
-                obligation: obligation.clone(),
-            }),
-        }),
-        Some(RunEvent::AttemptRecorded {
-            result: AttemptResult::Deferred { source },
-            ..
-        }) => Ok(AttemptCaptured::Deferred(source.clone())),
-        Some(RunEvent::AttemptRecorded {
-            result: AttemptResult::Done { output } | AttemptResult::Failed { output, .. },
-            ..
-        }) => Ok(AttemptCaptured::Captured(journal.materials.decode(output)?)),
-        _ => Err(boundary(&call.call_id)),
-    }
 }
 
 pub use crate::tool_run::RunCutRefusal;

@@ -32,7 +32,8 @@ The historical child/group implementation is not a runtime option.
 | K8 | Operation Run input kind over the session-operation opener (Q2) | `lash_core_store::tool_run::operation` | codec, identity | FIG-4888, FIG-4893 | host operations |
 | K10 | Callback slots and state authority, command batches, resolutions, applied frontier (Q5) | `lash_core_store::tool_run::state_command` | codec, refusal, frontier | FIG-4878 (FIG-4857 for construction) | FIG-4879, FIG-4880 |
 
-`RunCoordinator::decide_round` records one admission for the whole round,
+`RunCoordinator::start_round` (and `start_aggregate` for an aggregate)
+records one admission for the whole round,
 then registers independent `RunAttemptEntry` handles in admission order.
 Each X owns its canonical output. A selected Run record folds that X and
 its final decision together, or records retry eligibility and backoff;
@@ -258,17 +259,17 @@ record and the canonical material it owns, stamped with the effect-journal
 generation. Effect controllers journal it through
 `RuntimeEffectController::record_run_record`; a replay serves it without
 running its step, and every served record passes the `RunLedger` fold and the
-material check before anything acts on it. The singleton route
-(`lash_core::tool_dispatch::run_singleton_tool`) records a simple Done call as
-four records: `admit` (A: the prepared request and every before-check),
-`attempt:1` (X: the body's capture, checked against the recorded declaration),
-`decide` (D: after-checks, or the Run's cancellation read once) and `present`
-(V: presentation bytes distinct from the output, consumed and incorporated in
-the same record). A final that declares adds `declare` between D and V, and V
+material check before anything acts on it. A singleton is a one-member
+round on the same route; a simple Done call is four records: `admit` (A: the
+prepared request and every before-check), `attempt:1` (X: the body's capture,
+checked against the recorded declaration), the selected schedule record (D:
+the folded X with after-checks and any after-check contributions, or the Run's
+cancellation read once) and `present` (V: presentation bytes distinct from the
+output, consumed and incorporated in the same record). A final that declares adds `declare` between D and V, and V
 then also settles the declarations. A replay whose call drifts from its
 recorded admission (tool name, arguments, owner, or a recorded plugin revision
 this build no longer executes) refuses typed before any body; the recorded
-declaration governs, never the live catalog. Whole-round calls use `RunCoordinator::decide_round` and independent X records.
+declaration governs, never the live catalog. Every member of a round has its own independent X record.
 Reported retries follow the recorded dynamic schedule (K9).
 
 **Deferred completion (K4, FIG-4740).** The Run arms a source under the

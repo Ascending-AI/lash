@@ -60,7 +60,15 @@ impl RestateProcessRunner for Runner {
             call.available.clone(),
         );
         if process_id != self.parent {
-            run.decide(&call, body.as_ref()).await.unwrap();
+            crate::tests::decide_round(
+                &mut run,
+                std::slice::from_ref(&call),
+                std::sync::Arc::clone(&body)
+                    as std::sync::Arc<dyn lash_core::tool_dispatch::SingletonToolHandlers>,
+                Default::default(),
+            )
+            .await
+            .unwrap();
             let (_, terminal) = run.drain().await.unwrap().pop().unwrap();
             assert!(matches!(
                 terminal,
@@ -73,7 +81,15 @@ impl RestateProcessRunner for Runner {
         }
         call.declaration =
             ToolDeclaration::deferring().with_intents([ToolIntentKind::StartProcess]);
-        run.decide(&call, self.starter.as_ref()).await.unwrap();
+        crate::tests::decide_round(
+            &mut run,
+            std::slice::from_ref(&call),
+            std::sync::Arc::clone(&self.starter)
+                as std::sync::Arc<dyn lash_core::tool_dispatch::SingletonToolHandlers>,
+            Default::default(),
+        )
+        .await
+        .unwrap();
         run.await_deferred().await.unwrap();
         let (_, terminal) = run.drain().await.unwrap().pop().unwrap();
         let SingletonTerminal::Final { capture, .. } = terminal else {

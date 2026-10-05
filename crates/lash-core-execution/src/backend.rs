@@ -79,9 +79,8 @@ pub trait EffectEngine: Send + Sync {
     fn session_work(&self) -> Arc<dyn SessionWorkEngine>;
 
     /// The engine's retirement evidence (FIG-4454): the deployments that
-    /// serve a generation's lanes and the committed effect-group children
-    /// still owed a drain on them, which a generation's drain status waits
-    /// for. An engine that keeps no deployments answers
+    /// serve a generation's lanes and the unfinished invocations still pinned
+    /// to them, which a generation's drain status waits for. An engine that keeps no deployments answers
     /// [`NoDeployments`](crate::store::fleet_finalize::NoDeployments).
     ///
     /// Required, with no default, for the same reason as

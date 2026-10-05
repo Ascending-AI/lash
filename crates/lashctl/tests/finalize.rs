@@ -21,8 +21,8 @@ use serde_json::{Value, json};
 use sqlx::{Connection, PgConnection};
 
 /// A stand-in for the Restate admin API: `GET /deployments` answers the
-/// listing the law last set, and `POST /query` answers that no effect-group
-/// index record exists.
+/// listing the law last set, and `POST /query` answers that no invocation
+/// is open.
 struct Admin {
     url: String,
     listing: Arc<Mutex<Value>>,
@@ -62,7 +62,7 @@ impl Admin {
                 let (status, body) = if request_line.starts_with("GET /deployments ") {
                     ("200 OK", served.lock().expect("listing").to_string())
                 } else if request_line.starts_with("POST /query ") {
-                    // The effect-group index records the drain status reads
+                    // The open invocations the drain status reads
                     // (FIG-4454): this stand-in's server holds none.
                     ("200 OK", json!({"rows": []}).to_string())
                 } else {
