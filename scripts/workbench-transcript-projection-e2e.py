@@ -12,12 +12,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import sqlite3
 import subprocess
 import time
 import urllib.request
 
 from playwright.sync_api import sync_playwright
+from workbench_store_rows import StoreRows
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ("rendered-surface", "tool-value", "code-failure", "retry-reset-partial", "transcript-projection")
@@ -39,11 +39,11 @@ def settled(base: str, minimum_replies: int) -> dict:
     raise AssertionError("deterministic turn never quiesced")
 
 
-def assert_three_layers(page, state: dict, database: Path, artifact: Path, *, navigation_wait: str = "networkidle") -> None:
+def assert_three_layers(page, state: dict, store: StoreRows, artifact: Path, *, navigation_wait: str = "networkidle") -> None:
     rows = state["transcript"]
     session_id = state["settings"]["session_id"]
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
-        nodes = connection.execute("SELECT node_id, node_json FROM graph_nodes WHERE session_id=? AND tombstoned=0 ORDER BY generation", (session_id,)).fetchall()
+    nodes = [(node["node_id"], node["node_json"]) for node in
+             store.rows("graph_nodes", order=("generation",), session_id=session_id) if not node["tombstoned"]]
     assert len(rows) == len(nodes), "a committed node has neither a row nor a named suppression"
     assert [row["row_id"] for row in rows] == [node_id for node_id, _ in nodes], "retained source order or identity changed"
     for row, (_, node_json) in zip(rows, nodes):
@@ -106,7 +106,7 @@ def main() -> None:
                     replies = sum(not row["suppressed"] and row["kind"] == "assistant_reply" for row in state["transcript"])
                     page.wait_for_function("count => document.querySelectorAll('#timeline .message.assistant').length === count", arg=replies)
                     before = page.locator("#timeline .message.assistant").count()
-                    assert_three_layers(page, state, data / "lash-sessions/durable-core.db", artifact_dir / f"{scenario}.json")
+                    assert_three_layers(page, state, StoreRows("sqlite_file", data), artifact_dir / f"{scenario}.json")
                     assert page.locator("#timeline .message.assistant").count() == before, "quiescence left a provisional assistant copy"
                     assert page.locator("#timeline .message-attachment").count() == 1, "the UI-owned input lost its attachment"
                     if scenario == "transcript-projection":

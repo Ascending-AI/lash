@@ -94,9 +94,10 @@ bytes, serving PNG as `image/png` and other binary resources as
 `application/octet-stream`. `AGENT_WORKBENCH_SEARCH_MCP_URL`
 overrides the search peer URL for an isolated fixture run.
 
-S28 is `s28_workbench_mcp_peer_restart` in the upgrade harness. It uses
+S28 is `s28_workbench_mcp_peer_restart` in the upgrade harness, and
+`s28_workbench_mcp_peer_restart_postgresql` over PostgreSQL. It uses
 `tests/mcp_peer_restart.py` to compare two browser contexts, HTTP responses,
-SQLite records and actual Restate V7 tool outcomes while killing and restarting
+store records and actual Restate V7 tool outcomes while killing and restarting
 the independently owned HTTP peer. `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=mcp-fixture`
 provides deterministic RLM requests without a model service.
 

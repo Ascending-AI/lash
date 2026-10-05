@@ -201,6 +201,7 @@ impl WorkbenchHost {
                     "journals":journals,"materials":materials,"outcomes":outcomes}),
                 )
             }
+            "store-rows" => self.store_rows(&request).await,
             action => bail!("unknown MCP action {action}"),
         }
     }
@@ -208,6 +209,7 @@ impl WorkbenchHost {
         &mut self,
         repo: &std::path::Path,
         python: &std::path::Path,
+        store: crate::e2e::case::StoreKind,
         lease: &mut CaseLease,
     ) -> Result<Value> {
         let mut command = Command::new(python);
@@ -220,6 +222,8 @@ impl WorkbenchHost {
                 &lease.directory.display().to_string(),
                 "--mcp-url",
                 &format!("http://127.0.0.1:{}/mcp", self.http_port + 2),
+                "--store",
+                store.manifest(),
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

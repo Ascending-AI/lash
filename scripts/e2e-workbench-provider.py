@@ -102,6 +102,7 @@ def browser(args):
     spec.loader.exec_module(projection)
     directory = args.directory
     database = directory / "workbench-data/lash-sessions/durable-core.db"
+    rows = projection.StoreRows("sqlite_file", directory / "workbench-data")
     trace_path = directory / "workbench-data/trace.jsonl"
 
     def control(action, input=None):
@@ -272,7 +273,7 @@ def browser(args):
                     "reply_counts": {"detached": counts_a, "late": counts},
                     "entered": entered, "turn": turn, "input_id": work["input_id"],
                 })
-                projection.assert_three_layers(late, final, database,
+                projection.assert_three_layers(late, final, rows,
                                                directory / "s26-late-browser.json",
                                                navigation_wait="domcontentloaded")
                 write(directory / "scorecard.json", {
@@ -318,7 +319,7 @@ def browser(args):
                 expect(page.locator("#timeline .message.assistant")).to_have_count(0)
                 page.reload(wait_until="domcontentloaded")
                 expect(page.locator("#timeline .message.assistant")).to_have_count(0)
-                projection.assert_three_layers(page, state(), database,
+                projection.assert_three_layers(page, state(), rows,
                                                directory / "s26-partial-browser.json",
                                                navigation_wait="domcontentloaded")
                 write(directory / "s26-partial-evidence.json", {
@@ -386,7 +387,7 @@ def browser(args):
                     "inputs": [work_first["input_id"], work_second["input_id"]],
                     "done_events": done_events,
                 })
-                projection.assert_three_layers(page, final, database,
+                projection.assert_three_layers(page, final, rows,
                                                directory / "s27-browser.json",
                                                navigation_wait="domcontentloaded")
                 write(directory / "scorecard.json", {
@@ -428,7 +429,7 @@ def browser(args):
                 late = open_page(chrome, session)
                 expect(late.locator("#abort")).to_be_hidden()
                 expect(late.locator("#send")).to_be_enabled()
-                projection.assert_three_layers(late, final, database,
+                projection.assert_three_layers(late, final, rows,
                                                directory / "s18-late-browser.json",
                                                navigation_wait="domcontentloaded")
                 write(directory / "s18-evidence.json", {

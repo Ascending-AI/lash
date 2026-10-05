@@ -7,7 +7,6 @@ result delivery. Fixture answers are never the oracle for native tool outcomes.
 import argparse
 import hashlib
 import json
-import sqlite3
 import sys
 import time
 import urllib.parse
@@ -15,6 +14,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 from playwright.sync_api import expect, sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from workbench_store_rows import StoreRows  # noqa: E402
 
 BADGE = b"workbench workspace badge v1\x00\x01\x02\x03"
 STDIO = ["mcp__workspace_stdio__" + name for name in
@@ -27,7 +29,7 @@ class Journey:
         self.args = args
         self.root = args.directory
         self.data = self.root / "workbench-data"
-        self.session_db = self.data / "lash-sessions/durable-core.db"
+        self.rows = StoreRows(args.store, self.data, self.controller)
         self.gates = []
         self.pages = []
         self.session = self.api("/api/state")["settings"]["session_id"]
@@ -50,12 +52,6 @@ class Journey:
         receipt = json.loads(sys.stdin.readline())
         assert "error" not in receipt, receipt
         return receipt
-
-    @staticmethod
-    def sql(path, query, params=()):
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
-            db.row_factory = sqlite3.Row
-            return [dict(row) for row in db.execute(query, params)]
 
     def traces(self):
         return [json.loads(line) for line in (self.data / "trace.jsonl").read_text().splitlines() if line.strip()]
@@ -107,7 +103,7 @@ class Journey:
         return receipt
 
     def store(self):
-        return {table: self.sql(self.session_db, f"SELECT * FROM {table} WHERE session_id = ?", (self.session,))
+        return {table: self.rows.rows(table, session_id=self.session)
                 for table in ("graph_nodes", "runtime_turn_commits", "pending_turn_inputs")}
 
     @staticmethod
@@ -135,7 +131,7 @@ class Journey:
 
     def tool_receipts_for_turn(self, source: str, *, terminal: bool) -> list[dict[str, Any]]:
         run = source
-        rows = self.sql(self.session_db, "SELECT session_id, executor_json FROM session_runs WHERE run = ?", (run,))
+        rows = self.rows.rows("session_runs", run=run)
         if len(rows) != 1:
             raise AssertionError(f"tool Run has no unique retained executor: {run}, {rows}")
         owner_session = rows[0]["session_id"]
@@ -145,9 +141,7 @@ class Journey:
             raise AssertionError(f"tool evidence has another original owner/protocol: {native}")
         path = self.root / ("tool-run-" + hashlib.sha256(run.encode()).hexdigest() + ".json")
         path.write_text(json.dumps(native, indent=2) + "\n")
-        stored = self.sql(self.session_db,
-                          "SELECT request_json, completion_json FROM tool_call_receipts WHERE session_id = ? ORDER BY requested_at_ms, request_key",
-                          (owner_session,))
+        stored = self.rows.rows("tool_call_receipts", order=("requested_at_ms", "request_key"), session_id=owner_session)
         receipts = []
         for stored_row in stored:
             request = json.loads(stored_row["request_json"])
@@ -313,18 +307,18 @@ class Journey:
                 assert len(refs) == 1, refs
                 reference = refs[0]
                 ref = reference["attachment_ref"]
-                stored = self.sql(self.session_db, "SELECT content FROM attachment_blobs WHERE attachment_id = ?", (ref["id"],))
+                stored = self.rows.attachment(ref["id"])
                 with urllib.request.urlopen(self.args.base_url + "/api/attachments/" + urllib.parse.quote(ref["id"], safe="")) as response:
                     retrieved, media = response.read(), response.headers["content-type"]
                 self.save("attachment-retrieval.json", {"reference": reference, "committed_refs": committed_refs,
-                    "stored_bytes": [row["content"].hex() for row in stored], "retrieved_bytes": retrieved.hex(),
+                    "stored_bytes": [content.hex() for content in stored], "retrieved_bytes": retrieved.hex(),
                     "expected_bytes": BADGE.hex(), "media_type": media, "attach": attached,
                     "detach": detached, "servers": servers})
                 self.gate("attach", "native", "connected integration retains one stored binary reference with exact bytes, then detaches",
                     attached["connected"] is True and BADGE_TOOL in attached["tools"] and reference["source"] == "stored"
                     and committed_refs == refs
                     and ref["byte_len"] == len(BADGE) and ref["media_type"] == "application/octet-stream"
-                    and [r["content"] for r in stored] == [BADGE] and retrieved == BADGE and media == "application/octet-stream"
+                    and stored == [BADGE] and retrieved == BADGE and media == "application/octet-stream"
                     and detached == {"detached": "workspace_http"} and sorted(v["name"] for v in servers) == ["parallel", "workspace_stdio"])
                 requests = [json.loads(line) for line in (self.root / "provider-requests.jsonl").read_text().splitlines()]
                 offered = lambda r: json.dumps(r.get("instructions", "")) + json.dumps(r.get("tools", []))
@@ -360,4 +354,5 @@ if __name__ == "__main__":
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--directory", required=True, type=Path)
     parser.add_argument("--mcp-url", required=True)
+    parser.add_argument("--store", choices=("sqlite_file", "postgresql"), required=True)
     Journey(parser.parse_args()).run()

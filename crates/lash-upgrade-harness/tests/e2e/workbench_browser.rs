@@ -7,7 +7,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, ensure};
-use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease};
+use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease, Permutation};
 use lash_upgrade_harness::e2e::control::ProcessReceipt;
 use lash_upgrade_harness::e2e::evidence::Evidence;
 use lash_upgrade_harness::e2e::host::{HostAdapter as _, HostCommand};
@@ -20,7 +20,7 @@ use tokio::process::Command;
 
 use super::{artifact, required, turn_journals, write_case_receipt};
 
-pub async fn run() -> Result<()> {
+pub async fn run(permutation: Permutation) -> Result<()> {
     let directory = std::path::PathBuf::from(required("LASH_E2E_HOST_ARTIFACTS")?);
     std::fs::create_dir_all(&directory)?;
     let gate = required("KILN_GATE_ID")?;
@@ -58,7 +58,21 @@ pub async fn run() -> Result<()> {
         directory.display().to_string(),
         "--provider-port".into(),
         (port + 2).to_string(),
+        "--store".into(),
+        permutation.store.manifest().into(),
     ];
+    let mut environment = BTreeMap::from([
+        (
+            "AGENT_WORKBENCH_PROVIDER_URL".into(),
+            format!("http://127.0.0.1:{}", port + 2),
+        ),
+        ("OPENROUTER_API_KEY".into(), "s29-local-fixture".into()),
+        ("OPENROUTER_MODEL".into(), "openai/gpt-5.4".into()),
+        ("OPENROUTER_MODEL_VARIANT".into(), "high".into()),
+    ]);
+    if let Some(url) = permutation.postgres_url(&mut lease).await? {
+        environment.insert("AGENT_WORKBENCH_DATABASE_URL".into(), url);
+    }
     let mut provider_args = args.clone();
     provider_args.push("--provider".into());
     let mut provider = HostProcess::spawn_with_args(
@@ -76,15 +90,7 @@ pub async fn run() -> Result<()> {
         port,
         port + 1,
     )?
-    .configure(BTreeMap::from([
-        (
-            "AGENT_WORKBENCH_PROVIDER_URL".into(),
-            format!("http://127.0.0.1:{}", port + 2),
-        ),
-        ("OPENROUTER_API_KEY".into(), "s29-local-fixture".into()),
-        ("OPENROUTER_MODEL".into(), "openai/gpt-5.4".into()),
-        ("OPENROUTER_MODEL_VARIANT".into(), "high".into()),
-    ]))?;
+    .configure(environment)?;
     let server_path = required("LASH_RESTATE_SERVER_BIN")?;
     let server = ArtifactIdentity {
         role: "restate-server".into(),
@@ -138,14 +144,18 @@ pub async fn run() -> Result<()> {
                 writeln!(log, "{line}")?;
                 if let Some(request) = line.strip_prefix("H6_CONTROL ") {
                     let request: Value = serde_json::from_str(request)?;
-                    let response = match host
-                        .command(HostCommand::Process {
-                            action: request["action"].as_str().context("control action")?.into(),
+                    let action = request["action"].as_str().context("control action")?;
+                    let response = match if action == "store-rows" {
+                        host.store_rows(&request).await
+                    } else {
+                        host.command(HostCommand::Process {
+                            action: action.into(),
                             input: request["input"].clone(),
                         })
                         .await
-                    {
-                        Ok(receipt) => receipt.output,
+                        .map(|receipt| receipt.output)
+                    } {
+                        Ok(output) => output,
                         Err(error) => json!({"error":format!("{error:#}")}),
                     };
                     let mut bytes = serde_json::to_vec(&response)?;

@@ -16,6 +16,7 @@ use crate::e2e::{
 };
 
 mod mcp;
+mod store;
 
 pub struct WorkbenchHost {
     mcp: Option<HostProcess>,

@@ -6,7 +6,6 @@ import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
-import sqlite3
 import sys
 import threading
 import time
@@ -79,23 +78,24 @@ def browser(args):
     projection = module_from_spec(spec)
     spec.loader.exec_module(projection)
     directory = args.directory
-    database = directory / "workbench-data/lash-sessions/durable-core.db"
 
-    def control(action):
-        print("H6_CONTROL " + json.dumps({"action": action, "input": {}}), flush=True)
+    def request(body):
+        print("H6_CONTROL " + json.dumps(body), flush=True)
         receipt = json.loads(sys.stdin.readline())
         assert "error" not in receipt, receipt
         return receipt
+
+    def control(action):
+        return request({"action": action, "input": {}})
+
+    rows = projection.StoreRows(args.store, directory / "workbench-data", request)
 
     def state():
         with urllib.request.urlopen(args.base_url + "/api/state", timeout=5) as response:
             return json.load(response)
 
     def store(session):
-        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
-            connection.row_factory = sqlite3.Row
-            return {table: [dict(row) for row in connection.execute(
-                f"SELECT * FROM {table} WHERE session_id=?", (session,))]
+        return {table: rows.rows(table, session_id=session)
                 for table in ("pending_turn_inputs", "session_meta", "graph_nodes", "runtime_turn_commits")}
 
     def trace(session):
@@ -188,10 +188,10 @@ def browser(args):
                     "nodes": observer.locator("#timeline > *").evaluate_all(
                         "nodes => nodes.map(node => ({id:node.dataset.transcriptRowId, turn:node.dataset.turnId, text:node.textContent, class:node.className}))"),
                 })
-                projection.assert_three_layers(observer, final, database, directory / f"s29-observer-{index}.json", navigation_wait="domcontentloaded")
+                projection.assert_three_layers(observer, final, rows, directory / f"s29-observer-{index}.json", navigation_wait="domcontentloaded")
             late = chrome.new_page()
             late.goto(url, wait_until="domcontentloaded")
-            projection.assert_three_layers(late, state(), database, directory / "s29-late-browser.json", navigation_wait="domcontentloaded")
+            projection.assert_three_layers(late, state(), rows, directory / "s29-late-browser.json", navigation_wait="domcontentloaded")
             after = store(session)
             meta = after["session_meta"][0]
             assert meta["shift_epoch"] > before_meta["shift_epoch"] or (
@@ -212,6 +212,7 @@ def main():
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--provider-port", type=int, required=True)
     parser.add_argument("--provider", action="store_true")
+    parser.add_argument("--store", choices=("sqlite_file", "postgresql"), required=True)
     parser.add_argument("--base-url")
     args = parser.parse_args()
     args.directory.mkdir(parents=True, exist_ok=True)

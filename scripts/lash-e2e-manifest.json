@@ -3887,9 +3887,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL workbench MCP oracle; FIG-4968 registers SQLite-file/live/RLM only.",
-          "registration": null,
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s28_workbench_mcp_peer_restart_postgresql"
+          },
           "host": "workbench"
         },
         {
@@ -3916,12 +3919,12 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL workbench MCP oracle and replay workbench MCP oracle; FIG-4968 registers SQLite-file/live/RLM only.",
+          "hold_reason": "Replay leg gated by FIG-4998 (cold-reopen replay order); FIG-5057 registers the S28 replay oracle and s28_workbench_mcp_peer_restart_postgresql proves the PostgreSQL live leg.",
           "registration": null,
           "host": "workbench"
         }
       ],
-      "setup": "Workbench-owned HTTP/stdio MCP fixtures and binary attachment; SQLite-file/live/RLM. PostgreSQL and replay oracles remain held.",
+      "setup": "Workbench-owned HTTP/stdio MCP fixtures and binary attachment; SQLite-file and PostgreSQL live legs on RLM. Replay oracles remain held.",
       "fault": "Kill/reconnect peer during admitted call, detach after catalog refresh.",
       "observable": "Admitted revision completes or typed-refuses; subsequent catalog stops offering detached tool; exact attachment bytes/reference retained once; host sampling/elicitation results agree.",
       "arc_guards": []
@@ -3992,9 +3995,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Missing PostgreSQL oracle: s29_workbench_kill_after_acceptance proves the sqlite_file/live leg only; FIG-4974 deferred this leg; no owner ticket filed.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s29_workbench_kill_after_acceptance_postgresql"
+          }
         }
       ],
       "setup": "Workbench deterministic transcript and known tool output.",

@@ -373,15 +373,26 @@ async fn s30(leg: lash_upgrade_harness::e2e::case::Leg) -> Result<()> {
     Ok(())
 }
 
-#[test]
-#[ignore = "prebuilt workbench, Playwright and private Restate supplied by the E2E controller"]
-fn s29_workbench_kill_after_acceptance() -> Result<()> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_stack_size(8 * 1024 * 1024)
-        .build()?
-        .block_on(workbench_browser::run())
+// Each S29 permutation's workbench writes through the store it names.
+macro_rules! s29_case {
+    ($name:ident, $store:ident) => {
+        #[test]
+        #[ignore = "prebuilt workbench, Playwright and private Restate supplied by the E2E controller"]
+        fn $name() -> Result<()> {
+            use lash_upgrade_harness::e2e::case::{Leg, Permutation, StoreKind};
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(8 * 1024 * 1024)
+                .build()?
+                .block_on(workbench_browser::run(Permutation::provisioned(
+                    StoreKind::$store,
+                    Leg::Live,
+                )?))
+        }
+    };
 }
+s29_case!(s29_workbench_kill_after_acceptance, SqliteFile);
+s29_case!(s29_workbench_kill_after_acceptance_postgresql, PostgreSql);
 
 #[test]
 #[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
@@ -474,16 +485,27 @@ fn s18_workbench_cancel_suspended_application_timer() -> Result<()> {
         ))
 }
 
-#[test]
-#[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
-fn s28_workbench_mcp_peer_restart() -> Result<()> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_stack_size(8 * 1024 * 1024)
-        .build()?
-        .block_on(s28_workbench())
+// Each S28 permutation's workbench writes through the store it names.
+macro_rules! s28_case {
+    ($name:ident, $store:ident, $leg:ident) => {
+        #[test]
+        #[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
+        fn $name() -> Result<()> {
+            use lash_upgrade_harness::e2e::case::{Leg, Permutation, StoreKind};
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(8 * 1024 * 1024)
+                .build()?
+                .block_on(s28_workbench(Permutation::provisioned(
+                    StoreKind::$store,
+                    Leg::$leg,
+                )?))
+        }
+    };
 }
-async fn s28_workbench() -> Result<()> {
+s28_case!(s28_workbench_mcp_peer_restart, SqliteFile, Live);
+s28_case!(s28_workbench_mcp_peer_restart_postgresql, PostgreSql, Live);
+async fn s28_workbench(permutation: lash_upgrade_harness::e2e::case::Permutation) -> Result<()> {
     use lash_upgrade_harness::e2e::{
         cluster::{ClusterControl as _, LocalCluster},
         host_adapters::workbench::WorkbenchHost,
@@ -510,7 +532,8 @@ async fn s28_workbench() -> Result<()> {
         required("LASH_RESTATE_SERVER_BIN")?.into(),
     )?;
     let mut cluster = LocalCluster::new(port, deadline);
-    let environment = BTreeMap::from([
+    let postgres_url = permutation.postgres_url(&mut lease).await?;
+    let mut environment = BTreeMap::from([
         (
             "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO".into(),
             "mcp-fixture".into(),
@@ -536,6 +559,9 @@ async fn s28_workbench() -> Result<()> {
             lease.directory.join("stdio-peer.pid").display().to_string(),
         ),
     ]);
+    if let Some(url) = postgres_url {
+        environment.insert("AGENT_WORKBENCH_DATABASE_URL".into(), url);
+    }
     let mut host = WorkbenchHost::new(
         format!("http://127.0.0.1:{}", port),
         format!("http://127.0.0.1:{}", port + 1),
@@ -557,6 +583,7 @@ async fn s28_workbench() -> Result<()> {
         host.mcp_oracle(
             &PathBuf::from(required("LASH_E2E_REPO")?),
             &PathBuf::from(required("LASH_E2E_PYTHON")?),
+            permutation.store,
             &mut lease,
         )
         .await?;
