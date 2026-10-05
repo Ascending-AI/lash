@@ -1928,6 +1928,36 @@
       "dependencies": "Base, D03/D04, F01",
       "cases": [
         {
+          "variant": "structural-node",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
+            "test": "isolated::s19_isolated_start_cuts_recover_one_worker"
+          }
+        },
+        {
           "variant": "default",
           "store": "sqlite_file",
           "leg": "live",
@@ -1951,7 +1981,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: FIG-4934 deferred isolated start cuts; no owner ticket filed.",
+          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
           "registration": null
         },
         {
@@ -1978,7 +2008,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: FIG-4934 deferred isolated start cuts; no owner ticket filed.",
+          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
           "registration": null
         },
         {
@@ -2005,7 +2035,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: FIG-4934 deferred isolated start cuts; no owner ticket filed.",
+          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
           "registration": null
         },
         {
@@ -2032,7 +2062,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: FIG-4934 deferred isolated start cuts; no owner ticket filed.",
+          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
           "registration": null
         }
       ],
@@ -2054,6 +2084,36 @@
       "dependencies": "Base, D04/D06, physical worker adapter",
       "cases": [
         {
+          "variant": "structural-node",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
+            "test": "isolated::s20_isolated_cancel_terminates_and_reaps_worker"
+          }
+        },
+        {
           "variant": "default",
           "store": "sqlite_file",
           "leg": "live",
@@ -2077,7 +2137,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: FIG-4934 deferred OS termination and reaping; no owner ticket filed.",
+          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
           "registration": null
         },
         {
@@ -2104,7 +2164,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: FIG-4934 deferred OS termination and reaping; no owner ticket filed.",
+          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
           "registration": null
         },
         {
@@ -2131,7 +2191,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: FIG-4934 deferred OS termination and reaping; no owner ticket filed.",
+          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
           "registration": null
         },
         {
@@ -2158,7 +2218,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Not implemented: FIG-4934 deferred OS termination and reaping; no owner ticket filed.",
+          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
           "registration": null
         }
       ],

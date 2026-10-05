@@ -27,8 +27,13 @@ fn core(backend: lash::Backend, code: &str) -> Result<lash::LashCore> {
         super::super::PROFILE_KEY,
         lash::RegisteredLlmProfile::new(super::super::model()?, provider),
     )?;
+    let isolated = super::IsolatedHost::new(
+        backend.stores().process_registry(),
+        backend.effect_host(),
+        None,
+    );
     Ok(lash::LashCore::rlm_builder(backend, factory)
-        .plugin(super::plugin(""))
+        .plugin(super::plugin("", isolated))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .llm_profiles(Arc::new(models))

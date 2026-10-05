@@ -199,3 +199,5 @@ impl SingletonToolHandlers for Pending {
         self.0.discharge_start(obligation, process, cancel).await
     }
 }
+
+pub(super) mod isolated;
