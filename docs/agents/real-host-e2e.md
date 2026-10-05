@@ -1,6 +1,6 @@
 # Real-host E2E selection and receipts
 
-`scripts/lash-e2e-manifest.json` owns scenario selection. It lists S01–S36,
+`scripts/lash-e2e-manifest.json` owns scenario selection. It lists S01–S37,
 their named laws/risks, owner lanes, store/leg/channel/variant permutations,
 required artifacts and landing dependencies. Every implemented case is
 registered and runs through `scripts/e2e-gate.py`; held rows keep a named
@@ -16,7 +16,12 @@ Smoke selects exactly S01/S02/S17/S18/S26/S30 on the live leg. S01/S02/S17/S18/S
 use file SQLite; S30 uses memory SQLite. Full and release select the same
 deterministic catalogue; live-provider cases S35/S36 are separate. Counts cover
 each permutation. Held rows keep their variant hold until the named owner
-lands its implementation. S33 reuses the existing Phase A operator
+lands its implementation. S37 boots two workbench replicas over one
+Restate authority and one PostgreSQL store, runs a turn on replica B while
+replica A's feeds observe it, and kills B mid-turn. Its variant names the
+live replay store both replicas run with: with the process-local `memory`
+store, B's live activity never reaches A and A converges through the
+durable head. S33 reuses the existing Phase A operator
 choreography; it does not introduce another operator supervisor. Existing
 supervisors and the Restate law board remain until parity.
 

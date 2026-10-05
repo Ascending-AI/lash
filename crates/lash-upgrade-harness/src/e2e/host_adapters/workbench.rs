@@ -79,6 +79,7 @@ impl WorkbenchHost {
                     | "AGENT_WORKBENCH_TOOL_FIXTURE"
                     | "AGENT_WORKBENCH_DATA_DIR"
                     | "AGENT_WORKBENCH_DATABASE_URL"
+                    | "AGENT_WORKBENCH_LIVE_REPLAY_STORE"
                     | "LASH_HOST_SHUTDOWN_MARKER"
                     | "AGENT_WORKBENCH_RESTATE_ADVERTISE_URL"
                     | "OPENROUTER_API_KEY"

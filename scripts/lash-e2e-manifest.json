@@ -4961,6 +4961,55 @@
       "observable": "Weather facts backed by captured live source and DOM/API/store/trace; caps obeyed and row counted separately.",
       "arc_guards": [],
       "host": "workbench"
+    },
+    {
+      "id": "S37",
+      "title": "a turn on one replica reaches another replica's feed",
+      "owner": "H6",
+      "rules": [],
+      "risks": [
+        "R3",
+        "R7",
+        "R8"
+      ],
+      "dependencies": "Base, PG, FIG-5090 durable-head feed",
+      "cases": [
+        {
+          "variant": "memory-live-replay",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s37_replica_feed_memory_live_replay_postgresql"
+          }
+        }
+      ],
+      "setup": "Two workbench replicas share one Restate authority and one PostgreSQL store; B registers last, so the turn A accepts executes on B. Observers follow the session feed on A (before and mid-turn) and on B.",
+      "fault": "Hold the provider stream mid-turn, SIGKILL B under it, restart B in place.",
+      "observable": "The Run is pinned to B's deployment; both replicas' snapshots are one durable head; every A feed converges on the durable rows once and in order. With the process-local memory live replay store, B's live activity reaches B's feed and never A's, and A converges through the durable head (replay gap and snapshot).",
+      "arc_guards": [],
+      "host": "workbench"
     }
   ],
   "server": {

@@ -2,6 +2,7 @@
 //! its real HTTP contract, with the controller owning its lifetime.
 mod workbench_browser;
 mod workbench_provider;
+mod workbench_replicas;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -393,6 +394,18 @@ macro_rules! s29_case {
 }
 s29_case!(s29_workbench_kill_after_acceptance, SqliteFile);
 s29_case!(s29_workbench_kill_after_acceptance_postgresql, PostgreSql);
+
+#[test]
+#[ignore = "prebuilt workbench, PostgreSQL and private Restate supplied by the E2E controller"]
+fn s37_replica_feed_memory_live_replay_postgresql() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(workbench_replicas::run(
+            &workbench_replicas::MEMORY_LIVE_REPLAY,
+        ))
+}
 
 #[test]
 #[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
