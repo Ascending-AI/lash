@@ -456,8 +456,10 @@ function parseServerTime(value) {
 }
 
 function compareOrder(left, right) {
-  return left.t - right.t || left.seq - right.seq;
+  return left.t - right.t || left.group - right.group || left.lane - right.lane || left.seq - right.seq;
 }
+
+const TURN_LANES = { input: 0, thinking: 1, code: 2, tool: 2, retry: 2, event: 2, reply: 3 };
 
 // BEGIN WORKBENCH_SETTLED_TRANSCRIPT
 /* The keys committed rows take, from typed provenance alone. A turn's first
@@ -559,7 +561,33 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
   }
 
   function placeAt(t) {
-    return { t, seq: ++sequence };
+    const seq = ++sequence;
+    return { t, group: seq, lane: 0, seq };
+  }
+
+  /* Time orders independent occurrences and turns. Within a turn, input,
+     thinking, execution and reply are causal lanes: prose can stream before
+     the cell it describes runs, and its node can be recorded before that
+     cell's result. Clamp each lane after the lanes preceding it, retaining
+     execution order within a lane. Only a new row extends these bounds;
+     committing an existing keyed row never changes its place. */
+  function placeInTurn(order, kind, turnId) {
+    if (!turnId || TURN_LANES[kind] === undefined) return order;
+    const siblings = rowsOfTurn(turnId);
+    order.lane = TURN_LANES[kind];
+    order.group = siblings[0]?.order.group ?? order.group;
+    for (const sibling of siblings) {
+      if (sibling.order.lane < order.lane) order.t = Math.max(order.t, sibling.order.t);
+    }
+    let changed = false;
+    for (const sibling of siblings) {
+      if (sibling.order.lane > order.lane && sibling.order.t < order.t) {
+        sibling.order.t = order.t;
+        changed = true;
+      }
+    }
+    if (changed) ordered.sort((left, right) => compareOrder(left.order, right.order));
+    return order;
   }
 
   function insertOrdered(row) {
@@ -578,7 +606,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
   function upsert(key, kind, source, payload, order) {
     let row = rows.get(key);
     if (!row) {
-      row = { key, kind, order: order(), sources: {}, stamps: {}, turnId: null, view: null, dirty: true };
+      row = { key, kind, order: placeInTurn(order(), kind, payload?.turnId), sources: {}, stamps: {}, turnId: null, view: null, dirty: true };
       rows.set(key, row);
       insertOrdered(row);
     }
@@ -1442,7 +1470,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     for (const terminal of state.unknown_turn_terminals || []) {
       const anchor = rowsOfTurn(terminal.turn_id).at(-1);
       upsert(`terminal:${terminal.turn_id}`, "note", "local", { text: terminal.note },
-        () => anchor ? { t: anchor.order.t, seq: anchor.order.seq + 0.5 } : placeAt(snapshotNow));
+        () => anchor ? { ...anchor.order, seq: anchor.order.seq + 0.5 } : placeAt(snapshotNow));
     }
     flush();
   }
@@ -1512,10 +1540,10 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
       const key = `approval:${approval.key}`;
       const existing = rows.get(key);
       if (existing?.sources.local.decided) continue;
-      upsert(key, "approval", "local", { approval, decided: null }, () => {
-        const anchor = anchorOfCall(approval.call_id);
+      const anchor = anchorOfCall(approval.call_id);
+      upsert(key, "approval", "local", { approval, decided: null, turnId: anchor?.turnId }, () => {
         return anchor
-          ? { t: anchor.order.t, seq: anchor.order.seq + 0.5 }
+          ? { ...anchor.order, seq: anchor.order.seq + 0.5 }
           : placeAt(Number(approval.requested_at_ms) || serverNow());
       });
     }

@@ -18,6 +18,10 @@ test("all registered production surfaces preserve canonical records", () => {
     assert.ok(asset, `${surface} must supply its production asset`);
     verifyTranscriptSurface(surface, asset, durableToolTranscript);
     const corpus = allKindRecords();
-    verifyTranscriptSurface(surface, asset, [...corpus, {...corpus[0], row_id:"hidden", suppressed:"protocol_internal"}]);
+    // Display order follows the turn's lanes, not source recording order:
+    // the early reply in the corpus follows thinking and execution in the UI.
+    const displayOrder = ['user', 'reasoning', 'tool_call', 'code_block', 'attachment', 'event', 'assistant_reply']
+      .map(kind => corpus.find(row => row.kind === kind).row_id);
+    verifyTranscriptSurface(surface, asset, [...corpus, {...corpus[0], row_id:"hidden", suppressed:"protocol_internal"}], displayOrder);
   }
 });

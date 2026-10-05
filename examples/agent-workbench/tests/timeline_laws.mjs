@@ -121,6 +121,57 @@ function serialize(node) {
 
 export const laws = [
   {
+    name: "a turn's thinking, code and tools precede its reply without moving on settlement",
+    async run(env) {
+      const time = clock();
+      const view = env.timeline(time);
+      const turn = "turn-code-before-reply";
+      view.timeline.applyProductEvent(userInput(turn, "say hello in five words", time.now()));
+      time.advance(100);
+      view.timeline.applyObservation(activity(turn, { type: "reasoning_delta", text: "Preparing a greeting." }, "r1"));
+      // Model prose can arrive before the cell it describes executes. Its
+      // reply row still belongs after that turn's code and tool rows.
+      time.advance(100);
+      view.timeline.applyObservation(activity(turn, { type: "assistant_prose_delta", text: "Hello there, wonderful curious friend." }, "p1"));
+      for (let index = 0; index < 2; index++) {
+        time.advance(100);
+        view.timeline.applyObservation(activity(turn, { type: "code_block_started", language: "typescript", code: `await greeting(${index})` }));
+        view.timeline.applyObservation(activity(turn, { type: "tool_call_started", call_id: `tc-${index}`, name: "greeting", args: { index } }));
+        view.timeline.applyObservation(activity(turn, { type: "tool_call_completed", call_id: `tc-${index}`, name: "greeting", output: {}, duration_ms: 1 }));
+        view.timeline.applyObservation(activity(turn, { type: "code_block_completed", language: "typescript", output: "hello", tool_call_ids: [`tc-${index}`] }));
+      }
+      const expected = [`input:${turn}`, `thinking:${turn}:0`, `code:${turn}:0`, `code:${turn}:1`, `reply:${turn}`];
+      env.assert.deepEqual(rowKeys(view.list), expected, "live execution renders below the reply");
+      const nodes = [...view.list.children];
+      const tools = nodes.flatMap(node => [...node.querySelectorAll(".tool")]);
+      env.assert.equal(tools.length, 2);
+      const removed = env.removals(view.list);
+      // The reply's node was recorded before execution; neither its timestamp
+      // nor commit position is the presentation lane of the final answer.
+      const rows = [
+        row("n-input", "user", turn, T0, { text: "say hello in five words" }),
+        row("n-reply", "assistant_reply", turn, T0 + 200, {
+          reasoning: ["Preparing a greeting."], text: "Hello there, wonderful curious friend."
+        }),
+        ...[0, 1].map(index => row(`n-code-${index}`, "code_block", turn, T0 + 300 + index * 100, {
+          language: "typescript", code: `await greeting(${index})`, output: "hello", success: true,
+          tools: [{ operation: "greeting", status: "success" }]
+        }))
+      ];
+      view.timeline.applyProductEvent(productReply(`reply:${turn}`, turn, "Hello there, wonderful curious friend.", time.now()));
+      view.timeline.applyProductEvent(done(turn));
+      view.timeline.applyObservation(committed(turn, rows));
+      env.assert.deepEqual(rowKeys(view.list), expected, "settlement changed the lane order");
+      env.assert.deepEqual([...view.list.children], nodes, "settlement replaced a row");
+      env.assert.deepEqual(nodes.flatMap(node => [...node.querySelectorAll(".tool")]), tools, "settlement replaced a tool");
+      env.assert.deepEqual(removed(), [], "settlement moved a row");
+      // A viewer loading the settled turn gets the same causal lane order.
+      const loaded = env.timeline(time);
+      loaded.timeline.applySnapshot({ transcript: rows, active_turns: [] });
+      env.assert.deepEqual(rowKeys(loaded.list), expected, "the settled snapshot uses recording order");
+    }
+  },
+  {
     name: "a press made before a later reply renders above it, and stays there after settlement",
     async run(env) {
       const time = clock();

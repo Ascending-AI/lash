@@ -43,7 +43,7 @@ function observe(node) {
 // The production timeline module runs unchanged over a tree DOM; what it
 // rendered is read back from that DOM. Expected values are taken directly from
 // the supplied records.
-export function verifyTranscriptSurface(surface, asset, rows) {
+export function verifyTranscriptSurface(surface, asset, rows, displayOrder = rows.filter(row => !row.suppressed).map(row => row.row_id)) {
   if (surface !== 'workbench') throw new Error(`unregistered surface ${surface}`);
   block(asset, '// BEGIN WORKBENCH_SETTLED_TRANSCRIPT', '// END WORKBENCH_SETTLED_TRANSCRIPT');
   const document = createFakeDocument();
@@ -66,7 +66,10 @@ export function verifyTranscriptSurface(surface, asset, rows) {
   const observed = rendered.map(observe);
   const expected = [];
   const expectedIds = [];
-  for (const row of rows.filter(row => !row.suppressed)) {
+  const visibleRows = rows.filter(row => !row.suppressed);
+  assert.deepEqual([...displayOrder].sort(), visibleRows.map(row => row.row_id).sort(), 'display order must retain every canonical row once');
+  for (const id of displayOrder) {
+    const row = visibleRows.find(row => row.row_id === id);
     const content = row.content;
     for (const text of content.reasoning) { expected.push({kind: 'reasoning', value: text}); expectedIds.push(row.row_id); }
     if (row.kind === 'code_block') {
@@ -80,7 +83,7 @@ export function verifyTranscriptSurface(surface, asset, rows) {
     }
   }
   assert.deepEqual(JSON.parse(JSON.stringify(observed)), JSON.parse(JSON.stringify(expected)), `${surface}: canonical content changed`);
-  assert.deepEqual(rendered.map(node => node.dataset.transcriptRowId), expectedIds, `${surface}: rows were dropped, duplicated or reordered`);
+  assert.deepEqual(rendered.map(node => node.dataset.transcriptRowId), expectedIds, `${surface}: rows were dropped, duplicated or rendered out of lane order`);
   assert.deepEqual(rendered.map(node => node.dataset.turnId), expectedIds.map(id => rows.find(row => row.row_id === id).provenance.turn_id || ''), `${surface}: typed provenance changed`);
   if (ownedInput) {
     const inputs = rendered.filter(node => node.dataset.turnId === ownedInput.provenance.turn_id && node.classList.contains('user'));
