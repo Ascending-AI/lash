@@ -139,9 +139,20 @@ fn harness_text(input: &RelayHarnessInput<'_>) -> String {
         }
     }
 
+    // A note repeated by consecutive replies is shown once, with its count.
+    let mut notes: Vec<(&str, usize)> = Vec::new();
     for note in &view.feedback {
+        match notes.last_mut() {
+            Some((last, count)) if *last == note.trim() => *count += 1,
+            _ => notes.push((note.trim(), 1)),
+        }
+    }
+    for (note, count) in notes {
         out.push_str("\n\n--- Harness note ---\n");
-        out.push_str(note.trim());
+        out.push_str(note);
+        if count > 1 {
+            let _ = write!(out, "\n(repeated for your last {count} replies)");
+        }
     }
 
     let receipts = view

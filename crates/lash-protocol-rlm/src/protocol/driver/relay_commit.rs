@@ -31,7 +31,7 @@ pub(super) fn classify_relay_reply<'a>(
         Ok(None) => (
             "relay_request_cell",
             format!(
-                "No program ran, so this step committed nothing. Every step is one program between `{}` and `{}` on their own lines, ending with `await control.next({{ context, vars }})`. Prose outside it is never shown to the user; send output with `control.send_user_output`.",
+                "No program ran, so this step committed nothing. Every step is one program between `{}` and `{}` on their own lines, ending with `await control.next({{ context, vars }})`. Prose outside it is never shown to the user. To answer, ask a question or say you are blocked, send it with `control.send_user_output` and end the step with `await control.next({{ context, final: true }})`.",
                 tags.open, tags.close
             ),
         ),

@@ -427,7 +427,7 @@ Nothing carries from one step to the next except what you pass to `control.next`
 - `vars` (default `{{}}`) is a record of plain values that the next step finds as top-level variables. Every other variable is wiped. Functions cannot be carried: redefine helpers when you need them.
 - `final: true` ends the turn once the step commits. Send the user the answer in that same step.
 - Each step starts with `context` bound to your current context, so edit it with code: `await control.next({{ context: [...context, "port is 8080 (config.toml)"] }})`. `transcript` holds the committed user messages and outputs (`{{ role, id, text }}`), for when you need an old one.
-- `await control.send_user_output({{ text }})` sends text to the user. It is delivered only if the step commits. A turn must send the user something before it ends.
+- `await control.send_user_output({{ text }})` sends text to the user. It is delivered only if the step commits. A turn must send the user something before it ends. To ask the user a question or tell them you are blocked, send it and end the turn with `final: true`; their reply arrives as the next turn.
 
 ### Commit
 
