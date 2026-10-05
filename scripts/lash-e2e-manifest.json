@@ -2002,9 +2002,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "workbench_isolated::s19_isolated_start_cuts_recover_one_process_on_the_workbench"
+          }
         },
         {
           "variant": "default",
@@ -2030,7 +2033,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
+          "hold_reason": "Missing forced-suspension replay oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
           "registration": null
         },
         {
@@ -2057,7 +2060,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
+          "hold_reason": "Missing PostgreSQL oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
           "registration": null
         },
         {
@@ -2084,7 +2087,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
+          "hold_reason": "Missing PostgreSQL and forced-suspension replay oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
           "registration": null
         }
       ],
@@ -2158,9 +2161,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "workbench_isolated::s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench"
+          }
         },
         {
           "variant": "default",
@@ -2186,7 +2192,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
+          "hold_reason": "Missing forced-suspension replay oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
           "registration": null
         },
         {
@@ -2213,7 +2219,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
+          "hold_reason": "Missing PostgreSQL oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
           "registration": null
         },
         {
@@ -2240,7 +2246,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "No product isolated binding: production tool handlers lack isolated_start and an engine binding API (FIG-4997); the structural-node variant proves L08 on the upgrade node.",
+          "hold_reason": "Missing PostgreSQL and forced-suspension replay oracle: FIG-5005 registers the SQLite-file/live production workbench route; this permutation needs its own backend/leg fixture.",
           "registration": null
         }
       ],

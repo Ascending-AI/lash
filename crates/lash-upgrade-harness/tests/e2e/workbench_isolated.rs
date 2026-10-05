@@ -42,7 +42,12 @@ const ISOLATED_KEY: &str = "process-start-key:v1:isolated:";
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s19_isolated_start_cuts_recover_one_process_on_the_workbench() -> Result<()> {
     let mut case = Case::boot("s19-workbench-isolated", "S19").await?;
-    let result = s19(&mut case).await;
+    let result = tokio::time::timeout_at(
+        (case.deadline() - Duration::from_secs(60)).into(),
+        s19(&mut case),
+    )
+    .await
+    .unwrap_or_else(|_| Err(anyhow::anyhow!("S19 exceeded its execution deadline")));
     case.finish("S19", result).await
 }
 
@@ -53,21 +58,45 @@ async fn s19_isolated_start_cuts_recover_one_process_on_the_workbench() -> Resul
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s20_isolated_cancel_terminates_and_reaps_worker_on_the_workbench() -> Result<()> {
     let mut case = Case::boot("s20-workbench-isolated", "S20").await?;
-    let result = s20(&mut case).await;
+    let result = tokio::time::timeout_at(
+        (case.deadline() - Duration::from_secs(60)).into(),
+        s20(&mut case),
+    )
+    .await
+    .unwrap_or_else(|_| Err(anyhow::anyhow!("S20 exceeded its execution deadline")));
     case.finish("S20", result).await
 }
 
 async fn s19(case: &mut Case) -> Result<()> {
     let leg = case.submit("unbound", &[]).await?;
     let report = case.settled(&leg).await?;
-    let record = report
-        .tool_calls
-        .iter()
-        .find(|record| record.tool_name.contains("unbound"))
-        .with_context(|| format!("the turn records no unbound call: {report:?}"))?;
-    let RemoteToolCallOutcome::Failure(failure) = &record.output.outcome else {
-        bail!("the unbound call was not refused: {record:?}");
+    ensure!(report.status() == RemoteTurnStatus::Answered, "{report:?}");
+    // Admission refusals are retained in the Run, whereas a cold attach's
+    // transient tool observations need not include an already served call.
+    let refused = case
+        .events(&leg)
+        .await?
+        .into_iter()
+        .filter_map(|event| {
+            let RunEvent::AggregateAdmitted { plan, .. } = event else {
+                return None;
+            };
+            let mut inputs = plan.leaves.into_iter().filter_map(|leaf| match leaf {
+                lash_core::tool_run::AggregateLeaf::Refused { input }
+                    if input.pointer("/pending/tool_name").and_then(Value::as_str)
+                        == Some("tool:e2e.h2.unbound") =>
+                {
+                    Some(input)
+                }
+                _ => None,
+            });
+            inputs.next()
+        })
+        .collect::<Vec<_>>();
+    let [record] = refused.as_slice() else {
+        bail!("the unbound call has no unique journaled refusal: {refused:?}");
     };
+    let failure: lash_core::ToolFailure = serde_json::from_value(record["failure"].clone())?;
     ensure!(
         failure.code == lash_core::ToolAdmissionRefusal::CODE
             && failure.cause.as_deref()
@@ -100,7 +129,7 @@ async fn s19(case: &mut Case) -> Result<()> {
     case.restart().await?;
     let report = case.settled(&leg).await?;
     ensure!(report.status() == RemoteTurnStatus::Answered, "{report:?}");
-    let descriptor = presented_descriptor(&report)?;
+    let descriptor = finished_descriptor(&report)?;
     case.assert_recovered(&leg, &descriptor, None).await?;
 
     let leg = case.submit("registered", &[BarrierKind::VProposed]).await?;
@@ -128,31 +157,12 @@ async fn s19(case: &mut Case) -> Result<()> {
     case.restart().await?;
     let report = case.settled(&leg).await?;
     ensure!(report.status() == RemoteTurnStatus::Answered, "{report:?}");
-    let descriptor = presented_descriptor(&report)?;
+    let descriptor = finished_descriptor(&report)?;
     case.assert_recovered(&leg, &descriptor, Some((&process, pid)))
         .await
 }
 
 async fn s20(case: &mut Case) -> Result<()> {
-    let leg = case
-        .submit("pre-admission", &[BarrierKind::XProposed])
-        .await?;
-    case.hold(&leg, BarrierKind::XProposed).await?;
-    let cancel = case.cancel(&leg).await?;
-    case.release(&leg, BarrierKind::XProposed)?;
-    case.release(&leg, BarrierKind::BeforeAck)?;
-    let report = case.settled(&leg).await?;
-    ensure!(
-        report.status() == RemoteTurnStatus::Cancelled,
-        "a cancel before admission did not cancel the Run: {:?}",
-        report.outcome
-    );
-    case.assert_never_started(&leg).await?;
-    case.evidence.effects.push(
-        json!({"kind":"s20_pre_admission_cancel","run":leg.work.run,"cancel":cancel,
-            "outcome":report.outcome}),
-    );
-
     let leg = case
         .submit(
             "cancel",
@@ -171,6 +181,19 @@ async fn s20(case: &mut Case) -> Result<()> {
         .stores
         .push(json!({"kind":"s20_cancel_after_admission","run":leg.work.run,"cancel":cancel}));
     case.release(&leg, BarrierKind::BeforeAck)?;
+    let process = case.await_termination_gate().await?;
+    let pid = case.await_spawn(&leg).await?;
+    let held_rows = case.rows_for(&leg).await?;
+    ensure!(alive(pid), "a cancel request alone terminated the worker");
+    ensure!(
+        held_rows.len() == 1 && held_rows[0].process_id == process && held_rows[0].hold.is_some(),
+        "a cancel request alone released the hold: {held_rows:?}"
+    );
+    case.evidence
+        .stores
+        .push(json!({"kind":"s20_before_termination", "rows":held_rows,
+        "worker_pid":pid,"alive":true}));
+    std::fs::write(case.marker.with_extension("terminate-release"), b"released")?;
     let held = case.hold(&leg, BarrierKind::VProposed).await?;
     let pids = case.spawned(&leg)?;
     let [pid] = pids.as_slice() else {
@@ -190,7 +213,7 @@ async fn s20(case: &mut Case) -> Result<()> {
     let proposed = proposed_discharge(&held)?;
     ensure!(
         proposed.termination.as_ref().is_some_and(|receipt| {
-            receipt.process_id.to_string() == process && receipt.worker_pid.get() == pid
+            receipt.process_id.as_str() == process && receipt.worker_pid.get() == pid
         }),
         "the proposed descriptor names another termination: {proposed:?}"
     );
@@ -219,12 +242,12 @@ async fn s20(case: &mut Case) -> Result<()> {
                 RunEvent::StartAdmitted { .. },
                 RunEvent::StartLaunched { process_id, .. },
                 RunEvent::StartDischarged { cancelled: true, .. },
-            ] if process_id.to_string() == process
+            ] if process_id.as_str() == process
         ),
         "the cancelled start did not record admit/launch/discharge(cancelled) once: {starts:?}"
     );
     ensure!(
-        descriptor.process_id.to_string() == process
+        descriptor.process_id.as_str() == process
             && descriptor.boundary == ProcessExecutionBoundary::WorkerProcess
             && descriptor.termination == proposed.termination,
         "recovery lost the recorded termination receipt: {descriptor:?}"
@@ -239,6 +262,27 @@ async fn s20(case: &mut Case) -> Result<()> {
         "discharge left the registry at {rows:?}"
     );
     ensure!(case.deliveries()? == 0, "an ordinary body ran");
+    case.seen.insert(descriptor.start_key.to_string());
+
+    let leg = case
+        .submit("pre-admission", &[BarrierKind::XProposed])
+        .await?;
+    case.hold(&leg, BarrierKind::XProposed).await?;
+    let cancel = case.cancel(&leg).await?;
+    case.release(&leg, BarrierKind::XProposed)?;
+    case.release(&leg, BarrierKind::BeforeAck)?;
+    let report = case.settled(&leg).await?;
+    ensure!(
+        report.status() == RemoteTurnStatus::Cancelled,
+        "a cancel before admission did not cancel the Run: {:?}",
+        report.outcome
+    );
+    case.assert_never_started(&leg).await?;
+    case.evidence.effects.push(
+        json!({"kind":"s20_pre_admission_cancel","run":leg.work.run,"cancel":cancel,
+            "outcome":report.outcome}),
+    );
+
     Ok(())
 }
 
@@ -253,6 +297,21 @@ fn is_start(event: &RunEvent) -> bool {
 
 fn is_launched(event: &RunEvent) -> bool {
     matches!(event, RunEvent::StartLaunched { .. })
+}
+
+/// S19's RLM cell returns the descriptor as its durable final value. A cold
+/// attach need not reproduce transient tool observations to return that value.
+fn finished_descriptor(report: &RemoteTurnReport) -> Result<IsolatedProcessDescriptor> {
+    let lash_remote_protocol::RemoteTurnOutcome::Finished {
+        finish: lash_remote_protocol::RemoteTurnFinish::FinalValue { value },
+    } = &report.outcome
+    else {
+        bail!(
+            "the isolated call returned no final descriptor: {:?}",
+            report.outcome
+        );
+    };
+    serde_json::from_value(value.clone()).context("the final value is not an isolated descriptor")
 }
 
 /// The descriptor the isolated call presented, from the settled report.
@@ -344,6 +403,8 @@ struct Case {
     /// The process groups of killed workbench incarnations: what they spawned
     /// outlived them, and the case closes it at the end.
     killed: Vec<u32>,
+    /// Bound invocations retained even when a leg stops at a product failure.
+    works: Vec<WorkIdentity>,
 }
 
 impl Case {
@@ -434,6 +495,7 @@ impl Case {
             evidence,
             seen: BTreeSet::new(),
             killed: Vec::new(),
+            works: Vec::new(),
         })
     }
 
@@ -529,6 +591,7 @@ impl Case {
         self.evidence
             .stores
             .push(json!({"kind":"leg","leg":alias,"work":leg.work}));
+        self.works.push(leg.work.clone());
         Ok(leg)
     }
 
@@ -808,6 +871,20 @@ impl Case {
             .collect())
     }
 
+    async fn await_termination_gate(&self) -> Result<String> {
+        let path = self.marker.with_extension("terminate-entered");
+        loop {
+            if let Ok(process) = std::fs::read_to_string(&path) {
+                return Ok(process);
+            }
+            ensure!(
+                Instant::now() < self.deadline(),
+                "termination was never requested"
+            );
+            tokio::time::sleep(POLL).await;
+        }
+    }
+
     /// Every worker PID the engine's workers wrote, in spawn order.
     fn pids(&self) -> Result<Vec<u32>> {
         match std::fs::read_to_string(&self.marker) {
@@ -885,7 +962,7 @@ impl Case {
         let rows = self.rows_for(leg).await?;
         ensure!(
             rows.len() == 1
-                && rows[0].process_id == descriptor.process_id.to_string()
+                && rows[0].process_id == descriptor.process_id.as_str()
                 && rows[0].start_key == start_key.to_string()
                 && rows[0].hold.is_none(),
             "registry {rows:?}"
@@ -893,14 +970,14 @@ impl Case {
         let pid = self.await_spawn(leg).await?;
         if let Some((process, registered)) = before {
             ensure!(
-                descriptor.process_id.to_string() == process,
+                descriptor.process_id.as_str() == process,
                 "recovery admitted another process identity"
             );
             // The redelivered process workflow is the one recovery could
             // spawn a replacement from: once Restate retried it on this
             // incarnation, the recovered process has exactly the worker it
             // runs on.
-            self.await_redelivered(&descriptor.process_id.to_string())
+            self.await_redelivered(descriptor.process_id.as_str())
                 .await?;
             let spawned = self.spawned(leg)?;
             ensure!(
@@ -966,7 +1043,21 @@ impl Case {
         if let Err(error) = &result {
             errors.push(format!("{error:#}"));
         }
-        let pids = self.pids().unwrap_or_default();
+        // A failed leg still carries its durable command prefix. A missing
+        // terminal is a product red, not a reason to lose journal evidence.
+        for work in &self.works {
+            match self.view.journal(work, &work.segment, 7).await {
+                Ok(journal) => self.evidence.journals.extend(journal),
+                Err(error) => errors.push(format!("final journal read: {error:#}")),
+            }
+        }
+        let pids = match self.pids() {
+            Ok(pids) => pids,
+            Err(error) => {
+                errors.push(format!("worker marker read: {error:#}"));
+                Vec::new()
+            }
+        };
         match self.rows().await {
             Ok(rows) => self.evidence.stores.push(
                 json!({"kind":"isolated_final_state","pids":pids.iter().map(|pid| json!({"pid":pid,"alive":alive(*pid)})).collect::<Vec<_>>(),"rows":rows}),

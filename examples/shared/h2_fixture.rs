@@ -44,7 +44,7 @@ pub(crate) struct Fixture {
     receiver: Arc<OnceLock<lash::ProcessId>>,
     /// The one worker engine every contribution returns: the engine that
     /// ran a worker is the one that can terminate it.
-    worker: Option<Arc<lash::plugins::WorkerProcessEngine>>,
+    worker: Option<Arc<dyn lash::plugins::ProcessEngine>>,
 }
 
 impl Fixture {
@@ -93,6 +93,19 @@ impl Fixture {
             }
             _ => None,
         };
+        let worker: Option<Arc<dyn lash::plugins::ProcessEngine>> = worker.map(|engine| {
+            if config.scenario == "S20" {
+                Arc::new(TerminationGate {
+                    engine,
+                    marker: config
+                        .worker_marker
+                        .clone()
+                        .expect("validated worker marker"),
+                }) as Arc<dyn lash::plugins::ProcessEngine>
+            } else {
+                engine as Arc<dyn lash::plugins::ProcessEngine>
+            }
+        });
         let url = reqwest::Url::parse(&config.body_callback_url)?;
         ensure!(
             url.scheme() == "http"
@@ -325,7 +338,7 @@ impl lash::tools::ToolProvider for IsolatedBinding {
 }
 
 /// Contributes the fixture's one worker engine from every call.
-struct WorkerEnginePlugin(Arc<lash::plugins::WorkerProcessEngine>);
+struct WorkerEnginePlugin(Arc<dyn lash::plugins::ProcessEngine>);
 
 impl lash::plugins::PluginFactory for WorkerEnginePlugin {
     fn id(&self) -> &'static str {
@@ -365,5 +378,72 @@ impl lash::plugins::SessionPlugin for WorkerEngineSession {
         _reg: &mut lash::plugins::PluginRegistrar,
     ) -> std::result::Result<(), lash::plugins::PluginError> {
         Ok(())
+    }
+}
+
+/// S20 holds the physical termination call before delegating to the production
+/// worker. The case can observe a live PID and the still-retained consumer hold
+/// despite the durable cancel request. Execution and reaping remain owned by
+/// the one production engine; the files are out-of-journal fixture controls.
+struct TerminationGate {
+    engine: Arc<lash::plugins::WorkerProcessEngine>,
+    marker: PathBuf,
+}
+
+#[async_trait::async_trait]
+impl lash::plugins::PhysicalProcessWorker for TerminationGate {
+    async fn terminate_worker(
+        &self,
+        process: &lash::ProcessId,
+    ) -> std::result::Result<lash::plugins::WorkerTerminationReceipt, lash::plugins::PluginError>
+    {
+        std::fs::write(
+            self.marker.with_extension("terminate-entered"),
+            process.as_str(),
+        )
+        .map_err(|error| lash::plugins::PluginError::Session(error.to_string()))?;
+        let release = self.marker.with_extension("terminate-release");
+        while !release.exists() {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        lash::plugins::PhysicalProcessWorker::terminate_worker(self.engine.as_ref(), process).await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::plugins::ProcessEngine for TerminationGate {
+    fn kind(&self) -> &'static str {
+        lash::plugins::ProcessEngine::kind(self.engine.as_ref())
+    }
+    fn physical_worker(&self) -> Option<&dyn lash::plugins::PhysicalProcessWorker> {
+        Some(self)
+    }
+    async fn run(
+        &self,
+        context: lash::plugins::ProcessEngineRunContext<'_>,
+        payload: serde_json::Value,
+    ) -> std::result::Result<lash::plugins::ProcessRunOutcome, lash::plugins::ProcessInfraError>
+    {
+        lash::plugins::ProcessEngine::run(self.engine.as_ref(), context, payload).await
+    }
+    fn start_artifacts(
+        &self,
+        payload: &serde_json::Value,
+    ) -> std::result::Result<Vec<lash::persistence::ArtifactName>, lash::plugins::PluginError> {
+        lash::plugins::ProcessEngine::start_artifacts(self.engine.as_ref(), payload)
+    }
+    async fn end_artifact_referrer(
+        &self,
+        cleanup: &lash::persistence::ResolvedArtifactCleanup,
+    ) -> std::result::Result<(), lash::persistence::ArtifactStoreError> {
+        lash::plugins::ProcessEngine::end_artifact_referrer(self.engine.as_ref(), cleanup).await
+    }
+    async fn acquire_engine_artifact(
+        &self,
+        claim: &lash::persistence::ReferrerClaim,
+        artifact: &str,
+    ) -> std::result::Result<(), lash::plugins::PluginError> {
+        lash::plugins::ProcessEngine::acquire_engine_artifact(self.engine.as_ref(), claim, artifact)
+            .await
     }
 }

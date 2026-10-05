@@ -320,11 +320,17 @@ fn isolated_response(
     request: &LlmRequest,
     file: &mut std::fs::File,
 ) -> Result<(LlmResponse, Option<String>)> {
-    let mut asked = 0;
+    // A retried model call must return the same script. Only a new logical
+    // request advances the leg, even if transport delivered this one twice.
+    let scope = serde_json::to_value(&request.scope)?;
+    let mut previous_requests = BTreeSet::new();
     for line in previous.lines() {
         let value: serde_json::Value = serde_json::from_str(line)?;
-        asked += usize::from(value["input"] == text);
+        if value["input"] == text && value["scope"] != scope {
+            previous_requests.insert(value["scope"].to_string());
+        }
     }
+    let asked = previous_requests.len();
     let tool = if text.contains("unbound") {
         "unbound"
     } else {
