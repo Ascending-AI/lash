@@ -891,7 +891,7 @@ impl FleetFixture for RuntimeFixture {
             }
             let pool = self.pool.as_ref().context("fleet has no PG pool")?;
             let session = format!("{}-fleet", self.namespace);
-            let head:serde_json::Value=sqlx::query_scalar("SELECT json_build_object('shift_epoch',m.shift_epoch,'head_revision',h.head_revision,'head',h.head_json)::jsonb FROM lash_session_meta m JOIN lash_session_head h USING(session_id) WHERE m.session_id=$1").bind(&session).fetch_one(pool).await?;
+            let head:serde_json::Value=sqlx::query_scalar("SELECT json_build_object('shift_epoch',m.shift_epoch,'head_revision',h.head_revision,'head',r.head_json)::jsonb FROM lash_session_meta m JOIN lash_session_head h USING(session_id) JOIN lash_session_revisions r USING(session_id,head_revision) WHERE m.session_id=$1").bind(&session).fetch_one(pool).await?;
             evidence.stores.push(head);
             if after_fault {
                 let store = self

@@ -169,7 +169,7 @@ impl RawDurableReader {
                     .expect("Postgres reader is attached to a store");
                 let head: Option<(i64, Option<String>, Option<String>)> = sqlx::query_as(
                     "SELECT head_revision, leaf_node_id, checkpoint_ref
-                     FROM lash_session_head
+                     FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
                      WHERE session_id = $1",
                 )
                 .bind(session_id.as_str())
@@ -396,7 +396,7 @@ pub(super) async fn read_sqlite_durable_state(
     let head: Option<(i64, Option<String>, Option<String>)> = connection
         .query_row(
             "SELECT head_revision, leaf_node_id, checkpoint_ref
-             FROM session_head
+             FROM session_head JOIN session_revisions USING (session_id, head_revision)
              WHERE session_id = ?1",
             [session_id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),

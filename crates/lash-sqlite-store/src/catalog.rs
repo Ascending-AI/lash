@@ -41,12 +41,6 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                             fleet_format,
                         );
                         let head_json = encode_json(&created_head.payload())?;
-                        crate::conn::cached_execute(
-                            tx,
-                            crate::session_sql::session_sql().head.insert_created.sql(),
-                            rusqlite::params![created_head.session_id.as_str(), head_json],
-                        )
-                        .map_err(crate::sqlite_error)?;
                         // The creation revision is an ordinary retained
                         // revision: an empty session forks at it (FIG-4731).
                         crate::revisions::record_revision_conn(
@@ -57,6 +51,12 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                             None,
                             &head_json,
                         )?;
+                        crate::conn::cached_execute(
+                            tx,
+                            crate::session_sql::session_sql().head.insert_created.sql(),
+                            rusqlite::params![created_head.session_id.as_str()],
+                        )
+                        .map_err(crate::sqlite_error)?;
                         return Ok(lash_core_execution::SessionAdmission::Created);
                     }
                     let recorded = session_meta::load_recorded_lineage(tx, &meta.session_id)?

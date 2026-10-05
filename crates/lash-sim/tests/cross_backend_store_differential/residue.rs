@@ -56,9 +56,9 @@ const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
         "checkpoint_blob_refs",
         "checkpoint_blob_refs",
         "SELECT * FROM checkpoint_blob_refs
-         WHERE checkpoint_ref IN (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1)",
+         WHERE checkpoint_ref IN (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1)",
         "SELECT to_jsonb(t)::text FROM lash_checkpoint_blob_refs t
-         WHERE checkpoint_ref IN (SELECT checkpoint_ref FROM lash_session_head WHERE session_id = $1)",
+         WHERE checkpoint_ref IN (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1)",
     ),
     // Checkpoint manifest and component bytes reachable from this session's
     // head. Blobs are content-addressed and shared by every session, so only
@@ -68,17 +68,17 @@ const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
         "checkpoint_blobs",
         "blobs",
         "SELECT hash, hex(content) FROM blobs
-         WHERE hash IN (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1)
+         WHERE hash IN (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1)
             OR hash IN (
                 SELECT blob_ref FROM checkpoint_blob_refs
                 WHERE checkpoint_ref IN
-                    (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1))",
+                    (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1))",
         "SELECT hash || ':' || encode(content, 'hex') FROM lash_blobs
-         WHERE hash IN (SELECT checkpoint_ref FROM lash_session_head WHERE session_id = $1)
+         WHERE hash IN (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1)
             OR hash IN (
                 SELECT blob_ref FROM lash_checkpoint_blob_refs
                 WHERE checkpoint_ref IN
-                    (SELECT checkpoint_ref FROM lash_session_head WHERE session_id = $1))",
+                    (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1))",
     ),
 ];
 

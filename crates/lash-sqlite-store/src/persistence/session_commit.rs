@@ -807,20 +807,35 @@ impl SqliteStore {
                         end_frames_tx(tx, &commit.session_id, &left, None, now)?;
                     }
                     let head_json = encode_json(&meta.payload())?;
-                    crate::conn::cached_execute(tx,
-                        session_sql().head_sqlite.upsert.sql(),
+                    // The published head is a retained revision from this
+                    // transaction on. Recording it reads no pin: a pin
+                    // resolves to it by query whenever something asks.
+                    crate::revisions::record_revision_conn(
+                        tx,
+                        &commit.session_id,
+                        sql_head_revision,
+                        meta.leaf_node_id.as_deref(),
+                        meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
+                        &head_json,
+                    )?;
+                    let changed = crate::conn::cached_execute(tx,
+                        session_sql().head_sqlite.upsert_cas.sql(),
                         params![
                             meta.session_id.as_str(),
-                            head_json,
                             sql_head_revision,
-                            meta.leaf_node_id.as_deref(),
-                            meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
                             lash_core_execution::store::pending_follow_on::encode_pending_follow_on(
                                 meta.pending_follow_on.as_ref(),
                             )?,
+                            plan.actual_head_revision() as i64,
                         ],
                     )
                     .map_err(sqlite_error)?;
+                    if changed != 1 {
+                        return Err(StoreError::HeadRevisionConflict {
+                            expected: plan.actual_head_revision(),
+                            actual: published_revision,
+                        });
+                    }
                     let retention = tx
                         .prepare_cached(session_sql().meta.touch_last_commit.sql())
                         .map_err(sqlite_error)?
@@ -836,17 +851,6 @@ impl SqliteStore {
                                 lash_core_execution::Retention::from_stored(&kind, last_turns)
                             },
                         )?;
-                    // The published head is a retained revision from this
-                    // transaction on. Recording it reads no pin: a pin
-                    // resolves to it by query whenever something asks.
-                    crate::revisions::record_revision_conn(
-                        tx,
-                        &commit.session_id,
-                        sql_head_revision,
-                        meta.leaf_node_id.as_deref(),
-                        meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
-                        &head_json,
-                    )?;
                     if plan.head_changed()
                         && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
                     {

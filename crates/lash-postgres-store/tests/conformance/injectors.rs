@@ -65,7 +65,7 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
     async fn edge_path(&self, session_id: &SessionId) -> Vec<GraphFactObservation> {
         let mut facts = self.all_graph_facts().await;
         let mut current = sqlx::query_scalar::<_, String>(
-            "SELECT leaf_node_id FROM lash_session_head
+            "SELECT leaf_node_id FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
              WHERE session_id = $1 AND leaf_node_id IS NOT NULL",
         )
         .bind(session_id.as_str())
@@ -124,11 +124,25 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
     async fn inject_raw_value(&self, target: &FenceIntegrityTarget, value: i64) {
         let result = match target {
             FenceIntegrityTarget::SessionHeadRevision { session_id } => {
-                sqlx::query("UPDATE lash_session_head SET head_revision = $1 WHERE session_id = $2")
-                    .bind(value)
-                    .bind(session_id.as_str())
-                    .execute(self.storage.pool())
+                let mut tx = self
+                    .storage
+                    .pool()
+                    .begin()
                     .await
+                    .expect("begin pointer fault injection");
+                sqlx::query("SET LOCAL session_replication_role = replica")
+                    .execute(&mut *tx)
+                    .await
+                    .expect("enable pointer fault injection");
+                let result = sqlx::query(
+                    "UPDATE lash_session_head SET head_revision = $1 WHERE session_id = $2",
+                )
+                .bind(value)
+                .bind(session_id.as_str())
+                .execute(&mut *tx)
+                .await;
+                tx.commit().await.expect("commit corrupt pointer");
+                result
             }
             FenceIntegrityTarget::TriggerRevision { subscription_id } => {
                 sqlx::query(
@@ -164,8 +178,9 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                     Option<String>,
                     Option<String>,
                 ) = sqlx::query_as(
-                    "SELECT head_revision, head_json, leaf_node_id, checkpoint_ref
-                     FROM lash_session_head WHERE session_id = $1",
+                    "SELECT head.head_revision, revision.head_json, revision.leaf_node_id, revision.checkpoint_ref
+                     FROM lash_session_head AS head JOIN lash_session_revisions AS revision USING (session_id)
+                     WHERE head.session_id = $1 ORDER BY revision.head_revision DESC LIMIT 1",
                 )
                 .bind(session_id.as_str())
                 .fetch_one(self.storage.pool())
@@ -193,4 +208,60 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
             }
         }
     }
+}
+
+/// A published pointer must name a revision; enforcement waits until commit.
+#[tokio::test]
+async fn session_head_pointer_requires_a_revision() {
+    let (_database, storage) = storage().await.expect("hermetic PostgreSQL");
+    storage
+        .session_store_factory()
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(
+                &SessionId::fixture("head-pointer"),
+            ),
+        )
+        .await
+        .expect("create a session with revision zero");
+    let mut tx = storage
+        .pool()
+        .begin()
+        .await
+        .expect("begin pointer publication");
+    sqlx::query("UPDATE lash_session_head SET head_revision = 1 WHERE session_id = 'head-pointer'")
+        .execute(&mut *tx)
+        .await
+        .expect("pointer enforcement is deferred");
+    let error = tx
+        .commit()
+        .await
+        .expect_err("a dangling head pointer cannot commit");
+    assert_eq!(
+        error
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
+        Some("23503")
+    );
+    sqlx::query(
+        "INSERT INTO lash_session_revisions (session_id, head_revision, head_json)
+         SELECT session_id, 1, head_json FROM lash_session_revisions
+         WHERE session_id = 'head-pointer' AND head_revision = 0",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("record an unpublished revision");
+    let revisions = storage
+        .session_store_factory()
+        .revisions(&SessionId::fixture("head-pointer"))
+        .await
+        .expect("list retained revisions");
+    assert_eq!(
+        revisions
+            .iter()
+            .map(|row| (row.head_revision, row.head))
+            .collect::<Vec<_>>(),
+        vec![(0, true), (1, false)],
+        "the published pointer defines the head, even with a newer revision row"
+    );
 }

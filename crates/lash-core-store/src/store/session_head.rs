@@ -84,7 +84,7 @@ impl From<String> for BlobRef {
     }
 }
 
-/// JSON-owned fields persisted in a session head's `head_json` column.
+/// JSON-owned fields persisted in a revision's `head_json` column.
 ///
 /// Revision and graph/checkpoint references live in dedicated columns and are
 /// deliberately absent from this serializable payload.
@@ -106,9 +106,9 @@ pub struct SessionHeadPayload {
 
 /// Fully assembled session-head metadata returned by a store.
 ///
-/// This type is intentionally not serializable. Store implementations decode a
-/// [`SessionHeadPayload`] and must supply column-owned values and the leaf-derived frame through
-/// [`Self::assemble`].
+/// This type is intentionally not serializable. Store implementations follow the
+/// head pointer to its revision, decode its [`SessionHeadPayload`], and supply
+/// that revision's references and the leaf-derived frame through [`Self::assemble`].
 ///
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
 #[derive(Clone, Debug)]

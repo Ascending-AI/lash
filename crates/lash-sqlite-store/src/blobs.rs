@@ -49,7 +49,7 @@ lash_store_sql::statements! {
         reclaim_unreferenced_artifact = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
                AND NOT EXISTS (SELECT 1 FROM artifact_refs WHERE blob_ref = candidate.hash)
-               AND NOT EXISTS (SELECT 1 FROM session_head WHERE checkpoint_ref = candidate.hash)
+
                AND NOT EXISTS (SELECT 1 FROM session_revisions WHERE checkpoint_ref = candidate.hash)
                AND NOT EXISTS (SELECT 1 FROM checkpoint_blob_refs WHERE blob_ref = candidate.hash)";
 
@@ -60,10 +60,7 @@ lash_store_sql::statements! {
         /// forks by name, `session_head` here and `lash_session_head` there.
         reclaim_session_candidate = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
-               AND NOT EXISTS (
-                   SELECT 1 FROM session_head AS head
-                   WHERE head.checkpoint_ref = candidate.hash
-               )
+
                AND NOT EXISTS (
                    SELECT 1 FROM session_revisions AS revision
                    WHERE revision.checkpoint_ref = candidate.hash
@@ -90,10 +87,12 @@ lash_store_sql::statements! {
         /// rendered as "no such session". PostgreSQL's walk reads its own
         /// head table, `lash_session_head`, so the two texts fork on the table
         /// name alone.
-        select_session_checkpoint_page = "SELECT session_head.session_id, session_head.checkpoint_ref, blobs.content
-             FROM session_head
-             LEFT JOIN blobs ON blobs.hash = session_head.checkpoint_ref
-             WHERE session_head.checkpoint_ref IS NOT NULL
+        select_session_checkpoint_page = "SELECT session_head.session_id, revision.checkpoint_ref, blobs.content
+             FROM session_head JOIN session_revisions AS revision
+               ON revision.session_id = session_head.session_id
+              AND revision.head_revision = session_head.head_revision
+             LEFT JOIN blobs ON blobs.hash = revision.checkpoint_ref
+             WHERE revision.checkpoint_ref IS NOT NULL
                AND (?1 IS NULL OR session_head.session_id > ?1)
              ORDER BY session_head.session_id
              LIMIT ?2";

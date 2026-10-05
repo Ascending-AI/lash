@@ -533,6 +533,12 @@ fn decode_session_head_meta_row(
     let Some(row) = row else {
         return Ok(None);
     };
+    let head_revision = u64_from_sql("SessionHeadMeta", "head_revision", row.get(1))?;
+    let head_json: Option<String> = row.get(0);
+    let head_json = head_json.ok_or_else(|| StoreError::StoredDataCorrupt {
+        record_kind: "SessionHeadMeta",
+        message: "head pointer names a missing revision".to_owned(),
+    })?;
     let current_frame_node_id = row
         .try_get::<Option<String>, _>(5)
         .map_err(store_sqlx_error)?;
@@ -553,8 +559,6 @@ fn decode_session_head_meta_row(
             record_kind: "SessionGraph",
             message: error.to_string(),
         })?;
-    let head_json: String = row.get(0);
-    let head_revision: i64 = row.get(1);
     let leaf_node_id: Option<String> = row.get(2);
     let checkpoint_ref: Option<String> = row.get(3);
     let pending_follow_on: Option<String> = row.get(4);
@@ -576,7 +580,7 @@ fn decode_session_head_meta_row(
         SessionHeadMeta::assemble(
             session_id,
             payload,
-            u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
+            head_revision,
             checkpoint_ref.map(Into::into),
             leaf_node_id
                 .map(lash_core_execution::NodeId::parse)

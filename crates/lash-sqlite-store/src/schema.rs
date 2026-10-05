@@ -66,19 +66,6 @@ CREATE TABLE IF NOT EXISTS blobs (
     content BLOB NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS session_head (
-    session_id     TEXT PRIMARY KEY,
-    head_json      TEXT NOT NULL DEFAULT '{}',
-    head_revision  INTEGER NOT NULL DEFAULT 0,
-    leaf_node_id   TEXT,
-    checkpoint_ref TEXT,
-    pending_follow_on_json TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_session_head_leaf
-    ON session_head(leaf_node_id);
-CREATE INDEX IF NOT EXISTS idx_session_head_checkpoint_ref
-    ON session_head(checkpoint_ref);
-
 -- One row per published head revision a session still retains (FIG-4731).
 -- The name of a state is (session_id, head_revision). Membership is the
 -- retained-revisions relation every reclaimer roots what it keeps in. Each
@@ -96,6 +83,16 @@ CREATE INDEX IF NOT EXISTS idx_session_revisions_leaf
     ON session_revisions(leaf_node_id);
 CREATE INDEX IF NOT EXISTS idx_session_revisions_checkpoint_ref
     ON session_revisions(checkpoint_ref);
+
+-- The current revision is one pointer; per-revision facts live in revisions.
+CREATE TABLE IF NOT EXISTS session_head (
+    session_id TEXT PRIMARY KEY,
+    head_revision INTEGER NOT NULL,
+    pending_follow_on_json TEXT,
+    FOREIGN KEY (session_id, head_revision)
+        REFERENCES session_revisions(session_id, head_revision)
+        DEFERRABLE INITIALLY DEFERRED
+);
 
 -- One row per target a host asked a session to retain: an input, a turn or a
 -- head revision. A pin names a target, never a state, so it can be written

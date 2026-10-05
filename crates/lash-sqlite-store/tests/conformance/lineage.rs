@@ -70,7 +70,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
         let conn = self.backend.raw(SqliteDatabase::DurableCore);
         let mut current = conn
             .query_row(
-                "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
+                "SELECT leaf_node_id FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1",
                 rusqlite::params![session_id.as_str()],
                 |row| {
                     Ok(row

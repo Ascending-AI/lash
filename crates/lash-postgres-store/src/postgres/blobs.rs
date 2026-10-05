@@ -63,10 +63,7 @@ lash_store_sql::statements! {
         /// bytes live inline in `lash_lashlang_artifacts`.
         reclaim_session_candidate = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
-               AND NOT EXISTS (
-                   SELECT 1 FROM session_head AS head
-                   WHERE head.checkpoint_ref = candidate.hash
-               )
+
                AND NOT EXISTS (
                    SELECT 1 FROM session_revisions AS revision
                    WHERE revision.checkpoint_ref = candidate.hash

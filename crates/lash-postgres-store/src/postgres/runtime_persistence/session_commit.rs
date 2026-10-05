@@ -727,31 +727,6 @@ impl PostgresStore {
         let (checkpoint_ref, manifest) =
             put_checkpoint_tx(&mut tx, &commit.checkpoint, encoded_under).await?;
         let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
-        if existing.is_none() {
-            let placeholder = SessionHeadMeta::assemble(
-                &commit.session_id,
-                SessionHeadPayload {
-                    schema_version: encoded_under.writer_version(
-                        lash_core_execution::surface_format!(
-                            lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
-                        ),
-                    ),
-                    session_id: commit.session_id.clone(),
-                    config: commit.config.clone(),
-                    published_by_shift: false,
-                },
-                0,
-                None,
-                None,
-                None,
-            )?;
-            sqlx::query(session_sql().head_postgres.insert_placeholder.sql())
-                .bind(commit.session_id.as_str())
-                .bind(encode_json(&placeholder.payload())?)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        }
         let locked_revision = sqlx::query_scalar::<_, i64>(
             session_sql().head_postgres.select_revision_for_update.sql(),
         )
@@ -761,10 +736,7 @@ impl PostgresStore {
         .map_err(store_sqlx_error)?
         .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
         .transpose()?
-        .ok_or_else(|| StoreError::StoredDataCorrupt {
-            record_kind: "SessionHeadMeta",
-            message: "head row disappeared while commit authority was held".to_string(),
-        })?;
+        .unwrap_or(0);
         let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
         let parent_leaf = match old_leaf_node_id.as_deref() {
             Some(leaf_node_id) => sqlx::query_as::<_, (i64, String, String)>(
@@ -957,25 +929,29 @@ impl PostgresStore {
                 "frame transition does not match the committed head".into(),
             ));
         }
-        // The revision predicate stays on the upsert as the backstop, and it
-        // is the ONLY statement-level guard for a concurrent *first* commit,
-        // where the placeholder row above is created inside this transaction.
-        // Existing sessions already hold the row lock and the session-keyed
-        // advisory lock, so for them it can no longer disagree with the
-        // verdict.
+        // The session advisory lock and head row lock authorize this CAS.
         let head_json = encode_json(&meta.payload())?;
+        // The published head is a retained revision from this transaction
+        // on. Recording it reads no pin: a pin resolves to it by query
+        // whenever something asks.
+        crate::revisions::record_revision_tx(
+            &mut tx,
+            &commit.session_id,
+            sql_head_revision,
+            meta.leaf_node_id.as_deref(),
+            Some(checkpoint_ref.as_str()),
+            &head_json,
+        )
+        .await?;
         let head_write = sqlx::query(session_sql().head_postgres.upsert_cas.sql())
             .bind(commit.session_id.as_str())
             .bind(sql_head_revision)
-            .bind(&head_json)
-            .bind(checkpoint_ref.as_str())
-            .bind(meta.leaf_node_id.as_deref())
-            .bind(plan.actual_head_revision() as i64)
             .bind(
                 lash_core_execution::store::pending_follow_on::encode_pending_follow_on(
                     meta.pending_follow_on.as_ref(),
                 )?,
             )
+            .bind(plan.actual_head_revision() as i64)
             .execute(&mut **tx)
             .await;
         let head_write = match head_write {
@@ -1036,18 +1012,6 @@ impl PostgresStore {
                         lash_core_execution::Retention::from_stored(&kind, last_turns)
                     },
                 )?;
-        // The published head is a retained revision from this transaction
-        // on. Recording it reads no pin: a pin resolves to it by query
-        // whenever something asks.
-        crate::revisions::record_revision_tx(
-            &mut tx,
-            &commit.session_id,
-            sql_head_revision,
-            meta.leaf_node_id.as_deref(),
-            Some(checkpoint_ref.as_str()),
-            &head_json,
-        )
-        .await?;
         if plan.head_changed()
             && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
         {

@@ -496,7 +496,7 @@ async fn a_stale_writer_is_fenced_after_finalize() {
 #[cfg(feature = "synthetic-next")]
 async fn old_sessions(storage: &PostgresStorage, rows: usize) {
     for index in 0..rows {
-        sqlx::query("INSERT INTO lash_session_head (session_id, head_json) VALUES ($1, '{}')")
+        sqlx::query("WITH recorded AS (INSERT INTO lash_session_revisions (session_id, head_revision, head_json) VALUES ($1, 0, '{}') RETURNING session_id, head_revision) INSERT INTO lash_session_head (session_id, head_revision) SELECT session_id, head_revision FROM recorded")
             .bind(format!("old-{index:02}"))
             .execute(storage.pool())
             .await
@@ -535,8 +535,8 @@ async fn interrupted_backfill_resumes_idempotently() {
         .await
         .expect("finalize moves F");
     sqlx::query(
-        "INSERT INTO lash_session_head (session_id, head_json, synthetic_next_note)
-         VALUES ('old-03-next', '{}', 'written by N+1')",
+        "WITH recorded AS (INSERT INTO lash_session_revisions (session_id, head_revision, head_json) VALUES ('old-03-next', 0, '{}') RETURNING session_id, head_revision) INSERT INTO lash_session_head (session_id, head_revision, synthetic_next_note)
+         SELECT session_id, head_revision, 'written by N+1' FROM recorded",
     )
     .execute(next.pool())
     .await

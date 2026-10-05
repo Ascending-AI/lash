@@ -117,24 +117,22 @@ lash_store_sql::statements! {
                AND json_extract(pending_follow_on_json, '$.follow_on_turn_id') = ?3";
 
         /// The leaf node `?1`'s head points at.
-        select_leaf_node_id = "SELECT leaf_node_id FROM session_head WHERE session_id = ?1";
+        select_leaf_node_id = "SELECT revision.leaf_node_id FROM session_head AS head
+             JOIN session_revisions AS revision
+               ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             WHERE head.session_id = ?1";
 
 
-        /// Publish `?1`'s head.
-        ///
-        /// No revision predicate, and it needs none: the plan's revision was
-        /// read inside this `BEGIN IMMEDIATE` transaction — SQLite's
-        /// database-wide single-writer lock — and re-read under the same lock
-        /// before the shared head verdict authorized this write.
-        upsert = "INSERT OR REPLACE INTO session_head
-                         (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref,
-                          pending_follow_on_json)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+        /// Publish the new revision over `?4`, after recording its row.
+        upsert_cas = "INSERT INTO session_head
+                         (session_id, head_revision, pending_follow_on_json)
+                         VALUES (?1, ?2, ?3)
+                         ON CONFLICT (session_id) DO UPDATE SET
+                             head_revision = excluded.head_revision,
+                             pending_follow_on_json = excluded.pending_follow_on_json
+                         WHERE session_head.head_revision = ?4";
 
-        insert_fork = "INSERT INTO session_head
-                 (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
-                 VALUES (?1, ?2, 0, ?3, ?4)";
-
+        insert_fork = "INSERT INTO session_head (session_id, head_revision) VALUES (?1, 0)";
 
         /// The head leaf of `?1` and the readable generation range from `?2`
         /// up to it.
@@ -148,12 +146,13 @@ lash_store_sql::statements! {
                                  FROM fork_lineage AS lineage
                                  WHERE lineage.session_id = ?1
                              )
-                             SELECT head.leaf_node_id, head_node.generation, head_node.tombstoned,
+                             SELECT revision.leaf_node_id, head_node.generation, head_node.tombstoned,
                                     node.node_id, node.parent_node_id,
                                     node.generation, node.tombstoned
-                             FROM session_head AS head
+                             FROM session_head AS head LEFT JOIN session_revisions AS revision
+                 ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
                              LEFT JOIN graph_nodes AS head_node
-                               ON head_node.node_id = head.leaf_node_id
+                               ON head_node.node_id = revision.leaf_node_id
                              LEFT JOIN readable_sessions AS readable ON TRUE
                              LEFT JOIN graph_nodes AS node
                                ON node.session_id = readable.session_id
@@ -166,7 +165,10 @@ lash_store_sql::statements! {
 
         /// The stored head document of `?1`, for a test that wants to read or
         /// rewrite it behind the store's back.
-        select_head_json = "SELECT head_json FROM session_head WHERE session_id = ?1";
+        select_head_json = "SELECT revision.head_json FROM session_head AS head
+             JOIN session_revisions AS revision
+               ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             WHERE head.session_id = ?1";
     }
 }
 
@@ -178,8 +180,7 @@ lash_store_sql::statements! {
         /// The same root classes as checkpoint reclamation. An admission
         /// conservatively protects its committed session nodes until released.
         artifact_frame_is_retained = "WITH RECURSIVE roots AS (
-            SELECT leaf_node_id AS node_id FROM session_head WHERE leaf_node_id IS NOT NULL
-            UNION SELECT leaf_node_id FROM session_revisions WHERE leaf_node_id IS NOT NULL
+            SELECT leaf_node_id AS node_id FROM session_revisions WHERE leaf_node_id IS NOT NULL
             UNION SELECT node.node_id FROM graph_nodes AS node
                 JOIN session_meta AS meta ON meta.session_id = node.session_id
                 WHERE meta.admission_base_checkpoint_ref IS NOT NULL AND node.tombstoned = 0
@@ -276,8 +277,9 @@ lash_store_sql::statements! {
         /// statement. The head-path probe confirms it (ADR 0057).
         select_active_ancestor_candidate = "SELECT leaf.node_id, leaf.session_id, leaf.generation,
                        node.session_id, node.generation
-                FROM session_head AS head
-                JOIN graph_nodes AS leaf ON leaf.node_id = head.leaf_node_id
+                FROM session_head AS head LEFT JOIN session_revisions AS revision
+                 ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+                JOIN graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
                 JOIN graph_nodes AS node ON node.node_id = ?2
                 WHERE head.session_id = ?1
                   AND leaf.tombstoned = 0
@@ -292,8 +294,9 @@ lash_store_sql::statements! {
 
         /// The live head leaf of `?1`, where the head-path probe starts.
         select_head_leaf_path_node = "SELECT leaf.node_id, leaf.session_id, leaf.generation
-                FROM session_head AS head
-                JOIN graph_nodes AS leaf ON leaf.node_id = head.leaf_node_id
+                FROM session_head AS head LEFT JOIN session_revisions AS revision
+                 ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+                JOIN graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
                 WHERE head.session_id = ?1 AND leaf.tombstoned = 0";
 
         /// The lowest-generation node owner `?1` holds and the row its parent
@@ -316,10 +319,6 @@ lash_store_sql::statements! {
                          AND child.tombstoned = 0
                    )
                    AND NOT EXISTS (
-                       SELECT 1 FROM session_head AS head
-                       WHERE head.leaf_node_id = node.node_id
-                   )
-                   AND NOT EXISTS (
                        SELECT 1 FROM session_revisions AS revision
                        WHERE revision.leaf_node_id = node.node_id
                    )";
@@ -331,10 +330,6 @@ lash_store_sql::statements! {
                                SELECT 1 FROM graph_nodes AS child
                                WHERE child.parent_node_id = node.node_id
                                  AND child.tombstoned = 0
-                           )
-                           AND NOT EXISTS (
-                               SELECT 1 FROM session_head AS head
-                               WHERE head.leaf_node_id = node.node_id
                            )
                            AND NOT EXISTS (
                                SELECT 1 FROM session_revisions AS revision
@@ -465,10 +460,6 @@ lash_store_sql::statements! {
         /// ordering even though its side is not enforced.
         delete_unrooted = "DELETE FROM checkpoint_blob_refs AS edge
              WHERE NOT EXISTS (
-                       SELECT 1 FROM session_head AS head
-                       WHERE head.checkpoint_ref = edge.checkpoint_ref
-                   )
-               AND NOT EXISTS (
                        SELECT 1 FROM session_revisions AS revision
                        WHERE revision.checkpoint_ref = edge.checkpoint_ref
                    )
@@ -484,10 +475,6 @@ lash_store_sql::statements! {
         delete_unrooted_for_candidates = "DELETE FROM checkpoint_blob_refs AS edge
                      WHERE (edge.checkpoint_ref IN (SELECT value FROM json_each(?1))
                             OR edge.blob_ref IN (SELECT value FROM json_each(?1)))
-                       AND NOT EXISTS (
-                           SELECT 1 FROM session_head AS head
-                           WHERE head.checkpoint_ref = edge.checkpoint_ref
-                       )
                        AND NOT EXISTS (
                            SELECT 1 FROM session_revisions AS revision
                            WHERE revision.checkpoint_ref = edge.checkpoint_ref

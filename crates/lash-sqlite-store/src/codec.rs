@@ -201,7 +201,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
             params![session_id.as_str()],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
@@ -223,6 +223,15 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     else {
         return Ok(None);
     };
+    let head_revision = u64::try_from(head_revision).map_err(|_| {
+        stored_data_corrupt(
+            "SessionHeadMeta",
+            format!("head_revision must be non-negative, got {head_revision}"),
+        )
+    })?;
+    let head_json = head_json.ok_or_else(|| {
+        stored_data_corrupt("SessionHeadMeta", "head pointer names a missing revision")
+    })?;
     let pending_follow_on =
         lash_core_execution::store::pending_follow_on::decode_pending_follow_on(
             session_id,
@@ -253,12 +262,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
         SessionHeadMeta::assemble(
             session_id,
             payload,
-            u64::try_from(head_revision).map_err(|_| {
-                stored_data_corrupt(
-                    "SessionHeadMeta",
-                    format!("head_revision must be non-negative, got {head_revision}"),
-                )
-            })?,
+            head_revision,
             checkpoint_ref.map(Into::into),
             leaf_node_id
                 .map(lash_core_execution::NodeId::parse)

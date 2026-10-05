@@ -85,7 +85,7 @@ struct AdmittedRows {
 async fn committed_rows(storage: &PostgresStorage, session_id: &SessionId) -> AdmittedRows {
     let head = sqlx::query_as(
         "SELECT head_revision, head_json, checkpoint_ref, leaf_node_id, pending_follow_on_json
-         FROM lash_session_head WHERE session_id = $1",
+         FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1",
     )
     .bind(session_id.as_str())
     .fetch_optional(storage.pool())

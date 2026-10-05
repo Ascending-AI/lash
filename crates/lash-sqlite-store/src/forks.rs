@@ -293,16 +293,6 @@ pub(super) async fn fork_at_in_catalog(
                 current_frame_node_id,
             )?;
             let head_json = encode_json(&meta.payload())?;
-            crate::conn::cached_execute(tx,
-                session_sql().head_sqlite.insert_fork.sql(),
-                params![
-                    request.session_id.as_str(),
-                    head_json,
-                    leaf_node_id.as_deref(),
-                    checkpoint_ref.as_deref()
-                ],
-            )
-            .map_err(sqlite_error)?;
             // The fork's own head is its first retained revision.
             crate::revisions::record_revision_conn(
                 tx,
@@ -312,6 +302,11 @@ pub(super) async fn fork_at_in_catalog(
                 checkpoint_ref.as_deref(),
                 &head_json,
             )?;
+            crate::conn::cached_execute(tx,
+                session_sql().head_sqlite.insert_fork.sql(),
+                params![request.session_id.as_str()],
+            )
+            .map_err(sqlite_error)?;
             if let Some(fork_plan) = &fork_plan {
                 let mut stmt = tx
                     .prepare(

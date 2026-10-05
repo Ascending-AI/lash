@@ -144,8 +144,8 @@ fn sqlite_leaf_frame(stores: &lash_sqlite_store::SqliteStoreSet, session_id: &st
     rusqlite::Connection::open(stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore))
         .expect("open SQLite session catalog")
         .query_row(
-            "SELECT g.frame_node_id FROM session_head h
-             JOIN graph_nodes g ON g.node_id = h.leaf_node_id
+            "SELECT g.frame_node_id FROM session_head h JOIN session_revisions r USING (session_id, head_revision)
+             JOIN graph_nodes g ON g.node_id = r.leaf_node_id
              WHERE h.session_id = ?1",
             [session_id],
             |row| row.get::<_, String>(0),
@@ -798,7 +798,7 @@ fn sqlite_head_and_max_generation(
     .expect("open SQLite session catalog");
     let leaf = conn
         .query_row(
-            "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
+            "SELECT leaf_node_id FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1",
             [session_id.as_str()],
             |row| row.get::<_, String>(0),
         )

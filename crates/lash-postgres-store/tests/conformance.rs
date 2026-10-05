@@ -770,9 +770,13 @@ lash_conformance::append_head_switch_tests!({
         Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
         move |leaf_node_id: lash_core_execution::NodeId| async move {
             sqlx::query(
-                "UPDATE lash_session_head
-                 SET leaf_node_id = $1, head_revision = head_revision + 1
-                 WHERE session_id = 'root'",
+                "WITH recorded AS (
+                     INSERT INTO lash_session_revisions (session_id, head_revision, leaf_node_id, checkpoint_ref, head_json)
+                     SELECT session_id, head_revision + 1, $1, checkpoint_ref, head_json
+                     FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
+                     WHERE session_id = 'root' RETURNING session_id, head_revision
+                 ) UPDATE lash_session_head AS head SET head_revision = recorded.head_revision
+                   FROM recorded WHERE head.session_id = recorded.session_id",
             )
             .bind(leaf_node_id.into_inner())
             .execute(&pool)
@@ -896,7 +900,7 @@ impl lash_conformance::StoreMaintenanceFaultInjector for PostgresCorruptRootedMa
     async fn break_gc_scope(&self, _session_id: &SessionId) {
         let corrupted = sqlx::query(
             "UPDATE lash_blobs SET content = '\\xffffffff'::bytea
-             WHERE hash IN (SELECT checkpoint_ref FROM lash_session_head
+             WHERE hash IN (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
                             WHERE checkpoint_ref IS NOT NULL)",
         )
         .execute(self.storage.pool())

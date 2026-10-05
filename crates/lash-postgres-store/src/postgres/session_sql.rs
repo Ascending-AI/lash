@@ -142,10 +142,12 @@ lash_store_sql::statements! {
     pub(crate) struct SessionHeadPostgresStatements @ "session_head" {
 
         /// The published head of `?1`, row-locked.
-        select_meta_for_update = "SELECT head.head_json, head.head_revision, head.leaf_node_id, head.checkpoint_ref,
+        select_meta_for_update = "SELECT revision.head_json, head.head_revision, revision.leaf_node_id, revision.checkpoint_ref,
                 head.pending_follow_on_json, leaf.frame_node_id
-         FROM session_head AS head LEFT JOIN graph_nodes AS leaf
-             ON leaf.node_id = head.leaf_node_id
+         FROM session_head AS head LEFT JOIN session_revisions AS revision
+                 ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             LEFT JOIN graph_nodes AS leaf
+             ON leaf.node_id = revision.leaf_node_id
          WHERE head.session_id = ?1 FOR UPDATE OF head";
 
         /// The follow-on `?1`'s head owes (ADR 0101 §3), row-locked: every
@@ -170,45 +172,23 @@ lash_store_sql::statements! {
              WHERE session_id = ?1
              FOR UPDATE";
 
-        /// Materialize a first commit's head row so the row lock below has a
-        /// row to take.
-        ///
-        /// A head row does not exist during a session's first commit, so row
-        /// locking alone cannot serialize create-versus-delete; this insert is
-        /// what gives the lock something to hold.
-        insert_placeholder = "INSERT INTO session_head
-                 (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
-                 VALUES (?1, ?2, 0, NULL, NULL)
-                 ON CONFLICT (session_id) DO NOTHING";
-
-        /// Publish `?1`'s head, if its stored revision is still `?6`.
-        ///
-        /// The revision predicate stays on the statement as the backstop, and
-        /// it is the only statement-level guard for a concurrent *first*
-        /// commit, whose placeholder row was created inside this transaction.
-        /// For an existing session the row lock and the advisory lock have
-        /// already settled the question and the shared verdict has authorized
-        /// exactly this publication.
+        /// Publish the new revision over `?4`, after recording its row.
+        /// The session advisory lock also serializes the first publication.
         upsert_cas = "INSERT INTO session_head
-             (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref,
-              pending_follow_on_json)
-             VALUES (?1, ?3, ?2, ?5, ?4, ?7)
+             (session_id, head_revision, pending_follow_on_json)
+             VALUES (?1, ?2, ?3)
              ON CONFLICT (session_id) DO UPDATE SET
                 head_revision = EXCLUDED.head_revision,
-                head_json = EXCLUDED.head_json,
-                checkpoint_ref = EXCLUDED.checkpoint_ref,
-                leaf_node_id = EXCLUDED.leaf_node_id,
                 pending_follow_on_json = EXCLUDED.pending_follow_on_json
-             WHERE session_head.head_revision = ?6";
+             WHERE session_head.head_revision = ?4";
 
-        insert_fork = "INSERT INTO session_head
-             (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
-             VALUES (?1, ?2, 0, ?4, ?3)";
+        insert_fork = "INSERT INTO session_head (session_id, head_revision) VALUES (?1, 0)";
 
         /// Every distinct checkpoint root the sessions in `?1` have published.
-        select_checkpoints_for_sessions = "SELECT DISTINCT checkpoint_ref
-         FROM session_head
-         WHERE session_id = ANY(?1) AND checkpoint_ref IS NOT NULL
+        select_checkpoints_for_sessions = "SELECT DISTINCT revision.checkpoint_ref
+         FROM session_head AS head JOIN session_revisions AS revision
+           ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+         WHERE head.session_id = ANY(?1) AND revision.checkpoint_ref IS NOT NULL
          ORDER BY checkpoint_ref";
 
         /// The first page of sessions that have published a checkpoint root,
@@ -224,19 +204,21 @@ lash_store_sql::statements! {
         /// one with `?1 IS NULL OR session_id > ?1`: that predicate is not
         /// sargable, so the paginated walk this exists to make cheap would
         /// scan the whole table on every page.
-        scan_checkpoints_first_page = "SELECT session_id, checkpoint_ref
-     FROM session_head
-     WHERE checkpoint_ref IS NOT NULL
-     ORDER BY session_id
+        scan_checkpoints_first_page = "SELECT head.session_id, revision.checkpoint_ref
+     FROM session_head AS head JOIN session_revisions AS revision
+       ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+     WHERE revision.checkpoint_ref IS NOT NULL
+     ORDER BY head.session_id
      LIMIT ?1";
 
         /// The page of sessions that have published a checkpoint root after
         /// `?1`, `?2` rows of it.
-        scan_checkpoints_after = "SELECT session_id, checkpoint_ref
-     FROM session_head
-     WHERE checkpoint_ref IS NOT NULL
-       AND session_id > ?1
-     ORDER BY session_id
+        scan_checkpoints_after = "SELECT head.session_id, revision.checkpoint_ref
+     FROM session_head AS head JOIN session_revisions AS revision
+       ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+     WHERE revision.checkpoint_ref IS NOT NULL
+       AND head.session_id > ?1
+     ORDER BY head.session_id
      LIMIT ?2";
 
         /// Delete every head in `?1`, reporting the leaf nodes they published
@@ -247,8 +229,11 @@ lash_store_sql::statements! {
         /// live remains would let a concurrent commit land between them.
         delete_batch_returning = "WITH removed_sessions AS (
                  DELETE FROM session_head AS session
+                 USING session_revisions AS revision
                  WHERE session.session_id = ANY(?1)
-                 RETURNING session.session_id, session.leaf_node_id
+                   AND revision.session_id = session.session_id
+                   AND revision.head_revision = session.head_revision
+                 RETURNING session.session_id, revision.leaf_node_id
              )
              SELECT COALESCE(
                         array_agg(leaf_node_id ORDER BY session_id)
@@ -271,7 +256,10 @@ lash_store_sql::statements! {
 
         /// The stored head document of `?1`, row-locked, for a test that wants
         /// to read or rewrite it behind the store's back.
-        select_head_json_for_update = "SELECT head_json FROM session_head WHERE session_id = ?1 FOR UPDATE";
+        select_head_json_for_update = "SELECT revision.head_json FROM session_head AS head
+             JOIN session_revisions AS revision
+               ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             WHERE head.session_id = ?1 FOR UPDATE OF revision";
     }
 }
 
@@ -296,8 +284,7 @@ lash_store_sql::statements! {
         /// The same root classes as checkpoint reclamation. An admission
         /// conservatively protects its committed session nodes until released.
         artifact_frame_is_retained = "WITH RECURSIVE roots AS (
-            SELECT leaf_node_id AS node_id FROM session_head WHERE leaf_node_id IS NOT NULL
-            UNION SELECT leaf_node_id FROM session_revisions WHERE leaf_node_id IS NOT NULL
+            SELECT leaf_node_id AS node_id FROM session_revisions WHERE leaf_node_id IS NOT NULL
             UNION SELECT node.node_id FROM graph_nodes AS node
                 JOIN session_meta AS meta ON meta.session_id = node.session_id
                 WHERE meta.admission_base_checkpoint_ref IS NOT NULL AND node.tombstoned = FALSE
@@ -376,9 +363,6 @@ lash_store_sql::statements! {
                     WHERE parent_node_id = ?1 AND tombstoned = FALSE
                 )
                 OR EXISTS(
-                    SELECT 1 FROM session_head WHERE leaf_node_id = ?1
-                )
-                OR EXISTS(
                     SELECT 1 FROM session_revisions WHERE leaf_node_id = ?1
                 )";
 
@@ -396,10 +380,6 @@ lash_store_sql::statements! {
                SELECT 1 FROM graph_nodes AS child
                WHERE child.parent_node_id = node.node_id
                  AND child.tombstoned = FALSE
-           )
-           AND NOT EXISTS (
-               SELECT 1 FROM session_head AS head
-               WHERE head.leaf_node_id = node.node_id
            )
            AND NOT EXISTS (
                SELECT 1 FROM session_revisions AS revision
@@ -420,10 +400,6 @@ lash_store_sql::statements! {
                    SELECT 1 FROM graph_nodes AS child
                    WHERE child.parent_node_id = node.node_id
                      AND child.tombstoned = FALSE
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM session_head AS head
-                   WHERE head.leaf_node_id = node.node_id
                )
                AND NOT EXISTS (
                    SELECT 1 FROM session_revisions AS revision
@@ -559,10 +535,6 @@ lash_store_sql::statements! {
         /// Sever every edge whose checkpoint no longer has a live root.
         delete_unrooted = "DELETE FROM checkpoint_blob_refs AS edge
              WHERE NOT EXISTS (
-                       SELECT 1 FROM session_head AS head
-                       WHERE head.checkpoint_ref = edge.checkpoint_ref
-                   )
-               AND NOT EXISTS (
                        SELECT 1 FROM session_revisions AS revision
                        WHERE revision.checkpoint_ref = edge.checkpoint_ref
                    )
@@ -578,10 +550,6 @@ lash_store_sql::statements! {
         delete_unrooted_for_candidates = "DELETE FROM checkpoint_blob_refs AS edge
              WHERE (edge.checkpoint_ref = ANY(?1::TEXT[])
                     OR edge.blob_ref = ANY(?1::TEXT[]))
-               AND NOT EXISTS (
-                   SELECT 1 FROM session_head AS head
-                   WHERE head.checkpoint_ref = edge.checkpoint_ref
-               )
                AND NOT EXISTS (
                    SELECT 1 FROM session_revisions AS revision
                    WHERE revision.checkpoint_ref = edge.checkpoint_ref

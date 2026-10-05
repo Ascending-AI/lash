@@ -85,7 +85,7 @@ async fn postgres_persisted_record_decode_classification_head_when_configured() 
 
     let (head_session_id, head_store) = persisted_record_decode_store(&storage, "head").await;
     assert_eq!(
-        sqlx::query("UPDATE lash_session_head SET head_json = '{' WHERE session_id = $1")
+        sqlx::query("UPDATE lash_session_revisions SET head_json = '{' WHERE session_id = $1 AND head_revision = (SELECT head_revision FROM lash_session_head WHERE session_id = $1)")
             .bind(head_session_id.as_str())
             .execute(storage.pool())
             .await
@@ -123,7 +123,7 @@ async fn postgres_persisted_record_decode_classification_checkpoint_when_configu
     let (checkpoint_session_id, checkpoint_store) =
         persisted_record_decode_store(&storage, "checkpoint").await;
     let checkpoint_ref: String =
-        sqlx::query_scalar("SELECT checkpoint_ref FROM lash_session_head WHERE session_id = $1")
+        sqlx::query_scalar("SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1")
             .bind(checkpoint_session_id.as_str())
             .fetch_one(storage.pool())
             .await
@@ -1049,10 +1049,17 @@ async fn postgres_statement_calls_by_name(
     // window alongside the operation's own statements. Those rows are the
     // daemon's, not the operation's, so they are excluded here rather than
     // classified — the pin counts what the client connection issued.
+    // Foreign-key triggers also record server-internal statements. Deferred
+    // checks run at COMMIT and PostgreSQL marks them top-level, so exclude the
+    // canonical referential-integrity query shape as well. These enforce
+    // constraints without a client round trip; expected client counts stay
+    // unchanged when a constraint gains a trigger.
     for (query, calls) in sqlx::query_as::<_, (String, i64)>(
         "SELECT query, calls
          FROM pg_stat_statements
          WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+           AND toplevel
+           AND query !~ '^SELECT (1|[$][0-9]+) FROM ONLY \"[^\"]+\"[.]\"[^\"]+\" x WHERE .+ FOR KEY SHARE OF x$'
            AND query NOT LIKE '%pg_stat_statements%'
            AND query NOT LIKE 'autovacuum:%'",
     )
@@ -1116,7 +1123,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("SELECT pending_follow_on_json FROM lash_session_head") => {
             "pending-follow-on-read"
         }
-        q if q.starts_with("SELECT head.head_json, head.head_revision") => "head-load",
+        q if q.starts_with("SELECT revision.head_json, head.head_revision") => "head-load",
         q if q.starts_with("SELECT head_revision") => "head-lock",
         q if q.starts_with("SELECT node_id FROM lash_graph_nodes") => "graph-nodes-exist",
         q if q.starts_with("SELECT hash FROM lash_blobs") => "blob-lock",
@@ -1155,7 +1162,9 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("UPDATE lash_session_runs SET admission_json") => "run-admission-write",
         q if q.starts_with("UPDATE lash_session_meta") => "session-meta-touch",
         q if q.starts_with("LOCK TABLE lash_blobs") => "blob-table-lock",
-        q if q.starts_with("SELECT checkpoint_ref FROM lash_session_head") => "checkpoint-runs",
+        q if q.starts_with("SELECT checkpoint_ref FROM lash_session_revisions") => {
+            "checkpoint-runs"
+        }
         q if q.starts_with("SELECT content FROM lash_blobs") => "blob-content-read",
         q if q.starts_with("DELETE FROM lash_checkpoint_blob_refs") => "checkpoint-edges-sweep",
         q if q.starts_with("DELETE FROM lash_blobs") => "blob-sweep",

@@ -448,6 +448,56 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
     }
 }
 
+/// A published head must name a retained revision, including at transaction end.
+#[tokio::test]
+async fn session_head_pointer_requires_a_revision() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    backend
+        .store()
+        .await
+        .admit_session(&root_session_request("head-pointer"))
+        .await
+        .expect("create a session with revision zero");
+    let conn = backend.raw(SqliteDatabase::DurableCore);
+    conn.execute_batch("PRAGMA foreign_keys = ON; BEGIN IMMEDIATE")
+        .expect("begin pointer publication");
+    conn.execute(
+        "UPDATE session_head SET head_revision = 1 WHERE session_id = 'head-pointer'",
+        [],
+    )
+    .expect("the pointer constraint is deferred until commit");
+    let error = conn
+        .execute_batch("COMMIT")
+        .expect_err("a dangling head pointer cannot commit");
+    assert_eq!(
+        error.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::ConstraintViolation)
+    );
+    conn.execute_batch("ROLLBACK")
+        .expect("undo invalid pointer");
+    conn.execute(
+        "INSERT INTO session_revisions (session_id, head_revision, head_json)
+         SELECT session_id, 1, head_json FROM session_revisions
+         WHERE session_id = 'head-pointer' AND head_revision = 0",
+        [],
+    )
+    .expect("record an unpublished revision");
+    let revisions = backend
+        .store()
+        .await
+        .revisions(&SessionId::fixture("head-pointer"))
+        .await
+        .expect("list retained revisions");
+    assert_eq!(
+        revisions
+            .iter()
+            .map(|row| (row.head_revision, row.head))
+            .collect::<Vec<_>>(),
+        vec![(0, true), (1, false)],
+        "the published pointer defines the head, even with a newer revision row"
+    );
+}
+
 #[tokio::test]
 async fn fork_session_rejects_a_malformed_target_session_id() {
     let backend = TestBackend::open(SUBSTRATE).await;
@@ -628,6 +678,8 @@ impl SqliteFenceIntegrityInjector {
 impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
     async fn inject_raw_value(&self, target: &FenceIntegrityTarget, value: i64) {
         let conn = self.connection(target);
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("enable pointer fault injection");
         let changed = match target {
             FenceIntegrityTarget::SessionHeadRevision { session_id } => conn.execute(
                 "UPDATE session_head SET head_revision = ?1 WHERE session_id = ?2",
@@ -653,8 +705,9 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
         match target {
             FenceIntegrityTarget::SessionHeadRevision { session_id } => conn
                 .query_row(
-                    "SELECT head_revision, head_json, leaf_node_id, checkpoint_ref
-                     FROM session_head WHERE session_id = ?1",
+                    "SELECT head.head_revision, revision.head_json, revision.leaf_node_id, revision.checkpoint_ref
+                     FROM session_head AS head JOIN session_revisions AS revision USING (session_id)
+                     WHERE head.session_id = ?1 ORDER BY revision.head_revision DESC LIMIT 1",
                     [session_id.as_str()],
                     |row| {
                         let value: i64 = row.get(0)?;
@@ -1143,13 +1196,20 @@ lash_conformance::append_head_switch_tests!({
         store as Arc<dyn RuntimeStore>,
         move |leaf_node_id: lash_core_execution::NodeId| async move {
             let conn = mutation.raw(SqliteDatabase::DurableCore);
+            conn.execute_batch("PRAGMA foreign_keys = ON; BEGIN IMMEDIATE")
+                .expect("begin branch publication");
             conn.execute(
-                "UPDATE session_head
-                 SET leaf_node_id = ?1, head_revision = head_revision + 1
+                "INSERT INTO session_revisions (session_id, head_revision, leaf_node_id, checkpoint_ref, head_json)
+                 SELECT session_id, head_revision + 1, ?1, checkpoint_ref, head_json
+                 FROM session_head JOIN session_revisions USING (session_id, head_revision)
                  WHERE session_id = 'root'",
                 rusqlite::params![leaf_node_id.as_str()],
             )
-            .expect("switch sqlite active branch");
+            .expect("record branch revision");
+            conn.execute("UPDATE session_head SET head_revision = head_revision + 1 WHERE session_id = 'root'", [])
+                .expect("switch sqlite active branch");
+            conn.execute_batch("COMMIT")
+                .expect("commit branch publication");
         },
     )
 });

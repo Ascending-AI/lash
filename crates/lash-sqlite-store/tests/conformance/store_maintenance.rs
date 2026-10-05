@@ -29,7 +29,7 @@ impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedMani
         let corrupted = conn
             .execute(
                 "UPDATE blobs SET content = X'FFFFFFFF'
-                 WHERE hash IN (SELECT checkpoint_ref FROM session_head
+                 WHERE hash IN (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
                                 WHERE checkpoint_ref IS NOT NULL)",
                 [],
             )

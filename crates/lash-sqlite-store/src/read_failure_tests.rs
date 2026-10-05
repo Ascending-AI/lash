@@ -418,7 +418,7 @@ async fn sqlite_persisted_record_decode_classification() {
     let raw = rusqlite::Connection::open(&path).expect("open corruption connection");
     assert_eq!(
         raw.execute(
-            "UPDATE session_head SET head_json = '{' WHERE session_id = ?1",
+            "UPDATE session_revisions SET head_json = '{' WHERE session_id = ?1 AND head_revision = (SELECT head_revision FROM session_head WHERE session_id = ?1)",
             [head_session_id.as_str()],
         )
         .expect("corrupt head JSON"),
@@ -431,7 +431,7 @@ async fn sqlite_persisted_record_decode_classification() {
 
     let checkpoint_ref: String = raw
         .query_row(
-            "SELECT checkpoint_ref FROM session_head WHERE session_id = ?1",
+            "SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1",
             [checkpoint_session_id.as_str()],
             |row| row.get(0),
         )
@@ -792,12 +792,16 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     );
 
     raw.execute(
-        "INSERT INTO session_head
-         (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
-         VALUES ('corrupt', '{', 0, NULL, NULL)",
+        "INSERT INTO session_revisions (session_id, head_revision, head_json)
+         VALUES ('corrupt', 0, '{')",
         [],
     )
-    .expect("insert malformed head");
+    .expect("insert malformed head revision");
+    raw.execute(
+        "INSERT INTO session_head (session_id, head_revision) VALUES ('corrupt', 0)",
+        [],
+    )
+    .expect("publish malformed head");
     assert_corrupt(
         store.load_session_head_meta(&session_id).await,
         "SessionHeadMeta",
@@ -810,9 +814,9 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     );
 
     raw.execute(
-        "UPDATE session_head
+        "UPDATE session_revisions
          SET head_json = ?1, checkpoint_ref = 'missing-checkpoint-manifest'
-         WHERE session_id = 'corrupt'",
+         WHERE session_id = 'corrupt' AND head_revision = 0",
         params![
             encode_json(&SessionHeadPayload {
                 session_id: SessionId::from("corrupt"),

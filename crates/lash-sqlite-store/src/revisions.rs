@@ -14,8 +14,7 @@ use lash_core_execution::{RetainedRevision, Retention, Target};
 
 /// Record revision `head_revision` of `session_id` in the transaction that
 /// publishes it. `head_json` is the head document the revision was published
-/// with; it is stored only while the revision has no leaf to recover its
-/// configuration from.
+/// with, including config commands applied since its frame opened.
 pub(crate) fn record_revision_conn(
     tx: &Connection,
     session_id: &SessionId,
@@ -107,14 +106,15 @@ fn require_session_conn(conn: &Connection, session_id: &SessionId) -> Result<(),
     }
 }
 
-/// The greatest revision `session_id` has recorded: its head.
+/// The published pointer of `session_id`: its head.
 fn head_revision_conn(conn: &Connection, session_id: &SessionId) -> Result<u64, StoreError> {
     let head = conn
         .query_row(
             session_sql().revisions.select_head_revision.sql(),
             params![session_id.as_str()],
-            |row| row.get::<_, Option<i64>>(0),
+            |row| row.get::<_, i64>(0),
         )
+        .optional()
         .map_err(sqlite_error)?
         .unwrap_or(0);
     u64_from_sql("SessionRevision", "head_revision", head).map_err(sqlite_error)
@@ -311,7 +311,7 @@ pub(crate) fn revisions_conn(
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
     };
-    let head_revision = rows.last().map_or(0, |row| row.head_revision);
+    let head_revision = head_revision_conn(conn, session_id)?;
     let pins = resolved_pins_conn(conn, session_id)?;
     rows.into_iter()
         .map(|row| retained_revision(session_id, row, head_revision, &pins, fleet))

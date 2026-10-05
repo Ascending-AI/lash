@@ -618,8 +618,11 @@ async fn seed_wake(
 async fn seed_session(scratch: &ScratchSchema, session_id: &SessionId, checkpoint_ref: &str) {
     scratch
         .apply(&format!(
-            "INSERT INTO lash_session_head (session_id, head_revision, head_json, checkpoint_ref)
-             VALUES ('{session_id}', 1, '{{}}', '{checkpoint_ref}')"
+            "WITH recorded AS (
+                 INSERT INTO lash_session_revisions (session_id, head_revision, head_json, checkpoint_ref)
+                 VALUES ('{session_id}', 1, '{{}}', '{checkpoint_ref}') RETURNING session_id, head_revision
+             ) INSERT INTO lash_session_head (session_id, head_revision)
+                 SELECT session_id, head_revision FROM recorded"
         ))
         .await;
 }

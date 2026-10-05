@@ -663,9 +663,12 @@ mod walk {
             .expect("provision durable core");
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
         raw.execute(
-            "INSERT INTO session_head
-             (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
+            "INSERT INTO session_revisions (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
              VALUES ('orphaned', '{}', 0, NULL, 'missing-checkpoint-manifest')",
+            [],
+        ).expect("record the fixture revision");
+        raw.execute(
+            "INSERT INTO session_head (session_id, head_revision) VALUES ('orphaned', 0)",
             [],
         )
         .expect("install a dangling checkpoint reference");
@@ -702,12 +705,12 @@ mod walk {
         )
         .expect("install a bare checkpoint blob");
         raw.execute(
-            "INSERT INTO session_head
-             (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
+            "INSERT INTO session_revisions (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
              VALUES ('bare-checkpoint-session', '{}', 0, NULL, 'bare-checkpoint')",
             [],
-        )
-        .expect("install a session pointing at the bare blob");
+        ).expect("record the fixture revision");
+        raw.execute("INSERT INTO session_head (session_id, head_revision) VALUES ('bare-checkpoint-session', 0)", [])
+            .expect("install a session pointing at the bare blob");
         drop(raw);
 
         let page = SqliteStorePreflight::for_store_root(root.path())
@@ -754,10 +757,13 @@ mod walk {
 
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
         raw.execute(
-            "INSERT INTO session_head
-             (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
+            "INSERT INTO session_revisions (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
              VALUES ('published', '{}', 0, NULL, ?1)",
             rusqlite::params![stored.checkpoint_ref.as_str()],
+        ).expect("record the fixture revision");
+        raw.execute(
+            "INSERT INTO session_head (session_id, head_revision) VALUES ('published', 0)",
+            [],
         )
         .expect("publish the checkpoint root");
         drop(raw);
@@ -839,10 +845,13 @@ mod walk {
 
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
         raw.execute(
-            "INSERT INTO session_head
-             (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
+            "INSERT INTO session_revisions (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
              VALUES ('stateless', '{}', 0, NULL, ?1)",
             rusqlite::params![stored.checkpoint_ref.as_str()],
+        ).expect("record the fixture revision");
+        raw.execute(
+            "INSERT INTO session_head (session_id, head_revision) VALUES ('stateless', 0)",
+            [],
         )
         .expect("publish the checkpoint root");
         drop(raw);

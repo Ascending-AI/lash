@@ -93,8 +93,9 @@ impl FleetSnapshot {
             .execute(&mut *tx)
             .await?;
         let head = sqlx::query(
-            "SELECT meta.shift_epoch, head.head_revision, head.checkpoint_ref, head.head_json
+            "SELECT meta.shift_epoch, head.head_revision, revision.checkpoint_ref, revision.head_json
              FROM lash_session_meta meta JOIN lash_session_head head USING (session_id)
+             JOIN lash_session_revisions revision USING (session_id, head_revision)
              WHERE meta.session_id = $1",
         )
         .bind(session.as_str())

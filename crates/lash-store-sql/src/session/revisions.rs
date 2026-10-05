@@ -37,8 +37,8 @@ crate::statements! {
              FROM session_revisions
              WHERE session_id = ?1 AND head_revision = ?2";
 
-        /// The greatest retained revision of session `?1`: its head.
-        select_head_revision = "SELECT MAX(head_revision) FROM session_revisions
+        /// The published pointer of session `?1`: its head.
+        select_head_revision = "SELECT head_revision FROM session_head
              WHERE session_id = ?1";
 
         /// Every retained revision of session `?1`, oldest first.
@@ -73,7 +73,7 @@ crate::statements! {
         ///
         /// A revision is retained while any of these holds:
         ///
-        /// * it is its session's head, the greatest revision recorded;
+        /// * it is its session's published head;
         /// * a pin resolves to it: a revision pin names it, a turn pin names
         ///   a run whose terminal commit published it, or an input pin names
         ///   an input bound to such a run;
@@ -88,8 +88,8 @@ crate::statements! {
         /// run that ended without a commit names no revision.
         prune_unretained = "DELETE FROM session_revisions AS revision
              WHERE revision.session_id = COALESCE(?2, revision.session_id)
-               AND revision.head_revision < (
-                   SELECT MAX(head.head_revision) FROM session_revisions AS head
+               AND revision.head_revision != (
+                   SELECT head.head_revision FROM session_head AS head
                    WHERE head.session_id = revision.session_id
                )
                AND NOT EXISTS (

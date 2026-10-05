@@ -828,14 +828,6 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             current_frame_node_id,
         )?;
         let head_json = encode_json(&head.payload())?;
-        sqlx::query(session_sql().head_postgres.insert_fork.sql())
-            .bind(request.session_id.as_str())
-            .bind(&head_json)
-            .bind(checkpoint_ref.as_deref())
-            .bind(leaf_node_id.as_deref())
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
         // The fork's own head is its first retained revision.
         crate::revisions::record_revision_tx(
             &mut tx,
@@ -846,6 +838,11 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             &head_json,
         )
         .await?;
+        sqlx::query(session_sql().head_postgres.insert_fork.sql())
+            .bind(request.session_id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
         if let Some(fork_plan) = &fork_plan {
             for ancestor in fork_plan.ancestors() {
                 sqlx::query(session_sql().lineage.insert.sql())

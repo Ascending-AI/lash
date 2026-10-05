@@ -352,7 +352,7 @@ impl StoreSnapshot {
         for row in read(
             stores,
             core,
-            "SELECT session_id, leaf_node_id FROM session_head \
+            "SELECT session_id, leaf_node_id FROM session_head JOIN session_revisions USING (session_id, head_revision) \
              WHERE leaf_node_id IS NOT NULL ORDER BY session_id",
         )? {
             snapshot

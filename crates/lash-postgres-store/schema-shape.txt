@@ -412,13 +412,11 @@ table lash_schema_versions
   column version integer not-null
   primary-key (component)
 table lash_session_head
-  column checkpoint_ref text nullable
-  column head_json text not-null
-  column head_revision bigint not-null default
-  column leaf_node_id text nullable
+  column head_revision bigint not-null
   column pending_follow_on_json text nullable
   column session_id text not-null
   primary-key (session_id)
+  foreign-key (session_id, head_revision) references lash_session_revisions (session_id, head_revision) on delete no action deferrable initially deferred
 table lash_session_ingress_sequence
   column enqueue_seq bigint not-null
   column session_id text not-null

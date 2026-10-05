@@ -131,7 +131,7 @@ async fn postgres_refuses_each_unsafe_addition() {
         ),
         (
             "UNIQUE",
-            "ALTER TABLE lash_session_head ADD CONSTRAINT unsafe_unique UNIQUE (head_json)",
+            "ALTER TABLE lash_session_revisions ADD CONSTRAINT unsafe_unique UNIQUE (head_json)",
         ),
         (
             "FOREIGN KEY",

@@ -180,8 +180,8 @@ async fn expanded_store_rollback() -> Result<()> {
         ),
         (
             "FOREIGN KEY NOT VALID",
-            "ALTER TABLE lash_session_head ADD CONSTRAINT synthetic_fk FOREIGN KEY (leaf_node_id) REFERENCES lash_blobs(hash) NOT VALID",
-            "ALTER TABLE lash_session_head DROP CONSTRAINT synthetic_fk",
+            "ALTER TABLE lash_session_revisions ADD CONSTRAINT synthetic_fk FOREIGN KEY (leaf_node_id) REFERENCES lash_blobs(hash) NOT VALID",
+            "ALTER TABLE lash_session_revisions DROP CONSTRAINT synthetic_fk",
         ),
         (
             "EXCLUDE",

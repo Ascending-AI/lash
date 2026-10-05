@@ -15,8 +15,7 @@ type Tx<'c> = sqlx::Transaction<'c, sqlx::Postgres>;
 
 /// Record revision `head_revision` of `session_id` in the transaction that
 /// publishes it. `head_json` is the head document the revision was published
-/// with; it is stored only while the revision has no leaf to recover its
-/// configuration from.
+/// with, including config commands applied since its frame opened.
 pub(crate) async fn record_revision_tx(
     tx: &mut Tx<'_>,
     session_id: &SessionId,
@@ -113,11 +112,11 @@ async fn require_session_tx(tx: &mut Tx<'_>, session_id: &SessionId) -> Result<(
     }
 }
 
-/// The greatest revision `session_id` has recorded: its head.
+/// The published pointer of `session_id`: its head.
 async fn head_revision_tx(tx: &mut Tx<'_>, session_id: &SessionId) -> Result<u64, StoreError> {
     let head: Option<i64> = sqlx::query_scalar(session_sql().revisions.select_head_revision.sql())
         .bind(session_id.as_str())
-        .fetch_one(&mut **tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
     u64_from_sql("SessionRevision", "head_revision", head.unwrap_or(0))
@@ -319,7 +318,7 @@ impl PostgresStore {
                 head_json,
             });
         }
-        let head_revision = stored.last().map_or(0, |row| row.head_revision);
+        let head_revision = head_revision_tx(&mut tx, session_id).await?;
         let pins = resolved_pins_tx(&mut tx, session_id).await?;
         let mut revisions = Vec::with_capacity(stored.len());
         for row in stored {
