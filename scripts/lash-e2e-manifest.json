@@ -2734,7 +2734,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work proves the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
           "registration": null
         },
         {
@@ -2796,7 +2796,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work proves the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
           "registration": null
         }
       ],
@@ -2948,7 +2948,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing replay oracle: plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling prove the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
           "registration": null
         },
         {
@@ -3010,7 +3010,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Missing PostgreSQL and replay oracle: plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling and plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling prove the sqlite_file/live leg only; FIG-4936 deferred this leg; no owner ticket filed.",
+          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
           "registration": null
         }
       ],
