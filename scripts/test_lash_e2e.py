@@ -417,6 +417,20 @@ class ReceiptLaws(unittest.TestCase):
 class RunnerLaws(unittest.TestCase):
     """The executor's Unix socket must fit sun_path for every registration."""
 
+    def test_port_block_claims_are_exclusive_and_a_released_block_is_reused(self):
+        gate = e2e.GATE
+        (e2e.ROOT / "target").mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=e2e.ROOT / "target") as directory:
+            locks = Path(directory)
+            first, first_fd = gate.claim_port_block(locks)
+            second, second_fd = gate.claim_port_block(locks)
+            self.assertNotEqual(first, second)
+            os.close(first_fd)
+            third, third_fd = gate.claim_port_block(locks)
+            self.assertEqual(third, first)
+            os.close(third_fd)
+            os.close(second_fd)
+
     def test_socket_path_stays_under_107_for_the_longest_registration(self):
         registrations = [
             row["registration"]

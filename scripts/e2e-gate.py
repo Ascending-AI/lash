@@ -194,6 +194,38 @@ def certify_case(artifacts: Path, junit: Path, outputs: dict[str, Path], source:
     return provenance
 
 
+def claim_port_block(locks: Path) -> tuple[int, int]:
+    """Claim a free 50-port block of the 61000-65499 E2E space.
+
+    The claim is an flock on the block's file in the shared gate state
+    root: the same files the worktree gates lock, so a fork never picks
+    a live block, and the OS releases the claim when this process exits,
+    however it exits.
+    """
+    locks.mkdir(parents=True, exist_ok=True)
+    for slot in range(90):
+        path = locks / f"port-slot-{slot}.lock"
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            os.close(fd)
+            if error.errno not in (errno.EACCES, errno.EAGAIN):
+                raise
+            continue
+        stat = Path("/proc/self/stat").read_text()
+        os.ftruncate(fd, 0)
+        os.write(fd, (
+            f"battery=e2e-gate\npid={os.getpid()}\n"
+            f"pid_start={stat.rpartition(')')[2].split()[19]}\n"
+            f"started_at={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n"
+            f"worktree_slug={ROOT.name}\nworktree_root={ROOT}\n"
+            f"scope=port-slot\nlock_path={path}\n"
+        ).encode())
+        return 61000 + slot * 50, fd
+    raise ValueError("every E2E port block is claimed")
+
+
 def scratch_dir(artifacts: Path) -> Path:
     """The run's TMPDIR: fixed-width for every test name and artifacts path.
 
@@ -210,7 +242,8 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
     gate = os.environ["KILN_GATE_ID"]
     # S28 owns a second cluster in this block and fleet PostgreSQL owns
     # offset 40; serve owns offsets 45–47.
-    base = 61000 + (int(hashlib.sha256(gate.encode()).hexdigest()[:8], 16) % 89) * 50
+    base, block_fd = claim_port_block(Path(os.environ.get(
+        "LASH_GATE_STATE_ROOT", f"/tmp/lash-gate-{os.getuid()}")))
     reservations = []
     try:
         for port in range(base, base + 50):
@@ -370,6 +403,7 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
               f"failed={counts['failed']} artifacts={artifacts}", flush=True)
         return code if code else int(counts["failed"] != 0 or provenance["evidence_error"] is not None)
     finally:
+        os.close(block_fd)
         shutil.rmtree(scratch, ignore_errors=True)
 
 
