@@ -8,7 +8,10 @@ use lash_restate_test::{CrashCount, CrashPoint, CrashRule, RestateTestServer};
 const RUN: &str = "native-cell-run";
 const SLEEP: &str = "let local = 20; await sleep(60000); local += 22; finish(local);";
 const PROCESS: &str = r#"
-const worker = async () => { return await waitSignal("go"); };
+const worker = await processes.create({
+    source: 'const worker = async () => { return await waitSignal("go"); };',
+    dialect: "typescript"
+});
 let local = 20;
 const job = await processes.start({ definition: worker });
 const answer = await job;
@@ -833,7 +836,7 @@ async fn native_cut_without_wait(
     ];
     let requests = Arc::default();
     let code = typescript_block(if process {
-        r#"const worker = async () => { let local = 40; const results = await Promise.all([cut.body({id:"a"}), cut.body({id:"b"})]); return {results, local:local + 2}; }; const job = await processes.start({definition:worker}); finish(await job);"#
+        r#"const worker = await processes.create({ source: 'const worker = async () => { let local = 40; const results = await Promise.all([cut.body({id:"a"}), cut.body({id:"b"})]); return {results, local:local + 2}; };', dialect: "typescript" }); const job = await processes.start({definition:worker}); finish(await job);"#
     } else {
         r#"let local = 40; const results = await Promise.all([cut.body({id:"a"}), cut.body({id:"b"})]); finish({results, local:local + 2});"#
     });

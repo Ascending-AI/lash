@@ -529,31 +529,27 @@ pub fn lashlang_process_aggregate_producer(
         through_task_proxy: true,
         limit_unit: ToolCallLimitUnit::Process,
         staged: Some(Arc::new(|plan, first| {
-            let body = format!(
-                "const group = async () => {{\n{}\n  return [first, rest];\n}};\n\
-                 const handle = await processes.start({{ definition: group }});\n\
-                 finish(await handle);",
+            let source = format!(
+                "const group = async () => {{\n{}\n  return [first, rest];\n}};",
                 staged_aggregates(plan, first, "Promise.all", "  ")
             );
             vec![model_response(vec![crate::LlmOutputPart::Text {
-                text: format!("<{RLM_CELL_DIALECT}>\n{body}\n</{RLM_CELL_DIALECT}>"),
+                text: process_aggregate_cell(&source),
                 response_meta: None,
             }])]
         })),
         holding: Some(Arc::new(|plan, first| {
             let first = first.min(plan.leaves.len());
-            let body = format!(
+            let source = format!(
                 "const group = async () => {{\n\
                  \x20 const first = await Promise.race([\n{}\n  ]);\n\
                  \x20 const rest = await Promise.all([\n{}\n  ]);\n\
-                 \x20 return [first, rest];\n}};\n\
-                 const handle = await processes.start({{ definition: group }});\n\
-                 finish(await handle);",
+                 \x20 return [first, rest];\n}};",
                 staged_calls(plan, 0..first, "    "),
                 staged_calls(plan, first..plan.leaves.len(), "    "),
             );
             vec![model_response(vec![crate::LlmOutputPart::Text {
-                text: format!("<{RLM_CELL_DIALECT}>\n{body}\n</{RLM_CELL_DIALECT}>"),
+                text: process_aggregate_cell(&source),
                 response_meta: None,
             }])]
         })),
@@ -567,13 +563,21 @@ pub fn lashlang_process_aggregate_producer(
 /// the turn on the process's terminal value, for the reason given on
 /// [`rlm_cell_script`].
 fn lashlang_process_aggregate_cell(plan: &ToolBatchPlan) -> String {
-    let body = format!(
-        "const group = async () => {{\n  return await Promise.all([\n{}\n  ]);\n}};\n\
-         const handle = await processes.start({{ definition: group }});\n\
-         finish(await handle);",
+    let source = format!(
+        "const group = async () => {{\n  return await Promise.all([\n{}\n  ]);\n}};",
         aggregate_calls(plan, "    ")
     );
-    format!("<{RLM_CELL_DIALECT}>\n{body}\n</{RLM_CELL_DIALECT}>")
+    process_aggregate_cell(&source)
+}
+
+fn process_aggregate_cell(source: &str) -> String {
+    let source = serde_json::Value::String(source.to_owned());
+    format!(
+        "<{RLM_CELL_DIALECT}>\n\
+         const group = await processes.create({{ source: {source}, dialect: \"{RLM_CELL_DIALECT}\" }});\n\
+         const handle = await processes.start({{ definition: group }});\n\
+         finish(await handle);\n</{RLM_CELL_DIALECT}>"
+    )
 }
 
 /// The observation log every assertion in this law reads.
