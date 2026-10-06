@@ -240,3 +240,77 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
     let interrupted_position = interrupted.protocol_position;
     assert_eq!(interrupted_position, RemoteProtocolPosition::OutputStarted);
 }
+
+/// The handover successor opens the same data dir while the drained host is
+/// still writing, so two `ActiveTurns` share one `active-turns.json`. Each
+/// write stages under its own name before the rename: a shared staging name
+/// let a peer's rename move the file out from under this write and panic the
+/// persisting thread (ENOENT on the staged path).
+#[test]
+fn two_generations_persist_active_turns_to_one_shared_file() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    let data_dir = tempfile::tempdir().expect("shared active turns tempdir");
+    let path = data_dir.path().join("active-turns.json");
+    let drained = ActiveTurns::persistent(path.clone()).expect("draining active turns");
+    let successor = ActiveTurns::persistent(path.clone()).expect("successor active turns");
+    // A two-party rendezvous per write so the peers' staging and renames
+    // overlap; a panicking writer flags `failed` so its peer stops rather than
+    // wait on a rendezvous that never comes.
+    let failed = Arc::new(AtomicBool::new(false));
+    let epochs = Arc::new([AtomicUsize::new(0), AtomicUsize::new(0)]);
+    let writes = 200;
+    let mut threads = Vec::new();
+    for (side, (handle, prefix)) in [(drained, "drained"), (successor, "successor")]
+        .into_iter()
+        .enumerate()
+    {
+        let failed = Arc::clone(&failed);
+        let epochs = Arc::clone(&epochs);
+        threads.push(std::thread::spawn(move || {
+            let wrote = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                for index in 0..writes {
+                    epochs[side].store(index + 1, Ordering::Relaxed);
+                    while epochs[1 - side].load(Ordering::Relaxed) < index + 1
+                        && !failed.load(Ordering::Relaxed)
+                    {
+                        std::thread::yield_now();
+                    }
+                    if failed.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    handle.insert(
+                        SessionId::fixture(format!("{prefix}-session-{index}")),
+                        TurnId::fixture(format!("{prefix}-turn-{index}")),
+                        WorkbenchTurnKind::User,
+                    );
+                }
+            }));
+            if wrote.is_err() {
+                failed.store(true, Ordering::Relaxed);
+            }
+        }));
+    }
+    for thread in threads {
+        thread.join().expect("writer thread joined");
+    }
+    assert!(
+        !failed.load(Ordering::Relaxed),
+        "a shared-data-dir write panicked"
+    );
+    let bytes = std::fs::read(&path).expect("read shared active turns");
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .expect("a shared active-turns file stays decodable");
+    assert!(
+        data_dir
+            .path()
+            .read_dir()
+            .expect("list shared data dir")
+            .all(|entry| !entry
+                .expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")),
+        "a completed write leaves no staged files"
+    );
+}

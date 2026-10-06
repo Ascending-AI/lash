@@ -942,17 +942,7 @@ impl SessionEventRegistry {
             histories,
         })
         .expect("serialize product event log");
-        let temporary = path.with_extension("json.tmp");
-        std::fs::write(&temporary, bytes).unwrap_or_else(|err| {
-            panic!("write product event log `{}`: {err}", temporary.display())
-        });
-        std::fs::rename(&temporary, path).unwrap_or_else(|err| {
-            panic!(
-                "replace product event log `{}` from `{}`: {err}",
-                path.display(),
-                temporary.display()
-            )
-        });
+        crate::replace_file(path, &bytes, "product event log");
     }
 
     #[cfg(test)]

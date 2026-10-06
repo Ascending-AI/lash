@@ -234,10 +234,18 @@ class ReceiptLaws(unittest.TestCase):
         self.assertIs(conclusion["certified"], False)
         self.assertEqual(conclusion["reason"], result["reason"])
         self.assertTrue((self.root / "receipt.json").exists())
-        held = e2e.plan(self.manifest, "b" * 64, "full", ["S28"], SOURCE)
+        # Held-row refusal is independent of which catalogue rows are held:
+        # mark the selected scenario held on a copy of the manifest.
+        manifest = copy.deepcopy(self.manifest)
+        for scenario in manifest["scenarios"]:
+            if scenario["id"] == "S28":
+                for row in scenario["cases"]:
+                    row.update(state="held", hold_reason="synthetic missing registration",
+                               registration=None)
+        held = e2e.plan(manifest, "b" * 64, "full", ["S28"], SOURCE)
         with self.assertRaisesRegex(ValueError, "unavailable registrations"), \
              patch.object(e2e.subprocess, "call") as command:
-            e2e.run_cases(held, self.root, self.manifest)
+            e2e.run_cases(held, self.root, manifest)
             command.assert_not_called()
 
     def test_r8_runner_splits_a_case_receipt_into_reconcilable_role_files_and_names_missing_evidence(self):

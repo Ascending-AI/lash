@@ -327,33 +327,15 @@ impl WorkbenchSessions {
         let entries = roster.values().cloned().collect::<Vec<_>>();
         let encoded =
             serde_json::to_vec_pretty(&entries).expect("workbench session roster serializes");
-        let temporary = path.with_extension("json.tmp");
-        std::fs::write(&temporary, encoded)
-            .unwrap_or_else(|err| panic!("write session roster `{}`: {err}", temporary.display()));
-        std::fs::rename(&temporary, path).unwrap_or_else(|err| {
-            panic!(
-                "replace session roster `{}` from `{}`: {err}",
-                path.display(),
-                temporary.display()
-            )
-        });
+        crate::replace_file(path, &encoded, "session roster");
     }
 
     pub(crate) fn persist(&self) {
         let Some(path) = self.path.as_deref() else {
             return;
         };
-        let temporary = path.with_extension("tmp");
         let current = self.current();
-        std::fs::write(&temporary, current.as_str())
-            .unwrap_or_else(|err| panic!("write session id `{}`: {err}", temporary.display()));
-        std::fs::rename(&temporary, path).unwrap_or_else(|err| {
-            panic!(
-                "replace session id `{}` from `{}`: {err}",
-                path.display(),
-                temporary.display()
-            )
-        });
+        crate::replace_file(path, current.as_str().as_bytes(), "session id");
     }
 }
 

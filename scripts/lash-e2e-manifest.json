@@ -1474,9 +1474,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "PostgreSQL live proof pending the e2e drain route (FIG-5055); registrations and oracles in FIG-5047",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s11_inline_loser_postgresql"
+          }
         },
         {
           "variant": "deferred",
@@ -1501,9 +1504,12 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "PostgreSQL live proof pending the e2e drain route (FIG-5055); registrations and oracles in FIG-5047",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "cancel::s11_deferred_loser_postgresql"
+          }
         },
         {
           "variant": "inline",

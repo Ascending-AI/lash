@@ -531,16 +531,7 @@ impl ActiveTurns {
             kinds,
         })
         .expect("serialize active turns");
-        let temporary = path.with_extension("json.tmp");
-        std::fs::write(&temporary, bytes)
-            .unwrap_or_else(|err| panic!("write active turns `{}`: {err}", temporary.display()));
-        std::fs::rename(&temporary, path).unwrap_or_else(|err| {
-            panic!(
-                "replace active turns `{}` from `{}`: {err}",
-                path.display(),
-                temporary.display()
-            )
-        });
+        crate::replace_file(path, &bytes, "active turns");
     }
 }
 
