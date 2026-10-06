@@ -199,9 +199,8 @@ pub mod turn;
 pub mod usage;
 
 pub use crate::admin::{
-    AdvancedToolAdmin, Completions, CoreTriggerAdmin, PendingToolStateChange, PluginOperations,
-    SessionCommandAdmin, SessionCommandWithdrawal, SessionToolState, SessionTriggerAdmin,
-    ToolAdmin,
+    AdvancedToolAdmin, Completions, CoreTriggerAdmin, PluginOperations, SessionCommandAdmin,
+    SessionCommandWithdrawal, SessionTriggerAdmin, ToolAdmin,
 };
 pub use crate::core::{
     DeploymentDrainStatus, GenerationDrainStatus, LashCore, LashCoreBuilder, SessionClosing,

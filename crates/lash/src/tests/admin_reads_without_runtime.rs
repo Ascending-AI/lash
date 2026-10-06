@@ -11,7 +11,7 @@ const SEED: u64 = 0x5139_ad01;
 
 /// What the durable admin reads answered.
 struct AdminReads {
-    tool_state: crate::SessionToolState,
+    tool_state: crate::admin::SessionToolState,
     manifests: Vec<ToolManifest>,
     execution: Option<lash_core::plugin::HydratedExecutionState>,
     observed_tool_state: Option<ToolState>,
