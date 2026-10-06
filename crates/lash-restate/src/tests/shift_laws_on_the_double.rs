@@ -373,11 +373,13 @@ lash_conformance::queued_input_runs_tests!({
 // leg's mode. A shift that applies an administrative compaction and then runs
 // the input queued behind it replays the compaction after the input's run
 // sealed a newer shift epoch; the laws hold only if that replay never
-// presents the command run's superseded fence again.
+// presents the command run's superseded fence again. The host plugin task
+// laws count the task's code runs, which here are one per delivery of its
+// operation run, so this tier does not register them.
 mod frame_open_under_replay {
     use super::{HarnessServer, LiveConformanceHarness};
 
-    lash_conformance::frame_open_redrive_tests!({
+    lash_conformance::frame_open_redrive_tests!(every_await_replays; {
         let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
             unreachable!("in_process names the server double");
         };

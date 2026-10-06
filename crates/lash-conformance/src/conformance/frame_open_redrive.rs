@@ -1752,9 +1752,17 @@ macro_rules! frame_open_execution_state_tests {
 /// hands back a guard, a prefix, the tier's
 /// effect host, the store set under test and its
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
+///
+/// A tier where every await suspends and every resumption replays the
+/// handler's journal from its start names itself `every_await_replays;`
+/// ahead of its fixture, and registers every law but the host plugin task
+/// laws. A host task runs in its own operation run, whose invocation
+/// journals its work (FIG-4888), so its code runs again on every delivery of
+/// that run, and those laws count the task's code runs against a run
+/// delivered once unless a crash ends it.
 #[macro_export]
 macro_rules! frame_open_redrive_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
+    (every_await_replays; $(#[$attr:meta])* $fixture:block) => {
         $crate::frame_open_protocol_redrive_tests!($(#[$attr])* {
             let (guard, prefix, host, stores, runner) = $fixture;
             (
@@ -1828,8 +1836,7 @@ macro_rules! frame_open_redrive_tests {
             an_over_budget_command_settles_failed_at_its_bare_commits_size,
             an_over_budget_append_on_an_uncommitted_head_leaves_nothing_of_it,
             a_protocol_refused_append_on_an_uncommitted_head_leaves_nothing_of_it,
-            an_ancestor_refused_append_on_an_uncommitted_head_leaves_nothing_of_it,
-            host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_settlement);
+            an_ancestor_refused_append_on_an_uncommitted_head_leaves_nothing_of_it);
         $crate::frame_open_redrive_tests!(@commanded [$(#[$attr])*] $fixture;
             (host_append_waits_for_the_bound_turn,
                 host_append_waits_for_the_bound_turn, None),
@@ -1839,6 +1846,20 @@ macro_rules! frame_open_redrive_tests {
                 host_append_waits_for_the_bound_turn, Some(BeforeCommit)),
             (host_append_crashed_after_its_commit_applies_once,
                 host_append_waits_for_the_bound_turn, Some(AfterCommit)),
+            (host_frame_open_applies_at_the_boundary,
+                host_frame_open_applies_at_the_boundary, None),
+            (host_frame_open_crashed_after_its_lane_read_opens_once,
+                host_frame_open_applies_at_the_boundary, Some(AfterLaneRead)),
+            (host_frame_open_crashed_before_its_commit_opens_once,
+                host_frame_open_applies_at_the_boundary, Some(BeforeCommit)),
+            (host_frame_open_crashed_after_its_commit_opens_once,
+                host_frame_open_applies_at_the_boundary, Some(AfterCommit)));
+    };
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::frame_open_redrive_tests!(every_await_replays; $(#[$attr])* $fixture);
+        $crate::frame_open_redrive_tests!(@once [$(#[$attr])*] $fixture;
+            host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_settlement);
+        $crate::frame_open_redrive_tests!(@commanded [$(#[$attr])*] $fixture;
             (host_plugin_command_applies_at_the_boundary,
                 host_plugin_command_applies_at_the_boundary, None),
             (host_plugin_command_crashed_after_its_lane_read_applies_once,
@@ -1847,14 +1868,6 @@ macro_rules! frame_open_redrive_tests {
                 host_plugin_command_applies_at_the_boundary, Some(BeforeCommit)),
             (host_plugin_command_crashed_after_its_commit_applies_once,
                 host_plugin_command_applies_at_the_boundary, Some(AfterCommit)),
-            (host_frame_open_applies_at_the_boundary,
-                host_frame_open_applies_at_the_boundary, None),
-            (host_frame_open_crashed_after_its_lane_read_opens_once,
-                host_frame_open_applies_at_the_boundary, Some(AfterLaneRead)),
-            (host_frame_open_crashed_before_its_commit_opens_once,
-                host_frame_open_applies_at_the_boundary, Some(BeforeCommit)),
-            (host_frame_open_crashed_after_its_commit_opens_once,
-                host_frame_open_applies_at_the_boundary, Some(AfterCommit)),
             (host_cancel_settles_an_admitted_plugin_task_cancelled,
                 host_cancel_settles_an_admitted_plugin_task_cancelled, None),
             (host_cancelled_plugin_task_crashed_after_its_lane_read_settles_once,
