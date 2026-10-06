@@ -1796,9 +1796,11 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         .await?;
     let calls_before = provider_calls.load(Ordering::SeqCst);
 
+    // The command's run publishes its plugin transition first (FIG-4857);
+    // the compaction settles in the commit after it.
     script
         .on(StoreOp::commit_runtime_state)
-        .nth(script.calls(StoreOp::commit_runtime_state) + 1)
+        .nth(script.calls(StoreOp::commit_runtime_state) + 2)
         .before()
         .fail(|| StoreError::Backend("injected compaction settlement commit failure".to_string()));
     assert!(

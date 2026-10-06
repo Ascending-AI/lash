@@ -557,6 +557,12 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         .map(|encoded| {
             serde_json::from_str::<lash_core::OperationId>(&encoded)
                 .expect("decode commit operation")
+        })
+        // The run also publishes its plugin transition under its own scope
+        // (FIG-4857); the frame turns' commits are the rest.
+        .filter(|operation| !operation.key.starts_with("plugin-transition"))
+        .map(|operation| {
+            operation
                 .scope
                 .turn_id()
                 .expect("turn-scoped commit")

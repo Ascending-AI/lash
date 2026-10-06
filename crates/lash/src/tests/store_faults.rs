@@ -219,11 +219,9 @@ async fn a_send_to_a_session_whose_plugin_refuses_to_build_is_answered_with_the_
     crate::tests::create_catalog_session(&core, ID).await?;
     refuse.store(true, Ordering::SeqCst);
     let error = shift_refusal(ID, refusal_of(&core, &double, ID).await);
-    assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::PluginSessionManager,
-        "{error:?}"
-    );
+    // The run's recorded plugin transition builds the plugins (FIG-4857),
+    // so the factory's refusal is answered as the plugin's own.
+    assert_eq!(error.code, lash_core::RuntimeErrorCode::Plugin, "{error:?}");
     assert!(
         error.message.contains("the plugin refuses to build"),
         "the refusal names the plugin's own: {error:?}"

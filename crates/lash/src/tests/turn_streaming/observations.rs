@@ -1096,13 +1096,15 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
         "the durable turn must still commit"
     );
 
+    // The run publishes its plugin transition at revision 1 and commits the
+    // turn at revision 2 (FIG-4857).
     let SessionResume::Gap { observation, gap } =
         session.observe().resume_from_cursor(&before.cursor).await?
     else {
         panic!("a pre-commit cursor without replacement evidence must not replay cleanly");
     };
     assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Unavailable);
-    assert_eq!(gap.latest_revision, lash_core::SessionRevision::new(1));
+    assert_eq!(gap.latest_revision, lash_core::SessionRevision::new(2));
     assert_eq!(gap.requested_cursor, before.cursor);
     assert_eq!(gap.latest_cursor, observation.cursor);
     assert_ne!(
@@ -1118,7 +1120,7 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
         panic!("a pre-commit cursor without replacement evidence must not subscribe cleanly");
     };
     assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Unavailable);
-    assert_eq!(gap.latest_revision, lash_core::SessionRevision::new(1));
+    assert_eq!(gap.latest_revision, lash_core::SessionRevision::new(2));
     assert_eq!(gap.requested_cursor, before.cursor);
     assert_eq!(gap.latest_cursor, observation.cursor);
     assert_ne!(
@@ -1302,7 +1304,9 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
             )
         })
         .expect("durable transition emitted Committed");
-    assert_eq!(committed.revision(), lash_core::SessionRevision::new(1));
+    // The run publishes its plugin transition at revision 1 and commits the
+    // turn at revision 2 (FIG-4857).
+    assert_eq!(committed.revision(), lash_core::SessionRevision::new(2));
     let lash_core::SessionObservationEventPayload::Committed {
         base_revision,
         rows,
@@ -1334,7 +1338,7 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
     assert!(matches!(
         events.as_slice(),
         [event]
-            if event.revision() == lash_core::SessionRevision::new(1)
+            if event.revision() == lash_core::SessionRevision::new(2)
                 && matches!(
                     event.payload,
                     lash_core::SessionObservationEventPayload::ResidentChanged

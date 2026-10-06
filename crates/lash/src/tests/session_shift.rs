@@ -260,7 +260,7 @@ async fn a_run_retried_on_a_held_runtime_starts_from_the_durable_session() -> Re
     let fixture = HeldShiftFixture::with_pending("shift-held-retry", RUNS).await?;
     fixture
         .store
-        .fail_next_runtime_commit(lash_core::StoreError::Backend(
+        .fail_next_turn_terminal_commit(lash_core::StoreError::Backend(
             "the first run's commit meets a live fault".to_string(),
         ));
 
@@ -268,8 +268,11 @@ async fn a_run_retried_on_a_held_runtime_starts_from_the_durable_session() -> Re
 
     assert_eq!(outcome.stop, lash_core::engine::ShiftStop::Idle);
     assert_eq!(outcome.ran.len(), RUNS, "the retried run and the next ran");
+    // Each run publishes its plugin transition, then commits its turn
+    // (FIG-4857); the fault refused the first run's turn commit once.
+    let commits = fixture.store.runtime_commits();
     assert!(
-        fixture.store.commit_write_transaction_count() > RUNS,
+        fixture.store.commit_write_transaction_count() > commits.len(),
         "the first run's attempt met the fault"
     );
     assert!(
@@ -280,9 +283,19 @@ async fn a_run_retried_on_a_held_runtime_starts_from_the_durable_session() -> Re
         "every run committed: {outcome:?}"
     );
     assert_eq!(
-        *fixture.store.runtime_commit_count.lock_recover(),
+        commits
+            .iter()
+            .filter(|commit| commit.outcome.is_some())
+            .count(),
         RUNS,
-        "each run committed once"
+        "each run committed its turn once: {:?}",
+        commits
+            .iter()
+            .map(|commit| (
+                commit.turn_commit.operation.key.clone(),
+                commit.outcome.is_some()
+            ))
+            .collect::<Vec<_>>()
     );
     let session = fixture
         .core
