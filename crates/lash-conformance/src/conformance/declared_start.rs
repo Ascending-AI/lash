@@ -847,6 +847,11 @@ impl World {
             .chain([Arc::clone(&worker_facts) as Arc<dyn crate::facade_support::PluginFactory>])
             .collect::<Vec<_>>();
         let factories = factories.into_iter().chain([facts]).collect::<Vec<_>>();
+        // A probe's child is a held engine process: the fixture plugin's
+        // engines run on this host, the parent's and the worker's alike.
+        let host = crate::facade_support::PluginHost::new(factories.clone())
+            .install_process_engine_contributions(host, true)
+            .expect("install the fixture's process-engine contributions");
         let faults = crate::testing::ProcessRegistryFaults::new(tier.stores.process_registry());
         // One watch, two consumers: the runtime's process port and the worker
         // observe the same registry handle.

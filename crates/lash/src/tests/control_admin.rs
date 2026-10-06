@@ -620,6 +620,25 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         .await?;
     // The engine answers the cancel request with the process's terminal.
     core.processes().await_output(&process_id).await?;
+    // The registry wakes the terminal's waiters before its event sinks run,
+    // so the lifecycle feed may publish `Cancelled` after `await_output`
+    // returns: wait for it on the session feed before reading the replay.
+    let mut feed = session.observe().subscribe_and_recover(cursor.clone());
+    loop {
+        let item = futures_util::StreamExt::next(&mut feed)
+            .await
+            .expect("the session feed stays open")?;
+        if let crate::observe::SessionObservationStreamItem::Event(event) = item
+            && let lash_core::SessionObservationEventPayload::ProcessChanged {
+                kind: SessionProcessEventKind::Cancelled { .. },
+                process_ids,
+            } = &event.payload
+            && process_ids.as_slice() == std::slice::from_ref(&process_id)
+        {
+            break;
+        }
+    }
+    drop(feed);
 
     let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor).await?
     else {
