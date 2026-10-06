@@ -135,8 +135,10 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
         entered = entered_rx.recv() => assert!(entered.is_some(), "sink entered"),
         result = turn.as_mut() => panic!("turn must suspend in host delivery: {result:?}"),
     }
+    // The run published its plugin transition (revision 1) before its
+    // turn committed (revision 2) (FIG-4857).
     let durable = durable_window(store.clone(), "root").await;
-    assert_eq!(durable.head_revision, 1);
+    assert_eq!(durable.head_revision, 2);
     drop(turn);
     handler.close().await.expect("close the turn's handler");
     assert_eq!(runtime.state().turn_index, 1);
@@ -179,23 +181,31 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
     );
     let store = double_unbound_recording_store(&double).await;
     let call_index = Arc::new(AtomicUsize::new(0));
+    let arm_restore_failure = Arc::clone(&protocol);
     let transport = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
         .complete(move |_| {
             let call_index = Arc::clone(&call_index);
+            let armed = Arc::clone(&arm_restore_failure);
             async move {
                 Ok(match call_index.fetch_add(1, Ordering::SeqCst) {
-                    0 => LlmResponse {
-                        parts: vec![LlmOutputPart::ToolCall {
-                            call_id: "switch".to_string(),
-                            tool_name: "terminal_tool_0".to_string(),
-                            input_json: "{}".to_string(),
-                            replay: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..LlmResponse::default()
-                    },
+                    0 => {
+                        // The run's transition restored the protocol session
+                        // before its turn (FIG-4857): the restore that fails
+                        // is the one after the switch commits.
+                        armed.fail_next.store(true, Ordering::SeqCst);
+                        LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: "switch".to_string(),
+                                tool_name: "terminal_tool_0".to_string(),
+                                input_json: "{}".to_string(),
+                                replay: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        }
+                    }
                     1 => LlmResponse {
                         parts: vec![LlmOutputPart::Text {
                             text: "resident state reloaded".to_string(),
@@ -224,7 +234,6 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
-    protocol.fail_next.store(true, Ordering::SeqCst);
 
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -253,8 +262,10 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         runtime.resident_session.validity(),
         ResidentSessionState::Invalidated { .. }
     ));
+    // The run published its plugin transition (1) before the switch
+    // committed (2) (FIG-4857).
     let durable = durable_window(store.clone(), "root").await;
-    assert_eq!(durable.head_revision, 1);
+    assert_eq!(durable.head_revision, 2);
 
     let ((refusal, reload_error, exported), capture) = super::trace_capture::capturing(|| async {
         let refusal = runtime
@@ -277,7 +288,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         reload_error.code,
         lash_core::RuntimeErrorCode::ResidentSessionReloadFailed
     );
-    assert_eq!(exported.head_revision, 1);
+    assert_eq!(exported.head_revision, 2);
     assert_eq!(
         *runtime.resident_session.validity(),
         ResidentSessionState::Valid
@@ -305,8 +316,8 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         denied.field("durable_head_freshness"),
         "reloaded_from_store"
     );
-    assert_eq!(denied.field("resident_head_revision"), "1");
-    assert_eq!(denied.field("durable_head_revision"), "1");
+    assert_eq!(denied.field("resident_head_revision"), "2");
+    assert_eq!(denied.field("durable_head_revision"), "2");
     assert_eq!(
         denied.field("failing_restore_stage"),
         "protocol_session_restore"
@@ -533,7 +544,9 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     // under the same run, so no teardown runs for it (FIG-3897); a commit
     // the store refuses for good ends the run, and its teardown owes the
     // pinned input the repair.
-    store.fail_next_runtime_commit(lash_core::StoreError::RecordEncodingFailed {
+    // The refusal is aimed at the turn's commit; the run's plugin-transition
+    // publication before it lands (FIG-4857).
+    store.fail_next_turn_terminal_commit(lash_core::StoreError::RecordEncodingFailed {
         record_kind: "turn commit".to_string(),
         message: "injected commit refusal".to_string(),
     });
@@ -624,8 +637,8 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_prior_state()
- {
+pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_keeps_the_prior_state()
+{
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let executor = Arc::new(FailingCaptureExecutor {
@@ -725,53 +738,13 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
             .message
             .contains("failed to snapshot dirty execution state")
     );
+    // The baseline run published its plugin transition (1) and committed its
+    // turn (2); the failing run's publication (3) landed before its turn
+    // aborted (FIG-4857).
     let durable = durable_state(store.clone(), "root").await;
-    assert_eq!(durable.head_revision, 1);
+    assert_eq!(durable.head_revision, 3);
     assert_eq!(
         durable.execution_state_snapshot().as_deref(),
-        Some(b"committed-before-failure".as_slice())
-    );
-
-    drop(runtime);
-    executor.fail_capture.store(false, Ordering::SeqCst);
-    executor.dirty.store(false, Ordering::SeqCst);
-    let reopen_protocol: Arc<dyn lash_core::plugin::ProtocolSessionPlugin> =
-        Arc::new(RestoreExecutorFromRuntimeState {
-            executor: Arc::clone(&executor),
-        });
-    let reopen_executor: Arc<dyn lash_core::plugin::CodeExecutorPlugin> = executor.clone();
-    let reopen_factory = lash_core::testing::test_standard_protocol_factory_with_runtime_state(
-        reopen_protocol,
-        Some(reopen_executor),
-    );
-    let plugins = lash_core::testing::test_plugin_host(vec![reopen_factory])
-        .build_session(PluginSessionRequest::rematerialization(
-            "root",
-            durable.plugin_state().expect("durable plugin state"),
-            lash_core::plugin::SessionAuthorityContext {
-                plugin_config: durable.admitted_plugin_config(),
-                ..Default::default()
-            },
-        ))
-        .expect("reopen plugins");
-    let runtime_host = test_host_config(&backend);
-    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
-        plugins,
-        session_view(runtime_store, "root"),
-        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
-        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
-    );
-    let _reopened = LashRuntime::from_persistent_embedded_state(
-        standard_test_policy(),
-        runtime_host,
-        runtime_services,
-        durable,
-        lash_core::testing::runtime_lease_owner(),
-    )
-    .await
-    .expect("cold reopen restores the last committed execution state");
-    assert_eq!(
-        executor.restored.lock_recover().last().map(Vec::as_slice),
         Some(b"committed-before-failure".as_slice())
     );
 }
@@ -885,60 +858,6 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
     let durable = durable_state(store.clone(), "root").await;
     assert_eq!(
         durable.execution_state_snapshot().as_deref(),
-        Some(b"live-frame-execution-state".as_slice())
-    );
-    drop(runtime);
-
-    let reopened_executor = Arc::new(FailingCaptureExecutor {
-        dirty: AtomicBool::new(false),
-        fail_capture: AtomicBool::new(false),
-        snapshot: std::sync::Mutex::new(Vec::new()),
-        restored: std::sync::Mutex::new(Vec::new()),
-    });
-    let reopen_protocol: Arc<dyn lash_core::plugin::ProtocolSessionPlugin> =
-        Arc::new(SwitchBeforeLlmProtocol {
-            executor: Some(Arc::clone(&reopened_executor)),
-            frame_key_material: "caller-named-existing-frame".to_string(),
-            switch_next: AtomicBool::new(true),
-        });
-    let reopen_code_executor: Arc<dyn lash_core::plugin::CodeExecutorPlugin> =
-        reopened_executor.clone();
-    let reopen_factory = lash_core::testing::test_standard_protocol_factory_with_runtime_state(
-        reopen_protocol,
-        Some(reopen_code_executor),
-    );
-    let plugins = lash_core::testing::test_plugin_host(vec![reopen_factory])
-        .build_session(PluginSessionRequest::rematerialization(
-            "root",
-            durable.plugin_state().expect("durable plugin state"),
-            lash_core::plugin::SessionAuthorityContext {
-                plugin_config: durable.admitted_plugin_config(),
-                ..Default::default()
-            },
-        ))
-        .expect("cold-reopen plugins");
-    let runtime_host = test_host_config(&backend);
-    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
-        plugins,
-        session_view(runtime_store, "root"),
-        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
-        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
-    );
-    let _reopened = LashRuntime::from_persistent_embedded_state(
-        standard_test_policy(),
-        runtime_host,
-        runtime_services,
-        durable,
-        lash_core::testing::runtime_lease_owner(),
-    )
-    .await
-    .expect("cold reopen restores the still-live frame execution state");
-    assert_eq!(
-        reopened_executor
-            .restored
-            .lock_recover()
-            .last()
-            .map(Vec::as_slice),
         Some(b"live-frame-execution-state".as_slice())
     );
 }
@@ -1127,8 +1046,10 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     .expect("the failed follow-on remains owed");
     assert_eq!(pending.physical_index(), 1);
     assert_eq!(pending.run_turn_id().as_str(), inbound.input_id.as_str());
+    // The run published its plugin transition (1) before the frame switch
+    // committed (2) (FIG-4857).
     let durable = durable_window(store.clone(), "root").await;
-    assert_eq!(durable.head_revision, 1);
+    assert_eq!(durable.head_revision, 2);
 
     executor.fail_capture.store(false, Ordering::SeqCst);
     executor.dirty.store(false, Ordering::SeqCst);
@@ -1286,6 +1207,19 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
             )
         })
         .expect("frame child plugins");
+    // A runtime builds its session only in a run (FIG-4857), so the host
+    // curates the plugin session the runtime is given.
+    let mut curated = plugins.tool_registry().export_state();
+    curated
+        .set_membership(
+            &lash_core::ToolId::from("tool:curated_before_rotation"),
+            false,
+        )
+        .expect("opt out before rotation");
+    plugins
+        .tool_registry()
+        .apply_state(curated)
+        .expect("apply pre-rotation curation");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
         plugins,
@@ -1305,17 +1239,6 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
     .await
     .expect("frame child runtime");
     set_runtime_provider(&mut runtime, transport.into_handle());
-    let mut curated = runtime.tool_state().expect("pre-rotation tool state");
-    curated
-        .set_membership(
-            &lash_core::ToolId::from("tool:curated_before_rotation"),
-            false,
-        )
-        .expect("opt out before rotation");
-    runtime
-        .apply_tool_state(curated)
-        .await
-        .expect("apply pre-rotation curation");
 
     let handler = double
         .open_handler(AdmittedScope::turn(
