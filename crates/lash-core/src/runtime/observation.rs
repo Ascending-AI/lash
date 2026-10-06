@@ -105,7 +105,9 @@ impl RuntimeObservation {
                     None
                 }
             },
-            (None, _) => None,
+            // No registry is built here (FIG-4857): the session's tool state
+            // is what the adopted head recorded (FIG-5139).
+            (None, _) => runtime.state.tool_state_snapshot().cloned(),
         };
         let plugin_services = match (runtime.session.as_ref(), runtime.runtime_session_services()) {
             (Some(session), Ok(services)) => Some(ObservationPluginServices {
@@ -186,9 +188,9 @@ impl RuntimeObservation {
         session_id: Option<SessionId>,
     ) -> Result<(String, serde_json::Value), crate::PluginOperationInvokeError> {
         let Some(services) = self.plugin_services.as_ref() else {
-            return Err(crate::PluginOperationInvokeError::Unknown(
-                "runtime plugin query services not available".to_string(),
-            ));
+            return Err(crate::PluginOperationInvokeError::NotPublished {
+                session_id: self.session_id.clone(),
+            });
         };
         services
             .session

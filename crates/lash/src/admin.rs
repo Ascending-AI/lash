@@ -1,9 +1,9 @@
 use crate::support::{
     Arc, CancellationToken, EmbedError, InputItem, LashCore, LashRuntime, PluginMessage, Result,
     RuntimeHandle, RuntimeSessionState, ScopedEffectController, SessionError, SessionStateService,
-    ToolManifest, ToolRestoreReport, ToolSourceHandle, ToolState, TurnInput,
+    ToolManifest, ToolRestoreReport, ToolState, TurnInput,
 };
-use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
+use lash_core::facade_support::ToolStateFacadeOps;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -496,16 +496,6 @@ impl SessionAdmin {
         }
     }
 
-    async fn refresh_tool_catalog(&self) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .refresh_session_tool_catalog()
-                .await
-                .map_err(Into::into)
-        })
-        .await
-    }
-
     async fn submit_session_command(
         &self,
         command: lash_core::facade_support::SessionCommand,
@@ -740,39 +730,32 @@ impl SessionAdmin {
         Ok(summaries)
     }
 
+    /// The execution state the session's durable head recorded: its
+    /// protocol's root and leaves, read from the head's checkpoint without
+    /// building the session's capabilities (FIG-5139). `None` when the head
+    /// records none: the session never ran a code-executing turn, or its
+    /// current frame cleared it.
     async fn snapshot_execution_state(
         &self,
     ) -> Result<Option<lash_core::plugin::HydratedExecutionState>> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.snapshot_execution_state().await.map_err(Into::into)
-        })
+        let store = self.head_store()?;
+        let Some(loaded) = lash_core::store::load_session_window_state(
+            &store,
+            lash_core::store::WindowSelector::Current,
+        )
         .await
-    }
-
-    async fn restore_execution_state(
-        &self,
-        snapshot: &lash_core::plugin::HydratedExecutionState,
-    ) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .restore_execution_state(snapshot)
-                .await
-                .map_err(Into::into)
-        })
-        .await
+        .map_err(EmbedError::Store)?
+        else {
+            return Ok(None);
+        };
+        loaded
+            .state
+            .execution_state_hydration()
+            .map_err(EmbedError::Store)
     }
 
     async fn set_tool_membership(&self, tool_id: lash_core::ToolId, present: bool) -> Result<u64> {
         self.set_tool_membership_many(&[(tool_id, present)]).await
-    }
-
-    async fn remove_tool_source(&self, handle: &ToolSourceHandle) -> Result<u64> {
-        let tool_registry = self.tool_registry().await?;
-        tool_registry
-            .remove_source(handle)
-            .map_err(EmbedError::from)?;
-        self.refresh_tool_catalog().await?;
-        Ok(tool_registry.generation())
     }
 
     async fn inject_turn_input(
@@ -810,20 +793,6 @@ impl SessionAdmin {
                 .map_err(EmbedError::Runtime)?;
         }
         Ok(())
-    }
-
-    async fn tool_registry(&self) -> Result<Arc<lash_core::ToolRegistry>> {
-        self.runtime
-            .writer()
-            .lock()
-            .await
-            .plugin_session()
-            .map(|session| session.tool_registry())
-            .ok_or_else(|| {
-                EmbedError::Session(SessionError::Protocol(
-                    "tool registry is unavailable in this runtime session".to_string(),
-                ))
-            })
     }
 }
 
@@ -900,50 +869,6 @@ impl ToolAdmin {
     /// recorded; empty before a run recorded any.
     pub async fn active_manifests(&self) -> Result<Vec<ToolManifest>> {
         self.control.active_tool_manifests().await
-    }
-
-    /// Resolve the full contract currently available to this session.
-    ///
-    /// Catalog membership is enforced: a known tool that has been removed
-    /// from this session's catalog produces the same typed miss as an unknown
-    /// name.
-    pub async fn resolve_contract(
-        &self,
-        name: &str,
-    ) -> std::result::Result<Arc<lash_core::ToolContract>, crate::ToolCatalogMiss> {
-        let registry = self
-            .control
-            .tool_registry()
-            .await
-            .map_err(|_| crate::ToolCatalogMiss {
-                name: name.to_string(),
-            })?;
-        crate::tool_catalog::resolve_catalog_contract(&registry, name)
-    }
-
-    /// Contract resolution for turns composed after this method returns no
-    /// longer sees tools owned by `handle`. A turn already executing holds the
-    /// pre-removal registry snapshot and may continue resolving and executing
-    /// the removed provider to completion; removal is not revocation. The
-    /// core-altitude [`LashCore::tool_catalog`](crate::LashCore::tool_catalog)
-    /// view remains unchanged.
-    ///
-    /// Removal deletes the source's per-tool state, including membership
-    /// choices. Re-adding the provider later creates fresh default-member
-    /// entries rather than restoring the removed policy. The returned value is
-    /// the session [`ToolState`] generation after the removal refresh and is a
-    /// compare-and-swap baseline for [`AdvancedToolAdmin::apply_state`]. An
-    /// unknown or already-removed handle remains an error rather than becoming
-    /// a silent no-op.
-    ///
-    /// This is the host-facing route for session hosts that retire dynamically
-    /// discovered providers. It keeps the registry implementation behind the
-    /// facade as required by [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    /// The handle must have been issued by this same open session; handles are
-    /// not durable across session rebuilds, and cross-session misuse is
-    /// unchecked.
-    pub async fn remove_source(&self, handle: &ToolSourceHandle) -> Result<u64> {
-        self.control.remove_tool_source(handle).await
     }
 }
 
@@ -1179,22 +1104,21 @@ impl SessionStateAdmin {
         self.control.session_state_service().await
     }
 
-    /// Captures the current execution state for a durable process.
+    /// The protocol execution state (root and leaves) the session's durable
+    /// head recorded, read from the store without building the session's
+    /// capabilities (FIG-5139): the state the head's last commit captured,
+    /// on any process, whether or not a run built this handle's runtime.
+    /// `None` when the head records none, which includes a protocol without
+    /// a code executor and a frame switch that cleared it.
+    ///
+    /// Execution state moves only with the session's history: a host seeds
+    /// a fresh interpreter by opening a frame with a seed
+    /// ([`Self::open_agent_frame`]), never by writing a snapshot over the
+    /// head.
     pub async fn snapshot_execution(
         &self,
     ) -> Result<Option<lash_core::plugin::HydratedExecutionState>> {
         self.control.snapshot_execution_state().await
-    }
-
-    /// Restores durable process execution from a snapshot.
-    ///
-    /// A deferred executor receives the staged snapshot when the next recorded
-    /// runtime operation activates it. Observe live state after that operation.
-    pub async fn restore_execution(
-        &self,
-        snapshot: &lash_core::plugin::HydratedExecutionState,
-    ) -> Result<()> {
-        self.control.restore_execution_state(snapshot).await
     }
 
     /// Compacts the session's context: an administrative compaction that
@@ -1289,6 +1213,15 @@ impl PluginOperations {
             operation.run_id(),
         ))
     }
+
+    /// Run query `Op` over the plugin view a run or command published on
+    /// this process. A query is not an admin read: it runs plugin code, so it
+    /// needs the session's built plugins and never builds them (FIG-5139).
+    /// Where none is published here (the session never ran or commanded on
+    /// this process, as on a replica that has not served it) it is refused
+    /// with [`PluginOperationInvokeError::NotPublished`](lash_core::facade_support::PluginOperationInvokeError::NotPublished):
+    /// publish one with a session command, such as
+    /// [`SessionCommandAdmin::refresh_tool_catalog`], then retry.
     pub async fn query<Op: lash_core::facade_support::PluginQuery>(
         &self,
         args: Op::Args,
@@ -1300,6 +1233,7 @@ impl PluginOperations {
         decode_plugin_output::<Op>(output)
     }
 
+    /// [`Self::query`] by the query's registered name.
     pub async fn query_raw(
         &self,
         name: &str,

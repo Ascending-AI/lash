@@ -198,6 +198,41 @@ restore.
 Sources: `crates/lash/src/admin/tool_state.rs` and
 `crates/lash-core/src/runtime/tool_state_commands.rs`.
 
+### Every host admin read and write needs no activated runtime
+
+A handle's runtime builds capabilities only when a run on it publishes its
+plugin transition, and a run may never execute on it: the session never ran,
+another process ran it, or a cold reopen's recorded admission does not
+validate against this core. So no admin surface reads an activated runtime
+(FIG-5139):
+
+- Reads answer from the durable head or the session store: tool state and
+  active manifests (above); the execution snapshot
+  (`SessionStateAdmin::snapshot_execution`), the head checkpoint's
+  execution root and leaves, `None` when the head records none; the config
+  revision and catalog; trigger registrations; processes. The synchronous
+  `ObservableSession::tool_state` and `active_tool_manifests` answer the
+  adopted head's recorded tool state when no registry is built.
+- Writes are session commands applied at the next transition: appends,
+  frame opens, compaction, config transactions, tool-state changes, plugin
+  commands and tasks.
+- Removed, with no durable meaning: `SessionStateAdmin::restore_execution`
+  (execution state moves only with history; seed a fresh interpreter with
+  `open_agent_frame`), `ToolAdmin::resolve_contract` and `ToolCatalogMiss`
+  (a contract is the live provider's; the recorded manifest, with its
+  compact contract, is `ToolAdmin::active_manifests`), and
+  `ToolAdmin::remove_source` (a source handle is process-local; a session
+  drops a tool with `set_membership(id, false)`).
+
+A plugin query is not an admin read: it runs plugin code over the plugin
+view a run or command published on this process. Where none is published,
+including a replica that has not run or commanded the session, it is refused
+with the typed `PluginOperationInvokeError::NotPublished`; a host publishes
+one with a session command, such as a tool-catalog refresh, and retries.
+
+Sources: `crates/lash/src/admin.rs` and
+`crates/lash-core/src/runtime/observation.rs`.
+
 ### Only an open that executes hosts a run
 
 A session's runs execute on the most recent open a host holds in this

@@ -193,7 +193,6 @@ mod session_binding;
 mod support;
 #[cfg(test)]
 mod tests;
-mod tool_catalog;
 mod tool_intent_ingress;
 /// Turn builders, streams, activities, and output types.
 pub mod turn;
@@ -225,7 +224,6 @@ pub use crate::session::{
     LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,
     SessionParkRefused,
 };
-pub use crate::tool_catalog::ToolCatalogMiss;
 pub use crate::turn::{
     ReportSource, TurnActivityFanout, TurnOutput, TurnReport, message_role, message_text,
 };

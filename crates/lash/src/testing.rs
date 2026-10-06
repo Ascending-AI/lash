@@ -23,8 +23,8 @@ pub use lash_core::testing::run_tool_granted;
 pub use lash_core::testing::runtime_helpers::LayeredBackend;
 /// A standalone [`ToolRegistry`](crate::tools::ToolRegistry) plus the
 /// [`ToolSourceHandle`](crate::tools::ToolSourceHandle) `provider` registered
-/// under — the same live-source route `session.admin().tools().add_provider`
-/// takes, for host tests that exercise source routing without a live session.
+/// under — the live-source route a run's built registry takes, for host
+/// tests that exercise source routing without a live session.
 pub use lash_core::testing::tool_registry_with_live_provider;
 /// A recording or fault layer over any effect host: the host lends its inner
 /// host's scoped controllers with the layer in front of their seam operations,

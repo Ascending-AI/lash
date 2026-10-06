@@ -158,17 +158,12 @@ async fn typescript_is_served_on_the_production_session_path_and_survives_resume
         }) if number.as_u64() == Some(42)
     ));
 
-    let execution_snapshot = session
+    session
         .admin()
         .state()
         .snapshot_execution()
         .await?
         .expect("the completed RLM turn records an execution snapshot");
-    session
-        .admin()
-        .state()
-        .restore_execution(&execution_snapshot)
-        .await?;
 
     let parked = Box::pin(session.park()).await?;
     let resumed = Box::pin(core.resume(parked)).await?;

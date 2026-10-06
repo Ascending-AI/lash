@@ -157,29 +157,17 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
     .await?;
     session.refresh_background_graph().await?;
     assert!(session.admin().processes().list().await?.is_empty());
-    let err = session
-        .admin()
-        .state()
-        .snapshot_execution()
-        .await
-        .expect_err("standard protocol has no code executor to snapshot");
-    assert!(matches!(
-        err,
-        EmbedError::Session(SessionError::CodeExecutionUnavailable)
-    ));
-    let err = session
-        .admin()
-        .state()
-        .restore_execution(&lash_core::plugin::HydratedExecutionState {
-            root: vec![1, 2, 3].into(),
-            components: std::collections::BTreeMap::new(),
-        })
-        .await
-        .expect_err("standard protocol has no code executor to restore");
-    assert!(matches!(
-        err,
-        EmbedError::Session(SessionError::CodeExecutionUnavailable)
-    ));
+    // The execution snapshot is the durable head's (FIG-5139): a protocol
+    // with no code executor records none.
+    assert!(
+        session
+            .admin()
+            .state()
+            .snapshot_execution()
+            .await?
+            .is_none(),
+        "a standard-protocol head records no execution state"
+    );
     Ok(())
 }
 

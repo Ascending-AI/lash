@@ -22,50 +22,46 @@ pub(crate) fn catalog_lifecycle_provider() -> lash::provider::ProviderHandle {
 }
 
 pub(crate) async fn assert_tool_catalog_contract(session: &lash::LashSession) {
-    // A catalog is a session's: resolved from the session's recorded facts.
+    // A catalog is a session's: read from the session's recorded facts, the
+    // manifests its durable head recorded (FIG-5139).
     let session_tools = session.admin().tools();
-    let send_manifest = session_tools
-        .active_manifests()
+    let active_send = || async {
+        session_tools
+            .active_manifests()
+            .await
+            .expect("read active session manifests")
+            .into_iter()
+            .find(|manifest| manifest.name == "inbox__test__send")
+    };
+    let send_manifest = active_send()
         .await
-        .expect("read active session manifests")
-        .into_iter()
-        .find(|manifest| manifest.name == "inbox__test__send")
         .expect("the session catalog composes the workbench plugin's inbox tool");
-    let session_contract = session_tools
-        .resolve_contract("inbox__test__send")
-        .await
-        .expect("session catalog resolves an active tool");
-    assert_eq!(
-        session_contract.input_schema.canonical()["required"],
-        serde_json::json!(["title"]),
-        "the session catalog exposes the runtime input schema"
-    );
+    let compact = send_manifest
+        .compact_contract
+        .as_ref()
+        .expect("the recorded manifest carries its compact contract");
     assert!(
-        matches!(
-            session_contract.output_contract,
-            lash::tools::ToolOutputContract::Static
-        ),
-        "the session catalog exposes the runtime output contract"
+        compact.signature.contains("title"),
+        "the recorded contract names the runtime input schema: {}",
+        compact.signature
     );
-    let miss: lash::ToolCatalogMiss = session_tools
-        .resolve_contract("inbox__test__missing")
-        .await
-        .expect_err("unknown session tool has a typed miss");
-    assert_eq!(miss.name, "inbox__test__missing");
 
     session_tools
         .set_membership(send_manifest.id.clone(), false)
         .await
         .expect("remove send from this session catalog");
-    let gated = session_tools
-        .resolve_contract("inbox__test__send")
-        .await
-        .expect_err("non-member tool must resolve as a typed miss in this session");
-    assert_eq!(gated.name, "inbox__test__send");
+    assert!(
+        active_send().await.is_none(),
+        "a non-member tool leaves the session's recorded catalog"
+    );
     session_tools
         .set_membership(send_manifest.id, true)
         .await
         .expect("restore send to this session catalog");
+    assert!(
+        active_send().await.is_some(),
+        "membership restores the tool to the session's recorded catalog"
+    );
 }
 
 pub(crate) async fn assert_plugin_provider_execution(

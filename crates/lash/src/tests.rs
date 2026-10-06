@@ -1082,6 +1082,8 @@ pub(crate) use harness::{
 };
 mod absent_session_delete;
 #[cfg(feature = "rlm")]
+mod admin_reads_without_runtime;
+#[cfg(feature = "rlm")]
 mod adr_claims;
 mod agent_scenarios;
 #[cfg(feature = "rlm")]

@@ -49,10 +49,11 @@ pub struct PendingToolStateChange {
 }
 
 impl SessionAdmin {
-    fn tool_store(&self) -> Result<lash_core::store::SessionStore> {
+    /// The session's store, which every durable admin read answers from.
+    pub(super) fn head_store(&self) -> Result<lash_core::store::SessionStore> {
         self.runtime.observe().queue_store.clone().ok_or_else(|| {
             EmbedError::Session(SessionError::Protocol(
-                "tool administration reads a store-backed session".to_string(),
+                "a durable admin read needs a store-backed session".to_string(),
             ))
         })
     }
@@ -70,7 +71,7 @@ impl SessionAdmin {
     }
 
     pub(super) async fn tool_state(&self) -> Result<SessionToolState> {
-        let store = self.tool_store()?;
+        let store = self.head_store()?;
         // The lane is read before the head: a change that applies between
         // the two reads shows as pending and applied, never as neither.
         let mut open = store
@@ -124,7 +125,7 @@ impl SessionAdmin {
     }
 
     pub(super) async fn apply_tool_state(&self, state: ToolState) -> Result<u64> {
-        let store = self.tool_store()?;
+        let store = self.head_store()?;
         if let Some(recorded) = Self::recorded_tool_state(&store).await?
             && recorded.generation() != state.generation()
         {
@@ -156,7 +157,7 @@ impl SessionAdmin {
         &self,
         updates: &[(lash_core::ToolId, bool)],
     ) -> Result<u64> {
-        let store = self.tool_store()?;
+        let store = self.head_store()?;
         if let Some(mut recorded) = Self::recorded_tool_state(&store).await? {
             for (tool_id, member) in updates {
                 recorded
@@ -179,7 +180,7 @@ impl SessionAdmin {
     }
 
     pub(super) async fn active_tool_manifests(&self) -> Result<Vec<ToolManifest>> {
-        let store = self.tool_store()?;
+        let store = self.head_store()?;
         Ok(Self::recorded_tool_state(&store)
             .await?
             .map(|state| state.tool_manifests())

@@ -269,9 +269,9 @@ impl LashRuntime {
             .map_err(|err| PluginOperationInvokeError::Runtime(Box::new(err)))?;
         let manager = self.runtime_session_services()?;
         let Some(session) = self.session.as_ref() else {
-            return Err(PluginOperationInvokeError::Unknown(
-                "runtime session not available".to_string(),
-            ));
+            return Err(PluginOperationInvokeError::NotPublished {
+                session_id: self.state.session_id.clone(),
+            });
         };
         session
             .plugins()
