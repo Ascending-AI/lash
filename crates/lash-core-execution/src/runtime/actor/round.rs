@@ -509,6 +509,20 @@ impl RunFold {
         self.rounds.get(&run)
     }
 
+    /// The round admitted as `run`, rebuilt from its records: what an owner
+    /// that did not admit it presents through.
+    #[must_use]
+    pub fn admitted_round(&self, run: RunSeq) -> Option<AdmittedRound> {
+        let view = self.rounds.get(&run)?;
+        Some(AdmittedRound::admitted(
+            run,
+            view.members()
+                .iter()
+                .map(|member| view.execution(member))
+                .collect(),
+        ))
+    }
+
     /// Every admission's state, by run.
     pub fn rounds(&self) -> impl Iterator<Item = &RoundView> {
         self.rounds.values()

@@ -277,7 +277,8 @@ PACKAGE_DEPS = {
             "lashlang": "//crates/lashlang:lashlang",
             "serde_json": "//third-party/rust:p0313",
             "tempfile": "//third-party/rust:p0362",
-            "tokio": "//third-party/rust:p0371"
+            "tokio": "//third-party/rust:p0371",
+            "tokio_util": "//third-party/rust:p0377"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0015",

@@ -230,9 +230,10 @@ pub fn outcomes_to_inject(
             match recovery {
                 Recovery::Settled(outcome) => Some((*operation, outcome.clone())),
                 Recovery::Interrupt => Some((*operation, AttemptOutcome::Interrupted)),
-                Recovery::RerunAtOrdinal(_) | Recovery::RetryDue { .. } | Recovery::NotStarted => {
-                    None
-                }
+                Recovery::RerunAtOrdinal(_)
+                | Recovery::RetryDue { .. }
+                | Recovery::Vetoed(_)
+                | Recovery::NotStarted => None,
             }
         })
         .collect()

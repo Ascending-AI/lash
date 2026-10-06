@@ -211,7 +211,7 @@ impl RoundRunner {
         let mut finished: BTreeMap<AdmittedId, Result<MemberResult, Stop>> = BTreeMap::new();
         let mut batch_opened: Option<std::time::Instant> = None;
         let group = self.cx.backend().config().settings().group_commit;
-        let clock = self.cx.backend().clock();
+        let clock = Arc::clone(self.cx.clock());
         loop {
             let folded = fold(&rows, &self.policies)?;
             let view = folded
@@ -362,7 +362,7 @@ impl RoundRunner {
 
     /// The round's committed records, read once.
     async fn load(&self) -> Result<Vec<RunRecordRow>, RoundError> {
-        let rows = self.cx.backend().durable().run_records(&self.owner).await?;
+        let rows = self.cx.durable_reads()?.run_records(&self.owner).await?;
         Ok(rows.into_iter().filter(|row| row.run == self.run).collect())
     }
 
