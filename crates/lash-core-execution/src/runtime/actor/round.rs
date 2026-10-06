@@ -424,10 +424,6 @@ impl PolicyView {
 
 /// What an admitted execution's rows say to do on resume.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "the pinned recovery shape (S3): one per admitted execution, read once on resume"
-)]
 pub enum Recovery {
     /// It has its outcome.
     Settled(AttemptOutcome),

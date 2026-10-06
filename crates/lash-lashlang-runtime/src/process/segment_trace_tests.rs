@@ -659,26 +659,25 @@ fn a_segment_state_without_its_worker_recovery_ledger_is_a_typed_format_rejectio
         "the full envelope decodes"
     );
 
-    for field in ["worker_recovery"] {
-        let mut partial = envelope.clone();
-        partial
-            .as_object_mut()
-            .expect("the envelope is an object")
-            .remove(field)
-            .expect("the envelope carries the ledger");
-        let partial = serde_json::to_vec(&partial).expect("encode the partial envelope");
-        let Err(error) = decode_lashlang_segment_state(&partial) else {
-            panic!("an envelope without {field} must not decode");
-        };
-        assert!(
-            matches!(
-                &error,
-                LashlangSegmentStateError::FormatMismatch { details }
-                    if details.contains(&format!("missing field `{field}`"))
-            ),
-            "unexpected error: {error}"
-        );
-    }
+    let field = "worker_recovery";
+    let mut partial = envelope.clone();
+    partial
+        .as_object_mut()
+        .expect("the envelope is an object")
+        .remove(field)
+        .expect("the envelope carries the ledger");
+    let partial = serde_json::to_vec(&partial).expect("encode the partial envelope");
+    let Err(error) = decode_lashlang_segment_state(&partial) else {
+        panic!("an envelope without {field} must not decode");
+    };
+    assert!(
+        matches!(
+            &error,
+            LashlangSegmentStateError::FormatMismatch { details }
+                if details.contains(&format!("missing field `{field}`"))
+        ),
+        "unexpected error: {error}"
+    );
 }
 
 /// A handover with no version stamp has no compatibility decoder: it is the
