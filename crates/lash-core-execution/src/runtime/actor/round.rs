@@ -69,6 +69,8 @@ pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
 
 mod context;
 mod fold;
+#[cfg(test)]
+mod fold_tests;
 mod records;
 mod rounds;
 mod runner;

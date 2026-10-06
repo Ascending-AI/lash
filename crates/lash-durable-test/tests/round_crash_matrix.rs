@@ -51,7 +51,9 @@ use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
 use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, ToolCallId, ToolId, TurnId};
+use lash_sansio::{
+    ExecutionLimit, ExecutionPolicy, LimitCause, SessionId, ToolCallId, ToolId, TurnId,
+};
 use tokio_util::sync::CancellationToken;
 
 const FORMATS: &str = "l4";
@@ -128,6 +130,8 @@ enum Tool {
     Flaky,
     /// A `Repeatable` write that always reports a known failure.
     Failing,
+    /// A `Repeatable` write that completes.
+    Quick,
 }
 
 impl Tool {
@@ -136,13 +140,14 @@ impl Tool {
             Self::Write { .. } => "write",
             Self::Flaky => "flaky",
             Self::Failing => "failing",
+            Self::Quick => "quick",
         })
     }
 
     fn policy(self) -> ExecutionPolicy {
         match self {
             Self::Write { .. } => ExecutionPolicy::Once,
-            Self::Flaky | Self::Failing => {
+            Self::Flaky | Self::Failing | Self::Quick => {
                 ExecutionPolicy::repeatable(NonZeroU32::new(3).unwrap(), 100, 1_000)
             }
         }
@@ -181,7 +186,7 @@ impl MemberBodies for Catalog {
                 world.write(&call, attempt);
                 let output = format!("{call}#{attempt}");
                 let fails = match tool {
-                    Tool::Write { .. } => false,
+                    Tool::Write { .. } | Tool::Quick => false,
                     Tool::Flaky => attempt == 1,
                     Tool::Failing => true,
                 };
@@ -360,6 +365,8 @@ struct RoundScenario {
     backend: Mutex<Option<(Backend, Arc<SimClock>)>>,
     /// The calls whose final outcomes committed, in commit order.
     outcomes: Arc<Mutex<Vec<ToolCallId>>>,
+    /// Every final outcome each run of the scenario ended with.
+    settled: Arc<Mutex<Vec<AttemptOutcome>>>,
 }
 
 impl RoundScenario {
@@ -371,6 +378,7 @@ impl RoundScenario {
             tripwire: Arc::default(),
             backend: Mutex::default(),
             outcomes: Arc::default(),
+            settled: Arc::default(),
         }
     }
 
@@ -461,6 +469,13 @@ impl Scenario for RoundScenario {
             Ok(fold) => fold,
             Err(refusal) => return vec![format!("the run records do not fold: {refusal}")],
         };
+        if let Some(view) = fold.round(RUN) {
+            self.settled.lock_recover().extend(
+                view.members()
+                    .iter()
+                    .filter_map(|member| member.outcome().cloned()),
+            );
+        }
         violations.extend(round_laws(
             &self.members,
             &fold,
@@ -564,6 +579,24 @@ fn round_laws(
             Tool::Failing => {
                 if !matches!(outcome, AttemptOutcome::Failed(_)) {
                     violations.push(format!("{call} settled {outcome:?}"));
+                }
+            }
+            Tool::Quick => {
+                if view_member.starts().len() != 1 {
+                    violations.push(format!(
+                        "L-B2: a crash advanced {call} to {} attempts",
+                        view_member.starts().len()
+                    ));
+                }
+                match outcome {
+                    AttemptOutcome::Completed(_) if !writes.is_empty() => {}
+                    AttemptOutcome::TimedOut {
+                        cause: LimitCause::ExecutionTotal,
+                        ..
+                    } if entries <= 1 => {}
+                    other => violations.push(format!(
+                        "L-C1: {call} settled {other:?} after {entries} entries"
+                    )),
                 }
             }
         }
@@ -796,4 +829,40 @@ async fn a_retry_backoff_consumes_the_total_limit() {
     // Attempt 1 fails at 0 and retries at 100; attempt 2 fails at 100 and
     // its backoff (200) would end past the 250 ms limit.
     assert_eq!(world.writes(&call("call-f")), vec![1, 2]);
+}
+
+/// L-B2 and L-C1: a `Repeatable` started without an outcome reruns at its
+/// same ordinal with the limit its admission recorded; once that limit has
+/// expired by the time another owner resumes it, it settles
+/// `TimedOut { ExecutionTotal }` at once, without entering its body again.
+#[tokio::test]
+async fn an_expired_limit_settles_at_once_on_resume_and_is_never_refreshed() {
+    let members = vec![Member {
+        call: call("call-q"),
+        tool: Tool::Quick,
+    }];
+    let outcomes: Arc<Mutex<Vec<ToolCallId>>> = Arc::default();
+    let settled: Arc<Mutex<Vec<AttemptOutcome>>> = Arc::default();
+    let shared = (Arc::clone(&outcomes), Arc::clone(&settled));
+    // The limit is shorter than a failover, so a resumed rerun finds it
+    // expired.
+    let report = matrix()
+        .run(move || {
+            let mut fresh = RoundScenario::new(members.clone()).limit_ms(5_000);
+            fresh.outcomes = Arc::clone(&shared.0);
+            fresh.settled = Arc::clone(&shared.1);
+            fresh
+        })
+        .await;
+    report.assert_held();
+    assert!(
+        settled.lock_recover().iter().any(|outcome| matches!(
+            outcome,
+            AttemptOutcome::TimedOut {
+                cause: LimitCause::ExecutionTotal,
+                ..
+            }
+        )),
+        "no cut resumed the call after its limit expired"
+    );
 }
