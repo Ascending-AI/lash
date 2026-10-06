@@ -85,26 +85,3 @@ lash_conformance::artifact_referrer_tests!({
         })
     })
 });
-
-#[tokio::test(flavor = "multi_thread")]
-async fn run_handover_commits_material_ownership_with_the_head() {
-    let (database, storage) = storage().await.expect("the hermetic PostgreSQL fixture");
-    let url = database.url().to_owned();
-    Box::pin(
-        lash_conformance::material_retention::run_handover_commits_material_ownership_with_the_head(
-            Arc::new(storage.session_store_factory()),
-            Arc::new(storage.tool_material_store()),
-            async move || {
-                let reopened = PostgresStorage::connect(&url)
-                    .await
-                    .expect("reopen PostgreSQL");
-                (
-                    Arc::new(reopened.session_store_factory()) as Arc<dyn lash_core::RuntimeStore>,
-                    Arc::new(reopened.tool_material_store())
-                        as Arc<dyn lash_core::store::ToolMaterialStore>,
-                )
-            },
-        ),
-    )
-    .await;
-}

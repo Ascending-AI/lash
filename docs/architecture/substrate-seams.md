@@ -82,7 +82,7 @@ Each constant default was deleted and its call sites folded to the constant:
 | `hands_over_turns` | `false` | `cells_hand_over`, `end_at_segment_boundary`, `observe_drain_mark` and `ObserveDrainMarkRunner`; the turn-handover branch in `session_init.rs` collapsed to the spawn path |
 | `attempt_observation` | `None` | the observation plumbing in `direct.rs` and `trace/*` |
 | `wants_segment_boundary` | `None` | the `LlmCall` boundary check in `machine.rs`, the boundary block in `handlers.rs`, the lashlang process segment-boundary closure (now `|| false`, reason `HandOver`) |
-| `peek_run_cut` | `None` | `continuation.rs` `generation_cut_entry` answers `None`; `drain.rs` folds the cut to `None` |
+| `peek_run_cut` | `None` | L4 (FIG-5174) then deleted the cut plumbing it fed: `continuation.rs`, `CutChecked`/`CutRetained` and the Run transfer |
 | `turn_attach` | `None` | `TurnControlAttachment::Attached` and `run_scoped`; only the resolver path remains |
 | `bind_process_registry` | no-op | `ProcessRegistryBinding`, `ProcessRegistrationProbe` and both stores' registration probes; `bind_effect_host` on the registry and deployment store; `ProcessScopeFenceHosts` |
 
@@ -94,7 +94,7 @@ Behaviours the deleted `execute_effect` wrapper added around every effect, which
 
 Code the fold made unreachable, or nearly, that an owning lane is about to rewrite. I0 stopped here:
 
-- **L4:** the generation-cut plumbing in the run coordinator (`observe_generation_cuts`, `generation_cut_entry`, `check_cut`, `CutChecked`); the journal guard and owner-step gate in `runtime/actor/journal.rs`.
+- **L4:** the journal guard and owner-step gate in `runtime/actor/journal.rs`. (L4 deleted the generation-cut plumbing and the Run transfer.)
 - **L6 and L7b:** the `with_turn_hand_over(false)` plumbing (4 sites) and segment handover as process state; the process run-context builder (`process_runners/mod.rs`) and the capability items only it read (`session_runtime_store`, `execution_owner`, `turn_phase_probe`), kept under `#[expect(dead_code)]` for the advance-driven engine drive; `ProcessEngineRunContext` without effect accessors, and the lashlang run path (`run_lashlang_process`, which takes the context it will run under).
 - **L3, L4 and L6:** the await-event methods addressed by the retired `AwaitEventKey` (`await_event_key`, `resolve_await_event`, `publish_await_event`, `peek_await_event`, `await_await_event`, `prepare_completion_key`, `wait_effect`'s `AwaitEvent` and `PeekAwaitEvent`, and `completion_host_key`), kept by L5 in `runtime/actor/await_event_legacy.rs`. Each reaches `port_pending`, whose arm names the lane by wait identity: turn control and session-command cancel L3, tool completion and custom L4, process signals L6. They are deleted with their callers' ports; no wait row serves a recomputable key.
 - **V0:** `RunRecordObserver::bind`, kept for `record_run_record`.

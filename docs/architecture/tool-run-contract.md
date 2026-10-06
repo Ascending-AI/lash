@@ -30,7 +30,7 @@ that end state.
 | K1 | Whole-round admission: owner, call ids, operand aliases, prepared request, three-capability declaration, automatic callback binding, runtime retry/cancel policy, before-check record, reserved capacity | `lash_core_store::tool_run::admission` | codec, refusal | FIG-4875 | FIG-4877, FIG-4879, FIG-4855 |
 | K1/K3/K10 hooks | Tool hook phases, occurrences, verdicts, reducer and selection | `lash_core_store::tool_run::tool_hooks` | codec, reducer permutations | FIG-1399 (API cutover, ADR 0128) | FIG-4875, FIG-4877, FIG-4878 |
 | K2 | Owner-qualified material references and typed retained-result refusals (Q4) | `lash_core_store::tool_run::material` | codec, refusal | FIG-4876 | FIG-4877, FIG-4883, FIG-4739 |
-| K2/K6 retention | Retained bundles and their dependency leases: retain before publication, successor acquire, release, atomic retirement, holder fences | `lash_core_store::tool_run::retention`, `ToolMaterialStore` | codec, store laws (`tool_material_tests!`) | FIG-4889 | FIG-4739, FIG-4890, FIG-4883, FIG-4740 |
+| K2/K4 retention | Retained bundles and their dependency leases: retain before publication, release, atomic retirement, holder fences | `lash_core_store::tool_run::retention`, `ToolMaterialStore` | codec, store laws (`tool_material_tests!`) | FIG-4889 | FIG-4739, FIG-4890, FIG-4883, FIG-4740 |
 | K3/K9 | Run events with stable ordinals, the sole-active-segment fold, final-or-cancel once, protected drain frontier, reported-retry schedule, `Live`/`Closing`/`Settled` | `lash_core_store::tool_run::run_event` | codec, fold refusals | FIG-4877, FIG-4879, FIG-4880, FIG-4882 | FIG-4881, FIG-4892, FIG-529 |
 | K4 | Immutable `Resolved(ref)`/`Cancelled` source seal, authority, short subscriptions | `lash_core_store::tool_run::source_seal` | codec, refusal, L07/L12 double laws (`durable_wait_source_seal`) | FIG-4883, FIG-4740, FIG-4891 | FIG-4886, FIG-4887 |
 | K5 | Declared start obligation: stable `StartKey`, registration, environment, consumer hold; cancel before/after admission; drained inside a final's declarations by the Run records `StartAdmitted`/`StartLaunched`/`StartDischarged` | `crates/lash-core-execution/src/runtime/process/declared_start.rs`; `lash_core_store::tool_run::run_event` | codec, refusal, fold refusals, L08 double laws over SQLite memory and file reopen (`declared_start_run_drain_on_the_double`) | FIG-4884, FIG-4885 | FIG-4887, FIG-4888 |
@@ -61,41 +61,18 @@ without executing a body, check or reducer.
 `RunCoordinator::start_round` registers issued attempts with the coordinator;
 `progress` accepts one recorded selection at a time. A program effect can
 therefore run after a winner while another body remains unfinished.
-`request_cut` freezes further admission, and `quiesce` continues the same
-recorded schedule through durable acceptance of all issued local work.
-`capture_cut` refuses a pending handle, a failed invocation or a dropped
-progress frame. A body proposal is never an acknowledgement. Registered
+A body proposal is never an acknowledgement. Registered
 retry work retains its existing schedule and a pending Deferred source
 needs no local waiter.
 
-`RunTransfer` is the shared capture and adoption codec. It carries the
-acknowledged journal and independent attempt receipts, resolved state and
-namespace frontiers, unconsumed decisions, source authority, admitted
-environment, held capacity and declared-start obligations. `retain_cut`
-leases canonical material before publication and removes payload bytes from
-transferred receipts. `RunCoordinator::adopt` acquires the successor lease,
-rebuilds the recorded fold and obligations, and fences predecessor append
-before the successor writes its first record. It carries no native handle and
-performs no Closing, cancellation, reroute or successor publication. Turn and process owners retain their separate continuation transactions
-(FIG-4739/4890); source subscriptions rebind during adoption (FIG-4891).
-Stored format versions remain frozen.
-
-Process admission binds a `SegmentOrdinal` onto execution authority without
-changing its process-attempt fence. The native segment envelope carries the
-same `RunTransfer` beside the opaque VM continuation. Capture checks local ACK,
-retained material, source ownership and segment bounds. Event and capacity
-frontiers are derived from the acknowledged journal. The boundary container
-owns its reason and VM continuation; the capture stores source keys and
-bundles whose holder is implied by its owner and predecessor segment. Restore checks the process,
-admitted successor and inherited environment before loading definitions.
-Publication stores the original predecessor-stamped transfer unchanged.
-Adoption returns an in-memory successor beside the unchanged capture. The
-coordinator rebuilds subscriptions and reads material only through
-successor-held references, including after the predecessor lease is fenced.
-The process registry still owns lifecycle transactions and child holds.
+A Run never crosses a segment (FIG-5174). A physical boundary carries only
+the opener's incorporation ledger and refuses while the opener's Run is open;
+an owner that resumes reads the run records its commits made durable and
+folds them (`runtime/actor/round`), so no capture, transfer, adoption or
+material carry exists.
 
 The state frontier carries each acknowledged publication's receipt by ordinal.
-After adoption, an identical historical receipt remains `AlreadyApplied`.
+On recovery, an identical historical receipt remains `AlreadyApplied`.
 A changed receipt at that ordinal yields `FrontierRefusal::ReceiptMismatch`,
 including when its original publisher has already been fenced.
 
@@ -126,10 +103,7 @@ presentation and incorporation without consumption; a later consumer records
 its own `Consumed` fact. A consumer that observes every leaf (`allSettled`, the
 list batch) takes each value in its V, and after selection every V the consumer
 is still owed records its consumption; a consumption record follows only for a
-value presented earlier without it. When no such record follows, the frame's
-last V checks a generation cut in its own step and, on a cut, records
-`CutChecked` instead of `Consumed`, leaving the consumption to the successor.
-Coordination retains material references, rather than storing another copy of
+value presented earlier without it. Coordination retains material references, rather than storing another copy of
 the loser's output.
 
 The aggregate owner supplies its clock. Timer admission records the original
@@ -146,22 +120,8 @@ Only `close` ends the logical Run: it records Closing, freezes admission,
 discharges admitted eligible cancellation, accepts every issued X through its
 durable ACK, drains accepted finals and records Settled. Ignore-policy work
 receives no external cancel. Worker loss leaves recovery to the original engine
-journal. A physical cut retains Live and transfers aggregate plans, deadlines,
-unconsumed material and pending source descriptors through its existing snapshot.
-Standard, RLM and generic aggregate callers share this recorded selection path
+journal. Standard, RLM and generic aggregate callers share this recorded selection path
 (FIG-4894/1863/4895).
-
-A generation drain cuts a Run that may hand over through the same callbacks
-(FIG-4976): the admission or consumption step that observes the drain records
-`CutChecked` in place of its event and freezes admission. The caller receives
-`TurnWaitHandedOver` and hands over; it never fails the turn on it. A cell
-captures itself and its successor issues the cell again. A standard turn ends
-at a `HandOver` boundary whether the frozen Run refused its round's admission
-or its await on the round (FIG-5075), through one mapping. The continuation
-owes a refused round its unadmitted calls, and the successor admits them from
-the history the boundary committed; it owes an admitted round its settled
-cursor, and the successor awaits it. The model call that asked for the round
-is never repeated. Every other refusal keeps its own handling.
 
 A Run parked on a source wait hands over through the drain's wake instead: the
 wait answers `TurnWaitHandedOver` live, and an aggregate's caller takes it as
@@ -234,25 +194,20 @@ under terminal `retained_result_refused`; no refusal grants execution authority.
 Resolution stays inside the controller. The status-only drive reply remains
 unchanged.
 
-**Retention (FIG-4889).** Same-segment material resolves from the opener
-journal and costs no artifact transaction. Material another segment or a
-Deferred source seal names is retained first: `MaterialBundle` packs the
+**Retention (FIG-4889).** Run material resolves from the opener journal and
+costs no artifact transaction. Material a Deferred source seal names is
+retained first: `MaterialBundle` packs the
 payloads into one immutable bundle in the `ToolMaterial` artifact store,
 named by its bytes under `lash-tool-material-bundle/v1`, and
 `ToolMaterialStore::retain_material` writes it together with the holder's
-lease, a `run_segment` or `source` referrer edge, in one transaction. Only the
-`RetainedBundle` that returns may be published: `RunTransfer::check_capture`
-refuses material outside a tool-material bundle (`UnretainedMaterial`) or
-held by another lease than the transferring segment's (`UnleasedMaterial`),
-and a seal refuses an unretained result (`UnretainedResult`). The successor
-acquires its own lease before it reads and before the predecessor releases,
-so the predecessor's lease lasts until successor ownership is durable. A
-release fences its holder, severs its leases and retires every bundle with
+lease, a `source` referrer edge, in one transaction. Only the
+`RetainedBundle` that returns may be published: a seal refuses an unretained
+result (`UnretainedResult`). A release fences its holder, severs its leases and retires every bundle with
 no lease left, all payloads at once. The holder fence is the identity fence:
 an ended holder cannot republish, reacquire or read, its references refuse
 `Retired`, and a retired bundle refuses `Missing` to every later holder.
 Closing a Run is not garbage collection; only a release ends a lease.
-`RetainedBundle::copy_bytes` reports the measured handover copy.
+`RetainedBundle::copy_bytes` reports the measured retained copy.
 
 **Operation (Q2).** A tool-bearing host operation is a Run with its own input
 kind, driven by the session's keyed turn service, over the existing

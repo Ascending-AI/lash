@@ -509,7 +509,7 @@ impl<'run> ProductionToolHandlers<'run> {
         host_control: bool,
     ) -> Result<ToolRunAggregatePoll, SingletonRunError> {
         if &cursor.owner != run.owner() {
-            return Err(ContinuationRefusal::ForeignOwner.into());
+            return Err(crate::tool_run::RunEventRefusal::ForeignOwner.into());
         }
         let ToolRunAggregateCursor {
             key,

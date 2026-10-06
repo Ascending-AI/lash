@@ -119,9 +119,10 @@ impl RuntimeExecutionContext<'_> {
             .tool_run
             .as_ref()
             .ok_or_else(|| {
-                crate::RuntimeEffectControllerError::from(
-                    crate::tool_run::ContinuationRefusal::NotQuiescent,
+                crate::tool_dispatch::SingletonRunError::from(
+                    crate::tool_run::RunCutRefusal::InvocationFailed,
                 )
+                .into_controller_error()
             })?
             .admit(
                 request,
@@ -147,9 +148,10 @@ impl RuntimeExecutionContext<'_> {
         self.tool_run
             .as_ref()
             .ok_or_else(|| {
-                crate::RuntimeEffectControllerError::from(
-                    crate::tool_run::ContinuationRefusal::NotQuiescent,
+                crate::tool_dispatch::SingletonRunError::from(
+                    crate::tool_run::RunCutRefusal::InvocationFailed,
                 )
+                .into_controller_error()
             })?
             .consume(
                 cursor.clone(),
@@ -181,9 +183,10 @@ impl RuntimeExecutionContext<'_> {
             .tool_run
             .as_ref()
             .ok_or_else(|| {
-                crate::RuntimeEffectControllerError::from(
-                    crate::tool_run::ContinuationRefusal::NotQuiescent,
+                crate::tool_dispatch::SingletonRunError::from(
+                    crate::tool_run::RunCutRefusal::InvocationFailed,
                 )
+                .into_controller_error()
             })?
             .consume(cursor.clone(), consumer, true, host_control)
             .await;

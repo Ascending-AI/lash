@@ -1337,148 +1337,15 @@ fn tool_material(artifact_ref: &str) -> ArtifactName {
     }
 }
 
-fn segment_holder(segment: u32) -> MaterialHolder {
-    MaterialHolder::Segment {
-        opener: opener(),
-        segment: SegmentOrdinal(segment),
-    }
-}
-
-fn leased_bundle(holder: MaterialHolder) -> RetainedBundle {
-    RetainedBundle {
-        holder,
-        artifact: tool_material("bundle-1"),
-        references: vec![
-            run_material(MaterialRole::AttemptOutput).retained(tool_material("bundle-1")),
-        ],
-        copy_bytes: 512,
-    }
-}
-
-fn transfer() -> RunTransfer {
-    let call_id = ToolCallId::fixture("deferred");
-    let mut member = call("deferred");
-    member.declaration = ToolDeclaration::deferring();
-    let events = vec![
-        RunEvent::Admitted {
-            round: round(vec![member]),
+fn source_holder() -> MaterialHolder {
+    MaterialHolder::Source {
+        source: AwaitEventKey {
+            scope: ExecutionScope::turn("s", "t"),
+            wait: AwaitEventWaitIdentity::tool_completion(ToolCallId::fixture("deferred")),
+            key_id: "key".into(),
+            signature: "signature".into(),
         },
-        RunEvent::AttemptRecorded {
-            call_id: call_id.clone(),
-            attempt: AttemptOrdinal::FIRST,
-            result: AttemptOutcome::Waiting(CompletionSource::Deferred {
-                source: source_key(&call_id),
-            }),
-        },
-    ];
-    let entries = vec![RunJournalEntry {
-        record: RunRecord {
-            segment: SegmentOrdinal(0),
-            first: RunEventOrdinal(0),
-            events,
-            trace: None,
-        },
-        materials: Vec::new(),
-        state: Vec::new(),
-    }];
-    RunTransfer {
-        owner: opener(),
-        from: SegmentOrdinal(0),
-        entries,
-        attempts: Vec::new(),
-        material_aliases: Vec::new(),
-        sources: Vec::new(),
-        environment: None,
-        plugin_state: None,
-        material: vec![leased_bundle(segment_holder(0)).into()],
-        subscriptions: vec![source_key(&call_id)],
     }
-}
-
-/// S01 F1 / S08 F1: a transfer cannot decode a second truth for a journal
-/// frontier or its container's boundary reason.
-#[test]
-fn s01_transfer_refuses_conflicting_copies_of_derived_facts() {
-    for (field, conflicting) in [
-        ("events", json!(999)),
-        ("held_calls", json!(999)),
-        ("reason", json!("journal_budget")),
-        ("vm_continuation", json!(false)),
-        ("owed_starts", json!([])),
-        ("owed_cancels", json!([])),
-        (
-            "state",
-            serde_json::to_value(StateFrontier::default()).unwrap(),
-        ),
-    ] {
-        let mut encoded = serde_json::to_value(transfer()).unwrap();
-        encoded[field] = conflicting;
-        assert!(
-            serde_json::from_value::<RunTransfer>(encoded).is_err(),
-            "{field}"
-        );
-    }
-    let mut encoded = serde_json::to_value(transfer()).unwrap();
-    encoded["material"][0]["holder"] = serde_json::to_value(segment_holder(4)).unwrap();
-    assert!(serde_json::from_value::<RunTransfer>(encoded).is_err());
-    let mut encoded = serde_json::to_value(transfer()).unwrap();
-    encoded["subscriptions"][0] = serde_json::to_value(SourceSubscription {
-        source: source_key(&ToolCallId::fixture("deferred")),
-        owner: opener(),
-        segment: SegmentOrdinal(4),
-    })
-    .unwrap();
-    assert!(serde_json::from_value::<RunTransfer>(encoded).is_err());
-}
-
-/// L10: ownership and terminal refusal apply before adoption; L09: the
-/// in-memory successor fences the predecessor while the capture stays valid.
-#[test]
-fn l10_adoption_binds_a_live_owner_and_l09_fences_its_predecessor() {
-    let capture = transfer();
-    assert_eq!(
-        capture.clone().adopt(
-            &EffectOpener::turn("session-1", "fresh"),
-            RunLifecycle::Live,
-            SegmentOrdinal(1)
-        ),
-        Err(ContinuationRefusal::ForeignOwner)
-    );
-    assert_eq!(
-        capture
-            .clone()
-            .adopt(&opener(), RunLifecycle::Settled, SegmentOrdinal(1)),
-        Err(ContinuationRefusal::OwnerTerminal)
-    );
-    assert_eq!(
-        capture
-            .clone()
-            .adopt(&opener(), RunLifecycle::Live, SegmentOrdinal(2)),
-        Err(ContinuationRefusal::NotSuccessor { from: 0, found: 2 })
-    );
-    let adopted = capture
-        .adopt(&opener(), RunLifecycle::Live, SegmentOrdinal(1))
-        .unwrap();
-    adopted
-        .transfer
-        .check_capture(CutPhase::Capturable)
-        .unwrap();
-    let mut ledger = adopted.ledger().unwrap();
-    let record = RunRecord {
-        trace: None,
-        segment: SegmentOrdinal(0),
-        first: ledger.next_ordinal(),
-        events: vec![RunEvent::Lifecycle {
-            state: RunLifecycle::Closing,
-        }],
-    };
-    assert_eq!(
-        ledger.append(SegmentOrdinal(0), &record),
-        Err(RunEventRefusal::StaleSegment {
-            latest: 1,
-            found: 0
-        })
-    );
 }
 
 /// FIG-4889: material that stays in its opener journal needs no artifact
@@ -1501,7 +1368,7 @@ fn bundles_retain_only_crossing_material_and_refuse_corrupt_bytes() {
         panic!("one payload, deduplicated by digest");
     };
     assert_eq!(bundle.artifact().store, ArtifactStoreId::ToolMaterial);
-    let retained = bundle.retained_by(segment_holder(0));
+    let retained = bundle.retained_by(source_holder());
     assert!(retained.is_retained());
     assert_eq!(retained.copy_bytes, bundle.bytes().len() as u64);
     assert_eq!(

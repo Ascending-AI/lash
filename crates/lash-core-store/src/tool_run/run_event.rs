@@ -295,15 +295,6 @@ pub enum RunLifecycle {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunEvent {
-    /// Accepted retention of a capturable physical cut. Replaying the old
-    /// invocation serves these leases without reacquiring its ended holder.
-    CutRetained {
-        material: Vec<super::RetainedBundle>,
-    },
-    /// An accepted generation cut, recorded in its native frame's result.
-    CutChecked {
-        reason: lash_sansio::BoundaryReason,
-    },
     /// A whole round refused before it admitted any member or ran a body.
     AdmissionRefused {
         cause: super::AdmissionRefusal,
@@ -884,7 +875,6 @@ impl RunLedger {
 
     fn apply(&mut self, event: &RunEvent) -> Result<(), RunEventRefusal> {
         match event {
-            RunEvent::CutChecked { .. } | RunEvent::CutRetained { .. } => Ok(()),
             RunEvent::AdmissionRefused { .. } | RunEvent::IsolationRefused { .. } => {
                 if self.lifecycle != RunLifecycle::Live || self.aborted {
                     return Err(RunEventRefusal::AdmissionClosed);

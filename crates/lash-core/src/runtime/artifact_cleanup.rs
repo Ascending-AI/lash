@@ -255,7 +255,6 @@ impl ArtifactCleanupRelay {
                     | ArtifactReferrer::HostPin(_)
                     | ArtifactReferrer::Session(_)
                     | ArtifactReferrer::Upload(_)
-                    | ArtifactReferrer::RunSegment { .. }
                     | ArtifactReferrer::Source(_) => {}
                 }
                 Ok(Resolution::Carry(carries.clone()))

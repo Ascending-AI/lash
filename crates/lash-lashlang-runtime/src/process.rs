@@ -198,11 +198,6 @@ async fn run_lashlang_process_scoped(
 ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
     let is_initial_segment = handover.is_none();
     let phase_probe = context.turn_phase_probe();
-    let segment = context
-        .execution_context()
-        .execution_write_authority
-        .as_ref()
-        .and_then(|authority| authority.segment());
     let mut input = match LashlangProcessInput::from_payload(payload) {
         Ok(input) => input,
         Err(err) => {
@@ -239,28 +234,6 @@ async fn run_lashlang_process_scoped(
     let mut segment_state: Option<LashlangSegmentState> = match handover {
         Some(handover) => match decode_lashlang_segment_state(&handover.engine_state) {
             Ok(state) => {
-                if let Some(run) = &state.tool_run {
-                    let refused = (|| {
-                        run.check_capture(lash_core::tool_run::CutPhase::Capturable)?;
-                        let successor = segment.ok_or(
-                            lash_core::tool_run::ContinuationRefusal::MissingSegmentAuthority,
-                        )?;
-                        run.clone().adopt(
-                            &lash_core::EffectOpener::process(context.process_id().clone()),
-                            run.ledger()?.lifecycle(),
-                            successor,
-                        )?;
-                        if run.environment != context.registration().env_ref {
-                            return Err(
-                                lash_core::tool_run::ContinuationRefusal::ForeignEnvironment,
-                            );
-                        }
-                        Ok(())
-                    })();
-                    if let Err(refusal) = refused {
-                        return Err(segment_state::continuation_refused(refusal));
-                    }
-                }
                 // The parent's only look at the VM bytes: size, owner, the
                 // VM contract they were written under, format and hash.
                 let owner = segment_continuation_owner(context.process_id());
@@ -424,16 +397,6 @@ async fn run_lashlang_process_scoped(
     };
     definition_publication::publish_exports(&ctx, &artifact).await?;
     if let Some(segment_state) = segment_state.as_mut() {
-        if let Some(transfer) = segment_state.tool_run.take() {
-            let Some(successor) = segment else {
-                return Err(segment_state::continuation_refused(
-                    lash_core::tool_run::ContinuationRefusal::MissingSegmentAuthority,
-                ));
-            };
-            if let Err(error) = ctx.restore_run_continuation(*transfer, successor) {
-                return Err(segment_state::continuation_refused(error));
-            }
-        }
         ctx.restore_started_process_ids(&segment_state.started_process_ids);
         ctx.restore_incorporation_ledger(segment_state.incorporation_ledger.clone());
     }
@@ -669,14 +632,6 @@ async fn execute_lashlang(
         lash_vm_broker::BrokeredEnd::Suspended { checkpoint } => {
             hold_segment_definitions(&host.ctx, checkpoint.vm.definition_ids()).await?;
             let boundary_reason = lash_core::BoundaryReason::HandOver;
-            host.ctx
-                .capture_tool_run(boundary_reason)
-                .await
-                .map_err(|error| {
-                    lash_core::ProcessInfraError::new(
-                        lash_core::PluginError::RuntimeEffectController(error),
-                    )
-                })?;
             lash_core::ProcessRunOutcome::SegmentBoundary(
                 capture_segment(checkpoint.vm, host, boundary_reason, &program_hash)
                     .map_err(|(error, message)| infra(format!("{message}: {error}")))?,

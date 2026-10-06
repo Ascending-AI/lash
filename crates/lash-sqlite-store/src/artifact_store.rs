@@ -104,7 +104,6 @@ pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
 
 mod tool_material;
-pub(crate) use tool_material::commit_run_material_tx;
 
 /// The namespace of a store-set artifact store; an engine's own store has
 /// none here.

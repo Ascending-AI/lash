@@ -1129,7 +1129,7 @@ impl RuntimeError {
             | RuntimeErrorCause::ToolRunDrift { .. }
             | RuntimeErrorCause::ToolRunControl { .. }
             | RuntimeErrorCause::ToolRunAdmissionRefused { .. }
-            | RuntimeErrorCause::RunContinuationRefused { .. }
+            | RuntimeErrorCause::ToolRunRecordRefused { .. }
             | RuntimeErrorCause::MaterialRefused { .. }
             | RuntimeErrorCause::ProviderFailure { .. }
             | RuntimeErrorCause::VmWorker { .. }

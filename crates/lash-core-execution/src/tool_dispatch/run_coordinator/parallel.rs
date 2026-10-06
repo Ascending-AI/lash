@@ -354,13 +354,11 @@ impl<'a> RunCoordinator<'a> {
 
     /// Whether this window races the Run's open sources: always when they
     /// are all it waits for, and beside other work only while the Run is
-    /// live and no cut is requested, since Closing and a cut's quiesce
-    /// decide sources themselves.
+    /// live, since Closing decides sources itself.
     fn races_sources(&self, sources_alone: bool) -> bool {
         !self.waiting.is_empty()
             && (sources_alone
-                || (self.cut.is_none()
-                    && self.journal.ledger.lifecycle() == crate::tool_run::RunLifecycle::Live))
+                || self.journal.ledger.lifecycle() == crate::tool_run::RunLifecycle::Live)
     }
 
     /// One recorded selection over every issued body, timer, realization,

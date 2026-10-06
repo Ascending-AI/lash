@@ -125,7 +125,6 @@ async fn parent_state_decode_never_compiles_regexp() {
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
-        tool_run: None,
         worker_recovery: Default::default(),
     })
     .expect("encode the envelope");

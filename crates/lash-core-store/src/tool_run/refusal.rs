@@ -48,7 +48,8 @@ pub enum SingletonDrift {
     IsolationBinding,
 }
 
-/// Why a physical boundary cannot admit work or capture the Run.
+/// Why a Run's frame cannot proceed: an earlier frame of its invocation
+/// failed.
 #[derive(
     Clone,
     Copy,
@@ -61,12 +62,6 @@ pub enum SingletonDrift {
     thiserror::Error,
 )]
 pub enum RunCutRefusal {
-    #[error("the invocation failed; its engine journal owns recovery")]
+    #[error("the invocation failed; its owner recovers the Run from its records")]
     InvocationFailed,
-    #[error("no physical cut was requested")]
-    NotRequested,
-    #[error("issued local work has not been durably acknowledged")]
-    NotQuiescent,
-    #[error("new admission is frozen for the {reason:?} cut")]
-    AdmissionFrozen { reason: lash_sansio::BoundaryReason },
 }

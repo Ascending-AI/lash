@@ -1,6 +1,6 @@
 //! The invocation that owns a logical Run serves calls from every cell.
 //! Requests carry values; the borrowed coordinator and issued X bodies stay
-//! on the owner's stack until Closing or a retained physical cut.
+//! on the owner's stack until Closing.
 
 use std::sync::Arc;
 
@@ -10,12 +10,12 @@ use mailbox::{Reply, Sender, channel, reply};
 
 use super::execution_context::RuntimeExecutionContext;
 use super::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
+use crate::RuntimeEffectControllerError;
 use crate::session::tool_execution::{
     ToolAggregateConsumer, ToolAggregateRequest, ToolRunAggregateCursor, ToolRunAggregatePoll,
 };
 use crate::tool_dispatch::{ProductionToolHandlers, SingletonRunError};
-use crate::tool_run::{ContinuationRefusal, SegmentOrdinal};
-use crate::{BoundaryReason, RuntimeEffectControllerError};
+use crate::tool_run::{RunCutRefusal, SegmentOrdinal};
 
 #[derive(Clone)]
 pub(super) struct ToolRunChannel(Sender<Request>);
@@ -27,15 +27,6 @@ pub struct ToolRunOwner(
     ToolRunChannel,
     crate::runtime::process::LanguageCallAttributions,
 );
-
-impl ToolRunOwner {
-    pub async fn capture_tool_run(
-        &self,
-        reason: BoundaryReason,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.0.capture(reason).await
-    }
-}
 
 enum Request {
     Admit {
@@ -52,15 +43,11 @@ enum Request {
         host_control: bool,
         reply: Reply<Result<ToolRunAggregatePoll, SingletonRunError>>,
     },
-    Capture {
-        reason: BoundaryReason,
-        reply: Reply<Result<(), SingletonRunError>>,
-    },
     Close(Reply<Result<(), SingletonRunError>>),
 }
 
 fn owner_gone() -> RuntimeEffectControllerError {
-    ContinuationRefusal::NotQuiescent.into()
+    SingletonRunError::from(RunCutRefusal::InvocationFailed).into_controller_error()
 }
 
 impl ToolRunChannel {
@@ -110,17 +97,6 @@ impl ToolRunChannel {
             .map_err(SingletonRunError::into_controller_error)
     }
 
-    async fn capture(&self, reason: BoundaryReason) -> Result<(), RuntimeEffectControllerError> {
-        let (reply, receive) = reply();
-        self.0
-            .send(Request::Capture { reason, reply })
-            .map_err(|_| owner_gone())?;
-        receive
-            .await
-            .map_err(|_| owner_gone())?
-            .map_err(SingletonRunError::into_controller_error)
-    }
-
     pub(super) async fn close(&self) -> Result<(), RuntimeEffectControllerError> {
         let (reply, receive) = reply();
         self.0
@@ -131,27 +107,6 @@ impl ToolRunChannel {
             .map_err(|_| owner_gone())?
             .map_err(SingletonRunError::into_controller_error)
     }
-}
-
-fn cut_reply<T>(result: Result<T, SingletonRunError>) -> Result<T, SingletonRunError> {
-    // Only a safe frame boundary may return a cut to the VM. An accepted
-    // consumer result is delivered whole; real faults keep their typed cause.
-    if matches!(
-        result,
-        Err(SingletonRunError::Cut(
-            crate::tool_run::RunCutRefusal::AdmissionFrozen {
-                reason: crate::BoundaryReason::HandOver,
-            }
-        ))
-    ) {
-        let mut error = RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::TurnWaitHandedOver,
-            "the active native Run accepted its generation drain",
-        );
-        error.journaled = true;
-        return Err(error.into());
-    }
-    result
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
@@ -171,18 +126,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.tool_run = Some(owner.0.clone());
         self.language_calls = Arc::clone(&owner.1);
         self
-    }
-
-    /// Quiesce and retain all cells' issued work before publishing VM state.
-    pub async fn capture_tool_run(
-        &self,
-        reason: BoundaryReason,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.tool_run
-            .as_ref()
-            .ok_or_else(owner_gone)?
-            .capture(reason)
-            .await
     }
 
     /// Drive a logical owner beside its program. The program explicitly closes
@@ -206,30 +149,21 @@ impl<'run> RuntimeExecutionContext<'run> {
                 })
                 .or_else(|| crate::EffectOpener::for_scope(&self.admitted_scope()).ok())
                 .ok_or_else(|| {
-                    RuntimeEffectControllerError::from(ContinuationRefusal::ForeignOwner)
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+                        "a tool Run needs a logical owner: a turn or a process",
+                    )
                 })?;
             let state = self.opener_state();
             let segment = self
                 .process_event_context()
                 .and_then(|context| context.execution_write_authority.segment())
-                .or_else(|| {
-                    state
-                        .snapshot()
-                        .run
-                        .as_ref()
-                        .map(|transfer| SegmentOrdinal(transfer.from.0 + 1))
-                })
                 .unwrap_or(SegmentOrdinal(0));
             let scoped = self.dispatch.effect_controller.clone();
             let available = self.dispatch.plugins.tool_run_revisions();
             let claim = super::execution_context::execution_claim_of(scoped.execution_scope())
                 .map_err(RuntimeEffectControllerError::from)?;
-            let environment = if let Some(environment) = state
-                .snapshot()
-                .run
-                .as_ref()
-                .and_then(|transfer| transfer.environment.clone())
-                .or_else(|| self.inherited_process_execution_env_ref())
+            let environment = if let Some(environment) = self.inherited_process_execution_env_ref()
             {
                 self.process_env_store
                     .acquire_process_execution_env(&claim, &environment)
@@ -245,18 +179,10 @@ impl<'run> RuntimeExecutionContext<'run> {
                 materials.clone(),
                 environment.clone(),
             ));
-            let mut run = Box::pin(state.adopt_run(
-                &scoped,
-                owner,
-                segment,
-                available,
-                handlers.clone(),
-                self.dispatch.clock.as_ref(),
-            ))
-            .await
-            .map_err(SingletonRunError::into_controller_error)?
-            .with_admitted_environment(environment)
-            .with_generation_cuts(false);
+            let mut run = state
+                .open_run(&scoped, owner, segment, available)
+                .map_err(SingletonRunError::into_controller_error)?
+                .with_admitted_environment(environment);
             let bodies = run.bodies();
             let (send, mut receive) = channel();
             let mut context = self.clone();
@@ -294,7 +220,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                                     *attribution,
                                 ))
                                 .await;
-                                let _ = reply.send(cut_reply(result));
+                                let _ = reply.send(result);
                             }
                             Either::Right((
                                 Some(Request::Consume {
@@ -314,17 +240,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                                     host_control,
                                 ))
                                 .await;
-                                let _ = reply.send(cut_reply(result));
-                            }
-                            Either::Right((Some(Request::Capture { reason, reply }), _)) => {
-                                let result = match materials.as_deref() {
-                                    Some(materials) => {
-                                        Box::pin(state.capture_run(&mut run, reason, materials))
-                                            .await
-                                    }
-                                    None => Err(ContinuationRefusal::UnretainedMaterial.into()),
-                                };
-                                let _ = reply.send(cut_reply(result));
+                                let _ = reply.send(result);
                             }
                             Either::Right((Some(Request::Close(reply)), _)) => {
                                 let result = if closed {
@@ -336,7 +252,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                                 if result.is_ok() {
                                     state.finish_run();
                                 }
-                                let _ = reply.send(cut_reply(result));
+                                let _ = reply.send(result);
                             }
                             Either::Right((None, _)) => break Err(owner_gone()),
                         }

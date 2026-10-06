@@ -1,17 +1,12 @@
-//! K2/K6: retained material bundles and the dependency leases that keep them
-//! readable across segments (FIG-4889).
+//! K2/K4: retained material bundles and the dependency leases that keep
+//! them readable (FIG-4889).
 //!
-//! Same-segment material resolves from its opener journal and needs no
-//! artifact transaction. Material a successor segment or a Deferred source
-//! seal names is retained first: its payloads are written once, as one
-//! immutable bundle, together with the publishing holder's lease, and only
-//! then may a continuation or seal publish the bundle's references. A
-//! successor acquires its own lease before the predecessor's ends, so the
-//! predecessor's lease is held until successor ownership is durable. A bundle
+//! Material a Deferred source seal names is retained first: its payloads are
+//! written once, as one immutable bundle, together with the source's lease,
+//! and only then may the seal publish the bundle's references. A bundle
 //! retires atomically, every payload at once, when its last lease ends; an
 //! ended holder stays fenced, so its retired references refuse typed and
-//! never restart work. Closing a Run is not garbage collection: only a
-//! holder's release ends its lease.
+//! never restart work.
 
 use std::collections::BTreeMap;
 
@@ -20,10 +15,8 @@ use serde::{Deserialize, Serialize};
 use super::material::{
     MaterialDigest, MaterialOwner, MaterialPayload, MaterialRef, MaterialRefusal,
 };
-use super::run_event::SegmentOrdinal;
 use crate::artifact_referrer::{ArtifactName, ArtifactReferrer, ArtifactStoreId};
 use crate::await_event_identity::AwaitEventKey;
-use crate::effect_opener::EffectOpener;
 use crate::runtime_error::RuntimeEffectControllerError;
 use crate::store::plugin_writers::PluginRevision;
 
@@ -38,12 +31,6 @@ const BUNDLE_REF_PREFIX: &str = "tool-material:v1:";
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "holder", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MaterialHolder {
-    /// One segment of a logical Run: the lease behind the references its
-    /// continuation publishes, or the successor's lease once it acquires.
-    Segment {
-        opener: EffectOpener,
-        segment: SegmentOrdinal,
-    },
     /// One Deferred source: the lease behind its `Resolved` seal's result.
     Source { source: AwaitEventKey },
 }
@@ -53,10 +40,6 @@ impl MaterialHolder {
     #[must_use]
     pub fn referrer(&self) -> ArtifactReferrer {
         match self {
-            Self::Segment { opener, segment } => ArtifactReferrer::RunSegment {
-                opener: Box::new(opener.clone()),
-                segment: *segment,
-            },
             Self::Source { source } => ArtifactReferrer::Source(Box::new(source.clone())),
         }
     }

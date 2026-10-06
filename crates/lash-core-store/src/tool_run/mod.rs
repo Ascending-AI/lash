@@ -18,7 +18,6 @@
 //! | K2/K6 retained bundles and leases | [`retention`] | FIG-4889 |
 //! | K3/K9 Run events and retry schedule | [`run_event`] | FIG-4877, FIG-4879, FIG-4880 |
 //! | K4 source seal | [`source_seal`] | FIG-4883 |
-//! | K6 continuation | [`continuation`] | FIG-4881, FIG-4739, FIG-4890 |
 //! | K7 receipts and permits | [`receipt`] | FIG-4830 |
 //! | K8 operation Run | [`operation`] | FIG-4888 |
 //! | K10 state commands | [`state_command`] | FIG-4878 |
@@ -28,7 +27,6 @@
 
 pub mod admission;
 pub mod aggregate;
-pub mod continuation;
 pub mod material;
 pub mod operation;
 pub mod receipt;
@@ -45,9 +43,6 @@ pub use admission::{
     PresentationBinding, RoundAdmission, RuntimeCallPolicy, ToolDeclaration,
 };
 pub use aggregate::{AggregateConsumer, AggregateLeaf, AggregatePlan};
-pub use continuation::{
-    AdoptedRun, ContinuationRefusal, Cut, CutPhase, RunTransfer, TransferBundle,
-};
 pub use material::{
     InvalidMaterialDigest, MaterialDigest, MaterialEntry, MaterialLocation, MaterialOwner,
     MaterialPayload, MaterialRef, MaterialRefusal, MaterialRole,

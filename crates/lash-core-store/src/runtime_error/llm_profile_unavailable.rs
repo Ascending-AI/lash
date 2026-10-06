@@ -22,15 +22,12 @@ impl RuntimeErrorCause {
             | Self::PluginExecution { .. }
             | Self::PluginStatePublicationFenced { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
-            Self::RunContinuationRefused { refusal } => !matches!(
-                refusal.as_ref(),
-                crate::tool_run::ContinuationRefusal::NotQuiescent
-            ),
             Self::ToolRunCutRefused { .. }
             | Self::ToolRunIsolationRefused { .. }
             | Self::ToolRunDrift { .. }
             | Self::ToolRunControl { .. }
             | Self::ToolRunAdmissionRefused { .. }
+            | Self::ToolRunRecordRefused { .. }
             | Self::SourceRefused { .. }
             | Self::MaterialRefused { .. }
             | Self::ProviderFailure { .. }

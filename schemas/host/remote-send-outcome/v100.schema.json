@@ -231,7 +231,6 @@
         "host_pin",
         "session",
         "upload",
-        "run_segment",
         "source"
       ],
       "type": "string"
@@ -967,21 +966,6 @@
         "invalid_bounds"
       ],
       "type": "string"
-    },
-    "BoundaryReason": {
-      "description": "Why a run crossed a segment boundary into a new invocation.",
-      "oneOf": [
-        {
-          "const": "journal_budget",
-          "description": "The invocation's journal reached its budget.",
-          "type": "string"
-        },
-        {
-          "const": "hand_over",
-          "description": "The build the invocation runs on is draining, and the run handed its\nwork to a successor on the newest build: a process segment its open\nsignal wait (FIG-3799), a Run its next protocol step or the wait its\ncode cell is parked on (FIG-4739). The successor waits again on the\nsame wait.",
-          "type": "string"
-        }
-      ]
     },
     "CancelOrigin": {
       "description": "The runtime or actor decision that requested cancellation of a process\nor of a tool call's attempt. `RunClosing` is a call's owning tool Run\ndischarging its cancellation at Closing while the turn itself runs on.",
@@ -1951,170 +1935,6 @@
           "const": "refusal",
           "description": "The owner's own refusal, which did not encode.",
           "type": "string"
-        }
-      ]
-    },
-    "ContinuationRefusal": {
-      "description": "Why a transfer cannot be captured or adopted.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "cause": {
-              "$ref": "#/$defs/RunEventRefusal"
-            },
-            "refusal": {
-              "const": "records",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal",
-            "cause"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "segment_frontier",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "missing_segment_authority",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "foreign_environment",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "unacknowledged_attempt",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "foreign_source",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "not_quiescent",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "unretained_material",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "foreign_owner",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refusal": {
-              "const": "owner_terminal",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "found": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "from": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "refusal": {
-              "const": "not_successor",
-              "type": "string"
-            }
-          },
-          "required": [
-            "refusal",
-            "from",
-            "found"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -11106,37 +10926,11 @@
       "type": "string"
     },
     "RunCutRefusal": {
-      "description": "Why a physical boundary cannot admit work or capture the Run.",
-      "oneOf": [
-        {
-          "enum": [
-            "InvocationFailed",
-            "NotRequested",
-            "NotQuiescent"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "AdmissionFrozen": {
-              "properties": {
-                "reason": {
-                  "$ref": "#/$defs/BoundaryReason"
-                }
-              },
-              "required": [
-                "reason"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "AdmissionFrozen"
-          ],
-          "type": "object"
-        }
-      ]
+      "description": "Why a Run's frame cannot proceed: an earlier frame of its invocation\nfailed.",
+      "enum": [
+        "InvocationFailed"
+      ],
+      "type": "string"
     },
     "RunDefinitionRefusal": {
       "additionalProperties": false,
@@ -12174,14 +11968,14 @@
           "type": "object"
         },
         {
-          "description": "A physical boundary or successor refused the logical Run's transfer.",
+          "description": "A Run record breaks the Run's event contract.",
           "properties": {
             "kind": {
-              "const": "run_continuation_refused",
+              "const": "tool_run_record_refused",
               "type": "string"
             },
             "refusal": {
-              "$ref": "#/$defs/ContinuationRefusal"
+              "$ref": "#/$defs/RunEventRefusal"
             }
           },
           "required": [

@@ -958,18 +958,17 @@ pub mod plugins {
     };
     pub use lash_core::tool_run::{
         AdmissionRefusal as ToolRunAdmissionRefusal, AdmittedBinding, AdmittedCall, AdmittedRound,
-        AdoptedRun, AfterCheckVerdict, AggregateConsumer, AggregateLeaf, AggregatePlan,
-        AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CapacityScope, Cut, CutPhase,
-        RoundAdmission, RunLifecycle, RunTransfer, RuntimeCallPolicy, SegmentOrdinal,
-        TransferBundle,
+        AfterCheckVerdict, AggregateConsumer, AggregateLeaf, AggregatePlan, AttributedVerdict,
+        BeforeCheckVerdict, BeforeSelection, CapacityScope, RoundAdmission, RunLifecycle,
+        RuntimeCallPolicy, SegmentOrdinal,
     };
     /// Recorded Run data needed by engine extensions and effect-host journals.
     pub use lash_core::tool_run::{
-        BusinessReceipt, CheckRecord, ContinuationRefusal, InvalidMaterialDigest, LogicalTerminal,
-        MaterialBundle, MaterialDigest, MaterialEntry, MaterialHolder, MaterialLocation,
-        MaterialOwner, MaterialPayload, MaterialRef, MaterialRefusal, MaterialRetentionError,
-        MaterialRole, ObservationPermit, ObservedFact, OperationRun, RetainedBundle, RunInputKind,
-        SealOutcome, SealWriter, SourceAuthority, SourceDescriptor, SourceRefusal, SourceSeal,
+        BusinessReceipt, CheckRecord, InvalidMaterialDigest, LogicalTerminal, MaterialBundle,
+        MaterialDigest, MaterialEntry, MaterialHolder, MaterialLocation, MaterialOwner,
+        MaterialPayload, MaterialRef, MaterialRefusal, MaterialRetentionError, MaterialRole,
+        ObservationPermit, ObservedFact, OperationRun, RetainedBundle, RunInputKind, SealOutcome,
+        SealWriter, SourceAuthority, SourceDescriptor, SourceRefusal, SourceSeal,
         SourceSubscription,
     };
     /// A session's recorded plugin configuration and the owner contract that

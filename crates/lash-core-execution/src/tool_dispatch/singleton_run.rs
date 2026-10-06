@@ -665,8 +665,6 @@ pub use crate::tool_run::SingletonDrift;
 #[derive(Debug, thiserror::Error)]
 pub enum SingletonRunError {
     #[error(transparent)]
-    Continuation(#[from] crate::tool_run::ContinuationRefusal),
-    #[error(transparent)]
     Cut(#[from] super::run_coordinator::RunCutRefusal),
     /// A source seal named material whose retention or authority refused the read.
     #[error(transparent)]
@@ -799,7 +797,6 @@ impl SingletonRunError {
     pub(crate) fn into_controller_error(self) -> RuntimeEffectControllerError {
         match self {
             Self::Controller(error) => error,
-            Self::Continuation(refusal) => refusal.into(),
             Self::Material(refusal) => match refusal {
                 crate::tool_run::MaterialRetentionError::Refused(refusal) => refusal.into(),
                 crate::tool_run::MaterialRetentionError::Controller(error) => *error,
@@ -808,7 +805,15 @@ impl SingletonRunError {
                     crate::RuntimeError::artifact_referrer_ended(holder.referrer()).into()
                 }
             },
-            Self::Ledger(cause) => crate::tool_run::ContinuationRefusal::Records { cause }.into(),
+            Self::Ledger(cause) => {
+                let message = cause.to_string();
+                run_refusal(
+                    crate::RuntimeErrorCause::ToolRunRecordRefused {
+                        refusal: Box::new(cause),
+                    },
+                    message,
+                )
+            }
             Self::Admission(refusal) => {
                 let mut error = RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeToolRunShape,

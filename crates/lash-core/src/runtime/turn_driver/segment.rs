@@ -111,12 +111,6 @@ impl RuntimeTurnDriver<'_> {
             driver_plugin_id: driver_state.plugin_id.clone(),
             driver_state: driver_state.payload.clone(),
         };
-        if let Some(owner) = &self.tool_run_owner {
-            owner
-                .capture_tool_run(crate::BoundaryReason::HandOver)
-                .await
-                .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
-        }
         let opener = self
             .opener_state
             .boundary_snapshot()
@@ -194,12 +188,6 @@ impl RuntimeTurnDriver<'_> {
                 error.to_string(),
             )
         })?;
-        if let Some(owner) = &self.tool_run_owner {
-            owner
-                .capture_tool_run(reason)
-                .await
-                .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
-        }
         self.segment.taken = Some(Box::new(BoundaryTaken {
             iterations: self
                 .segment

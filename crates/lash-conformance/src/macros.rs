@@ -1260,8 +1260,6 @@ macro_rules! artifact_referrer_tests {
 macro_rules! tool_material_tests {
     ($fixture:block) => {
         $crate::tool_material_tests!(@catalogue $fixture; [
-            handover_leases_hold_material_until_the_last_dependency_ends,
-            early_release_retires_material_before_an_unacquired_successor,
             source_material_reads_refuse_typed_without_a_fresh_body,
         ]);
     };

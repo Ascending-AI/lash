@@ -565,7 +565,6 @@ async fn capture_parked_loop_segment() {
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
-        tool_run: None,
         worker_recovery: Default::default(),
     };
     let input = parked_loop_input();
@@ -651,7 +650,6 @@ fn a_segment_state_without_its_worker_recovery_ledger_is_a_typed_format_rejectio
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: Vec::new(),
         effect_omissions: Default::default(),
-        tool_run: None,
         worker_recovery: Default::default(),
     })
     .expect("encode the segment state");
@@ -661,7 +659,7 @@ fn a_segment_state_without_its_worker_recovery_ledger_is_a_typed_format_rejectio
         "the full envelope decodes"
     );
 
-    for field in ["worker_recovery", "tool_run"] {
+    for field in ["worker_recovery"] {
         let mut partial = envelope.clone();
         partial
             .as_object_mut()
@@ -836,7 +834,6 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: writer.pending(),
         effect_omissions: writer.omissions(),
-        tool_run: None,
         worker_recovery: Default::default(),
     })
     .expect("encode the boundary's segment state");

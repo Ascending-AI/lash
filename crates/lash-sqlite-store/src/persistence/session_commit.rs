@@ -715,13 +715,6 @@ impl SqliteStore {
                             facts,
                         )?;
                     }
-                    let cleanups = lash_core_execution::store::pending_follow_on::run_material_cleanups(
-                        &commit.session_id,
-                        existing.as_ref().and_then(|head| head.pending_follow_on.as_ref()),
-                        commit.pending_follow_on.as_ref(),
-                    &commit.turn_commit.operation,
-                    )?;
-                    crate::artifact_store::commit_run_material_tx(tx, &cleanups, now)?;
                     let sql_head_revision = sql_monotonic_counter_value(
                         "session_head_revision",
                         plan.actual_head_revision(),

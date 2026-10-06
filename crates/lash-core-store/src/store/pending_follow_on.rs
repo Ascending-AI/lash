@@ -112,128 +112,15 @@ pub struct RunContinuation {
     pub opener: RunOpenerState,
 }
 
-/// The logical Run's opener state transferred by a physical boundary.
+/// The logical opener's state a physical boundary carries: its
+/// incorporation ledger.
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
 pub struct RunOpenerState {
-    /// The complete acknowledged tool Run, shared by every cell and carried
-    /// under the same head fence as the protocol continuation.
-    #[schemars(with = "Option<serde_json::Value>")]
-    pub run: Option<Box<crate::tool_run::RunTransfer>>,
     /// The settlements already incorporated by any earlier cell or segment.
     pub incorporation: crate::effect_opener::IncorporationLedger,
-}
-
-/// Material edges moved by the same transaction that publishes or retires a
-/// continuation. A checkpoint preserving the head fact moves no ownership.
-pub fn run_material_cleanups(
-    session_id: &crate::SessionId,
-    existing: Option<&PendingFollowOn>,
-    written: Option<&PendingFollowOn>,
-    operation: &super::OperationId,
-) -> Result<Vec<crate::artifact_referrer::ResolvedArtifactCleanup>, StoreError> {
-    use crate::artifact_referrer::{ArtifactCarry, ResolvedArtifactCleanup};
-    use crate::tool_run::{CutPhase, MaterialHolder, SegmentOrdinal};
-
-    let terminal_turn = (operation.key == TURN_TERMINAL_OPERATION_KEY)
-        .then(|| operation.turn_id())
-        .flatten();
-    if existing == written && terminal_turn.is_none() {
-        return Ok(Vec::new());
-    }
-    fn run_of(pending: &PendingFollowOn) -> Option<&crate::tool_run::RunTransfer> {
-        pending
-            .owes
-            .continuation()
-            .and_then(|continuation| continuation.opener.run.as_deref())
-    }
-    let mut cleanups = Vec::new();
-    if let Some(pending) = written
-        && let Some(run) = run_of(pending)
-    {
-        let owner =
-            crate::effect_opener::EffectOpener::turn(session_id.clone(), pending.run_turn_id());
-        let successor = run
-            .from
-            .0
-            .checked_add(1)
-            .ok_or_else(|| StoreError::StoredDataCorrupt {
-                record_kind: "Run continuation",
-                message: "the successor segment ordinal overflows".into(),
-            })?;
-        if u64::from(successor) != pending.physical_index() || run.owner != owner {
-            return Err(StoreError::StoredDataCorrupt {
-                record_kind: "Run continuation",
-                message: "the tool Run does not belong to the published continuation".into(),
-            });
-        }
-        run.check_capture(CutPhase::Capturable).map_err(|refusal| {
-            StoreError::StoredDataCorrupt {
-                record_kind: "Run continuation",
-                message: refusal.to_string(),
-            }
-        })?;
-        let to = MaterialHolder::Segment {
-            opener: run.owner.clone(),
-            segment: SegmentOrdinal(successor),
-        }
-        .referrer();
-        cleanups.push(ResolvedArtifactCleanup {
-            referrer: run.holder().referrer(),
-            carries: run
-                .material
-                .iter()
-                .map(|bundle| ArtifactCarry {
-                    artifact: bundle.artifact.clone(),
-                    to: to.clone(),
-                })
-                .collect(),
-        });
-    }
-    if let Some(run) = existing.and_then(run_of) {
-        let successor = run
-            .from
-            .0
-            .checked_add(1)
-            .ok_or_else(|| StoreError::StoredDataCorrupt {
-                record_kind: "Run continuation",
-                message: "the successor segment ordinal overflows".into(),
-            })?;
-        let current = MaterialHolder::Segment {
-            opener: run.owner.clone(),
-            segment: SegmentOrdinal(successor),
-        }
-        .referrer();
-        if !cleanups.iter().any(|cleanup| cleanup.referrer == current) {
-            cleanups.push(ResolvedArtifactCleanup {
-                referrer: current,
-                carries: Vec::new(),
-            });
-        }
-    }
-    if written.and_then(run_of).is_none()
-        && let Some(turn) = terminal_turn
-    {
-        let (logical, ordinal) = PhysicalTurn::split_turn_id(turn);
-        let segment = u32::try_from(ordinal).map_err(|_| StoreError::StoredDataCorrupt {
-            record_kind: "Run continuation",
-            message: "the current segment ordinal overflows".into(),
-        })?;
-        let current = MaterialHolder::Segment {
-            opener: crate::effect_opener::EffectOpener::turn(session_id.clone(), logical),
-            segment: SegmentOrdinal(segment),
-        }
-        .referrer();
-        if !cleanups.iter().any(|cleanup| cleanup.referrer == current) {
-            cleanups.push(ResolvedArtifactCleanup {
-                referrer: current,
-                carries: Vec::new(),
-            });
-        }
-    }
-    Ok(cleanups)
 }
 
 /// A code cell a segment boundary stopped inside (FIG-4739): what the turn's

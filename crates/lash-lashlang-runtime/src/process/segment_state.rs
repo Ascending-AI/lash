@@ -1,13 +1,5 @@
 use super::*;
 
-pub(super) fn continuation_refused(
-    refusal: lash_core::tool_run::ContinuationRefusal,
-) -> lash_core::ProcessInfraError {
-    lash_core::ProcessInfraError::new(lash_core::PluginError::RuntimeEffectController(
-        refusal.into(),
-    ))
-}
-
 /// Version of the durable Lashlang segment-handover envelope.
 ///
 /// v12 carries VM continuation v16, which counts aggregates in the occurrence
@@ -210,18 +202,9 @@ pub(super) struct LashlangSegmentState {
     /// outcome class (FIG-3464). A successor segment keeps counting from here
     /// and the run's terminal omission record carries the total.
     pub(super) effect_omissions: BTreeMap<String, lash_core::ProcessEffectOmittedCounts>,
-    /// The complete tool Run, sealed after local durable acceptance.
-    #[serde(deserialize_with = "deserialize_tool_run")]
-    pub(super) tool_run: Option<Box<lash_core::tool_run::RunTransfer>>,
     /// The worker accounting the body carries across this boundary
     /// (ADR 0123).
     pub(super) worker_recovery: WorkerRecoveryLedger,
-}
-
-fn deserialize_tool_run<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Box<lash_core::tool_run::RunTransfer>>, D::Error> {
-    serde::Deserialize::deserialize(deserializer)
 }
 
 pub(super) fn decode_lashlang_segment_state(
@@ -254,10 +237,6 @@ pub(super) fn capture_segment(
     reason: lash_core::BoundaryReason,
     program_hash: &str,
 ) -> Result<lash_core::SegmentHandover, (String, &'static str)> {
-    let tool_run = host
-        .ctx
-        .run_continuation_snapshot()
-        .map_err(|error| (error.to_string(), "tool Run is not capturable; continuing"))?;
     let segment_state = LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm,
@@ -266,7 +245,6 @@ pub(super) fn capture_segment(
         incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
         pending_summary: host.effect_summary.pending(),
         effect_omissions: host.effect_summary.omissions(),
-        tool_run: tool_run.map(Box::new),
         // The worker released at this boundary settled its measured usage,
         // so the budget holds everything the body consumed so far.
         worker_recovery: host.worker_recovery.crossed(
