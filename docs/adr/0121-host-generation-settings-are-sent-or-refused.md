@@ -37,7 +37,7 @@ optional non-zero capacity and default cap. Construction and decoding reject
 a default above capacity. Requests carry the full `LlmProfileConfig`; a
 session-owned direct completion takes it from its owner. Generation resolution
 selects the request cap or recorded default and bounds it against capacity
-once. Requests and journals retain the original intent. The adapter's receipt
+once. Requests and recorded calls retain the original intent. The adapter's receipt
 reports `ClampedToCapacity` only when that bounded cap reached the wire.
 
 **Reasoning resolves once.** `LlmProfileCapability::reasoning_intent` resolves the

@@ -61,7 +61,7 @@ the core commands, which the run's shape records (FIG-5093).
 core reducer that reads more than the recorded namespace: it asks the host's
 `LlmProfiles` catalog to mint a `RecordedLlmProfile` (the key and its metadata)
 for the key, even when the key is the one already recorded. The resolution
-records that binding, so a redrive or replay reuses it and never re-derives it
+records that binding, so a resume or redrive reuses it and never re-derives it
 from a catalog that may since have changed. `SetReasoning` changes the
 reasoning selection on the recorded model and keeps the key.
 
@@ -96,11 +96,13 @@ request, and rides `SessionCommand::ApplyConfigTransaction`. A resubmission
 under the same id with other content is refused as `ChangedContent`.
 
 **Resolution.** The drain applies each session command alone. It resolves
-the transaction in one journaled `ResolveConfigTransaction` effect:
+the transaction in one recorded `ResolveConfigTransaction` resolution, which
+commits before publication:
 
 1. If an owner's installed implementation differs from the recorded one, the
-   effect records nothing and the command run parks as `RetiredGeneration`
-   until a build that runs the recorded reducers executes it.
+   resolution records nothing and the command run parks typed until a node
+   whose build runs the recorded reducers claims the session
+   ([ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) §1).
 2. If the config revision moved past the expected revision, the transaction
    resolves `Stale` without running a reducer.
 3. Otherwise the entries reduce in order over a private candidate. Every
@@ -121,8 +123,8 @@ the resolution records no decision and fails as `StoredDataCorrupt`, and the
 same holds for a run override, a creation from a corrupt parent and a run's
 render.
 
-A redrive replays the recorded resolution and never re-runs a reducer under
-new code.
+A resumed or redriven command loads the recorded resolution and never re-runs
+a reducer under new code.
 
 **Publication.** One fenced host-command commit publishes an applied
 resolution's replacements, advances `config_revision` by exactly one, and

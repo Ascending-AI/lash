@@ -29,7 +29,7 @@ Coverage metadata records the test name, display name and owned boundary. Macros
 
 ## Ownership boundaries
 
-Runtime Scenarios own admission ordering, checkpoint behavior, commands, cancellation, observation replay and commits. Persistence conformance owns backend permutations. The storage matrix is SQLite file, SQLite memory and PostgreSQL. Host laws run on the in-process Restate server double, live Restate and lash-sim's in-process effect host; upgrade proofs use the synthetic-next tier. These are evidence dimensions, not extra scenario layers.
+Runtime Scenarios own admission ordering, checkpoint behavior, commands, cancellation, observation and commits. Persistence conformance owns backend permutations. The storage matrix is SQLite file, SQLite memory and PostgreSQL. Laws run the production runtime over a fault-injecting store with labelled commits, a virtual clock and `SimNodes` ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §14). Upgrade proofs use the synthetic-next tier. These are evidence dimensions, not extra scenario layers.
 
 Focused scheduler, provider, stream, projection and helper tests remain focused where a full scenario obscures their invariant. Facade cases needing plugins, tools, process graphs or final values belong to Agent Scenarios.
 

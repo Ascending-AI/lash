@@ -38,12 +38,12 @@ A `StartKey` is a framed digest in the `lash.process-start-key` v1 family.
 Its preimage identifies the admitted operation, not the submitted content,
 source, compiler or minted result. The start paths have separate namespaces:
 
-- A tool intent uses its recorded replay key.
+- A tool intent uses its recorded intent identity.
 - A trigger delivery uses its occurrence, subscription, subscription
   incarnation and revision.
 - A host or remote caller supplies bytes to `StartKey::for_host`.
-- A keyless host start uses its admitted scope and start ordinal, so replay
-  issues the same key.
+- A keyless host start uses its admitted scope and start ordinal, so a
+  resumed start issues the same key.
 
 Host bytes alone determine a host key across the store set. Originators and
 deployment namespaces that share a store share that key space. The host
@@ -75,10 +75,10 @@ Evidence: `crates/lash-core-store/src/process_identity.rs:190`,
 
 ### 3. The start effect is addressed by the key
 
-A journaled start is `process:start:{start key}`. Its staging referrer is
+A recorded start is `process:start:{start key}`. Its staging referrer is
 `Start(key)`. A missing key refuses as `process_start_key_missing`. The
-recorded result contains the minted id and `Created` or `Existing`, so replay
-answers the disposition the first execution observed.
+recorded result contains the minted id and `Created` or `Existing`, so a
+resumed caller reads the disposition the first execution observed.
 
 Host and remote start receipts carry the id, key and disposition. A repeat
 that returns `Existing` releases its staged content rather than adopting it
@@ -90,9 +90,8 @@ start that finds its staging referrer ended holds the content under its own
 same referrer. [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md)
 §3.3 owns those artifact rules.
 
-Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs:910`,
-`crates/lash-core-execution/src/runtime/process/start_staging.rs:327`, and
-`crates/lash-restate/src/controller/process_command.rs:281`.
+Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs:910` and
+`crates/lash-core-execution/src/runtime/process/start_staging.rs:327`.
 
 ### 4. A declared start answers a slot
 
@@ -104,7 +103,7 @@ does not realize, the result is the typed `process_start_unrealized` failure.
 Registration records a declared start's consumer hold atomically with its
 process row. Retention cannot prune a held row. The consumer releases the
 hold after incorporating settlement; its opener's close also releases the
-hold. Cancellation and lifetime are separate obligations, as specified in
+hold. Cancellation and lifetime are separate duties, as specified in
 [ADR 0116](0116-tools-are-opaque.md) §3.
 
 Evidence: `crates/lash-sansio/src/handle.rs:168`,
@@ -112,14 +111,12 @@ Evidence: `crates/lash-sansio/src/handle.rs:168`,
 `crates/lash-sqlite-store/src/process_registry/registration.rs:104`, and
 `crates/lash-sqlite-store/src/process_registry/prune_api.rs:119`.
 
-### 5. A trigger delivery binds its process after the start
+### 5. A trigger delivery binds its process in the start's transaction
 
-A delivery reservation has no process until the start registers. The router
-then binds its minted id. Recovery starts an unbound reservation under its
-delivery key and binds the result. A crash between registration and binding
-therefore converges on the process retained under that key. Binding also
-settles the delivery obligation, as specified in
-[ADR 0109](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md) §3.
+A delivery reservation has no process until the start registers. Registration
+and binding commit in one transaction with the reservation
+([ADR 0021](0021-trigger-deliveries-are-first-class-and-recoverable.md)), so
+no crash separates them and there is no delivery to settle afterwards.
 
 A bound delivery never mints again, although §2 lets a key register afresh
 once its process is pruned. A delivery's key finds nothing after the bound
@@ -147,7 +144,7 @@ Evidence: `crates/lash-sansio/src/identity.rs:304` and
 
 Callers retain the returned `ProcessId` to address the process. A readable
 label cannot serve as that address. Reusing a start key after pruning creates
-a different lifetime, while a journal that retains its start result returns
+a different lifetime, while a caller that retains its start result returns
 its recorded id. Declared-start consumer holds protect the result until the
 consumer settles it.
 

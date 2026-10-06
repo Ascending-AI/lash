@@ -8,7 +8,7 @@ reproduces the record field-for-field.
 
 ## Context
 
-First-started facts, wait transitions, external references, cancellation,
+First-started facts, wait transitions, cancellation,
 terminal outcomes and parks need one auditable transition path. Reads use the
 stored projection instead of refolding history. A batch folds each event in
 order as individual appends would, then saves the record once.
@@ -41,7 +41,7 @@ authorization policy. Observer-edge visibility and tool filters are query and
 model-presentation rules.
 
 Hosts explicitly choose initial process observers, session-creation and fork
-observer selections, and later replay-keyed observer mutations. Session and
+observer selections, and later idempotency-keyed observer mutations. Session and
 fork creation retain an observer intent before cross-store publication and
 consume it after idempotent application. Opening reconciles an interrupted
 publication. Typed unavailable, missing and pruned outcomes describe each
@@ -89,12 +89,12 @@ implicitly cancel processes; hosts compose cancellation policy explicitly.
 SQLite and PostgreSQL store lifecycle JSON beside indexed query fields,
 observer edges and payload-free process tombstones. `ProcessStatus` is a
 label-only lifecycle enum; terminal payloads live in `ProcessRecord::outcome`.
-Continuation state uses the engine's scoped continuation contract.
+VM continuation state is the process's snapshot under [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8.
 
 ## Consequences
 
-A failed append cannot change the fold, and a replay key cannot create a
-second transition. First-writer and write-once constraints are checked before
+A failed append cannot change the fold, and an idempotency key cannot create
+a second transition. First-writer and write-once constraints are checked before
 projection. Every registry must pass the record-refolding conformance law.
 
 The best-effort event sink is observation; the durable event log is the

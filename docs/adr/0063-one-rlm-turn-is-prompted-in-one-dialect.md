@@ -49,7 +49,7 @@ Hard-coding source syntax in shared prompts couples every prompt consumer to
 one front end and lets examples disagree with the parser. Vocabulary and
 signature rendering keep those choices with the front end.
 
-Renaming durable machine identifiers for each source dialect changes replay
+Renaming durable machine identifiers for each source dialect changes durable
 identity without changing execution. Machine names remain dialect-neutral.
 
 Rewriting words in host prose risks changing descriptions and schema text.

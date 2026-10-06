@@ -8,11 +8,14 @@ without version bumps or upcasters. The 1.0 release boundary is governed by
 
 ## Context
 
-A rolling PostgreSQL deployment shares stored rows and Restate object state
-between builds, while a journal must replay under compatible execution code.
-SQLite storage belongs to one host and upgrades by closing the serving build
-before the next one opens the store set. Compatibility needs distinct rules
-for shared values, immutable history, identities and in-flight execution.
+A rolling PostgreSQL deployment shares stored rows between builds, and nodes
+of both builds claim actors from one store. Nothing re-runs against a recorded
+history ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §2),
+so changing kernel code never needs a drain; only a durable format a node
+cannot decode does. SQLite storage belongs to one host and upgrades by closing
+the serving build before the next one opens the database. Compatibility needs
+distinct rules for shared values, immutable history, identities and in-flight
+state.
 The current code supplies those mechanisms and proves upgrades through the
 synthetic-next tier; the freeze supplies no compatibility between arbitrary
 pre-1.0 builds.
@@ -21,7 +24,7 @@ pre-1.0 builds.
 
 The registered `UpgradePolicy` values distinguish migration, drain and
 coexistence. Migration converts stored meaning through schema steps or read
-upcasters. Drain preserves a journal on its compatible code. Coexistence admits
+upcasters. Drain finishes in-flight state on a node that decodes its format. Coexistence admits
 both supported forms across a compatibility window. A policy declaration is
 not evidence that every decoder already reads a predecessor: the decoder's
 registered range and upcaster rows decide what it accepts.
@@ -30,94 +33,44 @@ Evidence: `crates/lash-core-execution/src/engine/contracts.rs`,
 `crates/lash-core-store/src/compat.rs`,
 `scripts/discover_version_surfaces.py`.
 
-### 1. Long-running work and build generations
+### 1. Long-running work and drain by release
 
-`G` is the build's drain generation. The core hashes the sorted drain-policy
-format names and versions with `JOURNAL_LOGIC_EPOCH`, the build's
-`SessionAdmissionWindow` (its supported session-state range and every writer
-pin the recorded `F` could select, FIG-4454) and the ordered plugin
-composition: each registered plugin's id and declared behaviour revision, in
-hook order (FIG-4744). Two builds whose session admission differs therefore
-never share a lane, so work sent on its opener's lane runs on a build that
-admits every session its opener admitted; and two builds whose plugins differ
-in any behaviour revision, or only in order, never share one either.
-`G` exists once the core's plugins are registered: the core computes it when
-it is built and binds it into the engine, and there is no other way to obtain
-one, so no caller can open work on a lane no deployment serves.
-The engine's journal-bearing services bind a stable
-name and a generation name, `<Service>_g<G>`. Shared state services keep one
-stable name. The fleet epoch `F`, described in §2, selects durable writer
-formats independently of `G`.
+A build's format set names every durable format it decodes: turn checkpoints,
+VM continuations and snapshot blobs, the cell envelope used as snapshot data,
+Run record bodies, wait rows, engine-state format ids and outcome materials.
+Each format declares its version surface under
+[ADR 0131](0131-durable-types-declare-their-version-surface.md). A node
+records its decodable set in `lash_nodes.formats`; an actor records the format
+set of its state in `lash_actors.formats`. A claim takes only actors whose
+formats the claiming node decodes. An actor no live node can decode stays
+visible and can be cancelled without decoding its payload (ADR 0132 §11). The
+build's `SessionAdmissionWindow` (its supported session-state range and every
+writer pin the recorded `F` could select, FIG-4454) and its ordered plugin
+composition (each registered plugin's id and declared behaviour revision, in
+hook order, FIG-4744) are part of what it decodes. The fleet epoch `F`,
+described in §2, selects durable writer formats.
 
-A route is retained data beside a segment handover. Replay uses that route rather
-than deriving it from the current caller. Restate keys workflow and idempotency
-identity by service name, so recomputing a route can start different work. New
-segment successors use the stable route to the latest build; incompatible
-handovers retain their writer's generation route. Process terminals and source
-seals use their shared stable services. The Run's ordinary tool records belong
-to its owning handler's journal and generation.
+A build drains by release. An operator marks a node draining, and the node:
 
-Journal-bearing handlers check the recorded build generation before replaying
-work. The session and turn handlers fold that sentinel into their first
-recorded step. A foreign journal parks with `RetiredGeneration` rather than
-running fresh effects. Process segments retain a bounded journal and hand over
-continuation state, unresolved waits and ordinal state at a segment boundary.
-There are no in-place patch markers.
+1. stops claiming;
+2. finishes each actor it owns to its next committed phase, or to a snapshot
+   for a VM;
+3. releases it to `ready`.
 
-An operator marks a generation draining. The recovery leader wakes its live
-processes for handover through a distinct handoff arm, not cancellation.
-Generation status counts store-tracked live and parked processes, parked and
-in-flight turns, and closing sessions. A submitted successor remains counted
-until its admission changes the process's generation. The engine's
-`DeploymentRegistry` also counts `unfinished_invocations`
-pinned to retained deployments, including paused work and old shifts. Short
-source subscriptions transfer without leaving a pending waiter on the old lane;
-unresolved transferred sources alone do not hold that deployment (L11). An
-unreadable invocation count refuses drain or removal. Stalled obligations are
-reported separately and do not hold the drain. These reads are not one atomic
-snapshot or an enumeration of every engine invocation. Finalize additionally
-checks retained deployments in §2. Parked work requires compatible replay or
-an operator control decision.
+Nodes of the new build then claim the released actors, under the claim filter
+above. The drain moves no work by hand and parks nothing: a released actor
+resumes from committed state on whichever node claims it. A VM continuation
+bound to an executable identity whose bytecode contract changed finishes on a
+node of the old build or ends `Abandoned { ResumeRefused }`.
 
-A session shift's drain is bounded by one run per shift. Restate pins a
-`LashSession` shift invocation to the build that started it, and a shift
-admits one run after another, so a busy session would hold its pinned build
-for a whole backlog. Every admission after the run a shift started on
-therefore reads the drain mark of the build its invocation is pinned to,
-inside the recorded `AdmitShift` step. Marked, with work pending, the step
-admits nothing and records `AdmitVerdict::Draining` with that generation. The
-shift then sends the rest to its continuation request under the stable name,
-which the newest build serves, and stops `ShiftStop::Draining`; a waiter
-follows the continuation. The run in flight always runs to its terminal
-commit on its build. A replay decodes the recorded verdict and hands over
-where the first execution did, whatever the mark says by then. A shift
-resumed on a generation's lane executes the run it was resumed for and hands
-over the same way, its lane continuations included. A shift's first admission
-reads no mark: under the stable name a new invocation is already the newest
-build's, so a drain never passes work back and forth. The in-process shift
-loop is pinned to no build and reads none.
-
-A run is stamped with the generation of the build that admits it, the one
-serving the admission's shift invocation. The engine passes that generation
-to admission separately from the wire request. A shift request carries only
-its intended lane, with no generation suffix in its request id. So a run the
-newest build admits from a hand-over counts in that build's in-flight turns and
-parks
-under its generation, and the draining generation counts only the run still
-running on its own build.
+Drain status counts the actors a draining node still owns, and the actors in
+the store whose formats only draining nodes decode. Parked work requires a
+decoding node or an operator control decision.
 
 Evidence: `crates/lash/src/formats.rs`,
 `crates/lash-core/src/runtime/shift/admission.rs`,
-`crates/lash-restate/src/session_shifts.rs`,
-`crates/lash-restate/src/session_shifts/continuation.rs`,
-`crates/lash/src/tests/drain_hand_over.rs`,
-`crates/lash-core-store/src/store/state_version.rs`,
-`crates/lash-restate/src/services.rs`,
-`crates/lash-restate/src/deployment_registry.rs`,
-`crates/lash-restate/src/sentinel.rs`,
-`crates/lash-core-store/src/store/generation_drain.rs`,
-`crates/lash-restate/src/process/workflow.rs`,
-`crates/lash-restate/src/tests/wait_handoff_generations.rs`.
+`crates/lash-core-store/src/store/state_version.rs`. The substrate lanes
+implement the format set, the claim filter and drain by release.
 
 ### 2. Shared rows: the fleet format and finalize
 
@@ -129,20 +82,19 @@ the predecessor epoch and its own, so upgrade tests can prove read-both and
 write-old behavior instead of checking equal constants.
 
 Finalize closes the rollback window by moving `F` to the finalizing build's
-epoch. It requires the retired generation to be marked drained and the engine
-to retain no deployment serving it. An unread deployment registry refuses the
-operation. PostgreSQL's automatic mode also refuses an operator hold; its
+epoch. It requires that no live node lacks the newer formats: a newer format
+is never written while a node of the older build is live. An unread node table
+refuses the operation. PostgreSQL's automatic mode also refuses an operator hold; its
 explicit `--override-hold` mode bypasses only that hold. The fleet-row transaction
 moves `F` and fences stale writers. PostgreSQL finalize also runs eligible
-backfills; object sweeps are a separate operation after finalize, under §3.
+backfills.
 
 The host owns the rollout and calls finalize as its final drain operation.
 `lashctl finalize` exposes the PostgreSQL operation. A status read does not
 schedule an automatic finalize. SQLite's schema migration runs on open;
 finalizing its fleet epoch is a separate store operation with no operator hold.
-It seals a durable intent after checking retirement and before committing any
-database. A fresh open completes that checked transition before admitting the
-store; it does not decide a new retirement. A build whose
+It commits in one transaction of the one database, so there is no partial
+transition to complete. A build whose
 writable range excludes `F` refuses rather than writing another format.
 
 The two upgrade values remain distinct: `UpgradePolicy` describes how a
@@ -161,33 +113,8 @@ Evidence: `crates/lash-core-store/src/store/fleet_format.rs`,
 
 ### 3. Restate object state
 
-The durable-wait registry and source seals live in Restate under stable object
-keys. `LashDurableWaitIndex` and `LashDurableWaitWorkflow` retain their shared-state
-compatibility rules. Stored-value format and handler wire are distinct registered
-surfaces. The Rust registry trait is `LashDurableWaitRegistry`. Run aggregate
-records and material references live in the opener journal rather than object
-state in another service.
-
-Stored values carry `{format, body}`. A supported predecessor is lifted by the
-surface's registered upcasters; a foreign stamp refuses before the handler
-acts. Writers stamp the format selected by `F`. Each object also retains a
-`_compat` record: exclusive handlers check read and write admission, and shared
-handlers check read admission. Clearing an object keeps that compatibility
-record so a stale writer cannot recreate its values.
-
-An exclusive `upgrade` handler rewrites one object's values and raises its
-compatibility record when `F` selects that family's newest writer format.
-The object preflight uses Restate SQL introspection to list older objects;
-the sweep calls their handlers and reads
-preflight again. Object state is the resumable cursor. Introspection measures
-progress and supplies no writer fence. A family still writing its predecessor
-refuses with `NotFinalized`; finalize selects its newest format. The operator
-exposes these operations through `lashctl objects-preflight` and
-`lashctl objects-sweep`.
-
-Evidence: `crates/lash-restate/src/object_state.rs`,
-`crates/lash-restate/src/object_upgrade.rs`,
-`crates/lashctl/src/main.rs`.
+Retired: no durable state lives outside the lash store. Wait rows and source
+seals are store rows under ADR 0132 §6, versioned as surfaces under §4.
 
 ### 4. Per-surface policy
 
@@ -197,26 +124,23 @@ name the guarded shapes and files. `scripts/versioned-surfaces.toml` retains
 class exclusions, admission floors, constants that do not version durable
 formats, and permanently reserved retired hash domains.
 `scripts/check_format_registry.py` checks the declaration against the typed
-manifests. Engine formats are declared by
-the engine; the facade includes them only when that engine is enabled.
+manifests. Engine-state formats are declared by their process engines.
 
 | Stored shape | Current compatibility mechanism |
 |---|---|
 | SQL schema and component stamps | Compatibility descriptors and explicit schema runners; PostgreSQL migrates before worker open, SQLite at store-set open. |
-| Session-state marker | Shift-fenced admission reads the marker and applies its fleet read window. |
+| Session-state marker | Epoch-fenced admission reads the marker and applies its fleet read window. |
 | Mutable payloads | Surface read ranges, registered upcasters and `F`-selected writer versions. |
 | Immutable, hash-addressed history | Decode the admitted range and lift in memory without rewriting the stored bytes or identity preimage. |
 | Derived workflow graph and type facets | Their declared read ranges and projection policy. |
 | Content addresses and idempotency families | Preserve stored identity preimages; admit the declared family rather than re-derive an old identity with a new family. |
-| Effect, process, session-shift and group-dispatch journals | Drain generation, retained routes and generation sentinels. |
-| Turn checkpoints, VM continuations and process handovers | Their declared payload read range and the writer generation of in-flight work. |
-| Restate object values | Stored-value ranges, fleet-selected stamps and exclusive object upgrades. |
-| Live remote and Restate wire | Negotiated or declared wire read/write windows, separately from journal and stored-value versions. |
+| Turn checkpoints, VM snapshots, Run records, wait rows and engine state | Their declared payload read range, the claim filter and drain by release (§1). |
+| Live remote wire | Negotiated or declared wire read/write windows, separately from stored-value versions. |
 | Release fixtures | Capture by release tag; synthetic-next supplies the current upgrade proof. |
 
-Session-state admission validates the `ShiftFence` in the store transaction,
-reads the independent version marker, and returns the session id, version and
-shift epoch. It runs no per-session converter chain and advances no marker.
+Session-state admission validates the session actor's epoch in the store
+transaction, reads the independent version marker, and returns the session id,
+version and epoch. It runs no per-session converter chain and advances no marker.
 Recovery also checks the marker before guarded payload decoding. Each record
 reader still enforces its own surface window, as specified by
 [ADR 0077](0077-session-state-migrates-totally-at-admission.md).
@@ -264,10 +188,9 @@ on completion, error or cancellation; a cancelled waiter cannot return a
 locked connection to the pool. Worker timeouts and schema verification are
 unchanged.
 
-When migration is required, SQLite store-set open migrates all three databases
-after a complete backup under its migrator lock. Each database commits its own
-step in store-set order.
-An interrupted migration completes or restores from its manifest and stamps.
+When migration is required, SQLite store-set open migrates its one database
+after a complete backup under its migrator lock (ADR 0132 §12). An interrupted
+migration completes or restores from its manifest and stamps.
 An open that cannot obtain exclusive migration ownership refuses typed,
 including `MigrationOpenElsewhere`. A component opened independently verifies
 its stamp and does not migrate. SQLite upgrades are stop-then-start; live
@@ -281,7 +204,7 @@ peak = processes_per_generation * pool_max * overlapping_generations
 ```
 
 Shared `PostgresStorage` clones use the same pool; independently opened pools
-add to the process total. A rollback choreography can retain three generations,
+add to the process total. A rollback choreography can retain three builds,
 so its declaration budgets three. `lashctl preflight` accepts all five budget
 terms and checks the live server's capacity and reserved connections before
 the roll. The [rolling runbook](../../runbooks/rolling-upgrade/runbook.md#postgresql-connection-budget)
@@ -295,25 +218,26 @@ Evidence: `crates/lash-postgres-store/src/postgres/migrate.rs`,
 ### 6. Tests and gates
 
 Upgrade proofs use synthetic-next alongside the normal build. Phase A runs
-separate binaries and tests expanded-store rollback, generation handoff,
+separate binaries and tests expanded-store rollback, drain by release,
 finalize racing writers, immutable history after finalize, negotiated wire,
-object-sweep crash resume, retention delivery and skipped-release refusal.
-The rolling harness exercises PostgreSQL overlap and SQLite stop-then-start
-against live Restate, including rollback, drain, deployment removal, hold,
-finalize and contract. It tests the synthetic release window, not arbitrary
+retention delivery and skipped-release refusal. The rolling harness exercises
+PostgreSQL overlap and SQLite stop-then-start, including rollback, drain,
+hold, finalize and contract. It tests the synthetic release window, not arbitrary
 pre-1.0 binary compatibility. The multi-node leg (`just e2e-rolling-cluster`)
 runs the same choreography under load on the Helm load topology, on demand
 rather than per PR (ADR 0115 §6).
 
-Storage laws run against SQLite file, SQLite memory and PostgreSQL. Execution
-hosts are the in-process Restate server double, live Restate and lash-sim's
-in-process effect host. The handoff laws check signal and event delivery across
-segment transitions. Format-registry checks validate policy declarations;
-release fixture capture writes `fixtures/release/<tag>/`.
+Storage laws run against SQLite file, SQLite memory and PostgreSQL. Laws run
+the production runtime over a fault-injecting store with labelled commits, a
+virtual clock and `SimNodes` (ADR 0132 §14). The drain-by-release law cuts at
+every commit of a release and requires each released actor to be claimed by a
+new-build node with no `Once` body started twice. The claim-filter law
+requires that a node lacking a format never claims an actor stored in it.
+Format-registry checks validate policy declarations; release fixture capture
+writes `fixtures/release/<tag>/`.
 
 Evidence: `crates/lash-upgrade-harness/tests/phase_a/main.rs`,
 `crates/lash-upgrade-harness/tests/rolling/main.rs`,
-`crates/lash-restate/src/tests/wait_handoff_generations.rs`,
 `scripts/capture_release_fixtures.py`,
 `scripts/check_format_registry.py`.
 
@@ -322,21 +246,19 @@ Evidence: `crates/lash-upgrade-harness/tests/phase_a/main.rs`,
 Startup and decoder admission refuse unsupported component and surface ranges,
 unregistered predecessor conversions, malformed compatibility records and
 integrity failures. Synthetic-next tests prove a skipped compatibility release
-refuses. A foreign execution generation parks rather than issuing fresh work.
-Finalize refuses an undrained generation, a retained deployment, an unread
-registry or a hold in automatic mode. A stale writer refuses after the fleet
+refuses. A node never claims an actor whose formats it cannot decode.
+Finalize refuses while a node lacking the newer formats is live, on an unread
+node table, or on a hold in automatic mode. A stale writer refuses after the fleet
 epoch leaves its writable range. These are typed outcomes; missing evidence
-is not permission to mutate or replay under another contract.
+is not permission to mutate or decode under another contract.
 
 Evidence: `crates/lash-core-store/src/compat.rs`,
-`crates/lash-core-store/src/store/fleet_finalize.rs`,
-`crates/lash-restate/src/sentinel.rs`,
 `crates/lash-upgrade-harness/tests/phase_a/skipped_compatibility_release_refused.rs`.
 
 ### 8. The release boundary
 
-The current tree carries compatibility descriptors, writer pins, generation
-routing, migration runners and fixture capture. Synthetic-next supplies a
+The current tree carries compatibility descriptors, writer pins, migration
+runners and fixture capture. Synthetic-next supplies a
 successor format and schema for proving them. The normal build remains under
 the version freeze. The 1.0 cut owns the release baseline, strict version and
 upgrade gates, the baseline migration catalog, fixture capture at `v1.0.0`,
@@ -350,21 +272,16 @@ Evidence: `crates/lash-core-store/src/store/fleet_format.rs`,
 
 ## Rejected alternatives
 
-Patch markers require old journals to replay under changed code. Generation
-routing preserves their execution contract instead. Versioned object
-namespaces split shared wait and group state; stable keys and versioned values
-keep its coordination intact. Moving that state to SQL needs separate
-idempotency and wake delivery around each Restate call. Worker-boot DDL races
-mixed-version workers, so PostgreSQL uses one explicit runner. Heartbeat expiry
-cannot prove a deployment cannot execute a pinned journal; finalize checks
-retained deployments.
+Patch markers and generation lanes keep old code alive for recorded histories;
+with no replay there is no history to keep code for, so only formats drain.
+Worker-boot DDL races mixed-version workers, so PostgreSQL uses one explicit
+runner.
 
 ## Consequences
 
 A supported upgrade needs its declared read/write window and conversion or
-drain path. The rollback boundary is the fleet-epoch flip, and generation
-retirement requires both drained work and deployment removal. Operators run
-schema migration, generation drain, finalize and eligible object sweeps in
-that order. Immutable history retains its bytes and identities. The current
+drain path. The rollback boundary is the fleet-epoch flip, which requires that
+no node of the older build is live. Operators run schema migration, drain by
+release and finalize in that order. Immutable history retains its bytes and identities. The current
 upgrade evidence comes from synthetic-next; the version freeze does not
 promise migration or rollback between arbitrary development builds.

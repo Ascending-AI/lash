@@ -22,7 +22,7 @@ when live replay reports a gap.
 
 `emit` returns `()`: a sink cannot fail or roll back the committed write. The decorator awaits emission inline, so sink implementations must return promptly and offload I/O. Observers attach to the shared watched registry through `add_event_sink`. A `ProcessEventSinkRegistration` detaches its sink when dropped. Deployment wrapping can also provide an initial sink.
 
-Retention is host-scheduled through `prune_terminal_processes(cutoff, filter, watermark)` under ADR 0023. It removes eligible retired rows and events and retains typed tombstone evidence. The facade coordinates cross-store trigger cleanup. A late read can report `ProcessNoLongerRetained`; after tombstone compaction the id can be unknown. Host retention windows must cover still-replayable waiters.
+Retention is host-scheduled through `prune_terminal_processes(cutoff, filter, watermark)` under ADR 0023. It removes eligible retired rows and events and retains typed tombstone evidence. The facade coordinates cross-store trigger cleanup. A late read can report `ProcessNoLongerRetained`; after tombstone compaction the id can be unknown. Host retention windows must cover every reader that still awaits a retained process.
 
 ## Why and consequences
 

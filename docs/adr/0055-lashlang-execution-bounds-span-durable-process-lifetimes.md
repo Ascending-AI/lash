@@ -9,7 +9,7 @@ Accepted.
 TypeScript lowers into the Lashlang IR and VM. Execution can be a foreground
 RLM cell or a durable process that parks at effects and resumes from persisted
 continuations. Hosts need bounds on instruction work and logical heap size,
-and those bounds need a defined lifetime across segment handovers.
+and those bounds need a defined lifetime across snapshots and resumes.
 
 ## Decision
 
@@ -43,8 +43,8 @@ the same engine-owned shape in `ProcessRecord::engine_config` through
 `ProcessEngine::creation_config` (FIG-4664). It contains abilities, language
 features, resources and execution bounds. Constructor setters supply
 creation defaults only. A start that finds a retained row returns that row's
-settings, and every run reads only those settings. A deployment opening,
-redriving or resuming a process cannot override them through its RLM
+settings, and every run reads only those settings. A deployment opening
+or resuming a process cannot override them through its RLM
 namespace or live extensions. Available process wiring can restrict a
 recorded ability but cannot enable a recorded-disabled ability.
 
@@ -78,7 +78,8 @@ heap accounting or the instruction meter.
 ### Lifetime and enforcement
 
 Foreground instruction meters apply per executed cell. A durable process
-persists its execution counters and heap accounting across segment handovers;
+persists its execution counters and heap accounting in its VM snapshot
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8);
 resuming does not grant a fresh process instruction budget.
 
 The VM checks bounds on resumed execution, after intrinsic dispatch, at effect
@@ -99,7 +100,7 @@ or upcasters.
 ## Consequences
 
 - Hosts explicitly choose the RLM instruction and memory policy.
-- Durable handovers preserve cumulative instruction accounting.
+- Snapshots and resumes preserve cumulative instruction accounting.
 - Logical memory is a reproducible accounting schedule, not a promise about
   physical resident memory.
 - Bound failures are terminal rather than requests to retry unchanged work.

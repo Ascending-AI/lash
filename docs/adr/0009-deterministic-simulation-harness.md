@@ -8,11 +8,11 @@ accepted
 
 `lash-sim` is an unpublished workspace crate for randomized boundary and fault search. It composes runtime, protocol, agent, provider and persistence contracts and checks execution histories with independent oracles under ADR 0044. Virtual time can skip waits. Seeds select workloads and modeled boundaries; Tokio interleavings are not a deterministic schedule. Failed runs retain full execution histories for diagnosis.
 
-Runtime execution uses `SimEngine`: lash-restate handlers on the in-process Restate server double, with concurrent handlers and SQLite memory as storage. Provider Wire Scripts exercise real provider serialization and parsing through `ScriptedLlmHttpTransport`. Vendor schemas remain the responsibility of provider crates.
+Runtime execution uses the production runtime: lash's durable engine over SQLite memory, with `SimNodes` running several owners over one store ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §14). There is no second scheduler and no engine double. Provider Wire Scripts exercise real provider serialization and parsing through `ScriptedLlmHttpTransport`. Vendor schemas remain the responsibility of provider crates.
 
 ## Fault boundaries
 
-Storage faults are arms of a `Script` over the real store (ADR 0044), in the neutral `BackendFaultKind`, `BackendFault`, `BackendFaultArm` and `BackendFaultObservation` vocabulary: an arm refuses one `commit_runtime_state` call before the store or loses its reply, the same call on every backend. SQLite file, SQLite memory and PostgreSQL are storage variants. Host evidence distinguishes the server double, live Restate and the simulator's in-process effect host. Synthetic-next owns upgrade proofs.
+Storage faults are arms of a `Script` over the real store (ADR 0044), in the neutral `BackendFaultKind`, `BackendFault`, `BackendFaultArm` and `BackendFaultObservation` vocabulary. The fault-injecting store wraps the transaction seam, and every commit carries a label. The cuts per label are: fail before commit, commit with the acknowledgement hidden, stale epoch, zombie node and lost wake, the same cut on every backend. lash-sim's crash matrix enumerates commit labels. SQLite file, SQLite memory and PostgreSQL are storage variants. Synthetic-next owns upgrade proofs.
 
 Commit-boundary failure is modeled. Half-transaction row persistence is rejected as a simulated state because the SQL backends commit atomically. A single virtual clock cannot prove disagreement between database and client clocks; database clock contracts require direct backend evidence. Simulation checks its recorded boundaries and actual runtime outcomes rather than inventing SQL execution leases.
 
@@ -20,6 +20,6 @@ Commit-boundary failure is modeled. Half-transaction row persistence is rejected
 
 A custom deterministic executor is rejected because it adds a scheduling contract instead of exercising the runtime's concurrent engine behavior. Live provider calls are rejected as the main search mechanism because they are costly and cannot supply controlled wire failures. Simulation is an evidence dimension over the existing scenario contracts, not a fifth scenario family or part of the published SDK.
 
-Passing runs can use search mode without per-seed artifact packages. Failures produce trace, replay, minimization and history evidence. Confidence selectors choose bounded search budgets under ADR 0008; a seed alone is insufficient to reconstruct a failed interleaving.
+Passing runs can use search mode without per-seed artifact packages. Failures produce trace, minimization and history evidence. Confidence selectors choose bounded search budgets under ADR 0008; a seed alone is insufficient to reconstruct a failed interleaving.
 
 [Engine composition](../../crates/lash-sim/src/backend.rs), [virtual clock](../../crates/lash-sim/src/clock.rs), [provider transport](../../crates/lash-sim/src/provider/transport.rs) and [backend fault vocabulary](../../crates/lash-sim/src/backend_fault.rs) implement these boundaries.

@@ -6,13 +6,13 @@ Accepted.
 
 ## Context
 
-A frame's globals, a process record, a subscription revision and a replaying
+A frame's globals, a process record, a subscription revision and a resuming
 execution can read the same immutable artifact at different times. Each
 reader needs its own durable edge. Process lifetime is a separate decision
 ([ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md)); a
 process's completion does not itself release the inputs its record holds.
-The cleanup obligation records when a reader ends, and the engine decides
-when its journal cannot replay
+The cleanup obligation records when a reader ends, and the execution's
+durable facts decide when it has settled
 (`crates/lash-core/src/runtime/artifact_cleanup.rs:28-73`).
 
 ## Decision
@@ -34,8 +34,8 @@ An artifact reference or definition id alone keeps no bytes alive.
 | `process_record` | The process id's display form |
 | `subscription_revision` | Compact JSON array `["<subscription id>","<incarnation>",<revision>]` |
 | `start` | The start key's text |
-| `start_input` | Compact JSON array `["<start key>","<starter journal key>"]` |
-| `execution` | `EffectJournalIdentity::key()` |
+| `start_input` | Compact JSON array `["<start key>","<starter execution key>"]` |
+| `execution` | The admitted execution's identity, `EffectJournalIdentity::key()` |
 | `host_pin` | `host-pin:v1:` and 32 lowercase hex digits of a random v4 UUID |
 | `session` | The session id's text |
 | `upload` | Compact JSON array `["<session id>","upload:v1:<32 hex>"]` |
@@ -98,12 +98,12 @@ under the environment port and its existing referrer kinds. Attachment
 delivery has its own ownership and publication rules (ADR 0124).
 
 A turn's recorded preparation (FIG-5133) is a `TurnPrelude` artifact
-addressed by the digest of its bytes. The environment sync's step body
-publishes it through `TurnPreludeStore` under its turn journal's guarded
-`execution` claim before the sync's outcome completes, and the outcome
-journals only the digest. Replay reads it by digest and verifies it; bytes
-that are gone or are not the recorded ones refuse the run, typed. The relay
-ends the journal's edges with every other store's once the journal settles
+addressed by the digest of its bytes. The environment sync publishes
+it through `TurnPreludeStore` under its turn execution's guarded `execution`
+claim before the sync's phase commits, and the phase records only the
+digest. Resume reads it by digest and verifies it; bytes that are gone or are
+not the recorded ones refuse the run, typed. Cleanup ends the execution's
+edges with every other store's once the execution settles
 (`crates/lash-core-execution/src/runtime/effect/turn_prelude.rs`).
 
 #### 2.2 Process engines
@@ -126,7 +126,7 @@ write that ledger inside its own transaction
 `LashlangModule`, `ProcessDefinition`, or `Engine(kind)`. `ArtifactCarry`
 names a destination referrer. `ArtifactCleanup` is the durable obligation
 body: `Ended { referrer, carries, gate }` or `Await(ReferrerGuard)`.
-Only an ended record can carry a replay gate.
+Only an ended record can carry a settlement gate.
 `ResolvedArtifactCleanup` contains only the receiving store's carries,
 ordered by artifact reference
 (`crates/lash-core-store/src/artifact_referrer.rs:739-782,886-905`).
@@ -165,9 +165,10 @@ with ADR 0109's due, claimed and stalled states. The row's canonical
 only a tagged plan body. `StartInput` takes its starter from the row id.
 Decoding checks the guard against the row's kind and reports mismatches as
 `StoredDataCorrupt`; the relay stalls the row before applying any cleanup. A row exists only
-while cleanup is owed. PostgreSQL has one ledger table. SQLite has a core
-table and a registry table, so prune can record an end in its own database;
-ids have `core:` or `registry:` prefixes and settlement routes by prefix.
+while cleanup is owed. Each backend has one ledger table: SQLite keeps every
+table in one database file
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §12), so
+prune records an end in its own transaction.
 
 An end hook writes `Ended` beside the durable fact that ends the referrer.
 An `Ended` plan replaces a guard; a guard cannot replace an existing plan.
@@ -188,11 +189,11 @@ outside an end hook's transaction
 `crates/lash-core/src/runtime/artifact_cleanup.rs:190-215`). Its delivery:
 
 1. Loads the cleanup; a row another relay settled is already delivered.
-2. Defers while the optional gate journal may replay.
+2. Defers while the optional gate execution is unsettled.
 3. Resolves the plan. `Ended` supplies its carries; an ended start also
    protects any concurrently registered record before severing (§3.3).
-   `AwaitJournal` waits for journal settlement. `AwaitStart` carries the
-   retained record's inputs or waits for an absent start's journal to
+   `AwaitJournal` waits for execution settlement. `AwaitStart` carries the
+   retained record's inputs or waits for an absent start's execution to
    settle. `AwaitSubscriptionRevision` uses §3.4's three conditions.
    `AwaitFrame` keeps a retained frame and otherwise waits for its creator
    to settle. ADR 0124 owns upload-expiry and session-graph guards.
@@ -207,7 +208,7 @@ The resolution and delivery are in
 settlement is in
 `crates/lash-store-sql/src/artifact/cleanup_obligations.rs:125-149`.
 `NotYet` defers at the relay's maximum backoff with attempts reset.
-Every journal kind uses this deferral: awaited and shiftless runs,
+Every execution kind uses this deferral: awaited and command runs,
 processes, and session operations. Settlement permits cleanup when the next due
 pass reaches the row; it does not shorten the recorded delay. Retaining
 artifacts for the full deferral avoids a separate settlement fast path.
@@ -218,19 +219,16 @@ idempotently; partial success is never acknowledged
 (`crates/lash-core-execution/src/runtime/shift/relay.rs:184-205`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:571-593`).
 
-`EffectHost::journal_replay` returns `MayReplay` or `Settled`. `Settled`
-promises that the journal cannot replay or append. Restate uses durable
-facts and its invocation status:
+Execution settlement is decided by durable facts alone. `Settled` promises
+that the execution cannot resume, record or read again:
 
 - A turn needs a run terminal and no open run of that root.
-- A session operation needs no open session shift or root run.
-- A process needs terminal evidence and no open segment run; a pruned
-  process is settled.
-- A runtime operation needs its durable waits retired after its commit.
+- A session operation needs no open command or root run.
+- A process needs terminal evidence; a pruned process is settled.
+- A runtime operation needs its wait rows revoked after its commit.
 - Session deletion runs no publication and is settled.
 
-Wait retirement alone does not settle a turn or process journal
-(`crates/lash-restate/src/effect_host/journal_verdict.rs:28-79,89-183`).
+Wait revocation alone does not settle a turn or process execution.
 
 #### 2.6 Hosts
 
@@ -257,7 +255,7 @@ boundary (`crates/lash-core-execution/src/module_artifacts.rs:31-96`,
 
 #### 3.1 `frame_environment`: frame commit, session deletion, fork
 
-A cell publishes under its execution journal, then acquires its admitted
+A cell publishes under its execution, then acquires its admitted
 frame's edge. At cell end RLM acquires every tagged definition reachable
 from the globals and its complete manifest. The published-module cache is
 keyed by frame and module. Overwriting a global conservatively retains its
@@ -279,7 +277,7 @@ to the standard protocol; RLM's model-driven switch is `continue_as`
 Before SQL activates a successor, the parent validates carried definition
 descriptors and prepares their engine-store manifest entries under the
 successor's guarded frame claim. `AwaitFrame { creator }` protects an
-aborted preparation until its creator cannot replay. It keeps a committed
+aborted preparation until its creator's execution settles. It keeps a committed
 frame retained by a head, anchor or admission root. Admission retention
 conservatively protects its session's committed nodes until release
 (`crates/lash-core/src/runtime/frame_definition_carry.rs:8-65`,
@@ -296,7 +294,7 @@ entry must have the source frame's edge; otherwise the commit refuses
 A commit ends every frame it leaves: the prior head's frame and every frame
 it appends, in graph order, except the frame its new head holds. The store
 derives this chain in the commit transaction. `FrameTransition` names the
-carry source, successor, carries and replay gate; its source must be one
+carry source, successor, carries and settlement gate; its source must be one
 of the frames the commit leaves. The transaction fences each left frame
 and writes its empty-carry `Ended` record. A transition gates every end in
 the chain; a commit without a transition ends the chain ungated
@@ -325,11 +323,11 @@ ends its attachment edges
 `crates/lash-postgres-store/src/postgres/prune.rs:44-66`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:552-557`).
 
-#### 3.3 `start`: engine start and replay settlement
+#### 3.3 `start`: engine start and execution settlement
 
 Input attachments stage under `StartInput(key, starter)` with
 `AwaitStart { starter }` ([ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md)).
-The starter journal makes this claim independent of earlier uses of a
+The starter's execution makes this claim independent of earlier uses of a
 pruned host key. Its cleanup acquires the retained record's input before
 ending staging; without a retained record it waits for the starter to settle.
 
@@ -337,7 +335,7 @@ A start stages its environment, engine artifacts, and any definition
 closure under `Start(key)` before registration. Existing or inherited
 environments need an acquisition too. The first acquisition arms
 `AwaitStart { starter }`; independent engine acquisitions arm it through
-the ledger first. Once registration commits, the journaled step nudges
+the ledger first. Once registration commits, the starter nudges
 the guard. Resolution carries the retained record's inputs to its record,
 including its descriptor and manifest for a start by definition id
 (`crates/lash-core-execution/src/runtime/process/start_staging.rs:319-430,640-718`,
@@ -350,7 +348,7 @@ Equal captures under different start keys share one stored copy with
 independent durable lifetimes.
 
 A terminal refusal with no registered record arms an empty-carry `Ended`
-plan. An absent start is also ended when its starter's journal settles.
+plan. An absent start is also ended when its starter's execution settles.
 Because keys are global, resolving an `Ended` start reads the key again
 *after the fence* and acquires any retained record's content under that
 record before severing the start. This protects a registration racing the
@@ -370,11 +368,11 @@ nudges the replaced revision
 (`crates/lash-core-execution/src/triggers/revision_referrer.rs:64-151,179-218`).
 
 The declaration carries the draft's `env_ref`, held under its creator's
-`Execution` referrer before the command is journaled (§3.7).
+`Execution` referrer before the command is recorded (§3.7).
 
 A revision ends only when it is not the current nontombstoned revision,
 no delivery reserved under its incarnation/revision remains unbound, and
-its creator's journal is settled. A disabled current revision still holds
+its creator's execution is settled. A disabled current revision still holds
 its artifacts. Binding follows the delivery start's acquisition, so the
 revision needs no carries
 (`crates/lash-core/src/runtime/artifact_cleanup.rs:118-153,281-292`,
@@ -417,7 +415,7 @@ re-derive the id and reject noncanonical bytes. `ProcessDefinitionStore`
 stores descriptors in the `process_definition` namespace beside modules
 and environments. A start by id realizes an engine input and records that
 id in the process identity. Frame globals, starts, records, revisions,
-journals and host pins hold their own closure edges
+executions and host pins hold their own closure edges
 (`crates/lash-core-execution/src/runtime/process/definition_store.rs:49-85,229-243`,
 `crates/lash-core-execution/src/runtime/process/start_staging.rs:640-718`,
 `crates/lash-sqlite-store/src/artifact_store.rs:102-113`,
@@ -426,36 +424,37 @@ journals and host pins hold their own closure edges
 An id kept in a host table or copied as a string holds nothing. Between
 starts, availability without another reader requires an explicit host pin.
 Cleanup reclaims a descriptor and its dependencies after the last edge is
-severed, subject to replay gates and carries. Shared modules remain while
+severed, subject to settlement gates and carries. Shared modules remain while
 another referrer holds them
 (`crates/lash-core-execution/src/runtime/process/definition_store.rs:12-25,72-85`,
 `crates/lash-sqlite-store/src/artifact_store.rs:46-53`,
 `crates/lash/src/artifacts.rs:118-153`).
 
-#### 3.7 `execution`: replay settlement
+#### 3.7 `execution`: execution settlement
 
 RLM publication and realized tool intents hold artifacts under the enclosing
-journal's `Execution` referrer. The first acquisition arms `AwaitJournal`;
-its end requires `journal_replay` to answer `Settled`. A terminal durable
-fact alone cannot authorize cleanup while that journal may replay
+execution's `Execution` referrer. The first acquisition arms `AwaitJournal`;
+its end requires the execution to be `Settled` (§2.5). A terminal durable
+fact alone cannot authorize cleanup while that execution may still resume
 (`crates/lash-protocol-rlm/src/executor/mod.rs:955-979`,
 `crates/lash-core-execution/src/tool_dispatch/intent_executor.rs:644-660`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:268-269`).
 
 The attempt coordinator publishes its live capture or acquires an inherited
-reference before returning a journalable attempt outcome, including pending
+reference before returning a recordable attempt outcome, including pending
 starts. A code-runtime start does the same before recording its command.
 Host ingress acquires an already-published reference under its execution.
 Leaf tools derive a digest and declare it; publication belongs to the
 coordinator. Every capture publication is guarded by `AwaitJournal`.
-Declarations, submission rows, journal commands and process records contain
+Declarations, submission rows, Run records and process records contain
 references. The complete intent JSON, including those references, counts
-toward ADR 0025's 64 KiB budget. Immutable definition publication carries its
+toward the 64 KiB intent budget of
+[ADR 0116](0116-tools-are-opaque.md) §1.7. Immutable definition publication carries its
 descriptor and explicit artifact closure rather than a captured environment.
 
-`LoadExecutionEnv` acquires `Execution(child journal)` and validates the
-stored bytes before journaling its digest result. The driver resolves the
-same immutable bytes on replay. This journal's hold keeps them available
+`LoadExecutionEnv` acquires `Execution(child execution)` and validates the
+stored bytes before recording its digest result. The driver resolves the
+same immutable bytes on resume. This execution's hold keeps them available
 when the source pin ends, and load failures retain the driver's I/O retry
 classification.
 
@@ -463,12 +462,12 @@ classification.
 
 #### 4.1 A frame switch racing publication
 
-The switching commit fences the source frame. A replay can still publish
-under its execution edge; RLM treats a fenced frame acquisition as an ended
-frame and continues. The old frame's cleanup waits for the switching
-journal, while prepared engine edges and atomically committed SQL edges
-protect the successor. Severing at the switch would break post-commit
-re-execution that reads the source's artifacts
+The switching commit fences the source frame. A recomputed uncommitted
+stretch can still publish under its execution edge; RLM treats a fenced frame
+acquisition as an ended frame and continues. The old frame's cleanup waits for
+the switching execution to settle, while prepared engine edges and atomically
+committed SQL edges protect the successor. Severing at the switch would break
+a resumed execution that still reads the source's artifacts
 (`crates/lash-protocol-rlm/src/executor/mod.rs:993-1006`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:630-645`, §3.1).
 
@@ -502,14 +501,13 @@ for that binding rather than carrying the creator's references onward
 #### 4.5 A cancelling child still reading its inputs
 
 Cancellation does not end a process record's edges. The record holds its
-inputs until prune, and its execution edges last until journal settlement.
-The facade retires eligible process journals before deleting their records
+inputs until prune, and its execution edges last until execution settlement.
+The facade settles eligible process executions before deleting their records
 (`crates/lash/src/process_admin.rs:774-803`, §3.2, §3.7).
 
 #### 4.6 Cross-store prepare, acknowledge, activate and sever
 
-SQLite's registry and trigger databases are separate from its core, and
-an engine can own an independent artifact store. Protection therefore
+An engine can own an independent artifact store. Protection therefore
 precedes activation across stores: guarded starts and revisions acquire
 before registration, and a frame prepares its engine share before SQL
 activation. The descriptor and its store-set manifest share one transaction
@@ -532,7 +530,7 @@ frame share, which commits with the head
 and links the source against the dispatch catalog and declares
 `PublishDefinition` with the compiled module and descriptor. It publishes
 nothing in the tool body. Realization publishes under the execution's
-journal and returns the definition value with its derived signature.
+referrer and returns the definition value with its derived signature.
 The cell acquires its frame's closure edges before its result is exposed
 (`crates/lash-lashlang-runtime/src/process_create_tool.rs:1-13,271-321`,
 `crates/lash-core-execution/src/tool_dispatch/intent_executor.rs:621-624`,
@@ -544,9 +542,10 @@ switch carries the definitions its seed names (§3.1, §3.3, §3.6).
 
 ### 7. Acceptance tests
 
-The store matrix is SQLite file, SQLite memory and PostgreSQL. Host tiers
-are the in-process Restate server double, live Restate and lash-sim's
-in-process effect host; upgrade proofs use synthetic-next. Individual
+The store matrix is SQLite file, SQLite memory and PostgreSQL. Laws run the
+production runtime over a fault-injecting store with labelled commits, a
+virtual clock and `SimNodes` (ADR 0132 §14); upgrade proofs use
+synthetic-next. Individual
 registrations determine which laws run in each tier. Artifact-referrer
 store laws are registered in
 `crates/lash-sqlite-store/tests/conformance/suite.rs:540` and
@@ -557,7 +556,7 @@ PostgreSQL variant requires a non-empty `LASH_POSTGRES_DATABASE_URL`
 
 Definition store laws cover retention while any reader holds a descriptor,
 reclamation after the last referrer, byte verification on an existing id,
-and replay at six create/publication/start boundaries
+and resume at six create/publication/start boundaries
 (`crates/lash-conformance/src/conformance/definitions.rs`).
 Prepared-frame laws cover an aborted activation and retention after a
 committed activation
@@ -566,12 +565,12 @@ committed activation
 The captured-environment row law uses 128 KiB of ProjectInstructions and
 bounds the intent batch, submission row, start command and process row at
 64 KiB (`tool_dispatch::intent_executor::tests::a_128_kib_environment_keeps_durable_start_rows_under_the_intent_budget`).
-The environment-load law bounds its journal result too
+The environment-load law bounds its recorded result too
 (`runtime::effect::captured_environment_row_tests::an_environment_load_journal_row_stays_under_the_intent_budget`).
 `two_starts_share_one_captured_environment` realizes two starts and checks
 bounded records and last-reader reclamation.
 `captured_environments_are_shared_until_the_last_referrer_ends` reopens the
-store and checks cleanup replay and late-writer fences. Both store laws run
+store and checks repeated cleanup and late-writer fences. Both store laws run
 on SQLite file, SQLite memory and PostgreSQL. The load-plan turn 2/9 law
 exercises tool-attempt capture and child realization under the large prompt.
 
@@ -626,18 +625,16 @@ Revision cleanup waits for currency, bindings and its creator
 Prune and a late start rescue respect fences
 (`crates/lash-conformance/src/conformance/process_prune_start_staging.rs:15,294`).
 
-#### 7.11 Journal gates
+#### 7.11 Execution gates
 
-A replaying journal keeps its gate's artifacts
+An unsettled execution keeps its gate's artifacts
 (`crates/lash-core/src/runtime/artifact_cleanup_tests.rs:618`). For awaited
-and shiftless runs, processes, and session operations, a deferred
-cleanup retains its artifacts while the journal can replay and releases
-after settlement once the deferral expires, on SQLite memory/file and
-PostgreSQL over both the double and live Restate
-(`crates/lash-restate-test/tests/crash_windows/journal_settlement_cleanup.rs`).
+and command runs, processes, and session operations, a deferred cleanup
+retains its artifacts while the execution is unsettled and releases after
+settlement once the deferral expires, on SQLite memory/file and PostgreSQL.
 A carry turn held open across a recovery pass after a crash reclaims its
 predecessor frame after the cleanup clock passes the guarded deferral,
-while claim recovery keeps the matrix's lapsed-claim bound on both engines
+while claim recovery keeps the matrix's lapsed-claim bound
 (`crates/lash-sim/src/crash_matrix/cases/definition_carry.rs`).
 
 #### 7.12 Definition closure
@@ -648,11 +645,11 @@ and a host pin survives an uncarried switch
 a carry and a start by id each survive a deployment crash at every
 boundary: before and after the create attempt commits, after publication
 and before the frame commits, before admission, after registration, and
-after the recorded start. Each boundary is proven on the server double over
-SQLite and over PostgreSQL, and on a live server. A start cut before its
-registration step was stored admits at most one process, and one that
-admitted none leaves nothing held once the host's pin is gone. Every such world's store cells, schema and
-journal entries carry no catalog field beside a definition
+after the recorded start. Each boundary is proven over SQLite and over
+PostgreSQL. A start cut before its registration committed admits at most one
+process, and one that admitted none leaves nothing held once the host's pin
+is gone. Every such world's store cells, schema and recorded rows carry no
+catalog field beside a definition
 (`crates/lash-sim/src/crash_matrix/cases/definition.rs`,
 `crates/lash-sim/src/crash_matrix/catalog_audit.rs`).
 
@@ -677,22 +674,22 @@ incompatibility, and malformed ids are corruption
 Retrying cleanup after a destination ends is idempotent
 (`crates/lash-conformance/src/conformance/artifact_referrers.rs:238`).
 
-#### 7.17 Journal settlement
+#### 7.17 Execution settlement
 
-Restate answers settled only when nothing can replay the journal
-(`crates/lash-restate-test/tests/journal_verdict.rs:31`).
+An execution is settled only when its durable facts show that nothing can
+resume it or record under it (§2.5).
 
 ## Consequences
 
 Exact edges determine artifact availability; a definition id, process
 completion or scope cancellation cannot infer its lifetime. Reclamation
-is eventual because replay gates and durable cleanup obligations retain
+is eventual because settlement gates and durable cleanup obligations retain
 source edges until the relevant authorities settle them (§2.5, §3).
 
 Every ended referrer has a permanent fence. Host pins need explicit release;
 overwritten globals retain their frame edges until frame end. Waiting
-guards poll at the maximum backoff; journal settlement leaves them to
-the relay's next due pass. End facts still arm or nudge their own referrers.
+guards poll at the maximum backoff; execution settlement leaves them to
+the next due pass. End facts still arm or nudge their own referrers.
 Store faults
 retry, and refused or undecodable obligations remain visible as stalled
 work (§2.3-2.5, §3.1, §3.5) under

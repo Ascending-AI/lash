@@ -1,4 +1,4 @@
-# 0102: Every backend binds one journaled engine to one store set
+# 0102: Every backend binds one durable engine to one store set
 
 ## Status
 
@@ -14,40 +14,37 @@ same SQL contracts as a file or PostgreSQL deployment.
 
 ## Decision
 
-### D1. Every durable host journals
+### D1. Every durable host runs the one durable engine
 
-The effect engine owns recording and replay. A backend supplies its engine's
-`EffectHost`; SQLite and PostgreSQL supply storage through `StoreSet`.
-Restate is the shipping engine, as specified by
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
-A code cell reconstructs local execution state by re-execution over its nested
-journaled effects under [ADR 0103](0103-code-cells-replay-by-re-execution-on-every-host.md).
+Lash's durable engine executes all work and persists its state through the
+store set
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §1).
+SQLite and PostgreSQL supply storage through `StoreSet`; the engine's SQL lives
+in one module per dialect. Nothing re-runs to rebuild state: a code cell
+resumes from its committed VM snapshot under ADR 0132 §8.
 
-Evidence: `crates/lash-core-execution/src/backend.rs:39`,
-`crates/lash-restate/src/engine.rs:113`,
-`crates/lash-restate/src/controller/execution.rs:122`.
+Evidence: `crates/lash-core-execution/src/backend.rs:39`.
 
 ### D2. One backend supplies every port
 
-`Backend` contains one private `Arc<dyn EffectEngine>`. Its effect and work
-ports come from that engine; its storage ports come from the engine's one
-`StoreSet`. Cloning shares the engine. The process registry accessor returns
-the registry of the engine's process-work wiring, so callers use the same
-registry as the engine rather than an independently assembled handle.
+`Backend` builds the durable engine directly over its one `StoreSet`. Its work
+ports and storage ports come from that store set. Cloning shares the engine.
+The process registry accessor returns the registry of the engine's
+process-work wiring, so callers use the same registry as the engine rather
+than an independently assembled handle.
 
 `RuntimeHostConfig::new` requires a backend. Plugin factories that bind to a
 backend declare that binding, and core refuses a factory bound to another one.
-Storage identity (`StoreBindingId`) and effect authority name different state;
-the engine fixes both at construction. Storage identity is not an effect fence.
+Storage identity (`StoreBindingId`) names the store set; the actor epoch is the
+execution fence (ADR 0132 §3). Storage identity is not an execution fence.
 
 A SQLite store set supplies its storage ports from one typed location. A
 PostgreSQL store set supplies them from one `PostgresStorage` and takes its
 attachment-byte store at construction. Module artifacts belong to the store
-set that reopens the session. The kernel's contracts name neither a concrete
-SQL store nor a concrete engine.
+set that reopens the session. The kernel's contracts name no concrete SQL
+store.
 
 Evidence: `crates/lash-core-execution/src/backend.rs:89`,
-`crates/lash-core-execution/src/backend.rs:155`,
 `crates/lash-core-execution/src/runtime/host.rs:185`,
 `crates/lash/src/plugin_binding.rs:1`,
 `crates/lash-sqlite-store/src/backend.rs:95`,
@@ -55,17 +52,17 @@ Evidence: `crates/lash-core-execution/src/backend.rs:89`,
 
 ### D3. SQLite memory is named SQL storage
 
-`SqliteStoreSet::memory()` creates the durable-core, process-registry and
-trigger databases as named `memdb` databases. Each connection reaches its
-database through `file:/lash-<uuid>/<db>?vfs=memdb`. The store set pins one
-anchor connection per database; reopened handles share those anchors.
-The data lives while any owning handle keeps the anchors alive.
+A SQLite store set is one database (ADR 0132 §12). `SqliteStoreSet::memory()`
+creates it as a named `memdb` database. Each connection reaches it through
+`file:/lash-<uuid>/<db>?vfs=memdb`. The store set pins one anchor connection;
+reopened handles share it. The data lives while any owning handle keeps the
+anchor alive.
 
-`SqliteLocation` supplies both database addresses and the storage identity.
-A file location names `sqlite:<canonical durable-core.db path>`; a memory
-location names `sqlite-memory:<uuid>`. Path-taking constructors refuse raw
-`:memory:` and `file:` strings. Memory storage is explicit, through the typed
-constructor, and supplies no effect engine or restart durability.
+`SqliteLocation` supplies the database address and the storage identity. A
+file location names `sqlite:<canonical database path>`; a memory location names
+`sqlite-memory:<uuid>`. Path-taking constructors refuse raw `:memory:` and
+`file:` strings. Memory storage is explicit, through the typed constructor, and
+supplies no restart durability.
 
 Named memory databases use SQLite's `memory` journal mode. They have no WAL;
 a store operation must release a write transaction before awaiting work on
@@ -75,30 +72,26 @@ The live-replay stream buffer is an observation cache. It does not replace any
 persistence port or become the authority for a commit.
 
 Evidence: `crates/lash-sqlite-store/src/backend.rs:176`,
-`crates/lash-sqlite-store/src/backend.rs:211`,
 `crates/lash-sqlite-store/src/location.rs:28`,
-`crates/lash-sqlite-store/src/location.rs:47`,
-`crates/lash-sqlite-store/src/location.rs:165`,
 `crates/lash-sqlite-store/src/conn.rs:547`,
 `crates/lash-conformance/src/live_replay_store_tests.rs:1`.
 
 ### D4. Explicit construction and features
 
 The facade has no default features. `sqlite` enables SQLite storage, and
-`testing` does not implicitly enable it. A durable local application runs a
-local Restate server over a store set, under ADR 0104 §4. A test can use the
-in-process Restate server double over the same storage contracts.
+`testing` does not implicitly enable it. A durable local application is one
+SQLite database file with no server process (ADR 0132 §1). A test uses the
+same runtime over SQLite memory.
 
-Storage laws cover SQLite file, SQLite memory and PostgreSQL. Execution hosts
-are the in-process Restate server double, live Restate and lash-sim's
-in-process effect host. Lash-sim's `SimEngine` executes the production Restate
-handlers on the double over SQLite memory storage.
+Storage laws cover SQLite file, SQLite memory and PostgreSQL. Laws run the
+production runtime over a fault-injecting store with labelled commits, a
+virtual clock and `SimNodes` (ADR 0132 §14). Lash-sim runs that runtime over
+SQLite memory storage.
 
 Evidence: `crates/lash/Cargo.toml:61`,
 `crates/lash-sqlite-store/tests/conformance.rs:1`,
 `crates/lash-sqlite-store/tests/conformance_memory.rs:1`,
 `crates/lash-postgres-store/tests/conformance.rs:1`,
-`crates/lash-restate-test/src/backend.rs:82`,
 `crates/lash-sim/src/backend.rs:35`.
 
 ## Rejected alternatives
@@ -109,13 +102,12 @@ Evidence: `crates/lash/Cargo.toml:61`,
   contracts. Named SQLite memory databases exercise the SQL implementation.
 - File-only test storage requires a filesystem lifetime for tests that need
   only a process lifetime. Named memory storage retains shared connections.
-- A shipping in-process test host needs durable journal storage, scheduling
-  and recovery. Those are engine responsibilities under ADR 0104.
+- A pluggable engine seam with a second engine beside the store adds a second
+  recovery protocol; the store set is the only durable substrate.
 
 ## Consequences
 
-Embedders select an engine and a store set explicitly. Memory storage shares
-SQL semantics and costs local SQL work, but loses its data when its owning
-handles disappear. A durable local application also runs the engine server.
-Storage and effect identities remain distinct, and every runtime port comes
-from the backend's construction.
+Embedders select a store set explicitly. Memory storage shares SQL semantics
+and costs local SQL work, but loses its data when its owning handles
+disappear. A durable local application needs no server. Every runtime port
+comes from the backend's construction.

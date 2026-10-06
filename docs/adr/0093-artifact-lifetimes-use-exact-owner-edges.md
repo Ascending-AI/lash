@@ -25,7 +25,7 @@ when no edge remains. A content id alone retains nothing.
 The vocabulary and cleanup protocol belong to
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 `ArtifactReferrer` names a frame environment, process record, subscription
-revision, start, execution journal, host pin, definition revision, session, or
+revision, start, execution, host pin, definition revision, session, or
 upload. Stores decode each kind/id pair through its canonical encoding and
 refuse malformed or unknown vocabulary.
 
@@ -51,7 +51,7 @@ Evidence: `crates/lashlang/src/compile.rs:38`,
 
 Reference counts conceal which durable reader retains content and add mutable
 retry accounting. Exact edges make acquisition and release idempotent per
-reader. Time-based reclamation cannot prove durable replay has relinquished its
+reader. Time-based reclamation cannot prove a durable reader has relinquished its
 inputs; cleanup requires reader end evidence.
 
 ## Consequences

@@ -129,11 +129,11 @@ The decision values are S01's typed records in
 result decisions belongs to call admission and the resolved result decision
 (FIG-4877). Namespace state commands proposed by turn, checkpoint and
 result-check callbacks belong to the durable command publisher (FIG-4878).
-Recorded replay invokes no completed hook or reducer. Turn and checkpoint
+Resume invokes no completed hook or reducer. Turn and checkpoint
 contexts expose only `SessionReadService`. Their `SessionContributions`
 record tool membership changes by tool identity and graph appends with their
 operation identities and ancestor requirements. The runtime applies them
-after the owning step acknowledges, on the live pass and on replay. A graph
+after the owning phase commits, on the live pass and on resume. A graph
 append joins the turn draft and lands with its commit.
 
 A route without a recorded result decision refuses command-bearing result

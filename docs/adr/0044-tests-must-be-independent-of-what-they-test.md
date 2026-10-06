@@ -9,12 +9,13 @@ invariants, classifications and API contracts are valid oracles.
 
 Implementation-free invariants describe required outcomes without reproducing
 the implementation. A caller-shaped emission invariant can detect a missing
-effect; replay of a hand-built envelope cannot prove that production emits it.
+effect; a hand-built record cannot prove that production writes it.
 
-Differential execution runs a scenario live and explicitly redrives its own
-journal, then compares committed state and checks that local work is not
-re-executed. A replay-capable host that is never redriven proves no recovery
-property.
+Crash-cut execution runs a scenario live, cuts it at a labelled commit, resumes
+it on another owner, then compares committed state and counts body executions
+per admitted identity and outcome lookups per resume
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §2). A
+scenario that is never cut proves no recovery property.
 
 Captured provider traffic and prompt snapshots give independent evidence for
 observed behavior. Synthetic fixtures remain appropriate when a specified wire
@@ -25,10 +26,10 @@ unanticipated internal failures.
 ## Where a durability test stands
 
 A durability test enters above the emission point through the public API and
-uses a host that journals and replays. The current store matrix is SQLite
-file, SQLite memory and PostgreSQL. The host matrix is the in-process Restate
-server double, live Restate and lash-sim's in-process effect host. SQLite
-memory is SQL storage, not a separate map-backed store. Upgrade proofs use
+runs the production runtime over a fault-injecting store that labels every
+commit, with a virtual clock and `SimNodes` (ADR 0132 §14). The store matrix
+is SQLite file, SQLite memory and PostgreSQL. SQLite memory is SQL storage,
+not a separate map-backed store. Upgrade proofs use
 the `synthetic-next` tier.
 
 ## What is not a test
@@ -47,14 +48,14 @@ only the model's property and must be named accordingly.
 
 Virtual time does not control Tokio interleavings. The clock advances scheduled
 sleepers and uses bounded yields for unscheduled progress. Lash-sim is not an
-exhaustive scheduler. Such a scheduler cannot cover SQLite threads, PostgreSQL,
-live Restate or provider transport; adding it does not replace evidence at
+exhaustive scheduler. Such a scheduler cannot cover SQLite threads, PostgreSQL or provider
+transport; adding it does not replace evidence at
 those boundaries.
 
 A law injects faults and pauses only at trait seams. At the store and
 deployment seams it arms a `Script`, generated from the operation lists; at any
 other injected trait it implements (the stalled execution, an effect layer, the
-provider, the engine double) it holds the call at a `Gate`. Runtime code
+provider) it holds the call at a `Gate`. Runtime code
 carries no test hook. An in-process race with no trait between its steps stays
 covered by real-timing laws and the soak; a law that must order it extracts
 that boundary as an injected trait first.
@@ -70,7 +71,7 @@ because both sides are statements on one connection. The list is closed:
   children's (`pause_queued_work_hydration`,
   `pause_process_event_page_after_identity`);
 - SQLite's open-time migration steps (`SqliteMigrationHook`) and finalize's
-  per-database commits (`SqliteFinalizeHook`).
+  commit (`SqliteFinalizeHook`).
 
 Each compiles only under the store's `testing` feature or its own unit tests.
 None of them faults an operation of the store traits; a law that needs a store
@@ -89,7 +90,7 @@ whether other evidence covers it or the property is explicitly unclaimed.
 
 Choose evidence for the property at risk. Keep ordinary unit tests unless they
 mechanically duplicate their implementation. Add caller-shaped emission laws
-and small explicit redrive scenarios where they prove missing coverage.
+and small explicit crash-cut scenarios where they prove missing coverage.
 
 A simulation or CI failure remains a finding until root-cause analysis proves
 otherwise. Calling it flaky requires evidence, not a successful rerun. ADR 0008
@@ -100,6 +101,6 @@ the oracle.
 
 - [Script](../../crates/lash-core-store/src/testing/script.rs) and [Gate](../../crates/lash-core-store/src/testing/gate.rs), over the [store](../../crates/lash-core-store/src/store/runtime_store_decorator.rs) and [deployment](../../crates/lash-core-execution/src/runtime/deployment_store_decorator.rs) operation lists.
 - [Simulator backend faults](../../crates/lash-sim/src/backend_fault.rs) as script arms, and the in-store points of [SQLite](../../crates/lash-sqlite-store/src/testing.rs) and [PostgreSQL](../../crates/lash-postgres-store/src/postgres/testing.rs).
-- [Effect replay invariant](../../crates/lash-sim/src/invariants/effect_window.rs) and [virtual clock](../../crates/lash-sim/src/clock.rs).
-- [Restate test host](../../crates/lash-restate-test/src/lib.rs) and [store gate matrix](../../scripts/ci/store-tests.sh).
+- [Effect window invariant](../../crates/lash-sim/src/invariants/effect_window.rs) and [virtual clock](../../crates/lash-sim/src/clock.rs).
+- [Store gate matrix](../../scripts/ci/store-tests.sh).
 - [Mutation gate stages](../../scripts/ci/confidence-stage.sh) and [synthetic upgrade features](../../crates/lash-upgrade-harness/Cargo.toml).

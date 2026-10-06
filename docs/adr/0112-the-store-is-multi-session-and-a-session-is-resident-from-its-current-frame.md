@@ -29,12 +29,11 @@ it. Catalog-wide operations state their scope.
 Backend operations are required. Provided methods compose required
 primitives, such as head reads or input admission; they do not invent
 unsupported, empty or oldest-version backend answers. The operation list
-generates decorators and the session view's forwarders. Shift authority is a
-`ShiftFence`; the shift owns turn execution.
+generates decorators and the session view's forwarders. Execution authority is the session actor's epoch fence; the actor's owner runs
+turns ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §3).
 
-Evidence: `crates/lash-core-store/src/store/mod.rs:1063`, `:1790`,
-`crates/lash-core-store/src/store/runtime_store_decorator.rs`, and
-`crates/lash-core-store/src/store/shift_fence.rs:249`.
+Evidence: `crates/lash-core-store/src/store/mod.rs:1063`, `:1790`, and
+`crates/lash-core-store/src/store/runtime_store_decorator.rs`.
 
 #### 1.1 `SessionCatalogStore`
 
@@ -60,7 +59,7 @@ Evidence: `crates/lash-core-store/src/store/catalog.rs:18`,
 This segment owns head commits, checkpoint hydration, metadata, parks and
 turn-commit idempotency. Its atomic commit also settles the admitted ingress
 and applied commands it names. Every session read takes a session id;
-a mutation's request carries its session identity or shift fence.
+a mutation's request carries its session identity or the owner's epoch.
 History reads belong to §1.3.
 
 Evidence: `crates/lash-core-store/src/store/mod.rs:1040`.
@@ -153,7 +152,7 @@ session-bound handle.
 
 `RuntimePerfStore` decorates the deployment store and counts committed
 nodes with an atomic counter rather than retaining every committed node id.
-Blob storage and Restate execution remain separate backend responsibilities.
+Blob storage remains a separate backend responsibility.
 
 Evidence: `crates/lash-sqlite-store/src/lib.rs:195`,
 `crates/lash-sqlite-store/src/lifecycle.rs:236`,
@@ -259,7 +258,7 @@ Failure evidence is separate from the resident read view. Stored
 `failure_evidence` marks relevant receipts, with a partial index on session,
 commit time and turn id. `load_failure_evidence_page` orders by commit time
 and turn id and decodes selected receipts. Its cursor checks session identity.
-Model usage is data on the journaled model result, as
+Model usage is data on the recorded model result, as
 [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md) specifies.
 
 ### 9. Resident state
@@ -276,7 +275,7 @@ A pending `FrameOpen` selects the new frame before its commit. Read views
 and the turn editor use the same projection; a derived view rewrites the
 tail over its resident graph. Standard compaction's request identity uses
 that snapshot, so the admission-boundary resident graph must equal the
-admitted window on execution and replay.
+admitted window on execution and resume.
 
 Resident graph cost follows the current frame and pending state. Usage
 cost also includes grouped keys and outstanding holes. This is not a byte
@@ -304,15 +303,15 @@ Evidence: `crates/lash-core/src/runtime/turn_loop/context_pressure.rs:116`, `:26
 ### 11. Stored shapes
 
 Graph rows carry `body_bytes`. Turn-commit rows carry `failure_evidence`.
-Graph windows carry an anchor. Model results carry reported usage and sealed
-attempt history in the engine journal.
+Graph windows carry an anchor. Model results carry reported usage and attempt
+history in the model call's committed phase.
 
 Both SQL backends store these facts. Decoding validates body size and the
 window's anchor. The pre-1.0 version freeze applies; durable-format admission,
-writer fences and generation drain follow
+writer fences and drain by release follow
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
-A journal's compaction identity includes its window and token inputs,
-so replay must preserve those inputs.
+A compaction's identity includes its window and token inputs, so resume
+must preserve those inputs.
 
 Evidence: `crates/lash-store-sql/src/session/graph_nodes.rs`,
 `crates/lash-store-sql/src/session/usage_delta_holes.rs`,
@@ -323,7 +322,7 @@ Evidence: `crates/lash-store-sql/src/session/graph_nodes.rs`,
 
 `load_session_window_state`, `load_session_read_view` and
 `refresh_session_window` take `SessionStore` and adopt window reads. Runtime
-open, reopen, refresh and replay use these frame-bound helpers. Earlier
+open, reopen, refresh and resume use these frame-bound helpers. Earlier
 history is available through pages, not a whole-history store load or a
 message-tree escape.
 
@@ -351,8 +350,8 @@ Evidence: `crates/lash-core-store/src/store/history_gate_tests.rs:4` and
 
 Store laws run on SQLite file, SQLite memory and PostgreSQL. The shared
 history suite is `crates/lash-conformance/src/conformance/session_history.rs`.
-Runtime host laws use the in-process Restate server double, live Restate and
-Lash-sim's in-process effect host. Upgrade proofs use the synthetic-next tier.
+Runtime laws run the production runtime over a fault-injecting store with
+labelled commits, a virtual clock and `SimNodes` (ADR 0132 §14). Upgrade proofs use the synthetic-next tier.
 The following numbered groups identify the law each citation refers to.
 
 #### 14.1 Frame-bounded decoded rows
@@ -371,11 +370,11 @@ ceilings cannot authorize rows outside the parent chain.
 `history_window_rejects_corrupt_anchors` and the window-construction unit
 tests reject malformed bases, pointers, parent edges and stored body sizes.
 
-#### 14.4 Admitted replay
+#### 14.4 Admitted resume
 
 `crates/lash-conformance/src/conformance/frame_open_redrive/adversarial.rs`
 and `crates/lash-core/tests/runtime/tests/turns/frame_residency.rs` exercise
-admitted frame state across replay and frame switches. The resident graph
+admitted frame state across resume and frame switches. The resident graph
 and compaction identity must agree with the admitted window.
 
 #### 14.5 Paging and cursor stability

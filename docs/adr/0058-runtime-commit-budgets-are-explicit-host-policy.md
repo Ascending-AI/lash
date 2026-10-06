@@ -32,11 +32,11 @@ budget.
 ### Adoption accounting
 
 The `adopted_intent_rows` count is attempt-recorded evidence. It can differ from
-the rows an adoption update stamps. A same-turn-ID replay can adopt still-open
+the rows an adoption update stamps. A same-turn-ID retry can adopt still-open
 manifest rows from an earlier attempt that this attempt did not count, causing
 an undercount. Cancelled or failed puts and committed explicit IDs can cause an
 overcount. The node bound describes the recorded count, not an exact guarantee
-about every adoption row a replay can stamp.
+about every adoption row a retry can stamp.
 
 Exceeding either configured dimension produces a typed commit rejection.
 Retrying identical payload and policy cannot admit it. The host must raise the
@@ -127,7 +127,7 @@ changes without changing what the commit means.
 - Bounded and explicitly unbounded deployments are both serializable.
 - One carried policy reaches every commit entry and backend.
 - Hosts tune logical bytes and recorded rows against measured physical cost.
-- Replay adoption residuals remain visible; the recorded node count does not
+- Retry adoption residuals remain visible; the recorded node count does not
   silently claim an exact transactional census.
 
 ## Code evidence

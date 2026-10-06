@@ -10,8 +10,8 @@ persistence protocol beside the effect result.
 
 The retry-owning provider boundary seals one immutable `AttemptRecord` per
 transport invocation. `ProviderCompletion` and `ProviderCompletionError` both
-carry the complete `LlmCallRecord`. The runtime effect result journals that
-record with its outcome; there is no separate attempt journal.
+carry the complete `LlmCallRecord`. The model call's committed phase record
+carries that record with its outcome; there is no separate attempt log.
 
 An attempt is a transport invocation, not a retry-budget unit or an admission
 wait. A courtesy retry can produce another attempt without consuming retry
@@ -30,7 +30,7 @@ a typed provider failure kind, HTTP status, transport request id, retry-after an
 namespaced failure code. It does not persist the provider's diagnostic prose.
 Raw diagnostic text that Lash exposes is live observation for host sinks.
 
-`FailureCode` preserves the author's namespace. Trusted journal decoding
+`FailureCode` preserves the author's namespace. Trusted decoding of recorded state
 uses `from_wire`; foreign input uses `from_foreign_wire` and cannot acquire a
 reserved namespace by spelling one. Host and plugin namespaces are validated.
 These are vocabulary ownership rules, not an authentication policy.
@@ -38,8 +38,8 @@ These are vocabulary ownership rules, not an authentication policy.
 The turn report aggregates calls from that session. Child-session calls remain
 on child results. Lash exposes no final-output provenance selector (ADR 0033).
 Durable attempt history belongs to the execution that produces the recorded
-outcome. A crash before recording that outcome can lose its attempt history;
-the engine owns recovery under ADR 0110.
+outcome. A crash before that outcome commits can lose its attempt history;
+the call is re-sent under [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §4.
 
 The full Prompt View remains authoritative on every call. A provider may reuse
 a disposable cached response id only after validating the current request's
@@ -48,10 +48,10 @@ reuse. Provider cache state is not durable session authority.
 
 ## Consequences
 
-Replay returns the recorded ledger with the effect result without rebuilding
-it from telemetry. A separate append-only attempt journal is rejected because
+Resume loads the recorded ledger with the call's result without rebuilding
+it from telemetry. A separate append-only attempt log is rejected because
 it needs its own redelivery deduplication, retention and reconciliation with
-replay. The accepted trade is that an unrecorded crash-era attempt is not
+the committed result. The accepted trade is that an unrecorded crash-era attempt is not
 durable billing evidence. Hosts own any supplementary live telemetry archive.
 
 ## Implementation

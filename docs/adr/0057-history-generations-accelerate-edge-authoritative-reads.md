@@ -30,7 +30,7 @@ Both SQL stores enforce `UNIQUE (session_id, generation)`. A session appends
 only from its current head, so one producer session cannot contain two nodes at
 one generation. The planner receives only `ParentNodeFacts` from the backend,
 derives every appended node's facts, and preserves the existing cross-check
-against the head's claimed current frame. Receipt replay never recomputes or
+against the head's claimed current frame. A receipt retry never recomputes or
 rewrites node facts.
 
 A zero-copy fork writes `fork_lineage(session_id, ancestor_session_id,

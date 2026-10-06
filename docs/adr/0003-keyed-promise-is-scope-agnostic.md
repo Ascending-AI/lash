@@ -1,17 +1,48 @@
-# Durable waits are scoped and resolved by the effect host
+# Durable waits are scoped wait rows with a first winner
 
 ## Decision
 
-Turns and Runtime Processes use the same one-shot keyed promise: `AwaitEvent { key }` and the effect host's resolve operation. Execution Scope provides replay, wait, cancellation and trace identity; its bound Execution Environment supplies execution requirements. A wait key identifies a promise. The host controls ingress authorization, as described by ADR 0014 and ADR 0046.
+Turns and Runtime Processes use the same durable wait: a wait row in the lash
+store under [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md)
+§6. A wait has a kind, an owner actor, an owner scope for revocation and a
+deadline written once at creation. Execution Scope provides wait, cancellation
+and trace identity; its bound Execution Environment supplies execution
+requirements. Named signals, process joins, tool completions and timers are
+wait kinds of this one mechanism. The host controls ingress authorization, as
+described by ADR 0014 and ADR 0046.
 
-Restate owns durable suspension and promise settlement. A waiting turn remains the session's active turn and commits no partial transcript merely because it waits. A waiting process records its wait as an observation of running work. Process events describe the wait; they do not resolve it.
+A waiting turn remains the session's active turn and commits no partial
+transcript merely because it waits. A waiting process records its wait as an
+observation of running work. Process events describe the wait; they do not
+resolve it. An actor with nothing runnable commits its last phase and releases
+as `waiting`; it holds no node while it waits.
 
 ## Rules and guarantees
 
-The promise address derives from the structured scope and wait identity. The first terminal resolution is retained. A repeated resolve returns the recorded terminal result even when its proposed payload differs. Unknown or revoked addresses remain distinguishable from runtime failures. Inbound resolution uses an ordinary object call; retained terminal state supplies deduplication.
+The row exists from minting, so a resolution that arrives before the owner
+awaits finds it. Resolution is a conditional update from `pending`; the first
+terminal resolution wins and is retained. A repeated resolution with the same
+digest answers `AlreadyResolved`, one with a different digest answers
+`Conflict`, and a revoked or unknown wait answers `UnknownOrRevoked`, distinct
+from runtime failures. A deadline that passes resolves the wait
+`TimedOut { WaitDeadline }` before anything acts on it.
+
+A host-resolvable key is `wk1.<wait_id>.<mac>`, an HMAC under the deployment
+secret that carries no scope or kind in plaintext. Hosts resolve only the
+`tool_completion` and `custom` kinds; signals, turn cancellation and process
+terminals have their own admission paths. Named signals carry declared schemas
+and validate their payloads. Waiting is a facet on a running process, mirrored
+by wait and resume events, rather than a lifecycle status.
 
 ## Alternatives and consequences
 
-Making a suspended turn a process is rejected because a session-owned turn must not acquire process addressability and lifecycle. Requiring authors to start a process before a long tool call is rejected because suspension is an execution concern. Sharing the promise mechanism preserves those separate ownership rules.
+Making a suspended turn a process is rejected because a session-owned turn
+must not acquire process addressability and lifecycle. Requiring authors to
+start a process before a long tool call is rejected because suspension is an
+execution concern. Adding a separate primitive per wait kind is rejected
+because each kind needs only a row with its own resolution path. Sharing the
+wait mechanism preserves those separate ownership rules.
 
-The implementation is in [durable wait identities and promises](../../crates/lash-restate/src/durable_wait.rs) and [resolve ingress](../../crates/lash-restate/src/effect_host/ingress.rs). ADR 0012 describes engine journaling and deadline replay.
+The current implementation is in
+[durable wait identities](../../crates/lash-core-store/src/await_event_identity.rs);
+the substrate lanes implement wait rows under ADR 0132 §6.

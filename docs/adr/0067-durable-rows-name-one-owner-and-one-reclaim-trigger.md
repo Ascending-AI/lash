@@ -11,8 +11,9 @@ state it is, when its owner releases it, or what evidence permits deletion.
 Without those answers a sweep can delete live data, retain ownerless data
 forever, or present an enumeration failure as a healthy empty pass.
 
-Session and process stores own storage reclamation. The effect host owns
-execution-state retirement. Hosts choose explicit retention horizons and invoke
+Session and process stores own storage reclamation. The durable engine retires
+execution state in the owner's own transactions
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §4 and §11). Hosts choose explicit retention horizons and invoke
 factory-wide maintenance. These authorities need one ownership vocabulary.
 
 ## Decision
@@ -72,9 +73,10 @@ of reclaim after eligibility exists. No automatic age rule may delete a live
 owner's continuation.
 
 Both SQL backends guard reclaim markers with named CHECK constraints.
-A parent-end plan's `settled_at_ms` requires delivered cancellation work;
-claimed or stalled work remains retained. Delivery settlement arms the marker
-atomically and honors its claim token. A subscription change's `deleted_at_ms`
+A parent-end plan's `settled_at_ms` requires its batched cancellation cascade
+to have reached every child; a plan whose cascade cursor still has children
+remains retained. The batch that finishes the cascade arms the marker
+atomically (ADR 0132 §11). A subscription change's `deleted_at_ms`
 requires the tombstoned lifecycle in its retained JSON record. Missing lifecycle
 tags cannot satisfy that guard under SQL NULL semantics.
 
@@ -107,8 +109,8 @@ silently become a whole-catalog blob sweep.
 | Session subscription | Registering session | The deleted-session frontier and zero remaining deliveries. A tombstone remains a `Revive` fence while that session can still speak. |
 | Host or platform subscription tombstone | Host or platform namespace | Permanent name fence; the namespace has no deleted-session frontier or purge lever. |
 | Session ingress tombstone | Its session | Host vacuum after its terminal transition, or session deletion. A command retains its first receipt and applying operation key until vacuum. |
-| Session mutation receipt | Registering session's replay eligibility | The host retention lever under ADR 0023 once its owner is durably deleted and no outstanding delivery names it. |
-| Host or platform mutation receipt | Namespace replay eligibility | The host retention lever under ADR 0023, by age alone. |
+| Session mutation receipt | Registering session's retry eligibility | The host retention lever under ADR 0023 once its owner is durably deleted and no outstanding delivery names it. |
+| Host or platform mutation receipt | Namespace retry eligibility | The host retention lever under ADR 0023, by age alone. |
 | Fired occurrence | Committed delivery fan-out | Transactional reconciliation after zero delivery rows remain. |
 | Non-fired occurrence | Factory audit history | Explicit non-fired audit cutoff, never delivery reconciliation. |
 | Occurrence tombstone | Factory redelivery fence for one reclaimed occurrence identity | Explicit host deletion through `forget_trigger_tombstones(written_before_epoch_ms)`, after the host vouches that its source stops redelivering the selected identities. Reclaim never deletes these tombstones (ADR 0021, FIG-4610). |
@@ -123,7 +125,7 @@ is not evidence for assigning an owner.
 
 #### Host tool-intent ledger
 
-A host tool-intent submission row is the first-outcome replay fence of one
+A host tool-intent submission row is the first-outcome idempotency fence of one
 intent identity, owned by the session that owns the identity. The
 retained-evidence lever under ADR 0023 reclaims it once that session is
 durably deleted and the row was admitted before the host's bound. The same
@@ -135,9 +137,10 @@ admitted or realized again (FIG-1509).
 | Row or payload | Owner | Reclaim trigger |
 | --- | --- | --- |
 | Retained event payload | Process history readers selected by the host | Explicit prefix release under ADR 0023, or terminal process pruning. |
-| Released event metadata and digest | Process replay and signal-ordinal evidence | Terminal process pruning. Prefix release keeps these fences. |
+| Released event metadata and digest | Process idempotency and signal-ordinal evidence | Terminal process pruning. Prefix release keeps these fences. |
 | Process event horizon | The retained process | Process deletion cascades the horizon. |
-| Segment continuation and start marker | The engine's segment execution | Journaled retirement after successor handover, or terminal process pruning. |
+| VM snapshot | The process actor | Replaced by the next snapshot revision, or terminal process pruning. |
+| Run records and phase rows | The owning turn or process actor | A turn's rows are pruned by its turn commit; a process's are compacted into its next snapshot, or pruned with the process. |
 
 Event release preserves execution state and releases host-selected history
 payloads. It cannot delete a live continuation or its dependencies. The
@@ -220,7 +223,7 @@ The pass completes each adopted row before listing and condemning new candidates
 `begin_attachment_sweep` mints a monotonically increasing durable generation.
 Creation, adoption, arming and settlement compare the condemnation's recorded
 `sweep_generation` with the pass's own generation. SQLite holds liveness in a
-process registry; PostgreSQL holds a session advisory lock on a dedicated
+process-local registry; PostgreSQL holds a session advisory lock on a dedicated
 connection keyed by catalog and generation. A predecessor is dead only when
 its liveness authority permits adoption. A timed-out lock probe defers; it
 does not prove death.
@@ -246,7 +249,7 @@ condemnation with its opaque token and clears it only after restoring the bytes.
 Run aggregate retirement likewise waits for every recovery, consumer and material
 dependency, severs owned state atomically and preserves its identity fence.
 Logical Closing is not garbage collection (L13).
-The engine retains an identity fence and discharges group cleanup as a whole
+The Run retains an identity fence and discharges group cleanup as a whole
 under ADR 0065 and ADR 0099.
 
 ## Alternatives considered
@@ -294,9 +297,8 @@ coverage at the reclamation boundary.
   and [condemnation SQL](../../crates/lash-store-sql/src/attachment/condemnation.rs#L1)
   implement §6. [Cold-reopen adoption laws](../../crates/lash-conformance/src/conformance/attachment_condemnation_recovery.rs#L1)
   cover interrupted passes and competing sweepers.
-- Store laws run on SQLite file, SQLite memory and PostgreSQL. Effect-host laws
-  run on the in-process Restate server double, live Restate and lash-sim's
-  in-process effect host. Upgrade proofs use the synthetic-next tier.
+- Store laws run on SQLite file, SQLite memory and PostgreSQL. Laws run the production runtime over a fault-injecting store with labelled commits, a virtual clock and `SimNodes` ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §14).
+  Upgrade proofs use the synthetic-next tier.
 
 - [Complete attachment root collector](../../crates/lash-core-store/src/attachments/root_enumeration.rs).
 - [Reclamation enumeration witnesses and partial-scan laws](../../crates/lash-core-store/src/store/enumeration.rs).

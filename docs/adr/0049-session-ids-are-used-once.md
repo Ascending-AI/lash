@@ -32,53 +32,34 @@ Facade `create` is stricter and refuses an existing id with
 Binding includes session relation and ownership. Admission materializes and
 checks it atomically. Ordinary history-node ids use session id, operation id
 and ordinal; frame ids use session id and frame key. Turn addresses and
-session-scoped journal identities use that same session id, with no separate
+session-scoped durable identities use that same session id, with no separate
 session-lifetime discriminator. Facade sessions bind explicit storage and
 lifecycle owners (ADR 0088).
 
 ### Scope fences are a permanent-row class with one release rule
 
 Process and runtime-operation scopes have no session id, so deleting a session
-does not revoke their promises. Scope-exact retirement supplies their own
-revocation boundary. Production journals belong to Restate, not SQL stores
-(ADR 0104). Restate's scope index durably records revocation and refuses later
-promise admission and access under the revoked scope.
+does not revoke their waits. Scope-exact retirement supplies their own
+revocation boundary: it revokes every wait row of the scope and records the
+revocation, so later wait admission and resolution under the revoked scope
+refuse ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §6).
 
 Retirement requires named reachability proof. An owner-terminal retirement
-can revoke the scope. `WhenQuiescent` refuses while executing effects,
-unsettled group children or indexed unresolved waits remain; its refusal
-leaves the index unfenced. Pending turn-closure participants also prevent
-revocation. A returning operation receipt alone does not prove quiescence.
-Retention and lifecycle cleanup use the host's explicit levers.
-
-Restate process-scope quiescence is conservative per segment (FIG-4849).
-The segment registers one journal pin before its runner can issue effects
-and releases it only after the runner ends. Both retirement modes refuse
-while that journal can issue another effect; each effect needs only its own
-journaled step. Cancel still ends the segment through its existing process
-signal. A killed invocation's completed engine status proves an abandoned
-pin can be cleared; an absent or active status proves nothing. Unsettled
-process-scoped group children also prevent retirement after the segment
-ends. The process's generation remains counted as live work until its
-terminal transaction. Runtime-operation effect recording and retirement
-retain their existing semantics.
+can revoke the scope; a process's terminal transaction revokes its own pending
+waits (ADR 0132 §11). `WhenQuiescent` refuses while started executions without
+an outcome, unsettled group children or unresolved wait rows remain; its
+refusal leaves the scope unfenced. A returning operation receipt alone does
+not prove quiescence. Retention and lifecycle cleanup use the host's explicit
+levers.
 
 Process ids are minted and single-use (ADR 0107), and runtime-operation ids
-are used once. `reinstate_effect_scope` is a process-scope lever only; session
-revocation cannot be lifted by it. The process registry binds its registration
-probe to the effect host. A revoked process index reads that probe to repair
-a committed registration whose reinstatement did not reach the engine;
-ordinary registration never deliberately reuses a pruned process id.
-
-Test-host quiescence has one explicit differential. The in-process simulation
-host has no durable record of a dropped waiter; the Restate index retains
-unresolved wait evidence and can refuse retirement after the local waiter is
-gone. A law over a live waiter holds on both.
+are used once. Session revocation cannot be lifted. Ordinary registration
+never reuses a pruned process id.
 
 ## Consequences
 
 Deleting a session is final for its id. Reset creates a new id rather than
-reopening a deleted lifetime. Tombstones, retained graph and engine revocation
+reopening a deleted lifetime. Tombstones, retained graph and wait revocation
 must keep a consistent lifecycle; independently wiping identity evidence can
 violate non-reuse. Adding another incarnation field is rejected because every
 session-keyed identity can rely on the same permanent admission fence.
@@ -94,5 +75,4 @@ clear. The single-use fork id cannot alias a later lifetime.
 
 - [ID validation and closure pins](../../crates/lash-core-store/src/store/mod.rs).
 - [SQLite admission](../../crates/lash-sqlite-store/src/catalog.rs), [PostgreSQL admission](../../crates/lash-postgres-store/src/postgres/session_factory/store.rs) and [facade create/open](../../crates/lash/src/session.rs).
-- [Restate scope retirement](../../crates/lash-restate/src/effect_host.rs) and [durable quiescence](../../crates/lash-restate/src/durable_wait.rs).
 - [Observer intent reconciliation](../../crates/lash-core-execution/src/runtime/process/observer_intent.rs).

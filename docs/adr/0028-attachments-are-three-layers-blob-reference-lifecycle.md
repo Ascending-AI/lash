@@ -12,7 +12,7 @@ The file store stages to a unique pid/counter sibling, syncs bytes, renames it a
 
 ## Reference tracking
 
-`AttachmentReferrers` holds digest edges, pending writes and upload evidence. A `RuntimeAttachmentStore` binds the flat backend, referrer port and runtime holder. Turn puts are held by their execution journal; process puts by their process record; out-of-turn session puts by a fresh expiring session upload. Ephemeral holders record no durable roots.
+`AttachmentReferrers` holds digest edges, pending writes and upload evidence. A `RuntimeAttachmentStore` binds the flat backend, referrer port and runtime holder. Turn puts are held by their turn's execution; process puts by their process record; out-of-turn session puts by a fresh expiring session upload. Ephemeral holders record no durable roots.
 
 `begin_attachment_write` records the pending attempt and its edge before writing bytes. `complete_attachment_write` requires its current permit and records positive upload evidence. A stale permit records nothing; the facade can retry behind a fresh permit within its bounded attempt budget. Aborting settles only that attempt and releases its edge only when no evidence or sibling write requires it.
 

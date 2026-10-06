@@ -2,11 +2,9 @@
 
 ## Status
 
-Accepted. The substrate lanes implement it. Restate serves production on main
-until the Restate deletion lane switches the last caller; until then ADRs 0104,
-0103 and 0111 describe that path, and the sections of ADRs 0105, 0109, 0110 and
-0130 listed under "Scope" below describe it too. That lane deletes those ADRs
-and moves their citations here.
+Accepted. The substrate lanes implement it. The ADR set states this end state;
+the gap between it and code on main is the substrate lanes' open work, and the
+Restate deletion lane removes the Restate path.
 
 ## Context
 
@@ -346,24 +344,13 @@ answered by adding a replay fallback.
 
 ## Scope
 
-This decision replaces, once its lanes land:
-
-- ADR 0104 entirely;
-- ADR 0103 entirely: code cells resume from VM snapshots (§8);
-- ADR 0111 entirely: Restate names go with Restate;
-- ADR 0105 §1, §3 and §5 to §12, and the shift seal and run-start nonce of
-  its §2. The Run's ownership of concurrent calls in its §4, and run
-  admission's binding of rows and base head in its §2, carry over onto
-  persisted records;
-- ADR 0109 §1 to §3 and §5 to §7 for every kind except `ArtifactCleanup` and
-  `SessionDelete`. The session-delete phases of its §4 stay, without the
-  engine half;
-- ADR 0110 §2 to §4 and §7: recovery by engine replay, the unjournaled window,
-  engine-bounded retries and Restate process ownership. Input ownership,
-  abandon writers and operator controls in its §1, §5 and §6 carry over;
-- ADR 0130's separate realization invocation: the store half of realization
-  commits with the tool result (§5), and intent identities and their
-  exactly-once fences carry over.
+This decision replaces ADR 0104 and ADR 0103, and with Restate it retires
+ADR 0111, ADR 0043 and ADR 0025. ADR 0130's separate realization execution is
+replaced by §5. The decision rules of ADRs 0105, 0109 and 0110 are restated on
+top of this decision: run admission's binding of rows and base head and the
+Run's ownership of concurrent calls (ADR 0105), the two deferred-work kinds
+`SessionDelete` and `ArtifactCleanup` (ADR 0109), and input ownership, abandon
+writers and operator controls (ADR 0110).
 
 `JOURNAL_LOGIC_EPOCH`, generation lanes and the build-generation sentinel go
 with Restate. Changing kernel code never requires a drain; changing a durable

@@ -12,7 +12,7 @@ The registry contract has nine concern traits:
 
 - `ProcessQuery` supplies point reads, listings, change feeds, bounded
   non-terminal pages, and aggregates.
-- `ProcessRegistrar` registers a process and records its external backend reference.
+- `ProcessRegistrar` registers a process.
 - `ProcessObserverRegistry` owns observer edges and session routing cleanup.
 - `ProcessEventLog` owns the append-only process event log.
 - `ProcessLifecycle` records starts, waits, departures, completion, and parent-end teardown.
@@ -31,9 +31,10 @@ identity and incarnation checks. Other concerns do not acquire unrelated
 concern obligations. Backend implementations group methods by concern, and a
 decorator delegates unintercepted concerns wholesale.
 
-Process execution and recovery belong to the engine under ADR 0110; registry
+Process execution and recovery belong to the durable engine under ADR 0110 and
+[ADR 0132](0132-durability-is-state-first-over-the-lash-store.md); registry
 concerns are persistence reads and writes. Wake-outbox claim tokens belong to
-the obligation relay under ADR 0109.
+wake delivery under ADR 0046.
 
 The runtime-store decorator follows the same ownership rule. Its default
 forwarder and component implementations derive from one `runtime_store_operations!`

@@ -40,8 +40,8 @@ The shared machine owns:
   that need an exact live set;
 - logical-memory charges computed from the live heap objects and the
   explicit execution bounds of ADR 0055;
-- the allocation counter and heap objects carried across durable continuation
-  handovers; and
+- the allocation counter and heap objects carried in durable VM snapshots
+  ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8); and
 - the shared AST nesting cap of 64, checked before linking and compilation.
 
 A front end must produce IR within the shared structural bound. TypeScript has

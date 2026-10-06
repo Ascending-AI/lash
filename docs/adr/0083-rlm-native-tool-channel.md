@@ -43,7 +43,7 @@ error. Finish values, schema mismatch, and execution errors use the common cell
 adjudication contract. Completed code executions emit the shared cell-start and
 cell-end observations.
 
-2026-10-06 (FIG-5104): a Natural termination may state a finish schema
+A Natural termination may state a finish schema (FIG-5104)
 (`RlmTermination::Natural { schema }`, per send through
 `allow_prose_or_finish_schema` or session-wide through the recorded
 termination). Prose still ends the turn; a `finish` value is validated on both

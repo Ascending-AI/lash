@@ -110,7 +110,7 @@ error enumeration and JSON rendering follow their guest property contract.
 A host returning an identical exported value can reuse the boundary cache;
 a rebuilt JSON record is an ordinary record and does not become a heap error.
 
-### Promise aggregates settle on journaled order
+### Promise aggregates settle on recorded order
 
 `Promise.all`, `allSettled`, `race` and `any` consume runtime array expressions.
 Tool handles are awaited, settled values pass through, and mixed arrays are
@@ -122,7 +122,7 @@ A mixed aggregate is one resource-operation batch. The logical Run records
 settlement ranks. `all` rejects at the first consumed rejection; `allSettled`
 returns outcomes in input order. `race` returns the first settlement; `any`
 returns the first fulfilment or an `AggregateError` with reasons in input order.
-Replay reads the durable decision rather than reconstructing it from a clock.
+Resume reads the committed decision rather than reconstructing it from a clock.
 A host answer incompatible with the requested consumer mode fails closed.
 
 Lowering records the aggregate consumer mode explicitly. The VM does not infer

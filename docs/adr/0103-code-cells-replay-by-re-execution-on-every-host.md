@@ -2,156 +2,17 @@
 
 ## Status
 
-Accepted for the Restate path that serves production on main. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md)
-replaces this decision entirely: code cells resume from VM snapshots under
-ADR 0132 §8. The Restate deletion lane deletes this ADR.
+Replaced by [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md)
+§8. Code on main still cites this file; the Restate deletion lane removes that
+code, deletes this file and moves its citations to ADR 0132.
 
-## Context
+## Note
 
-A code cell returns an `ExecResponse` and changes interpreter state that the
-turn commits. Serving only a recorded response cannot reconstruct that state.
-The cell therefore re-runs local computation while its nested effects answer
-from their journal. The storage engine does not execute or replay the cell.
-
-## Decision
-
-### Code cells reconstruct state on replay
-
-`RuntimeEffectCommand::replays_by_reexecution` is true for `ExecCode` only.
-Restate classifies it as `DirectLocal` and runs the local executor on replay.
-Its nested model calls, tool attempts and language-runtime values retain their
-own journal identities. The executor restores execution state and deferred
-resolution state through the same cell path on a fresh attempt.
-
-A cell seals only a response that has no controller abort and is not cancelled.
-A nested replay refusal stops further dispatch; a seal cannot hide it.
-Replaying a checkpoint treats its recorded result as the authority for messages
-already incorporated there, so a later checkpoint does not deliver them twice.
-
-Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs`,
-`crates/lash-restate/src/controller/execution.rs`,
-`crates/lash-protocol-rlm/src/executor/mod.rs`,
-`crates/lash-core/src/runtime/turn_driver/effects.rs`.
-
-### Issue-ordinal identity
-
-Every command leaving the VM takes the next issue ordinal before the bridge
-can fail. Replay keys derive from the run namespace and that ordinal, not an
-AST node or bytecode address. Host-injected retry operations use subkeys of
-the command. A cell namespace is `{exec_replay_key}:lk2`; a process namespace
-is `lashlang:v2:{opener_scope}:lk2`. A command key appends a ten-digit,
-zero-padded ordinal. The cell's final key is `P:~seal`.
-
-A process segment carries its ordinal state forward. A cell seal records the
-issued count and a digest of dispatched ordinals; it rejects a keyed replay
-that ends before a recorded command. Producer attribution is diagnostic.
-
-The run reads its recorded frontier once through `read_recorded_journal`.
-A keyed controller validates recorded command shapes and refuses an unrecorded
-write beneath the namespace when later work or a seal exists. A positional
-controller answers `RecordedJournal::Positional`; Restate's journal and
-canonical-envelope checks enforce its replay. A replay mismatch is a typed
-refusal before fresh dispatch, not permission to run the missing work live.
-
-Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs`,
-`crates/lash-restate/src/controller/mod.rs`.
-
-### Journaled prompt and binding set
-
-The execution-environment sync returns the prompt environment and tool catalog
-as a recorded outcome. The shift installs that outcome on the live pass and
-on replay. The live registry supplies executors; it does not replace the
-recorded definitions used by the turn.
-
-Before a cell's first effect, its executor journals every referenced ambient
-path with its full tool definition or `null` for an unbound path. Deferred
-resolution has its own record. On replay the cell links against the recorded
-paths. It compares each recorded definition with the live dispatch contract:
-identity, bindings, activation, argument projection, retry policy, schemas and
-output contract. Descriptions and examples do not decide drift.
-
-A missing or changed binding is served only. A recorded outcome can replay;
-a dispatch that needs the live tool refuses `lashlang_cell_binding_drift`.
-The engine answers whether it can serve the outcome. Once a guarded command
-refuses, its later writes refuse too. A turn parks without a terminal result,
-and a restored compatible tool can allow its replay to complete.
-
-Evidence: `crates/lash-core/src/runtime/turn_driver/effects.rs`,
-`crates/lash-core/src/runtime/turn_driver/handlers.rs`,
-`crates/lash-lashlang-runtime/src/cell_bindings.rs`,
-`crates/lash-protocol-rlm/src/executor/mod.rs`,
-`crates/lash-restate/src/controller/journaled_effect.rs`.
-
-### Per-call binding belongs to Run admission
-
-K1 admission records the prepared call and its executable, preparation and
-presentation callback identities before the body runs. The recorded request,
-owner, capabilities and revisions remain authoritative across crash redelivery,
-reported retries and handover. A changed request or unavailable admitted
-revision refuses with its typed cause before a fresh body, route or identity.
-A retained result is served without re-executing preparation or the body.
-
-The cell's recorded ambient binding set and this per-call gate have separate
-jobs: the former reconstructs the cell's link environment; the latter protects
-every admitted call wherever it resumes. Tool bodies remain opaque under
-[ADR 0116](0116-tools-are-opaque.md). K1 in the
-[tool-run contract](../architecture/tool-run-contract.md) and
-[ADR 0099 §1](0099-tool-children-of-effect-groups-are-live-closing-settled.md#1-logical-opener-identity-and-admission-k1-l12)
-carry that guarantee for every host.
-
-Evidence: `crates/lash-core-store/src/tool_run/admission.rs`,
-`crates/lash-core-execution/src/tool_dispatch/production.rs` and
-`crates/lash-core-execution/src/tool_dispatch/run_coordinator.rs`.
-
-### Executable generation at admission
-
-A turn's run admission records the executor's executable generation and
-checks it before turn effects. The Lashlang cell generation hashes semantic
-identity, bytecode generation, instruction accounting and cell-journal grammar.
-An incompatible recorded generation refuses as `retired_generation` and parks
-with the recorded generation. An absent stamp is accepted only when the
-current executor also names none. This is distinct from the engine's
-build generation, which routes journal-bearing handlers under ADR 0106 §1.
-
-The pre-1.0 version freeze applies. Shapes change in place; version counters
-and grammar stamps do not imply a compatibility reader for arbitrary builds.
-[ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) and
-[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) govern the
-release boundary.
-
-Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs`,
-`crates/lash-core/src/runtime/shift/run.rs`,
-`crates/lash-core/src/runtime/turn_loop/generation_fence.rs`.
-
-### Laws
-
-`effect_controller_code_cell_replays_by_reexecution` requires two local cell
-executions across live and replay passes and one nested effect execution.
-The binding, Run-admission and model-call drift laws require recorded results to
-replay, fresh drifted dispatch to park, and restored tools to complete.
-The laws use the controller/backend contracts. The current storage matrix is
-SQLite file, SQLite memory and PostgreSQL; execution hosts are the Restate
-server double, live Restate and lash-sim's in-process effect host.
-
-Evidence: `crates/lash-conformance/src/conformance/effect_host.rs`,
-`crates/lash-conformance/src/conformance/cell_binding_drift.rs`,
-`crates/lash-core-store/src/tool_run/tests.rs`,
-`crates/lash-conformance/src/conformance/model_call_drift_park.rs`.
-
-## Rejected alternatives
-
-Journaling an interpreter-state delta adds a second state representation and a
-second restoration contract beside the committed snapshot. Re-execution uses
-the same interpreter path. Compiler-derived effect keys let a compiler change
-move durable identities; issue ordinals keep them tied to issued commands.
-Linking against the live catalog changes a replay's dispatch contract; recorded
-bindings preserve the contract and refuse a required fresh call that drifted.
-
-## Consequences
-
-Replay repeats local cell computation while recorded nested effects avoid
-fresh dispatch. Observation ids and measured durations can differ between
-attempts and cannot decide committed state. A mismatched generation, envelope
-or binding parks rather than silently accepting a different execution. A
-park requires compatible code or tool restoration, or an operator control
-intent under the run's durable control contract.
+This decision rebuilt a code cell's interpreter state by re-running the cell
+while its nested effects answered from an engine journal, keyed by issue
+ordinal. In the end state a cell resumes from its committed VM snapshot: the
+snapshot, the broker ledger and the admission of every operation issued since
+the previous snapshot commit together, and on restore each admitted
+operation's saved outcome is fed back in. No earlier host operation re-runs
+(ADR 0132 §2 and §8). Per-call binding stays with Run admission under
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md) §1.

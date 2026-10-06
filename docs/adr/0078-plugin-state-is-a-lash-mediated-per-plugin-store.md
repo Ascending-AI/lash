@@ -49,8 +49,8 @@ generation advances once.
 failure in `get_as` or `set_as`, and a pure initial or converted namespace over
 the limits. Its `Into<PluginError>` conversion returns `PluginError::State`
 with the typed variant and fields. `PluginStateError` and `KeyRejection` are
-cloneable and serializable; plugin JSON and process journals retain their
-variants and fields.
+cloneable and serializable; plugin JSON and recorded process outcomes retain
+their variants and fields.
 
 ### 3. One coordinator, sequenced per namespace
 
@@ -63,37 +63,37 @@ body's recorded outcome. Bodies of other namespaces, and bodies that return no
 commands, never wait.
 
 A resolution names its plugin revision, origin (tool attempt or callback
-occurrence), owner segment, ordinal and predecessor. The ordinal is the
+occurrence), owner activation, ordinal and predecessor. The ordinal is the
 namespace's publication position; the predecessor is the last publication it
 was reduced against. Its publisher's effect address identifies the logical Run
 and recorded phase. Namespace generation tracks value freshness, including
 format conversion, separately from the publication frontier.
 
-### 4. Publication and replay
+### 4. Publication and resume
 
-A resolution publishes only after the engine returns the outcome that carries
-it, so a published change is durable with its result. A publication the
-engine never returned may be durable: its namespace publishes nothing more
-until the owner is rebuilt from durable state, and that fence is never a
-body's recorded result.
+A resolution commits in the transaction that records the outcome that carries
+it ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §5), so a
+published change is durable with its result. An outcome that did not commit
+published nothing.
 
-Replay installs recorded resolutions without running the body, the hook, the
+Resume installs committed resolutions without running the body, the hook, the
 reducer or a format converter. A delivery ahead of its predecessor waits for
 it; one at or below the namespace's frontier applies nothing only when its
 complete receipt digest matches the checkpoint's evidence. A different receipt
-at an applied ordinal is refused as `FrontierRefusal::ReceiptMismatch`. After ownership
-moves to a later segment, an earlier segment's unapplied resolution is refused
-with a typed `FrontierRefusal`.
+at an applied ordinal is refused as `FrontierRefusal::ReceiptMismatch`. After
+ownership moves to a later activation, an earlier activation's unapplied
+resolution is refused with a typed `FrontierRefusal`.
 
 Physical-turn preparation adopts the admitted session turn index as publication
-ownership before any hook runs. A process adopts its engine-admitted segment
-ordinal before capability construction. A callback retains the segment it
-started under across awaits, so a handover cannot relabel a stale callback.
+ownership before any hook runs. A process adopts its admitted activation
+before capability construction. A callback retains the activation it started
+under across awaits, so a new owner's claim cannot relabel a stale callback.
 
-Before-turn and after-turn callbacks run inside one recorded `PluginCallbacks`
-step per turn boundary; replay serves its decisions without calling them.
-After-tool result checks of a tool attempt are recorded with the attempt; a
-cached or deferred result's checks run inside their own recorded step.
+Before-turn and after-turn callbacks run in the turn-boundary phase they belong
+to, and their decisions commit with it. A phase that did not commit runs them
+again from committed state, so hooks are repeat-safe (ADR 0132 §4). After-tool
+result checks of a tool attempt are recorded with the attempt; a cached or
+deferred result's checks commit with their own phase.
 
 ### 5. Where the view is exposed
 
@@ -103,13 +103,13 @@ registration view.
 
 The engine records pure initialization and conversion as one complete
 `PluginTransitionRecord` before constructing capabilities. The request names
-its effect address, runtime owner, retained session head or captured process
-segment, and target plugin admission. A refused namespace or config keeps the
+its admitted identity, runtime owner, retained session head or captured process
+state, and target plugin admission. A refused namespace or config keeps the
 whole candidate unpublished. Inactive namespaces retain their stamp and values.
 
 For a session, one fenced `RuntimeCommit` publishes the namespace checkpoint,
-recorded admission and native view with the existing operation receipt. Replay
-serves the recorded candidate, and acknowledgement loss reuses that receipt.
+recorded admission and native view with the existing operation receipt. Resume
+loads the recorded candidate, and acknowledgement loss reuses that receipt.
 Factory build, registration and readiness reconstruct capabilities over the
 published native view. The plugin view of the host cannot export other
 namespaces.
@@ -126,7 +126,7 @@ a new value generation. Otherwise it retains the reference.
 
 The `plugin_admission` opaque checkpoint component carries the transition
 request and current native namespace/config view. It uses the existing
-checkpoint blob and operation receipt machinery, with no second journal or
+checkpoint blob and operation receipt machinery, with no second log or
 transition table. Resident adoption reads this native view and performs no
 conversion. The separately encoded `plugin_state` component retains the
 admission's writer formats.
@@ -140,8 +140,8 @@ and their frontiers.
 Fork initialization uses a deep copy of captured parent namespaces and their
 generations. It preserves non-resident namespaces as well as resident ones.
 Parent and child publications are independent; there is no merge.
-Fork creation resets publication ownership to the child's initial segment and
-retains the inherited applied receipts. Content-addressed
+Fork creation resets publication ownership to the child's initial activation
+and retains the inherited applied receipts. Content-addressed
 storage can deduplicate unchanged bodies. Retention policy governs how long
 the session's checkpoint contents remain available.
 
@@ -176,7 +176,7 @@ process environments; state stamps travel with every captured `SessionPluginInit
 Lash owns publication order, serialization, and checkpoint capture. Derived
 caches can be rebuilt from the store. A plugin sees its own commands only after
 their result returns; reducers must be pure, since a recorded resolution is
-replayed without them.
+installed without them.
 
 ## Code references
 
@@ -186,6 +186,6 @@ replayed without them.
 - `crates/lash-core-execution/src/plugin/recorded_callbacks.rs` records before-turn, after-turn and deferred result-check callbacks.
 - `crates/lash-core-execution/src/plugin/transition.rs` defines complete transitions and checkpoint native views.
 - `crates/lash-core/src/runtime/shift/plugin_transition.rs` prepares and publishes the session transition.
-- `crates/lash-core/src/runtime/process_runtime.rs` adopts a process segment's recorded transition.
+- `crates/lash-core/src/runtime/process_runtime.rs` adopts a process's recorded transition.
 - `crates/lash-core-execution/src/plugin/runtime_impl.rs` reconstructs read-only capabilities.
 - `crates/lash-core-store/src/session_state.rs` captures the checkpoint components.

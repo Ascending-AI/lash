@@ -18,15 +18,19 @@ The named integrator classes are:
 Store implementors provide persistence, deployment-store, process, trigger,
 attachment and artifact contracts and need their signature types.
 
-### 2. Effect-host implementors
+### 2. Projection-provider implementors
 
-Effect-host implementors provide effect-controller and event-resolution
-contracts and need their signature types.
+Projection-provider implementors register a `ProjectionProvider` by type and
+answer `read` and `read_range` for a `ResourceRef`
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §9). They
+need the request, response and reference types.
 
 ### 3. Protocol, process-engine and tool implementors
 
 These integrators implement `ProtocolSessionPlugin`, `ProtocolDriverPlugin`,
-`CodeExecutorPlugin`, `ProcessEngine` or `ToolProvider`. Every executable tool
+`CodeExecutorPlugin`, `ProcessEngine` or `ToolProvider`. A `ProcessEngine` is an
+explicit state machine, `advance(state, event) -> (state, action)` (ADR 0132
+§10). Every executable tool
 registers through `ToolProvider`, whose required leaf route is
 `execute(ToolCall<'_>) -> ToolAttemptOutcome`. A `ToolCall` holds an immutable
 manifest and exposes its coherent name and ID. Completed and pending outcomes
@@ -53,7 +57,7 @@ names it directly. The same rule applies to members:
 
 Direction belongs to an integrator class, not to the type alone. Stores consume
 `RuntimeCommit`; a conformance harness constructs it. Engines consume
-`ProcessEngineRunContext` through its accessors. Direct-use scanning cannot
+their state and event values through their accessors. Direct-use scanning cannot
 replace this reasoning, because an external implementor can depend on a member
 with no in-repository caller.
 

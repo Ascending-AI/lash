@@ -15,6 +15,14 @@ adopted hook-composition ruling. [ADR 0099](../adr/0099-tool-children-of-effect-
 records ownership and [ADR 0116](../adr/0116-tools-are-opaque.md) defines authoring.
 The historical child/group implementation is not a runtime option.
 
+The durable mechanics below (the opener journal, physical segment cuts, K0's
+SDK seam and the separate realization invocation) are how main implements this
+contract over Restate. [ADR 0132](../adr/0132-durability-is-state-first-over-the-lash-store.md)
+§5 owns their end state: Run records are rows keyed by `(owner, run, ordinal)`,
+a started row commits before each body, and the store half of realization
+commits with the tool result. The tool-round lanes carry this document to
+that end state.
+
 ## Seams
 
 | Seam | Contract | Pinned in | Witness | Implementing owner | Consumers |
@@ -365,7 +373,8 @@ through every decided call in rank order. A final
 whose result declares intents issues them (`declare`) only once every
 committed final ranked below it is seated (`RunLedger::drain_frontier_open`),
 sends intent realization to `LashToolRealization` under the Run/call idempotency
-key and records its durable invocation ID (ADR 0130). That invocation owns
+key and records its durable invocation ID; ADR 0132 §5 owns the end state, in
+which the store half of realization commits with the tool result. That invocation owns
 every nested intent command. The Run selects and adopts its durable receipt
 before presentation, then settles declarations in the presentation and
 incorporation record. A physical cut transfers the invocation ID while

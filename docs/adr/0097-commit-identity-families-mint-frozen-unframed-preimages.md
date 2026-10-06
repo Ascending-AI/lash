@@ -7,7 +7,7 @@ Accepted.
 ## Context
 
 Append receipts, commit receipts, and graph rows persist opaque digests and
-compare them by exact equality. Changing preimage framing changes replay and
+compare them by exact equality. Changing preimage framing changes idempotency and
 conflict decisions even when the requested operation is equal.
 
 ## Decision
@@ -63,7 +63,7 @@ encoder also changes append number identity and typed projection spelling.
 
 ## Consequences
 
-- Replay uses exact persisted evidence with a pinned grammar.
+- Idempotent retries compare exact persisted evidence with a pinned grammar.
 - The unframed allowlist has exactly three members.
 - Other identity owners retain their own domains and preimages.
 - Format evolution follows the pre-1.0 freeze and

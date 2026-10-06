@@ -33,8 +33,8 @@ times. Children and the completion span are siblings under the admission
 anchor. No SDK span or event buffer stays open across suspension.
 
 Only a newly committed lifecycle transition emits a logical completion.
-Only an executed journaled body emits a live attempt observation. Serving a
-journal result or reading a retained terminal grants neither permission.
+Only an executed body emits a live attempt observation. Loading a committed
+result or reading a retained terminal grants neither permission.
 Product process and language graphs reconstruct through a separate observer
 on replay, without exporting another lifecycle observation.
 

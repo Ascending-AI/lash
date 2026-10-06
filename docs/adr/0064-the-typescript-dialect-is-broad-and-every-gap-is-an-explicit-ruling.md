@@ -56,9 +56,12 @@ covers cells, sequences of cells and editable source projection.
   `all` stops at its first consumed rejection; `allSettled` reports every input;
   `race` takes the first settlement; `any` takes the first fulfillment.
   Unawaited `sleep(ms)` contributes a pending timer to an aggregate.
-- `Date.now()`, argumentless `new Date()` and `Math.random()` are journaled host
-  effects. Replay reads the recorded result. Durability requires that result
-  to survive; it does not require banning nondeterministic reads.
+- `Date.now()`, argumentless `new Date()` and `Math.random()` are host reads
+  inside the VM. A read in an uncommitted stretch is drawn again after a
+  crash; nothing outside the VM observed it, because every effect that could
+  carry it commits with the snapshot that contains it
+  ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8).
+  Durability does not require banning nondeterministic reads.
 - Signature tables define accepted standard-library names and optional
   arguments. ECMA number formatting uses `ryu-js`. Regex execution uses
   `lash-regress` with a charged execution budget and an explicit exhaustion
@@ -162,7 +165,7 @@ An approximate Rust type checker creates a second authority that can disagree
 with `tsc`. Erasure keeps runtime semantics separate from advisory host checking.
 
 Per-host language acceptance forks the census and prompt contract. Parsing and
-lowering are independent of the effect host; execution may return a typed
+lowering are independent of the executing host; execution may return a typed
 unsupported-host refusal.
 
 ## Consequences

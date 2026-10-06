@@ -43,7 +43,7 @@ Provider resolution layers the recorded model's default cap
 once. It invents no cap or temperature. The model's other behavioural defaults,
 thinking visibility, prompt-cache retention and the response-metadata
 allowlists, are recorded with the model in the same `LlmProfileRequestDefaults` and
-ride every `LlmRequest`, so a replay sends and captures what was recorded
+ride every `LlmRequest`, so a re-sent call sends and captures what was recorded
 rather than whatever the provider handle is configured with now (FIG-4374,
 FIG-4397). `ProviderOptions` keeps only transport concerns: reliability and
 response budgets. Unsupported explicit controls are typed,

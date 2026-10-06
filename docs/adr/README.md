@@ -1,6 +1,8 @@
 # Architecture decisions
 
-ADRs describe the current design on main. History lives in git. Keep one numbered
+ADRs describe the design on main and the durable end state of
+[ADR 0132](0132-durability-is-state-first-over-the-lash-store.md), which the
+substrate lanes implement. History lives in git. Keep one numbered
 file per decision and rewrite that file in place. The convention applies to
 every ADR, including decisions maintained by implementation tickets.
 
@@ -10,8 +12,9 @@ every ADR, including decisions maintained by implementation tickets.
 - Do not add amendment sections or blocks, superseded-by or supersedes notes, previously/formerly/used-to/no-longer/was-retired/originally narration, dated change notes, or ticket-by-ticket history.
 - Ticket IDs may appear only as pointers to executable evidence such as tests and gates, or to open work that the ADR explicitly depends on.
 - Delete an ADR when its decision is entirely retired. Never reuse its number. Update every citation in code, tests, scripts and docs to the ADR that owns the behaviour, or remove the citation when no ADR owns it.
+- While code on main still cites a replaced or retired ADR, keep its file until the lane that removes that code deletes it. Its `## Status` states, in present tense, either `Replaced by` its successor and section or `Retired:` with the reason. Trim its body to a short note, and keep each heading that code cites as a one-line pointer to the owning section.
 - Preserve section headings and section numbers that code cites when their content survives. Update every affected citation in the same change when a cited section is removed or renumbered.
-- Code on main is the truth. Verify retained claims against the code. If a claim and the code disagree, record both file:line references in the lane report and state which you think is right. Do not silently choose a design or mark the ADR. The orchestrator decides whether the code needs a bug ticket or the text needs a correction.
+- Code on main is the truth, except where ADR 0132 governs durability: there the ADRs state the end state, and the gap between it and code on main is the substrate lanes' open work. Verify every other retained claim against the code. If a claim and the code disagree, record both file:line references in the lane report and state which you think is right. Do not silently choose a design or mark the ADR. The orchestrator decides whether the code needs a bug ticket or the text needs a correction.
 - Keep this convention and the live index in this README. Each index row gives a decision's number and title.
 
 ## Repository check
@@ -43,7 +46,7 @@ The generated region below is checked against the live filenames and headings.
 | --- | --- |
 | 0001 | [Context management uses views or frames](0001-context-management-uses-views-or-frames.md) |
 | 0002 | [Session observation uses cursors and bounded live replay](0002-session-observation-uses-cursors-and-bounded-live-replay.md) |
-| 0003 | [Durable waits are scoped and resolved by the effect host](0003-keyed-promise-is-scope-agnostic.md) |
+| 0003 | [Durable waits are scoped wait rows with a first winner](0003-keyed-promise-is-scope-agnostic.md) |
 | 0004 | [Process environments carry plugin options, not product metadata](0004-process-environments-carry-plugin-options-not-product-metadata.md) |
 | 0005 | [Tool Catalog membership defines availability](0005-tool-catalog-membership-replaces-availability-tiers.md) |
 | 0006 | [RLM history renders in the emission format](0006-rlm-history-renders-in-emission-format.md) |
@@ -82,7 +85,7 @@ The generated region below is checked against the live filenames and headings.
 | 0042 | [Tool attempts are atomic](0042-tool-attempts-are-atomic.md) |
 | 0043 | [Hosts register immutable deployments](0043-hosts-register-immutable-deployments.md) |
 | 0044 | [Tests must be independent of what they test](0044-tests-must-be-independent-of-what-they-test.md) |
-| 0045 | [Services are stateless; engines own continuation](0045-services-are-stateless-substrates-own-continuation.md) |
+| 0045 | [Services are stateless; the store owns continuation](0045-services-are-stateless-substrates-own-continuation.md) |
 | 0046 | [Process transitions are events; the record is a fold](0046-process-transitions-are-events-record-is-a-fold.md) |
 | 0047 | [History is shared; branches are sessions](0047-history-is-shared-branches-are-sessions.md) |
 | 0048 | [Checkpoint component identity is a backend contract](0048-checkpoint-component-identity-is-a-backend-contract.md) |
@@ -135,14 +138,14 @@ The generated region below is checked against the live filenames and headings.
 | 0099 | [Tool calls and aggregates belong to the logical Run](0099-tool-children-of-effect-groups-are-live-closing-settled.md) |
 | 0100 | [The run-observation contract](0100-the-run-observation-contract.md) |
 | 0101 | [One session ingress carries every admitted item](0101-one-session-ingress-carries-every-admitted-item.md) |
-| 0102 | [Every backend binds one journaled engine to one store set](0102-zero-infra-is-a-sqlite-in-memory-backend.md) |
+| 0102 | [Every backend binds one durable engine to one store set](0102-zero-infra-is-a-sqlite-in-memory-backend.md) |
 | 0103 | [Code cells replay by re-execution on every host](0103-code-cells-replay-by-re-execution-on-every-host.md) |
 | 0104 | [Restate is the only effect engine; SQL stores are storage](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md) |
-| 0105 | [The shift replays recorded decisions through the controller](0105-the-shift-is-deterministic-workflow-code.md) |
+| 0105 | [The session actor decides from committed state](0105-the-shift-is-deterministic-workflow-code.md) |
 | 0106 | [Durable formats use migration, drain or coexistence](0106-durable-formats-upgrade-by-migration-or-drain.md) |
 | 0107 | [A process is named by a minted id, a start by its key](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md) |
 | 0108 | [A process lives until a scope its start could reach](0108-a-process-lives-until-a-scope-its-start-could-reach.md) |
-| 0109 | [Store→engine delivery is an outbox of obligations](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md) |
+| 0109 | [Work that outlives its transaction is an outbox of obligations](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md) |
 | 0110 | [The engine owns process recovery; lash never re-runs started work](0110-the-engine-owns-process-recovery.md) |
 | 0111 | [A deployment namespace prefixes every Restate name lash binds or calls](0111-a-deployment-namespace-prefixes-every-restate-name.md) |
 | 0112 | [The store is multi-session, and a session is resident from its current frame](0112-the-store-is-multi-session-and-a-session-is-resident-from-its-current-frame.md) |
@@ -166,3 +169,21 @@ The generated region below is checked against the live filenames and headings.
 | 0131 | [Durable types declare their version surface](0131-durable-types-declare-their-version-surface.md) |
 | 0132 | [Durability is state-first over the lash store: actors, epoch fences, no replay](0132-durability-is-state-first-over-the-lash-store.md) |
 <!-- adr-index:end -->
+
+## Replaced and retired decisions
+
+These files stay until the lane that removes the code citing them deletes them.
+[The 2026-10 reset table](../architecture/adr-reset-2026-10.md) classifies
+every decision from 0001 to 0131.
+
+| Number | Status | Owner |
+| --- | --- | --- |
+| 0012 | Replaced | ADR 0132 §6 and ADR 0003 |
+| 0025 | Retired: segment journal budgets | ADR 0116 §1.7 owns the intent budget |
+| 0043 | Retired: deployment pinning for replay | ADR 0106 §1 owns drain |
+| 0059 | Replaced | ADR 0128 |
+| 0103 | Replaced | ADR 0132 §8 |
+| 0104 | Replaced | ADR 0132 |
+| 0111 | Retired: Restate service names | ADR 0102 D2 owns deployment separation |
+| 0125 | Replaced | ADR 0127 |
+| 0130 | Replaced | ADR 0132 §5 |

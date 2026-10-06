@@ -10,7 +10,7 @@ Definition starts refer to immutable definitions under ADR 0095. Realization res
 
 Originator and `caused_by` are provenance. Observer edges determine observation, and a wake target routes at most one session wake. These relationships do not imply one another or cleanup. Descendants inherit the root session capability; host-originated roots need no session observer. A process-created session is an ordinary child session with its own usage.
 
-Every registration records a Lifetime over its admitted Ancestry under ADR 0108. Scope-end cleanup follows that explicit lifetime under ADR 0094. Session deletion removes session-owned relationships and deliveries; provenance alone does not cancel a process. Artifact liveness follows referrer edges under ADR 0113. Engine journals own execution recovery under ADR 0110.
+Every registration records a Lifetime over its admitted Ancestry under ADR 0108. Scope-end cleanup follows that explicit lifetime under ADR 0094. Session deletion removes session-owned relationships and deliveries; provenance alone does not cancel a process. Artifact liveness follows referrer edges under ADR 0113. The process actor's committed state owns execution recovery under ADR 0110 and [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md).
 
 ## Alternatives and consequences
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (FIG-4852), Sam's ruling of 2026-10-02. Supersedes
+Accepted (FIG-4852). This decision replaces
 [ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md).
 
 ## Context
@@ -16,14 +16,16 @@ Figments, Lash's production host, already meters at the `Provider` boundary.
 Its `CostTrackingProvider` reserves spend before dispatch and settles receipts
 from successes and failed partial responses. It reads turn `RemoteUsage`
 summaries and does not consume the ADR 0125 ledger. That ledger adds a SQL
-admission and a journaled delivery per model call, duplicates host metering,
+admission and a recorded delivery per model call, duplicates host metering,
 and would freeze unnecessary storage and host APIs at 1.0.
 
 ## Decision
 
-Usage is provider-reported data. Each model call's journaled result carries
-its response and sealed `LlmCallRecord`, including the observed usage and
-failure of each attempt. Replay reads that result. Absence stays absent and
+Usage is provider-reported data. Each model call's committed result carries
+its response and `LlmCallRecord`, including the observed usage and failure of
+each attempt
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §4).
+Resume loads that result. Absence stays absent and
 explicit zero stays zero, as ADRs 0031 and 0032 require. Lash uses this data
 for context-window and compaction decisions, configured token budgets,
 turn-result summaries (`RemoteUsage`) and trace attributes.
@@ -35,14 +37,17 @@ rather than deriving a debit from token counts and a mutable price catalogue.
 
 Lash guarantees hosts:
 
-- Deterministic request ids remain stable across retries and replay.
-- Replay or redrive of a completed, recorded model call makes no provider call.
+- Deterministic request ids remain stable across retries, re-sends and resume.
+- Resume or redrive of a model call whose result committed makes no provider
+  call.
 - Allowlisted response headers and JSON pointers are captured on buffered,
   streaming and failed partial responses, so receipts reach the decorator.
 - Provider failures remain typed. A host spend-cap refusal can reach the
   caller as a quota failure rather than an unclassified string.
 
-These guarantees do not make an unrecorded external attempt exactly once.
+These guarantees do not make an external attempt exactly once: a model call is
+`Repeatable`, so a crash before its result commits re-sends the pinned request
+while its `model_total` deadline allows.
 The engine can retry after dispatch but before recording the result. The host
 owns receipt retention and idempotent settlement for that window.
 

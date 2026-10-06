@@ -43,8 +43,8 @@ filtered subscription listings do not supply a safe continuation cursor.
 turn and session terminals in one bounded snapshot. `TurnChangeCursor` is
 opaque and store-scoped. Each terminal receipt has an indexed `change_seq`.
 Its accepting transaction raises `turn_change_clock`, so a later position
-cannot commit ahead of an earlier one. Replaying a receipt raises no clock
-and creates no second change. Plain state commits consume a position but
+cannot commit ahead of an earlier one. Committing the same receipt again
+raises no clock and creates no second change. Plain state commits consume a position but
 carry no terminal and are excluded by the partial index.
 
 `TurnChangeKind::Committed` carries the operation and the existing typed
@@ -72,6 +72,6 @@ clears and session deletion never erase unread terminals. Permanent session
 identity tombstones remain independent of this evidence sweep.
 
 The SQL conformance laws `unread_turn_terminals_survive_retention` and
-`terminal_feed_is_ordered_and_replay_stable`, and the Restate-double law
+`terminal_feed_is_ordered_and_replay_stable`, and the runtime law
 `a_disconnected_host_reconciles_a_failed_turn_after_live_replay_trims`, own
 this contract. Each backend runs the same store laws.

@@ -48,8 +48,8 @@ changing serialized fields, identity tags or durable format versions.
 The enforced inventory includes public type declarations and names bound by
 `pub use`, including aliases, throughout workspace Rust sources in `crates`,
 `examples` and `runbooks`. A glob re-export's declarations are checked at their
-definition. The gate excludes separate tests, `cfg(test)` support and the named
-vendored Restate protocol output whose type vocabulary belongs to that protocol.
+definition. The gate excludes separate tests, `cfg(test)` support and named vendored
+protocol output whose type vocabulary belongs to that protocol.
 Private implementation names follow the same naming roles when changed.
 
 ### Two near-neighbours, kept apart on purpose

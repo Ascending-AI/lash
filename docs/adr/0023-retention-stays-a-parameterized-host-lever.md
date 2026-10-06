@@ -4,12 +4,12 @@
 
 Hosts schedule differentiated retention through `prune_terminal_processes(cutoff, filter, watermark)`. `ProcessListFilter` selects provenance, identity and creation ranges; `ProjectionWatermark::UpTo(cursor)` limits deletion to acknowledged changes under ADR 0020, while `NoProjector` explicitly states there is no projector. The public `Processes::prune` forwards the filter and refuses filters selecting non-terminal work.
 
-Eligibility protects pending deliveries, cleanup obligations and consumer holds. Pruning retains typed tombstone evidence and coordinates trigger retention under ADR 0021. Hosts retain process evidence beyond every still-replayable waiter; Lash supplies no finite maximum waiter lifetime.
+Eligibility protects pending deliveries, cleanup obligations and consumer holds. Pruning retains typed tombstone evidence and coordinates trigger retention under ADR 0021. Hosts retain process evidence beyond every reader that still awaits it; Lash supplies no finite maximum waiter lifetime.
 
 ## Running-process event release
 
 Pruning reclaims retired processes only. A long-running process keeps
-appending events across its segments, so hosts release the history of a
+appending events while it runs, so hosts release the history of a
 retained process, running or not, through
 `ProcessRetention::release_process_events(process_id, through)`, which the
 facade exposes as `Processes::release_events`. The host selects the prefix.
@@ -18,16 +18,15 @@ earlier release raised and reports the horizon and the events the call
 released, so repeated cleanup releases nothing new.
 
 A release strips the payload of each event at or below the horizon and
-keeps the row: sequence, type, replay key, invocation, timestamps and a
-digest of the payload. A cancel request keeps its payload, because its
-replays match on the cancellation rather than on payload bytes and a process
-holds one. Sequence allocation and signal ordinals count rows, so they are
-unchanged. A re-presented replay key of a released event coalesces when the
-payload has the released digest and refuses as a durable-identity conflict
-otherwise. Segment replays, transferred Run attempts and host signal retries
-can all re-present a key, and storage cannot observe when
-the last of them has finished, so the release keeps every fence the way
-trigger mutation receipts keep theirs. Release therefore reclaims payload
+keeps the row: sequence, type, idempotency key, timestamps and a digest of
+the payload. A cancel request keeps its payload, because its retries match on
+the cancellation rather than on payload bytes and a process holds one.
+Sequence allocation and signal ordinals count rows, so they are unchanged. A
+re-presented idempotency key of a released event coalesces when the payload
+has the released digest and refuses as a durable-identity conflict otherwise.
+Recomputed process phases and host signal retries can re-present a key, and
+storage cannot observe when the last of them has finished, so the release
+keeps every fence the way trigger mutation receipts keep theirs. Release therefore reclaims payload
 bytes; the retained row of an event with a small payload stays roughly its
 size.
 
@@ -40,20 +39,16 @@ folds the retained events and reports its durable summary incomplete with
 `HistoryReleased`. The host must acknowledge its projections and decide that
 event readers may expire before selecting the prefix. Stored waits and
 outcomes remain on the process row, wake deliveries carry their own content,
-signal payloads travel through engine promises, and replay reads happen
-inside recorded steps. A fresh event await below the horizon cannot recover
+and signal payloads travel on their wait rows
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §6). A fresh event await below the horizon cannot recover
 a released payload.
 
-Release covers the event log only. Segment handovers stay bounded by the
-retire step under ADR 0025. A continuation's size is live program data.
-Restate invocation journals follow the engine's retention: each segment's
-effect count is bounded by its budget, while result bytes have no such bound.
-Restate's journal and workflow retention govern completed segment invocations.
-Lash sets no retention on its
-services, so the host configures them on its Restate deployment. Per-run TTLs
-and automatic release policies are rejected for the same reason as producer
-retention classes, and deleting released rows is rejected because it would
-drop replay fences that no stored fact can prove dead.
+Release covers the event log only. A VM snapshot replaces its predecessor
+revision, and its size is live program data (ADR 0132 §8). A turn's phase
+rows are pruned at its commit. Per-run TTLs and automatic release policies
+are rejected for the same reason as producer retention classes, and deleting
+released rows is rejected because it would drop idempotency fences that no
+stored fact can prove dead.
 
 The [release law](../../crates/lash-conformance/src/conformance/process_registry/event_release.rs)
 runs on SQLite file, SQLite memory and PostgreSQL. The
@@ -61,18 +56,17 @@ runs on SQLite file, SQLite memory and PostgreSQL. The
 covers the typed read and snapshot gap.
 
 The [growth inventory](../operations/process-history-release.md) records
-retention owners, measured payload savings, remaining metadata growth and
-the Restate configuration contract.
+retention owners, measured payload savings and remaining metadata growth.
 
 ## Durable-core evidence retention
 
 `DeploymentStore::reclaim_retained_evidence(RetentionBound)` is an explicit factory-wide lever with an exclusive commit-timestamp horizon. Only receipts belonging to durably deleted sessions are eligible. Permanent deleted-session identity evidence remains. Live receipts and usage deltas survive; terminal usage is reclaimed only when its matching receipt is absent.
 
-SQLite and PostgreSQL delete eligible receipts and dependent usage in one fenced transaction. Reports describe committed counts; errors roll back the operation. Repetition after exhausting the eligible set removes nothing. Attachment liveness follows referrer and graph-retirement contracts under ADRs 0028, 0113 and 0124 rather than receipt age. SQL stores own no effect journals; Restate invocation journals use engine retention under ADR 0025.
+SQLite and PostgreSQL delete eligible receipts and dependent usage in one fenced transaction. Reports describe committed counts; errors roll back the operation. Repetition after exhausting the eligible set removes nothing. Attachment liveness follows referrer and graph-retirement contracts under ADRs 0028, 0113 and 0124 rather than receipt age. Turn phase rows are pruned at the turn commit and hold no retained evidence (ADR 0132 §4).
 
-`vacuum` cleans eligible tombstoned graph and terminal ingress rows without a receipt horizon. Blob GC uses its separate explicit policy. Trigger mutation receipts are durable evidence under the same lever (FIG-4108): receipts older than the bound are reclaimed when ownerless (host/platform) or when their session owner is durably deleted and no outstanding delivery still names it, and a resent mutation then re-evaluates rather than replaying. The lever's bound is what proves a retry identity dead; the deleted-owner requirement is what makes that proof safe for session receipts. On SQLite the trigger database is its own file in the store set, so the sweep's receipt arm runs as a fenced write on a connection of its own, the discipline `delete_session` already uses for the process registry.
+`vacuum` cleans eligible tombstoned graph and terminal ingress rows without a receipt horizon. Blob GC uses its separate explicit policy. Trigger mutation receipts are durable evidence under the same lever (FIG-4108): receipts older than the bound are reclaimed when ownerless (host/platform) or when their session owner is durably deleted and no outstanding delivery still names it, and a resent mutation then re-evaluates rather than returning the reclaimed receipt. The lever's bound is what proves a retry identity dead; the deleted-owner requirement is what makes that proof safe for session receipts. On both backends the sweep's receipt arm runs in the sweep's transaction, since SQLite keeps every table in one database file (ADR 0132 §12).
 
-The host tool-intent submission ledger is evidence under the same lever (FIG-1509). Each row is the first-outcome replay fence of one host-submitted intent identity and belongs to the identity's owner session; the store stamps its admission time. A row admitted before the bound is reclaimed once its owner session is durably deleted, and the same transaction fences that owner in `tool_intent_retired_owners`. The fence is permanent identity evidence: every later submission under the owner answers `Reclaimed`, so a reclaimed identity is refused instead of realized again. A live owner's rows are never eligible, whatever their age. On SQLite the arm runs on the process registry's own fenced connection after the durable core proves each candidate owner deleted; deletion is permanent, so that proof still holds when the registry's transaction commits. On PostgreSQL the proof is a join with `deleted_sessions` inside the sweep's transaction, and submissions take the sweep's advisory key shared, so a claim cannot slip between the fence and the delete.
+The host tool-intent submission ledger is evidence under the same lever (FIG-1509). Each row is the first-outcome idempotency fence of one host-submitted intent identity and belongs to the identity's owner session; the store stamps its admission time. A row admitted before the bound is reclaimed once its owner session is durably deleted, and the same transaction fences that owner in `tool_intent_retired_owners`. The fence is permanent identity evidence: every later submission under the owner answers `Reclaimed`, so a reclaimed identity is refused instead of realized again. A live owner's rows are never eligible, whatever their age. The proof is a join with `deleted_sessions` inside the sweep's transaction on both backends. On PostgreSQL submissions take the sweep's advisory key shared, so a claim cannot slip between the fence and the delete; SQLite serializes them on its one writer.
 
 ## Why and alternatives
 

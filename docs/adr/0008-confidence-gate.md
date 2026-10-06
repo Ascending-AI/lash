@@ -13,28 +13,23 @@ accepted
 - `broad` adds PostgreSQL evidence when available, model replay, backend contention and bounded mutation. It claims bounded broad evidence.
 - `full` requires broad semantics, coverage and full critical-crate mutation; non-full mutation scopes are refused.
 
-The weekly workflow's `mutation-packages-rotating` legs each judge a smoke canary and one rotating slice. Their manifests, sidecars and summaries report `bounded_rotating`, leg coordinates, run index and revision. A complete mutant union at one revision requires an unsharded local full run. A green rotating run is evidence about its slices.
+The `mutation-packages-rotating` stages each judge a smoke canary and one rotating slice. Their manifests, sidecars and summaries report `bounded_rotating`, leg coordinates, run index and revision. A complete mutant union at one revision requires an unsharded local full run. A green rotating run is evidence about its slices.
 
 ## Failure evidence and tool policy
 
-The first failing attempt's logs and artifacts remain evidence. Attempt-qualified uploads prevent a rerun from replacing them. Retry-to-green and quarantine are refused; nextest uses no retries and `flaky-result = "fail"`.
+The first failing attempt's logs and artifacts remain evidence. Attempt-qualified artifacts prevent a rerun from replacing them. Retry-to-green and quarantine are refused; nextest uses no retries and `flaky-result = "fail"`.
 
-Required tools fail a lane when absent; the original opt-in bootstrap setting installed pinned tools. Any allowed bounded selector that omits coverage or mutation records `not_run`, never a passing result. Coverage supplies LCOV, missing-line text and JSON as a blind-spot map, without a percentage goal.
+Required tools are installed at their pinned versions when the gate runs. Any allowed bounded selector that omits coverage or mutation records `not_run`, never a passing result. Coverage supplies LCOV, missing-line text and JSON as a blind-spot map, without a percentage goal.
 
 ## Consequences
 
-Confidence uses the storage matrix of SQLite file, SQLite memory and PostgreSQL. Host laws distinguish the in-process Restate server double, live Restate and lash-sim's in-process effect host. Upgrade evidence uses synthetic-next. Seeds choose simulation inputs; a failed concurrent run supplies its history, not a guarantee of a repeatable schedule.
+Confidence uses the storage matrix of SQLite file, SQLite memory and PostgreSQL. Laws run the production runtime over a fault-injecting store with labelled commits, a virtual clock and `SimNodes` ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §14). Upgrade evidence uses synthetic-next. Seeds choose simulation inputs; a failed concurrent run supplies its history, not a guarantee of a repeatable schedule.
 
-The Confidence workflow runs weekly and supports manual selectors. Releases require the latest scheduled main run to succeed, certify an ancestor of the release SHA and complete within eight days. An explicit non-blank override reason bypasses only that precondition; release-SHA full-profile evidence remains independently required. No automatic ticket creation follows a red weekly.
+Confidence runs locally on demand; no CI workflow runs it. The local entry
+point is `just confidence-local` (`scripts/confidence-local.sh`), with its stage
+plan in `scripts/confidence-stages.json` and a strict local conclusion. Release
+automation validates only the release SHA's full-profile CI. Before cutting,
+run the local Confidence runner on that SHA and record its summary in the
+release checklist.
 
-The [gate](../../scripts/confidence-gate.sh), former GitHub workflow and [release workflow](../../.github/workflows/release.yml) define executable policy. Scenarios and conformance supplement one another because neither coverage alone nor facade tests alone prove durable recovery.
-
-## Amendment — 2026-10-06 (FIG-5103)
-
-Confidence runs locally on demand; no CI workflow runs it. The local entry point
-is `just confidence-local` (`scripts/confidence-local.sh`), with its stage plan
-in `scripts/confidence-stages.json` and a strict local conclusion. Missing tools
-are installed at their pinned versions when the gate runs. The workflow and
-release override described above are retired: release automation validates only
-the release SHA's full-profile CI. Before cutting, run the local Confidence
-runner on that SHA and record its summary in the release checklist.
+The [gate](../../scripts/confidence-gate.sh), the [local runner](../../scripts/confidence-local.sh) and the [release workflow](../../.github/workflows/release.yml) define executable policy. Scenarios and conformance supplement one another because neither coverage alone nor facade tests alone prove durable recovery.

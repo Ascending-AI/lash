@@ -25,7 +25,7 @@ process) or a session. A `ScopeRef` pairs it with one grant:
 
 `ScopeRef` has no deserializer and its public construction path is
 `host_session_lookup`. Runtime starts obtain ancestor references through
-`StartCx`. The journaled representation is `LifetimeDecision`, which carries
+`StartCx`. The recorded representation is `LifetimeDecision`, which carries
 the chosen scope and grant. `Detached` names no cancelling scope.
 
 Evidence:
@@ -62,11 +62,11 @@ registration refusals and run in production builds.
 
 Evidence: `crates/lash-core-execution/src/runtime/process/validation.rs:1155`.
 
-### 4. A policy decides, and the decision is journaled
+### 4. A policy decides, and the decision is recorded
 
 A start-declaring plugin takes a required `LifetimePolicy`, a function from
 `StartCx` to `Lifetime`. Declaration runs the policy and records its decision;
-replay reads that decision without consulting the policy again.
+resume reads that decision without consulting the policy again.
 
 `lifetime::session_or_starter` chooses the session when available and the
 starter otherwise. `lifetime::starter` chooses the starter, and
@@ -83,24 +83,23 @@ and `crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs:399`
 The scope-close ledger, `parent_end_plans`, records one row per closed scope.
 
 - A process's terminal transaction records its process scope's end.
-- A logical turn run closes after its terminal evidence is durable. Its
-  terminal transaction arms `ScopeClose` on the run row. The recorded
-  `CloseRunScope` step or the obligation relay delivers it. A frame switch
-  does not close the logical run, and a parked run has no terminal close.
-- A session closes through the engine half of its `CloseSession` intent.
-  That half closes the open runs and session scope. Physical storage
-  deletion writes no replacement close row.
+- A logical turn run's terminal transaction records its run scope's end: the
+  turn commit includes the parent-end of `Until(turn)` processes
+  ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §4). A
+  frame switch does not close the logical run, and a parked run has no
+  terminal close.
+- A session closes in the closing session actor's own transactions, which
+  close its open runs and session scope. Physical storage deletion writes no
+  replacement close row.
 
-The next run's admission does not wait for the terminal run's scope close.
-The close remains owed through its durable obligation, and affects the
-terminal run's `Until` children. Its transaction settles the obligation;
-a repeat finds it settled. Recovery reads due obligations instead of
-rescanning terminal runs.
+The next run's admission does not wait for the terminal run's cascade, which
+affects only the terminal run's `Until` children. A repeated close finds its
+row and writes nothing.
 
 Applying a close plan owes cancellation to processes living `Until` that
-scope. `ParentEnd` delivery retains the plan's owed work until each cancel
-is delivered or refused. [ADR 0109](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md)
-§3 owns delivery and retry policy.
+scope. The cascade writes cancel requests to the children's mailboxes in
+bounded batches and advances a durable cursor, so it survives a crash and no
+transaction walks a large tree (ADR 0132 §11).
 
 Evidence: `crates/lash-sqlite-store/src/session_runs.rs:169`,
 `crates/lash-core-execution/src/runtime/process/scope_close.rs:139`, and
@@ -109,11 +108,12 @@ Evidence: `crates/lash-sqlite-store/src/session_runs.rs:169`,
 ### 5a. The `CloseSession` intent is the deletion tombstone
 
 Deletion records `CloseSession` before removing storage. The intent stays
-pending while its obligation is owed and remains recoverable; a refusal
-records `Refused { cause }`. Its acknowledgement arms the
-physical-delete obligation. The acknowledged intent stays as permanent
-deletion evidence, and `run_terminal` can answer runs of the deleted
-session as `Cancelled` with cause `SessionDeleted`.
+pending until the session actor's close commits; a refusal records
+`Refused { cause }`. Its acknowledgement writes the `SessionDelete` deferred
+work of [ADR 0109](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md)
+§4 in the same transaction. The acknowledged intent stays as permanent
+deletion evidence, and `run_terminal` can answer runs of the deleted session
+as `Cancelled` with cause `SessionDeleted`.
 
 Session deletion and evidence reclamation preserve this tombstone. The
 session's other control intents can be removed. A retried deletion completes

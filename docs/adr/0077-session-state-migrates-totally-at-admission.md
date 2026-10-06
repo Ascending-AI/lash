@@ -17,25 +17,29 @@ codec versions.
 
 ### Admission is the compatibility seam
 
-Shift admission reads the marker before admitting work. Recovery checks it
+Run admission reads the marker before admitting work. Recovery checks it
 before guarded payload decoding. A version outside the fleet read window
 returns `SessionStateVersionUnsupported` or `SessionStateVersionNewerThanRuntime`
 without attempting to interpret the payload.
 
-`admit_session_state` validates a sealed `ShiftFence` inside a backend
-transaction before reading the marker. Its result carries the session id,
-version, and shift epoch. This admission checks compatibility; it does not
+`admit_session_state` validates the session actor's epoch fence inside a
+backend transaction before reading the marker
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §3). Its
+result carries the session id, version, and epoch. This admission checks compatibility; it does not
 execute a per-session converter chain or advance the marker.
 
 Run admission carries the session gate and the admitted executable binding.
-A build's drain generation `G` hashes its `SessionAdmissionWindow`, including
-all writer pins the recorded fleet format could select. Compatible admission
-is checked before new work; a committed final remains protected through drain.
+A build's format set includes its `SessionAdmissionWindow`, including all
+writer pins the recorded fleet format could select, so a node claims only
+sessions whose marker it reads
+([ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) §1).
+Compatible admission is checked before new work; a committed final remains
+protected through drain.
 A marker refusal cannot replace a durable final or authorize fresh execution.
 
 The marker moves only through the explicit fleet conversion contract. A future
 marker mover must exclude every active logical Run and owed protected drain,
-including transferred work, before changing it. A shift fence alone is not
+including transferred work, before changing it. An epoch fence alone is not
 proof that all execution dependencies ended. The Run's ownership and frontiers
 in [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
 supply those facts; there is no separate child compatibility gate.
@@ -61,19 +65,19 @@ session generations by guessing defaults.
 
 ### Executable state remains pinned
 
-The marker does not translate a parked VM instruction pointer, heap, compiled
-artifact, or engine invocation into another executable deployment. Executable
-identity and drain rules remain separate under ADR 0043. Wire negotiation and
+The marker does not translate a parked VM instruction pointer, heap or
+compiled artifact into another executable contract. A VM snapshot bound to an
+executable identity whose bytecode contract changed finishes on a node that
+reads it or is migrated, under ADR 0106 §1. Wire negotiation and
 physical-store admission also retain their own contracts.
 
 ## Enforcement gates
 
 The session-state admission law places malformed payload behind an unsupported
 marker and asserts that marker refusal wins over decoding. It also proves
-that a stale shift fence fails before the marker check. These laws run against
+that a stale epoch fence fails before the marker check. These laws run against
 SQLite file, SQLite memory, and PostgreSQL. Upgrade proofs use the synthetic-next
-tier; host laws cover the Restate server double, live Restate, and lash-sim's
-in-process effect host where applicable.
+tier. Laws run the production runtime over a fault-injecting store with labelled commits, a virtual clock and `SimNodes` ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §14).
 
 ## Alternatives considered
 
@@ -92,8 +96,8 @@ validation, while fleet conversion owns supported format transitions.
 ## Code references
 
 - `crates/lash-core-store/src/store/state_version.rs` defines marker admission, the fleet window, and the `SessionAdmissionWindow` descriptor.
-- `crates/lash/src/formats.rs` folds the session admission window into the drain generation `G`.
-- `crates/lash-core/src/runtime/shift/admission.rs` gates shift admission.
-- `crates/lash-sqlite-store/src/persistence/session_commit.rs` validates the shift fence.
+- `crates/lash/src/formats.rs` folds the session admission window into the build's format set.
+- `crates/lash-core/src/runtime/shift/admission.rs` gates run admission.
+- `crates/lash-sqlite-store/src/persistence/session_commit.rs` validates the fence.
 - `crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs` implements the same transaction.
 - `crates/lash-conformance/src/conformance/session_store_factory/state_version.rs` pins refusal ordering.

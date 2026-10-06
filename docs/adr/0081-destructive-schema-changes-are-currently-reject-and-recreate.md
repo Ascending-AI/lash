@@ -26,8 +26,7 @@ and unsupported-generation refusal are distinct outcomes.
 
 For a PostgreSQL generation that cannot migrate, the remedy drains affected
 sessions and recreates the whole Lash trust domain. It provisions the Lash
-schema with `lash migrate` or this build's published schema artifact and resets
-Restate state that refers to those sessions. Current teardown statements alone
+schema with `lash migrate` or this build's published schema artifact. Current teardown statements alone
 cannot promise to remove an incompatible catalog's tables.
 
 ## The store records which release wrote it

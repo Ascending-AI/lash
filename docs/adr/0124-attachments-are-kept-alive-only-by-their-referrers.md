@@ -7,7 +7,7 @@ Accepted.
 ## Context
 
 Attachment bytes live outside the store that records their users. Session
-history, execution journals, process records and uploads have different
+history, executions, process records and uploads have different
 lifetimes. A receiver needs its own hold before recording a delivered value,
 so the producer's lifetime cannot determine whether the receiver can read it.
 
@@ -29,12 +29,12 @@ Six kinds may hold an attachment (`ArtifactReferrerKind::holds_attachments`):
 
 | Kind | Acquired by | Guard | Ends when |
 |---|---|---|---|
-| `execution` (journal `j`) | a put in a session runtime bound to `j`; a delivery into any scope that is not a process | `AwaitJournal` | `j` settles (ADR 0113). |
+| `execution` (execution `j`) | a put in a session runtime bound to `j`; a delivery into any scope that is not a process | `AwaitJournal` | `j` settles (ADR 0113 §2.5). |
 | `process_record` (`p`) | every put in `p`'s runtime; every delivery into `p`; `p`'s terminal output and its start input | none | Prune's `Ended` record. |
-| `start_input` (`key`, `starter`) | the start input's stored ids, before registration | `AwaitStart { starter }` | Cleanup acquires the retained input under `ProcessRecord(p)` before ending this starter's staging. Without a retained row, the starter's settled journal ends staging. |
+| `start_input` (`key`, `starter`) | the start input's stored ids, before registration | `AwaitStart { starter }` | Cleanup acquires the retained input under `ProcessRecord(p)` before ending this starter's staging. Without a retained row, the starter's settled execution ends staging. |
 | `session` (`s`) | the boundary commit, on the committed ids; an enqueue into `s` | none | Session deletion arms `AwaitSessionGraphRetired`; the executor ends it once `s` is deleted and no untombstoned graph node of `s` remains, so a fork keeps what its retained history names. |
 | `upload` (`s`, `u`) | a put in a session runtime with no execution bound | `AwaitUploadExpiry { expires_at_ms }` | `expires_at_ms` passes, or `s` is deleted or absent. Each put mints a fresh `u`, so one expiry never fences a later upload. |
-| `source` (`AwaitEventKey`) | K4 process-terminal delivery, before publishing the immutable result seal | source holder fence | Logical Run or scope retirement ends the source. |
+| `source` (`AwaitEventKey`) | K4 process-terminal delivery, before publishing the immutable result seal on its wait row | source holder fence | Logical Run or scope retirement ends the source. |
 
 No other kind holds an attachment, and an attachment end carries nothing:
 the receiver acquires before the source may end (§4), so `Ended.carries`
@@ -123,23 +123,23 @@ that record exists.
 The receiving claim is one function of the receiving scope,
 `receiving_claim(scope)`: a process receives through
 `unguarded(ProcessRecord(p))`, every other scope through
-`guarded(ReferrerGuard::Journal(journal))`. A process never holds through
-its journal: prune retires the journal before it removes the row, and the
+`guarded(ReferrerGuard::Journal(execution))`. A process never holds through
+its execution: prune settles the execution before it removes the row, and the
 terminal output needs the row anyway.
 
-- **Deferred and process-terminal delivery.** Short process-terminal
-  subscriptions retain the producer's terminal and name the receiver's source.
+- **Deferred and process-terminal delivery.** A `process_terminal` wait row
+  names the receiver's source
+  ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §6).
   Delivery acquires the receiver's attachment references before retaining the
-  canonical result and sealing `Resolved(ref)`. The Run journals the terminal
-  under its source lease, then discharges the consumer hold. An ended receiver
+  canonical result and sealing `Resolved(ref)` in the producer's terminal
+  transaction. The Run records the terminal, then discharges the consumer
+  hold. An ended receiver
   refuses delivery and cannot recreate a subscription. Permanent acquisition
   refusal stays typed; transient store faults retain retry ownership.
-- **Direct awaits and process-to-process delivery.** The controller's
-  process-terminal path uses the same short registration and acquire-before-seal
-  rule. An already-terminal process records its outcome after acquisition.
-  Cancellation and revocation observations are journaled. Transfer acquires
-  successor references before releasing predecessor interest; no long attach
-  invocation is needed. A cancelled observer does not cancel the process unless
+- **Direct awaits and process-to-process delivery.** A process await uses the
+  same wait row and acquire-before-seal rule. An already-terminal process
+  records its outcome after acquisition. Cancellation and revocation
+  observations are recorded. No long attach execution is needed. A cancelled observer does not cancel the process unless
   its recorded cancel policy requires that separate obligation.
 
 - **Queued inputs.** The enqueue transaction acquires `Session(s)` on the
@@ -153,20 +153,20 @@ terminal output needs the row anyway.
   whose source was already swept is recorded as the typed failure
   `process_result_attachment_unavailable`; an external or host completion is
   refused with `ProcessOutputAttachmentUnavailable` and nothing is recorded.
-- **Start inputs.** Before registration, the journaled start step acquires
+- **Start inputs.** Before registration, the recorded start acquires
   `guarded(ReferrerGuard::StartInput { start_key: key, starter })` on the input's
   stored ids.
   Unavailable input refuses the start before any process row is published.
-  Registration mints the id, and the step acquires `ProcessRecord(p)`.
+  Registration mints the id, and the start acquires `ProcessRecord(p)`.
   Cleanup also acquires the retained record's input before ending
   `StartInput(key, starter)`, including when the caller abandons the start
   or an explicit `Ended` record ends staging. The upload expires independently.
-  The starter journal distinguishes staging claims across later uses of a
-  pruned host key. A fenced attempt can replay a retained row after acquiring its record;
-  it cannot publish a new row with unstaged input. A replay of the step
+  The starter's execution distinguishes staging claims across later uses of a
+  pruned host key. A fenced attempt can adopt a retained row after acquiring
+  its record; it cannot publish a new row with unstaged input. A repeated start
   answers `Existing` and acquires again. An acquisition's
   `Contended` or `StorageFailure` retains its typed retryable classification:
-  the step records no refusal, and its retry acquires under the same process
+  the start records no refusal, and its retry acquires under the same process
   id and start key.
 - **The boundary commit** acquires `Session(s)` on the committed ids, all or
   nothing. The committed ids are every stored attachment the committed
@@ -174,7 +174,7 @@ terminal output needs the row anyway.
   retained output. A tool result's retained block is read from
   its message part. A code cell's aggregate print archive and retained finish value live in
   protocol records the commit cannot read, so the turn driver notes them
-  from the cell's recorded response, and a replay notes the same ones.
+  from the cell's recorded response, and a resumed turn notes the same ones.
 
 A delivery whose acquisition finds no evidence answers `SourceGone`: the
 producer's edges were already ended and swept. That is the typed outcome of
@@ -185,12 +185,12 @@ A delivery into a fenced receiver answers `ReceiverEnded`, distinct from
 ended source completes without resolving or recreating its wait. The
 receiver gains no edge. Genuine storage
 faults retry the unrecorded acquisition; permanent compatibility refusals
-are recorded once with their typed controller error.
+are recorded once with their typed error.
 
-**A turn put nobody references dies at journal settlement.** A put under a
+**A turn put nobody references dies at execution settlement.** A put under a
 turn is held by the turn's `Execution` referrer. If no committed message or
 tool output names it, nothing else acquires it, and it is unreferenced once
-the journal settles.
+the execution settles.
 
 ### 5. The upload expiry lever
 
@@ -205,7 +205,7 @@ every runtime the host builds, session or process, inherits it.
 
 A process is not a session. Its runtime, `ProcessRuntimeContext`, is built
 from the host's ports, the environment its start captured and the
-controller the worker admitted; it has no session state, no catalog row and
+ownership of the node that claimed its actor; it has no session state, no catalog row and
 no plugin session of a fake session. Process construction and prune operate
 on the process id without admitting or deleting a synthetic session.
 
@@ -224,7 +224,7 @@ a stand-in for its own id.
   the owner, and the durable `tool_intent_submissions` column is `owner` on
   both backends.
 - **A process-owned tool call** runs under its admitted process runtime and
-  recorded environment, including after segment adoption.
+  recorded environment, including after another node claims the process.
 - **A subagent spawned inside a process** parents under the session that
   originated the process chain, read by name, and is caused by the process.
   A host-originated chain and a `ParentFork` capability refuse (ADR 0116).

@@ -47,10 +47,10 @@ process start included; one that states none is refused typed
 record: a child copies its parent's recorded config, a fork copies its fork
 point's recorded config in full, a process runs under its captured
 environment, and an open or a shift reads only the record. Each run
-snapshots the configuration, controls included,
-in its recorded `ResolveTurnConfig` step (`ResolvedRun`). Its turns, redrives,
-replays and a recovered follow-on run under that snapshot, so a later
-configuration change reaches the next run, never a running or replayed one.
+snapshots the configuration, controls included, in its committed admission
+(`ResolvedRun`). Its turns, resumes and a recovered follow-on run under that
+snapshot, so a later configuration change reaches the next run, never a
+running or resumed one.
 An urgent stop is a recorded cancellation, not a configuration change.
 
 Remote process environments carry the recorded no-progress budget and charge
@@ -73,8 +73,8 @@ namespace records its prompt config when the session is created, from the
 plugin creation options of the session's `SessionSpec` over the plugin's own
 built-in defaults, and the protocol's prompt commands change it for the
 runs after them (ADR 0126). The protocol renders the system prompt from the
-namespace the running run was admitted under, and the render is a recorded
-step: a redrive is served the recorded text and renders nothing. A child
+namespace the running run was admitted under, and the render commits with the
+run's admission: a resumed run loads the recorded text and renders nothing. A child
 created by its parent copies the parent's recorded prompt config, and a
 process carries the recorded plugin config of its starter. A run's options
 cannot state a prompt: a run-options payload that carries one is refused,
@@ -83,9 +83,10 @@ typed (FIG-4589).
 A compaction's summarizer call carries the prompt the same protocol renders
 for it, without tool or execution prose since the call ships no tools. That
 text is recorded before the call on every compaction path (commanded,
-context pressure and overflow recovery), so a redrive replays it.
+context pressure and overflow recovery), so a re-sent call carries the same
+text.
 
-The opener owns only the session binding: the store and the worker wiring
+The opener owns only the session binding: the store and the node wiring
 it runs on. An open, including the engine's own reopen, overrides no recorded
 fact. A session-turn process's child is created from its starter's recorded
 facts: the start captures its starter's recorded configuration, admits the
@@ -93,14 +94,16 @@ child's complete facts against it before the handoff, and the worker creates
 the child from that captured environment. A worker names no configuration of
 its own (ADR 0088).
 
-The recorded model is bound to its transport lazily. Only the body of an
-unjournaled model call or direct completion asks the host's models for the
-transport; a replay serves the recorded call and asks nothing, so a
-deployment that retired the key still completes recorded work (ADR 0105 §1).
+The recorded model is bound to its transport lazily. Only a model call or
+direct completion whose result has not committed asks the host's models for
+the transport; resume loads a committed call and asks nothing, so a
+deployment that retired the key still completes committed work (ADR 0105 §1).
 A bind the deployment refuses is the attempt's fault. It is never the call's
-recorded result: the step stays unsealed, the engine retries it, and after
-its attempts it parks the work with reason `EngineRetryExhausted` carrying the
-model key typed. A direct completion inside a tool attempt ends that attempt
+recorded result: the call commits nothing, its `Repeatable` policy re-sends
+it while its `model_total` deadline allows
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §4 and
+§7), and a call that stays refused parks the work with a typed reason
+carrying the model key. A direct completion inside a tool attempt ends that attempt
 the same way, and ends it at the fault: the completion hands its tool no
 error, and the tool's body is dropped where it awaited the completion, so no
 retry repeats what the tool would have done with the failure. Hosts settle

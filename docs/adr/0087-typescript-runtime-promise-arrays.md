@@ -51,7 +51,7 @@ Abandoned handles that cannot be proven unused at lowering produce a typed
 `PendingTool` error at execution completion. Each pending entry retains its
 call path and source span from the recorded instruction position. Source-aware
 feedback renders each call's line as well as the count. This inspects only VM
-state and changes neither dispatch nor replay re-execution.
+state and changes neither dispatch nor snapshot resume.
 
 Pending requests and their execution identity are continuation state. Suspension
 preserves them under the declared continuation and compiled-program contract.

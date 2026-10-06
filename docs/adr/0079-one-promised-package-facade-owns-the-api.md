@@ -16,16 +16,16 @@ dependency aliases keep internal Rust crate names readable without promising
 those package paths to hosts.
 
 Optional facade features expose host-wired extensions: `sqlite`, `postgres`,
-`s3`, `restate`, `openai`, `anthropic`, `google`, `mcp`, `subagents`,
+`s3`, `openai`, `anthropic`, `google`, `mcp`, `subagents`,
 `typescript`, and `http-transport`. Each selects its domain module and
 internal dependency. Hosts name remote vocabulary through `lash::remote`.
 
 ### 2. Integrator contracts deepen existing facade modules
 
 ADR 0051 defines the supported integrator classes and transitive signature
-closure. Store contracts have a home in `lash::persistence`; effect-host
-contracts in `lash::durability` and `lash::runtime`; protocol and engine
-extensions in `lash::plugins`. A required signature member missing from these
+closure. Store contracts have a home in `lash::persistence`; durable-engine
+configuration in `lash::durability`; protocol, process-engine and
+projection-provider extensions in `lash::plugins`. A required signature member missing from these
 modules is a facade gap, rather than another promised internal package.
 
 Durable-backend conformance laws are an explicit tooling dependency on
@@ -35,7 +35,7 @@ Durable-backend conformance laws are an explicit tooling dependency on
 
 The `testing` feature exposes facade test support, including test providers.
 It does not pull in the durable-backend certification laws. Integrators select
-the law crate and the backend/host matrix they need directly. RLM test support
+the law crate and the store matrix they need directly. RLM test support
 is available when the optional RLM dependencies are selected.
 
 ### 4. Features are additive and opt-in

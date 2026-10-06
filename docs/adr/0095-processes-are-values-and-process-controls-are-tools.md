@@ -22,8 +22,8 @@ TypeScript async arrows are the source process literals under
 declares `ToolIntent::RegisterTrigger`; realization installs the subscription.
 Other trigger administration operations use `TriggerHostOperation`.
 
-Process handles retain identity in nested containers through suspension,
-snapshots, and replay. Process lifetime and identity follow
+Process handles retain identity in nested containers through suspension and
+snapshots. Process lifetime and identity follow
 [ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md) and
 [ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md).
 
@@ -88,7 +88,7 @@ Lash has no named-definition registry, definition revisions, compare-and-swap,
 or replacement. Lash supplies no model operation to replace, delete, or list a
 definition catalog. Hosts own names and versions. Publication and pinning use
 `HostArtifactPin`; reads acquire no lasting pin. A content id alone retains
-nothing. Frames, process records, subscription revisions, starts, journals, and
+nothing. Frames, process records, subscription revisions, starts, executions, and
 host pins hold the artifact closure under
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 Both a definition value and its tagged id can retain the closure in a frame;
@@ -103,10 +103,13 @@ The independent golden vectors and laws live in
 
 ### No new intent-identity mechanism
 
-The recorded tool call and attempt supply the start identity. A replay-stable
+The recorded tool call and attempt supply the start identity. A stable
 `StartKey` identifies a start, while the registrar mints the process id once.
-Replaying the start returns that process. VM code-call identity is positional:
-issue ordinal names a command; structural node id and occurrence are telemetry.
+A repeated start returns that process. VM code-call identity is the admitted
+operation identity: the issue ordinal is assigned when the operation is
+admitted and commits with the VM snapshot
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8);
+structural node id and occurrence are telemetry.
 
 Evidence: `crates/lash-core-execution/src/runtime/process/model/start_request.rs`,
 `crates/lash-core-store/src/process_identity.rs`, and
@@ -129,10 +132,11 @@ The shared handle record is `{ __handle__: "lash", id }`. A process handle id
 is `p.<minted process id>`; the codec distinguishes that target from a tool
 request. Pending requests use handle ids.
 
-`processes.await` returns Deferred on a process-terminal source. The logical
-Run retains its descriptor through handover and takes a rank only when the
-immutable source seal becomes a final decision. There is no local body waiting
-on a long attach handler. A raw process handle in an aggregate must be replaced
+`processes.await` returns Deferred on a process-terminal source, a
+`process_terminal` wait row (ADR 0132 §6 and §11). The logical Run retains its
+descriptor through snapshot and resume and takes a rank only when the resolved
+wait becomes a final decision. There is no local body waiting on a long attach
+handler. A raw process handle in an aggregate must be replaced
 by the explicit await call.
 
 A losing wait stays admitted while the logical Run lives. Closing releases that
@@ -142,8 +146,7 @@ canonical `ProcessAwaitOutput`, including process failure or cancellation;
 `Cancelled` is cancellation of the observing wait. No source timeout exists.
 
 Evidence: `crates/lash-sansio/src/handle.rs`,
-`crates/lashlang/src/runtime/vm/pending_tools.rs`,
-`crates/lash-restate/src/process/mod.rs`, and
+`crates/lashlang/src/runtime/vm/pending_tools.rs`, and
 `crates/lash-core-execution/src/runtime/effect/executor/process_local.rs`.
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
 owns Run settlement, and
@@ -162,7 +165,7 @@ A marker at the literal site duplicates the expected type the linker already
 checks. Language aliases for controls duplicate catalog teaching and lowering.
 An atomic batch requiring a process terminal to settle inside one resource
 operation cannot represent waits lasting days. Independently durable group
-children use the Durable Wait protocol and one recorded settlement order.
+children use durable wait rows and one recorded settlement order.
 
 ## Consequences
 

@@ -1,45 +1,52 @@
-# Services are stateless; engines own continuation
+# Services are stateless; the store owns continuation
 
-A service instance is stateless with respect to correctness across an effect
-boundary. In-memory turns, watch hubs and caches exist, but committed steps
-live in SQL state or the engine journal. Sticky sessions are an optimization,
-not correctness authority. The session-head CAS and sealed shift fence govern
-session mutations and admission (ADR 0101).
+A service instance is stateless with respect to correctness across a committed
+boundary. In-memory turns, watch hubs, caches and the owner's actor state
+exist, but committed phases live in the lash store. The owner's cache is keyed
+by `(actor, epoch)` and is never a grant: on any failed fence it is discarded
+and state reloads from rows
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §3). Sticky
+sessions are an optimization, not correctness authority. The session-head CAS
+and the session actor's epoch fence govern session mutations and admission
+(ADR 0101).
 
-Streaming is in memory until the next recorded effect or checkpoint. A crash
-can cost re-execution of unrecorded work. It cannot authorize a fresh execution
-of work whose retained start proves that its journal is lost.
+Streaming is in memory until the next committed phase or checkpoint. A crash
+can cost recomputation of uncommitted work from the last committed state. It
+cannot authorize a fresh execution of work whose started row is committed:
+recovery follows that row's execution policy.
 
-## Once in flight, the substrate owns it
+## Once in flight, the store owns it
 
-Restate is the production effect engine; SQL stores are storage (ADR 0104).
-The engine owns invocation continuation, crash redrive, retry policy and
-backpressure. Lash does not restart a started process from scratch. The
-`ProcessStart` obligation relay submits work to the engine and executes no
-process body (ADR 0109). Waiting work suspends through engine operations.
+Lash's durable engine runs over the lash store (ADR 0132 §1). Each session and
+each process is an actor with one scheduling row; a node owns it under an
+epoch, and a reaped node's actors are claimed by another node with an epoch
+bump. Lash does not restart a started process from scratch: resume loads its
+committed state and continues. Waiting work commits its last phase and releases
+its actor; it holds no node.
 
-Engine-owned commit backpressure is an operation-level controller fact,
-`owns_commit_backpressure`. Core uses that contract rather than guessing from
-a backend name. An engine's retries and concurrency policy are not duplicated
-by a second runtime attempt budget or scheduler.
+Retry policy is data. A `Repeatable` execution records its `BoundedRetry`, and a
+retry is a record with a due time (ADR 0132 §5 and §7). An actor whose claims
+make no phase progress counts failed activations and parks with
+`ActivationLoop` at its activation budget. No second runtime attempt budget or
+scheduler duplicates these.
 
 ## Conformance is the contract
 
-Effect-host, work-driver, process-registry and differential replay laws define
-what an engine implementor must supply. A correctness property absent from
-conformance is a gap in Lash's contract. Conformance remains maintained product
-code rather than an informal example.
+Store, work-driver, process-registry and crash-matrix laws define what a store
+implementor must supply. A correctness property absent from conformance is a
+gap in Lash's contract. Conformance remains maintained product code rather
+than an informal example.
 
-The current store matrix is SQLite file, SQLite memory and PostgreSQL. Hosts
-are the Restate server double, live Restate and lash-sim's in-process effect
-host. The test doubles exercise the journal contract over SQL storage.
+The store matrix is SQLite file, SQLite memory and PostgreSQL. Laws run the
+production runtime over a fault-injecting store with labelled commits, a
+virtual clock and `SimNodes` (ADR 0132 §14).
 
 ## Consequences
 
 Correctness state held only in instance memory across a committed boundary is
-a defect. A recorded outcome settles as recorded; a live fault remains engine
-retry work. Replay divergence parks rather than publishing a fabricated
-terminal outcome. Recovery is engine-owned under ADR 0110.
+a defect. A committed outcome settles as recorded; a live fault recomputes
+from committed state. Stored data that cannot be decoded parks rather than
+publishing a fabricated terminal outcome. Recovery follows ADR 0110.
 
 ## Considered and rejected: durable partial assistant streams
 
@@ -49,36 +56,16 @@ observation history is not session continuation authority. A host that needs
 crash-surviving preview activity supplies durable observation retention rather
 than adding token-by-token session commits.
 
-## A Restate segment never restarts started work
+## Started work never restarts
 
-Every process segment establishes admission before any effect:
-
-1. A read-only journaled verdict inspects the retained start marker. A marker
-   for a lost execution refuses fresh execution with `SubstrateLost`. With no
-   marker, the verdict records an OS-random nonce. An already-completed
-   segment is ignored.
-2. A separate journaled start writes the marker set-if-absent. The same nonce
-   identifies this execution's own retry; a different nonce proves another
-   execution started it and refuses with `SubstrateLost`.
-3. Effects require the sealed `SegmentStarted` proof returned by start.
-
-Drawing and writing in one retryable step is rejected because a retry could
-mint a different nonce and refuse its own committed marker. An invocation id
-or engine-context RNG cannot prove journal continuity after lost engine state.
-
-A journaled verdict survives a crash before start. Loss of journal before a
-marker permits fresh admission because no effect can precede it. Loss after
-the marker refuses with zero redispatch, even if no effect actually ran. A
-false abandonment is the accepted direction; a duplicate execution is not.
-
-Recovery resubmits a live row under its current segment key. The engine
-coalesces a live invocation or retained journal; a missing journal encounters
-the admission proof. External invocation references are observation. The
-handler's generation sentinel and successor windows govern which build may
-continue it (ADRs 0043 and 0106).
+A process's started execution is a committed row. A `Once` execution started
+without an outcome records `Interrupted` and never runs again; a `Repeatable`
+one runs again at its same ordinal (ADR 0132 §5). Nothing rebuilds a lost
+history by running work fresh, because no history is re-run: the rows are the
+state. A false `Interrupted` is the accepted direction; a duplicate `Once`
+execution is not.
 
 ## Implementation
 
-- [Process segment admission](../../crates/lash-restate/src/process/admission.rs) and [engine submissions](../../crates/lash-restate/src/process/mod.rs).
-- [Controller backpressure contract](../../crates/lash-core-execution/src/runtime/effect/executor/control.rs).
 - [Failure classification](../../crates/lash-core-store/src/runtime_error/classification.rs).
+- The substrate lanes implement actors, epochs and phase rows under ADR 0132.

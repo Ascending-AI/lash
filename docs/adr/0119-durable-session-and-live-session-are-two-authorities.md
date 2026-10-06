@@ -42,7 +42,7 @@ and language features, prompt features, discovery operation, output limit,
 soft-warning threshold and render; the standard protocol's discovery
 operation, `batch` choice and maximum and render — is a creation default. The
 session records it in its protocol namespace at creation, and every open,
-redrive and process of that session runs under the recorded value, whatever
+resume, redrive and process of that session runs under the recorded value, whatever
 the opening deployment's factory states (FIG-4398). A child session records
 its parent's, and a process started outside any session records the creating
 deployment's with its row (FIG-4527). What a factory supplies live is physical: the
@@ -79,13 +79,12 @@ User input and non-user queued work remain separate row classes.
 
 The live session owns runtime configuration and live runtime views. Session deletion uses its scoped delete context and
 closure-pin checks. Forking names a destination session and reconciles its
-observers. Runtime administration and effect-host wait revocation require
-their own authority. Restate serializes session shifts; the sealed shift fence
-gates execution writes.
+observers. Runtime administration and wait revocation require their own authority. The
+session actor has one owner at a time, and its epoch fence gates execution
+writes ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §3).
 
-Sources: `crates/lash/src/durable_session.rs:209`,
-`crates/lash-core/src/runtime/durable_queue.rs:160`, and
-`crates/lash-restate/src/session_shifts.rs`.
+Sources: `crates/lash/src/durable_session.rs:209` and
+`crates/lash-core/src/runtime/durable_queue.rs:160`.
 
 ### Acquisition never creates
 
@@ -107,7 +106,7 @@ After durable queue success, `DurableSessionOps` publishes `QueueChanged`
 best-effort through the configured Live Replay store. Publication failure does
 not fail the mutation. The event uses the committed head revision, supplied
 by admission or read through `load_session_head_meta`; an empty head has
-revision zero. A failed head read invalidates replay continuity instead of
+revision zero. A failed head read invalidates live-replay continuity instead of
 inventing a revision. Existing cursors then recover through their gap path.
 
 The default Live Replay store is process-local. Cross-process visibility
@@ -192,7 +191,7 @@ typed `ReconfigureError` when it is invalid against the recorded snapshot,
 otherwise applied in lane order by the command run against the capabilities
 its transition built, and settled as a typed `ToolStateChangeOutcome`. A
 protocol session extension is durable the same way: its session nodes are a
-host append the command lane applies, which the protocol replays on every
+host append the command lane applies, which the protocol folds on every
 restore.
 
 Sources: `crates/lash/src/admin/tool_state.rs` and
@@ -245,11 +244,9 @@ engine's own runtime (FIG-5091).
 
 There is no enqueue-only open. A host that sends or reads the queue without a
 runtime uses `durable()`. A host command needs a live session, and it queues
-as a session command that the shift applies on the runtime that executes the
-session's runs (FIG-4202). Earlier, an enqueue-only open kept its tools
-unreconciled, refused every turn and was still registered as the runtime
-that runs the session's turns. A run admitted beside it was therefore refused
-terminally.
+as a session command that the session actor's owner applies on the runtime
+that executes the session's runs (FIG-4202). An open that cannot reconcile
+its tools and run turns is never the runtime that runs the session's turns.
 
 Sources: `crates/lash/src/session.rs` (`open_resolved`) and
 `crates/lash/src/core/session_shifts.rs` (`shift_runtime`).

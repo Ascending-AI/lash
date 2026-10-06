@@ -1,24 +1,27 @@
-# 0109: Store→engine delivery is an outbox of obligations
+# 0109: Work that outlives its transaction is an outbox of obligations
 
 ## Status
 
-Accepted. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) reduces this outbox to `SessionDelete` and
-`ArtifactCleanup` once its lanes land. It replaces §1 to §3 and §5 to §7 for
-the other seven kinds; the session-delete phases of §4 stay without the
-engine half.
+Accepted. Every cross-actor message is a mailbox write plus a wake in its
+producer's transaction
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §12). This
+decision owns the two kinds of work that cannot finish inside one transaction:
+`SessionDelete` and `ArtifactCleanup`.
 
 ## Context
 
-A SQL transaction can accept work before its engine delivery succeeds. The
-accepted row must retain what delivery owes, when another attempt is due,
-and whether an operator must intervene. Recovery must make progress past
-one failing row and avoid making every deployment rescan settled history.
+A transaction can accept work that cannot complete inside it: deleting a
+session's storage after its close, or deleting attachment bytes that live
+outside the database. The accepted row must retain what is owed, when another
+attempt is due, and whether an operator must intervene. Recovery must make
+progress past one failing row and avoid making every deployment rescan settled
+history.
 
 ## 1. Interface
 
 ### 1.1 Obligation columns
 
-An owning ledger row carries its delivery obligation. The common family is:
+An owning ledger row carries its obligation. The common family is:
 
 | Column | Meaning |
 |---|---|
@@ -38,29 +41,25 @@ order by due time and id, include lapsed claims, and take a bounded page.
 PostgreSQL uses `FOR UPDATE SKIP LOCKED`. A claim increments attempts, sets
 its token and holds the row until its claim expiry.
 
-`processes` has independent families: `start_obligation_*` for start and
-`obligation_*` for terminal publication. Arming or settling one does not
-change the other. `ArtifactCleanup` uses `artifact_cleanup_obligations`,
-keyed by the artifact referrer; its owner and guard rules are in
+`SessionDelete` lives on `session_meta`. `ArtifactCleanup` uses
+`artifact_cleanup_obligations`, keyed by the artifact referrer; its owner and
+guard rules are in
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
-Wake deliveries have their own equivalent ledger vocabulary.
 
-Evidence: `crates/lash-store-sql/src/obligation.rs`,
-`crates/lash-store-sql/src/process/processes.rs`, and
+Evidence: `crates/lash-store-sql/src/obligation.rs` and
 `crates/lash-core-store/src/store/obligation.rs`.
 
 ### 1.2 Kinds
 
-`ObligationKind::ALL` orders nine kinds: `Ingress`, `ControlIntent`,
-`ScopeClose`, `ParentEnd`, `SessionDelete`, `TriggerDelivery`, `ProcessStart`,
-`ProcessTerminal`, and `ArtifactCleanup`. Their snake-case labels are the
-metric and drain-status keys. `ObligationKey` names the owning row of each
-kind, including the artifact referrer for cleanup.
+`ObligationKind::ALL` orders the two kinds, `SessionDelete` and
+`ArtifactCleanup`. Their snake-case labels are the metric and drain-status
+keys. `ObligationKey` names the owning row of each kind, including the
+artifact referrer for cleanup.
 
 Every arm path obtains its id from `ObligationKey::id()`: the kind label
 followed by byte-length-prefixed key parts in key order. Delimiters and Unicode
-in a session, run or other key cannot alias another row. Re-arming the same
-row retains this identity; claim tokens remain separate fencing identities.
+in a session or other key cannot alias another row. Re-arming the same row
+retains this identity; claim tokens remain separate fencing identities.
 
 Unknown stored vocabulary returns `StoreError::Incompatible` with
 `UnknownVocabulary`. A key that cannot decode remains addressable by its
@@ -75,292 +74,160 @@ explicit re-arm, stalled listing and standing reads. Producers arm inside
 the transaction accepting their work. Repair arming affects only a row that
 owes nothing. Backends provide one ledger per kind through `StoreSet`.
 
-Due passes mint a fresh `ClaimToken`. A journaled claimant can derive its
-token from the step's stable identity and obligation id. A by-id claim takes
-a due row, or refreshes a claim held by that same token without incrementing
-its attempts. It cannot take a claim another claimant holds. Once a due
-pass retakes a lapsed claim under a fresh token, the old claimant cannot
-refresh or settle it.
+Due passes mint a fresh `ClaimToken`. A by-id claim takes a due row, or
+refreshes a claim held by that same token without incrementing its attempts.
+It cannot take a claim another claimant holds. Once a due pass retakes a
+lapsed claim under a fresh token, the old claimant cannot refresh or settle it.
 
 Settlement compares the token and answers `Applied` or `ClaimLost`.
 `Delivered` clears the error; `Retry` records the next due time and error;
 `Stall` records its reason and error. `Defer` returns guarded cleanup to due
 with attempts reset. Re-arm accepts only a stalled row and resets attempts.
 Producers arm work due at once where delivery must not depend on a database
-clock being ahead of the relay's host clock.
+clock being ahead of the worker's host clock.
 
 Evidence: `crates/lash-core-store/src/store/obligation.rs`.
 
-### 1.4 Engine half: the relay
+### 1.4 Delivery
 
-Each `ObligationRelay` supplies its ledger, policy and idempotent delivery.
-The core assembles every kind's relay in `ObligationKind::ALL` order and
-refuses missing delivery dependencies as `ObligationRelayUnavailable`.
+Each kind supplies its ledger, policy and idempotent delivery. The core
+assembles both kinds in `ObligationKind::ALL` order and refuses missing
+delivery dependencies as `ObligationRelayUnavailable`.
 
-`deliver_now` claims and attempts a producer's immediate delivery.
-`deliver_claimed` attempts a claim already taken in the producer's
-transaction. `relay_due` claims a bounded page and attempts its rows
-concurrently. Every delivery runs under its attempt budget.
-
-A successful ordinary delivery settles `Delivered`. A consumer-settled
-delivery, notably ingress, leaves its claim held when the engine accepts
-the ask; the consumer's transaction delivers the row. A delivery that
-settles its own row can leave the relay's settlement answering `ClaimLost`.
+`deliver_now` claims and attempts a producer's immediate delivery. `relay_due`
+claims a bounded page and attempts its rows concurrently. Every delivery runs
+under its attempt budget. A successful delivery settles `Delivered`.
 
 A refusal stalls as `refused`; an undecodable key stalls as `undecodable`.
 A retryable failure backs off until the ceiling, then stalls as
-`attempts_exhausted`. An exhausted consumer-settled claim stalls before
-another ask. Guarded cleanup that is not yet owed defers rather than stalls.
-One undecodable or slow row does not prevent other claimed rows from running.
+`attempts_exhausted`. Guarded cleanup that is not yet owed defers rather than
+stalls. One undecodable or slow row does not prevent other claimed rows from
+running.
 
 Defaults are a 1-second initial backoff, 15-minute maximum backoff, 16
 attempts, 60-second claim TTL and 30-second attempt budget. Backoff doubles
 per attempt and starts at the attempt's start time. The host owns these
 policy values; the attempt budget must remain below the claim TTL.
 
-Evidence: `crates/lash-core/src/runtime/shift/relays.rs` and
-`crates/lash-core-execution/src/runtime/shift/relay.rs`.
-
 ### 1.5 Stalled surfacing
 
-Ingress stalls appear as `TurnStatus::Stalled(StalledDelivery)`. Deployment
-and generation drain status expose stalled-obligation counts and cannot
-report drained while those counts are nonzero. Generation drain addresses
-one build's retained work; deployment drain addresses the deployment.
-Closing sessions also hold the drain while their delete remains owed.
+Drain status exposes stalled-obligation counts. Closing sessions hold a drain
+while their delete remains owed.
 
 `LashCore::stalled_obligations` lists stalled rows and
 `LashCore::rearm_obligation` explicitly makes one due again. Nothing
-implicitly re-arms a delivered process start or a stalled row. Operational
-metrics record delivery outcomes, stalled counts and recovery-leader
-standing.
+implicitly re-arms a stalled row. Operational metrics record delivery outcomes
+and stalled counts.
 
-Evidence: `crates/lash/src/core.rs`,
-`crates/lash/src/core/drain.rs`, and
-`crates/lash-core-execution/src/runtime/shift/relay.rs`.
+Evidence: `crates/lash/src/core.rs`.
 
 ### 1.6 Leader lease
 
-The recovery leader row is scoped to storage and engine authority, named
-`recovery:{turn_control_binding_id}`. It records holder, generation rank,
-term, election time and expiry. Acquisition, renewal and resignation use
-the database clock. A lapsed lease can be acquired; a higher rank can
-preempt after minimum tenure. Changing holder increments the term.
-Resignation expires the row rather than deleting it.
-
-The host sets generation rank, default 0, and lease timings. Defaults are
-15-second TTL, renewal every 5 seconds, 2.5-second request timeout,
-2-second trust margin, 5-second follower retry plus up to 500 milliseconds
-of jitter, and 30-second minimum tenure.
-
-A deployment owns one holder and a separate election task. Host-clock trust
-expires at renewal start plus TTL minus trust margin. Losing trust stops
-leader duties. Drain and shutdown resign; dropping the deployment also
-resigns a grant whose initiating caller lost its answer. The lease controls
-load and is not an execution fence.
-
-Evidence: `crates/lash-core-execution/src/engine/reconcile.rs`,
-`crates/lash-core/src/runtime/recovery_lease.rs`,
-`crates/lash/src/core/recovery.rs`, and
-`crates/lash-store-sql/src/recovery_leader.rs`.
+There is no leader. Every serving node keeps a heartbeat row, and a reaper
+releases a dead node's actors (ADR 0132 §3). Due claims are fenced by claim
+tokens, so any live node can run a due pass.
 
 ### 1.7 Duties
 
-Every deployment serves its own handlers and immediate deliveries.
-PostgreSQL permits due claims on every deployment through skip-locked reads;
-SQLite restricts due claims to the leader. Parks, repair, drain handover,
-park-feed compaction and opt-in evidence retention are leader duties.
-All duties remain idempotent when leader activity overlaps.
-
-Evidence: `crates/lash-core/src/runtime/recovery_lease.rs` and
-`crates/lash-core/src/runtime/shift/reconcile.rs`.
+Every node claims due obligations. PostgreSQL permits due claims on every node
+through skip-locked reads. A SQLite deployment is one database file, and its
+nodes serialize on its one writer. Park-feed compaction and opt-in evidence
+retention are idempotent duties any node may run; overlapping runs are safe.
 
 ### 1.8 Detection and delivery bounds
 
-Recovery follows a 10-second fixed grid. Each kind's pass runs on its own
-`RelayLanes` lane. The default tick waits at most 1 second on due passes
-before running leader duties, and each delivery has a 30-second budget.
-A busy kind is skipped until its pass finishes. Rows in one claimed page
-run together, rather than waiting behind each other's delivery budgets.
-Leader recovery arms run concurrently under an outer guard of `2W`, where
-`W` is the host's tick wait (default 1 second). Each Restate paused-work,
-lost-process and lost-run page shares one `W` deadline across its store
-read, queries, outcomes and durable writes. A slow repair cannot hold drain
-handover or the next interval tick beyond that guard.
+Due passes follow a 10-second fixed grid. Each kind's pass runs on its own
+lane. The default tick waits at most 1 second on due passes, and each delivery
+has a 30-second budget. A busy kind is skipped until its pass finishes. Rows
+in one claimed page run together, rather than waiting behind each other's
+delivery budgets.
 
 With tick interval `T`, budget `B`, page store latency `S` and a free lane,
 a due row is claimed within `T` of its due time. A busy lane can add `B + S`.
 A lapsed claim first becomes eligible at claim expiry, and then follows the
-same bound. SQLite failover also adds the election delay. Retry eligibility
-is attempt start plus its backoff, so time spent delivering counts toward
-the wait. A stalled row waits for explicit re-arm.
+same bound. Retry eligibility is attempt start plus its backoff, so time spent
+delivering counts toward the wait. A stalled row waits for explicit re-arm.
 
-These bounds require sufficient page capacity and store and leader-duty
-latency within the tick budget. They are not a throughput guarantee under
-an unbounded incoming queue. Simulation varies scheduling to exercise loss,
-retry, stalled delivery and failover.
+These bounds require sufficient page capacity and store latency within the
+tick budget. They are not a throughput guarantee under an unbounded incoming
+queue. Simulation varies scheduling to exercise loss, retry and stalled
+delivery.
 
-Evidence: `crates/lash-core/src/runtime/shift/interval.rs`,
-`crates/lash-core/src/runtime/shift/lanes.rs`, and
-`crates/lash-core-execution/src/engine/reconcile.rs`.
+Evidence: `crates/lash-core/src/runtime/shift/interval.rs` and
+`crates/lash-core/src/runtime/shift/lanes.rs`.
 
 ## 2. Rationale
 
-A durable obligation closes the failure window between SQL acceptance and
-engine delivery. A best-effort send alone leaves accepted work without a
-retry owner. Repeated full-table recovery scans spend work on settled rows
-and give a persistent failure no explicit ceiling. Due indexes, bounded
-claims and typed stalls make those costs and operator decisions explicit.
+A durable obligation closes the window between a committed acceptance and
+work that cannot run inside that transaction. A best-effort call alone leaves
+accepted work without a retry owner. Repeated full-table recovery scans spend
+work on settled rows and give a persistent failure no explicit ceiling. Due
+indexes, bounded claims and typed stalls make those costs and operator
+decisions explicit.
 
 A single due-time column represents both retry eligibility and claim expiry
-because a row cannot be due and claimed simultaneously. A separate side
-outbox is useful when work has no owning row; ordinary obligations live on
-the row that accepts them. Artifact cleanup needs its referrer ledger because
-cleanup can outlive the referrer's authoritative row.
-
-SQL remains the acceptance authority. Restate executes accepted work and
-records execution; it is not another ingress authority.
+because a row cannot be due and claimed simultaneously. Artifact cleanup needs
+its referrer ledger because cleanup can outlive the referrer's authoritative
+row. Work between actors needs no obligation: the producer's transaction
+writes the mailbox row and the wake, so nothing is owed after it commits.
 
 ## 3. Per-ledger mapping
 
-| Kind | Owning ledger | Armed by | Delivered when |
+| Work | Carried by | Written in | Done when |
 |---|---|---|---|
-| `Ingress` | `pending_turn_inputs`, `queued_work_batches` | Accepted ingress | Run admission selects the row in its transaction |
-| `ControlIntent` | `control_intents` | Recorded control verb | Its engine half and follow-on delivery complete |
-| `ScopeClose` | `session_runs` | Run terminal transaction | Its scope-close transaction |
-| `ParentEnd` | `parent_end_plans` | Recorded scope end | Each child's cancel is delivered or refused |
-| `SessionDelete` | `session_meta` | Close acknowledgement | Physical storage deletion completes |
-| `TriggerDelivery` | `trigger_deliveries` | Reservation insert | Binding records the process |
-| `ProcessStart` | `processes`, `start_obligation_*` | Registration of an executed input | Engine accepts its current-segment submission |
-| `ProcessTerminal` | `processes` | Terminal transaction | Engine terminal publication completes |
+| Ingress | `pending_turn_inputs`, `queued_work_batches` | The accepting transaction, which wakes the session actor | Run admission selects the row in its transaction |
+| Control intent | `control_intents`, a mailbox row | The recording transaction, which wakes the actor | The session actor's owner commits its decision |
+| Scope close | The run or process terminal | The terminal transaction itself | Committed with the terminal |
+| Parent end | `parent_end_plans` with a cascade cursor | The terminal transaction | Each batch commits; the cursor reaches the last child (ADR 0132 §11) |
+| `SessionDelete` | `session_meta` obligation | The close acknowledgement | Physical storage deletion completes (§4) |
+| Trigger delivery | `trigger_deliveries` | The emission's transaction, with the start and binding | Committed with the reservation |
+| Process start | `processes`, a runnable actor row | The start's transaction | Committed with the registration |
+| Process terminal | `processes`, `process_terminal` wait rows | The terminal transaction, which resolves the waits | Committed with the terminal |
 | `ArtifactCleanup` | `artifact_cleanup_obligations` | Referrer end or guarded staging | Referrer cleanup completes |
 
-Ingress composes the two tables' oldest due rows. Its id is
-`ingress:{item_id}` and its shift request is `{obligation_id}:{attempt}`.
-The engine accepting the ask holds the claim; run admission settles it
-regardless of the relay state. A child-session acceptance takes its row's
-claim in the acceptance transaction, because its acceptor's inline shift is
-the ask ([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md) §6). That claim only delays the relay's ask: once a run's
-admission is sealed, its recorded executor decides who runs it, whoever holds
-the claim. A waiter follows later claimed attempts if
-the earlier shift ends without admitting the item. An ingress retry uses a
-minted token and cannot send another ask while a prior claim remains held.
+An ingress row binds to the run that admits it in the admission transaction,
+fenced by the session actor's epoch. A child-session acceptance inserts the
+child's input and wakes the child actor in the parent's transaction
+([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md) §6). A waiter
+follows the run that admits its item.
 
-Process start uses `process_start:{process_id}`. The producer's immediate
-attempt and the due fallback use the same ledger. Restate's journaled start
-claims with a token derived from its claim step, sends with its execution
-context, then settles. A cancelled step can rerun and recover its own claim.
-Cancellation at the send await does not prove a failed start. Once delivered,
-the obligation remains delivered; engine-owned lost-run recovery is
-[ADR 0110](0110-the-engine-owns-process-recovery.md) §2.
+A control intent's state records only what was decided: pending, acknowledged,
+overtaken by a later intent, or refused with its typed cause. The session
+actor's owner reads the intent with its mail and commits the decision under
+its epoch. Run scope close and parent-end cancellation retain their own
+progress, so a failing child does not keep a cancel or fork verb open. A
+refused child is recorded on its plan.
 
-Every process terminal arms publication. The storing segment can publish
-and settle in its own journal; the relay publishes through the process run's
-`complete_terminal`. A terminal process's paused segment can be killed after
-publication is delivered.
+A run or process whose owner died is not lost: the reaper releases its actor
+and another node claims it and resumes from committed state (ADR 0132 §3).
+There is no lost-run or lost-process scan. An actor whose claims make no
+progress parks with `ActivationLoop`.
 
-Trigger emit's start and bind are its immediate attempt without a relay
-claim. Binding settles the row in any state. A concurrent relay can then
-observe `ClaimLost`. Recovery uses the recorded reservation and the same
-router wiring as an emit.
-
-Control-intent acknowledgements and refusals compare their claim token. An
-intent's state records only what was decided about its engine half: pending,
-acknowledged, overtaken by a later intent, or refused with the engine's
-typed cause. Failed
-attempts and their exhaustion live on the obligation alone. The engine half
-is owed exactly while the intent is pending and its obligation is due or
-claimed; each store states that once, as the generated column
-`engine_half_owed`, and admission reads it. A permanent refusal writes the
-intent refused and stalls the obligation; attempts running out, a failing
-ledger call included, stall the obligation and leave the intent pending.
-Either way the stall unwedges admission, and the session is asked to work
-once it is durable. Explicit re-arm makes the intent owed again, returning a
-refused one to pending. Run scope close and parent-end cancellation
-retain their own retry ownership, so a failing child does not keep a cancel
-or fork verb open. A refused child is recorded on its plan.
-
-Paused executes require a park and an explicit redrive, except a shift waiting
-for a redrive that then settles. A shift with no resumable run or deleted
-session is killed. Accepted ingress retains its obligation for a fresh shift.
-Engine-owned lost-run recovery also checks non-terminal session runs and
-ends failed runs with durable loss or cancellation evidence, settling their
-ingress and arming `ScopeClose` atomically. Lost-process and lost-run scans
-each inspect at most one page per tick, including healthy and failed rows,
-and retain separate cursors across ticks. Cursors advance before engine
-requests, so failed or timed-out items cannot pin a page; an exhausted
-catalog wraps and retries them.
-
-Evidence: `crates/lash-core/src/runtime/shift/relays.rs`,
-`crates/lash-core-execution/src/runtime/trigger_delivery.rs`,
-`crates/lash-sqlite-store/src/process_registry/registration.rs`,
-`crates/lash-restate/src/process/park_reconcile.rs`, and
+Evidence: `crates/lash-core-execution/src/runtime/trigger_delivery.rs`,
+`crates/lash-sqlite-store/src/process_registry/registration.rs` and
 `crates/lash-core-execution/src/runtime/vocabulary.rs`.
-
-The same pass reads a run whose key Restate holds no execution of on any
-generation lane. An admission delivers its input's ingress obligation in the
-same write, so no relay owns that input. The pass judges the run by the
-execution recorded for it (`RunExecutor`), which the store lists beside each
-open run. It never infers the executor from the run's name. The seal of the
-run's admission records the executor, the admission records it from then on,
-and every later admission of the run reads the record back unchanged.
-
-- **Its own run.** Retention purged the run, or its journal store was lost.
-  The run has started, its effects may have run, and a fresh execution
-  would run them again under an empty journal. It ends `SubstrateLost` in
-  the same transaction as a failed execution's run.
-- **An acceptor's run.** A `SessionTurn` process's shift runs inline, in the
-  process's own execution, every run it admits: its child turn's run, and any
-  run admitted ahead of that turn in a reused session. No lane ever holds a
-  run of those keys. While the process's record is not terminal, the pass
-  leaves the run and its admitted input, and the lost-process pass owns the
-  process's run. A terminal process runs nothing more, so the run ends
-  `SubstrateLost`. A failed registry read ends nothing.
-- **Another execution's shift.** An in-process shift holds no engine run
-  the pass can read, so absence proves nothing and the pass leaves the run.
-- **No recorded admission.** The run has started nothing. Its ingress
-  obligation still owes its input and executes it, so the pass never ends it.
-  When the executor its seal recorded holds no run any more (its own run is
-  gone, or its acceptor process is terminal), the pass releases that record,
-  so the shift the obligation asks for seals the run as its own.
-
-An acceptor under a parent turn's scope records no run the pass can read, so
-the pass leaves its run, admitted or only sealed.
-
-An admin read that fails proves nothing about any run and ends nothing.
 
 ## 4. Two-phase session delete
 
-Before accepting a close, delete checks the session's pending turn-cancel
-closure authorizations. A pending authorization refuses it as
-`StoreError::TurnCancelClosureLifecyclePinned`, with its session and count.
-Nothing has closed. The turn's final commit consumes its exact authorization;
-its answer does not prove that a successor or a replaying turn holds no pin.
-`LashCore::await_turn_cancel_closures` observes consumption of these stored
-pins before a host attempts a close again. Run protected-drain and material
-dependencies retain their own eligibility checks. Every close still checks its refusals, since new work can race readiness.
-
 Delete records `CloseSession` and marks the session closing. New sends refuse
-as `SessionClosing`. The engine half stops its runs and closes its scopes.
-Acknowledgement arms `SessionDelete` in the same transaction. Once the close
-commits, deletion bypasses pre-close pin checks and retains its recorded close.
+as `SessionClosing`. The closing session actor's owner stops its runs and
+closes its scopes in its own transactions. Acknowledgement arms
+`SessionDelete` in the same transaction. Once the close commits, deletion
+retains its recorded close. Run protected-drain and material dependencies
+retain their own eligibility checks. Every close still checks its refusals,
+since new work can race readiness.
 
-An answered run's terminal commit arms `ScopeClose`. On Restate, the run's
-`run` returns and sends its separate shared `close` handler. The answer can
-therefore precede delivery of scope cleanup. That delivery records and applies
-parent-end plans and calls `LashDurableWaitIndex/<session>/retire_run` to
-retire the run's indexed waits. The session index serializes this call with
-its other exclusive handlers. A busy index can delay cleanup; an attempt that
-fails or exceeds its delivery budget leaves its obligation owed under §1.4.
-Replay alone is not a reason to retain the scope-close obligation after its
-consumer has acknowledged the close.
+A run's terminal transaction closes its scope, revokes its pending wait rows
+and writes its parent-end plan (ADR 0132 §4 and §11). The answer and the
+scope close commit together; the parent-end cascade proceeds in batches after
+them.
 
-Physical delete waits retryably while the session's scope-close or parent-end
-cleanup is undelivered. It removes process-session state and subscriptions,
-revokes waits, retires the effect journal and deletes storage last. Storage
+Physical delete waits retryably while the session's parent-end cascade is
+unfinished. It removes process-session state and subscriptions, revokes
+waits, prunes the session's phase rows and deletes storage last. Storage
 delete removes the owning obligation row. Every preceding step is idempotent;
-a failed attempt leaves the obligation owed for another relay attempt.
-The permanent `CloseSession` tombstone is retained, per ADR 0108 §5a.
+a failed attempt leaves the obligation owed for another attempt. The permanent
+`CloseSession` tombstone is retained, per ADR 0108 §5a.
 
 Physical delete is only ever this obligation's delivery. Deleting an id that
 never materialized a session closes nothing, arms nothing and cleans up
@@ -370,88 +237,68 @@ nothing: it answers `SessionDeletion::Absent` and the id stays creatable
 `SessionDeletion::Closing` means accepted deletion remains owed, with a typed
 reason: an unacknowledged close, cleanup counts, a failed delivery or the
 obligation's standing. Hosts await `LashCore::await_session_deletion` instead
-of reissuing deletion. It makes no engine request and starts no delivery.
+of reissuing deletion. It starts no delivery.
 `SessionDeleteCompletion::Deleted` requires the permanent storage tombstone;
 `Absent` and `NotClosing` distinguish an unknown id and a live id whose close
-has not committed. `Stalled` carries the retained close, scope-close,
-parent-end or physical-delete obligation for explicit operator re-arm.
-Neither a missing obligation nor an elapsed timeout proves deletion. Dropping
-the observer leaves accepted work owed to recovery. A Restate host journals
-the returned observation in its own step.
+has not committed. `Stalled` carries the retained physical-delete obligation
+for explicit operator re-arm. Neither a missing obligation nor an elapsed
+timeout proves deletion. Dropping the observer leaves accepted work owed to
+recovery.
 
-Delete does not wait for arbitrary engine replay. Journaled admission and
-seal steps record either their pre-delete answer or retirement. Closing
-session pins can be retired with storage because the session cannot activate
-again. Pre-close checks run before the close's durable step, so a repeated
+Closing session state can be retired with storage because the session cannot
+activate again. Pre-close checks run before the close commits, so a repeated
 delete honors the recorded close.
 
-A stalled close arms no physical delete. Its unfinished runs remain
-accounted for as `held_by_stalled_close` until re-arm or deletion settles the
-work. Cleanup stalls use the same operator listing and re-arm as other kinds.
+A stalled delete keeps its session closing until re-arm or deletion settles
+the work. Cleanup stalls use the same operator listing and re-arm as the other
+kind.
 
 Evidence: `crates/lash-core/src/runtime/session_close.rs`,
 `crates/lash-core/src/runtime/session_delete.rs`,
-`crates/lash/src/core/session_deletion.rs`,
-`crates/lash-restate/src/session_shifts.rs`,
-`crates/lash-core-execution/src/runtime/process/scope_close.rs`, and
-`crates/lash-restate-test/tests/host_send_wait/session_delete.rs`.
+`crates/lash/src/core/session_deletion.rs` and
+`crates/lash-core-execution/src/runtime/process/scope_close.rs`.
 
 ## 5. Due time belongs to delivery
 
-Delayed delivery uses `obligation_due_at_ms`. Retry backoff is the relay's
-policy. Queued work carries no separate `available_at_ms` scheduling field.
-
-Evidence: `crates/lash-store-sql/src/turn_ingress/queued_batches.rs` and
-`crates/lash-core-execution/src/runtime/shift/relay.rs`.
+Delayed delivery uses `obligation_due_at_ms`. Retry backoff is the kind's
+policy. Queued work carries no separate `available_at_ms` scheduling field; a
+timer is a wait row with a due time (ADR 0132 §6).
 
 ## 6. Scope-close recovery
 
-A crash between terminal commit and scope close leaves durable terminal
-evidence and an owed run-row obligation. The recorded close step or the due
-relay completes it. The close transaction delivers the row; replay finds
-it settled. A delivered close does not become new work on the next tick.
-ADR 0108 §5 owns the lifetime meaning of the close. A close that meets
-corrupt stored data is refused rather than retried (§9).
+A scope closes in the terminal transaction that ends its owner, so no crash
+separates the terminal from the close. ADR 0108 §5 owns the lifetime meaning
+of the close. A close that meets corrupt stored data is refused rather than
+retried (§9).
 
-Evidence: `crates/lash-sqlite-store/src/session_runs.rs` and
-`crates/lash-core/src/runtime/shift/scope_close.rs`.
+## 7. Commands and adjacent writers present the epoch fence
 
-## 7. Commands and adjacent writers present the shift fence
+The session actor's owner applies leading commands in an `ActorTx` under its
+epoch. The command lane takes no session binding. Applying the command run
+settles its rows in the commit; withdrawal of a selected command refuses the
+commit. A settlement waiter reads the outcome rather than draining commands.
 
-The shift applies leading commands in a recorded step under its shift fence.
-The command lane takes no session binding. Applying the command run settles
-its rows in the commit; withdrawal of a selected command refuses the commit.
-A settlement waiter reads the outcome rather than draining commands.
-
-A writer beside the shift reads `current_shift_fence` and presents it on its
-commit. A later sealed admission refuses that write as `StaleShiftFence`.
-The writer does not raise the epoch to gain authority. [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
+Every other writer gets a `MailTx`: it appends to the actor's mailbox and wakes
+it, and has no owner-state writers (ADR 0132 §3). It never raises the epoch to
+gain authority. [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
 owns command admission and ordering.
-
-Evidence: `crates/lash-core-store/src/store/shift_fence.rs` and
-`crates/lash-core/src/runtime/session_api.rs`.
 
 ## 8. Executable evidence
 
-Relay and leader-lease laws live in store conformance and backend tests.
-The store matrix is SQLite file, SQLite memory and PostgreSQL. Host laws use
-the in-process Restate server double, live Restate and Lash-sim's in-process
-effect host. Upgrade proofs use the synthetic-next tier.
-
-The Run owner-recovery laws in
-`crates/lash-restate/src/tests/run_coordinator_on_the_double/owner_park.rs`
-exercise engine redelivery. `crates/lash-restate/src/tests/process_terminal_obligation_on_the_double.rs`
-checks terminal publication. `crates/lash/src/core/session_shifts.rs`
-assembles the core relays. The session-delete finalizer is covered by
+Obligation laws live in store conformance and backend tests. The store matrix
+is SQLite file, SQLite memory and PostgreSQL. Laws run the production runtime
+over a fault-injecting store with labelled commits, a virtual clock and
+`SimNodes` (ADR 0132 §14). Upgrade proofs use the synthetic-next tier. The
+session-delete finalizer is covered by
 `crates/lash/src/tests/core_session_builder/session_delete_finalizer.rs` and
 `crates/lash-sim/tests/session_delete_bounds.rs`.
 
 ## 9. Corruption after a published answer is the session's fault
 
-A run's answer is published before its scope closes (§4) and before its
-shift's next admission reads the session. Corrupt stored data met by either
-step cannot fail that run, and no retry repairs it. The published answer
-stands and is never rewritten or retracted.
+A run's answer is published with its terminal and before the session's next
+admission reads the session. Corrupt stored data met by a later step cannot
+fail that run, and no retry repairs it. The published answer stands and is
+never rewritten or retracted.
 
 The session owns the fault. Its `session_meta` row records one
 `SessionFault`: the typed code (`runtime_store_corrupt`), the message, the
@@ -459,27 +306,22 @@ typed cause with its fields, what met it (`scope_close` of a run, or
 `shift_admission`) and when. A session already faulted keeps its first
 fault. The row lives and dies with the session.
 
-- **Scope close.** `ScopeCloseRelay` records the fault and refuses the
-  delivery, so the run's `ScopeClose` obligation stalls as `refused` on
-  that attempt under the same code (§1.4, §1.5). A fault that could not be
-  recorded leaves the close owed for another attempt. Every other store
-  error stays retryable.
-- **Shift admission.** The recorded `AdmitShift` step records the fault
-  before it answers the corruption as its terminal outcome. A fault that
-  could not be recorded is the attempt's, and the engine runs the step
-  again.
+- **Scope close.** The close records the fault and refuses, under the same
+  code. A fault that could not be recorded leaves the transaction uncommitted,
+  and the owner recomputes it from committed state. Every other store error
+  stays retryable.
+- **Run admission.** The admission transaction records the fault before it
+  answers the corruption as its terminal outcome. A fault that could not be
+  recorded commits nothing, and the next activation recomputes the admission.
 
-While the fault stands the session admits nothing. `StoredShiftEpoch`
-carries it, admission refuses every shift with the fault's code and cause,
-and a send whose input is still open is answered with the same typed error
-from the store, whether or not a shift reached it. Accepted inputs stay
-accepted; their ingress obligations follow §1.4.
+While the fault stands the session admits nothing. The stored epoch carries
+it, admission refuses every run with the fault's code and cause, and a send
+whose input is still open is answered with the same typed error from the
+store. Accepted inputs stay accepted.
 
 `LashCore::session_faults` lists standing faults in session-id order.
-`LashCore::clear_session_fault` is the only thing that clears one, after
-the operator repaired the data. A stalled close is re-armed separately with
-`LashCore::rearm_obligation`; a re-armed close that meets the corruption
-again records the fault again.
+`LashCore::clear_session_fault` is the only thing that clears one, after the
+operator repaired the data, and wakes the session actor.
 
 Evidence: `crates/lash-core-store/src/store/session_fault.rs`,
 `crates/lash-core/src/runtime/shift/scope_close.rs`,

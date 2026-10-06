@@ -6,7 +6,7 @@ accepted
 
 ## Decision
 
-Protocols acquire runtime capabilities through the uniform plugin contract. After building the plugin host, core asks factories for `process_engine_contributions`, passing extensions, trace context and process-lifecycle availability. Registrations pair an execution engine with a store-free recorded-input admission descriptor. The engine registry enforces unique kinds and stores execution and admission separately. Deployment durability claims belong to the host that composes the engine and storage.
+Protocols acquire runtime capabilities through the uniform plugin contract. After building the plugin host, core asks factories for `process_engine_contributions`, passing extensions, trace context and process-lifecycle availability. Registrations pair an execution engine with a store-free recorded-input admission descriptor. The engine registry enforces unique kinds and stores execution and admission separately. Deployment durability claims belong to the host that chooses the store and its topology ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §13).
 
 Session Plugin Options are creation configuration. At creation every installed plugin factory, the protocol's included, creates its own namespace and defaults through the `ConfigOwner` it registered with `PluginFactory::register_config`. The session records the results as its `PluginConfig`, keyed by plugin id, with its initial config head (FIG-4379). RLM defaults root final answers to Markdown and child answers to RawFinalValue. The protocol turn options are a view of the protocol's recorded namespace. Every open supplies the recorded values unchanged and resolves nothing again.
 
@@ -20,6 +20,6 @@ Facade-specific engine installers bypass the contract and are rejected. A sessio
 
 ## Consequences
 
-One `LashCoreBuilder` assembles protocol and common plugins. RLM's factory requires its backend artifact port and contributes the process engine; its compile operations live with the protocol. Durable workers reconstruct the same plugin capabilities from captured options.
+One `LashCoreBuilder` assembles protocol and common plugins. RLM's factory requires its backend artifact port and contributes the process engine; its compile operations live with the protocol. A node that resumes an actor reconstructs the same plugin capabilities from captured options.
 
 [Engine contributions](../../crates/lash-core-execution/src/plugin/runtime_impl.rs), [RLM materialization and patches](../../crates/lash-protocol-rlm/src/plugin/protocol_session.rs), [session creation](../../crates/lash/src/session.rs) and [creation head types](../../crates/lash-core-store/src/session_identity.rs) implement the decision.

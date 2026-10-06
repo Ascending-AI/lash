@@ -2,16 +2,17 @@
 
 ## Status
 
-Accepted. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) replaces §2 to §4 and §7 once its lanes land:
-recovery loads state instead of replaying a journal, and phase rows record
-`Once` and `Repeatable` executions. §1, §5 and §6 carry over.
+Accepted. The durable mechanics are owned by
+[ADR 0132](0132-durability-is-state-first-over-the-lash-store.md): recovery
+loads committed state, and phase rows record `Once` and `Repeatable`
+executions.
 
 ## Context
 
-Re-executing a started process without its journal can repeat effects whose
-results the process has already lost. The engine owns retry and replay.
+Re-executing a started process from scratch can repeat effects whose outcomes
+the process never committed. The durable engine owns resume and retry policy.
 The registry records execution facts and terminal evidence; it cannot
-reconstruct an engine journal.
+fabricate an outcome for work whose outcome never committed.
 
 ## Decision
 
@@ -19,65 +20,55 @@ reconstruct an engine journal.
 
 Every process input is work the engine executes: an engine input runs on the
 host-registered `ProcessEngine` of its kind, and a session turn runs its
-child session. Every registration captures the execution environment it
-runs under and arms its `ProcessStart` obligation. Registration carries no
-recovery disposition and no ownership class.
+child session. Every registration captures the execution environment it runs
+under and inserts the process's runnable actor in its start transaction
+(ADR 0132 §12). Registration carries no recovery disposition and no ownership
+class.
 
 Work a host runs outside lash is a process of a host-registered engine that
-awaits that work's completion durably. Its deadline, cancellation and
-recovery are the process's own, so there is no second kind of row that lash
-never runs and only its host can close.
+awaits that work's completion durably, through its `AwaitExternal` action: a
+wait row with a completion key and a deadline (ADR 0132 §6 and §10). Its
+deadline, cancellation and recovery are the process's own, so there is no
+second kind of row that lash never runs and only its host can close.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/validation.rs`
-and `crates/lash-restate/src/process/admission.rs`.
+Evidence: `crates/lash-core-execution/src/runtime/process/validation.rs`.
 
-### 2. Recovery is the engine's replay
+### 2. Recovery loads committed state
 
-A started process resumes through its engine's recorded journal. A fresh
-admission that finds execution already started without that journal ends
-`Abandoned` with `ResumeRefused { SubstrateLost }`, before executing the
-process body. Generation refusal uses the same terminal vocabulary with
-`RetiredGeneration`. Executable artifact corruption ends with
+A started process resumes from committed state. Its actor's last committed
+phase or VM snapshot is the state, and a node that claims the actor loads it
+and continues (ADR 0132 §2 and §3). An uncommitted stretch is recomputed from
+that state.
+
+A process whose state its node cannot decode is never claimed by that node
+under the claim filter of
+[ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) §1. A VM
+continuation bound to an executable identity whose bytecode contract changed
+ends `Abandoned` with `ResumeRefused`. Executable artifact corruption ends with
 `StoredArtifactCorrupt`, carrying the artifact reference and typed validation
-cause. Corruption never contributes a refused generation to a drain.
+cause.
 
-Restate journals the admission verdict and nonce. The run's execution-start
-write binds attempt 1. Successor segments use their retained handover and
-set-if-absent segment-start marker. Retrying the same execution is
-idempotent; a successor execution takes the next attempt. The registry
-refuses other attempts.
+The registry refuses an execution write whose epoch is stale. A process's
+terminal transaction resolves every `process_terminal` wait on it, so waiters
+receive the terminal in that commit (ADR 0132 §11).
 
-Recovery reads live processes in bounded pages and asks Restate about their
-current segments. A run that finishes with failure without a process
-terminal ends that live process `SubstrateLost`; a process whose own park
-refuses remains at that park. If Restate holds no run for the current
-segment, recovery resubmits it, with at most one page of resubmissions per
-pass. Admission then starts work that has never started or refuses a
-started segment whose journal is unavailable. Submission coalesces by
-workflow key. Recovery does not re-arm `ProcessStart`.
+Evidence: `crates/lash-core-execution/src/runtime/process/validation.rs:146`.
 
-The terminal transaction arms `ProcessTerminal`, so waiters receive the
-terminal even when the segment invocation cannot publish it. A boundary
-records its successor's external reference in its journaled handover; a
-store failure makes the step retry.
+### 3. Effect implementors own the window before an outcome commits
 
-Evidence: `crates/lash-restate/src/process/admission.rs:452`,
-`crates/lash-core-execution/src/runtime/process/validation.rs:146`, and
-`crates/lash-restate/src/process/park_reconcile.rs:201`.
+An effect can finish before its outcome commits. What happens next is the
+execution's recorded `ExecutionPolicy` (ADR 0132 §5 and §7): a `Once`
+execution started without an outcome records `Interrupted` and never runs
+again; a `Repeatable` execution runs again at its same ordinal. An implementor
+of a `Repeatable` effect makes the repeat safe using Lash's `ToolCallId`. Lash
+derives and records that id for the admitted logical call; it is stable across
+`Repeatable` ordinals and reported-failure retries. Provider call ids are
+correlation data. [ADR 0117](0117-lash-names-every-tool-call.md) owns the
+derivation and recording rules.
 
-### 3. Effect implementors own the unjournaled window
-
-An effect can finish before the engine records its result. Its implementor
-makes a retry safe using Lash's `ToolCallId`. Lash derives and records that
-id for the admitted logical call; crash replay and reported-failure retry
-use the same id. Provider call ids are correlation data. [ADR 0117](0117-lash-names-every-tool-call.md)
-owns the derivation and recording rules.
-
-Effects are at least once, as specified in [ADR 0042](0042-tool-attempts-are-atomic.md).
-`ToolRetryPolicy::Never` disables retry after a reported failure; it cannot
-prevent engine replay of an effect whose result was never recorded.
-There is no at-most-once marker. A process-engine implementor must journal
-its effects through the effect host and respect the same resume refusal.
+`ToolRetryPolicy::Never` disables retry after a reported failure. A
+process-engine implementor performs effects only as admitted `Step` actions,
+each with its own execution policy, and its `advance` function performs none.
 
 Evidence: `crates/lash-sansio/src/tool_call_id.rs:270`,
 `crates/lash-core-execution/src/tool_provider.rs:1011`, `:1387`, and
@@ -85,17 +76,16 @@ Evidence: `crates/lash-sansio/src/tool_call_id.rs:270`,
 
 ### 4. The engine bounds retries
 
-Lash carries no process retry budget in registrations or start requests.
-Restate's invocation retry policy bounds attempts and pauses an invocation
-at exhaustion. Reconciliation parks a live process with
-`EngineRetryExhausted`, retaining its journal and writing no terminal.
-Resuming that park retries the paused invocation over its journal.
+Lash carries no process retry budget in registrations or start requests beyond
+the execution policy. A `Repeatable` execution records its `BoundedRetry`, and
+a retry is a record with a due time. An actor whose claims make no phase
+progress counts failed activations and parks with `ActivationLoop` at its
+activation budget, writing no terminal (ADR 0132 §3). Resuming that park
+claims the actor again from its committed state.
 
-Delivery obligations have their own attempt policy, owned by ADR 0109.
-That bounds store-to-engine delivery, not re-execution of the process.
+The two deferred-work kinds have their own attempt policy, owned by ADR 0109.
 
-Evidence: `crates/lash-restate/src/process/park_reconcile.rs:94` and
-`crates/lash-core-execution/src/runtime/process/model/start_request.rs`.
+Evidence: `crates/lash-core-execution/src/runtime/process/model/start_request.rs`.
 
 ### 5. Who writes `Abandoned`
 
@@ -103,18 +93,21 @@ Evidence: `crates/lash-restate/src/process/park_reconcile.rs:94` and
 records its own lost-work outcome. Lash writes a resume refusal when it
 cannot safely continue the execution.
 
-`ProcessCompletionAuthority` is `WorkflowKey` or `WorkflowKeyRecovery`.
-Recovery names the segment ordinal, so it cannot end a process a later
-segment carries.
+`ProcessCompletionAuthority` names the actor's owner, fenced by its epoch, or
+a cancellation that ends the process without running its engine
+([ADR 0027](0027-unleased-completion-carries-explicit-authority.md)). A stale
+owner cannot end a process a later owner carries.
 
 Evidence: `crates/lash-core-execution/src/runtime/process/events.rs:71`
 and `crates/lash-core-execution/src/runtime/process/events.rs:130`.
 
 ### 6. Operators use cancellation
 
-An operator stops a process through cancellation. A lost execution ends
-through the engine's resume refusal. A host engine whose external work was
-lost ends its process with its own `Abandoned { Producer }` outcome.
+An operator stops a process through cancellation. A process no node can resume
+ends through the engine's resume refusal. A host engine whose external work was
+lost ends its process with its own `Abandoned { Producer }` outcome; a host
+resolves external work that completed by resolving its wait with the
+completion key.
 
 These operations record the outcome directly. There is no separate abandon
 request waiting for a Lash lease to expire, and closing a host does not
@@ -123,43 +116,38 @@ abandon started work.
 Evidence: `crates/lash-core-execution/src/runtime/process/registry_concerns.rs:511`
 and `crates/lash-core-execution/src/runtime/process/events.rs:130`.
 
-### 7. Restate owns process execution
+### 7. The durable engine owns process execution
 
-Restate's process workflow owns production execution and recovery. SQL
-stores retain process facts, continuation data and delivery obligations.
-A SQL store is not a second execution engine. Tests exercise the contract
-through the in-process Restate server double and live Restate; simulation
-uses Lash-sim's in-process effect host.
+Lash's durable engine owns process execution and recovery over the lash store
+(ADR 0132 §1). Process facts, continuation data and engine state are rows in
+that store. Laws run the production runtime over a fault-injecting store with
+labelled commits, a virtual clock and `SimNodes` (ADR 0132 §14).
 
 ### 8. Cancellation is cooperative; hard isolation is the host engine's
 
-Lash provides the `ProcessEngine` seam. A host registers its own engines in
-its own deployment, and Restate runs each process's invocation on the host's
-nodes, the same way turns run there. An isolated tool binds a host-registered
-engine through `IsolatedProcessBinding` and runs as one process of it.
+Lash provides the `ProcessEngine` seam, an `advance` state machine (ADR 0132
+§10). A host registers its own engines in its own deployment, and its nodes
+claim each process's actor the same way they claim sessions. An isolated tool
+binds a host-registered engine through `IsolatedProcessBinding` and runs as
+one process of it.
 
-Lash's cancellation of a process is cooperative: it records the request,
-the process workflow delivers it to the running engine, and the engine ends
-its run. Lash ships
-no engine that executes OS programs or keeps ownership state on local disk. A
-host that needs hard isolation (an OS kill and reap, adoption of a live
-worker across host loss) builds it into its own `ProcessEngine`, together
-with whatever durable ownership that requires.
+Lash's cancellation of a process is cooperative: it writes the request to the
+process's mailbox, the running step sees its token, and after the engine's
+cancel grace Lash commits a forced `Cancelled` terminal and drops the step.
+Lash ships no engine that executes OS programs or keeps ownership state on
+local disk. A host that needs hard isolation (an OS kill and reap, adoption of
+a live worker across host loss) builds it into its own `ProcessEngine`,
+together with whatever durable ownership that requires.
 
 Evidence: `crates/lash/src/tests/isolated_tool_route.rs`.
 
 ## Consequences
 
-A registry row cannot authorize re-execution from scratch. Losing an engine
-journal yields an explicit terminal instead of a best-effort reconstruction.
-Host-run external work has one path, a host engine process, so it gets the
-same deadline, cancellation and recovery as every other process.
+A registry row cannot authorize re-execution from scratch. A started `Once`
+execution without an outcome yields an explicit `Interrupted` instead of a
+second run. Host-run external work has one path, a host engine process, so it
+gets the same deadline, cancellation and recovery as every other process.
 
-A per-process recovery disposition would offer different answers to the
-same missing-journal problem without providing the journal. An at-most-once
-marker would trade an unrecorded result for permanently missing work. The
-engine's replay and implementor's call-id idempotency cover those boundaries.
-
-Executable evidence includes
-`crates/lash-restate/src/tests/substrate_lost.rs` and
-`crates/lash-restate-test/tests/substrate_lost_zombie.rs`.
+A per-process recovery disposition would offer different answers to the same
+missing-outcome problem. The execution policy, recorded before the work
+starts, and the implementor's call-id idempotency cover that boundary.

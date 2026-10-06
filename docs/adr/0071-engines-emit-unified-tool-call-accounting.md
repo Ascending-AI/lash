@@ -12,7 +12,7 @@ Each completed tool record in a successful RLM exec response contributes a
 `SessionStreamEvent::ToolCall`, subject to the accounting bounds below. The
 cell and native drivers emit these events in `handle_exec_result`, after
 inspecting the full response for terminal tool control. Recorded exec responses
-pass through this same handling path on redrive. Live trace and activity events
+pass through this same handling path on resume. Live trace and activity events
 remain separate observations of execution.
 
 Three rules apply:
@@ -44,7 +44,7 @@ A put in a session runtime bound to an execution acquires an `Execution`
 referrer. A put without that binding acquires an expiring `Upload` referrer.
 Commit does not promote every put: an id kept only in opaque plugin state or
 plain JSON is not part of the committed reference scan. An unreferenced turn
-put loses its execution hold when the journal settles. Reclamation requires
+put loses its execution hold when its turn's execution settles. Reclamation requires
 the absence of both referrer edges and pending writes under
 [ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md).
 
@@ -81,4 +81,4 @@ referrer vocabulary.
 - `crates/lash-core-store/src/attachments.rs:1665-1690` selects execution and upload referrers for puts.
 - `crates/lash-sqlite-store/src/persistence/session_commit.rs:852-853` acquires session edges at commit.
 - `crates/lash-sqlite-store/src/attachments.rs:80-137,850-860` validates acquisition and preserves retained roots.
-- `crates/lash-core/src/runtime/artifact_cleanup.rs` executes artifact cleanup obligations.
+- `crates/lash-core/src/runtime/artifact_cleanup.rs` executes artifact cleanup.

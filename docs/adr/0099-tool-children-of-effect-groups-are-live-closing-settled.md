@@ -8,20 +8,23 @@ is rationale for machinery this decision rejects, not an operating contract.
 ## Context
 
 A tool call needs one owner from admission through incorporation. The owner
-must survive worker loss and segment cuts, protect a committed final through
-its declarations, and answer language aggregates whose losing calls keep
-running. A separate invocation per call, plus group services that kept their
-own ranks, duplicated the engine's ordering authority and spent several engine
-records on every simple call. A loser that outlived its opener produced
+must survive worker and node loss, protect a committed final through its
+declarations, and answer language aggregates whose losing calls keep running.
+A separate execution per call, plus group services that kept their own ranks,
+would duplicate the Run's ordering authority and spend several records on
+every simple call. A loser that outlived its opener produced
 unobserved side effects; a loser abandoned on a crash destroyed declarations
 that [ADR 0042](0042-tool-attempts-are-atomic.md) protects.
 
 ## Decision
 
 The logical Run owns every call from admission through incorporation. Ordinary
-tool bodies are opaque, at-least-once recorded attempts in that opener's journal.
+tool bodies are opaque attempts recorded as Run rows keyed by
+`(owner, run, ordinal)`, each with a started row and an outcome under its
+`ExecutionPolicy`
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §5 and §7).
 Long work, independent lifetime, accepted intermediate state and hard isolation
-use an admitted process. A physical turn or process segment does not end its
+use an admitted process. A physical turn, a worker or a node does not end its
 logical opener.
 
 The [tool-run contract](../architecture/tool-run-contract.md) defines K0-K10 and
@@ -33,10 +36,11 @@ processes and tool-bearing host operation Runs.
 **live.** Aggregate selection cancels nothing; a losing call keeps running,
 exactly as a losing promise does in ECMA-262. Worker loss does not end an
 opener: an admitted call is recovered from its recorded admission while the
-opener lives. Every host journals, so no call is held only in memory (§14).
+opener lives. Every call's admission and outcome are rows, so no call is held
+only in memory (§14).
 
 **closing.** Entered by the logical owner's durable terminal transition (§7),
-never by a worker dying or a segment cut. New admission stops, cancel-eligible
+never by a worker or node dying. New admission stops, cancel-eligible
 calls become cancel-decided, and every call whose final committed drains its
 declarations, presentation and incorporation.
 
@@ -55,7 +59,7 @@ the program named.**
 operation_id }` or `Process { process_id }`.** `EffectOpener`
 (`crates/lash-core-store/src/effect_opener.rs`) is that identity, derived once by
 `EffectOpener::for_scope` from the `AdmittedScope`. It is stable across worker
-attempts and segments. A process opener is the process's minted id, which is
+attempts and owners. A process opener is the process's minted id, which is
 never reused ([ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md)),
 so two processes are two openers. Every logical turn a shift runs is opened by
 `Turn(logical run)`; a process-backed session turn runs its cells under the
@@ -72,32 +76,34 @@ declaration is exactly `may_defer`, `intents` and `isolated`. Bindings are
 recorded automatically; an unavailable admitted revision refuses with its typed
 cause before a body, route or new identity is selected.
 
-Replay serves the admitted request. It compares identity and request content
+Resume loads the admitted request. It compares identity and request content
 before fresh execution and never substitutes the live catalog or repeats
-preparation to repair drift. This is the per-call binding guarantee that
-[ADR 0103](0103-code-cells-replay-by-re-execution-on-every-host.md) relies on.
+preparation to repair drift. Code cells rely on this per-call binding when
+they resume from a VM snapshot (ADR 0132 §8).
 
 ### 2. Recorded attempts (K3)
 
 A owns canonical prepared input; each attempt X owns its output and captures.
-Coordination — retry eligibility, backoff wakes, completion-key derivation and
-deferred registration — runs in the owning handler and follows the recorded
-schedule, including its command prefix on replay. Only the atomic attempt runs
-inside a recorded body, which emits no journal command (ADR 0042). Coordination
-carries material references; a proposal is not a durable acknowledgement.
+Coordination — retry eligibility, backoff, completion-key derivation and
+deferred registration — runs in the owning actor and follows the recorded
+schedule. Only the atomic attempt runs inside a body, which writes no durable
+record of its own (ADR 0042). Coordination carries material references; a
+proposal is not a durable acknowledgement.
 
-Crash redelivery keeps `ToolCallId` and attempt ordinal. Only a reported retry
-advances the ordinal. Bodies deduplicate external side effects on `ToolCallId`.
-A successful physical return settles every issued local X through
-acknowledgement; failed-invocation recovery owns unfinished X.
+A round's admission and a started row for every member commit in one
+transaction before any body runs. A started `Once` member without an outcome
+records `Interrupted` and never runs again; a started `Repeatable` member runs
+again at the same ordinal, keeping its `ToolCallId`. A reported retry is a
+record with a due time, and the next attempt takes the next ordinal. Bodies
+deduplicate external side effects on `ToolCallId`. Finished members commit
+their outcomes in batches, one transaction per batch.
 
 ### 3. Execution authority and accepted work
 
 Admission retains the prepared caller environment, render record, admitted grant,
 owner, lineage and cancellation authority beside the prepared request. A call
-never invents an environment: replay, retry, a resumed segment and a successor
-all run from that recorded material, not from current session policy or a
-fresh admission. Environment bytes stay protected under their owner through
+never invents an environment: resume, retry and a new owner all run from that
+recorded material, not from current session policy or a fresh admission. Environment bytes stay protected under their owner through
 their last retained dependency.
 
 `RuntimeExecutionContext` is never serialized and there is no second
@@ -108,17 +114,18 @@ completion; they do not make unrecorded opaque I/O exactly-once.
 ### 4. Commit versus cancel arbitration
 
 **Cancellation requests are not cancellation decisions.** The final-attempt
-record and the cancel disposition compete at one durable, fenced point in the
-Run's journal, and D commits exactly one final-or-cancel decision. A committed
+record and the cancel disposition compete at one durable point in the Run's
+rows, fenced by the owner's epoch, and D commits exactly one final-or-cancel
+decision. A committed
 final retains settlement ownership and is protected from later cancellation. A
 cancel decision refuses any later final and any new semantic admission under
 the cancelled call. Signalling the body follows the decision and cannot reverse
 it. A final found after recovery is protected even if its live notification
 was never published.
 
-- **Declared starts.** The start's own journaled admission runs under the
-  call's cancel fence, so exactly one of launch admission and a cancel decision
-  lands first; an admitted launch still realizes on redrive
+- **Declared starts.** The start's own admission commits under the call's
+  cancel fence, so exactly one of launch admission and a cancel decision
+  lands first; an admitted launch still realizes on resume
   ([ADR 0116](0116-tools-are-opaque.md) §3.2).
 - **Cancel obligations.** A cancelled call whose runtime-owned source carries
   `CancelHint::CancelExternalWork` records and discharges its cancel obligation
@@ -126,7 +133,7 @@ was never published.
 
 ### 5. Rankability and intent order (L18)
 
-The §4 decision reserves the call's rank in the same journaled step; a retried
+The §4 decision reserves the call's rank in the same transaction; a retried
 decision allocates nothing. A call becomes rankable only after its own final
 intent outcomes and presentation. The seat publishes the reserved rank, so
 seats may land out of rank order, but a read is served only inside the seated
@@ -141,18 +148,18 @@ finish before presentation, which precedes incorporation.
 ### 6. Presentation and incorporation
 
 V owns distinct presentation bytes and incorporation. The recorded presentation
-boundary folds the ordered presentation steps once; replay serves the recorded
+boundary folds the ordered presentation steps once; resume loads the recorded
 model return and runs no completed body, hook, presenter or reducer. Bounded
 attempt stream observations emit only after accepted presentation.
 
 **Incorporation is an opener-owned, once-only mapping from each aggregate to its
 incorporated rank prefix**, distinct from each aggregate's consumption cursor.
-Before an externally effective continuation step, record the chosen prefix in
-that step's replay history, then apply it. Replay restores exactly that prefix
-and never adds later-available settlements retroactively, which could grant
-process possession earlier than the original execution did. The opener's phase
-contexts share one `IncorporationLedger`; it rides each journaled checkpoint and
-segment handover, so a resumed opener never incorporates a rank twice.
+Before an externally effective continuation step, commit the chosen prefix with
+that step, then apply it. Resume restores exactly that prefix and never adds
+later-available settlements retroactively, which could grant process
+possession earlier than the original execution did. The opener's phase
+contexts share one `IncorporationLedger`; it rides each committed checkpoint
+and VM snapshot, so a resumed opener never incorporates a rank twice.
 
 Possession is the authority this protects: a started process reaches the opener
 in the same realized outcome its projection is taken from. Refusing a late
@@ -165,8 +172,8 @@ program did not select.
 Only the logical owner's terminal path — every final turn exit and every process
 terminal, including failed and cancelled exits — records `Closing`, with its
 proposed terminal disposition, before stopping admission or issuing any
-cancellation. Worker loss and segment cuts do not. Recovery resumes closing
-whenever that fact exists.
+cancellation. Worker and node loss do not. Recovery resumes closing whenever
+that fact exists.
 
 **Finalization is an ordered, idempotent sequence**; a crash between steps
 resumes the first incomplete one:
@@ -188,44 +195,33 @@ letting losers run is Promise semantics. The divergence is at opener end, where
 Lash fences further unprotected semantic writes; it does not claim that external
 I/O already issued stops.
 
-### 8. Rank authority and consuming-bridge replay
+### 8. Rank authority and consuming-bridge resume
 
-The Run record in the opener's journal (`crates/lash-restate/src/controller/run_record.rs`)
-is the rank authority. There is no group service, payload service or separate
-rank store. Admission, decisions, ranks, protected drain, presentation and
-incorporation are commands of the owning invocation, so replay serves the same
-recorded prefix on whichever worker retries it.
+The Run rows in the lash store are the rank authority (ADR 0132 §5). There is
+no group service, payload service or separate rank store. Admission, decisions,
+ranks, protected drain, presentation and incorporation are committed facts of
+the owning actor, so resume loads the same recorded prefix on whichever node
+claims the actor.
 
 An aggregate's consumer reads its recorded selection schedule. Consumption on
-replay preserves the recorded prefix and never races calls again to decide an
-existing rank. A consuming bridge resumed in a successor reads the transferred
-Run, not the predecessor's futures.
+resume preserves the recorded prefix and never races calls again to decide an
+existing rank.
 
-### 9. Segments, bounds and retirement (K2/K6, L09/L13/L16)
+### 9. Bounds and retirement (K2/K6, L09/L13/L16)
 
-**A cut carries the entire logical Run.** `RequestCut` freezes admission;
-`Quiescing` keeps polling issued local attempts through durable acceptance;
-only then is the Run `Capturable`. A pending Deferred source can transfer while
-unresolved; a live inline attempt cannot. A boundary is never declined because a
-call is unsettled; declining at a non-capturable point stays correct.
-
-`RunTransfer` carries the event and independent-attempt prefixes, earlier and
-current aggregates, unconsumed and unseated finals, unranked source seals,
-canonical material, state frontier, capacity, admitted environment, owed starts
-and cancels, the incorporation ledger and VM continuation, for both `HandOver`
-and `JournalBudget`. Successor ownership is durable before the predecessor
-releases its lease, and adoption fences predecessor publication. Native futures,
-borrowed contexts and sockets never transfer. Turn and process owners share the
-codec while retaining their separate lifecycle transactions.
+A Run never moves between executions: its rows and the VM snapshot are its
+state, and a new owner continues from them. Native futures, borrowed contexts
+and sockets never cross an owner change; a live inline attempt on a lost owner
+follows its execution policy (§2).
 
 **The limit and its unit (FIG-4546).** The session's `max_tool_calls` is
 required host configuration with no default: recorded at creation, changed only
 by the core `set_max_tool_calls` command, and read from the record by every
-replay, redrive and reopen, so a changed limit never refuses accepted work. The
+resume and reopen, so a changed limit never refuses accepted work. The
 unit is the unique tool invocation; a timer is not counted, and operand
 positions are not host work (§10 L4). A cell counts every tool call it makes; a
 process counts the calls it holds at once, admitted, running or settled and
-still required. Admission reserves capacity atomically and replay reuses the
+still required. Admission reserves capacity atomically and resume reuses the
 reservation. A round that does not fit is refused whole, before anything is
 dispatched, with `RuntimeErrorCode::MaxToolCallsExceeded` and its typed cause
 `ToolCallLimitExceeded`. The refusal is the program's failure and is not
@@ -233,17 +229,16 @@ retried. Nothing is queued, paced or split. `batch` limits are
 [ADR 0116](0116-tools-are-opaque.md) §2.5's.
 
 **Retention follows dependencies.** Material is owner-qualified, role-tagged,
-digest-checked and journal-local or retained. Acquire leases before publishing a
-source or continuation reference. Settled work still required by replay, a
-consumer or protected drain reserves capacity. Retire an aggregate atomically
-only after every dependency ends, and keep its identity fence. Missing,
-retired, corrupt, wrong-owner or unavailable-revision material gives a typed
-retained-result refusal; it never starts a body. A measured handover copy is
-allowed and counted.
+digest-checked and retained with the Run's rows. Acquire leases before
+publishing a source or continuation reference. Settled work still required by
+resume, a consumer or protected drain reserves capacity. Retire an aggregate
+atomically only after every dependency ends, and keep its identity fence.
+Missing, retired, corrupt, wrong-owner or unavailable-revision material gives a
+typed retained-result refusal; it never starts a body.
 
-Generic scope retirement, process consumer holds and process journal pins retain
-their own jobs. External host tool-intent submissions retain first-outcome and
-owner-death fences; they are not a second tool execution journal.
+Generic scope retirement and process consumer holds retain their own jobs.
+External host tool-intent submissions retain first-outcome and owner-death
+fences; they are not a second tool execution record.
 
 ### 10. Aggregate laws
 
@@ -252,7 +247,7 @@ owner-death fences; they are not a second tool execution journal.
 and `all` and `allSettled` share `All`: they ask for the same thing and differ
 only in how far the caller consumes. The wake policy is recorded admission
 identity; the consumer mode is a caller-side loop decision and is never
-journaled.
+recorded.
 
 **L2 — the response algebra is total.**
 
@@ -277,7 +272,7 @@ mapping above unique calls, never two calls under one identity.
 **L5 — already-settled operands and preparation completions form a source-ordered
 immediate prefix ahead of newly admitted settlements.** All pending siblings are
 still admitted before that prefix can answer (§11 clause 3). The prefix and the
-mapping survive replay.
+mapping survive resume.
 
 **L6 — a loser's value is never synthesized.** No `undefined`, no
 `{status:"cancelled"}` smuggled into an `allSettled` array, no placeholder for a
@@ -294,9 +289,9 @@ mode. ADR 0086's comprehension rules are untouched.
 `SettledValue`, `ExhaustedRejections`. Infrastructure failure and cancellation
 are the ability's `Err`, which the VM raises as the uncatchable
 `AggregateHostControl` terminal — no guest `catch` sees it — and a live
-controller error is also recorded as the enclosing execution's nested effect
-error, so the cell aborts and is redriven rather than committing an outcome its
-aggregate never answered. The VM deduplicates a handle written twice into one
+infrastructure error commits nothing for the cell, so the cell aborts and
+recomputes from its last committed snapshot rather than committing an outcome
+its aggregate never answered. The VM deduplicates a handle written twice into one
 leaf and expands its outcome to every position.
 
 ### 11. Value model
@@ -316,9 +311,9 @@ it too.
    pending siblings before the immediate prefix can answer; skipping would make
    a side effect depend on an operand's arrival order.
 4. **A timer's start point is its admission, and its fulfilment value is
-   `undefined`.** Admission records the timer's deadline once from a journaled
-   clock sample; replay and reattachment reuse that deadline, and duplicate
-   positions share the same timer. Recovery never starts a fresh duration.
+   `undefined`.** Admission records the timer's deadline once as a due time on a
+   timer wait row (ADR 0132 §6); resume and reattachment reuse that deadline,
+   and duplicate positions share the same timer. Recovery never starts a fresh duration.
 5. **`Promise.race([])` never settles, faithfully.** ECMA-262 returns a
    forever-pending promise and there is no exception to catch. The dialect
    awaits aggregates in place and admits nothing for zero operands; the host
@@ -356,19 +351,21 @@ aggregates.
 ### 12. Deferred sources and process awaits (K4, L07)
 
 **Deferred completion is one immutable source seal.** The Run arms its admitted
-source before a body that may defer. A Deferred X releases its local attempt and
-keeps the call pending without D or V. The source authenticates its owner and
-resolver authority and seals exactly once: `Resolved(ref)` or `Cancelled`.
-Resolve-before-subscribe reads that same seal. Short subscriptions target the
-current segment; transfer rebinds them and ends the predecessor's interest. No
-long process-attach invocation owns a wait. A descriptor never wins an
-aggregate and never emits `ToolCompletion`.
+source, a wait row, before a body that may defer (ADR 0132 §6). A Deferred X
+releases its local attempt and keeps the call pending without D or V. The
+source authenticates its owner and resolver authority and seals exactly once:
+`Resolved(ref)` or `Cancelled`. The row exists from minting, so a resolution
+that arrives before the owner awaits finds it. No long process-attach
+execution owns a wait. A descriptor never wins an aggregate and never emits
+`ToolCompletion`.
 
 A resolved seal drains protected finalization, permitted state commands and
 presentation. Cancellation publishes no success commands; late completion
-cannot revive cancelled work. Tools own transport timeouts inside their bodies.
-Hosts bound Runs with cancellation and turn/no-progress limits. There is no
-runtime per-call deadline, timeout terminal or automatic reroute to a process.
+cannot revive cancelled work. A Deferred call's wait carries a `WaitDeadline`
+recorded before the wait starts; an expired one resolves
+`TimedOut { WaitDeadline }` (ADR 0132 §7). An inline attempt carries its
+`ExecutionLimit`, recorded before its body starts. There is no automatic
+reroute of a slow body to a process.
 
 **`processes.await(h)` is a call on a `ProcessTerminal` source.** Selection never
 cancels it: a winning timer in `race([processes.await(job), sleep(10_000)])`
@@ -378,59 +375,54 @@ crashes recovers it. Opener close releases the subscription without cancelling
 [ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)'s.
 A process terminal — success, failure or process cancellation — travels as a
 payload and is converted at the await site. Cancelling the await is host
-cancellation (`process_await_cancelled` in `crates/lash-restate/src/process/mod.rs`)
-and never a fabricated process terminal.
+cancellation (`process_await_cancelled`) and never a fabricated process
+terminal.
 
 ### 13. Usage
 
 Cancellation can reject a call's semantic result after provider tokens were
 spent. Each recorded model-call result retains the response's reported usage and
 sealed attempt history (ADRs 0031 and 0032), independently of selection. A
-replayed attempt is indistinguishable from a fresh one in what it reports. Tool
+re-sent `Repeatable` attempt is indistinguishable from a fresh one in what it
+reports. Tool
 settlements and incorporation carry semantic facts, with no usage ledger or
 accounting delivery.
 
 Hosts meter spend at the Provider seam (ADR 0127). They reserve before dispatch,
 settle every attempt's receipt, including failed partial responses, and retain
 request-id and attempt-ordinal identities for idempotent settlement. A call
-whose result is recorded is served on replay without dispatch. A crash before
-recording can repeat external spend, so Lash claims no exactly-once billing.
+whose result is committed is loaded on resume without dispatch. A crash before
+the result commits can repeat external spend for a `Repeatable` call, so Lash
+claims no exactly-once billing.
 Unreported usage stays absent; live trace delivery remains best effort.
 
 ### 14. Hosts and deployments (K0/K8, L11/L21)
 
 **No Run state is held only in memory.** Admission, decisions, closing and
-retained material are durable facts in the owning journal and its stores
-([ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md),
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)), so
-OS process death is worker loss and recovery reads the journal.
+retained material are durable rows in the lash store
+([ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md), ADR 0132), so
+OS process death is worker or node loss and recovery reads the rows.
 
 Hosts submit through `send()` and the engine's drive. A tool-bearing plugin task
-is an operation Run with explicit completion, reached through the existing
-session turn service. Hosts obtain its Run handle and follow, cancel or read
-its result. Session-lifetime work remains a process; tool-free administration
-retains its command scope.
+is an operation Run with explicit completion, owned by its session actor.
+Hosts obtain its Run handle and follow, cancel or read its result.
+Session-lifetime work remains a process; tool-free administration retains its
+command scope.
 
-Hosts obtain the SDK through `lash::restate::restate_sdk` or
-`lash_restate::restate_sdk`, and bind host and Lash handlers on one Endpoint.
-Changed handler command order or names move `JOURNAL_LOGIC_EPOCH` and its
-synthetic-next counterpart immediately. Stored shapes change in place during
-the pre-1.0 freeze. The predecessor retains its generation's drain lane.
-
-Transferred source waits must not pin an old deployment. Independently owned
-old work, process pins, delivery obligations and `unfinished_invocations` still
-block non-forced removal. Failure to query that evidence refuses removal; it
-never proves drained. See the [deployment guide](../operations/deploying-and-upgrading.md).
+Changing kernel code never requires a drain; a node of a new build claims a
+Run's actor when it reads the Run's stored formats
+([ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) §1). Stored
+shapes change in place during the pre-1.0 freeze. See the
+[deployment guide](../operations/deploying-and-upgrading.md).
 
 ### 15. Cost evidence (L15)
 
-Count the complete invocation tree through incorporation: source records,
-raw engine records, RPCs, canonical and transport bytes, application transactions,
+Count the transactions, rows and bytes of a call through incorporation, and
 serial waits and latency separately. Compare the same small Done workload at
-widths 1/2/16. Four records for a simple singleton and `1+3N` for independent
-Done calls are branch budgets, not totals for Deferred, retries, starts,
-cancellation or transfer. The child-invocation route is a failing four-record
-control; quiet-host release measurements remain a separate release gate.
+widths 1/2/16. Group commit makes a round's finished members one transaction
+per batch (ADR 0132 §5). Budgets per simple call come from the performance
+comparison against the measured baseline; quiet-host release measurements
+remain a separate release gate.
 
 ## Alternatives rejected
 
@@ -442,18 +434,17 @@ A loser abandoned with a recorded decision on a crash past the winner destroys
 recorded declarations between "final attempt recorded" and "declarations
 drained", and mistakes an interrupted opener for an ended one.
 
-An invocation per call with group services keeping their own ranks duplicates
-the engine's ordering authority, needs a second recovery path for every child,
-and costs several engine records per simple call. A second SQL settlement
-journal would make storage an effect engine.
+An execution per call with group services keeping their own ranks duplicates
+the Run's ordering authority, needs a second recovery path for every child,
+and costs several records per simple call.
 
-A runtime per-call deadline that stops a slow body and reroutes it to a process
-cannot preserve at-least-once body semantics or the body's own transport
-contract; long work is an explicit process.
+Rerouting a slow body to a process cannot preserve the body's execution policy
+or its own transport contract; long work is an explicit process, an isolated
+tool or a Pending tool, each with a bounded inline prefix (ADR 0132 §7).
 
 ## Consequences
 
-One journal orders every tool fact an opener owns, so replay, transfer and
+One set of Run rows orders every tool fact an opener owns, so resume and
 recovery read one record. Losing calls keep Promise semantics while the opener
 lives and stop at its end. Long-lived or isolated work names a process. Cost is
 measured per invocation tree rather than per service hop.
@@ -461,17 +452,15 @@ measured per invocation tree rather than per service hop.
 ## Implementation and laws
 
 - `crates/lash-core-store/src/tool_run/`: admission, material, Run fold, source
-  seal, transfer, retention and state frontier.
+  seal, retention and state frontier.
 - `crates/lash-core-execution/src/tool_dispatch/run_coordinator/`: attempts,
-  aggregates, protected drain, Deferred completion and capture/adoption.
-- `crates/lash-restate/src/controller/run_record.rs`: owning-journal recording.
-- `crates/lash-restate/src/durable_wait/source_seal.rs`: source authority and seals.
-- `crates/lash-restate/src/tests/run_coordinator_on_the_double/`: aggregate,
-  continuation and owner-recovery laws; `durable_wait_source_seal.rs` covers L07.
+  aggregates, protected drain and Deferred completion.
 - `crates/lash/src/tests/aggregate_oracle.rs`: the aggregate laws of §10 and §11
   on the product path.
+- The substrate lanes persist Run rows and wait rows under ADR 0132 §5 and §6.
 
-Storage laws use SQLite memory, SQLite file reopen and PostgreSQL. Execution
-hosts are the in-process Restate server double, live Restate and lash-sim's
-effect host. Upgrade witnesses use synthetic-next. A receipt must report the
+Storage laws use SQLite memory, SQLite file reopen and PostgreSQL. Laws run the
+production runtime over a fault-injecting store with labelled commits, a
+virtual clock and `SimNodes` (ADR 0132 §14). Upgrade witnesses use
+synthetic-next. A receipt must report the
 full test path and nonzero executed count; a listed target alone is no proof.

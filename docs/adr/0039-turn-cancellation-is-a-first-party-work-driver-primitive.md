@@ -9,49 +9,42 @@ authorization policy to them.
 
 ## Decision
 
-`TurnWorkDriver::request_cancel` races normal completion through a reserved,
-first-writer-wins keyed promise. The accepted request carries a request id,
-optional opaque origin and optional reason. A normal completion seals the
-gate, and later requests report `CompletionWonRace`. A second reserved
-promise publishes terminal evidence after commit. Semantic session and turn
-identity keeps the keys stable across owner loss.
+`TurnWorkDriver::request_cancel` writes a cancel request row to the session
+actor's mailbox and wakes the actor, including a parked one
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §3 and
+§11). The accepted request carries a request id, optional opaque origin and
+optional reason. It races normal completion at one fenced point: the turn
+commit and the cancellation decision are both owner transactions of the
+session actor, so exactly one commits first. After a turn commit wins, later
+requests report `CompletionWonRace`. Semantic session and turn identity keeps
+the request address stable across owner loss.
 
-The configured effect host owns these promises. The request receipt describes
-addressing the gate; it does not prove that execution has stopped. The
-running or replayed owner observes the gate, honours cooperative cancellation
-and commits `TurnStop::Cancelled { evidence }`. Durable request rows are
-intent and receipt projections, not a stop channel or a second arbitration
-result. No waiter polls those rows to discover cancellation.
+The request receipt describes addressing the turn; it does not prove that
+execution has stopped. The owner, the current one or the one that claims the
+actor after it, reads the request with its mail, honours cooperative
+cancellation and commits `TurnStop::Cancelled { evidence }`. The mailbox row
+is the stop channel and the turn commit is the arbitration result; the owner
+learns of a request through its mail flag, and nothing polls the rows.
 
-Closing the reserved cancel, escalation and terminal promises is a
-crash-completable protocol. Before closure, the current shift fence authorizes
-one non-overwritable operation containing the control binding, admitted scope,
-keys, proposed base terminal and observed intent revision. An identical retry
-adopts it; a different operation conflicts. A successor may finish its exact
-promise resolutions. Final publication depends on the session-head CAS,
-settled cancellation facts and the authorization, not the authorizing fence's
-epoch. Activation repair validates its current shift fence and drains pending
-closures before doing new work.
-
-Promise resolution and SQL mutation are separate authority domains. The
-retained authorization bridges a crash between them. Unknown or revoked
-promise evidence fails typed and leaves the authorization pinned. Destructive
-session or scope cleanup refuses while matching closure pins remain. An intent
-CAS refusal retries the refreshed predicate without rerunning model calls or
-restaging usage.
+The cancellation decision, its terminal evidence, the settled cancellation
+facts and the session-head compare-and-set commit in the turn commit's one
+transaction (ADR 0132 §4). No crash separates them, so no closure
+authorization bridges two authority domains. An intent CAS refusal retries the
+refreshed predicate without re-sending model calls.
 
 Opaque origins are host data. Internal token cancellation synthesizes an
 `internal:<turn_id>` request identity; a raw cancellation token records no
-invented origin. Engine invocation cancellation or kill is host recovery under ADR 0110 and
-does not prove a Lash `Cancelled` result. Cooperative stop cannot guarantee
-that detached tasks or non-cooperative external work have stopped.
+invented origin. Killing a node is host recovery: another node claims the
+actor after the reap (ADR 0132 §3), and the kill does not prove a Lash
+`Cancelled` result. Cooperative stop cannot guarantee that detached tasks or
+non-cooperative external work have stopped.
 
 ## Cancel modes: immediate abort and after-step stop
 
 `Immediate` feeds accepted evidence into the cooperative token and can unwind
 provider, tool and durable-wait work. Its uncommitted tail returns to the last
-checkpoint. Journaled start, after-model and after-step gates preserve the
-observed decision on replay.
+checkpoint. The start, after-model and after-step gates commit the decision
+they observe with the phase they end, so a resumed turn keeps it.
 
 `AfterStep` lets the current protocol iteration finish, including its tool
 calls and accepted checkpoint, then honours the request at the step boundary.
@@ -95,15 +88,14 @@ winner's request id.
 ## Consequences
 
 A host offering stop-all retains exact turn ids and submits exact requests.
-Session-wide guessing and invocation-id stop are rejected because they can
+Session-wide guessing and node-kill stop are rejected because they can
 address the wrong turn or destroy an owner without a Lash outcome. Turning a
 foreground turn into a Process is rejected because its lifecycle is
-session-owned. Store-polled cancellation is rejected because it adds a second
-coordination protocol beside the authoritative promise gate.
+session-owned. A cancel channel outside the session actor's mailbox is rejected because it
+adds a second coordination protocol beside the fenced commit.
 
 ## Implementation
 
 - [Addressed control and arbitration](../../crates/lash-core-execution/src/runtime/turn_control.rs).
-- [Closure authorization contract](../../crates/lash-core-store/src/store/mod.rs) and [closure evidence](../../crates/lash-core-store/src/turn_control_vocabulary.rs).
+- [Cancellation evidence](../../crates/lash-core-store/src/turn_control_vocabulary.rs).
 - [Cancel modes and input policy](../../crates/lash-sansio/src/session_model/mod.rs).
-- [Promise-owner settlement](../../crates/lash-core-execution/src/runtime/effect/executor/turn_control_authority.rs).

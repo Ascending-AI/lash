@@ -115,7 +115,7 @@ execution commands consume IR and shared values, not source syntax.
 `processes.create` lowers its source through the session's dialect and hands
 the process engine IR.
 
-The journaled clock/random module is `__lashlang_runtime`, its receiver type
+The clock/random module is `__lashlang_runtime`, its receiver type
 is `lashlang.Runtime`, and its host operation is `lashlang.runtime`. Internal
 modules in the reserved `__` namespace are hidden from the model. Durable
 engine, process and effect identifiers keep their Lashlang spellings.

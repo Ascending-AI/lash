@@ -2,23 +2,24 @@
 
 ## Context
 
-A tool body is opaque host code. Lash cannot discover or independently journal
-each network call, database write or timer inside it. Nested durable commands
-inside a recorded body also violate an ordinal-addressed engine's journal
-contract.
+A tool body is opaque host code. Lash cannot discover or independently record
+each network call, database write or timer inside it. A body is one admitted
+execution with a started row and an outcome
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §5); nested
+durable commands inside it would have no phase of their own to commit.
 
 ## Decision
 
 One prepared tool attempt is one recorded `ToolAttempt` outcome. Every tool
 provider implements `execute(ToolCall) -> ToolAttemptOutcome` and receives
-sealed, controller-free `AttemptContext`. A body has no journal-capable
+sealed, controller-free `AttemptContext`. A body has no durable
 process administration or recursive batch dispatch. If it needs a result later,
 it returns Pending; if it needs to cause durable work, it returns an intent.
 ADR 0116 defines this tool interface.
 
 `ToolCall` carries one immutable manifest. The dispatcher owns admission and
 routing. `ToolCallId` is mandatory Lash identity for the admitted logical call;
-provider call ids are correlation only. Crash replay and reported-failure
+provider call ids are correlation only. Crash recovery and reported-failure
 retries preserve `ToolCallId`, while `attempt_number` identifies the attempt
 (ADR 0117). Authors key external idempotency on the logical call id.
 
@@ -31,19 +32,19 @@ declarations are discarded.
 
 A direct model completion inside the attempt runs locally as part of its
 opaque work, with ordinary request planning and outcome bookkeeping. It does
-not submit a nested durable Direct invocation. Multi-step durable composition
+not admit a nested durable execution. Multi-step durable composition
 belongs in an explicit process body.
 
 The runtime records the final attempt before realizing its declarations.
 Within that attempt, declarations are admitted in source order. Realization
-uses recorded payload and stable replay identity. It does not reread live tool
+uses recorded payload and stable admitted identity. It does not reread live tool
 visibility or host configuration as a new admission gate. Unknown, terminal
 and conflicting command outcomes remain typed recorded outcomes.
 
 Hosts can submit typed declarations through `ToolIntentIngress`, bound to a
 session and execution scope. Identity validation happens before realization.
-The engine's journal owns replay; an external invocation is not automatically
-an idempotency lookup. Child lifetime and scope-end settlement are registration
+Committed outcome rows answer recovery; an external submission is not
+automatically an idempotency lookup. Child lifetime and scope-end settlement are registration
 facts governed by ADRs 0094 and 0108.
 
 Standard `batch` is protocol sugar expanded into the turn's admitted tool round. `spawn_agent` is an ordinary opaque tool returning Pending with a
@@ -59,7 +60,7 @@ durable fenced decision point (ADR 0099):
 - A final record that wins retains settlement ownership. Recovery finishes its
   declarations and projection before the scope reports success.
 - A cancellation decision that wins refuses subsequent final recording typed,
-  without a journal write. Cooperative signalling and grace cannot reverse it.
+  without writing an outcome. Cooperative signalling and grace cannot reverse it.
 - Worker loss does not cancel a recorded declaration. Cancellation does not
   undo admitted commands or destroy retained descendant obligations.
 
@@ -70,20 +71,21 @@ inside one attempt.
 
 Retries, completion-key derivation, Deferred subscription, final decision and
 protected drain run in the owning Run coordinator. Only the opaque body runs
-inside X. Each attempt records its own result; replay of a durable result runs
-no body. The admitted executable and prepared input supply recovery, so a
+inside X. Each attempt records its own result; resume of a committed result
+runs no body. The admitted executable and prepared input supply recovery, so a
 caller does not reconstruct an independent child handler.
 
 ## Consequences
 
-Replay of a recorded outcome returns it without invoking the body again. A
-crash after an external write but before recording the outcome can run the
-whole attempt again; model work can be billed again. Attempts are at-least-once.
-`ToolRetryPolicy::Never` prevents a retry after a reported failure, not crash
-re-execution of an unrecorded outcome (ADR 0110).
+Resume of a committed outcome returns it without invoking the body again. A
+crash after the started row commits but before the outcome commits follows
+the call's `ExecutionPolicy` (ADR 0132 §5 and §7): a `Once` attempt records
+`Interrupted` and never runs again; a `Repeatable` attempt runs again at the
+same ordinal, so its external writes and model work can repeat. A reported
+failure retries only as the recorded policy admits (ADR 0110).
 
-Tool-body memos, an action ledger and a replay opt-in are rejected because they
-create another durability contract inside opaque code. Authors make external
+Tool-body memos, an action ledger and a body-level replay opt-in are rejected
+because they create another durability contract inside opaque code. Authors make external
 writes idempotent when needed and place independent durable boundaries in
 process steps. World readiness, such as artifact loading, belongs in process
 preparation or execution; it is not a store-dependent start-admission verdict.

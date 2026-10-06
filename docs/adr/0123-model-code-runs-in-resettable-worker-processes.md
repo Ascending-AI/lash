@@ -66,14 +66,14 @@ and `VmInstance::resume` answers that request. Nothing crossing the
 interface borrows:
 
 - A run returns `VmStep::Suspended { request }` (an ability operation, a
-  cancel checkpoint, or in process mode a segment boundary),
+  cancel checkpoint, or in process mode a snapshot point),
   `VmStep::Parked` (a durable continuation), `VmStep::Complete` or
   `VmStep::GuestError`.
 - A resume consumes the answer to the pending request; one that answers a
   different request is refused and leaves the run suspended.
 - `VmContinuation` carries `resume: VmResumePoint`: `NextInstruction`, or
   `ReissueOperation { operation, loop_phase }` when the continuation must
-  issue an operation again. A signal wait handed to a successor reissues
+  issue an operation again. A signal wait restored from a snapshot reissues
   its wait. A run parked while awaiting an effect (section 8) reissues the
   resource operation, resource-operation batch, process await or sleep it
   was waiting on: the VM rewinds to the operation's instruction, pushes its
@@ -120,11 +120,11 @@ policy.
   reads back an `RlmWorkerCapture` (the header and the changed and
   unchanged fragments). Both deny unknown fields, so a capture that names a
   grant is refused. Deferred tool outcomes have one durable home in the
-  journaled resolution effect. The parent keeps an in-memory `DeferredLink`
+  recorded resolution. The parent keeps an in-memory `DeferredLink`
   while executing the cell; the snapshot carries no copy. The root takes
   `deferred_trigger_resolutions` from the parent's own state.
-- A process segment's worker returns the VM bytes of its continuation only;
-  the segment's ledgers and route stay in the parent's envelope.
+- A process body's worker returns the VM bytes of its continuation only;
+  the body's ledgers stay in the parent's envelope.
 - Laws: `rlm_worker_envelope_carries_no_grant_or_binding` (a sentinel in an
   `execution_binding` never appears in worker-bound or worker-returned
   bytes) and `worker_returned_state_cannot_replace_parent_authority` (a
@@ -146,7 +146,7 @@ only through
 `restore_durable_parts`): `VmContinuation` exposes no general
 `Deserialize` implementation, and the protocol crate depends on nothing that
 could decode the bytes. `parent_state_decode_never_compiles_regexp` pins both halves: the
-parent's decode of a segment whose continuation holds an invalid pattern
+parent's decode of a snapshot whose continuation holds an invalid pattern
 succeeds, and only the worker's open refuses it.
 
 ### 6. The protocol
@@ -201,8 +201,8 @@ transport or pool:
   frame that cannot encode is `WorkerLimit::Frame`, carrying the message kind,
   complete encoded size and bound. Encoding counts without retaining bytes
   past the cap, and the outgoing fence advances only after encoding succeeds.
-  These deterministic limits are recorded, never retried. Journaled effect
-  results stay journaled even when they exceed the delivery bound. The RLM
+  These deterministic limits are recorded, never retried. Recorded effect
+  results stay recorded even when they exceed the delivery bound. The RLM
   plugin result retains the typed limit in `CellFailure::worker_limit`; a
   process terminal retains it in its structured failure data (FIG-4475,
   FIG-4476).
@@ -227,17 +227,21 @@ transport or pool:
 
 ### 7. Durability
 
-Determinism is not a goal; durability is. When a worker dies, the parent
-fences the transport lease, settles every operation it already admitted
-within its invocation, and returns a typed retryable infrastructure failure
-so the owning substrate invocation is redriven. The VM and its counters
-are rebuilt only by real journal replay, never by resetting ordinals
-locally inside a live invocation. A replacement attaches to a still
-addressable operation rather than dispatching another, and no recorded
-effect executes twice. A checkpoint commits VM bytes and the parent's
-counters and ledgers together. Cancellation stays the journaled
-instruction-checkpoint observation of ADR 0039: a physical kill after a
-grace period does not decide precedence.
+Determinism is not a goal; durability is. The parent commits, in one
+transaction, the next VM snapshot revision, the broker ledger that matches it,
+and the admission of every operation the VM issued since its last snapshot;
+bodies start only after that commit
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8). When a
+worker dies, the parent fences the transport lease, settles every operation it
+already admitted, and returns a typed retryable infrastructure failure. The
+run resumes from its last committed snapshot: on restore the saved outcome of
+each admitted operation is fed back in, and no earlier host operation runs
+again. Ordinals are admitted operation identities, never reset locally. A
+replacement attaches to a still addressable operation rather than dispatching
+another. A `Once` operation admitted without an outcome records `Interrupted`;
+no recorded effect executes twice. Cancellation stays the recorded
+instruction-checkpoint observation of ADR 0039: a physical kill after a grace
+period does not decide precedence.
 
 ### 8. The broker
 
@@ -263,8 +267,8 @@ belongs to the transport, which reports a silent worker as
   request the next ordinal and derives its `ToolCallId`s through
   `CodeCallIdentities` (ADR 0117 §2), the one derivation both Lashlang
   hosts also mint from. Each admission carries a fingerprint (BLAKE3 over
-  the canonical request) that the journal retains, so a redriven run that
-  asks something different at a recorded ordinal fails with
+  the canonical request) that the admission row retains, so a resumed run that
+  asks something different at an admitted ordinal fails with
   `RetainedRequestDrift` instead of reusing the recorded answer.
 - **Fencing.** A message whose lease, owner epoch, frame epoch or sequence
   is not the next one is a protocol violation, and so is a request id that
@@ -272,28 +276,25 @@ belongs to the transport, which reports a silent worker as
   violation is acted on.
 - **Recovery goes through the substrate.** When a worker is lost (a crash,
   EOF, an unresponsive transport or a violation), the broker kills it,
-  settles the operation already admitted, within `BrokerBounds` and in the
-  same invocation, and returns `BrokerFailure::WorkerLost`, which is
-  retryable. The substrate redrives the invocation: the new attempt starts
-  from the last committed checkpoint, re-admits from the checkpoint's
-  ordinals, and gets each recorded answer back from the journal with no
-  second dispatch. The broker never restarts a run, rewinds a counter or
+  settles the operation already admitted, within `BrokerBounds`, and returns
+  `BrokerFailure::WorkerLost`, which is retryable. The run resumes from its
+  last committed snapshot, and each admitted operation's saved outcome is fed
+  back in with no second dispatch. The broker never restarts a run, rewinds a counter or
   retries an effect locally. A partial frame is refused and the last
   checkpoint kept, and a fully received `Complete` wins over a later EOF.
 - **Park on effect releases the slot.** When a parkable request's effect
   needs a worker of its own (nested compilation, a nested run, the body of
   an awaited process), the broker answers `Park`. The worker serializes the run. The broker holds that
-  continuation
-  within the invocation without committing a checkpoint, and the slot goes
-  back to the pool before the effect is performed. On the
+  continuation in memory, and the slot goes back to the pool before the effect
+  is performed; a crash meanwhile resumes from the last committed snapshot. On the
   outcome the broker checks a worker out again, resumes the continuation,
   and hands the held outcome to the reissued request, matched by
   fingerprint. A pool of one slot therefore completes a nested
   compilation, or a cell that awaits a process it started, instead of
   deadlocking.
 - **Cancellation.** A stop sends `Cancel` and waits the grace period
-  before a physical kill. The run ends `Cancelled` only when the journal
-  observed the cancellation at an instruction checkpoint (ADR 0039);
+  before a physical kill. The run ends `Cancelled` only when the cancellation
+  was observed at a recorded instruction checkpoint (ADR 0039);
   otherwise it ends `Interrupted`. The kill itself decides nothing.
 - **Frames.** `VmSession::open_frame` advances the frame fence, opens the
   frame in the checkpoint store and waits, bounded, until every run of an
@@ -305,11 +306,11 @@ belongs to the transport, which reports a silent worker as
   frame, and an identical re-commit is a no-op. `BrokerBounds::standard()`
   uses a 30-second settle deadline and a one-second cancellation grace.
 
-The conformance laws `vm_broker_tests!` use an in-process worker double and
-journal effects through the tier's controller. The store matrix is SQLite
-memory, SQLite file and PostgreSQL; hosts are the in-process Restate server
-double, live Restate and lash-sim's in-process effect host. Upgrade proofs use
-the synthetic-next tier. The broker law macro registers:
+The conformance laws `vm_broker_tests!` use an in-process worker double. The
+store matrix is SQLite memory, SQLite file and PostgreSQL; laws run the
+production runtime over a fault-injecting store with labelled commits, a
+virtual clock and `SimNodes` (ADR 0132 §14). Upgrade proofs use the
+synthetic-next tier. The broker law macro registers:
 
 - `worker_kill_before_start_runs_no_effect`
 - `worker_kill_mid_compute_redrives_through_the_substrate`
@@ -331,13 +332,13 @@ environment. The entry closes inherited descriptors except its IPC socket
 before running the worker server. The pool bounds checkout, queue size,
 process count, deadlines, cumulative CPU and replacement attempts. Clean
 release resets the worker; a crash, protocol failure or exhausted limit
-discards it. Pool accounting stays parent-owned across redrive.
+discards it. Pool accounting stays parent-owned across resume.
 
 Async compiler and guest-state callers use `ServiceRuntimeOps::request_accounted`.
 It checkpoints worker accounting around a blocking-pool task; the synchronous
 checkout and framed exchange are private to that seam. Cold pool creation also
 runs on the blocking pool. Pool saturation remains a typed host failure across
-plugin and tool-attempt boundaries, so the engine retries or parks the attempt
+plugin and tool-attempt boundaries, so the attempt is recomputed or parks
 without recording a tool refusal. Guest compile refusals remain tool results.
 
 This provides crash containment, rather than an OS sandbox. Lash installs no
@@ -428,44 +429,36 @@ Parent adapters retain opaque VM bytes and worker-verified structural metadata.
 Cells and process bodies reserve their parent-admitted code scope on the
 backend before model work starts. The reservation records consumed attempts,
 known cumulative CPU, unknown CPU attempts, and whether a worker is active.
-Worker release settles measured CPU before parent callbacks. Park/resume and
-segment handover keep the same attempt. A failed or interrupted active attempt
-requires a replacement attempt on substrate redrive; the reservation prevents
-that redrive from receiving fresh counters. Fenced settlement prevents an older
-parent from overwriting a successor's totals.
+Worker release settles measured CPU before parent callbacks. Park and resume
+keep the same attempt. A failed or interrupted active attempt requires a
+replacement attempt when the run resumes; the reservation prevents a resumed
+run from receiving fresh counters. The epoch fence prevents a stale owner from
+overwriting the current owner's totals.
 
 Parent loss during an active attempt records its CPU as unknown. It consumes
-an attempt without inventing measured usage or preventing durable redrive.
-Repeated losses exhaust the typed attempt bound. Each attempt has a CPU cap,
-so the worst-case work bound is `(attempts × per-attempt CPU cap) + known CPU`.
-Known CPU and consumed attempts remain monotone across redrives. SQLite and
-PostgreSQL store this accounting independently of positional effect journals.
+an attempt without inventing measured usage or preventing resume. Repeated
+losses exhaust the typed attempt bound. Each attempt has a CPU cap, so the
+worst-case work bound is `(attempts × per-attempt CPU cap) + known CPU`. Known
+CPU and consumed attempts remain monotone across resumes. The VM snapshot
+carries the totals consumed so far, so a resumed run's first reservation
+seeds its scope with them before any worker launches. SQLite and PostgreSQL
+store this accounting beside the snapshot.
 
-A process body reserves one scope per segment boundary. The engine re-executes
-a segment that already handed over while its successor runs live: Restate
-replays the handler from the start on each resumption. A shared scope would
-let that replay count the successor's active worker as a lost attempt and
-fence its settlement. The segment state a boundary hands over carries the
-boundary count and the totals consumed so far. The successor's first
-reservation seeds its scope with those totals before any worker launches, so
-the totals stay monotone across the whole process.
-
-The reservation is live accounting read outside every recorded step, so its
-answer decides nothing the journal holds (ADR 0105 §1). A process body whose
-reservation is refused fails its attempt retryably and issues no command. A
-terminal proposed there would sit at a position where a re-execution's journal
-already holds the body's commands. A body whose budget stays exhausted parks
-once its engine's bounded retry runs out.
+The reservation is live accounting, read outside every deciding transaction,
+so its answer decides nothing that is committed (ADR 0105 §1). A process body
+whose reservation is refused fails its attempt retryably and issues no
+operation. A body whose budget stays exhausted parks with `ActivationLoop`
+once its activation budget is spent (ADR 0132 §3).
 
 The same holds for every verdict of the host's worker budget, pool capacity or
 recovery store, wherever it is met: a refused reservation, a deadline or the
 cumulative CPU or attempt bound met mid-run, a full queue, a checkout timeout
-or a restart storm. A replay reaches such a verdict at another position, and
-another host with capacity not at all, so it is never an execution's recorded
-outcome. A process body fails its attempt retryably. An RLM cell fails its
-attempt retryably too: it seals nothing, the model never sees the verdict, and
-the turn journals nothing after it, not even its cancellation peek, since the
-retry runs the cell again. Only a limit the run itself exhausted — fuel, heap,
+or a restart storm. Another node with capacity would not reach it, so it is
+never an execution's recorded outcome. A process body fails its attempt
+retryably. An RLM cell fails its attempt retryably too: it commits nothing,
+the model never sees the verdict, and the turn commits nothing after it, not
+even its cancellation reading, since the retry runs the cell again from the
+last committed snapshot. Only a limit the run itself exhausted — fuel, heap,
 frame depth, its observation stream, or its encoded effect values, VM state
 and frames, measured against their bounds, is recorded: the process terminal
 `process_execution_bound_exhausted`, or the cell's program failure (FIG-4451,
@@ -484,11 +477,9 @@ A missing or unexecutable configured worker is a typed `WorkerDeployment`
 fault carrying the executable path. The shared spawn seam classifies ENOENT,
 EACCES and ENOEXEC; synchronous and async pool callers retain that cause.
 It is non-transient and records no guest result. The turn writes a durable
-`WorkerDeployment` park on its first refusal, and the standard park path
-pauses its engine invocation after eight attempts with its journal retained.
-No Lash transient retry budget is spent. Supplying an executable at that path
+`WorkerDeployment` park on its first refusal, keeping its committed state. No
+Lash transient retry budget is spent. Supplying an executable at that path
 lets an operator redrive the same run to completion (FIG-4776).
-
 
 An owned child also installs a kernel CPU ceiling before guest work, from its
 current process CPU and the configured execution CPU budget. It remains
@@ -522,15 +513,16 @@ capture declines and the host answers the await in place. Decoding refuses a
 larger count, and a reissued await whose carried results do not match its walk
 is refused.
 
-This representation keeps the host contract and the journal unchanged: each
-handle keeps its own admitted operation and ordinal, a straight-through run
-and a parked one issue the same awaits in the same order, and journal replay
-after a parent crash lines up position for position. Two alternatives are
+This representation keeps the host contract and the admitted operations
+unchanged: each handle keeps its own admitted operation and ordinal, and a
+straight-through run and a parked one issue the same awaits in the same
+order, so a run restored from its snapshot after a parent crash feeds each
+admitted await its saved outcome. Two alternatives are
 rejected. Reissuing the whole aggregate on resume would await settled handles
 again, so the reissued request would not match the held operation and
 each resume would admit fresh ordinals. One host await over the whole
 aggregate would change the `Await` ability for every host and merge
-separately journaled waits into one operation.
+separately admitted waits into one operation.
 
 A resource-operation batch is one host operation, so it parks as
 `VmSuspendedOperation::ResourceOperationBatch` and reissues the same batch.

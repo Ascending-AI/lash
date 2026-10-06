@@ -27,11 +27,13 @@ Runtime sites add their site kind under that node. Process-root graph nodes
 have no runtime site. A lifted literal's owner contains its body digest.
 
 Version identity stays on the document as `source_identity`, and trace identity
-also carries `module_ref`. Effect addressing has a separate owner. VM commands
-are named positionally by issue ordinal through `CodeCallIdentities`; node id,
-occurrence, and telemetry attempt do not name external effects. A process
+also carries `module_ref`. Effect addressing has a separate owner. VM operations
+are named by their admitted issue ordinal through `CodeCallIdentities`, which
+commits with the VM snapshot
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8); node
+id, occurrence, and telemetry attempt do not name external effects. A process
 opener contains the minted process id. Editing a structural node cannot weaken
-the journal's command addressing contract.
+that admitted identity.
 
 Evidence: `crates/lashlang/src/workflow_graph.rs::workflow_node_id`,
 `crates/lashlang/src/tracking.rs:50`,
@@ -100,21 +102,21 @@ Evidence: `crates/lash-trace/src/lashlang_graph/model.rs:24`,
 
 Result incorporation records the first `PROCESS_EFFECT_OCCURRENCE_CAP`, 8,
 occurrences per effect node. Each contains node id, occurrence, operation,
-outcome class, optional code, and replay key, with no payload, timing, or
-attempt. Later occurrences contribute to bounded omission counts. Replay-stable
-progress and pending entries travel in segment state.
+outcome class, optional code, and idempotency key, with no payload, timing, or
+attempt. Later occurrences contribute to bounded omission counts. Progress and
+pending entries travel in the VM snapshot.
 
 Pending occurrences commit at the next process boundary: entering or clearing
 a wait, a body event, or terminal completion. They are the prelude of that
 boundary's atomic event batch; terminal batches add omissions before the
-terminal event. A segment boundary carries state and commits no summary itself.
+terminal event. A snapshot carries state and commits no summary itself.
 The fold updates the process projection and change clock as one committed batch.
 
-Repeating an equal replay key is a no-op. A different payload under it refuses
-the batch. Failed summary incorporation is infrastructure failure for redrive,
-not an error delivered to the program. Restate rebuilds through journal replay
-and segment state. This does not promise exactly-once external I/O before the
-journal settles. Pure computations, branches, and iterations gain no durable
+Repeating an equal idempotency key is a no-op. A different payload under it
+refuses the batch. Failed summary incorporation is infrastructure failure: the
+process resumes from its last committed snapshot, and the failure is not an
+error delivered to the program. This does not promise exactly-once external
+I/O for an effect whose outcome has not committed. Pure computations, branches, and iterations gain no durable
 summary events.
 
 Evidence: `crates/lash-core-execution/src/runtime/process/effect_summary.rs:26`,
@@ -125,7 +127,7 @@ Evidence: `crates/lash-core-execution/src/runtime/process/effect_summary.rs:26`,
 ### R5: attempt is telemetry identity only
 
 Attempt distinguishes telemetry observations and trace deduplication. It does
-not enter effect replay keys, group keys, or Restate command addresses. Process
+not enter effect idempotency keys, group keys, or admitted operation identities. Process
 identity is the minted id, with no additional process-incarnation component.
 
 Evidence: `crates/lash-trace/src/lashlang_graph/model.rs:24`,
@@ -223,9 +225,8 @@ fold bounded telemetry, and read durable effect outcomes without storing a
 trace history. Carrier owners enforce decode policy and published schemas.
 Evidence includes graph carrier laws, trace fold/schema tests, process
 observation tests, event-page SQL pins, and event-batch conformance.
-Store laws use SQLite file, SQLite memory, and PostgreSQL. Host laws use the
-in-process Restate server double, live Restate, and lash-sim's in-process effect
-host. Upgrade proofs use synthetic-next.
+Store laws use SQLite file, SQLite memory, and PostgreSQL. Laws run the production runtime over a fault-injecting store with labelled commits, a virtual clock and `SimNodes` ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §14). Upgrade
+proofs use synthetic-next.
 
 ## Model usage
 

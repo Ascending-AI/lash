@@ -25,7 +25,7 @@ before its surrounding commit. Intent hashing uses the typed
 transport authority, fencing and clock observations do not.
 
 Stores derive commit identity from received content rather than accepting a
-caller-supplied intent hash. Receipt replay validates the appropriate commit
+caller-supplied intent hash. A retried commit validates against its receipt the appropriate commit
 and append identity and returns stored realization. Graph rows, head and
 receipt publish atomically. The runtime adopts that realization, including
 store-observed values, rather than its retry proposal.
@@ -43,13 +43,14 @@ than accumulate observation history (ADR 0048).
 
 Reachability comes from parent edges and each session's retained revisions.
 A fork adds a root over the shared prefix. A process registry row does not
-implicitly root stored history; pins remain explicit. Effect journals
-are owned by the configured engine, with stable identities joining their outcomes to
-session commits across transaction domains.
+implicitly root stored history; pins remain explicit. Phase records live in the
+same store as session history and commit in the same transactions
+([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §4).
 
 A session id is host-provided and single-use in its store (ADR 0049).
 History and frame identity therefore use that id directly. Ingress admission
-and settlement use run bindings under the sealed shift fence (ADR 0101).
+and settlement use run bindings under the session actor's epoch fence
+(ADR 0101).
 
 ## Store leaf validation versus caller branch liveness
 
@@ -83,8 +84,7 @@ upsert invitation. Caller branch-liveness checks permit concurrent appends and
 do not grant exclusivity. Full graph replacement and in-place rewind are
 rejected because they weaken immutable identity and branch fencing.
 
-Reclamation is host-scheduled and lifecycle-gated. SQL session commits and
-engine journals remain separate transactions with explicit stable identities.
+Reclamation is host-scheduled and lifecycle-gated.
 
 ## Attachment prefix retention
 

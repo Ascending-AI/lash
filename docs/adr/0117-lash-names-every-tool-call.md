@@ -22,15 +22,16 @@ idempotency in the window between an effect and the durable record of its result
 ### 1. Every admitted tool call has one `ToolCallId`
 
 Every admitted logical tool call has a mandatory `ToolCallId`. The admission
-root and source position determine it before execution. Crash replay and
-reported-failure retries preserve it. A fresh logical call gets a distinct id,
+root and source position determine it before execution. Crash recovery,
+`Repeatable` ordinals and reported-failure retries preserve it. A fresh logical call gets a distinct id,
 even when the model repeats the provider id.
 
-Tools remain opaque, atomic and at-least-once. A tool uses `call_id` as its
+Tools remain opaque and atomic, and each attempt follows its recorded
+execution policy ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §7). A tool uses `call_id` as its
 external idempotency key. If it needs per-attempt freshness, it combines the id
 with `attempt_number`. Business deduplication across distinct logical calls
 belongs to the service's domain key and fingerprint. Multi-effect durability
-belongs to process steps, rather than a tool-body memo store or replay opt-in.
+belongs to process steps, rather than a tool-body memo store or a body-level re-run opt-in.
 
 ### 2. The derivation
 
@@ -58,7 +59,7 @@ submission needs a fresh admission. The default deployment namespace is empty.
 | 4 | Content index | Full response index before filtering |
 | 5 | Batch member | Original index, written only by `child` |
 | 6 | Code opener | Canonical opener identity encoding |
-| 7 | Code cell | Cell replay key |
+| 7 | Code cell | Cell admission key |
 | 8 | Code command | Whole-program issue ordinal |
 | 9 | Code aggregate | Leaf's first-appearance index |
 
@@ -71,13 +72,13 @@ and completion order do not renumber members.
 |---|---|
 | Model call | Admitted run, continuation, iteration, effect ordinal, full content index |
 | Batch member | Wrapper id and original member index |
-| RLM cell command | Opener admission, code opener, cell replay key, command ordinal, and aggregate index for a leaf |
+| RLM cell command | Opener admission, code opener, cell admission key, command ordinal, and aggregate index for a leaf |
 | Process-body command | Process admission, code opener, command ordinal, and aggregate index for a leaf |
 | Host submission | Submission admission and any content position assigned by its caller |
 | Trigger delivery | The bound process admission and that process's command positions |
 
 `CodeCallIdentities` owns the code derivation shared by the Lashlang hosts and
-worker broker. Process segment boundaries preserve the whole-program ordinal.
+worker broker. VM snapshots preserve the whole-program ordinal (ADR 0132 §8).
 Provider ids, arguments, tool names, attempt numbers, scheduling order and
 user labels are absent from the preimage.
 
@@ -101,8 +102,8 @@ Source: `crates/lash-sansio/src/tool_call_id.rs`.
 
 The admission and the recorded plan precede the tool effect. A model call's
 plan is its recorded response and full content order. A code command uses its
-journaled issue position; a host submission uses its admission. Replaying the
-same plan yields the same ids. A fresh response has a fresh position even if
+admitted issue position, committed with the VM snapshot; a host submission uses
+its admission. Resuming the same plan yields the same ids. A fresh response has a fresh position even if
 its provider ids match another response's.
 
 Sources: `crates/lash-sansio/src/sansio/turn_protocol.rs`,
@@ -162,7 +163,7 @@ blank and within-response duplicate ids before admission. It reserves valid
 ids first, then derives a noncolliding replacement from the request id, full
 content index and collision counter. Streamed and non-streamed responses use
 this path. Repetition in another response is valid. Repair preserves provider
-replay metadata and item ids.
+round-trip metadata and item ids.
 
 The LLM request carries paired call/result correlation strings. Each adapter
 maps those strings together for its wire. Anthropic preserves legal ids and
@@ -174,17 +175,17 @@ Sources: `crates/lash-core/src/runtime/assembly.rs`,
 `crates/lash-provider-anthropic/src/request.rs`, and
 `crates/lash-protocol-rlm/src/native/tool.rs`.
 
-### 9. Generation ownership
+### 9. Format ownership
 
-Executable records remain owned by their admitted generation. The generation
-and admission fence of [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md)
-prevents a replica from reinterpreting another generation's recorded keys.
-An executable record is never reminted to fit a new derivation. Shapes change
+Recorded keys are durable data under their format. The claim filter of
+[ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) §1 keeps a
+node from claiming an actor whose recorded formats it cannot decode, so no
+node reinterprets keys it does not read. A recorded key is never reminted to
+fit a new derivation. Shapes change
 in place during the pre-1.0 version freeze; upgrade read contracts belong to
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
 
-Sources: `crates/lash-core/src/runtime/turn_loop/generation_fence.rs` and
-`crates/lash-restate/src/process/workflow.rs`.
+Source: `crates/lash-sansio/src/tool_call_id.rs`.
 
 ### 11. Laws
 
@@ -197,9 +198,7 @@ Sources: `crates/lash-core/src/runtime/turn_loop/generation_fence.rs` and
 
 `batch_admission_and_identity_contract` covers batch identity. Run admission
 refuses retained-request drift (L12).
-The store matrix is SQLite file, SQLite memory and PostgreSQL. Host coverage
-uses the in-process Restate server double, live Restate and lash-sim's
-in-process effect host. Upgrade proofs use the synthetic-next tier.
+The store matrix is SQLite file, SQLite memory and PostgreSQL.  Laws run the production runtime over a fault-injecting store with labelled commits, a virtual clock and `SimNodes` ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §14). Upgrade proofs use the synthetic-next tier.
 
 Sources: `crates/lash-conformance/src/macros/tool_call_identity.rs`,
 `crates/lash-conformance/src/conformance/batch_sugar.rs`,
