@@ -166,6 +166,30 @@ fn resolved_type_assignability_treats_dict_as_gradual_at_object_targets() {
     assert!(!is_resolved_type_assignable(&TypeExpr::Int, &object));
 }
 
+/// A process value evaluates to its immutable definition record, so it fills a
+/// contract slot that names that record (`processes.start`'s `definition`),
+/// and no other record shape.
+#[test]
+fn resolved_type_assignability_lets_a_process_fill_its_definition_record() {
+    let id = json!({"type": "object", "properties": {"$lash_definition_id": {"type": "string", "pattern": "^lash\\.definition:sha256:[0-9a-f]{64}$"}}, "required": ["$lash_definition_id"], "additionalProperties": false});
+    let definition = json_schema_to_type_expr(&json!({"type": "object", "properties": {"id": id, "signature": {"anyOf": [{"type": "object", "properties": {"signature": {"const": "unknown"}}, "required": ["signature"], "additionalProperties": false}, {"type": "object", "properties": {"signature": {"const": "known"}, "encoding": {}}, "required": ["signature", "encoding"], "additionalProperties": false}]}}, "required": ["id", "signature"], "additionalProperties": false}))
+    .expect("the definition record schema imports");
+    let process = process_type(&[], TypeExpr::Str);
+
+    assert!(is_resolved_type_assignable(&process, &definition));
+    assert!(is_resolved_type_assignable(
+        &TypeExpr::Process(crate::ProcessType::unknown()),
+        &definition
+    ));
+    assert!(!is_resolved_type_assignable(
+        &process,
+        &TypeExpr::Object(vec![
+            required_field("id", TypeExpr::Str),
+            required_field("signature", TypeExpr::Any),
+        ])
+    ));
+}
+
 /// `[]` is how a caller spells "no items", and `union_type` types it as
 /// the empty-list sentinel `list[null]`. It has to reach a `list[T]`
 /// parameter for every `T`, including through a union target such as

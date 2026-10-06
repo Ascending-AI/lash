@@ -1101,6 +1101,10 @@ pub fn is_resolved_type_assignable(source: &TypeExpr, target: &TypeExpr) -> bool
             object_type_assignable(source, target)
         }
         (TypeExpr::Ref(source), TypeExpr::Ref(target)) => source == target,
+        // A process value evaluates to its immutable definition record (the
+        // compiler's `process_ref_literal`), so it fits wherever a contract
+        // names that record, as `processes.start`'s `definition` does.
+        (TypeExpr::Process(_), TypeExpr::Object(target)) => is_definition_record_type(target),
         (TypeExpr::Process(source), TypeExpr::Process(target)) => {
             match (source.as_signature(), target.as_signature()) {
                 (None, _) | (_, None) => true,
@@ -1124,6 +1128,28 @@ pub fn is_resolved_type_assignable(source: &TypeExpr, target: &TypeExpr) -> bool
         }
         _ => false,
     }
+}
+
+/// Whether `fields` spell the immutable definition record `{ id, signature }`:
+/// `id` the tagged `{ $lash_definition_id: str }` and `signature` its variants.
+fn is_definition_record_type(fields: &[TypeField]) -> bool {
+    let [first, second] = fields else {
+        return false;
+    };
+    let (id, signature) = if first.name.as_str() == "id" {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    let tagged_id = matches!(
+        &id.ty,
+        TypeExpr::Object(id_fields)
+            if matches!(
+                id_fields.as_slice(),
+                [tag] if tag.name.as_str() == "$lash_definition_id" && tag.ty == TypeExpr::Str
+            )
+    );
+    id.name.as_str() == "id" && tagged_id && signature.name.as_str() == "signature"
 }
 
 fn object_type_assignable(source: &[TypeField], target: &[TypeField]) -> bool {
