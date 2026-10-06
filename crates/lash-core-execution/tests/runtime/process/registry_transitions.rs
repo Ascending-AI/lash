@@ -81,8 +81,10 @@ mod tests {
         );
     }
 
+    /// A stored wake row requires its version: no pre-1.0 default reads an
+    /// unstamped row as some older format (FIG-4818).
     #[test]
-    fn a_version_absent_v2_wake_delivery_is_refused() {
+    fn a_version_absent_wake_delivery_is_refused() {
         let mut payload: serde_json::Value =
             serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
         payload
@@ -96,11 +98,11 @@ mod tests {
         .project(lash_core_execution::FleetFormat::current())
         .expect_err("a pre-version wake delivery row must be refused");
 
-        assert!(matches!(
-            error,
-            PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
-                if expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && found == 2
-        ));
+        assert!(
+            matches!(&error, PluginError::Session(message)
+                if message.starts_with("failed to decode process registry row: missing field `version`")),
+            "unexpected refusal: {error}"
+        );
     }
 
     #[test]
