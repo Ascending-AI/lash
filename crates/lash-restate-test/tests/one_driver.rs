@@ -285,15 +285,18 @@ async fn an_empty_commit_finishes_the_shift_without_another_admission() {
     backend.settle_session_shift(&session.session_id()).await;
     let shifts = journaled_steps(&backend, SESSION_SHIFT_SERVICE);
     assert_eq!(shifts.len(), 1, "one shift owns the send: {shifts:?}");
-    let admissions: Vec<_> = shifts[0]
-        .1
+    // A shift's admissions journal on the runs it hands each leg to
+    // (FIG-4848), so the shift and every run it started are counted.
+    let runs = journaled_steps(&backend, TURN_DRIVER_SERVICE);
+    let admissions = shifts
         .iter()
+        .chain(&runs)
+        .flat_map(|(_, steps)| steps)
         .filter(|name| recorded_effect_starts_with(name, "lash:shift-admission:"))
-        .collect();
+        .count();
     assert_eq!(
-        admissions.len(),
-        1,
-        "the commit's empty-queue receipt ends the shift: {shifts:?}",
+        admissions, 1,
+        "the commit's empty-queue receipt ends the shift: {shifts:?} {runs:?}",
     );
     assert!(
         !shifts[0].1.iter().any(|name| name == "lash.shift.boundary"),
