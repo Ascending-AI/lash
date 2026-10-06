@@ -546,9 +546,10 @@ fn parked_projected_tool_arguments_keep_the_recorded_request() {
             mode: ExecutionMode::Foreground,
             projected: vec![ProjectionDescription {
                 name: "session_projection".into(),
-                key: 0,
-                type_name: "string".into(),
-                scalar: Some(lashlang::Value::String("session:durable".into())),
+                value: lashlang::Value::Projected(lashlang::ProjectedValue::scalar(
+                    "session_projection",
+                    lashlang::Value::String("session:durable".into()),
+                )),
             }],
             ..RunContext::default()
         })

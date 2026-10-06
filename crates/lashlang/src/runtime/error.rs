@@ -362,12 +362,19 @@ pub enum RuntimeError {
     /// Assignment targeted a projected binding that is read-only.
     #[error("`{name}` is a read-only projected binding")]
     ReadOnlyProjectedBinding { name: String },
-    /// A projection decoded from a durable wire was read without its host
-    /// descriptor having been re-supplied (FIG-2865).
-    #[error(
-        "projected host descriptor `{name}` ({type_name}) is unavailable after restore; re-supply the binding or rerun the producing tool"
-    )]
-    ProjectedValueUnavailable { name: String, type_name: String },
+    /// A projection whose type no registered provider answers was read
+    /// (ADR 0132 §9).
+    #[error("projected value `{name}` cannot be read: {refusal}")]
+    ProjectionRefused {
+        name: String,
+        refusal: super::ProjectionRefusal,
+    },
+    /// A projection's provider failed to answer a read.
+    #[error("projected value `{name}` could not be read: {source}")]
+    ProjectionReadFailed {
+        name: String,
+        source: super::ProjectionError,
+    },
     /// A projected host descriptor was asked a read it does not answer
     /// (FIG-2863). Distinct from a descriptor answering "there is no value".
     #[error("projected host descriptor `{name}` ({type_name}) does not answer `{request}`")]
@@ -680,7 +687,8 @@ impl RuntimeError {
             Self::InvalidCharacterIndex { .. } => ErrorTaxonomy::Catchable,
             Self::IncompatibleSequenceConcatenation => ErrorTaxonomy::Catchable,
             Self::ReadOnlyProjectedBinding { .. } => ErrorTaxonomy::Catchable,
-            Self::ProjectedValueUnavailable { .. } => ErrorTaxonomy::Catchable,
+            Self::ProjectionRefused { .. } => ErrorTaxonomy::Catchable,
+            Self::ProjectionReadFailed { .. } => ErrorTaxonomy::Catchable,
             Self::ProjectedReadUnsupported { .. } => ErrorTaxonomy::Catchable,
             Self::ValidateTypeLiteralRequired => ErrorTaxonomy::Catchable,
             Self::NotTypeValue { .. } => ErrorTaxonomy::Catchable,
@@ -816,7 +824,8 @@ impl RuntimeError {
             Self::InvalidCharacterIndex { .. } => "InvalidCharacterIndex",
             Self::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
             Self::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
-            Self::ProjectedValueUnavailable { .. } => "ProjectedValueUnavailable",
+            Self::ProjectionRefused { .. } => "ProjectionRefused",
+            Self::ProjectionReadFailed { .. } => "ProjectionReadFailed",
             Self::ProjectedReadUnsupported { .. } => "ProjectedReadUnsupported",
             Self::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
             Self::NotTypeValue { .. } => "NotTypeValue",

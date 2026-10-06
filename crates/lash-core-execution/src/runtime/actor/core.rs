@@ -321,6 +321,16 @@ impl ActorContext {
             .expect("an unavailable ActorContext has no backend")
     }
 
+    /// The backend's projection providers (ADR 0132 §9); none on
+    /// [`Self::unavailable`], which has no backend.
+    #[must_use]
+    pub fn projection_providers(&self) -> Option<&Arc<dyn super::projection::ProjectionProviders>> {
+        self.inner
+            .backend
+            .as_ref()
+            .map(Backend::projection_providers)
+    }
+
     /// The scope-bound observer of the Run records this context's tool
     /// rounds record, for their traces.
     #[must_use]

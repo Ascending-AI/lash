@@ -30,12 +30,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     ) -> Result<Self, RuntimeError> {
         state.validate_program(program)?;
         let projected = host.projected_bindings();
-        let (mut globals, mut heap) = state.take_runtime();
-        // A snapshot restore leaves placeholders wherever a projection was
-        // nested inside a container or a heap object; the slot-name rebinding
-        // in `from_globals` never revisits those (FIG-2865).
-        crate::runtime::projected_refresh::refresh_record(&mut globals, &projected);
-        crate::runtime::projected_refresh::refresh_heap(&mut heap, &projected);
+        let (globals, heap) = state.take_runtime();
         let slot_values = scratch
             .as_deref_mut()
             .map(|scratch| std::mem::take(&mut scratch.slot_values))

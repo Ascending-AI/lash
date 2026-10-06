@@ -182,11 +182,6 @@ impl<'a> ContinuationValidator<'a> {
     ) -> Result<(), ContinuationError> {
         let location = format!("heap RegExp {}.lastIndex", id.get());
         self.validate_heap_values(std::slice::from_ref(&regexp.last_index), &location)?;
-        if let Value::Projected(projected) = &regexp.last_index {
-            crate::runtime::projected_wire::CanonicalProjectedValue::from_projected(
-                projected, &location, 0,
-            )?;
-        }
         Ok(())
     }
 

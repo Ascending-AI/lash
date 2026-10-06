@@ -638,7 +638,9 @@ async fn execute_lashlang(
         state: start,
         boundary: &boundary,
         hand_over: None,
-        projection_namespace: None,
+        providers: lashlang::ProjectionCatalog::of_backend(
+            host.ctx.projection_providers().as_deref(),
+        ),
     }
     .run()
     .await;

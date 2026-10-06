@@ -85,6 +85,11 @@ impl ExecutionHost for EchoHost {
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }
+
+    /// No bindings, reading test views (ADR 0132 §9).
+    fn projected_bindings(&self) -> crate::ProjectedBindings {
+        crate::testing::projection::reading_test_views(crate::ProjectedBindings::new())
+    }
 }
 
 /// FIG-2999: starting, signalling, cancelling and yielding are leaf tools, not
@@ -256,7 +261,11 @@ pub async fn execute_compiled_with_projected_bindings<H: ExecutionHost>(
     host: &H,
     projected: &ProjectedBindings,
 ) -> Result<ExecutionOutcome, RuntimeError> {
-    let env = ExecutionEnvironment::new(host).with_projected_bindings(projected.clone());
+    let projected = match projected.reader() {
+        Some(_) => projected.clone(),
+        None => crate::testing::projection::reading_test_views(projected.clone()),
+    };
+    let env = ExecutionEnvironment::new(host).with_projected_bindings(projected);
     crate::execute(program, state, &env).await
 }
 

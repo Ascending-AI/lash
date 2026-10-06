@@ -10,8 +10,9 @@ use anyhow::{Context, Result, bail, ensure};
 use lash_protocol_rlm::{RlmHistoryProjection, rlm_history_projection};
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionBounds, ExecutionMode, ExecutionOutcome, ProjectedBindings,
-    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Value,
-    VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
+    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, ProjectionReadError,
+    ProjectionReader, ProjectionType, ResourceRef, Value, VmExecutionStart, VmInstance, VmRequest,
+    VmResume, VmRunConfig, VmStep,
 };
 use serde::Serialize;
 
@@ -68,17 +69,13 @@ struct Report {
     measurements: Vec<Measurement>,
 }
 
-/// Benchmark adapter over the actual RLM history projection. Production's
-/// descriptor is private; these are its length/index reads, the only reads the
-/// authored cell needs. The host object is deliberately recreated on restore.
+/// Benchmark provider over the actual RLM history projection. Production's
+/// provider is private; these are its length/index reads, the only reads the
+/// authored cell needs. The provider is deliberately recreated on restore.
 struct History(RlmHistoryProjection);
 
-impl ProjectedHostDescriptor for History {
-    fn type_name(&self) -> &str {
-        "list"
-    }
-
-    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
+impl History {
+    fn answer(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
         match request {
             ProjectedReadRequest::Len => Some(ProjectedReadResponse::Len(self.0.len())),
             ProjectedReadRequest::Field(field) if field.as_ref() == "length" => {
@@ -93,6 +90,42 @@ impl ProjectedHostDescriptor for History {
             _ => None,
         }
     }
+}
+
+/// The in-process VM reads the provider directly; a run reads it over the
+/// worker's wire.
+impl ProjectionReader for History {
+    fn read(
+        &self,
+        _resource: &ResourceRef,
+        request: ProjectedReadRequest,
+    ) -> Result<Option<ProjectedReadResponse>, ProjectionReadError> {
+        Ok(self.answer(request))
+    }
+
+    fn read_range(
+        &self,
+        _resource: &ResourceRef,
+        requests: Vec<ProjectedReadRequest>,
+    ) -> Result<Vec<Option<ProjectedReadResponse>>, ProjectionReadError> {
+        Ok(requests
+            .into_iter()
+            .map(|request| self.answer(request))
+            .collect())
+    }
+}
+
+/// The `history` binding: plain data naming the transcript.
+fn history_binding() -> ProjectedValue {
+    ProjectedValue::resource(
+        lash_protocol_rlm::HISTORY_PROJECTION,
+        "list",
+        ResourceRef {
+            projection: ProjectionType::new(lash_protocol_rlm::HISTORY_PROJECTION),
+            id: "vm-snapshot".into(),
+            revision: Some("0".into()),
+        },
+    )
 }
 
 fn history_config(elements: usize) -> Result<VmRunConfig> {
@@ -114,11 +147,8 @@ fn history_config(elements: usize) -> Result<VmRunConfig> {
     let history = rlm_history_projection(&chronological)?;
     ensure!(history.len() == elements, "history fixture lost entries");
     let mut config = VmRunConfig::new(ExecutionMode::Foreground, ExecutionBounds::unbounded());
-    config.projected = ProjectedBindings::new();
-    config.projected.try_insert(
-        "history",
-        ProjectedValue::custom("history", Arc::new(History(history))),
-    )?;
+    config.projected = ProjectedBindings::new().with_reader(Arc::new(History(history)));
+    config.projected.try_insert("history", history_binding())?;
     Ok(config)
 }
 
@@ -221,7 +251,10 @@ fn verify_completion(instance: &mut VmInstance, case: &Case) -> Result<bool> {
                 ensure!(
                     matches!(
                         error.failure.error,
-                        lashlang::RuntimeError::ProjectedValueUnavailable { .. }
+                        lashlang::RuntimeError::ProjectionRefused {
+                            refusal: lashlang::ProjectionRefusal::NoProvider { .. },
+                            ..
+                        }
                     ),
                     "history failed for a cause other than its missing provider: {:?}",
                     error.failure.error

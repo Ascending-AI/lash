@@ -650,7 +650,7 @@ impl Session<'_, '_> {
             if let Err(error) = broker.codec.check_payload(&request.payload.0) {
                 return Some(self.lost(error.into()));
             }
-            let response = match broker.effects.projection(&request.payload) {
+            let response = match broker.effects.projection(&request.payload).await {
                 Ok(response) => response,
                 Err(fault) => return Some(SessionEnd::Lost(BrokerFailure::Parent { fault })),
             };

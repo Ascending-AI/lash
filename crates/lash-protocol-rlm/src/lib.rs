@@ -57,8 +57,8 @@ pub use plugin::{
     UnsetBound, UnsetChannel, rlm_lashlang_surface, rlm_protocol_config, rlm_session_config,
 };
 pub use projection::{
-    RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, RlmSeed, is_rlm_protocol_output,
-    rlm_history_projection, rlm_protocol_event, rlm_seed_initial_nodes,
+    HISTORY_PROJECTION, RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, RlmSeed,
+    is_rlm_protocol_output, rlm_history_projection, rlm_protocol_event, rlm_seed_initial_nodes,
 };
 pub use projection::{RlmProjectedBindings, rlm_session_projection_extension};
 // Harnesses read recorded RLM events through the protocol's own decoder; the

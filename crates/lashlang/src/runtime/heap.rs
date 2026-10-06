@@ -11,7 +11,6 @@ mod javascript_builtins;
 mod javascript_exotics;
 mod object;
 mod partition;
-mod projections;
 mod reference_assignment;
 mod summary;
 mod url_objects;

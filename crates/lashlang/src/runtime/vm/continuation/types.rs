@@ -54,14 +54,6 @@ impl PendingOperation {
         };
         std::iter::once(first).chain(rest)
     }
-
-    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut Value> {
-        let (first, rest) = match self {
-            Self::Tool { receiver, args, .. } => (receiver, args.as_mut_slice()),
-            Self::Timer { duration, .. } => (duration, &mut [][..]),
-        };
-        std::iter::once(first).chain(rest)
-    }
 }
 
 impl VmContinuation {

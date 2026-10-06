@@ -1,6 +1,6 @@
 use super::*;
 use crate::frontend::TypeScriptFrontend;
-use lashlang::{AbilityOutcome, Record, Value};
+use lashlang::Value;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
@@ -104,55 +104,6 @@ fn starts_reuse_one_parser_thread_per_worker() {
             parser.thread_spawn_count(),
             1,
             "errors and a cap-sized source keep the same thread"
-        );
-    }
-}
-
-#[test]
-fn projection_free_outcomes_allocate_nothing() {
-    use lashlang::{ResourceOperationBatchOutcome as Batch, ResourceOperationOutcome as Leaf};
-    let frontend = TypeScriptFrontend::default();
-    let (mut server, _parent) = server(&frontend);
-    let wire = server.wire().expect("wire");
-    let record: Record = [(
-        "nested".into(),
-        Value::List(
-            vec![
-                Value::Tuple(
-                    vec![Value::Number(1.0), Value::String("x".repeat(4096).into())].into(),
-                ),
-                Value::Record(Arc::new(
-                    [("leaf".into(), Value::Null)].into_iter().collect(),
-                )),
-            ]
-            .into(),
-        ),
-    )]
-    .into_iter()
-    .collect();
-    let value = Value::Record(Arc::new(record));
-    let outcomes = [
-        AbilityOutcome::Value(value.clone()),
-        AbilityOutcome::ResourceOperationBatch(Batch::AllResults(vec![
-            Leaf::Value(value.clone()),
-            Leaf::Value(value.clone()),
-        ])),
-        AbilityOutcome::ResourceOperationBatch(Batch::Selected {
-            leaf: 1,
-            result: Leaf::Value(value),
-        }),
-    ];
-    for outcome in outcomes {
-        let expected = rmp_serde::to_vec_named(&outcome).expect("expected outcome");
-        let (outcome, bytes) = allocated(|| wire.rebind_outcome(outcome));
-        println!("projection-free outcome: {bytes} allocated bytes");
-        assert_eq!(
-            bytes, 0,
-            "rebinding must move an unprojected answer unchanged"
-        );
-        assert_eq!(
-            rmp_serde::to_vec_named(&outcome).expect("outcome"),
-            expected
         );
     }
 }

@@ -42,31 +42,10 @@ fn canonical_decode_rejects_first_over_limit_value_depth_for_every_nested_shape(
         };
     }
 
-    let mut object = CanonicalJsonValue::Null {};
-    let mut array = CanonicalJsonValue::Null {};
-    for _ in 0..MAX_SNAPSHOT_VALUE_DEPTH {
-        object = CanonicalJsonValue::Object {
-            fields: vec![CanonicalJsonField {
-                name: "child".to_string(),
-                value: object,
-            }],
-        };
-        array = CanonicalJsonValue::Array { items: vec![array] };
-    }
-    let projected = |projection_ref| CanonicalValue::Projected {
-        value: CanonicalProjectedValue {
-            name: "root".to_string(),
-            type_name: "object".to_string(),
-            projection_ref: Some(projection_ref),
-        },
-    };
-
     for (shape, value) in [
         ("record", record),
         ("list", list),
         ("tuple", tuple),
-        ("projected object", projected(object)),
-        ("projected array", projected(array)),
         ("mixed", mixed),
     ] {
         assert_eq!(

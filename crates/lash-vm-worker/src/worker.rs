@@ -39,7 +39,6 @@ pub(crate) struct Server<'frontend, const MEASURE: bool = false> {
     owner: Option<VmOwner>,
     pending: Option<EffectRequest>,
     reissue: Option<RecordedRequest>,
-    projection_namespace: String,
     capture_state_view: bool,
     cpu_ceiling: Option<libc::rlim_t>,
     /// The run's heap budget, which also bounds the observations a step
@@ -147,7 +146,6 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             owner: None,
             pending: None,
             reissue: None,
-            projection_namespace: String::new(),
             capture_state_view: false,
             cpu_ceiling: None,
             observation_budget: None,
@@ -333,7 +331,6 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                         (_, EffectOutcome::Cancelled) => VmResume::EffectCancelled,
                         (_, EffectOutcome::Value(value)) => {
                             let value: AbilityOutcome = self.decode(&value)?;
-                            let value = self.wire()?.rebind_outcome(value);
                             VmResume::Effect(Ok(value))
                         }
                         (_, EffectOutcome::Unit) => VmResume::Effect(Ok(AbilityOutcome::Unit)),
@@ -411,7 +408,6 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             self.inbound.clone(),
             self.codec.clone(),
             self.fences.clone(),
-            self.projection_namespace.clone(),
         ));
         self.wire = Some(wire.clone());
         Ok(wire)
@@ -454,7 +450,6 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 })
             })?;
         }
-        self.projection_namespace = context.projection_namespace;
         self.wire = None;
         self.capture_state_view = context.capture_state_view;
         self.observation_budget = start.limits.memory_limit_bytes;
@@ -560,21 +555,14 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
         );
         config.observe_execution = context.observe_execution;
         config.trace_runtime_errors = true;
-        let wire = self.wire()?;
         for description in context.projected {
-            let value = match description.scalar {
-                Some(value) => lashlang::ProjectedValue::scalar(description.name.clone(), value),
-                None => lashlang::ProjectedValue::custom(
-                    format!(
-                        "worker-projection/{}/{}/{}",
-                        self.projection_namespace, description.key, description.name
-                    ),
-                    Arc::new(crate::projection::RemoteProjection {
-                        wire: wire.clone(),
-                        key: description.key,
-                        type_name: description.type_name,
-                    }),
-                ),
+            let lashlang::Value::Projected(value) = description.value else {
+                return Err(PoolError::refused(RunRefusal::ProjectedBinding {
+                    detail: Detail::new(format!(
+                        "projected binding `{}` is not a projection",
+                        description.name
+                    )),
+                }));
             };
             config
                 .projected
@@ -585,9 +573,12 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                     })
                 })?;
         }
-        config.projected = config
-            .projected
-            .with_resolver(Arc::new(move |value| wire.resolve(value)));
+        config.projected =
+            config
+                .projected
+                .with_reader(Arc::new(crate::projection::RemoteProjection {
+                    wire: self.wire()?,
+                }));
         self.instance
             .start(Arc::new(program), execution_start, config)
             .map_err(|error| {
@@ -798,10 +789,9 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                             AbilityOp::Sleep(_) => EffectKind::Sleep,
                             AbilityOp::WaitSignal { .. } => EffectKind::WaitSignal,
                         };
-                        // The VM wire restores projections by identity. The
-                        // request already issued includes their scalar values,
-                        // so resume reads that request rather than rebuilding it
-                        // from the continuation's unavailable placeholders.
+                        // The VM wire carries a scalar projection as its value,
+                        // so a request rebuilt from the continuation is not
+                        // the one already issued: resume reads that request.
                         match self.reissue.take() {
                             Some(recorded) if recorded.kind == kind => {
                                 (recorded.kind, recorded.payload.0)

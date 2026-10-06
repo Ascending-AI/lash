@@ -453,10 +453,11 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
 
 /// FIG-2865: the continuation wire used to refuse `Value::Projected` outright,
 /// so a slot holding a projected binding could not park at all — while the
-/// `State` snapshot accepted the identical value. Both writers now carry the
-/// projection by identity.
+/// `State` snapshot accepted the identical value. A scalar projection is plain
+/// data (ADR 0132 §9), so both writers carry it as its value, and the host's
+/// binding re-occupies the slot on resume.
 #[test]
-fn continuation_carries_a_projected_binding_slot_by_identity() {
+fn continuation_carries_a_projected_binding_slot_as_its_value() {
     // `finish input`
     let program = compile_program_for_tests(builders::program(vec![builders::finish(
         builders::var("input"),
@@ -474,19 +475,13 @@ fn continuation_carries_a_projected_binding_slot_by_identity() {
     let mut vm = Vm::new(&program, slots, &host, None, ExecutionMode::Foreground);
 
     let continuation = vm.suspend().expect("a projected slot must be capturable");
-    let wire = serde_json::to_value(&continuation).expect("continuation should serialize");
+    let wire = serde_json::to_vec(&continuation).expect("continuation should serialize");
+    let restored: VmContinuation =
+        serde_json::from_slice(&wire).expect("continuation should deserialize");
     assert_eq!(
-        wire["slots"][0]["value"],
-        serde_json::json!({
-            "kind": "projected",
-            "value": {
-                "name": "input",
-                "type_name": "number",
-                "projection_ref": null,
-            },
-        }),
-        "the continuation wire must carry the same three canonical fields the \
-         snapshot wire writes"
+        restored.slots.first(),
+        Some(&Some(Value::Number(3.0))),
+        "the continuation wire carries the scalar projection's value"
     );
 }
 

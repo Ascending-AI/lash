@@ -57,7 +57,7 @@ pub use canonical_messagepack::{
 ///     ),
 ///     shapes(
 ///         path = "crates/lashlang/src/runtime/projected_wire.rs",
-///         cover(CanonicalProjectedValue, CanonicalJsonValue, CanonicalJsonField),
+///         cover(CanonicalProjectedValue),
 ///     ),
 ///     shapes(
 ///         path = "crates/lashlang/src/runtime/heap.rs",
@@ -678,8 +678,6 @@ enum CanonicalValue {
 }
 
 use super::projected_wire::CanonicalProjectedValue;
-#[cfg(test)]
-use super::projected_wire::{CanonicalJsonField, CanonicalJsonValue};
 
 impl CanonicalSnapshot {
     fn encode(snapshot: &Snapshot, stamps: SnapshotStamps) -> Result<Self, ContinuationError> {
@@ -860,6 +858,7 @@ enum ExpectedValue {
     Runtime,
     Json,
     Projected,
+    ProjectionResource,
     Image,
     Resource,
     String,
@@ -872,7 +871,7 @@ enum ExpectedValue {
     OptionalUnsigned {
         maximum: u64,
     },
-    OptionalJson,
+    OptionalString,
     Key(&'static str),
     RuntimeArray,
     JsonArray,
@@ -1210,12 +1209,12 @@ fn validate_expected(
             expect_key(bytes, cursor, "name", &location)?;
             push(
                 pending,
-                ExpectedValue::OptionalJson,
-                format!("{location}.projection_ref"),
+                ExpectedValue::ProjectionResource,
+                format!("{location}.resource"),
                 depth + 1,
-                value_depth + 1,
+                value_depth,
             );
-            push_key(pending, "projection_ref", &location, depth + 1, value_depth);
+            push_key(pending, "resource", &location, depth + 1, value_depth);
             push(
                 pending,
                 ExpectedValue::String,
@@ -1228,6 +1227,34 @@ fn validate_expected(
                 pending,
                 ExpectedValue::String,
                 format!("{location}.name"),
+                depth + 1,
+                value_depth,
+            );
+        }
+        ExpectedValue::ProjectionResource => {
+            ensure_depth(depth)?;
+            expect_struct_map(bytes, cursor, 3, &location, "projection resource")?;
+            expect_key(bytes, cursor, "projection", &location)?;
+            push(
+                pending,
+                ExpectedValue::OptionalString,
+                format!("{location}.revision"),
+                depth + 1,
+                value_depth,
+            );
+            push_key(pending, "revision", &location, depth + 1, value_depth);
+            push(
+                pending,
+                ExpectedValue::String,
+                format!("{location}.id"),
+                depth + 1,
+                value_depth,
+            );
+            push_key(pending, "id", &location, depth + 1, value_depth);
+            push(
+                pending,
+                ExpectedValue::String,
+                format!("{location}.projection"),
                 depth + 1,
                 value_depth,
             );
@@ -1274,11 +1301,11 @@ fn validate_expected(
                 validate_unsigned(bytes, cursor, &location, maximum)?;
             }
         }
-        ExpectedValue::OptionalJson => {
+        ExpectedValue::OptionalString => {
             if bytes.get(*cursor) == Some(&0xc0) {
                 *cursor += 1;
             } else {
-                push(pending, ExpectedValue::Json, location, depth, value_depth);
+                take_canonical_string(bytes, cursor, &location)?;
             }
         }
         ExpectedValue::Key(key) => expect_key(bytes, cursor, key, &location)?,

@@ -303,6 +303,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// and when the loop ends. Where the loop checks its bounds, and so the
     /// instruction a cancellation lands on, is unchanged.
     async fn run_loop(&mut self, stop_after_effect: bool) -> Result<VmOutcome, VmTrap> {
+        // Every projection read the loop makes, on whichever thread polls it,
+        // goes through this execution's reader (ADR 0132 §9).
+        let reader = self.projected_bindings.reader();
+        crate::runtime::projection_provider::reading_through(
+            reader,
+            self.run_instructions(stop_after_effect),
+        )
+        .await
+    }
+
+    async fn run_instructions(&mut self, stop_after_effect: bool) -> Result<VmOutcome, VmTrap> {
         // A whole-run loop resumed from a park on an operation picks up the
         // yield phase it parked in (FIG-4159), so its cancel checkpoints fall
         // where an unparked run's do.

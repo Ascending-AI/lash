@@ -1,10 +1,9 @@
 use crate::projection::{flow_record_to_tool_args, flow_to_json_value, projected_index};
 use lash_rlm_types::PROJECTED_JSON_TAG;
-use lash_sansio::ProcessId;
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
-    ExecutionOutcome, ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, Record as FlowRecord, Value as FlowValue,
+    ExecutionOutcome, ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse,
+    ProjectedValue, Record as FlowRecord, Value as FlowValue,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 mod step_trace;

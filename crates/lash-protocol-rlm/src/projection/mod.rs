@@ -1,5 +1,6 @@
 pub(crate) mod bindings;
 mod context;
+mod history_provider;
 pub(crate) mod transcript;
 mod transport;
 
@@ -8,6 +9,7 @@ pub use context::{
     RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, is_rlm_protocol_output,
     rlm_history_projection, rlm_protocol_event,
 };
+pub use history_provider::HISTORY_PROJECTION;
 pub use transport::{RlmSeed, rlm_seed_initial_nodes};
 
 pub(crate) use bindings::{READ_ONLY_VARIABLES_TITLE, read_only_variables_prompt};

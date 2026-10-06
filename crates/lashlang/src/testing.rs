@@ -17,6 +17,9 @@ pub mod harness;
 /// feature so they never ship in a production build.
 pub mod ast_builders;
 
+/// Test projections behind a real provider and catalog (ADR 0132 §9).
+pub mod projection;
+
 /// The name of every heap object kind: the value kinds a durable session can
 /// hold, one per variant of the heap's object enum, whose exhaustive match
 /// names each. The snapshot round-trip law (FIG-3608) holds every kind to a

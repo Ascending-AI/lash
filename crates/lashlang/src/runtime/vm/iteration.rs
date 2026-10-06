@@ -214,22 +214,6 @@ pub(super) fn range_has_next(start: i64, end: i64, step: i64) -> bool {
     (step > 0 && start < end) || (step < 0 && start > end)
 }
 
-/// Re-binds restored projections held by live iterators (FIG-2865).
-pub(super) fn refresh_iterators(
-    iterators: &mut [IterState],
-    bindings: &crate::runtime::ProjectedBindings,
-) {
-    use crate::runtime::projected_refresh;
-    for iterator in iterators {
-        if let IterCursor::List { values, .. } = &mut iterator.cursor {
-            projected_refresh::refresh_values(values.make_mut(), bindings);
-        }
-        if let Some(value) = iterator.restore.previous.as_mut() {
-            projected_refresh::refresh_value(value, bindings);
-        }
-    }
-}
-
 impl<H: ExecutionHost> Vm<'_, H> {
     /// The cursor a loop walks `iterable` with (FIG-3625). An array, a
     /// `URLSearchParams`, a `Map` or a `Set` is iterated live, as ECMA-262's

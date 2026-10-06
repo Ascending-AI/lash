@@ -1,5 +1,6 @@
 use super::*;
 use crate::ast::{CoercingBinaryOp, CoercingUnaryOp};
+use crate::testing::projection::{TestView, test_view, with_test_views};
 
 /// The lashlang spelling of the language-operation parity fixture, kept as the
 /// label the divergence assertions quote.
@@ -93,12 +94,6 @@ impl TestProjectedValue {
     }
 }
 
-#[derive(Default)]
-struct SnapshotGuardProjectedValue {
-    materialize_count: AtomicUsize,
-    render_count: AtomicUsize,
-}
-
 struct SearchProjectedText {
     text: Arc<str>,
     slice_count: AtomicUsize,
@@ -123,31 +118,7 @@ impl SearchProjectedText {
     }
 }
 
-impl ProjectedHostDescriptor for SnapshotGuardProjectedValue {
-    fn type_name(&self) -> &str {
-        "string"
-    }
-
-    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
-        match request {
-            ProjectedReadRequest::Render => {
-                self.render_count.fetch_add(1, Ordering::SeqCst);
-                Some(ProjectedReadResponse::Text(
-                    "rendered full text".to_string(),
-                ))
-            }
-            ProjectedReadRequest::Materialize => {
-                self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                Some(ProjectedReadResponse::Value(Value::String(
-                    "materialized full text".into(),
-                )))
-            }
-            _ => None,
-        }
-    }
-}
-
-impl ProjectedHostDescriptor for SearchProjectedText {
+impl TestView for SearchProjectedText {
     fn type_name(&self) -> &str {
         "string"
     }
@@ -179,7 +150,7 @@ impl ProjectedHostDescriptor for SearchProjectedText {
     }
 }
 
-impl ProjectedHostDescriptor for TestProjectedValue {
+impl TestView for TestProjectedValue {
     fn type_name(&self) -> &str {
         "list"
     }
@@ -223,7 +194,7 @@ impl ProjectedHostDescriptor for TestProjectedValue {
 
 fn projected_list_bindings(name: &str, list: Arc<TestProjectedValue>) -> ProjectedBindings {
     let mut projected = ProjectedBindings::new();
-    projected.insert(name, ProjectedValue::custom(name.to_string(), list));
+    projected.insert(name, test_view(name, list));
     projected
 }
 
@@ -379,7 +350,7 @@ fn projected_response_from_value(
     }
 }
 
-impl ProjectedHostDescriptor for ProjectedFixture {
+impl TestView for ProjectedFixture {
     fn type_name(&self) -> &str {
         value_type_name(&self.value)
     }
@@ -398,12 +369,9 @@ fn projected_value_binding(name: &str, value: Value) -> ProjectedBindings {
     projected
 }
 
-fn projected_custom_binding(
-    name: &str,
-    value: Arc<dyn ProjectedHostDescriptor>,
-) -> ProjectedBindings {
+fn projected_custom_binding(name: &str, value: Arc<dyn TestView>) -> ProjectedBindings {
     let mut projected = ProjectedBindings::new();
-    projected.insert(name, ProjectedValue::custom(name.to_string(), value));
+    projected.insert(name, test_view(name, value));
     projected
 }
 
@@ -483,7 +451,7 @@ pub(super) async fn exec_with_projected(
 /// not made.
 struct SilentDescriptor;
 
-impl ProjectedHostDescriptor for SilentDescriptor {
+impl TestView for SilentDescriptor {
     fn type_name(&self) -> &str {
         "widget"
     }
@@ -499,16 +467,19 @@ impl ProjectedHostDescriptor for SilentDescriptor {
 /// `false`, `null` or an empty key set (FIG-2863).
 #[tokio::test(flavor = "current_thread")]
 async fn an_unanswered_read_refuses_with_the_binding_and_request_named() {
-    let projected = ProjectedValue::custom("widget", Arc::new(SilentDescriptor));
+    let projected = test_view("widget", Arc::new(SilentDescriptor));
 
-    for (label, error) in [
-        ("len", projected.len().err()),
-        ("empty", projected.empty().err()),
-        ("truthy", projected.truthy().err()),
-        ("keys", projected.keys().err()),
-        ("values", projected.values().err()),
-        ("contains", projected.contains(&Value::Number(1.0)).err()),
-    ] {
+    let errors = with_test_views(|| {
+        [
+            ("len", projected.len().err()),
+            ("empty", projected.empty().err()),
+            ("truthy", projected.truthy().err()),
+            ("keys", projected.keys().err()),
+            ("values", projected.values().err()),
+            ("contains", projected.contains(&Value::Number(1.0)).err()),
+        ]
+    });
+    for (label, error) in errors {
         let error = error.unwrap_or_else(|| panic!("`{label}` must refuse"));
         assert!(
             matches!(
@@ -615,47 +586,11 @@ async fn print_projected_leaves_projection_to_host_and_finish_materializes() {
     )
     .await
     .expect("projected print and finish");
-    let _ = to_json(&value);
+    // The host reads a finished projection through its providers.
+    let _ = with_test_views(|| to_json(&value));
 
     assert_eq!(list.render_count.load(Ordering::SeqCst), 0);
     assert_eq!(list.materialize_count.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn canonical_snapshot_restore_makes_projected_value_unavailable() {
-    let snapshot = Snapshot::new(
-        [(
-            "match_text".to_string(),
-            Value::Projected(ProjectedValue::custom(
-                "matches[0].text",
-                Arc::new(SnapshotGuardProjectedValue::default()),
-            )),
-        )]
-        .into_iter()
-        .collect(),
-    );
-    let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-    let snapshot = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
-
-    let Some(Value::Projected(projected)) = snapshot.globals().get("match_text") else {
-        panic!("expected projected placeholder");
-    };
-
-    assert_eq!(projected.name(), "matches[0].text");
-    assert_eq!(projected.value_type_name(), "string");
-    // Before FIG-2865 both of these produced the diagnostic *as data*: `render`
-    // returned the sentence and `materialize` returned it as a `Value::String`,
-    // so a restored placeholder read back as an English message where the host's
-    // view used to be. Both now refuse, typed.
-    assert!(matches!(
-        projected.render(),
-        Err(RuntimeError::ProjectedValueUnavailable { ref name, ref type_name })
-            if name == "matches[0].text" && type_name == "string"
-    ));
-    assert!(matches!(
-        projected.materialize(),
-        Err(RuntimeError::ProjectedValueUnavailable { .. })
-    ));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -665,10 +600,7 @@ async fn flat_search_match_projected_text_separates_slice_snapshot_and_stringify
     match_record.insert("title".to_string(), Value::String("first".into()));
     match_record.insert(
         "text".to_string(),
-        Value::Projected(ProjectedValue::custom(
-            "search.matches[0].text",
-            text.clone(),
-        )),
+        Value::Projected(test_view("search.matches[0].text", text.clone())),
     );
     let mut result_record = Record::default();
     result_record.insert(
@@ -1086,12 +1018,30 @@ async fn image_values_are_immutable_and_len_is_unsupported() {
 }
 
 /// FIG-2865: a projection nested inside a container survives the snapshot wire
-/// with its three canonical fields intact. Before, the wire only ever saw a
-/// top-level projection; a nested one was written and read back with no way to
-/// tell the placeholder from the live view.
+/// with its canonical fields intact. A projection is plain data (ADR 0132 §9),
+/// so what decodes is the same projection of the same resource.
 #[test]
 fn nested_projection_survives_the_snapshot_wire() {
-    let snapshot = nested_projection_snapshot();
+    let report = ResourceRef {
+        projection: ProjectionType::new("report"),
+        id: "7".into(),
+        revision: Some("r1".into()),
+    };
+    let snapshot = Snapshot::new(
+        [(
+            "rows".to_string(),
+            Value::List(
+                vec![Value::Projected(ProjectedValue::resource(
+                    "report",
+                    "string",
+                    report.clone(),
+                ))]
+                .into(),
+            ),
+        )]
+        .into_iter()
+        .collect(),
+    );
     let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
     let snapshot = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
 
@@ -1099,37 +1049,13 @@ fn nested_projection_survives_the_snapshot_wire() {
         panic!("expected the nested container to survive the snapshot wire");
     };
     let Some(Value::Projected(nested)) = rows.first() else {
-        panic!("expected a nested projected placeholder");
+        panic!("expected a nested projection");
     };
     assert_eq!(nested.name(), "report");
     assert_eq!(nested.value_type_name(), "string");
     assert_eq!(
-        nested.projection_ref(),
-        Some(&serde_json::json!({ "kind": "report", "id": 7 })),
-        "`projection_ref` must cross the wire unchanged"
+        nested.resource_ref(),
+        Some(&report),
+        "the resource must cross the wire unchanged"
     );
-    assert!(
-        nested.is_unavailable(),
-        "a decoded projection is a placeholder"
-    );
-}
-
-fn nested_projection_snapshot() -> Snapshot {
-    Snapshot::new(
-        [(
-            "rows".to_string(),
-            Value::List(
-                vec![Value::Projected(
-                    ProjectedValue::unavailable_after_restore_with_projection_ref(
-                        "report",
-                        "string",
-                        Some(serde_json::json!({ "kind": "report", "id": 7 })),
-                    ),
-                )]
-                .into(),
-            ),
-        )]
-        .into_iter()
-        .collect(),
-    )
 }

@@ -1,7 +1,7 @@
 use super::*;
 use crate::ast::{AssignTarget, Expr, FunctionExpr, Program};
 use crate::runtime::entry_points::compile_program_internal;
-use crate::runtime::{ProjectedBindings, ProjectedValue};
+use crate::runtime::{ProjectedValue, ProjectionType, ResourceRef};
 
 #[test]
 fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
@@ -149,23 +149,24 @@ fn canonical_decode_rejects_non_minimal_integer_width_with_location() {
     let snapshot = Snapshot::new(
         [(
             "root".to_string(),
-            Value::Projected(
-                ProjectedValue::unavailable_after_restore_with_projection_ref(
-                    "root",
-                    "number",
-                    Some(serde_json::json!(1)),
-                ),
-            ),
+            Value::Image(Box::new(ImageValue::new(
+                "sha256:00ff",
+                crate::MediaType::parse("image/png").expect("media type"),
+                "pixel",
+                2,
+                Some(1),
+                None,
+            ))),
         )]
         .into_iter()
         .collect(),
     );
     let mut bytes = snapshot.to_canonical_bytes().expect("canonical bytes");
-    let needle = [0xa5, b'v', b'a', b'l', b'u', b'e', 0x01];
+    let needle = [0xa5, b'w', b'i', b'd', b't', b'h', 0x01];
     let offset = bytes
         .windows(needle.len())
         .rposition(|window| window == needle)
-        .expect("projection JSON integer");
+        .expect("image width integer");
     bytes.splice(
         offset + needle.len() - 1..offset + needle.len(),
         [0xcc, 0x01],
@@ -177,7 +178,7 @@ fn canonical_decode_rejects_non_minimal_integer_width_with_location() {
         matches!(
             &error,
             SnapshotDecodeError::NonCanonicalEncoding { location, reason }
-                if location == "globals.root.value.projection_ref.value"
+                if location == "globals.root.value.width"
                     && reason.contains("integer width is not minimal")
         ),
         "{error:?}"
@@ -417,7 +418,7 @@ fn canonical_decode_rejects_a_depth_bomb_before_deserializing() {
 // Pins N's version and bytes; the synthetic N+1 moves them.
 #[cfg(not(feature = "synthetic-next"))]
 #[test]
-fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
+fn canonical_wire_golden_covers_every_value_kind_and_projection_resource() {
     let image = ImageValue::new(
         "sha256:00ff",
         crate::MediaType::parse("image/png").expect("media type"),
@@ -426,10 +427,6 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
         Some(1),
         Some(1),
     );
-    let projection_ref = serde_json::json!({
-        "array": [null, true, 7, "bytes\u{0000}\u{007f}"],
-        "object": {"key": "value"}
-    });
     let snapshot = Snapshot::new(
         [
             ("bool".to_string(), Value::Bool(true)),
@@ -439,13 +436,15 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
             ("number".to_string(), Value::Number(-12.5)),
             (
                 "projected".to_string(),
-                Value::Projected(
-                    ProjectedValue::unavailable_after_restore_with_projection_ref(
-                        "memory",
-                        "object",
-                        Some(projection_ref),
-                    ),
-                ),
+                Value::Projected(ProjectedValue::resource(
+                    "memory",
+                    "object",
+                    ResourceRef {
+                        projection: ProjectionType::new("memory"),
+                        id: "bytes\u{0000}\u{007f}".into(),
+                        revision: Some("7".into()),
+                    },
+                )),
             ),
             (
                 "record".to_string(),
@@ -473,13 +472,13 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     );
     let bytes = snapshot.to_canonical_bytes().expect("golden snapshot");
     use sha2::Digest as _;
-    assert_eq!(bytes.len(), 884);
+    assert_eq!(bytes.len(), 704);
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x34, 0xbe, 0x89, 0x9a, 0xc6, 0x8e, 0xc2, 0x5e, 0xef, 0xff, 0x44, 0x41, 0xa9, 0x4f,
-            0xb4, 0xc3, 0x31, 0x03, 0xd8, 0x53, 0x4d, 0xfd, 0xd4, 0x97, 0xc5, 0x56, 0x08, 0x2e,
-            0x27, 0x9e, 0x7c, 0xf7,
+            0x8e, 0x60, 0x59, 0x5c, 0x35, 0x8a, 0x15, 0x88, 0xd1, 0xfc, 0x79, 0x11, 0x2f, 0x5e,
+            0xb0, 0xc6, 0x04, 0x2c, 0x99, 0x1f, 0x84, 0xde, 0x6b, 0x84, 0x8d, 0xc1, 0xb7, 0x54,
+            0x16, 0x6d, 0x3a, 0xda,
         ]
     );
 }
@@ -625,7 +624,11 @@ fn canonical_runtime_value_validator_covers_every_canonical_value_variant() {
             value: CanonicalProjectedValue {
                 name: "root".to_string(),
                 type_name: "object".to_string(),
-                projection_ref: Some(CanonicalJsonValue::Null {}),
+                resource: ResourceRef {
+                    projection: ProjectionType::new("memory"),
+                    id: "root".to_string(),
+                    revision: None,
+                },
             },
         },
     ];
@@ -706,20 +709,6 @@ fn canonical_decode_accepts_every_max_depth_encode_shape() {
         list = Value::List(vec![list].into());
     }
     round_trip(list);
-
-    let mut projection_ref = serde_json::Value::Null;
-    // `Projected` enters its JSON payload at depth one, so 63 nested
-    // objects place the terminal null at the shared depth limit of 64.
-    for _ in 0..MAX_SNAPSHOT_VALUE_DEPTH - 1 {
-        projection_ref = serde_json::json!({"child": projection_ref});
-    }
-    round_trip(Value::Projected(
-        ProjectedValue::unavailable_after_restore_with_projection_ref(
-            "root",
-            "object",
-            Some(projection_ref),
-        ),
-    ));
 }
 
 pub(super) fn canonical_heap_with(
@@ -1787,52 +1776,6 @@ fn taking_the_runtime_leaves_the_host_view_as_a_plain_state() {
     assert!(
         !heap.has_runtime_state(),
         "a second take hands out a fresh heap, not the live one"
-    );
-}
-
-/// Refreshing a reload's projection placeholders writes inside the objects
-/// that hold them: two bindings that shared an object before still share it,
-/// and both see the live projection (FIG-3628).
-#[test]
-fn refreshing_projections_keeps_every_binding_on_the_same_object() {
-    let placeholder = ProjectedValue::unavailable_after_restore_with_projection_ref(
-        "report",
-        "object",
-        Some(serde_json::json!({"kind": "memory", "key": "k"})),
-    );
-    let mut heap = Heap::default();
-    let mut holder = Record::new();
-    holder.insert("doc".to_string(), Value::Projected(placeholder));
-    holder.insert("n".to_string(), Value::Number(1.0));
-    let holder = heap.allocate_record(holder).expect("holder");
-    let mut roots = Record::new();
-    roots.insert("alias".to_string(), holder.clone());
-    roots.insert("holder".to_string(), holder.clone());
-    let mut state = State::new();
-    state
-        .install_runtime(roots, heap)
-        .expect("install the shared holder");
-
-    let live = ProjectedValue::scalar("report", Value::String("live".into()));
-    let mut projected = ProjectedBindings::new();
-    projected.insert("report", live.clone());
-    let StateMode::HeapBacked(backed) = &mut state.mode else {
-        panic!("the installed runtime is heap-backed");
-    };
-    crate::runtime::projected_refresh::refresh_record(&mut backed.runtime_globals, &projected);
-    crate::runtime::projected_refresh::refresh_heap(&mut backed.heap, &projected);
-    backed.projected = host_view(&backed.runtime_globals, &mut backed.heap).expect("host view");
-
-    let roots = heap_backed_roots(&state);
-    assert_eq!(roots["alias"], holder, "`alias` still names the holder");
-    assert_eq!(roots["holder"], holder, "`holder` still names the holder");
-    let Some(Value::Record(view)) = state.globals().get("holder") else {
-        panic!("the holder is in the host view")
-    };
-    assert_eq!(
-        view["doc"],
-        Value::Projected(live),
-        "the view is re-derived from the rebound object"
     );
 }
 

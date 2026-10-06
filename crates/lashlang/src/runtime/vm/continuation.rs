@@ -137,7 +137,7 @@ use super::exceptions::PendingErrorOrigin;
 ///     ),
 ///     shapes(
 ///         path = "crates/lashlang/src/runtime/projected_wire.rs",
-///         cover(CanonicalProjectedValue, CanonicalJsonValue, CanonicalJsonField),
+///         cover(CanonicalProjectedValue),
 ///     ),
 ///     shapes(path = "crates/lashlang/src/runtime/error.rs", cover(RuntimeError)),
 ///     shapes(
@@ -690,10 +690,14 @@ mod continuation_serde {
                 ValueWire::List(values.iter().map(value_to_wire).collect::<Result<_, _>>()?)
             }
             Value::Record(record) => ValueWire::Record(record_to_wire(record)?),
-            Value::Projected(projected) => ValueWire::Projected(
-                CanonicalProjectedValue::from_projected(projected, "continuation value", 0)
-                    .map_err(|_| "projection reference beyond the snapshot depth limit")?,
-            ),
+            // A scalar projection is its value on the wire (ADR 0132 §9).
+            Value::Projected(projected) => match projected.scalar_value() {
+                Some(value) => value_to_wire(value)?,
+                None => ValueWire::Projected(
+                    CanonicalProjectedValue::from_projected(projected, "continuation value")
+                        .map_err(|_| "scalar projection without a value")?,
+                ),
+            },
         })
     }
 
@@ -722,11 +726,7 @@ mod continuation_serde {
                     .into(),
             ),
             ValueWire::Record(entries) => Value::Record(Arc::new(record_from_wire(entries)?)),
-            ValueWire::Projected(projected) => Value::Projected(
-                projected
-                    .into_projected()
-                    .map_err(|_| "invalid projection reference")?,
-            ),
+            ValueWire::Projected(projected) => Value::Projected(projected.into_projected()),
         })
     }
 
@@ -1306,12 +1306,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
 
     /// Captures all mutable execution state without consuming the VM.
     ///
-    /// Projected host values cross the boundary by identity: the wire carries
-    /// the binding name, the declared type name and the `projection_ref`, and
-    /// the host descriptor behind them is re-supplied on resume. Refusing them
-    /// instead — which is what this did before FIG-2865 — made an ordinary
-    /// program that merely put a projected binding in a list unable to park at
-    /// all, while the `State` snapshot accepted the identical value.
+    /// Projected values cross the boundary as the plain data they are: a
+    /// resource projection as its name, declared type and `ResourceRef`, a
+    /// scalar projection as its value (ADR 0132 §9). Refusing them instead —
+    /// which is what this did before FIG-2865 — made an ordinary program that
+    /// merely put a projected binding in a list unable to park at all.
     pub fn suspend(&mut self) -> Result<VmContinuation, ContinuationError> {
         validate_parked_await_bound(&self.resume_point)?;
         let roots = self.heap_roots();
@@ -1742,11 +1741,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             #[cfg(test)]
             heapify_passes: 0,
         };
-        // Everything decoded from the wire is an unavailable placeholder: the
-        // host descriptor is not serializable, only the projection's identity
-        // is. Re-binding happens here, once, before the first resumed
-        // instruction, and reaches nested occurrences (FIG-2865).
-        vm.refresh_projected_bindings(&host.projected_bindings());
+        // The host's projected bindings re-occupy their read-only root slots.
+        // Every other projection decoded from the wire is plain data that
+        // reads through its provider (ADR 0132 §9).
+        vm.rebind_projected_slots(&host.projected_bindings());
         Ok(vm)
     }
 }

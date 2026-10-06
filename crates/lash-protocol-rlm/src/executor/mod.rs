@@ -725,9 +725,18 @@ async fn execute_code_in_worker_scope(
         }
     }
 
-    let projected = {
+    let (projected, providers) = {
         let _phase = ctx.named_phase("rlm_lashlang.resolve_projected_bindings");
-        match projected_bindings(&ctx, session_projected_bindings) {
+        match projected_bindings(&ctx, session_projected_bindings).and_then(
+            |(projected, history)| {
+                let mut providers =
+                    lashlang::ProjectionCatalog::of_backend(ctx.projection_providers().as_deref());
+                providers
+                    .register(Arc::new(history))
+                    .map_err(|refusal| refusal.to_string())?;
+                Ok((projected, providers))
+            },
+        ) {
             Ok(projected) => projected,
             Err(err) => {
                 return exec_setup_failure_or_stop(
@@ -803,7 +812,7 @@ async fn execute_code_in_worker_scope(
         "rlm:{}:{:?}",
         scope.session_id, scope.agent_frame_id
     ));
-    let (start_state, projection_namespace) = match resumed {
+    let start_state = match resumed {
         Some(resumed) => {
             if let Err(error) = hold_continuation_definitions(&ctx, &resumed.vm).await {
                 return exec_setup_failure_or_stop(
@@ -813,30 +822,21 @@ async fn execute_code_in_worker_scope(
                     error,
                 );
             }
-            (
-                lash_vm_protocol::StartState::Continuation(resumed.vm),
-                resumed.projection_namespace,
-            )
+            lash_vm_protocol::StartState::Continuation(resumed.vm)
         }
-        None => (
-            state
-                .vm
-                .state()
-                .bytes()
-                .map(|bytes| {
-                    lash_vm_protocol::StartState::Snapshot(lash_vm_protocol::OpaqueVmState::seal(
-                        lash_vm_protocol::VmStateKind::Snapshot,
-                        owner.clone(),
-                        lashlang::vm_contract_versions(),
-                        bytes.to_vec(),
-                    ))
-                })
-                .unwrap_or(lash_vm_protocol::StartState::Fresh),
-            cell.as_ref()
-                .as_ref()
-                .ok()
-                .map(|cell| cell_segment::projection_namespace(&cell.identities().namespace())),
-        ),
+        None => state
+            .vm
+            .state()
+            .bytes()
+            .map(|bytes| {
+                lash_vm_protocol::StartState::Snapshot(lash_vm_protocol::OpaqueVmState::seal(
+                    lash_vm_protocol::VmStateKind::Snapshot,
+                    owner.clone(),
+                    lashlang::vm_contract_versions(),
+                    bytes.to_vec(),
+                ))
+            })
+            .unwrap_or(lash_vm_protocol::StartState::Fresh),
     };
     let identities = match cell.as_ref() {
         Ok(cell) => cell.identities().code().clone(),
@@ -868,14 +868,13 @@ async fn execute_code_in_worker_scope(
             capture_state_view: true,
             projected: Vec::new(),
             observe_execution: lashlang_execution_trace.is_some(),
-            ..Default::default()
         },
         projected,
         bounds: execution_bounds,
         state: start_state,
         boundary: &|| false,
         hand_over: Some(host.hand_over_gate()),
-        projection_namespace,
+        providers,
     }
     .run()
     .await;
@@ -1157,7 +1156,6 @@ async fn suspend_cell(
             .execution()
             .ok_or_else(|| "a suspended cell has no execution identity".to_owned())?
             .to_owned(),
-        projection_namespace: host.hand_over_gate().projection_namespace(),
         projected_bindings,
         host_environment,
         cell_bindings,

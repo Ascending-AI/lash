@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1104 rows over 687 files, 3257 laws.
-# By class: mechanical 140, semantic 99, delete 559, replace 306.
-# By lane: L1b 11, L9b 59, L9c 242, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 82, L8 26, L10a 184, I0 49.
-# By status: todo 484, ported 38, deleted 582.
+# 1112 rows over 693 files, 3268 laws.
+# By class: mechanical 140, semantic 99, delete 567, replace 306.
+# By lane: L1b 11, L7p 8, L9b 59, L9c 242, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 82, L8 26, L10a 184, I0 49.
+# By status: todo 483, ported 38, deleted 591.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -2324,7 +2324,7 @@ laws = [
   "heap_backed_default_patch_survives_next_cell_and_cold_restore",
   "rejected_global_patch_leaves_byte_identical_state_and_no_dirty_marks",
   "rejected_protected_name_patch_leaves_byte_identical_state",
-  "heap_backed_projection_refresh_and_prune_survive_execution_and_restore",
+  "heap_backed_projection_and_prune_survive_execution_and_restore",
   "a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_serves",
   "projected_scalar_bindings_are_read_only_and_not_snapshotted",
   "executor_snapshot_does_not_materialize_projected_tool_result_globals",
@@ -2340,7 +2340,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
-note = "the export registry and its hand-over refusal are deleted by L7"
+note = "L7p (FIG-5197) deleted the export registry and its hand-over refusal; the projection laws here read through providers"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/projections_and_snapshots.rs"
@@ -2353,7 +2353,8 @@ laws = [
   "exported_host_descriptor_declines_handover_without_losing_its_reads",
 ]
 disposition = "subject-deleted"
-status = "todo"
+status = "deleted"
+note = "L7p (FIG-5197): projection values are plain data, so no cell holds an exported descriptor and nothing declines a hand-over"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/session_globals_law.rs"
@@ -18133,3 +18134,118 @@ disposition = "owed"
 status = "todo"
 owed = "a promoted generated regression trace, recorded on the durable engine, replays with active-turn queued input hidden and the cancellation terminalizing the pending row before any later idle admission"
 note = "FIG-5190 follow-up deleted the test with its fixture, crates/lash-sim/replays/queued-active-turn-cancel-race: the trace was recorded on the Restate effect controller."
+
+[[row]]
+path = "crates/lashlang/src/runtime/tests/projection_cases.rs"
+test = "*"
+area = "projections"
+needs = []
+class = "delete"
+lane = "L7p"
+laws = [
+  "canonical_snapshot_restore_makes_projected_value_unavailable",
+]
+disposition = "covered-by:crates/lashlang/src/runtime/tests/projection_provider_laws.rs::a_heap_of_projections_restores_fresh_and_reads_through_its_provider"
+status = "deleted"
+note = "L7p (FIG-5197) deleted the unavailable-after-restore placeholder; only this law of the file is listed, the rest stay"
+
+[[row]]
+path = "crates/lashlang/src/runtime/state/tests.rs"
+test = "*"
+area = "projections"
+needs = []
+class = "delete"
+lane = "L7p"
+laws = [
+  "refreshing_projections_keeps_every_binding_on_the_same_object",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7p (FIG-5197) deleted placeholder refresh: a restored projection is plain data; only this law of the file is listed, the rest stay"
+
+[[row]]
+path = "crates/lashlang/src/runtime/state/durable_tests.rs"
+test = "*"
+area = "projections"
+needs = []
+class = "delete"
+lane = "L7p"
+laws = [
+  "regexp_last_index_rejects_unsupported_durable_projection",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7p (FIG-5197) deleted projection_ref, the only projection part that could exceed the depth bound; only this law of the file is listed, the rest stay"
+
+[[row]]
+path = "crates/lashlang/src/runtime/vm/continuation/tests.rs"
+test = "*"
+area = "projections"
+needs = []
+class = "delete"
+lane = "L7p"
+laws = [
+  "regexp_last_index_continuation_rejects_unsupported_durable_projection",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7p (FIG-5197) deleted projection_ref, the only projection part that could exceed the depth bound; only this law of the file is listed, the rest stay"
+
+[[row]]
+path = "crates/lash-typescript/tests/projected_durable_restore.rs"
+test = "*"
+area = "projections"
+needs = []
+class = "delete"
+lane = "L7p"
+laws = [
+  "an_unrefreshed_nested_projection_refuses_the_read_after_resume",
+  "an_unrefreshed_nested_snapshot_placeholder_refuses_the_read",
+  "string_coercion_of_an_unrefreshed_placeholder_refuses",
+  "concatenating_an_unrefreshed_placeholder_refuses",
+]
+disposition = "covered-by:crates/lashlang/src/runtime/tests/projection_provider_laws.rs::a_projection_without_a_provider_is_refused_with_no_provider"
+status = "deleted"
+note = "L7p (FIG-5197): a projection no provider answers is refused with NoProvider; only these laws of the file are listed, the rest stay"
+
+[[row]]
+path = "crates/lash-typescript/tests/projected_durable_restore.rs"
+test = "a_nested_snapshot_placeholder_refreshes_from_a_re_supplied_binding"
+area = "projections"
+needs = []
+class = "delete"
+lane = "L7p"
+laws = [
+  "a_nested_snapshot_placeholder_refreshes_from_a_re_supplied_binding",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7p (FIG-5197) deleted placeholder refresh"
+
+[[row]]
+path = "crates/lash-typescript/tests/projected_durable_restore.rs"
+test = "a_template_literal_over_a_container_refuses_an_unrefreshed_placeholder"
+area = "projections"
+needs = []
+class = "delete"
+lane = "L7p"
+laws = [
+  "a_template_literal_over_a_container_refuses_an_unrefreshed_placeholder",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7p (FIG-5197) deleted the placeholder whose refusal it pinned"
+
+[[row]]
+path = "crates/lash-vm-worker/tests/performance/mod.rs"
+test = "*"
+area = "projections"
+needs = []
+class = "delete"
+lane = "L7p"
+laws = [
+  "projection_free_outcomes_allocate_nothing",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7p (FIG-5197) deleted the worker's rebinding of exported projection tokens in host outcomes; only this law of the file is listed, the rest stay"

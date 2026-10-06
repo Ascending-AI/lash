@@ -459,8 +459,14 @@ impl CanonicalValue {
                     })
                     .collect::<Result<_, ContinuationError>>()?,
             },
-            Value::Projected(projected) => Self::Projected {
-                value: CanonicalProjectedValue::from_projected(projected, location, depth)?,
+            // A scalar projection is its value on the wire (ADR 0132 §9).
+            Value::Projected(projected) => match projected.scalar_value() {
+                Some(value) => {
+                    Self::from_runtime_with_references(value, location, depth, references_allowed)?
+                }
+                None => Self::Projected {
+                    value: CanonicalProjectedValue::from_projected(projected, location)?,
+                },
             },
         })
     }
@@ -501,7 +507,7 @@ impl CanonicalValue {
                     })
                     .collect::<Result<_, _>>()?,
             )),
-            Self::Projected { value } => Value::Projected(value.into_projected()?),
+            Self::Projected { value } => Value::Projected(value.into_projected()),
         })
     }
 }

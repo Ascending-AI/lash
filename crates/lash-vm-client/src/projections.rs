@@ -1,278 +1,181 @@
-use crate::{ProjectionDescription, ProjectionRead};
-use lashlang::{ProjectedBindings, ProjectedReadResponse, ProjectedValue, Record, Value};
-use std::sync::{Arc, Mutex};
+//! The parent's half of projection reads (ADR 0132 §9).
+//!
+//! A projection value is plain data, so nothing here is registered per run:
+//! a worker's read names the resource it reads, and the parent answers it
+//! through the provider the catalog holds for the resource's type, on
+//! whichever node runs the actor.
+use crate::{ProjectionAnswer, ProjectionDescription, ProjectionRead};
+use lashlang::{
+    ProjectedBindings, ProjectedReadRequest, ProjectedValue, ProjectionCatalog, Record,
+    ResourceRef, Value,
+};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-/// Host descriptors are retained only for this run. Tokens are descriptions,
-/// never authority, and another run cannot accidentally reuse their keys.
+/// The bound a value walk refuses past, as the effect wire does.
+const MAX_DEPTH: usize = 64;
+
+/// A run's projection providers, answering its worker's reads.
 pub struct Projections {
-    values: Mutex<Vec<ProjectedValue>>,
-    /// How many of `values` are the run's admitted bindings; the rest were
-    /// exported from host outcomes while it ran.
-    admitted: usize,
-    namespace: String,
-    max_nodes: usize,
+    catalog: ProjectionCatalog,
 }
+
 impl Projections {
-    /// The registry of `bindings` under `namespace`, or under a fresh one.
-    /// A run resumed from another segment's state passes the namespace that
-    /// state's tokens name; every other run mints its own.
-    pub fn new(
-        bindings: &ProjectedBindings,
-        max_nodes: usize,
-        namespace: Option<String>,
-    ) -> Result<(Self, Vec<ProjectionDescription>), String> {
-        let values = bindings
+    pub fn new(catalog: ProjectionCatalog) -> Self {
+        Self { catalog }
+    }
+
+    /// The bindings as the worker installs them.
+    pub fn describe(bindings: &ProjectedBindings) -> Vec<ProjectionDescription> {
+        bindings
             .names()
-            .filter_map(|name| bindings.get(&name).map(|v| (name, v)))
-            .collect::<Vec<_>>();
-        if values.len() > max_nodes {
-            return Err("projection registry exceeds its bound".into());
-        }
-        let descriptions = values
-            .iter()
-            .enumerate()
-            .map(|(key, (name, value))| ProjectionDescription {
-                name: name.clone(),
-                key,
-                type_name: value.type_name().to_string(),
-                scalar: value.scalar_value().cloned(),
+            .filter_map(|name| {
+                let value = bindings.get(&name)?;
+                Some(ProjectionDescription {
+                    name,
+                    value: Value::Projected(value),
+                })
             })
-            .collect();
-        Ok((
-            Self {
-                admitted: values.len(),
-                values: Mutex::new(values.into_iter().map(|(_, value)| value).collect()),
-                namespace: namespace.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-                max_nodes,
-            },
-            descriptions,
-        ))
+            .collect()
     }
-    pub fn namespace(&self) -> &str {
-        &self.namespace
+
+    /// Answer one projection frame: every request in it, in order.
+    pub async fn read(&self, read: ProjectionRead) -> ProjectionAnswer {
+        self.catalog.answer(&read.resource, read.requests).await
     }
-    /// Descriptors exported by host outcomes, which another segment cannot
-    /// reconstruct from the run's admitted bindings.
-    pub fn exported_descriptors(&self) -> usize {
-        self.values
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .len()
-            - self.admitted
-    }
-    pub fn read(&self, request: ProjectionRead) -> Result<Option<ProjectedReadResponse>, String> {
-        let value = self
-            .values
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(request.key)
-            .cloned();
-        let Some(value) = value else {
-            return Err("projection key is outside the admitted registry".into());
-        };
-        let Some(response) = value
-            .host_descriptor()
-            .and_then(|descriptor| descriptor.read_one(request.request))
-        else {
-            return Ok(None);
-        };
-        Ok(Some(match response {
-            ProjectedReadResponse::Value(value) => {
-                ProjectedReadResponse::Value(self.export(value)?)
-            }
-            other => other,
-        }))
-    }
-    pub fn import_operation(
+
+    /// `op` with each resource projection in its values materialized through
+    /// its provider, so the host reads plain values. A projection whose
+    /// provider is missing, fails or does not answer `Materialize` stays as it
+    /// is, and the host's own read of it refuses typed.
+    pub async fn materialize_operation(
         &self,
         mut op: lashlang::AbilityOp,
     ) -> Result<lashlang::AbilityOp, String> {
-        use lashlang::AbilityOp;
-        let value = |value: &mut Value| -> Result<(), String> {
-            *value = self.import(value.clone(), 0)?;
-            Ok(())
-        };
-        match &mut op {
-            AbilityOp::ResourceOperation(operation) => {
-                value(&mut operation.receiver)?;
-                for argument in &mut operation.args {
-                    value(argument)?;
-                }
+        let mut resources = HashSet::new();
+        for value in operation_values(&mut op) {
+            collect_resources(value, 0, &mut resources)?;
+        }
+        if resources.is_empty() {
+            return Ok(op);
+        }
+        let mut materialized = HashMap::new();
+        for resource in resources {
+            if let Ok(mut answers) = self
+                .catalog
+                .answer(&resource, vec![ProjectedReadRequest::Materialize])
+                .await
+                && let Some(Some(answer)) = answers.pop()
+            {
+                materialized.insert(resource, Value::from(answer));
             }
-            AbilityOp::ResourceOperationBatch(batch) => {
-                for leaf in &mut batch.leaves {
-                    match leaf {
-                        lashlang::ResourceOperationBatchLeaf::Operation(operation) => {
-                            value(&mut operation.receiver)?;
-                            for argument in &mut operation.args {
-                                value(argument)?;
-                            }
-                        }
-                        lashlang::ResourceOperationBatchLeaf::Timer(sleep) => {
-                            value(&mut sleep.value)?
-                        }
-                    }
-                }
-            }
-            AbilityOp::Await(argument)
-            | AbilityOp::Print(argument)
-            | AbilityOp::Finish(argument)
-            | AbilityOp::Fail(argument) => value(argument)?,
-            AbilityOp::ProcessEvent(event) => value(&mut event.value)?,
-            AbilityOp::Sleep(sleep) => value(&mut sleep.value)?,
-            AbilityOp::WaitSignal { .. } => {}
+        }
+        for value in operation_values(&mut op) {
+            *value = substitute(value.clone(), &materialized);
         }
         Ok(op)
     }
-    fn import(&self, value: Value, depth: usize) -> Result<Value, String> {
-        if depth > 64 {
-            return Err("projection request exceeds depth bound".into());
+}
+
+/// Every value an operation carries.
+fn operation_values(op: &mut lashlang::AbilityOp) -> Vec<&mut Value> {
+    use lashlang::AbilityOp;
+    let mut values = Vec::new();
+    match op {
+        AbilityOp::ResourceOperation(operation) => {
+            values.push(&mut operation.receiver);
+            values.extend(operation.args.iter_mut());
         }
-        Ok(match value {
-            Value::Projected(value) => {
-                if let Some(rest) = value.name().strip_prefix("worker-projection/") {
-                    let (namespace, rest) = rest
-                        .split_once('/')
-                        .ok_or("malformed projection namespace")?;
-                    if namespace != self.namespace {
-                        return Err("projection belongs to another run".into());
+        AbilityOp::ResourceOperationBatch(batch) => {
+            for leaf in &mut batch.leaves {
+                match leaf {
+                    lashlang::ResourceOperationBatchLeaf::Operation(operation) => {
+                        values.push(&mut operation.receiver);
+                        values.extend(operation.args.iter_mut());
                     }
-                    let (key, _) = rest.split_once('/').ok_or("malformed projection key")?;
-                    let key = key.parse::<usize>().map_err(|_| "invalid projection key")?;
-                    let descriptor = self
-                        .values
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .get(key)
-                        .cloned()
-                        .ok_or("projection key is outside admitted registry")?;
-                    match value.scalar_value() {
-                        Some(scalar) => Value::Projected(ProjectedValue::scalar(
-                            value.name().to_owned(),
-                            self.import(scalar.clone(), depth + 1)?,
-                        )),
-                        None => Value::Projected(descriptor),
+                    lashlang::ResourceOperationBatchLeaf::Timer(sleep) => {
+                        values.push(&mut sleep.value);
                     }
-                } else {
-                    Value::Projected(value)
                 }
             }
-            Value::List(values) => Value::List(
-                values
-                    .iter()
-                    .cloned()
-                    .map(|value| self.import(value, depth + 1))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into(),
-            ),
-            Value::Tuple(values) => Value::Tuple(
-                values
-                    .iter()
-                    .cloned()
-                    .map(|value| self.import(value, depth + 1))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into(),
-            ),
-            Value::Record(values) => Value::Record(Arc::new(
-                values
-                    .iter()
-                    .map(|(key, value)| {
-                        self.import(value.clone(), depth + 1)
-                            .map(|value| (key.to_string(), value))
-                    })
-                    .collect::<Result<Record, _>>()?,
-            )),
-            other => other,
-        })
-    }
-    pub fn export_outcome(
-        &self,
-        outcome: lashlang::AbilityOutcome,
-    ) -> Result<lashlang::AbilityOutcome, String> {
-        use lashlang::{
-            AbilityOutcome, ResourceOperationBatchOutcome as Batch,
-            ResourceOperationOutcome as Leaf,
-        };
-        let leaf = |leaf| match leaf {
-            Leaf::Value(value) => self.export(value).map(Leaf::Value),
-            other => Ok(other),
-        };
-        Ok(match outcome {
-            AbilityOutcome::Value(value) => AbilityOutcome::Value(self.export(value)?),
-            AbilityOutcome::ResourceOperationBatch(Batch::AllResults(values)) => {
-                AbilityOutcome::ResourceOperationBatch(Batch::AllResults(
-                    values.into_iter().map(leaf).collect::<Result<_, _>>()?,
-                ))
-            }
-            AbilityOutcome::ResourceOperationBatch(Batch::Selected {
-                leaf: index,
-                result,
-            }) => AbilityOutcome::ResourceOperationBatch(Batch::Selected {
-                leaf: index,
-                result: leaf(result)?,
-            }),
-            other => other,
-        })
-    }
-    pub fn export(&self, value: Value) -> Result<Value, String> {
-        let mut remaining = self.max_nodes;
-        self.export_at(value, 0, &mut remaining)
-    }
-    fn export_at(
-        &self,
-        value: Value,
-        depth: usize,
-        remaining: &mut usize,
-    ) -> Result<Value, String> {
-        if depth > 64 || *remaining == 0 {
-            return Err("projection result exceeds its structural bound".into());
         }
-        *remaining -= 1;
-        let mut items = |values: &[Value]| {
+        AbilityOp::Await(argument)
+        | AbilityOp::Print(argument)
+        | AbilityOp::Finish(argument)
+        | AbilityOp::Fail(argument) => values.push(argument),
+        AbilityOp::ProcessEvent(event) => values.push(&mut event.value),
+        AbilityOp::Sleep(sleep) => values.push(&mut sleep.value),
+        AbilityOp::WaitSignal { .. } => {}
+    }
+    values
+}
+
+fn collect_resources(
+    value: &Value,
+    depth: usize,
+    resources: &mut HashSet<ResourceRef>,
+) -> Result<(), String> {
+    if depth > MAX_DEPTH {
+        return Err("projection request exceeds depth bound".into());
+    }
+    match value {
+        Value::Projected(projected) => {
+            if let Some(resource) = projected.resource_ref() {
+                resources.insert(resource.clone());
+            }
+        }
+        Value::List(values) | Value::Tuple(values) => {
+            for value in values.iter() {
+                collect_resources(value, depth + 1, resources)?;
+            }
+        }
+        Value::Record(record) => {
+            for value in record.values() {
+                collect_resources(value, depth + 1, resources)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn substitute(value: Value, materialized: &HashMap<ResourceRef, Value>) -> Value {
+    if !value.contains_projected() {
+        return value;
+    }
+    match value {
+        Value::Projected(projected) => match projected
+            .resource_ref()
+            .and_then(|resource| materialized.get(resource))
+        {
+            Some(value) => Value::Projected(ProjectedValue::scalar(
+                projected.name().to_owned(),
+                value.clone(),
+            )),
+            None => Value::Projected(projected),
+        },
+        Value::List(values) => Value::List(
             values
                 .iter()
                 .cloned()
-                .map(|value| self.export_at(value, depth + 1, remaining))
-                .collect::<Result<Vec<_>, _>>()
-        };
-        Ok(match value {
-            Value::Projected(value) if value.scalar_value().is_none() => {
-                let name = value.name().to_owned();
-                let mut values = self
-                    .values
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if values.len() >= self.max_nodes {
-                    return Err("projection registry exceeds its bound".into());
-                }
-                let key = values.len();
-                values.push(value.clone());
-                Value::Projected(ProjectedValue::custom(
-                    format!("worker-projection/{}/{key}/{name}", self.namespace),
-                    Arc::new(Shape(value.type_name().to_owned())),
-                ))
-            }
-            Value::List(values) => Value::List(items(&values)?.into()),
-            Value::Tuple(values) => Value::Tuple(items(&values)?.into()),
-            Value::Record(values) => Value::Record(Arc::new(
-                values
-                    .iter()
-                    .map(|(key, value)| {
-                        self.export_at(value.clone(), depth + 1, remaining)
-                            .map(|value| (key.to_string(), value))
-                    })
-                    .collect::<Result<Record, _>>()?,
-            )),
-            other => other,
-        })
-    }
-}
-struct Shape(String);
-impl lashlang::ProjectedHostDescriptor for Shape {
-    fn type_name(&self) -> &str {
-        &self.0
-    }
-    fn read_one(&self, _: lashlang::ProjectedReadRequest) -> Option<ProjectedReadResponse> {
-        None
+                .map(|value| substitute(value, materialized))
+                .collect::<Vec<_>>()
+                .into(),
+        ),
+        Value::Tuple(values) => Value::Tuple(
+            values
+                .iter()
+                .cloned()
+                .map(|value| substitute(value, materialized))
+                .collect::<Vec<_>>()
+                .into(),
+        ),
+        Value::Record(record) => Value::Record(Arc::new(
+            record
+                .iter()
+                .map(|(key, value)| (key.to_string(), substitute(value.clone(), materialized)))
+                .collect::<Record>(),
+        )),
+        other => other,
     }
 }

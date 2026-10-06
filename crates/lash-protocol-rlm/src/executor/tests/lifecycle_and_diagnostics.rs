@@ -247,7 +247,7 @@ pub(super) async fn execute_with_projected(
         state: snapshot,
         boundary: &|| false,
         hand_over: None,
-        projection_namespace: None,
+        providers: lashlang::testing::projection::test_catalog(),
     }
     .run()
     .await
@@ -398,7 +398,7 @@ pub(super) struct SnapshotProjectedToolText {
     pub(super) render_count: AtomicUsize,
 }
 
-impl ProjectedHostDescriptor for SnapshotProjectedToolText {
+impl lashlang::testing::projection::TestView for SnapshotProjectedToolText {
     fn type_name(&self) -> &str {
         "string"
     }
@@ -422,7 +422,7 @@ impl ProjectedHostDescriptor for SnapshotProjectedToolText {
     }
 }
 
-impl ProjectedHostDescriptor for TestProjectedValue {
+impl lashlang::testing::projection::TestView for TestProjectedValue {
     fn type_name(&self) -> &str {
         "list"
     }
@@ -448,7 +448,7 @@ pub(super) fn projected_history(values: Vec<FlowValue>) -> ProjectedBindings {
     let mut projected = ProjectedBindings::new();
     projected.insert(
         "history",
-        ProjectedValue::custom("history", Arc::new(TestProjectedValue(values))),
+        lashlang::testing::projection::test_view("history", Arc::new(TestProjectedValue(values))),
     );
     projected
 }

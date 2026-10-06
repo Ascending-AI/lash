@@ -257,7 +257,7 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
 }
 
 #[test]
-pub(super) fn heap_backed_projection_refresh_and_prune_survive_execution_and_restore() {
+pub(super) fn heap_backed_projection_and_prune_survive_execution_and_restore() {
     block_on(async {
         // history = [{ role: "user" }]
         // kept = [{ nested: [2] }]
@@ -284,27 +284,31 @@ pub(super) fn heap_backed_projection_refresh_and_prune_survive_execution_and_res
         state
             .insert_global(
                 "doc",
-                FlowValue::Projected(ProjectedValue::custom(
+                FlowValue::Projected(lashlang::testing::projection::test_view(
                     "doc",
                     Arc::new(SnapshotProjectedToolText::default()),
                 )),
             )
             .expect("insert projected value");
-        let unavailable = state
+        let bytes = state
             .snapshot()
             .to_canonical_bytes()
             .expect("encode projected state");
         state = lashlang::State::from_snapshot(
             lashlang::VmInstance::pristine()
-                .open_snapshot(&unavailable)
-                .expect("restore projected state as unavailable"),
+                .open_snapshot(&bytes)
+                .expect("restore projected state"),
         );
-        // The restore left `doc` a placeholder; a same-named projected
-        // binding re-supplies it in place at the next execution.
+        // `doc` restores as the same plain-data projection (ADR 0132 §9); a
+        // same-named projected binding takes its read-only slot at the next
+        // execution.
         let mut projected = ProjectedBindings::new();
         projected.insert(
             "doc",
-            ProjectedValue::custom("doc", Arc::new(SnapshotProjectedToolText::default())),
+            lashlang::testing::projection::test_view(
+                "doc",
+                Arc::new(SnapshotProjectedToolText::default()),
+            ),
         );
         crate::projection::prune_reserved_projected_bindings(&mut state);
 
@@ -416,7 +420,7 @@ pub(super) async fn executor_snapshot_does_not_materialize_projected_tool_result
         .state_mut()
         .insert_global(
             "m".to_string(),
-            FlowValue::Projected(ProjectedValue::custom(
+            FlowValue::Projected(lashlang::testing::projection::test_view(
                 "search.matches[0].text",
                 projected.clone(),
             )),
@@ -454,209 +458,81 @@ pub(super) async fn executor_snapshot_does_not_materialize_projected_tool_result
 
 #[test]
 pub(super) fn flow_to_json_value_materializes_a_custom_projection() {
-    block_on(async {
-        let host = Arc::new(SnapshotProjectedToolText::default());
-        let projected = ProjectedValue::custom("doc", host.clone());
-        let value = flow_to_json_value(&FlowValue::Projected(projected));
-        assert_eq!(host.materialize_count.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            value,
-            serde_json::json!({
-                PROJECTED_JSON_TAG: {
-                    "kind": "materialized",
-                    "value": "materialized tool text",
-                }
-            })
-        );
+    lashlang::testing::projection::with_test_views(|| {
+        block_on(async {
+            let host = Arc::new(SnapshotProjectedToolText::default());
+            let projected = lashlang::testing::projection::test_view("doc", host.clone());
+            let value = flow_to_json_value(&FlowValue::Projected(projected));
+            assert_eq!(host.materialize_count.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                value,
+                serde_json::json!({
+                    PROJECTED_JSON_TAG: {
+                        "kind": "materialized",
+                        "value": "materialized tool text",
+                    }
+                })
+            );
+        })
     });
 }
 
 #[test]
 pub(super) fn flow_record_to_tool_args_preserves_only_seed_projected_roots() {
-    block_on(async {
-        let projected_root =
-            ProjectedValue::custom("doc", Arc::new(SnapshotProjectedToolText::default()));
-        let mut computed = FlowRecord::default();
-        computed.insert(
-            "summary".to_string(),
-            FlowValue::Projected(ProjectedValue::scalar(
-                "summary",
-                FlowValue::String("materialized summary".into()),
-            )),
-        );
-        let mut seed = FlowRecord::default();
-        seed.insert("problem".to_string(), FlowValue::Projected(projected_root));
-        seed.insert(
-            "computed".to_string(),
-            FlowValue::Record(Arc::new(computed)),
-        );
-        let mut record = FlowRecord::default();
-        record.insert(
-            "task".to_string(),
-            FlowValue::Projected(ProjectedValue::scalar(
-                "task",
-                FlowValue::String("inspect".into()),
-            )),
-        );
-        record.insert("seed".to_string(), FlowValue::Record(Arc::new(seed)));
+    lashlang::testing::projection::with_test_views(|| {
+        block_on(async {
+            let projected_root = lashlang::testing::projection::test_view(
+                "doc",
+                Arc::new(SnapshotProjectedToolText::default()),
+            );
+            let mut computed = FlowRecord::default();
+            computed.insert(
+                "summary".to_string(),
+                FlowValue::Projected(ProjectedValue::scalar(
+                    "summary",
+                    FlowValue::String("materialized summary".into()),
+                )),
+            );
+            let mut seed = FlowRecord::default();
+            seed.insert("problem".to_string(), FlowValue::Projected(projected_root));
+            seed.insert(
+                "computed".to_string(),
+                FlowValue::Record(Arc::new(computed)),
+            );
+            let mut record = FlowRecord::default();
+            record.insert(
+                "task".to_string(),
+                FlowValue::Projected(ProjectedValue::scalar(
+                    "task",
+                    FlowValue::String("inspect".into()),
+                )),
+            );
+            record.insert("seed".to_string(), FlowValue::Record(Arc::new(seed)));
 
-        let value = flow_record_to_tool_args(
-            &record,
-            &lash_core::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
-        )
-        .await
-        .expect("projection transport should be canonical");
+            let value = flow_record_to_tool_args(
+                &record,
+                &lash_core::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
+            )
+            .await
+            .expect("projection transport should be canonical");
 
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "task": "inspect",
-                "seed": {
-                    "problem": {
-                        "__projected__": {
-                            "kind": "materialized",
-                            "value": "materialized tool text"
+            assert_eq!(
+                value,
+                serde_json::json!({
+                    "task": "inspect",
+                    "seed": {
+                        "problem": {
+                            "__projected__": {
+                                "kind": "materialized",
+                                "value": "materialized tool text"
+                            }
+                        },
+                        "computed": {
+                            "summary": "materialized summary"
                         }
-                    },
-                    "computed": {
-                        "summary": "materialized summary"
                     }
-                }
-            })
-        );
+                })
+            );
+        })
     });
-}
-
-/// An exported descriptor cannot be replaced by its materialized value: this
-/// oracle answers Render and Materialize differently. The parked cell keeps
-/// the live host registry and completes on the build that admitted it.
-#[tokio::test]
-pub(super) async fn exported_host_descriptor_declines_handover_without_losing_its_reads() {
-    struct DescriptorHost<'a> {
-        descriptor: Arc<SnapshotProjectedToolText>,
-        parked: &'a tokio::sync::Notify,
-        release: &'a tokio::sync::Notify,
-        rendered: &'a std::sync::Mutex<Vec<String>>,
-    }
-    impl ExecutionHost for DescriptorHost<'_> {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
-            match op {
-                AbilityOp::ResourceOperation(_) => Ok(AbilityOutcome::Value(FlowValue::Record(
-                    Arc::new(FlowRecord::from_iter([(
-                        "doc".to_string(),
-                        FlowValue::Projected(ProjectedValue::custom(
-                            "doc",
-                            self.descriptor.clone(),
-                        )),
-                    )])),
-                ))),
-                AbilityOp::Sleep(_) => {
-                    self.parked.notify_one();
-                    self.release.notified().await;
-                    Ok(AbilityOutcome::Value(FlowValue::Null))
-                }
-                AbilityOp::Print(value) => {
-                    let FlowValue::Projected(value) = value else {
-                        panic!("the print must resolve the live exported descriptor")
-                    };
-                    self.rendered
-                        .lock()
-                        .expect("rendered text")
-                        .push(value.render().expect("descriptor render"));
-                    Ok(AbilityOutcome::Unit)
-                }
-                op => lashlang::testing::harness::EchoHost.perform(op).await,
-            }
-        }
-    }
-    let descriptor = Arc::new(SnapshotProjectedToolText::default());
-    let parked = tokio::sync::Notify::new();
-    let release = tokio::sync::Notify::new();
-    let rendered = std::sync::Mutex::new(Vec::new());
-    let host = DescriptorHost {
-        descriptor: descriptor.clone(),
-        parked: &parked,
-        release: &release,
-        rendered: &rendered,
-    };
-    let gate = lash_lashlang_runtime::HandOverGate::new();
-    let service = lash_vm_client::service::Service::default();
-    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![park_tool_definition()]);
-    let environment = LashlangSurface::default()
-        .host_environment(&catalog)
-        .expect("fixture surface");
-    let run = lash_lashlang_runtime::WorkerRun {
-        service: &service,
-        host: &host,
-        identities: lash_vm_broker::CodeCallIdentities::process_body(ProcessId::fixture(
-            "descriptor-refusal",
-        )),
-        owner: lash_vm_protocol::VmOwner::new("descriptor-refusal"),
-        frame_epoch: lash_vm_protocol::FrameEpoch(0),
-        program: lash_vm_protocol::ProgramSource::Source {
-            dialect: "typescript".into(),
-            text: "const result = await cell.park({ value: 1 }); await sleep(60000); print(result.doc); finish(42);"
-                .into(),
-        },
-        context: lash_vm_client::RunContext {
-            environment,
-            ..Default::default()
-        },
-        projected: Default::default(),
-        bounds: lashlang::ExecutionBounds::new(
-            lashlang::ExecutionBound::Unbounded,
-            lashlang::ExecutionBound::Unbounded,
-        ),
-        state: lash_vm_protocol::StartState::Fresh,
-        boundary: &|| false,
-        hand_over: Some(&gate),
-        projection_namespace: None,
-    }
-    .run();
-    tokio::pin!(run);
-    tokio::select! {
-        () = parked.notified() => {}
-        result = &mut run => panic!("descriptor cell ended before its parked wait: {result:?}"),
-    }
-    assert!(!gate.parked());
-    assert_eq!(
-        gate.refusal(),
-        Some(lash_lashlang_runtime::HandOverRefusal::ExportedHostDescriptors { count: 1 })
-    );
-    assert_eq!(descriptor.materialize_count.load(Ordering::SeqCst), 0);
-    release.notify_one();
-    let lash_vm_broker::BrokeredEnd::Complete { value, .. } =
-        run.await.expect("cell completes in place")
-    else {
-        panic!("the refused cell must complete in place")
-    };
-    assert_eq!(
-        rmp_serde::from_slice::<ExecutionOutcome>(&value.0).expect("outcome"),
-        ExecutionOutcome::Finished(FlowValue::Number(42.0))
-    );
-    assert_eq!(
-        rendered.lock().expect("rendered text").as_slice(),
-        &["rendered tool text"]
-    );
-    assert_eq!(descriptor.render_count.load(Ordering::SeqCst), 1);
-    assert_eq!(descriptor.materialize_count.load(Ordering::SeqCst), 0);
-}
-
-fn park_tool_definition() -> lash_core::ToolDefinition {
-    use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
-
-    lash_core::ToolDefinition::raw(
-        "tool:cell_park",
-        "cell_park",
-        "Test-only effect used to park a cell continuation.",
-        serde_json::json!({
-            "type": "object",
-            "properties": { "value": { "type": "number" } },
-            "required": ["value"],
-            "additionalProperties": false
-        }),
-        serde_json::json!({ "type": "number" }),
-    )
-    .expect("valid declared tool schemas")
-    .with_tool_binding(ToolBinding::new(["cell"], "park"))
 }

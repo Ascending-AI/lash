@@ -340,18 +340,22 @@ fn continuation_decode_rejects_descending_counters_and_dangling_refs() {
 /// FIG-2865: the continuation wire refused `Value::Projected` recursively, so a
 /// slot holding `[report]` could not park at all while the `State` snapshot
 /// wrote the identical value without complaint. Both writers now use the same
-/// canonical three-field shape, and a nested occurrence rides it too.
+/// canonical shape, a resource projection's name, type and `ResourceRef`
+/// (ADR 0132 §9), and a nested occurrence rides it too.
 #[test]
 fn nested_projection_survives_the_continuation_wire() {
+    let report = crate::runtime::ResourceRef {
+        projection: crate::runtime::ProjectionType::new("report"),
+        id: "7".into(),
+        revision: Some("r1".into()),
+    };
     let mut continuation = empty_continuation(Heap::default());
     continuation.operand_stack = vec![Value::List(
-        vec![Value::Projected(
-            crate::runtime::ProjectedValue::unavailable_after_restore_with_projection_ref(
-                "report",
-                "string",
-                Some(serde_json::json!({ "kind": "report", "id": 7 })),
-            ),
-        )]
+        vec![Value::Projected(crate::runtime::ProjectedValue::resource(
+            "report",
+            "string",
+            report.clone(),
+        ))]
         .into(),
     )];
 
@@ -363,13 +367,7 @@ fn nested_projection_survives_the_continuation_wire() {
             "value": {
                 "name": "report",
                 "type_name": "string",
-                "projection_ref": {
-                    "kind": "object",
-                    "fields": [
-                        { "name": "id", "value": { "kind": "number", "value": 7 } },
-                        { "name": "kind", "value": { "kind": "string", "value": "report" } },
-                    ],
-                },
+                "resource": { "projection": "report", "id": "7", "revision": "r1" },
             },
         }),
         "the nested projection must carry the snapshot wire's canonical shape"
@@ -381,55 +379,14 @@ fn nested_projection_survives_the_continuation_wire() {
         panic!("expected the nested container back");
     };
     let Some(Value::Projected(nested)) = rows.first() else {
-        panic!("expected a nested projected placeholder");
+        panic!("expected a nested projection");
     };
     assert_eq!(nested.name(), "report");
     assert_eq!(nested.value_type_name(), "string");
     assert_eq!(
-        nested.projection_ref(),
-        Some(&serde_json::json!({ "kind": "report", "id": 7 })),
-        "`projection_ref` must cross the wire unchanged"
-    );
-}
-
-#[test]
-fn regexp_last_index_continuation_rejects_unsupported_durable_projection() {
-    let mut identity = serde_json::json!(0);
-    for _ in 0..66 {
-        identity = serde_json::json!([identity]);
-    }
-    let unsupported = Value::Projected(
-        crate::runtime::ProjectedValue::unavailable_after_restore_with_projection_ref(
-            "unsupported",
-            "number",
-            Some(identity),
-        ),
-    );
-    let mut heap = Heap::default();
-    let regexp = heap
-        .allocate_regexp("a".into(), "g".into())
-        .expect("regexp");
-    let Value::Ref(id) = regexp else {
-        panic!("heap reference")
-    };
-    heap.set_regexp_last_index(id, unsupported)
-        .expect("raw assignment");
-    let mut continuation = empty_continuation(heap);
-    continuation.reference_semantics = true;
-    continuation.operand_stack.push(regexp);
-    let validation = validate_continuation(&continuation)
-        .expect_err("suspension prevalidation refuses unsupported property");
-    assert!(
-        matches!(validation, ContinuationError::UnserializableValue { ref location, variant: "value beyond the snapshot depth limit" } if location.contains("lastIndex")),
-        "{validation}"
-    );
-    let error =
-        serde_json::to_vec(&continuation).expect_err("unsupported property cannot be emitted");
-    assert!(
-        error
-            .to_string()
-            .contains("projection reference beyond the snapshot depth limit"),
-        "{error}"
+        nested.resource_ref(),
+        Some(&report),
+        "the resource must cross the wire unchanged"
     );
 }
 

@@ -3,9 +3,8 @@
 
 use super::*;
 use lashlang::{
-    DurableBaseline, DurableFragment, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, Record as FlowRecord, State as FlowState,
-    Value as FlowValue,
+    DurableBaseline, DurableFragment, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue,
+    Record as FlowRecord, State as FlowState, Value as FlowValue,
 };
 use serde_json::json;
 
@@ -635,7 +634,7 @@ struct CountingProjectedValue {
     render_count: AtomicUsize,
 }
 
-impl ProjectedHostDescriptor for CountingProjectedValue {
+impl lashlang::testing::projection::TestView for CountingProjectedValue {
     fn type_name(&self) -> &str {
         "string"
     }
@@ -666,7 +665,10 @@ async fn excludes_custom_projected_globals_without_rendering_or_materializing() 
         .state_mut()
         .insert_global(
             "projected".to_string(),
-            FlowValue::Projected(ProjectedValue::custom("projected", projected.clone())),
+            FlowValue::Projected(lashlang::testing::projection::test_view(
+                "projected",
+                projected.clone(),
+            )),
         )
         .await
         .expect("seed a global");

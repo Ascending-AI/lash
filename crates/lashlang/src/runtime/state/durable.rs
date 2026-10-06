@@ -383,11 +383,20 @@ fn non_fixed_point(location: &str) -> SnapshotDecodeError {
     }
 }
 
+/// What the durable wire encodes for `value`: a scalar projection's value.
+fn durable_view(value: &Value) -> &Value {
+    match value {
+        Value::Projected(projected) => projected.scalar_value().map_or(value, durable_view),
+        other => other,
+    }
+}
+
 /// Whether two root values encode to the same bytes, without encoding them:
 /// numbers by their canonical bits (so `-0` and `+0` differ), records in
-/// property order, projections by the identity the wire carries.
+/// property order, a resource projection by the identity the wire carries
+/// and a scalar projection as the value it is encoded as.
 fn durably_identical(left: &Value, right: &Value) -> bool {
-    match (left, right) {
+    match (durable_view(left), durable_view(right)) {
         (Value::Number(left), Value::Number(right)) => {
             canonical_bits(*left) == canonical_bits(*right)
         }
@@ -410,7 +419,7 @@ fn durably_identical(left: &Value, right: &Value) -> bool {
         (Value::Projected(left), Value::Projected(right)) => {
             left.name() == right.name()
                 && left.value_type_name() == right.value_type_name()
-                && left.projection_ref() == right.projection_ref()
+                && left.resource_ref() == right.resource_ref()
         }
         (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
         (Value::Bool(left), Value::Bool(right)) => left == right,

@@ -21,10 +21,11 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
+use lashlang::testing::projection::{TestView, reading_test_views, test_view};
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, RuntimeError, State, Value,
+    ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, RuntimeError,
+    State, Value,
 };
 
 /// Supplies the session's projected bindings the way a real host does — through
@@ -66,9 +67,9 @@ impl ExecutionHost for Host {
             bindings.insert(name, ProjectedValue::scalar(name, value));
         }
         if let Some(view) = &self.view {
-            bindings.insert("view", ProjectedValue::custom("view", view.clone()));
+            bindings.insert("view", test_view("view", view.clone()));
         }
-        bindings
+        reading_test_views(bindings)
     }
 }
 
@@ -81,7 +82,7 @@ struct RecordingView {
     asked: Mutex<Vec<String>>,
 }
 
-impl ProjectedHostDescriptor for RecordingView {
+impl TestView for RecordingView {
     fn type_name(&self) -> &str {
         "RecordingView"
     }
@@ -394,7 +395,7 @@ struct ProjectedRows {
     values: Vec<Value>,
 }
 
-impl ProjectedHostDescriptor for ProjectedRows {
+impl TestView for ProjectedRows {
     fn type_name(&self) -> &str {
         "ProjectedRows"
     }
@@ -439,14 +440,14 @@ impl ExecutionHost for RowsHost {
         let mut bindings = ProjectedBindings::new();
         bindings.insert(
             "rows",
-            ProjectedValue::custom(
+            test_view(
                 "rows",
                 Arc::new(ProjectedRows {
                     values: (1..=4).map(|n| Value::Number(f64::from(n))).collect(),
                 }),
             ),
         );
-        bindings
+        reading_test_views(bindings)
     }
 }
 

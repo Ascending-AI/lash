@@ -89,7 +89,8 @@ impl DurableBackendBuilder {
     }
 }
 
-/// The catalog of `providers`, refusing two of one type.
+/// The catalog of `providers`, refusing two of one type. Lash provides
+/// `history` itself, so a host provider of it is the second of its type.
 #[cfg(feature = "rlm")]
 fn projection_catalog(
     providers: Vec<Arc<dyn lashlang::ProjectionProvider>>,
@@ -100,11 +101,13 @@ fn projection_catalog(
     let mut catalog = lashlang::ProjectionCatalog::new();
     for provider in providers {
         let projection = provider.projection_type();
-        catalog
-            .register(provider)
-            .map_err(|_| DurableBuildError::DuplicateProvider {
-                projection: projection.as_str().to_owned(),
-            })?;
+        let duplicate = || DurableBuildError::DuplicateProvider {
+            projection: projection.as_str().to_owned(),
+        };
+        if projection.as_str() == lash_protocol_rlm::HISTORY_PROJECTION {
+            return Err(duplicate());
+        }
+        catalog.register(provider).map_err(|_| duplicate())?;
     }
     Ok(Arc::new(catalog))
 }

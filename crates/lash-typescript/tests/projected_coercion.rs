@@ -28,10 +28,11 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use lashlang::testing::projection::{TestView, reading_test_views, test_view};
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, RuntimeError, State, Value,
+    ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, RuntimeError,
+    State, Value,
 };
 
 #[derive(Default)]
@@ -113,7 +114,7 @@ struct CountingDescriptor {
     materialize_calls: Arc<AtomicUsize>,
 }
 
-impl ProjectedHostDescriptor for CountingDescriptor {
+impl TestView for CountingDescriptor {
     fn type_name(&self) -> &str {
         "CountingDescriptor"
     }
@@ -146,7 +147,7 @@ impl ExecutionHost for CountingHost {
     fn projected_bindings(&self) -> ProjectedBindings {
         let mut bindings = ProjectedBindings::new();
         bindings.insert("pending", self.projected.clone());
-        bindings
+        reading_test_views(bindings)
     }
 }
 
@@ -160,7 +161,7 @@ async fn execute_counting(
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let program = lashlang::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let projected = ProjectedValue::custom(
+    let projected = test_view(
         "pending",
         Arc::new(CountingDescriptor {
             value,

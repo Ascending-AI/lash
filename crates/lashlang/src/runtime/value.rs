@@ -1,11 +1,12 @@
 //! Value types: the dynamically-typed `Value` enum, its projection wrapper,
-//! the `ImageValue` attachment descriptor, and the public projection traits
-//! (`ProjectedHostDescriptor`, `ProjectedReadRequest`, `ProjectedReadResponse`).
+//! the `ImageValue` attachment descriptor, and the projection read vocabulary
+//! (`ResourceRef`, `ProjectedReadRequest`, `ProjectedReadResponse`).
 //!
 //! The `Value` enum is the universal currency of the lashlang runtime: every
 //! load, every binary op, every host-tool argument, every JSON round-trip
 //! flows through it. `ProjectedValue` wraps host-side bindings the runtime
-//! can read but should not own; field/index access on a projected source
+//! can read but does not own: a scalar in memory, or a `ResourceRef` read
+//! through its type's provider (ADR 0132 §9); field/index access on a projected source
 //! propagates the wrapper so downstream consumers can tell that this came
 //! from a projected binding.
 
@@ -22,6 +23,7 @@ use rustc_hash::FxHashMap;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use super::projection_provider::{self, ProjectionReadError, ProjectionReader};
 use super::record::Symbol;
 use super::{
     HeapId, Name, Record, RuntimeError, RuntimeJson, append_tuple_literal_direct,
@@ -57,43 +59,37 @@ impl RenderValue for Value {
             Self::Ref(_) => RenderNode::Placeholder(Cow::Borrowed("[unavailable reference]")),
             Self::Projected(projected) => match &projected.kind {
                 ProjectedKind::Scalar(value) => value.node(),
-                ProjectedKind::Custom(_) if projected.is_unavailable() => RenderNode::Placeholder(
-                    Cow::Owned(format!("[{} unavailable]", projected.name())),
-                ),
-                ProjectedKind::Custom(descriptor) => {
-                    if descriptor.type_name() == "list" {
-                        return match descriptor.read_one(ProjectedReadRequest::Len) {
-                            Some(ProjectedReadResponse::Len(len)) => RenderNode::Array(len),
-                            Some(ProjectedReadResponse::Value(Value::Number(len)))
-                                if len >= 0.0 =>
-                            {
-                                RenderNode::Array(len as usize)
-                            }
-                            _ => RenderNode::Placeholder(Cow::Owned(
-                                projected
-                                    .render()
-                                    .unwrap_or_else(|error| format!("[{error}]")),
-                            )),
-                        };
+                ProjectedKind::Resource {
+                    type_name,
+                    resource,
+                } => {
+                    let fallback = || {
+                        RenderNode::Placeholder(Cow::Owned(
+                            projected
+                                .render()
+                                .unwrap_or_else(|error| format!("[{error}]")),
+                        ))
+                    };
+                    let len = || match projected.read_one(resource, ProjectedReadRequest::Len) {
+                        Ok(Some(ProjectedReadResponse::Len(len))) => RenderNode::Array(len),
+                        Ok(Some(ProjectedReadResponse::Value(Value::Number(len))))
+                            if len >= 0.0 =>
+                        {
+                            RenderNode::Array(len as usize)
+                        }
+                        _ => fallback(),
+                    };
+                    if type_name.as_ref() == "list" {
+                        return len();
                     }
-                    match descriptor.read_one(ProjectedReadRequest::Keys) {
-                        Some(ProjectedReadResponse::Keys(keys)) => RenderNode::Object(keys.len()),
-                        Some(ProjectedReadResponse::Value(Value::List(keys))) => {
+                    match projected.read_one(resource, ProjectedReadRequest::Keys) {
+                        Ok(Some(ProjectedReadResponse::Keys(keys))) => {
                             RenderNode::Object(keys.len())
                         }
-                        _ => match descriptor.read_one(ProjectedReadRequest::Len) {
-                            Some(ProjectedReadResponse::Len(len)) => RenderNode::Array(len),
-                            Some(ProjectedReadResponse::Value(Value::Number(len)))
-                                if len >= 0.0 =>
-                            {
-                                RenderNode::Array(len as usize)
-                            }
-                            _ => RenderNode::Placeholder(Cow::Owned(
-                                projected
-                                    .render()
-                                    .unwrap_or_else(|error| format!("[{error}]")),
-                            )),
-                        },
+                        Ok(Some(ProjectedReadResponse::Value(Value::List(keys)))) => {
+                            RenderNode::Object(keys.len())
+                        }
+                        _ => len(),
                     }
                 }
             },
@@ -118,23 +114,27 @@ impl RenderValue for Value {
                 .iter()
                 .map(|(key, value)| (Cow::Borrowed(key), Cow::Borrowed(value)))
                 .collect(),
-            Self::Projected(projected) => projected
-                .keys()
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|key| {
-                    let value = match &projected.kind {
-                        ProjectedKind::Scalar(value) => match value.as_ref() {
-                            Value::Record(record) => record.get(&key).cloned(),
-                            _ => None,
-                        },
-                        ProjectedKind::Custom(descriptor) => descriptor
-                            .read_one(ProjectedReadRequest::Field(Arc::from(key.as_str())))
-                            .map(Into::into),
-                    };
-                    value.map(|value| (Cow::Owned(key), Cow::Owned(value)))
-                })
-                .collect(),
+            Self::Projected(projected) => {
+                let keys = projected.keys().unwrap_or_default();
+                match &projected.kind {
+                    ProjectedKind::Scalar(value) => match value.as_ref() {
+                        Value::Record(record) => keys
+                            .into_iter()
+                            .filter_map(|key| {
+                                let value = record.get(&key).cloned()?;
+                                Some((Cow::Owned(key), Cow::Owned(value)))
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    },
+                    ProjectedKind::Resource { resource, .. } => projected
+                        .read_fields(resource, keys)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(key, value)| (Cow::Owned(key), Cow::Owned(value)))
+                        .collect(),
+                }
+            }
             _ => Vec::new(),
         };
         fields.into_iter()
@@ -641,12 +641,10 @@ impl<'de> Deserialize<'de> for Value {
     }
 }
 
-type ProjectedValueResolver = dyn Fn(&ProjectedValue) -> Option<ProjectedValue> + Send + Sync;
-
 #[derive(Clone, Default)]
 pub struct ProjectedBindings {
     bindings: FxHashMap<Symbol, ProjectedValue>,
-    resolver: Option<Arc<ProjectedValueResolver>>,
+    reader: Option<Arc<dyn ProjectionReader>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -714,16 +712,17 @@ impl ProjectedBindings {
             .map(|symbol| symbol.as_str().to_string())
     }
 
-    /// Rebinds worker-owned projection references after a parked continuation
-    /// is restored. The resolver lives in the owned execution configuration.
-    pub fn with_resolver(mut self, resolver: Arc<ProjectedValueResolver>) -> Self {
-        self.resolver = Some(resolver);
+    /// Answer this execution's projection reads through `reader`: the
+    /// worker's wire, or a catalog for an in-process execution. A projection
+    /// value holds no reader; the execution that holds it does.
+    pub fn with_reader(mut self, reader: Arc<dyn ProjectionReader>) -> Self {
+        self.reader = Some(reader);
         self
     }
 
-    pub(crate) fn resolve(&self, projected: &ProjectedValue) -> Option<ProjectedValue> {
-        self.get(projected.name())
-            .or_else(|| self.resolver.as_ref()?.as_ref()(projected))
+    /// The reader this execution's projection reads go through.
+    pub fn reader(&self) -> Option<Arc<dyn ProjectionReader>> {
+        self.reader.clone()
     }
 }
 
@@ -731,13 +730,17 @@ impl ProjectedBindings {
 pub struct ProjectedValue {
     name: Arc<str>,
     kind: ProjectedKind,
-    projection_ref: Option<serde_json::Value>,
 }
 
 #[derive(Clone)]
 enum ProjectedKind {
     Scalar(Arc<Value>),
-    Custom(Arc<dyn ProjectedHostDescriptor>),
+    /// The VM's whole hold on a host view: its declared type and its
+    /// resource, plain data that snapshots with the heap (ADR 0132 §9).
+    Resource {
+        type_name: Arc<str>,
+        resource: Arc<ResourceRef>,
+    },
 }
 
 /// A projection type: the name its provider is registered under.
@@ -838,10 +841,10 @@ impl ProjectedReadRequest {
     }
 }
 
-/// What a host descriptor answers when it *does* answer.
+/// What a projection provider answers when it *does* answer.
 ///
 /// "Cannot answer" is not in here: that is `None` from
-/// [`ProjectedHostDescriptor::read_one`]. Keeping the two apart is the point of
+/// [`super::ProjectionProvider::read`]. Keeping the two apart is the point of
 /// FIG-2863 — a single `Missing` used to mean both, and each consumer picked
 /// its own widening for it, so an unanswerable `Contains` read as `false` and an
 /// unanswerable `Field` read as `null`.
@@ -883,83 +886,55 @@ impl From<ProjectedReadResponse> for Value {
     }
 }
 
-pub trait ProjectedHostDescriptor: Send + Sync {
-    fn type_name(&self) -> &str;
-
-    /// Whether this descriptor is the placeholder a durable wire decodes to
-    /// before the live binding is re-supplied. Reads on such a projection refuse
-    /// with `RuntimeError::ProjectedValueUnavailable` instead of answering
-    /// (FIG-2865); host descriptors never override it.
-    fn unavailable_after_restore(&self) -> bool {
-        false
-    }
-
-    /// Answers one read, or `None` when this descriptor does not answer that
-    /// request at all.
-    ///
-    /// The read is synchronous and pure: a descriptor is a view over state the
-    /// host already holds, resolved before the runtime asks. There is no async
-    /// surface here — the VM reads it inline, with no executor (FIG-3672 P4).
-    ///
-    /// There is deliberately no default: a descriptor states what it answers,
-    /// so an unanswered request is a decision rather than an omission
-    /// (FIG-2863). Consumers that need an answer refuse with
-    /// [`RuntimeError::ProjectedReadUnsupported`]; the string and iteration
-    /// helpers treat `None` as "no special implementation" and fall back to
-    /// materializing.
-    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse>;
-}
-
 impl ProjectedValue {
     pub fn scalar(name: impl Into<Arc<str>>, value: Value) -> Self {
         Self {
             name: name.into(),
             kind: ProjectedKind::Scalar(Arc::new(value)),
-            projection_ref: None,
         }
     }
 
-    pub fn custom(name: impl Into<Arc<str>>, value: Arc<dyn ProjectedHostDescriptor>) -> Self {
-        Self {
-            name: name.into(),
-            kind: ProjectedKind::Custom(value),
-            projection_ref: None,
-        }
-    }
-
-    pub(crate) fn unavailable_after_restore_with_projection_ref(
+    /// A projection of `resource`, declared as a `type_name` value: plain
+    /// data that reads through the provider registered for
+    /// `resource.projection` (ADR 0132 §9).
+    pub fn resource(
         name: impl Into<Arc<str>>,
         type_name: impl Into<Arc<str>>,
-        projection_ref: Option<serde_json::Value>,
+        resource: ResourceRef,
     ) -> Self {
-        let name = name.into();
         Self {
-            name: name.clone(),
-            kind: ProjectedKind::Custom(Arc::new(UnavailableProjection {
+            name: name.into(),
+            kind: ProjectedKind::Resource {
                 type_name: type_name.into(),
-            })),
-            projection_ref,
+                resource: Arc::new(resource),
+            },
         }
     }
 
-    /// Whether this projection is a placeholder decoded from a durable wire
-    /// whose host descriptor has not been re-supplied (FIG-2865).
-    pub(crate) fn is_unavailable(&self) -> bool {
-        match &self.kind {
-            ProjectedKind::Scalar(_) => false,
-            ProjectedKind::Custom(value) => value.unavailable_after_restore(),
+    /// One read of `resource` through the reader of the execution that holds
+    /// this value; `None` when its provider does not answer `request`.
+    fn read_one(
+        &self,
+        resource: &ResourceRef,
+        request: ProjectedReadRequest,
+    ) -> Result<Option<ProjectedReadResponse>, RuntimeError> {
+        projection_provider::read(resource, request).map_err(|error| self.read_error(error))
+    }
+
+    fn read_error(&self, error: ProjectionReadError) -> RuntimeError {
+        match error {
+            ProjectionReadError::Refused(refusal) => RuntimeError::ProjectionRefused {
+                name: self.name.to_string(),
+                refusal,
+            },
+            ProjectionReadError::Failed(source) => RuntimeError::ProjectionReadFailed {
+                name: self.name.to_string(),
+                source,
+            },
         }
     }
 
-    /// The one answer a placeholder can give any read.
-    fn refusal(&self) -> RuntimeError {
-        RuntimeError::ProjectedValueUnavailable {
-            name: self.name.to_string(),
-            type_name: self.value_type_name().to_string(),
-        }
-    }
-
-    /// The refusal a consumer raises when this descriptor does not answer a
+    /// The refusal a consumer raises when the provider does not answer a
     /// request it needs an answer to (FIG-2863).
     fn unsupported(&self, request: &ProjectedReadRequest) -> RuntimeError {
         RuntimeError::ProjectedReadUnsupported {
@@ -969,54 +944,42 @@ impl ProjectedValue {
         }
     }
 
-    fn refuse_if_unavailable(&self) -> Result<(), RuntimeError> {
-        if self.is_unavailable() {
-            return Err(self.refusal());
-        }
-        Ok(())
-    }
-
     pub fn name(&self) -> &str {
         &self.name
     }
 
     /// Host descriptor vocabulary for prompt and linker metadata. Scalar
-    /// projections report the underlying runtime value type; custom
-    /// projections forward the descriptor's declared type name.
+    /// projections report the underlying runtime value type; resource
+    /// projections their declared type name.
     pub fn type_name(&self) -> &str {
         self.value_type_name()
     }
 
-    pub fn projection_ref(&self) -> Option<&serde_json::Value> {
-        self.projection_ref.as_ref()
+    /// The resource a resource projection reads, which is all of it the VM
+    /// holds.
+    pub fn resource_ref(&self) -> Option<&ResourceRef> {
+        match &self.kind {
+            ProjectedKind::Resource { resource, .. } => Some(resource),
+            ProjectedKind::Scalar(_) => None,
+        }
     }
 
-    /// The value behind a *scalar* projection, which is already in memory and so
-    /// costs nothing to read through. Path reads use this to resolve field and
-    /// index access with the VM's dialect-aware helpers instead of the
-    /// dialect-blind `access.rs` reads `get_field` / `get_index` fall back to —
-    /// a scalar projection of a string has a `.length`, and a missing key on a
-    /// projected record is `undefined` in the TypeScript dialect, exactly as it
-    /// is when the same value is not projected. `None` for a custom projection,
-    /// whose reads belong to the host descriptor and stay lazy.
     /// Whether this projection is absent, for `??`.
     ///
     /// A scalar projection is nullish exactly when the value behind it is —
     /// `Scalar(Null)` is how this design spells an absent projected value, which
     /// is the whole point of FIG-1479.
     ///
-    /// A custom projection stands for a live host view, so it is present, and it
+    /// A resource projection stands for a host view, so it is present, and it
     /// is deliberately not read to find that out. Reading would invert the
-    /// answer: an unanswered `ProjectedReadRequest` is `Missing`, which
-    /// `materialize` maps to `Value::Null`, so every descriptor that does
-    /// not implement `Materialize` — the documented minimum is `type_name` alone
-    /// — would judge its own view absent and hand `??` the fallback. It would
-    /// also be the one read this question must never make, dragging a whole
-    /// session view across to decide presence.
+    /// answer: a provider that does not answer `Materialize` would judge its
+    /// own view absent and hand `??` the fallback. It would also be the one read
+    /// this question must never make, dragging a whole session view across to
+    /// decide presence.
     ///
     /// Because nothing is read, `IsNullish` stays completed by the VM's fast path
     /// rather than bailing to the async projected route the way `ToBool` does:
-    /// truthiness has a `ProjectedReadRequest::Truthy` to await, and presence has
+    /// truthiness has a `ProjectedReadRequest::Truthy` to ask, and presence has
     /// no counterpart to ask for.
     ///
     /// Matched on the kind rather than through `scalar_value` so that a new
@@ -1027,22 +990,22 @@ impl ProjectedValue {
             ProjectedKind::Scalar(value) => {
                 matches!(value.as_ref(), Value::Null | Value::Undefined)
             }
-            ProjectedKind::Custom(_) => false,
+            ProjectedKind::Resource { .. } => false,
         }
     }
 
+    /// The value behind a *scalar* projection, which is already in memory and so
+    /// costs nothing to read through. Path reads use this to resolve field and
+    /// index access with the VM's dialect-aware helpers instead of the
+    /// dialect-blind `access.rs` reads `get_field` / `get_index` fall back to —
+    /// a scalar projection of a string has a `.length`, and a missing key on a
+    /// projected record is `undefined` in the TypeScript dialect, exactly as it
+    /// is when the same value is not projected. `None` for a resource
+    /// projection, whose reads belong to its provider and stay lazy.
     pub fn scalar_value(&self) -> Option<&Value> {
         match &self.kind {
             ProjectedKind::Scalar(value) => Some(value),
-            ProjectedKind::Custom(_) => None,
-        }
-    }
-
-    /// Pure access to the admitted host descriptor, without materializing it.
-    pub fn host_descriptor(&self) -> Option<&dyn ProjectedHostDescriptor> {
-        match &self.kind {
-            ProjectedKind::Custom(value) => Some(value.as_ref()),
-            ProjectedKind::Scalar(_) => None,
+            ProjectedKind::Resource { .. } => None,
         }
     }
 
@@ -1081,89 +1044,90 @@ impl ProjectedValue {
     }
 
     pub(crate) fn len(&self) -> Result<usize, RuntimeError> {
-        self.refuse_if_unavailable()?;
         Ok(match &self.kind {
             ProjectedKind::Scalar(value) => value_len(value).unwrap_or(0),
-            ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Len) {
-                Some(ProjectedReadResponse::Len(value)) => value,
-                Some(ProjectedReadResponse::Value(value)) => value_len(&value).unwrap_or(0),
-                Some(ProjectedReadResponse::Text(value)) => value.chars().count(),
-                Some(ProjectedReadResponse::Keys(values)) => values.len(),
-                Some(ProjectedReadResponse::Bool(_)) | None => {
-                    return Err(self.unsupported(&ProjectedReadRequest::Len));
+            ProjectedKind::Resource { resource, .. } => {
+                match self.read_one(resource, ProjectedReadRequest::Len)? {
+                    Some(ProjectedReadResponse::Len(value)) => value,
+                    Some(ProjectedReadResponse::Value(value)) => value_len(&value).unwrap_or(0),
+                    Some(ProjectedReadResponse::Text(value)) => value.chars().count(),
+                    Some(ProjectedReadResponse::Keys(values)) => values.len(),
+                    Some(ProjectedReadResponse::Bool(_)) | None => {
+                        return Err(self.unsupported(&ProjectedReadRequest::Len));
+                    }
                 }
-            },
+            }
         })
     }
 
     pub(crate) fn empty(&self) -> Result<Option<bool>, RuntimeError> {
-        self.refuse_if_unavailable()?;
         Ok(match &self.kind {
             ProjectedKind::Scalar(value) => value_len(value).map(|len| len == 0),
-            ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Empty) {
-                Some(ProjectedReadResponse::Bool(value)) => Some(value),
-                Some(ProjectedReadResponse::Value(Value::Bool(value))) => Some(value),
-                Some(ProjectedReadResponse::Value(value)) => Some(value_truthy(&value)?),
-                Some(ProjectedReadResponse::Len(value)) => Some(value == 0),
-                Some(ProjectedReadResponse::Keys(values)) => Some(values.is_empty()),
-                Some(ProjectedReadResponse::Text(value)) => Some(value.is_empty()),
-                None => return Err(self.unsupported(&ProjectedReadRequest::Empty)),
-            },
+            ProjectedKind::Resource { resource, .. } => {
+                match self.read_one(resource, ProjectedReadRequest::Empty)? {
+                    Some(ProjectedReadResponse::Bool(value)) => Some(value),
+                    Some(ProjectedReadResponse::Value(Value::Bool(value))) => Some(value),
+                    Some(ProjectedReadResponse::Value(value)) => Some(value_truthy(&value)?),
+                    Some(ProjectedReadResponse::Len(value)) => Some(value == 0),
+                    Some(ProjectedReadResponse::Keys(values)) => Some(values.is_empty()),
+                    Some(ProjectedReadResponse::Text(value)) => Some(value.is_empty()),
+                    None => return Err(self.unsupported(&ProjectedReadRequest::Empty)),
+                }
+            }
         })
     }
 
     pub(crate) fn truthy(&self) -> Result<bool, RuntimeError> {
-        self.refuse_if_unavailable()?;
         Ok(match &self.kind {
             ProjectedKind::Scalar(value) => value_truthy(value)?,
-            ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Truthy) {
-                Some(ProjectedReadResponse::Bool(value)) => value,
-                Some(ProjectedReadResponse::Value(value)) => value_truthy(&value)?,
-                Some(ProjectedReadResponse::Len(value)) => value != 0,
-                Some(ProjectedReadResponse::Keys(values)) => !values.is_empty(),
-                Some(ProjectedReadResponse::Text(value)) => !value.is_empty(),
-                None => return Err(self.unsupported(&ProjectedReadRequest::Truthy)),
-            },
+            ProjectedKind::Resource { resource, .. } => {
+                match self.read_one(resource, ProjectedReadRequest::Truthy)? {
+                    Some(ProjectedReadResponse::Bool(value)) => value,
+                    Some(ProjectedReadResponse::Value(value)) => value_truthy(&value)?,
+                    Some(ProjectedReadResponse::Len(value)) => value != 0,
+                    Some(ProjectedReadResponse::Keys(values)) => !values.is_empty(),
+                    Some(ProjectedReadResponse::Text(value)) => !value.is_empty(),
+                    None => return Err(self.unsupported(&ProjectedReadRequest::Truthy)),
+                }
+            }
         })
     }
 
     /// Indexes a projected source.
     ///
-    /// `None` means the descriptor does not answer an index read of this key --
+    /// `None` means the provider does not answer an index read of this key --
     /// which for a container view is the ordinary "no element there". The
     /// caller, which knows the dialect, substitutes its absent value; this layer
     /// does not invent one, because `null` and `undefined` are different answers
     /// in the two dialects (FIG-2863).
     pub(crate) fn get_index(&self, index: &Value) -> Result<Option<Value>, RuntimeError> {
-        self.refuse_if_unavailable()?;
         let index = materialize_value(index.clone())?;
         match &self.kind {
             ProjectedKind::Scalar(value) => read_index_ref_direct(value, &index).map(Some),
-            ProjectedKind::Custom(value) => Ok(value
-                .read_one(ProjectedReadRequest::Index(index))
+            ProjectedKind::Resource { resource, .. } => Ok(self
+                .read_one(resource, ProjectedReadRequest::Index(index))?
                 .map(ProjectedReadResponse::into_value)),
         }
     }
 
     /// `None` carries the same meaning as in [`Self::get_index`].
     pub(crate) fn get_field(&self, field: &Name) -> Result<Option<Value>, RuntimeError> {
-        self.refuse_if_unavailable()?;
         match &self.kind {
             ProjectedKind::Scalar(value) => read_field_ref_direct(value, field).map(Some),
-            ProjectedKind::Custom(value) => {
+            ProjectedKind::Resource { resource, .. } => {
                 if let Some(response) =
-                    value.read_one(ProjectedReadRequest::Field(field.text.clone()))
+                    self.read_one(resource, ProjectedReadRequest::Field(field.text.clone()))?
                 {
                     return Ok(Some(response.into_value()));
                 }
                 // `.length` is the count question spelled as a field. A
-                // descriptor answers counts through `Len` and has no reason to
+                // provider answers counts through `Len` and has no reason to
                 // also answer a field named `length`, so without this the lazy
                 // route silently produced `undefined` where the materializing
                 // route (`view.slice(0).length`) produced the count (FIG-3058).
                 if field.text.as_ref() == "length"
                     && let Some(ProjectedReadResponse::Len(len)) =
-                        value.read_one(ProjectedReadRequest::Len)
+                        self.read_one(resource, ProjectedReadRequest::Len)?
                 {
                     return Ok(Some(Value::Number(len as f64)));
                 }
@@ -1172,13 +1136,32 @@ impl ProjectedValue {
         }
     }
 
+    /// The named fields of a resource projection, read in one batch: one
+    /// frame for all of them rather than one each.
+    fn read_fields(
+        &self,
+        resource: &ResourceRef,
+        keys: Vec<String>,
+    ) -> Result<Vec<(String, Value)>, RuntimeError> {
+        let requests = keys
+            .iter()
+            .map(|key| ProjectedReadRequest::Field(Arc::from(key.as_str())))
+            .collect();
+        let responses = projection_provider::read_range(resource, requests)
+            .map_err(|error| self.read_error(error))?;
+        Ok(keys
+            .into_iter()
+            .zip(responses)
+            .filter_map(|(key, response)| response.map(|response| (key, response.into_value())))
+            .collect())
+    }
+
     pub(crate) fn contains(&self, needle: &Value) -> Result<bool, RuntimeError> {
-        self.refuse_if_unavailable()?;
         match &self.kind {
             ProjectedKind::Scalar(value) => execute_contains_direct(value, needle),
-            ProjectedKind::Custom(value) => {
+            ProjectedKind::Resource { resource, .. } => {
                 let request = ProjectedReadRequest::Contains(needle.clone());
-                match value.read_one(request.clone()) {
+                match self.read_one(resource, request.clone())? {
                     Some(ProjectedReadResponse::Bool(value)) => Ok(value),
                     Some(ProjectedReadResponse::Value(value)) => value_truthy(&value),
                     Some(_) | None => Err(self.unsupported(&request)),
@@ -1188,38 +1171,38 @@ impl ProjectedValue {
     }
 
     pub(crate) fn find(&self, needle: Value, start: usize) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::Find { needle, start })
+        self.resource_read_or_missing(ProjectedReadRequest::Find { needle, start })
     }
 
     pub(crate) fn grep_text(&self, needle: Value) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::GrepText(needle))
+        self.resource_read_or_missing(ProjectedReadRequest::GrepText(needle))
     }
 
     pub(crate) fn keys(&self) -> Result<Vec<String>, RuntimeError> {
-        self.refuse_if_unavailable()?;
         Ok(match &self.kind {
             ProjectedKind::Scalar(value) => match value.as_ref() {
                 Value::Record(record) => record.keys().map(ToString::to_string).collect(),
                 _ => Vec::new(),
             },
-            ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Keys) {
-                Some(ProjectedReadResponse::Keys(value)) => value,
-                Some(ProjectedReadResponse::Value(Value::List(values))) => values
-                    .iter()
-                    .filter_map(|value| match value {
-                        Value::String(value) => Some(value.to_string()),
-                        _ => None,
-                    })
-                    .collect(),
-                Some(_) | None => {
-                    return Err(self.unsupported(&ProjectedReadRequest::Keys));
+            ProjectedKind::Resource { resource, .. } => {
+                match self.read_one(resource, ProjectedReadRequest::Keys)? {
+                    Some(ProjectedReadResponse::Keys(value)) => value,
+                    Some(ProjectedReadResponse::Value(Value::List(values))) => values
+                        .iter()
+                        .filter_map(|value| match value {
+                            Value::String(value) => Some(value.to_string()),
+                            _ => None,
+                        })
+                        .collect(),
+                    Some(_) | None => {
+                        return Err(self.unsupported(&ProjectedReadRequest::Keys));
+                    }
                 }
-            },
+            }
         })
     }
 
     pub(crate) fn values(&self) -> Result<Option<Value>, RuntimeError> {
-        self.refuse_if_unavailable()?;
         Ok(match &self.kind {
             ProjectedKind::Scalar(value) => match value.as_ref() {
                 Value::Record(record) => Some(Value::List(
@@ -1228,31 +1211,33 @@ impl ProjectedValue {
                 Value::Null => Some(Value::List(Vec::new().into())),
                 _ => None,
             },
-            ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Values) {
-                Some(response) => Some(response.into_value()),
-                None => return Err(self.unsupported(&ProjectedReadRequest::Values)),
-            },
+            ProjectedKind::Resource { resource, .. } => {
+                match self.read_one(resource, ProjectedReadRequest::Values)? {
+                    Some(response) => Some(response.into_value()),
+                    None => return Err(self.unsupported(&ProjectedReadRequest::Values)),
+                }
+            }
         })
     }
 
     pub(crate) fn starts_with(&self, prefix: Value) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::StartsWith(prefix))
+        self.resource_read_or_missing(ProjectedReadRequest::StartsWith(prefix))
     }
 
     pub(crate) fn ends_with(&self, suffix: Value) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::EndsWith(suffix))
+        self.resource_read_or_missing(ProjectedReadRequest::EndsWith(suffix))
     }
 
     pub(crate) fn split(&self, needle: Value) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::Split(needle))
+        self.resource_read_or_missing(ProjectedReadRequest::Split(needle))
     }
 
     pub(crate) fn join(&self, sep: Value) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::Join(sep))
+        self.resource_read_or_missing(ProjectedReadRequest::Join(sep))
     }
 
     pub(crate) fn trim(&self) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::Trim)
+        self.resource_read_or_missing(ProjectedReadRequest::Trim)
     }
 
     pub(crate) fn slice(
@@ -1260,34 +1245,33 @@ impl ProjectedValue {
         start: Option<isize>,
         end: Option<isize>,
     ) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::Slice { start, end })
+        self.resource_read_or_missing(ProjectedReadRequest::Slice { start, end })
     }
 
     pub(crate) fn push(&self, item: Value) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::Push(item))
+        self.resource_read_or_missing(ProjectedReadRequest::Push(item))
     }
 
     pub(crate) fn to_number(&self) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::ToNumber)
+        self.resource_read_or_missing(ProjectedReadRequest::ToNumber)
     }
 
     pub(crate) fn json_parse(&self) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::JsonParse)
+        self.resource_read_or_missing(ProjectedReadRequest::JsonParse)
     }
 
     pub(crate) fn slice_bound(&self) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::SliceBound)
+        self.resource_read_or_missing(ProjectedReadRequest::SliceBound)
     }
 
     pub(crate) fn range_bound(&self) -> Result<Option<Value>, RuntimeError> {
-        self.custom_read_or_missing(ProjectedReadRequest::RangeBound)
+        self.resource_read_or_missing(ProjectedReadRequest::RangeBound)
     }
 
-    fn custom_read_or_missing(
+    fn resource_read_or_missing(
         &self,
         request: ProjectedReadRequest,
     ) -> Result<Option<Value>, RuntimeError> {
-        self.refuse_if_unavailable()?;
         Ok(match &self.kind {
             ProjectedKind::Scalar(_) => None,
             // `None` here is "no special implementation", not "cannot answer a
@@ -1295,28 +1279,30 @@ impl ProjectedValue {
             // materializing and computing the true answer generically, so
             // refusing would remove a correct result rather than a fabricated
             // one (FIG-2863).
-            ProjectedKind::Custom(value) => value.read_one(request).map(Into::into),
+            ProjectedKind::Resource { resource, .. } => {
+                self.read_one(resource, request)?.map(Into::into)
+            }
         })
     }
 
     pub fn render(&self) -> Result<String, RuntimeError> {
-        self.refuse_if_unavailable()?;
         Ok(match &self.kind {
             ProjectedKind::Scalar(value) => stringify_value(value).unwrap_or_default(),
-            ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Render) {
-                Some(ProjectedReadResponse::Text(value)) => value,
-                Some(response) => stringify_value(&response.into_value()).unwrap_or_default(),
-                None => return Err(self.unsupported(&ProjectedReadRequest::Render)),
-            },
+            ProjectedKind::Resource { resource, .. } => {
+                match self.read_one(resource, ProjectedReadRequest::Render)? {
+                    Some(ProjectedReadResponse::Text(value)) => value,
+                    Some(response) => stringify_value(&response.into_value()).unwrap_or_default(),
+                    None => return Err(self.unsupported(&ProjectedReadRequest::Render)),
+                }
+            }
         })
     }
 
     pub fn materialize(&self) -> Result<Value, RuntimeError> {
-        self.refuse_if_unavailable()?;
         Ok(match &self.kind {
             ProjectedKind::Scalar(value) => (**value).clone(),
-            ProjectedKind::Custom(value) => {
-                match value.read_one(ProjectedReadRequest::Materialize) {
+            ProjectedKind::Resource { resource, .. } => {
+                match self.read_one(resource, ProjectedReadRequest::Materialize)? {
                     Some(response) => response.into_value(),
                     None => return Err(self.unsupported(&ProjectedReadRequest::Materialize)),
                 }
@@ -1325,56 +1311,48 @@ impl ProjectedValue {
     }
 }
 
-/// A projection that survived a durable wire but lost its host descriptor.
-///
-/// It carries only the identity both durable writers encode — the binding name
-/// and the declared type name — which is what lets a re-supplied binding refresh
-/// it in place. Until that happens it answers nothing: reads refuse with
-/// [`RuntimeError::ProjectedValueUnavailable`] so the host's missing view can
-/// never be substituted by a diagnostic string standing in as data (FIG-2865).
-struct UnavailableProjection {
-    type_name: Arc<str>,
-}
-
-impl ProjectedHostDescriptor for UnavailableProjection {
-    fn type_name(&self) -> &str {
-        &self.type_name
-    }
-
-    fn unavailable_after_restore(&self) -> bool {
-        true
-    }
-
-    fn read_one(&self, _request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
-        // Unreachable: `ProjectedValue` refuses before asking a placeholder.
-        None
-    }
-}
-
 impl fmt::Debug for ProjectedValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ProjectedValue")
+        let mut debug = f.debug_struct("ProjectedValue");
+        debug
             .field("name", &self.name)
-            .field("kind", &self.value_type_name())
-            .finish()
+            .field("kind", &self.value_type_name());
+        if let Some(resource) = self.resource_ref() {
+            debug.field("resource", resource);
+        }
+        debug.finish()
+    }
+}
+
+impl ProjectedValue {
+    /// Whether both are projections of one resource as one declared type: one
+    /// view, since a resource is pinned to what it answers, so equal without
+    /// a read.
+    pub(crate) fn same_resource(&self, other: &Self) -> bool {
+        matches!(
+            (&self.kind, &other.kind),
+            (
+                ProjectedKind::Resource {
+                    type_name: left_type,
+                    resource: left,
+                },
+                ProjectedKind::Resource {
+                    type_name: right_type,
+                    resource: right,
+                },
+            ) if left == right && left_type == right_type
+        )
     }
 }
 
 impl PartialEq for ProjectedValue {
     fn eq(&self, other: &Self) -> bool {
-        // An unavailable placeholder has no value to compare, so it is equal
-        // only to the same placeholder. Materializing it would be an error, and
-        // silently treating that error as a value is exactly what FIG-2865
-        // removes.
-        match (self.is_unavailable(), other.is_unavailable()) {
-            (true, true) => {
-                self.name == other.name && self.value_type_name() == other.value_type_name()
-            }
-            (true, false) | (false, true) => false,
-            (false, false) => match (self.materialize(), other.materialize()) {
-                (Ok(left), Ok(right)) => left == right,
-                _ => false,
-            },
+        if self.same_resource(other) {
+            return true;
+        }
+        match (self.materialize(), other.materialize()) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
         }
     }
 }
@@ -1383,11 +1361,10 @@ impl ProjectedValue {
     pub(crate) fn value_type_name(&self) -> &str {
         match &self.kind {
             ProjectedKind::Scalar(value) => value_type_name(value),
-            ProjectedKind::Custom(value) => value.type_name(),
+            ProjectedKind::Resource { type_name, .. } => type_name,
         }
     }
 }
-
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

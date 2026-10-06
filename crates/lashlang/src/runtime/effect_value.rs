@@ -1,9 +1,10 @@
 //! Heapless values crossing the owned effect seam. JSON projections lose
 //! undefined, tuple identity and non-finite numbers, so this wire uses explicit
-//! variants and IEEE bits. Projections cross as unavailable descriptions,
-//! never as host handles. Heap references cannot cross.
+//! variants and IEEE bits. A projection crosses as what it is: a scalar with
+//! its value, a resource as its `ResourceRef`, never a host handle (ADR 0132
+//! §9). Heap references cannot cross.
 
-use super::{ImageValue, Record, ResourceHandle, Value};
+use super::{ImageValue, Record, ResourceHandle, ResourceRef, Value};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Serialize, Deserialize)]
@@ -21,9 +22,12 @@ enum EffectValue {
     Record(Vec<(String, EffectValue)>),
     Projection {
         name: String,
+        scalar: Box<EffectValue>,
+    },
+    ProjectedResource {
+        name: String,
         type_name: String,
-        reference: Option<serde_json::Value>,
-        scalar: Option<Box<EffectValue>>,
+        resource: ResourceRef,
     },
 }
 impl EffectValue {
@@ -52,14 +56,17 @@ impl EffectValue {
                     .map(|(key, value)| Ok((key.to_string(), Self::of(value, depth + 1)?)))
                     .collect::<Result<_, &'static str>>()?,
             ),
-            Value::Projected(value) => Self::Projection {
-                name: value.name().to_owned(),
-                type_name: value.type_name().to_owned(),
-                reference: value.projection_ref().cloned(),
-                scalar: value
-                    .scalar_value()
-                    .map(|value| Self::of(value, depth + 1).map(Box::new))
-                    .transpose()?,
+            Value::Projected(value) => match (value.scalar_value(), value.resource_ref()) {
+                (Some(scalar), _) => Self::Projection {
+                    name: value.name().to_owned(),
+                    scalar: Box::new(Self::of(scalar, depth + 1)?),
+                },
+                (None, Some(resource)) => Self::ProjectedResource {
+                    name: value.name().to_owned(),
+                    type_name: value.type_name().to_owned(),
+                    resource: resource.clone(),
+                },
+                (None, None) => return Err("a projection is a scalar or a resource"),
             },
             Value::Ref(_) => return Err("heap references cannot cross an effect frame"),
         })
@@ -85,17 +92,14 @@ impl EffectValue {
                     .collect::<Vec<_>>()
                     .into(),
             ),
-            Self::Projection {
+            Self::Projection { name, scalar } => {
+                Value::Projected(super::ProjectedValue::scalar(name, scalar.into_value()))
+            }
+            Self::ProjectedResource {
                 name,
                 type_name,
-                reference,
-                scalar,
-            } => Value::Projected(match scalar {
-                Some(value) => super::ProjectedValue::scalar(name, value.into_value()),
-                None => super::ProjectedValue::unavailable_after_restore_with_projection_ref(
-                    name, type_name, reference,
-                ),
-            }),
+                resource,
+            } => Value::Projected(super::ProjectedValue::resource(name, type_name, resource)),
             Self::Record(v) => {
                 let mut record = Record::new();
                 for (key, value) in v {

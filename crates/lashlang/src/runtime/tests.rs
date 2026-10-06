@@ -836,6 +836,7 @@ use projection_cases::*;
 mod async_and_cache_cases;
 mod await_park_cases;
 mod continuation_cases;
+mod projection_provider_laws;
 use continuation_cases::*;
 mod continuation_wire_cases;
 mod declared_function_cases;

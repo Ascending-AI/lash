@@ -25,10 +25,9 @@ pub struct WorkerRun<'a, H> {
     /// parked on. A process body has none: its signal wait hands over through
     /// the worker, which suspends on the answer.
     pub hand_over: Option<&'a HandOverGate>,
-    /// The namespace the run's projection tokens are minted under: the one a
-    /// continuation's tokens name, for a run resumed from another segment's
-    /// state, and a fresh one otherwise.
-    pub projection_namespace: Option<String>,
+    /// The providers that answer the run's projection reads, on this node
+    /// (ADR 0132 §9).
+    pub providers: lashlang::ProjectionCatalog,
 }
 
 /// Whether the operation a foreground run's host is performing is one the
@@ -37,15 +36,6 @@ pub struct WorkerRun<'a, H> {
 #[derive(Debug, Default)]
 pub struct HandOverGate {
     parked: std::sync::atomic::AtomicBool,
-    namespace: Mutex<Option<String>>,
-    refusal: Mutex<Option<HandOverRefusal>>,
-}
-
-/// Why a captured foreground cell must keep executing on its admitted build.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum HandOverRefusal {
-    #[error("the cell holds {count} exported host descriptors without a portable capture contract")]
-    ExportedHostDescriptors { count: usize },
 }
 
 impl HandOverGate {
@@ -56,25 +46,6 @@ impl HandOverGate {
     /// Whether the operation being performed may be handed over.
     pub fn parked(&self) -> bool {
         self.parked.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// The reason the last parked operation could not hand over. A refusal
-    /// keeps the operation and its turn alive on their original build.
-    pub fn refusal(&self) -> Option<HandOverRefusal> {
-        *self
-            .refusal
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    /// The namespace the run's projection tokens are minted under, once an
-    /// operation of the run could be handed over: what the segment that
-    /// resumes the run passes as [`WorkerRun::projection_namespace`].
-    pub fn projection_namespace(&self) -> Option<String> {
-        self.namespace
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
     }
 }
 
@@ -125,7 +96,8 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
         let request = OperationRequest::decode(payload).map_err(|e| ParentFault(e.to_string()))?;
         let request = self
             .projections
-            .import_operation(request)
+            .materialize_operation(request)
+            .await
             .map_err(ParentFault)?;
         let result = self.host.perform(request).await;
         let outcome = if self.host.is_cancelled() {
@@ -133,15 +105,9 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
         } else {
             match result {
                 Ok(lashlang::AbilityOutcome::HandedOver) => EffectOutcome::HandedOver,
-                Ok(value) => {
-                    let value = self
-                        .projections
-                        .export_outcome(value)
-                        .map_err(ParentFault)?;
-                    EffectOutcome::Value(EncodedPayload(
-                        rmp_serde::to_vec_named(&value).map_err(|e| ParentFault(e.to_string()))?,
-                    ))
-                }
+                Ok(value) => EffectOutcome::Value(EncodedPayload(
+                    rmp_serde::to_vec_named(&value).map_err(|e| ParentFault(e.to_string()))?,
+                )),
                 Err(error) => EffectOutcome::Failed(EncodedPayload(
                     rmp_serde::to_vec_named(&error).map_err(|e| ParentFault(e.to_string()))?,
                 )),
@@ -153,31 +119,12 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
         &self,
         operation: &AdmittedOperation,
     ) -> Result<ParkedPerformed, ParentFault> {
-        // A token minted for a descriptor a host outcome exported resolves
-        // only in this run's registry, so a run holding one stays here.
         let Some(gate) = self.hand_over else {
             return self
                 .perform(operation)
                 .await
                 .map(ParkedPerformed::Performed);
         };
-        let count = self.projections.exported_descriptors();
-        let refusal = (count > 0).then_some(HandOverRefusal::ExportedHostDescriptors { count });
-        *gate
-            .refusal
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = refusal;
-        if let Some(refusal) = refusal {
-            crate::process::record_segment_boundary_decline(&refusal, "cell handover declined");
-            return self
-                .perform(operation)
-                .await
-                .map(ParkedPerformed::Performed);
-        }
-        gate.namespace
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_or_insert_with(|| self.projections.namespace().to_owned());
         gate.parked.store(true, std::sync::atomic::Ordering::SeqCst);
         let performed = self.perform(operation).await;
         gate.parked
@@ -197,11 +144,11 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
     fn needs_worker(&self, operation: &AdmittedOperation) -> bool {
         matches!(&operation.kind, AdmittedKind::Control { kind, .. } if kind.parkable())
     }
-    fn projection(&self, payload: &EncodedPayload) -> Result<EncodedPayload, ParentFault> {
-        let request: lash_vm_client::ProjectionRead =
+    async fn projection(&self, payload: &EncodedPayload) -> Result<EncodedPayload, ParentFault> {
+        let read: lash_vm_client::ProjectionRead =
             rmp_serde::from_slice(&payload.0).map_err(|e| ParentFault(e.to_string()))?;
         Ok(EncodedPayload(
-            rmp_serde::to_vec_named(&self.projections.read(request).map_err(ParentFault)?)
+            rmp_serde::to_vec_named(&self.projections.read(read).await)
                 .map_err(|e| ParentFault(e.to_string()))?,
         ))
     }
@@ -279,16 +226,7 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
             identities: self.identities,
             bindings: Arc::new(FrozenBindings::default()),
         };
-        let (projections, descriptions) = lash_vm_client::Projections::new(
-            &self.projected,
-            self.service.config().protocol.decode.max_nodes as usize,
-            self.projection_namespace.take(),
-        )
-        .map_err(|fault| BrokerFailure::Parent {
-            fault: ParentFault(fault),
-        })?;
-        self.context.projection_namespace = projections.namespace().to_owned();
-        self.context.projected = descriptions;
+        self.context.projected = lash_vm_client::Projections::describe(&self.projected);
         let bytes = rmp_serde::to_vec_named(&self.context).map_err(|e| BrokerFailure::Parent {
             fault: ParentFault(e.to_string()),
         })?;
@@ -329,7 +267,7 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
         };
         let effects = Effects {
             host: self.host,
-            projections,
+            projections: lash_vm_client::Projections::new(self.providers),
             boundary: self.boundary,
             hand_over: self.hand_over,
         };

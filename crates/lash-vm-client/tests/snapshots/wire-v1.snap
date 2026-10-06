@@ -26,8 +26,8 @@ struct CreatedDefinition { draft : lash_core_execution :: ProcessDefinitionDraft
 
 # [serde (deny_unknown_fields)] struct InspectedArtifact { # [serde (with = "serde_bytes")] bytes : Vec < u8 > , module_ref : lashlang :: ModuleRef , host_requirements_ref : lashlang :: HostRequirementsRef , host_requirements : lashlang :: HostRequirements , exports : lashlang :: ModuleExports , source_identity : String , processes : BTreeMap < String , ProcessMetadata > , graph : lashlang :: WorkflowGraph , }
 
-# [serde (deny_unknown_fields)] struct RunContext { environment : LashlangHostEnvironment , mode : ExecutionMode , # [serde (default)] projected : Vec < ProjectionDescription > , # [serde (default)] observe_execution : bool , capture_state_view : bool , # [serde (default)] projection_namespace : String , }
+# [serde (deny_unknown_fields)] struct RunContext { environment : LashlangHostEnvironment , mode : ExecutionMode , # [serde (default)] projected : Vec < ProjectionDescription > , # [serde (default)] observe_execution : bool , capture_state_view : bool , }
 
-struct ProjectionDescription { name : String , key : usize , type_name : String , # [serde (with = "lashlang::effect_value::optional")] scalar : Option < lashlang :: Value > , }
+struct ProjectionDescription { name : String , # [serde (with = "lashlang::effect_value")] value : lashlang :: Value , }
 
-struct ProjectionRead { key : usize , request : lashlang :: ProjectedReadRequest , }
+struct ProjectionRead { resource : lashlang :: ResourceRef , requests : Vec < lashlang :: ProjectedReadRequest > , }

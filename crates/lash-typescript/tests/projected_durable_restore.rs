@@ -1,30 +1,25 @@
 //! Durable restore of projections nested inside containers (FIG-2865).
 //!
-//! Both durable writers now accept `Value::Projected`, nested occurrences
-//! included, through one canonical shape. What that buys a program is pinned
-//! here, from the outside, through the public runtime API:
-//!
-//! * A cell that puts a projected session binding inside a list can park at its
-//!   tool effect at all. The continuation wire used to refuse the value
-//!   recursively, so `const rows = [report]` made the turn uncapturable — while
-//!   the `State` snapshot persisted the identical value without complaint.
-//! * A restored placeholder, top-level or nested, is re-bound to the live host
-//!   view when the host re-supplies a binding of the same name. The old refresh
-//!   was keyed on slot names, so the copy inside the list was never revisited.
-//! * A placeholder nothing re-supplied refuses every read with a typed error.
-//!   It used to materialize the unavailability sentence as the value, so a cell
-//!   read an English diagnostic where the host's view belonged, and finished.
+//! Both durable writers accept `Value::Projected`, nested occurrences
+//! included, through one canonical shape. A projection is plain data (ADR 0132
+//! §9): a scalar projection crosses as its value and a resource projection as
+//! its `ResourceRef`, so nothing is rebound on restore. What that buys a
+//! program is pinned here, from the outside, through the public runtime API:
+//! a cell that puts a projected session binding inside a list, or inside a
+//! heap `Error`, can park at its tool effect and resume reading it. The
+//! continuation wire used to refuse the value recursively, so
+//! `const rows = [report]` made the turn uncapturable — while the `State`
+//! snapshot persisted the identical value without complaint.
 
 use std::collections::BTreeSet;
 
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
-    ProjectedBindings, ProjectedValue, Record, RuntimeError, Snapshot, State, Value, Vm,
-    VmContinuation, VmRunOutcome,
+    ProjectedBindings, ProjectedValue, State, Value, Vm, VmContinuation, VmRunOutcome,
 };
 
 /// Runs cells in process mode, answers the one tool call the park test makes,
-/// and re-supplies `report` only when asked to.
+/// and binds `report`.
 struct RestoreHost {
     report: Option<Value>,
 }
@@ -34,10 +29,6 @@ impl RestoreHost {
         Self {
             report: Some(Value::String("live".into())),
         }
-    }
-
-    fn without_bindings() -> Self {
-        Self { report: None }
     }
 }
 
@@ -73,10 +64,10 @@ fn compile(source: &str) -> lashlang::CompiledProgram {
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"))
 }
 
-/// A projected binding nested in a list parks with the turn and comes back as
-/// the host's live view.
+/// A projected binding nested in a list parks with the turn and reads the same
+/// after resume.
 #[tokio::test(flavor = "current_thread")]
-async fn a_nested_projection_parks_and_resumes_against_the_live_binding() {
+async fn a_nested_projection_parks_and_resumes() {
     let program = compile(
         r#"
         const rows = [report];
@@ -114,109 +105,11 @@ async fn a_nested_projection_parks_and_resumes_against_the_live_binding() {
     );
 }
 
-/// The same continuation, resumed by a host that re-supplies nothing: the read
-/// refuses rather than answering with a sentence.
-#[tokio::test(flavor = "current_thread")]
-async fn an_unrefreshed_nested_projection_refuses_the_read_after_resume() {
-    let program = compile(
-        r#"
-        const rows = [report];
-        await tools.ping({});
-        finish(rows[0] + "!");
-        "#,
-    );
-
-    let host = RestoreHost::live();
-    let mut state = State::new();
-    let mut vm = Vm::from_state(&program, &mut state, &host).expect("vm should build");
-    vm.run_process_until_effect()
-        .await
-        .expect("the effect should complete");
-    let continuation = vm.suspend().expect("capturable");
-    drop(vm);
-
-    let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-    let restored: VmContinuation = lashlang::VmInstance::pristine()
-        .open_continuation(&bytes)
-        .expect("continuation should deserialize");
-
-    let host = RestoreHost::without_bindings();
-    let mut resumed =
-        Vm::resume_from(restored, &program, &host).expect("continuation should resume");
-    let error = resumed
-        .run_process_until_effect()
-        .await
-        .expect_err("an unrefreshed placeholder must refuse");
-    assert!(
-        matches!(
-            error,
-            RuntimeError::ProjectedValueUnavailable { ref name, ref type_name }
-                if name == "report" && type_name == "string"
-        ),
-        "unexpected error: {error:?}"
-    );
-}
-
-/// The snapshot wire's half of the same guarantee: a nested placeholder decoded
-/// from canonical bytes is re-bound when the binding is re-supplied.
-#[tokio::test(flavor = "current_thread")]
-async fn a_nested_snapshot_placeholder_refreshes_from_a_re_supplied_binding() {
-    let mut state = restored_state_with_a_nested_placeholder();
-    let program = compile(r#"finish(rows[0] + "!");"#);
-    let host = RestoreHost::live();
-    let outcome = lashlang::execute(&program, &mut state, &host)
-        .await
-        .expect("the refreshed placeholder should read");
-    assert_eq!(
-        outcome,
-        ExecutionOutcome::Finished(Value::String("live!".into()))
-    );
-}
-
-/// And refuses, typed, when it is not.
-#[tokio::test(flavor = "current_thread")]
-async fn an_unrefreshed_nested_snapshot_placeholder_refuses_the_read() {
-    let mut state = restored_state_with_a_nested_placeholder();
-    let program = compile(r#"finish(rows[0] + "!");"#);
-    let host = RestoreHost::without_bindings();
-    let error = lashlang::execute(&program, &mut state, &host)
-        .await
-        .expect_err("an unrefreshed placeholder must refuse");
-    assert!(
-        matches!(
-            error,
-            RuntimeError::ProjectedValueUnavailable { ref name, ref type_name }
-                if name == "report" && type_name == "string"
-        ),
-        "unexpected error: {error:?}"
-    );
-}
-
-/// A state restored from canonical snapshot bytes whose `rows` global holds a
-/// projection *inside* a list.
-fn restored_state_with_a_nested_placeholder() -> State {
-    let snapshot = Snapshot::new(Record::from_iter([(
-        "rows".to_string(),
-        Value::List(
-            vec![Value::Projected(ProjectedValue::scalar(
-                "report",
-                Value::String("stale".into()),
-            ))]
-            .into(),
-        ),
-    )]));
-    let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-    let decoded = lashlang::VmInstance::pristine()
-        .open_snapshot(&encoded)
-        .expect("snapshot decode");
-    State::from_snapshot(decoded)
-}
-
 /// `cause` and `errors` are ordinary values on a heap `Error`, persisted by the
 /// heap encoders, so a projection reaches a restore through them as surely as
-/// through a list. The refresh walk covers them (FIG-2865).
+/// through a list (FIG-2865).
 #[tokio::test(flavor = "current_thread")]
-async fn a_projection_inside_an_error_refreshes_across_a_park() {
+async fn a_projection_inside_an_error_survives_a_park() {
     let program = compile(
         r#"
         const failure = new Error("boom", { cause: report });
@@ -255,82 +148,4 @@ async fn a_projection_inside_an_error_refreshes_across_a_park() {
             "live/live".into()
         )))
     );
-}
-
-/// A template literal over a *container* holding an unrefreshed placeholder.
-/// The stringifier reaches the JSON writer for the list, which used to have no
-/// error channel and wrote a literal `null`, so the cell read `"[null]"` and
-/// finished (FIG-2865).
-#[tokio::test(flavor = "current_thread")]
-async fn a_template_literal_over_a_container_refuses_an_unrefreshed_placeholder() {
-    let mut state = restored_state_with_a_nested_placeholder();
-    let program = compile(r#"finish(`${rows}`);"#);
-    let host = RestoreHost::without_bindings();
-    let error = lashlang::execute(&program, &mut state, &host)
-        .await
-        .expect_err("stringifying a container holding a placeholder must refuse");
-    assert!(
-        matches!(
-            error,
-            RuntimeError::ProjectedValueUnavailable { ref name, ref type_name }
-                if name == "report" && type_name == "string"
-        ),
-        "unexpected error: {error:?}"
-    );
-}
-
-/// `String(report)` on an unrefreshed placeholder refuses rather than falling
-/// through the synchronous coercion path and reading `"undefined"`.
-#[tokio::test(flavor = "current_thread")]
-async fn string_coercion_of_an_unrefreshed_placeholder_refuses() {
-    let mut state = restored_state_with_a_top_level_placeholder();
-    let program = compile(r#"finish(String(report));"#);
-    let host = RestoreHost::without_bindings();
-    let error = lashlang::execute(&program, &mut state, &host)
-        .await
-        .expect_err("String() over a placeholder must refuse");
-    assert!(
-        matches!(
-            error,
-            RuntimeError::ProjectedValueUnavailable { ref name, ref type_name }
-                if name == "report" && type_name == "string"
-        ),
-        "unexpected error: {error:?}"
-    );
-}
-
-/// And so does `report + ""`, the other route into scalar coercion.
-#[tokio::test(flavor = "current_thread")]
-async fn concatenating_an_unrefreshed_placeholder_refuses() {
-    let mut state = restored_state_with_a_top_level_placeholder();
-    let program = compile(r#"finish(report + "");"#);
-    let host = RestoreHost::without_bindings();
-    let error = lashlang::execute(&program, &mut state, &host)
-        .await
-        .expect_err("concatenating a placeholder must refuse");
-    assert!(
-        matches!(
-            error,
-            RuntimeError::ProjectedValueUnavailable { ref name, ref type_name }
-                if name == "report" && type_name == "string"
-        ),
-        "unexpected error: {error:?}"
-    );
-}
-
-/// A state restored from canonical snapshot bytes whose `report` global is a
-/// bare projection, not one nested in a container.
-fn restored_state_with_a_top_level_placeholder() -> State {
-    let snapshot = Snapshot::new(Record::from_iter([(
-        "report".to_string(),
-        Value::Projected(ProjectedValue::scalar(
-            "report",
-            Value::String("stale".into()),
-        )),
-    )]));
-    let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-    let decoded = lashlang::VmInstance::pristine()
-        .open_snapshot(&encoded)
-        .expect("snapshot decode");
-    State::from_snapshot(decoded)
 }

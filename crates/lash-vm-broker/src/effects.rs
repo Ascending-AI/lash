@@ -68,7 +68,9 @@ pub trait ParentEffects: Send + Sync {
         false
     }
 
-    fn projection(
+    /// Answers a worker's projection read: awaited, because the provider
+    /// that answers it is async (ADR 0132 §9).
+    async fn projection(
         &self,
         _payload: &lash_vm_protocol::EncodedPayload,
     ) -> Result<lash_vm_protocol::EncodedPayload, ParentFault> {

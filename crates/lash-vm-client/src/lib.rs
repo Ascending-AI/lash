@@ -12,7 +12,7 @@ pub mod service;
 mod testing;
 pub use broker::PoolSlots;
 pub use config::{Deadlines, PoolConfig, WorkerEntry};
-pub use context::{ProjectionDescription, ProjectionRead, RunContext};
+pub use context::{ProjectionAnswer, ProjectionDescription, ProjectionRead, RunContext};
 pub use error::PoolError;
 /// The VM-protocol vocabulary a worker pool's configuration and outcomes
 /// name.

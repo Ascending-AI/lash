@@ -14,8 +14,7 @@ use std::sync::Arc;
 
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, ImageValue,
-    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
-    ResourceHandle, Snapshot, State, Value,
+    ProjectedValue, ProjectionType, Record, ResourceHandle, ResourceRef, Snapshot, State, Value,
 };
 use proptest::prelude::*;
 
@@ -254,20 +253,6 @@ fn encode_string(value: &str) -> String {
     out
 }
 
-#[derive(Debug)]
-struct SnapshotProjectedDescriptor;
-
-impl ProjectedHostDescriptor for SnapshotProjectedDescriptor {
-    fn type_name(&self) -> &str {
-        "snapshot_property"
-    }
-
-    /// Identity only: this descriptor answers no read (FIG-2863).
-    fn read_one(&self, _request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
-        None
-    }
-}
-
 fn snapshot_string_strategy() -> impl Strategy<Value = String> {
     prop::collection::vec(
         prop_oneof![
@@ -298,10 +283,15 @@ fn canonical_snapshot_variant_corpus_strategy() -> impl Strategy<Value = Vec<Val
         snapshot_string_strategy(),
     )
         .prop_map(
-            |(number_bits, boolean, text, image_size, width, height, _projection_text)| {
-                let projected = Value::Projected(ProjectedValue::custom(
+            |(number_bits, boolean, text, image_size, width, height, projection_text)| {
+                let projected = Value::Projected(ProjectedValue::resource(
                     "session.items[3]",
-                    Arc::new(SnapshotProjectedDescriptor),
+                    "snapshot_property",
+                    ResourceRef {
+                        projection: ProjectionType::new("snapshot_property"),
+                        id: projection_text.clone(),
+                        revision: (!projection_text.is_empty()).then_some(projection_text),
+                    },
                 ));
                 let tuple =
                     Value::Tuple(vec![Value::String(text.clone().into()), Value::Null].into());
@@ -379,7 +369,7 @@ fn assert_canonical_value_round_trip(expected: &Value, actual: &Value) {
         (Value::Projected(expected), Value::Projected(actual)) => {
             assert_eq!(actual.name(), expected.name());
             assert_eq!(actual.type_name(), expected.type_name());
-            assert_eq!(actual.projection_ref(), expected.projection_ref());
+            assert_eq!(actual.resource_ref(), expected.resource_ref());
         }
         (expected, actual) => panic!("snapshot value changed variant: {expected:?} -> {actual:?}"),
     }

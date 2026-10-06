@@ -134,13 +134,12 @@ pub(crate) fn javascript_strict_equal(left: &Value, right: &Value) -> bool {
     // what the host has behind it. Leaving the wrapper in place made every
     // comparison fall to `_ => false`, and made the loose ladder below recurse
     // on an object that never became a primitive.
-    // A restored placeholder has no value behind it, so it is equal to nothing
-    // but the same placeholder; `Value`'s own `PartialEq` makes the same call
-    // (FIG-2865).
+    // Two projections of one resource are one view, equal without a read;
+    // `ProjectedValue`'s own `PartialEq` makes the same call.
     if let (Value::Projected(left), Value::Projected(right)) = (left, right)
-        && (left.is_unavailable() || right.is_unavailable())
+        && left.same_resource(right)
     {
-        return left == right;
+        return true;
     }
     if let Value::Projected(left) = left {
         let Ok(left) = left.materialize() else {
@@ -172,9 +171,9 @@ pub(crate) fn javascript_strict_equal(left: &Value, right: &Value) -> bool {
 
 fn javascript_loose_equal(left: &Value, right: &Value) -> bool {
     if let (Value::Projected(left), Value::Projected(right)) = (left, right)
-        && (left.is_unavailable() || right.is_unavailable())
+        && left.same_resource(right)
     {
-        return left == right;
+        return true;
     }
     if let Value::Projected(left) = left {
         let Ok(left) = left.materialize() else {

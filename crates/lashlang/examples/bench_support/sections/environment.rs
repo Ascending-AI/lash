@@ -166,13 +166,13 @@ pub fn projected_bindings(scenario: Scenario) -> ProjectedBindings {
             | Scenario::ContinueAsSeedHostEnvironment
             | Scenario::SnapshotProjectedState
     ) {
-        return bindings;
+        return lashlang::testing::projection::reading_test_views(bindings);
     }
     match scenario {
         Scenario::ProjectedValues => {
             bindings.insert(
                 "history",
-                ProjectedValue::custom("history", Arc::new(ProjectedList::history())),
+                test_view("history", Arc::new(ProjectedList::history())),
             );
             bindings.insert(
                 "docs",
@@ -186,29 +186,9 @@ pub fn projected_bindings(scenario: Scenario) -> ProjectedBindings {
             );
         }
         // The snapshot scenario seeds its projections inside a plain global
-        // record, so a snapshot round-trip decodes them as placeholders. Naming
-        // them here is what lets the restore re-bind them to the live host view
-        // (FIG-2865) instead of refusing the read.
-        Scenario::SnapshotProjectedState => {
-            bindings.insert(
-                "snap.projected.body",
-                ProjectedValue::custom(
-                    "snap.projected.body",
-                    Arc::new(ProjectedText::new(
-                        "snapshot_body",
-                        "projected body stays lazy across snapshot markers",
-                    )),
-                ),
-            );
-            bindings.insert(
-                "snap.mixed.nested.projected_title",
-                ProjectedValue::custom(
-                    "snap.mixed.nested.projected_title",
-                    Arc::new(ProjectedText::new("nested_title", "Nested Projection")),
-                ),
-            );
-        }
+        // record: plain data that reads through the test-view provider after
+        // a snapshot round-trip as before it (ADR 0132 §9), so it binds none.
         _ => {}
     }
-    bindings
+    lashlang::testing::projection::reading_test_views(bindings)
 }

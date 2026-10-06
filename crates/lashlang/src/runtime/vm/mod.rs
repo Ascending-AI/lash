@@ -246,7 +246,7 @@ pub struct Vm<'a, H> {
     guest_coercions: Vec<GuestCoercionLog>,
     /// The host's projected-binding declaration, captured once at build or
     /// resume — the same map `SlotState::from_globals` and
-    /// `refresh_projected` seed from. A root slot whose name is in it is
+    /// `rebind_projected_slots` seed from. A root slot whose name is in it is
     /// read-only; nothing per-slot duplicates that.
     projected_bindings: ProjectedBindings,
     handlers: Vec<ExceptionHandler>,

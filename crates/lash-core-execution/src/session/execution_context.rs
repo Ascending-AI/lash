@@ -1381,6 +1381,18 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    /// The projection providers of the backend this context's actor runs
+    /// over, which answer the reads of its VM runs on this node (ADR 0132
+    /// §9). `None` without a backend.
+    pub fn projection_providers(
+        &self,
+    ) -> Option<Arc<dyn crate::runtime::actor::projection::ProjectionProviders>> {
+        self.dispatch
+            .effect_controller
+            .projection_providers()
+            .cloned()
+    }
+
     pub fn chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
         Arc::clone(&self.chronological_projection)
     }

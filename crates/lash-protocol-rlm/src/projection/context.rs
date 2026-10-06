@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 use lash_core::{
     AttachmentSource, Message, MessageRole, PartKind, RuntimeExecutionContext,
@@ -8,16 +7,13 @@ use lash_core::{
 use lash_rlm_types::{
     RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmProtocolEvent, RlmTrajectoryEntry,
 };
-use lashlang::{
-    ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, Value as FlowValue,
-};
+use lashlang::{ProjectedBindings, Value as FlowValue};
 
 #[cfg(test)]
 use lashlang::State as FlowState;
 
 use super::bindings::RlmProjectedBindings;
-use super::transport::json_to_flow_value;
+use super::history_provider::{HISTORY_PROJECTION, HistoryProvider};
 
 /// Version of the RLM payload nested in a session-history protocol event.
 /// version_surface = "migrate"
@@ -95,11 +91,18 @@ impl RlmHistoryProjection {
     pub fn from_chronological(
         projection: &lash_core::facade_support::ChronologicalProjection,
     ) -> Result<Self, lash_core::StoredDataCorruption> {
-        let suppressed_chronological_indices =
-            completed_turn_internal_indices(projection.entries())?;
-        let mut history = Vec::with_capacity(projection.entries().len());
+        Self::from_entries(projection.entries())
+    }
+
+    /// The history of a transcript's entries; of a prefix of them, the
+    /// history the transcript had when it was that long.
+    pub(crate) fn from_entries(
+        entries: &[lash_core::facade_support::ChronologicalEntry],
+    ) -> Result<Self, lash_core::StoredDataCorruption> {
+        let suppressed_chronological_indices = completed_turn_internal_indices(entries)?;
+        let mut history = Vec::with_capacity(entries.len());
         let mut chronological_indices = BTreeMap::new();
-        for entry in projection.entries() {
+        for entry in entries {
             if suppressed_chronological_indices.contains(&entry.index) {
                 continue;
             }
@@ -244,27 +247,31 @@ pub fn rlm_history_projection(
     RlmHistoryProjection::from_chronological(projection)
 }
 
+/// A cell's projected bindings, and the provider its `history` binding reads
+/// through: `history` is a resource of the session's transcript at the
+/// revision the cell starts from (ADR 0132 §9).
 pub(crate) fn projected_bindings(
     ctx: &RuntimeExecutionContext<'_>,
     session_bindings: RlmProjectedBindings,
-) -> Result<ProjectedBindings, String> {
+) -> Result<(ProjectedBindings, HistoryProvider), String> {
+    let scope = ctx.session_scope().map_err(|error| error.to_string())?;
+    let history = HistoryProvider::new(
+        scope.session_id.to_string(),
+        scope
+            .agent_frame_id
+            .as_ref()
+            .map_or("", |frame| frame.as_str()),
+        ctx.chronological_projection(),
+    );
+    history
+        .history(&history.current())
+        .map_err(|error| error.message)?;
     let mut bindings = ProjectedBindings::new();
     bindings
-        .try_insert(
-            "history",
-            ProjectedValue::custom(
-                "history",
-                Arc::new(HistoryProjectedValue {
-                    projection: Arc::new(
-                        rlm_history_projection(ctx.chronological_projection().as_ref())
-                            .map_err(|error| error.to_string())?,
-                    ),
-                }),
-            ),
-        )
+        .try_insert(HISTORY_PROJECTION, history.binding())
         .map_err(|err| format!("`{}` is reserved as an RLM built-in binding", err.name()))?;
     insert_projected_bindings(&mut bindings, session_bindings)?;
-    Ok(bindings)
+    Ok((bindings, history))
 }
 
 #[expect(
@@ -288,99 +295,6 @@ fn insert_projected_bindings(
         })?;
     }
     Ok(())
-}
-
-struct HistoryProjectedValue {
-    projection: Arc<RlmHistoryProjection>,
-}
-
-impl HistoryProjectedValue {
-    /// `contains(history, x)` compares `x` against each entry's projected
-    /// value, the same shape `history[i]` hands back, so the two agree.
-    fn contains(&self, needle: &FlowValue) -> bool {
-        (0..self.projection.len())
-            .filter_map(|index| self.projection.item(index))
-            .filter_map(|item| serde_json::to_value(item).ok())
-            .map(json_to_flow_value)
-            .any(|item| &item == needle)
-    }
-}
-
-impl ProjectedHostDescriptor for HistoryProjectedValue {
-    fn type_name(&self) -> &str {
-        "list"
-    }
-
-    fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
-        {
-            match request {
-                ProjectedReadRequest::Len => {
-                    Some(ProjectedReadResponse::Len(self.projection.len()))
-                }
-                ProjectedReadRequest::Index(index) => {
-                    let Ok(Some(index)) = projected_index(&index, self.projection.len()) else {
-                        return None;
-                    };
-                    self.projection
-                        .item(index)
-                        .and_then(|item| serde_json::to_value(item).ok())
-                        .map(json_to_flow_value)
-                        .map(ProjectedReadResponse::Value)
-                }
-                // `Empty`, `Truthy`, `Keys` and `Contains` below are reachable
-                // through the lashlang intrinsics (`empty`, truthiness, `keys`,
-                // `contains`) and through any host that executes the descriptor
-                // directly. TypeScript source reaches none of them: it has no
-                // `empty`, its array methods lower to their own operations
-                // rather than these hooks, and `Object.keys` materializes
-                // first. They are answered, not dead.
-                //
-                // A list is empty exactly when it has no entries and truthy
-                // whatever its length, matching the dialect's own reading of a
-                // `Value::List`. Answering both here keeps `if (history)` and
-                // `empty(history)` off the materializing path (FIG-2863).
-                ProjectedReadRequest::Empty => {
-                    Some(ProjectedReadResponse::Bool(self.projection.is_empty()))
-                }
-                ProjectedReadRequest::Truthy => Some(ProjectedReadResponse::Bool(true)),
-                // `keys` over a list is the dialect's empty key set, not an
-                // unanswerable request: a list has no named fields.
-                ProjectedReadRequest::Keys => Some(ProjectedReadResponse::Keys(Vec::new())),
-                ProjectedReadRequest::Contains(needle) => {
-                    Some(ProjectedReadResponse::Bool(self.contains(&needle)))
-                }
-                // `history.length` is the one field a list answers; every other
-                // field is unanswerable and says so rather than degrading.
-                ProjectedReadRequest::Field(field) if field.as_ref() == "length" => {
-                    Some(ProjectedReadResponse::Len(self.projection.len()))
-                }
-                ProjectedReadRequest::Render => Some(ProjectedReadResponse::Text(
-                    serde_json::to_string(self.projection.history())
-                        .unwrap_or_else(|_| "[]".to_string()),
-                )),
-                ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(
-                    json_to_flow_value(self.projection.value()),
-                )),
-                // Everything else this descriptor does not answer. The caller
-                // turns that into a typed refusal instead of a widened guess.
-                ProjectedReadRequest::Field(_)
-                | ProjectedReadRequest::Find { .. }
-                | ProjectedReadRequest::GrepText(_)
-                | ProjectedReadRequest::Values
-                | ProjectedReadRequest::StartsWith(_)
-                | ProjectedReadRequest::EndsWith(_)
-                | ProjectedReadRequest::Split(_)
-                | ProjectedReadRequest::Join(_)
-                | ProjectedReadRequest::Trim
-                | ProjectedReadRequest::Slice { .. }
-                | ProjectedReadRequest::Push(_)
-                | ProjectedReadRequest::ToNumber
-                | ProjectedReadRequest::JsonParse
-                | ProjectedReadRequest::SliceBound
-                | ProjectedReadRequest::RangeBound => None,
-            }
-        }
-    }
 }
 
 pub(crate) fn projected_index(index: &FlowValue, len: usize) -> Result<Option<usize>, ()> {
@@ -408,7 +322,7 @@ pub(crate) fn prune_reserved_projected_bindings(rlm: &mut FlowState) {
 pub(crate) fn prune_protected_bindings(rlm: &mut FlowState, protected_names: &BTreeSet<String>) {
     prune_projected_binding_names(
         rlm,
-        std::iter::once("history").chain(protected_names.iter().map(String::as_str)),
+        std::iter::once(HISTORY_PROJECTION).chain(protected_names.iter().map(String::as_str)),
     );
 }
 
@@ -514,6 +428,9 @@ fn attachment_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::projection::history_provider::answer;
+    use lashlang::{ProjectedReadRequest, ProjectedReadResponse, ProjectionProvider};
+    use std::sync::Arc;
 
     #[test]
     fn corrupt_rlm_history_refuses_projection_and_transcript() {
@@ -592,8 +509,11 @@ mod tests {
         )
     }
 
-    async fn read_index(value: &HistoryProjectedValue, index: i64) -> FlowValue {
-        match value.read_one(ProjectedReadRequest::Index(FlowValue::Number(index as f64))) {
+    async fn read_index(history: &RlmHistoryProjection, index: i64) -> FlowValue {
+        match answer(
+            history,
+            ProjectedReadRequest::Index(FlowValue::Number(index as f64)),
+        ) {
             Some(ProjectedReadResponse::Value(value)) => value,
             other => panic!("expected indexed value, got {other:?}"),
         }
@@ -624,18 +544,16 @@ mod tests {
         source: &str,
         history: &lash_core::facade_support::ChronologicalProjection,
     ) -> Result<FlowValue, lashlang::RuntimeError> {
+        let provider = HistoryProvider::new("session", "frame", Arc::new(history.clone()));
         let mut bindings = ProjectedBindings::new();
-        bindings.insert(
-            "history",
-            lashlang::ProjectedValue::custom(
-                "history",
-                Arc::new(HistoryProjectedValue {
-                    projection: Arc::new(
-                        rlm_history_projection(history).expect("valid history fixture"),
-                    ),
-                }),
-            ),
-        );
+        bindings.insert("history", provider.binding());
+        let mut providers = lashlang::ProjectionCatalog::new();
+        providers
+            .register(Arc::new(provider))
+            .expect("one history provider");
+        let bindings = bindings.with_reader(Arc::new(
+            lashlang::testing::projection::CatalogReader(providers),
+        ));
         let globals = BTreeSet::from(["history".to_string()]);
         let parsed = lash_typescript::parse_with_globals(source, &globals)
             .unwrap_or_else(|error| panic!("`{source}` should parse: {error}"));
@@ -682,20 +600,18 @@ mod tests {
     /// compares objects by reference and is false for any two built records.
     #[tokio::test]
     async fn history_contains_its_own_first_entry() {
-        let value = HistoryProjectedValue {
-            projection: Arc::new(
-                rlm_history_projection(&step_projection("only")).expect("valid history fixture"),
-            ),
-        };
-        let first = read_index(&value, 0).await;
+        let history =
+            rlm_history_projection(&step_projection("only")).expect("valid history fixture");
+        let first = read_index(&history, 0).await;
         assert!(matches!(
-            value.read_one(ProjectedReadRequest::Contains(first)),
+            answer(&history, ProjectedReadRequest::Contains(first)),
             Some(ProjectedReadResponse::Bool(true))
         ));
         assert!(matches!(
-            value.read_one(ProjectedReadRequest::Contains(FlowValue::String(
-                "absent".into()
-            ))),
+            answer(
+                &history,
+                ProjectedReadRequest::Contains(FlowValue::String("absent".into()))
+            ),
             Some(ProjectedReadResponse::Bool(false))
         ));
     }
@@ -718,25 +634,20 @@ mod tests {
     /// to materializing the whole history.
     #[tokio::test]
     async fn history_answers_empty_at_the_descriptor_seam() {
-        let populated = HistoryProjectedValue {
-            projection: Arc::new(
-                rlm_history_projection(&step_projection("only")).expect("valid history fixture"),
-            ),
-        };
+        let populated =
+            rlm_history_projection(&step_projection("only")).expect("valid history fixture");
         assert!(matches!(
-            populated.read_one(ProjectedReadRequest::Empty),
+            answer(&populated, ProjectedReadRequest::Empty),
             Some(ProjectedReadResponse::Bool(false))
         ));
 
-        let empty = HistoryProjectedValue {
-            projection: Arc::new(RlmHistoryProjection {
-                history: Vec::new(),
-                chronological_indices: BTreeMap::new(),
-                suppressed_chronological_indices: BTreeSet::new(),
-            }),
+        let empty = RlmHistoryProjection {
+            history: Vec::new(),
+            chronological_indices: BTreeMap::new(),
+            suppressed_chronological_indices: BTreeSet::new(),
         };
         assert!(matches!(
-            empty.read_one(ProjectedReadRequest::Empty),
+            answer(&empty, ProjectedReadRequest::Empty),
             Some(ProjectedReadResponse::Bool(true))
         ));
     }
@@ -776,6 +687,70 @@ mod tests {
                 .await
                 .expect("an unanswered field is absent, not a failure"),
             FlowValue::String("fallback".into())
+        );
+    }
+
+    fn transcript(texts: &[&str]) -> Arc<lash_core::facade_support::ChronologicalProjection> {
+        let messages = texts
+            .iter()
+            .enumerate()
+            .map(|(index, text)| message(&format!("m{index}"), MessageRole::User, text))
+            .collect::<Vec<_>>();
+        Arc::new(
+            lash_core::facade_support::ChronologicalProjection::from_turn_view(
+                &[],
+                &messages.into(),
+            ),
+        )
+    }
+
+    /// Provider purity (ADR 0132 §9): a `history` read is `Repeatable` at its
+    /// pinned revision. The same request answers the same twice, and a
+    /// provider built afresh over the transcript after it grew, as another
+    /// node builds one, answers the pinned revision exactly as before. A
+    /// revision of another frame is refused, never answered from a different
+    /// transcript.
+    #[tokio::test]
+    async fn history_reads_repeat_at_their_pinned_revision() {
+        let first = HistoryProvider::new("session", "frame", transcript(&["one"]));
+        let pinned = first.current();
+        let once = first
+            .read(&pinned, ProjectedReadRequest::Materialize)
+            .await
+            .expect("pinned read");
+        let twice = first
+            .read(&pinned, ProjectedReadRequest::Materialize)
+            .await
+            .expect("pinned read again");
+        assert_eq!(once, twice, "the same read answers the same");
+
+        let grown = HistoryProvider::new("session", "frame", transcript(&["one", "two"]));
+        assert_eq!(
+            grown
+                .read_range(
+                    &pinned,
+                    vec![ProjectedReadRequest::Materialize, ProjectedReadRequest::Len],
+                )
+                .await
+                .expect("the earlier revision is retained"),
+            vec![once, Some(ProjectedReadResponse::Len(1))],
+            "a pinned revision answers what it answered before the transcript grew"
+        );
+        assert_eq!(
+            grown
+                .read(&grown.current(), ProjectedReadRequest::Len)
+                .await
+                .expect("current read"),
+            Some(ProjectedReadResponse::Len(2))
+        );
+
+        let compacted = HistoryProvider::new("session", "next-frame", transcript(&["one"]));
+        assert!(
+            compacted
+                .read(&pinned, ProjectedReadRequest::Len)
+                .await
+                .is_err(),
+            "another frame's revision is refused"
         );
     }
 

@@ -103,9 +103,9 @@ pub use runtime::{
     LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY, LASHLANG_SNAPSHOT_VERSION,
     LinkedProgramCache, LinkedProgramCacheError, ListValue, PendingOperation, PendingOperationMap,
     ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport, ProfileStat,
-    ProjectedBindingError, ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, ProjectionCatalog, ProjectionError, ProjectionProvider,
-    ProjectionRefusal, ProjectionType, Record, ResourceHandle, ResourceOperation,
+    ProjectedBindingError, ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse,
+    ProjectedValue, ProjectionCatalog, ProjectionError, ProjectionProvider, ProjectionReadError,
+    ProjectionReader, ProjectionRefusal, ProjectionType, Record, ResourceHandle, ResourceOperation,
     ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
     ResourceOperationOutcome, ResourceRef, RuntimeError, RuntimeFailure, Sleep, SleepKind,
     Snapshot, SnapshotDecodeError, State, StringValue, UnawaitedToolCall,
@@ -115,7 +115,7 @@ pub use runtime::{
     VmLoopPhase, VmParkReason, VmParked, VmPendingErrorOriginContinuation, VmProfileContinuation,
     VmRequest, VmResume, VmResumePoint, VmRunConfig, VmRunOutcome, VmStep, VmStepError,
     VmSuspended, VmSuspendedOperation, cancel_checkpoint_reached, compile, execute, from_json,
-    is_javascript_builtin_global, is_process_handle, unwrap_type_value,
+    is_javascript_builtin_global, is_process_handle, unwrap_type_value, with_projection_reader,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,

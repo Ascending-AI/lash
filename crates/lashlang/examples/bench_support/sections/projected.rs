@@ -7,7 +7,7 @@ fn projected_docs_record() -> Value {
     );
     record.insert(
         "body".to_string(),
-        Value::Projected(ProjectedValue::custom(
+        Value::Projected(test_view(
             "docs.body",
             Arc::new(ProjectedText::new("body", "lazy markdown body")),
         )),
@@ -19,7 +19,7 @@ fn snapshot_projected_record() -> Value {
     let mut projected = Record::default();
     projected.insert(
         "body".to_string(),
-        Value::Projected(ProjectedValue::custom(
+        Value::Projected(test_view(
             "snap.projected.body",
             Arc::new(ProjectedText::new(
                 "snapshot_body",
@@ -45,7 +45,7 @@ fn snapshot_projected_record() -> Value {
     let mut nested = Record::default();
     nested.insert(
         "projected_title".to_string(),
-        Value::Projected(ProjectedValue::custom(
+        Value::Projected(test_view(
             "snap.mixed.nested.projected_title",
             Arc::new(ProjectedText::new("nested_title", "Nested Projection")),
         )),
@@ -67,7 +67,7 @@ fn projected_operations_record() -> Value {
     let mut record = Record::default();
     record.insert(
         "items".to_string(),
-        Value::Projected(ProjectedValue::custom(
+        Value::Projected(test_view(
             "proj.items",
             Arc::new(ProjectedList {
                 name: "items",
@@ -83,21 +83,21 @@ fn projected_operations_record() -> Value {
     );
     record.insert(
         "text".to_string(),
-        Value::Projected(ProjectedValue::custom(
+        Value::Projected(test_view(
             "proj.text",
             Arc::new(ProjectedText::new("text", "alpha beta gamma delta")),
         )),
     );
     record.insert(
         "padded".to_string(),
-        Value::Projected(ProjectedValue::custom(
+        Value::Projected(test_view(
             "proj.padded",
             Arc::new(ProjectedText::new("padded", "  alpha  ")),
         )),
     );
     record.insert(
         "json".to_string(),
-        Value::Projected(ProjectedValue::custom(
+        Value::Projected(test_view(
             "proj.json",
             Arc::new(ProjectedText::new("json", "{\"ok\":true,\"count\":4}")),
         )),
@@ -170,7 +170,7 @@ fn slice_string(text: &str, start: Option<isize>, end: Option<isize>) -> String 
     chars[start..end].iter().collect()
 }
 
-impl ProjectedHostDescriptor for ProjectedList {
+impl TestView for ProjectedList {
     fn type_name(&self) -> &str {
         "list"
     }
@@ -246,8 +246,8 @@ fn history_item(role: &str, content: &str) -> Value {
     record.insert("role".to_string(), Value::String(role.to_string().into()));
     record.insert(
         "content".to_string(),
-        Value::Projected(ProjectedValue::custom(
-            format!("history.{role}.content"),
+        Value::Projected(test_view(
+            &format!("history.{role}.content"),
             Arc::new(ProjectedText::new("content", content)),
         )),
     );
@@ -268,7 +268,7 @@ impl ProjectedText {
     }
 }
 
-impl ProjectedHostDescriptor for ProjectedText {
+impl TestView for ProjectedText {
     fn type_name(&self) -> &str {
         "string"
     }

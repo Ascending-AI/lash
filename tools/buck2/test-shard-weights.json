@@ -638,7 +638,7 @@
     "executor::tests::projections_and_snapshots::flow_record_to_tool_args_preserves_only_seed_projected_roots": 1,
     "executor::tests::projections_and_snapshots::flow_to_json_value_materializes_a_custom_projection": 1,
     "executor::tests::projections_and_snapshots::heap_backed_default_patch_survives_next_cell_and_cold_restore": 41,
-    "executor::tests::projections_and_snapshots::heap_backed_projection_refresh_and_prune_survive_execution_and_restore": 38,
+    "executor::tests::projections_and_snapshots::heap_backed_projection_and_prune_survive_execution_and_restore": 38,
     "executor::tests::projections_and_snapshots::projected_history_is_available_without_clobbering_executor_globals": 18,
     "executor::tests::projections_and_snapshots::projected_scalar_bindings_are_read_only_and_not_snapshotted": 25,
     "executor::tests::projections_and_snapshots::rejected_global_patch_leaves_byte_identical_state_and_no_dirty_marks": 13,

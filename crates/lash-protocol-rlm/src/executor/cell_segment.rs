@@ -19,11 +19,8 @@
 //! and the deferred grants. Those records live in the journal of the segment
 //! that wrote them, so the envelope carries their contents and the resumed
 //! cell links against them without journaling them again.
-//!
-//! One thing cannot be carried: a host descriptor a tool outcome exported
-//! into the run's projection registry. A run holding one is never handed
-//! over: `HandOverRefusal::ExportedHostDescriptors` keeps it on its admitted
-//! build, whose drain still counts the turn until it ends.
+//! A projection the cell holds is plain data too (ADR 0132 §9), so nothing
+//! keeps a cell on the build that started it.
 
 use std::collections::BTreeMap;
 
@@ -34,27 +31,6 @@ use super::host_bridge::CellHostLedgers;
 /// version_surface = "coexist"
 /// version_guard(items(LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION, code_digest))
 const LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-rlm-cell-segment-code/v1";
-
-/// version_surface = "coexist"
-/// version_guard(items(LASH_RLM_CELL_PROJECTION_NAMESPACE_DOMAIN_VERSION, projection_namespace))
-const LASH_RLM_CELL_PROJECTION_NAMESPACE_DOMAIN_VERSION: &str =
-    "lash-rlm-cell-projection-namespace/v1";
-
-/// The namespace a fresh execution of a cell mints its projection tokens
-/// under: derived from the cell's own replay namespace, so every execution
-/// of the same cell — its first, a replay, a retry — mints the same tokens
-/// and captures the same state at a boundary inside it. A random one would
-/// make the boundary's commit content differ between an execution and its
-/// replay, and the replay's commit would be refused as other content under
-/// the same operation.
-pub(super) fn projection_namespace(
-    cell: &lash_lashlang_runtime::LashlangReplayNamespace,
-) -> String {
-    lash_sansio::core_support::blake3_domain_hash_hex(
-        LASH_RLM_CELL_PROJECTION_NAMESPACE_DOMAIN_VERSION,
-        cell.seal().as_bytes(),
-    )
-}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
@@ -76,8 +52,6 @@ pub(super) struct CellSegmentState {
     /// Native call identities keep the admitting cell across physical turns.
     pub cell_opener: lash_core::EffectOpener,
     pub cell_execution: String,
-    /// The namespace the run's projection tokens name.
-    pub projection_namespace: Option<String>,
     /// The session's projected bindings as the cell recorded them.
     pub projected_bindings: BTreeMap<String, crate::projection::bindings::RecordedProjection>,
     /// The host environment the cell linked against.
