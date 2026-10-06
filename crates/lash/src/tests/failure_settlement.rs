@@ -269,11 +269,9 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_run_is_cancelled() -> 
         "the parked turn's input stays admitted to its run: {:?}",
         pending[0].status
     );
-    let cancelled = session.cancel(crate::CancelTarget::Input(input_id)).await?;
-    assert!(
-        matches!(cancelled, crate::CancelReceipt::Requested { .. }),
-        "{cancelled:?}"
-    );
+    // The parked-work verb is the run's only canceller: an input cancel sent
+    // first reaches the run's turn invocation, where an attempt the engine
+    // is still retrying ends the run before the verb's park CAS can.
     let cancelled = core
         .parked_work()
         .cancel(
@@ -289,14 +287,29 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_run_is_cancelled() -> 
         cancelled.terminal.kind(),
         lash_core::store::RunTerminalKind::Cancelled
     );
+    let withdrawn = session.cancel(crate::CancelTarget::Input(input_id)).await?;
+    assert!(
+        matches!(
+            &withdrawn,
+            crate::CancelReceipt::Withdrawn(receipt)
+                if matches!(
+                    receipt.outcome,
+                    lash_core::runtime::PendingTurnInputCancelOutcome::AlreadyCancelled(_)
+                )
+        ),
+        "the run cancel already cancelled its input: {withdrawn:?}"
+    );
     let status = core.drain_status(false).await?;
     assert_eq!(
         (status.parked_turns, status.in_flight_turns),
         (0, 0),
-        "pending inputs after withdrawal: {:?}",
+        "pending inputs after the run cancel: {:?}",
         session.durable().pending_turn_inputs().await?
     );
-    assert!(status.drained(), "withdrawing the input settles the park");
+    assert!(
+        status.drained(),
+        "cancelling the parked run settles the park"
+    );
     Ok(())
 }
 
