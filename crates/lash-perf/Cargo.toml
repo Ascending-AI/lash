@@ -32,6 +32,11 @@ name = "postgres-substrate"
 path = "src/bin/postgres_substrate.rs"
 test = false
 
+[[bin]]
+name = "vm-snapshot"
+path = "src/bin/vm_snapshot.rs"
+test = false
+
 [lints]
 workspace = true
 

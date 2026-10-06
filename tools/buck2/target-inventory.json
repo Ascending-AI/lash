@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 56,
-  "cargo_target_count": 221,
+  "cargo_target_count": 222,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_122c210f[static]",
     "//crates/lash-conformance:lash-conformance__fv_1e77b00c[static]",
@@ -275,6 +275,8 @@
     "//crates/lash-perf:tool_batch_baseline__bin__fv_e5ed47cb",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_5853c010",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_e5ed47cb",
+    "//crates/lash-perf:vm-snapshot__bin__fv_5853c010",
+    "//crates/lash-perf:vm-snapshot__bin__fv_e5ed47cb",
     "//crates/lash-perf:vm-worker-matrix__bin__fv_5853c010",
     "//crates/lash-perf:vm-worker-matrix__bin__fv_e5ed47cb",
     "//crates/lash-perf:workload__test__fv_5853c010",
@@ -1390,6 +1392,8 @@
     "//crates/lash-perf:tool_batch_baseline__bin__fv_e5ed47cb[check]",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_5853c010[check]",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_e5ed47cb[check]",
+    "//crates/lash-perf:vm-snapshot__bin__fv_5853c010[check]",
+    "//crates/lash-perf:vm-snapshot__bin__fv_e5ed47cb[check]",
     "//crates/lash-perf:vm-worker-matrix__bin__fv_5853c010[check]",
     "//crates/lash-perf:vm-worker-matrix__bin__fv_e5ed47cb[check]",
     "//crates/lash-perf:workload__test__fv_5853c010[check]",
@@ -2505,6 +2509,8 @@
     "//crates/lash-perf:tool_batch_baseline__bin__fv_e5ed47cb",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_5853c010",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_e5ed47cb",
+    "//crates/lash-perf:vm-snapshot__bin__fv_5853c010",
+    "//crates/lash-perf:vm-snapshot__bin__fv_e5ed47cb",
     "//crates/lash-perf:vm-worker-matrix__bin__fv_5853c010",
     "//crates/lash-perf:vm-worker-matrix__bin__fv_e5ed47cb",
     "//crates/lash-perf:workload__test__fv_5853c010",
@@ -21162,6 +21168,26 @@
       ],
       "kind": "bin-unit-test",
       "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_e5ed47cb",
+      "package": "lash-perf"
+    },
+    {
+      "build_label": "//crates/lash-perf:vm-snapshot__bin__fv_5853c010",
+      "check_label": "//crates/lash-perf:vm-snapshot__bin__fv_5853c010[check]",
+      "clippy_label": "//crates/lash-perf:vm-snapshot__bin__fv_5853c010__clippy[clippy.txt]",
+      "features": [],
+      "kind": "bin",
+      "label": "//crates/lash-perf:vm-snapshot__bin__fv_5853c010",
+      "package": "lash-perf"
+    },
+    {
+      "build_label": "//crates/lash-perf:vm-snapshot__bin__fv_e5ed47cb",
+      "check_label": "//crates/lash-perf:vm-snapshot__bin__fv_e5ed47cb[check]",
+      "clippy_label": "//crates/lash-perf:vm-snapshot__bin__fv_e5ed47cb__clippy[clippy.txt]",
+      "features": [
+        "dhat-heap"
+      ],
+      "kind": "bin",
+      "label": "//crates/lash-perf:vm-snapshot__bin__fv_e5ed47cb",
       "package": "lash-perf"
     },
     {
@@ -50305,6 +50331,8 @@
       "//crates/lash-perf:tool_batch_baseline__bin__fv_e5ed47cb",
       "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_5853c010",
       "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_e5ed47cb",
+      "//crates/lash-perf:vm-snapshot__bin__fv_5853c010",
+      "//crates/lash-perf:vm-snapshot__bin__fv_e5ed47cb",
       "//crates/lash-perf:vm-worker-matrix__bin__fv_5853c010",
       "//crates/lash-perf:vm-worker-matrix__bin__fv_e5ed47cb",
       "//crates/lash-perf:workload__test__fv_5853c010",
@@ -51414,7 +51442,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_b81ca3f5"
     ]
   },
-  "generated_label_count": 290,
+  "generated_label_count": 291,
   "packages": [
     {
       "declared_features": [
@@ -52451,6 +52479,15 @@
           "clippy_label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__clippy[clippy.txt]",
           "kind": "bin-unit-test",
           "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-perf:vm-snapshot__bin",
+          "cargo": "vm-snapshot",
+          "check_label": "//crates/lash-perf:vm-snapshot__bin[check]",
+          "clippy_label": "//crates/lash-perf:vm-snapshot__bin__clippy[clippy.txt]",
+          "kind": "bin",
+          "label": "//crates/lash-perf:vm-snapshot__bin",
           "tags": []
         },
         {
@@ -57094,6 +57131,7 @@
     "//crates/lash-perf:postgres-substrate__bin",
     "//crates/lash-perf:tool_batch_baseline__bin",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
+    "//crates/lash-perf:vm-snapshot__bin",
     "//crates/lash-perf:vm-worker-matrix__bin",
     "//crates/lash-perf:workload__test",
     "//crates/lash-plugin-mcp:lash-plugin-mcp[static]",
@@ -57386,6 +57424,7 @@
     "//crates/lash-perf:postgres-substrate__bin[check]",
     "//crates/lash-perf:tool_batch_baseline__bin[check]",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test[check]",
+    "//crates/lash-perf:vm-snapshot__bin[check]",
     "//crates/lash-perf:vm-worker-matrix__bin[check]",
     "//crates/lash-perf:workload__test[check]",
     "//crates/lash-plugin-mcp:lash-plugin-mcp[check]",
@@ -57677,6 +57716,7 @@
     "//crates/lash-perf:postgres-substrate__bin__clippy[clippy.txt]",
     "//crates/lash-perf:tool_batch_baseline__bin__clippy[clippy.txt]",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test__clippy[clippy.txt]",
+    "//crates/lash-perf:vm-snapshot__bin__clippy[clippy.txt]",
     "//crates/lash-perf:vm-worker-matrix__bin__clippy[clippy.txt]",
     "//crates/lash-perf:workload__test__clippy[clippy.txt]",
     "//crates/lash-plugin-mcp:lash-plugin-mcp__clippy[clippy.txt]",
@@ -57968,6 +58008,7 @@
     "//crates/lash-perf:postgres-substrate__bin",
     "//crates/lash-perf:tool_batch_baseline__bin",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
+    "//crates/lash-perf:vm-snapshot__bin",
     "//crates/lash-perf:vm-worker-matrix__bin",
     "//crates/lash-perf:workload__test",
     "//crates/lash-plugin-mcp:lash-plugin-mcp",
@@ -58259,6 +58300,7 @@
     "//crates/lash-perf:postgres-substrate__bin",
     "//crates/lash-perf:tool_batch_baseline__bin",
     "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
+    "//crates/lash-perf:vm-snapshot__bin",
     "//crates/lash-perf:vm-worker-matrix__bin",
     "//crates/lash-perf:workload__test",
     "//crates/lash-plugin-mcp:lash-plugin-mcp",
