@@ -16,7 +16,7 @@ impl RuntimeSessionServices {
         // Engine rows reach their registry through the process wiring the run
         // context builds, so this impl reads it from `self` rather than from
         // the argument the trait passes.
-        registry: Arc<dyn crate::ProcessRegistry>,
+        _registry: Arc<dyn crate::ProcessRegistry>,
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: tokio_util::sync::CancellationToken,
         handover: Option<crate::SegmentHandover>,
@@ -24,13 +24,9 @@ impl RuntimeSessionServices {
         let crate::runtime::effect::AdmittedProcess {
             registration,
             process_id,
+            trace,
         } = admitted;
-        let retained_scope = registry
-            .get_process(&process_id)
-            .await
-            .map_err(crate::ProcessInfraError::new)?
-            .and_then(|record| record.trace);
-        let scoped_effect_controller = match retained_scope {
+        let scoped_effect_controller = match trace {
             Some(scope) => scoped_effect_controller.with_trace_scope(scope),
             None => scoped_effect_controller,
         };

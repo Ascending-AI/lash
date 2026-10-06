@@ -108,6 +108,11 @@ struct WaitControls {
 pub struct AdmittedProcess {
     pub registration: crate::ProcessRegistration,
     pub process_id: crate::ProcessId,
+    /// The trace scope the process's registration retained, read off the
+    /// record its admission returned. It never changes after registration,
+    /// so a replayed segment runs under it without a fresh registry read
+    /// (ADR 0105 §1).
+    pub trace: Option<lash_trace::DurableTraceScope>,
 }
 
 #[async_trait::async_trait]

@@ -379,6 +379,7 @@ impl DurableProcessWorker {
         let admitted = crate::execution::runtime::effect::AdmittedProcess {
             registration,
             process_id: process_id.clone(),
+            trace: admitted.trace,
         };
         if let Some(plugins) = plugin_admission.as_ref()
             && let Err(error) = self.config.plugin_host.validate_plugin_admission(plugins)
