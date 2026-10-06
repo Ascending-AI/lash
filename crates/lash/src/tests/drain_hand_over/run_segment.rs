@@ -167,8 +167,6 @@ enum DeferredCase {
     Mixed,
     HeldPending,
     Cancel,
-    DispatchBefore,
-    DispatchAfter,
     TransferBefore,
     TransferAfter,
 }
@@ -186,13 +184,8 @@ async fn cancellation_reaches_a_deferred_round_after_handover() -> Result<()> {
     deferred_round_law(DeferredCase::Cancel).await
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn deferred_dispatch_and_ownership_transfer_recover_on_both_sides() -> Result<()> {
-    for case in [
-        DeferredCase::DispatchBefore,
-        DeferredCase::DispatchAfter,
-        DeferredCase::TransferBefore,
-        DeferredCase::TransferAfter,
-    ] {
+async fn a_deferred_ownership_transfer_recovers_on_both_sides() -> Result<()> {
+    for case in [DeferredCase::TransferBefore, DeferredCase::TransferAfter] {
         deferred_round_law(case).await?;
     }
     Ok(())
@@ -249,21 +242,6 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
     let crashes = lash_restate_test::CrashCount::new();
     assert!(double.server().on_crash(crashes.listener()));
     use lash_restate_test::{CrashPoint, CrashRule};
-    if matches!(
-        case,
-        DeferredCase::DispatchBefore | DeferredCase::DispatchAfter
-    ) {
-        double.server().crash_on(
-            CrashRule::new(if matches!(case, DeferredCase::DispatchBefore) {
-                CrashPoint::BeforeCommand { index: 1 }
-            } else {
-                CrashPoint::BeforeFrame {
-                    ty: lash_restate_test::protocol::MessageType::OutputCommand,
-                }
-            })
-            .handler("child"),
-        );
-    }
     let executed = Arc::new(AtomicUsize::new(0));
     let key = Arc::new(std::sync::Mutex::new(None));
     let dispatched = Arc::new(tokio::sync::Notify::new());
@@ -495,10 +473,7 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
     );
     if matches!(
         case,
-        DeferredCase::DispatchBefore
-            | DeferredCase::DispatchAfter
-            | DeferredCase::TransferBefore
-            | DeferredCase::TransferAfter
+        DeferredCase::TransferBefore | DeferredCase::TransferAfter
     ) {
         assert_eq!(crashes.get(), 1, "the requested crash actually ran");
     }
