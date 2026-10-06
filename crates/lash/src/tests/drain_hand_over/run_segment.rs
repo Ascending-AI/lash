@@ -477,20 +477,26 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
     ) {
         assert_eq!(crashes.get(), 1, "the requested crash actually ran");
     }
+    // The handle answers at the Run's final commit, before its scope close
+    // retires the source (FIG-3979); the late write follows that close.
+    double.settle_session_shift(&session_id).await;
     let late = core
         .completions()
         .resolve(
             completion,
             lash_core::Resolution::Ok(serde_json::json!({"late":true})),
         )
-        .await?;
+        .await;
+    let Err(EmbedError::Runtime(late)) = late else {
+        panic!("a late result cannot replace the terminal: {late:?}");
+    };
     assert!(
         matches!(
-            late,
-            lash_core::ResolveOutcome::AlreadyResolved { .. }
-                | lash_core::ResolveOutcome::UnknownOrRevoked
+            &late.cause,
+            Some(lash_core::RuntimeErrorCause::SourceRefused { refusal })
+                if **refusal == lash_core::tool_run::SourceRefusal::Retired
         ),
-        "a late result cannot replace the terminal: {late:?}"
+        "the retired source refuses a late result, typed: {late:?}"
     );
     drop(core);
     engine.finish().await;
