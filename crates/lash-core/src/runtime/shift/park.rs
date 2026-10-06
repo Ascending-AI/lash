@@ -54,11 +54,9 @@ impl LashRuntime {
         // Under a shift the park names the admitted run's logical run,
         // whatever name the aborting site knew it by.
         let run = &self.park_run(Some(run.clone()), run);
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
+        // The runtime's own store: a run refused at its admission parks
+        // before its plugin transition has built any session (FIG-4857).
+        let Some(store) = self.services.store.clone() else {
             return;
         };
         // FIG-3795 S9: the park records the drain generation of the build the
