@@ -88,6 +88,15 @@ repos:
         files: '^(\.pre-commit-config\.yaml|crates/.*\.rs|scripts/(check-substrate-boundary\.sh|shift-determinism-allowlist\.(count|txt)|test_check_substrate_boundary\.py))$'
         pass_filenames: false
 
+      # Mirrors CI Lint "Check substrate port ledger": every test that uses the
+      # Restate server double has a ledger row (ADR 0132 §14).
+      - id: substrate-port-ledger
+        name: substrate port ledger
+        language: system
+        entry: python3 scripts/check-substrate-port-ledger.py
+        files: '^(\.pre-commit-config\.yaml|docs/testing/substrate-port-ledger\.toml|(crates|examples|runbooks)/.*(\.rs|Cargo\.toml)|scripts/(check-substrate-port-ledger|test_check_substrate_port_ledger)\.py)$'
+        pass_filenames: false
+
       # Restate retries non-terminal handler failures indefinitely; production
       # handler code must use typed errors rather than panic-capable operations.
       - id: restate-handler-panic-boundary

@@ -190,6 +190,9 @@ run_rust_source_guards() {
   step "Substrate boundary guard"
   bash scripts/check-substrate-boundary.sh
 
+  step "Substrate port ledger"
+  python3 scripts/check-substrate-port-ledger.py
+
   step "Dialect boundary guard"
   python3 scripts/check-dialect-boundary.py
 

@@ -1333,6 +1333,9 @@ jobs:
       - name: Check substrate boundary
         run: bash scripts/check-substrate-boundary.sh
 
+      - name: Check substrate port ledger
+        run: python3 scripts/check-substrate-port-ledger.py
+
       - name: Check history readers
         run: bash scripts/check-history-readers.sh
 
