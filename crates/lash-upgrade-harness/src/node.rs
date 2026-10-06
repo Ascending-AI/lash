@@ -578,6 +578,7 @@ fn core_builder(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash:
             backend.stores().process_registry(),
             backend.effect_host(),
             observed.gate_dir.clone(),
+            backend.stores().process_env_store(),
         ),
         backend.tool_material_store(),
     );

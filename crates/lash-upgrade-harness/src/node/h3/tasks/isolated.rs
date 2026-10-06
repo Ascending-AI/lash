@@ -17,8 +17,6 @@ use std::time::{Duration, Instant};
 pub(in crate::node) const ISOLATED: &str = "e2e.h3.isolated";
 /// The engine kind the isolated call binds.
 pub const WORKER_KIND: &str = "e2e-h3-worker";
-/// The environment the Run binds to the start lash executes.
-pub const ENVIRONMENT: &str = "process-env:e2e-h3-isolated";
 const MARKER_WAIT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(25);
 
@@ -93,6 +91,11 @@ pub fn worker_file(dir: &Path, process: &ProcessId) -> PathBuf {
     dir.join(format!("worker-{}.json", digest(process)))
 }
 
+/// The serving incarnation that entered the registered worker engine.
+pub fn observer_file(dir: &Path, process: &ProcessId) -> PathBuf {
+    dir.join(format!("observer-{}.marker", digest(process)))
+}
+
 pub fn receipt_file(dir: &Path, process: &ProcessId) -> PathBuf {
     dir.join(format!("receipt-{}.json", digest(process)))
 }
@@ -150,6 +153,8 @@ pub struct IsolatedHost {
     registry: Arc<dyn lash_core::ProcessRegistry>,
     effects: Arc<dyn lash_core::EffectHost>,
     gate_dir: Option<PathBuf>,
+    environments: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    environment_pin: lash_core::HostArtifactPin,
     children: Arc<Mutex<BTreeMap<ProcessId, std::process::Child>>>,
 }
 
@@ -158,13 +163,34 @@ impl IsolatedHost {
         registry: Arc<dyn lash_core::ProcessRegistry>,
         effects: Arc<dyn lash_core::EffectHost>,
         gate_dir: Option<PathBuf>,
+        environments: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     ) -> Self {
         Self {
             registry,
             effects,
             gate_dir,
+            environments,
+            environment_pin: lash_core::HostArtifactPin::mint(),
             children: Arc::default(),
         }
+    }
+
+    fn engine(&self, physical: bool) -> Arc<WorkerEngine> {
+        Arc::new(WorkerEngine {
+            physical,
+            registry: self.registry.clone(),
+            children: self.children.clone(),
+        })
+    }
+
+    pub(in crate::node) fn factory(
+        &self,
+        inner: StaticPluginFactory,
+    ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+        Arc::new(WorkerFactory {
+            inner,
+            engine: self.engine(true),
+        })
     }
 
     async fn gate(&self, gate: Option<&String>) -> Result<(), String> {
@@ -187,8 +213,41 @@ impl IsolatedHost {
     }
 }
 
+struct WorkerFactory {
+    inner: StaticPluginFactory,
+    engine: Arc<WorkerEngine>,
+}
+
+impl lash_core::plugin::PluginMetadata for WorkerFactory {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginMetadata::plugin_declaration(&self.inner)
+    }
+}
+
+impl lash_core::facade_support::PluginFactory for WorkerFactory {
+    fn id(&self) -> &'static str {
+        lash_core::facade_support::PluginFactory::id(&self.inner)
+    }
+
+    fn build(
+        &self,
+        context: &lash_core::facade_support::PluginSessionContext,
+    ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
+        lash_core::facade_support::PluginFactory::build(&self.inner, context)
+    }
+
+    fn process_engine_contributions(
+        &self,
+        _context: &lash_core::ProcessEngineContributionContext<'_>,
+    ) -> Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError> {
+        Ok(vec![lash_core::ProcessEngineRegistration::accepting(
+            self.engine.clone(),
+        )])
+    }
+}
+
 struct WorkerEngine {
-    dir: PathBuf,
+    registry: Arc<dyn lash_core::ProcessRegistry>,
     physical: bool,
     children: Arc<Mutex<BTreeMap<ProcessId, std::process::Child>>>,
 }
@@ -196,13 +255,13 @@ struct WorkerEngine {
 impl WorkerEngine {
     /// Spawn the worker for `process`, or adopt the one a previous
     /// incarnation launched under the same process.
-    async fn launch(&self, process: &ProcessId) -> Result<u32, String> {
-        let marker = worker_file(&self.dir, process);
+    async fn launch(&self, dir: &Path, process: &ProcessId) -> Result<u32, String> {
+        let marker = worker_file(dir, process);
         if let Some(existing) = read_json::<WorkerMarker>(&marker)? {
             return Ok(existing.pid);
         }
         let exe = std::env::current_exe().map_err(|error| error.to_string())?;
-        let log = std::fs::File::create(self.dir.join(format!("worker-{}.log", digest(process))))
+        let log = std::fs::File::create(dir.join(format!("worker-{}.log", digest(process))))
             .map_err(|error| error.to_string())?;
         let child = std::process::Command::new(exe)
             .arg("isolated-worker")
@@ -226,7 +285,7 @@ impl WorkerEngine {
             let mut ledger = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(spawns_file(&self.dir))
+                .open(spawns_file(dir))
                 .map_err(|error| error.to_string())?;
             writeln!(
                 ledger,
@@ -254,8 +313,12 @@ impl WorkerEngine {
         }
     }
 
-    fn receipt(&self, process: &ProcessId) -> Result<Option<WorkerTerminationReceipt>, String> {
-        read_json(&receipt_file(&self.dir, process))
+    fn receipt(
+        &self,
+        dir: &Path,
+        process: &ProcessId,
+    ) -> Result<Option<WorkerTerminationReceipt>, String> {
+        read_json(&receipt_file(dir, process))
     }
 }
 
@@ -265,8 +328,17 @@ impl PhysicalProcessWorker for WorkerEngine {
         &self,
         process: &ProcessId,
     ) -> Result<WorkerTerminationReceipt, lash_core::PluginError> {
+        let record = self.registry.get_process(process).await?.ok_or_else(|| {
+            lash_core::PluginError::Invoke(format!("no worker process {process}"))
+        })?;
+        let ProcessInput::Engine { payload, .. } = record.input.as_ref() else {
+            return Err(lash_core::PluginError::Invoke(
+                "the worker has no engine input".into(),
+            ));
+        };
+        let dir = worker_directory(payload)?;
         if let Some(receipt) = self
-            .receipt(process)
+            .receipt(&dir, process)
             .map_err(lash_core::PluginError::Invoke)?
         {
             return Ok(receipt);
@@ -297,7 +369,7 @@ impl PhysicalProcessWorker for WorkerEngine {
         };
         let bytes = serde_json::to_vec(&receipt)
             .map_err(|error| lash_core::PluginError::Invoke(error.to_string()))?;
-        crate::node::write_atomically(&receipt_file(&self.dir, process), &bytes)
+        crate::node::write_atomically(&receipt_file(&dir, process), &bytes)
             .map_err(|error| lash_core::PluginError::Invoke(format!("{error:#}")))?;
         Ok(receipt)
     }
@@ -315,15 +387,38 @@ impl lash_core::ProcessEngine for WorkerEngine {
 
     async fn run(
         &self,
-        _context: lash_core::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
+        context: lash_core::ProcessEngineRunContext<'_>,
+        payload: serde_json::Value,
     ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-        Err(lash_core::ProcessInfraError::new(
-            lash_core::PluginError::Invoke(
-                "the H3 worker engine runs no in-engine body; its isolated start owns the worker"
-                    .into(),
-            ),
-        ))
+        // Launch belongs to the isolated start. A workflow only observes its
+        // retained worker, including after a host cut; it never spawns again.
+        let dir = worker_directory(&payload)?;
+        crate::node::write_atomically(
+            &observer_file(&dir, context.process_id()),
+            std::process::id().to_string().as_bytes(),
+        )
+        .map_err(|error| lash_core::PluginError::Invoke(format!("observe worker: {error:#}")))?;
+        let cancellation = context.cancellation_token();
+        loop {
+            if self
+                .receipt(&dir, context.process_id())
+                .map_err(lash_core::PluginError::Invoke)?
+                .is_some()
+            {
+                return Ok(lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
+                        "the isolated worker was terminated",
+                    )),
+                )
+                .into());
+            }
+            tokio::select! {
+                () = cancellation.cancelled() => {
+                    self.terminate_worker(context.process_id()).await?;
+                }
+                () = tokio::time::sleep(POLL) => {}
+            }
+        }
     }
 
     fn start_artifacts(
@@ -349,6 +444,11 @@ impl lash_core::ProcessEngine for WorkerEngine {
     }
 }
 
+fn worker_directory(payload: &serde_json::Value) -> Result<PathBuf, lash_core::PluginError> {
+    serde_json::from_value(payload["worker_dir"].clone())
+        .map_err(|error| lash_core::PluginError::Invoke(format!("worker directory: {error}")))
+}
+
 pub(in crate::node) fn register(spec: PluginSpec, host: IsolatedHost) -> PluginSpec {
     spec.with_plugin_task_typed::<Isolated, _, _>(move |ctx, args| {
         let host = host.clone();
@@ -371,12 +471,30 @@ async fn run(
     )?;
     call.arguments = serde_json::json!({ "key": args.key });
     call.cancel = ExternalCancelPolicy::CancelExternalWork;
-    call.environment = Some(lash_core::ProcessExecutionEnvRef::new(ENVIRONMENT));
-    let engine = Arc::new(WorkerEngine {
-        dir: args.worker_dir.clone(),
-        physical: args.claim == IsolatedClaim::Physical,
-        children: Arc::clone(&host.children),
-    });
+    let session_id = ctx
+        .session_id
+        .as_ref()
+        .ok_or("the isolated fixture has no session")?;
+    let snapshot = ctx
+        .sessions
+        .snapshot_session(session_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    // These fixture sessions have only their initial configuration revision.
+    let environment = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::AdmittedPluginConfig::new(snapshot.plugin_config, 0),
+        snapshot.policy,
+    );
+    let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+        host.environment_pin.clone(),
+    ))
+    .map_err(|error| error.to_string())?;
+    call.environment = Some(
+        lash_core::publish_process_execution_env(host.environments.as_ref(), &claim, &environment)
+            .await
+            .map_err(|error| error.to_string())?,
+    );
+    let engine = host.engine(args.claim == IsolatedClaim::Physical);
     let engines = lash_core::ProcessEngineRegistry::new().with_registration(
         lash_core::ProcessEngineRegistration::accepting(engine.clone()),
     );
@@ -499,7 +617,7 @@ impl SingletonToolHandlers for IsolatedHandlers {
             registration: ProcessStartRegistration::of_target(
                 ProcessInput::Engine {
                     kind: WORKER_KIND.to_owned(),
-                    payload: serde_json::json!({ "key": self.args.key }),
+                    payload: serde_json::json!({ "key": self.args.key, "worker_dir": self.args.worker_dir }),
                 },
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
@@ -589,7 +707,9 @@ impl SingletonToolHandlers for IsolatedHandlers {
             .register_process(registration)
             .await
             .map_err(|error| error.to_string())?;
-        self.engine.launch(&record.id).await?;
+        self.engine
+            .launch(&self.args.worker_dir, &record.id)
+            .await?;
         self.host.gate(self.args.hold_registered.as_ref()).await?;
         Ok(record.id)
     }
@@ -612,7 +732,11 @@ impl SingletonToolHandlers for IsolatedHandlers {
                 )
                 .await
                 .map_err(|error| error.to_string())?;
-            if self.engine.receipt(process)?.is_none() {
+            if self
+                .engine
+                .receipt(&self.args.worker_dir, process)?
+                .is_none()
+            {
                 return Err("the consumer hold would be released before termination".into());
             }
         }

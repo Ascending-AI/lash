@@ -29,9 +29,9 @@ pub mod rlm;
 mod tasks;
 
 pub use tasks::isolated::{
-    ENVIRONMENT as ISOLATED_ENVIRONMENT, IsolatedArgs, IsolatedClaim, IsolatedHost,
-    IsolatedWorkerArgs, WORKER_KIND, WorkerMarker, WorkerSpawn, body_marker, isolated_worker,
-    receipt_file, spawns, start_key as isolated_start_key, terminal_file, worker_file,
+    IsolatedArgs, IsolatedClaim, IsolatedHost, IsolatedWorkerArgs, WORKER_KIND, WorkerMarker,
+    WorkerSpawn, body_marker, isolated_worker, observer_file, receipt_file, spawns,
+    start_key as isolated_start_key, terminal_file, worker_file,
 };
 
 /// Node controls deliberately preserve the public Run vocabulary.
@@ -107,7 +107,7 @@ pub(super) fn plugin(
     namespace: &str,
     isolated: IsolatedHost,
     materials: Arc<dyn lash_core::store::ToolMaterialStore>,
-) -> Arc<StaticPluginFactory> {
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     let namespace = namespace.to_owned();
     let spec = lash_core::facade_support::PluginSpec::new()
         .with_plugin_task_typed::<Operation, _, _>(move |ctx, output| {
@@ -184,8 +184,8 @@ pub(super) fn plugin(
                 Ok(lash_core::plugin::PluginOperationOutcome::new(output))
             }
         });
-    let spec = tasks::isolated::register(tasks::register(spec, materials), isolated);
-    Arc::new(StaticPluginFactory::new(
+    let spec = tasks::isolated::register(tasks::register(spec, materials), isolated.clone());
+    isolated.factory(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial(PLUGIN),
         spec,
     ))

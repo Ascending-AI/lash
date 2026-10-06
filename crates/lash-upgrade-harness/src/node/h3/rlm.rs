@@ -31,6 +31,7 @@ fn core(backend: lash::Backend, code: &str) -> Result<lash::LashCore> {
         backend.stores().process_registry(),
         backend.effect_host(),
         None,
+        backend.stores().process_env_store(),
     );
     let materials = backend.tool_material_store();
     Ok(lash::LashCore::rlm_builder(backend, factory)

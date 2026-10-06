@@ -22,9 +22,7 @@ use lash_upgrade_harness::e2e::control::{
 use lash_upgrade_harness::e2e::evidence::{CaseReceipt, DecodedRecord, Evidence, Verdict};
 use lash_upgrade_harness::harness::{Case, NodeBinary, ServeOptions, Services, ServingNode};
 use lash_upgrade_harness::identity::BuildLabel;
-use lash_upgrade_harness::node::h3::{
-    self, H3Command, ISOLATED_ENVIRONMENT, IsolatedArgs, IsolatedClaim, WorkerMarker,
-};
+use lash_upgrade_harness::node::h3::{self, H3Command, IsolatedArgs, IsolatedClaim, WorkerMarker};
 use serde_json::{Value, json};
 
 const CASE_DEADLINE: Duration = Duration::from_secs(300);
@@ -237,7 +235,12 @@ async fn s20(host: &mut Host) -> Result<()> {
     );
     let rows = host.rows_for(key)?;
     ensure!(
-        rows == vec![Row::drained(&process, key, true)],
+        rows == vec![Row::drained(
+            &process,
+            key,
+            host.environment(&rows).await?,
+            true
+        )],
         "discharge left the registry at {rows:?}"
     );
     ensure!(
@@ -290,11 +293,16 @@ struct Row {
 }
 
 impl Row {
-    fn drained(process: &lash_core::ProcessId, key: &str, cancel_requested: bool) -> Self {
+    fn drained(
+        process: &lash_core::ProcessId,
+        key: &str,
+        environment: String,
+        cancel_requested: bool,
+    ) -> Self {
         Self {
             process_id: process.to_string(),
             start_key: Some(h3::isolated_start_key(key).to_string()),
-            environment: Some(ISOLATED_ENVIRONMENT.to_owned()),
+            environment: Some(environment),
             hold: None,
             cancel_requested,
         }
@@ -652,6 +660,27 @@ impl Host {
             .collect()
     }
 
+    async fn environment(&self, rows: &[Row]) -> Result<String> {
+        let [row] = rows else {
+            bail!("expected one isolated process: {rows:?}");
+        };
+        let reference = row
+            .environment
+            .as_ref()
+            .context("process has no environment")?;
+        let stores = self.stores().await?;
+        let spec = lash_core::runtime::load_process_execution_env(
+            lash::StoreSet::process_env_store(&stores).as_ref(),
+            &lash_core::ProcessExecutionEnvRef::new(reference),
+        )
+        .await?;
+        ensure!(
+            spec.stable_ref()?.as_str() == reference,
+            "environment is not content-addressed"
+        );
+        Ok(reference.clone())
+    }
+
     fn rows_for(&self, key: &str) -> Result<Vec<Row>> {
         let start = h3::isolated_start_key(key).to_string();
         Ok(self
@@ -754,7 +783,12 @@ impl Host {
         self.evidence.journals.extend(journal);
         let rows = self.rows_for(key)?;
         ensure!(
-            rows == vec![Row::drained(&descriptor.process_id, key, false)],
+            rows == vec![Row::drained(
+                &descriptor.process_id,
+                key,
+                self.environment(&rows).await?,
+                false
+            )],
             "{key}: registry {rows:?}"
         );
         let spawns = self.spawns_for(&descriptor.process_id)?;
@@ -795,6 +829,80 @@ impl Host {
         let mut errors = Vec::new();
         if let Err(error) = &result {
             errors.push(format!("{error:#}"));
+        }
+        // Inspect before teardown: killing the endpoint would itself make
+        // healthy process invocations retry their transport.
+        let health = async {
+            let view = self.case.view()?;
+            let prefix = view.service_name("LashProcessWorkflow").replace('\'', "''");
+            let processes = self
+                .rows()?
+                .iter()
+                .map(|row| lash_core::ProcessId::parse(&row.process_id))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let node_pid = self
+                .serving
+                .as_ref()
+                .context("no serving node")?
+                .pid()?
+                .to_string();
+            let invocations = loop {
+                let invocations: Vec<lash_upgrade_harness::restate_view::ProcessSegment> = view
+                    .query(&format!(
+                        "SELECT target_service_name AS lane, target_service_key AS key, \
+                         id, status, last_failure, retry_count FROM sys_invocation \
+                         WHERE target_service_name LIKE '{prefix}%' AND target_handler_name = 'run'"
+                    ))
+                    .await?;
+                let retrying = invocations.iter().any(|segment| {
+                    matches!(segment.invocation.status.as_str(), "backing-off" | "paused")
+                        || segment.invocation.last_failure.is_some()
+                });
+                // Running is healthy only after the current node reached the
+                // registered engine. A completed cancelled workflow may skip
+                // the body altogether. Neither an empty query nor a pending
+                // invocation can satisfy this observation.
+                let observed = processes.iter().all(|process| {
+                    invocations.iter().any(|segment| {
+                        segment.key == process.as_str()
+                            && (segment.invocation.status == "completed"
+                                || std::fs::read_to_string(h3::observer_file(
+                                    &self.workers,
+                                    process,
+                                ))
+                                .is_ok_and(|pid| pid == node_pid))
+                    })
+                });
+                if retrying || observed {
+                    break invocations;
+                }
+                ensure!(
+                    Instant::now() < self.deadline(),
+                    "isolated processes never reached their worker engines: {invocations:?}"
+                );
+                tokio::time::sleep(POLL).await;
+            };
+            self.evidence
+                .stores
+                .push(json!({"kind":"isolated_process_invocations",
+                "invocations":invocations.iter().map(|segment| json!({
+                    "key":segment.key,"lane":segment.lane,
+                    "id":segment.invocation.id,"status":segment.invocation.status,
+                    "last_failure":segment.invocation.last_failure,
+                    "retry_count":segment.invocation.retry_count
+                })).collect::<Vec<_>>()}));
+            ensure!(
+                invocations.iter().all(|segment| !matches!(
+                    segment.invocation.status.as_str(),
+                    "backing-off" | "paused"
+                ) && segment.invocation.last_failure.is_none()),
+                "isolated process workflow is retrying: {invocations:?}"
+            );
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        if let Err(error) = health {
+            errors.push(format!("process workflow health: {error:#}"));
         }
         match (self.markers(), self.spawns(), self.rows()) {
             (Ok(markers), Ok(spawns), Ok(rows)) => self.evidence.stores.push(
