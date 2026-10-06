@@ -192,10 +192,12 @@ async fn on_live(postgres: bool) {
     } else {
         let directory = tempfile::tempdir().expect("SQLite directory");
         let live = LiveRestateBackend::start_with_store_set(config, |clock| async {
-            let stores =
-                lash_sqlite_store::SqliteStoreSet::open_with_clock(directory.path(), clock)
-                    .await
-                    .expect("SQLite file storage");
+            let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(
+                directory.path().join("lash.db"),
+                clock,
+            )
+            .await
+            .expect("SQLite file storage");
             Ok(Arc::new(stores) as Arc<dyn lash::StoreSet>)
         })
         .await

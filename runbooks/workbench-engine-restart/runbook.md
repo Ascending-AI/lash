@@ -236,7 +236,7 @@ exactly once.
    Require the PID to change and the run log to gain a fresh `starting agent-workbench` line,
    while the session and turn address remain exact.
 
-   Record `session_meta.shift_epoch` in `<data-dir>/lash-sessions/durable-core.db`
+   Record `session_meta.shift_epoch` in `<data-dir>/lash-sessions.db`
    on both sides of the restart. Copy the database together with its `-wal` and
    `-shm` files before querying. Require the replacement shift to seal a newer
    epoch. Each arm also requires **exactly one** `runtime_turn_commits` row with

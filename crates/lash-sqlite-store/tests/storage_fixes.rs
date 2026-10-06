@@ -28,7 +28,7 @@ use lash_core_execution::{
     AttachmentReferrers, AttachmentRootSet, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit,
     RuntimeSessionState, SessionCatalogStore, SessionCommitStore, StoreError, StoreSchemaVerdict,
 };
-use lash_sqlite_store::{SqliteDatabase, SqliteStore, verify_schema_at};
+use lash_sqlite_store::{SqliteStore, verify_schema_at};
 
 fn unique_db_path(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -305,7 +305,7 @@ async fn unsupported_compatibility_floor_reports_real_versions() {
     .expect("raise the recorded reader floor");
     drop(conn);
 
-    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
+    let found = verify_schema_at(&path).await;
     assert_eq!(
         found.verdict,
         StoreSchemaVerdict::Refused {
@@ -373,7 +373,7 @@ fn concurrent_first_open_never_observes_an_unstamped_schema() {
 #[tokio::test]
 async fn process_record_is_a_root_without_registry_liveness() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = SqliteStore::open(&dir.path().join("sessions"))
+    let store = SqliteStore::open(&dir.path().join("sessions.db"))
         .await
         .expect("open catalog");
     let request = lash_core_execution::SessionStoreCreateRequest {
@@ -433,7 +433,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
         .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))
         .unwrap();
     drop(conn);
-    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
+    let found = verify_schema_at(&path).await;
     assert_eq!(
         found.verdict,
         StoreSchemaVerdict::Refused {

@@ -75,8 +75,8 @@ class CaptureTests(unittest.TestCase):
                     hashlib.sha256(copied.read_bytes()).hexdigest(), record["sha256"]
                 )
         self.assertEqual(
-            (self.dest / "session-at-rest" / "durable-core.db").read_bytes(),
-            (self.repo / "fixtures/durable-read/v1/sqlite/durable-core.db").read_bytes(),
+            (self.dest / "session-at-rest" / "lash.db").read_bytes(),
+            (self.repo / "fixtures/durable-read/v1/sqlite/lash.db").read_bytes(),
         )
 
     def test_the_source_commit_is_the_manifests_only_provenance(self):

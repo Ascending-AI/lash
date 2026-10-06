@@ -1137,16 +1137,7 @@ DDL_STAMPS = {
         'ExpandMigration {{ id: "planted", from_version: {at}, to_version: {to}, statements: "" }},'
     ),
     "crates/lash-core-store/src/compat.rs:SQLITE_CORE_SCHEMA_VERSION": (
-        "SqliteMigration {{ database: SqliteDatabase::DurableCore, from: {at}, to: {to}, "
-        'ddl: "" }},'
-    ),
-    "crates/lash-core-store/src/compat.rs:SQLITE_REGISTRY_SCHEMA_VERSION": (
-        "SqliteMigration {{ database: SqliteDatabase::ProcessRegistry, from: {at}, to: {to}, "
-        'ddl: "" }},'
-    ),
-    "crates/lash-core-store/src/compat.rs:SQLITE_TRIGGERS_SCHEMA_VERSION": (
-        "SqliteMigration {{ database: SqliteDatabase::Triggers, from: {at}, to: {to}, "
-        'ddl: "" }},'
+        'SqliteMigration {{ from: {at}, to: {to}, ddl: "" }},'
     ),
 }
 

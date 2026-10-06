@@ -164,7 +164,7 @@ mod permanent_run_admission {
             postgres_store_set().await.expect("PostgreSQL gate")
         } else {
             let files = tempfile::tempdir().expect("SQLite store directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(files.path())
+            let stores = lash_sqlite_store::SqliteStoreSet::open(files.path().join("lash.db"))
                 .await
                 .expect("SQLite file stores");
             (Arc::new(stores), Box::new(files))

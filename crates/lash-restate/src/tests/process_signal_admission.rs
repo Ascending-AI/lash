@@ -25,7 +25,7 @@ fn signal_event_type() -> String {
 
 /// A registry over a SQLite file store in `dir`.
 pub(super) async fn file_process_registry(dir: &tempfile::TempDir) -> Arc<dyn ProcessRegistry> {
-    lash_sqlite_store::SqliteStoreSet::open(dir.path().join("signal-admission"))
+    lash_sqlite_store::SqliteStoreSet::open(dir.path().join("signal-admission.db"))
         .await
         .expect("open the SQLite file store set")
         .process_registry()

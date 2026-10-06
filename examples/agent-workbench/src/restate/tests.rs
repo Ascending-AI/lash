@@ -624,7 +624,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
 
     let restate = Arc::new(lash::restate::RestateEngine::new(
         Arc::new(
-            lash::sqlite::SqliteStoreSet::open(data_dir.path().join("lash-sessions"))
+            lash::sqlite::SqliteStoreSet::open(data_dir.path().join("lash-sessions.db"))
                 .await
                 .expect("open the SQLite store set"),
         ),

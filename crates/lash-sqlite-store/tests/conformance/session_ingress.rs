@@ -20,7 +20,7 @@ lash_conformance::session_ingress_tests!({
         move || {
             let backend = observed.clone();
             Box::pin(async move {
-                backend.raw(lash_sqlite_store::SqliteDatabase::DurableCore).query_row(
+                backend.raw().query_row(
                 "SELECT (SELECT count(*) FROM pending_turn_inputs),
                         (SELECT count(*) FROM queued_work_batches),
                         (SELECT count(*) FROM session_run_specs),

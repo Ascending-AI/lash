@@ -65,7 +65,7 @@ cross-surface identity, not the quality of the model's image description.
 5. **The attachment facet is the same in both session modes; the bytes' home is not.** The
    backend the workbench boots owns blob storage: SQLite keeps attachment bytes in the
    `attachment_blobs` table of the session catalog
-   (`<data-dir>/lash-sessions/durable-core.db`), while Postgres wires
+   (`<data-dir>/lash-sessions.db`), while Postgres wires
    `FileAttachmentStore` under `<data-dir>/attachments`. The deterministic companion gate
    reopens the backend's attachment store and checks model usage in trace records
    against the SQLite session-store backend.
@@ -95,7 +95,7 @@ cross-surface identity, not the quality of the model's image description.
   `GET /api/attachments/{attachment_id}`, and `GET /api/state`.
 - Disk truth: the active session backend's `session` referrer edge for the attachment,
   the stored blob, and `<data-dir>/trace.jsonl`. SQLite keeps both in
-  `<data-dir>/lash-sessions/durable-core.db` — the edge in `attachment_referrer_edges`,
+  `<data-dir>/lash-sessions.db` — the edge in `attachment_referrer_edges`,
   the bytes as the `attachment_blobs` row under the same id — while Postgres names the
   edge table `lash_attachment_referrer_edges` and keeps bytes at
   `<data-dir>/attachments/blake3/<first-two-id-characters>/<attachment-id>`.
@@ -146,7 +146,7 @@ Complete the three-layer attachment cross-check before continuing:
    and retrieval URL.
 3. **Durable state:** one `session` referrer edge for the session/id plus the content blob in
    the backend's attachment store — on the SQLite stack this scenario boots, exactly one
-   `attachment_blobs` row under the id in `<data-dir>/lash-sessions/durable-core.db`; byte
+   `attachment_blobs` row under the id in `<data-dir>/lash-sessions.db`; byte
    length and content must match the source exactly.
 
 From the matching trace turn, save the `llm_call_started` record as

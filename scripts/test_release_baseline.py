@@ -173,8 +173,6 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         for path, constant, default, synthetic in [
             (compat, "POSTGRES_SCHEMA_VERSION", 141, 141),
             (compat, "SQLITE_CORE_SCHEMA_VERSION", 99, 99),
-            (compat, "SQLITE_REGISTRY_SCHEMA_VERSION", 44, 44),
-            (compat, "SQLITE_TRIGGERS_SCHEMA_VERSION", 12, 12),
             ("crates/lash-restate/src/process/admission.rs", "JOURNAL_LOGIC_EPOCH", 1, 2),
             ("crates/lashlang/src/workflow_graph.rs", "WORKFLOW_GRAPH_SCHEMA_VERSION", 21, 22),
         ]:
@@ -191,8 +189,8 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
             return
         self.assertEqual(result.returncode, 1, result.stderr)
         for name in ["REMOTE_PROTOCOL_VERSION", "RESTATE_PROCESS_JOURNAL_VERSION",
-                     "WORKFLOW_GRAPH_SCHEMA_VERSION", "SQLITE_REGISTRY_SCHEMA_VERSION",
-                     "SQLITE_TRIGGERS_SCHEMA_VERSION", "compat.rs:POSTGRES_SCHEMA_VERSION"]:
+                     "WORKFLOW_GRAPH_SCHEMA_VERSION", "SQLITE_CORE_SCHEMA_VERSION",
+                     "compat.rs:POSTGRES_SCHEMA_VERSION"]:
             self.assertIn(name, result.stderr)
 
     @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
@@ -210,9 +208,7 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         versions = baseline.store_versions(ROOT)
         self.assertEqual(
             {component: constant for component, (constant, _) in versions.items()},
-            {"POSTGRES": "POSTGRES_SCHEMA_VERSION", "SQLITE_CORE": "SQLITE_CORE_SCHEMA_VERSION",
-             "SQLITE_REGISTRY": "SQLITE_REGISTRY_SCHEMA_VERSION",
-             "SQLITE_TRIGGERS": "SQLITE_TRIGGERS_SCHEMA_VERSION"})
+            {"POSTGRES": "POSTGRES_SCHEMA_VERSION", "SQLITE_CORE": "SQLITE_CORE_SCHEMA_VERSION"})
         registered = {f'{row["constant_path"]}:{row["constant"]}' for row in baseline.surfaces(ROOT)}
         for constant, _ in versions.values():
             self.assertIn(f"{baseline.STORE_VERSIONS}:{constant}", registered)
@@ -222,7 +218,7 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         self.assertEqual(baseline.step_bound(" 3 ", names, "t"), 3)
         self.assertEqual(baseline.step_bound("compat::SQLITE_CORE_SCHEMA_VERSION", names, "t"), 7)
         self.assertEqual(baseline.step_bound("compat::SQLITE_CORE_SCHEMA_VERSION + 1", names, "t"), 8)
-        for expression in ["compat::SQLITE_REGISTRY_SCHEMA_VERSION", "next()", "1 + 1"]:
+        for expression in ["compat::POSTGRES_SCHEMA_VERSION", "next()", "1 + 1"]:
             with self.subTest(expression=expression), self.assertRaises(baseline.BaselineError):
                 baseline.step_bound(expression, names, "t")
 
@@ -498,12 +494,13 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             self.assertIn(step, reset_catalog)
             catalog.write_text(reset_catalog.replace(step, "from: 2,\n        to: 3,", 1))
             errors = baseline.sqlite_stamp_mismatches(repo)
-            self.assertTrue(any("DurableCore step 2 to 3 is outside" in error for error in errors), errors)
-            self.assertTrue(any("DurableCore has no step chain from the default stamp 1" in error
+            self.assertTrue(any("the SQLite database step 2 to 3 is outside" in error
                                 for error in errors), errors)
+            self.assertTrue(any("the SQLite database has no step chain from the default stamp 1"
+                                in error for error in errors), errors)
             catalog.write_text(reset_catalog.replace(
-                step, "from: compat::SQLITE_REGISTRY_SCHEMA_VERSION,\n"
-                      "        to: compat::SQLITE_REGISTRY_SCHEMA_VERSION + 1,", 1))
+                step, "from: compat::POSTGRES_SCHEMA_VERSION,\n"
+                      "        to: compat::POSTGRES_SCHEMA_VERSION + 1,", 1))
             with self.assertRaises(baseline.BaselineError):
                 baseline.sqlite_stamp_mismatches(repo)
 

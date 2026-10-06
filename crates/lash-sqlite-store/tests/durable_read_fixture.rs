@@ -21,11 +21,12 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE";
 
+/// The database file a SQLite deployment keeps its store in.
+const DATABASE: &str = "lash.db";
+
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct SqliteVersions {
-    durable_core: i32,
-    processes: i32,
-    triggers: i32,
+    database: i32,
 }
 
 /// What this build writes, it reads back with the same meaning: seed a fresh
@@ -57,21 +58,17 @@ async fn release_sqlite_fixture_reads_retained_semantics() {
         &std::fs::read(source.join("versions.json")).expect("read retained SQLite versions"),
     )
     .expect("decode retained SQLite versions");
-    let session_bytes = std::fs::read(corpus.join("session-at-rest/durable-core.db"))
+    let session_bytes = std::fs::read(corpus.join("session-at-rest").join(DATABASE))
         .expect("read the retained session catalog");
     assert_eq!(
         session_bytes,
-        std::fs::read(source.join("durable-core.db")).expect("read the retained core catalog")
+        std::fs::read(source.join(DATABASE)).expect("read the retained database")
     );
     let temp = tempfile::tempdir().expect("release SQLite read-back tempdir");
-    for name in database_names() {
-        std::fs::copy(source.join(name), temp.path().join(name))
-            .expect("copy the immutable release catalog for read-back");
-    }
-    assert_eq!(versions_at(temp.path()), versions);
     // Read the separately named session artifact through the same typed stores.
-    std::fs::write(temp.path().join("durable-core.db"), session_bytes)
+    std::fs::write(temp.path().join(DATABASE), session_bytes)
         .expect("install the retained session catalog copy");
+    assert_eq!(versions_at(temp.path()), versions);
     let handles = open_handles(temp.path(), fixture::FIXTURE_READ_MS).await;
     Box::pin(fixture::assert_semantics(&handles, &expected)).await;
     println!("release SQLite read-back: 4 catalog fixtures, retained semantics matched");
@@ -94,15 +91,13 @@ async fn regenerate_sqlite_durable_fixture() {
     let handles = open_handles(temp.path(), fixture::FIXTURE_WRITE_MS).await;
     let expected = Box::pin(fixture::seed(&handles)).await;
     drop(handles);
-    pin_attachment_write_token(&temp.path().join("durable-core.db"));
-    checkpoint_files(temp.path());
+    pin_attachment_write_token(&temp.path().join(DATABASE));
+    checkpoint(temp.path());
 
     let destination = fixture_dir();
     std::fs::create_dir_all(&destination).expect("create SQLite fixture directory");
-    for name in database_names() {
-        std::fs::copy(temp.path().join(name), destination.join(name))
-            .unwrap_or_else(|error| panic!("copy generated SQLite fixture {name}: {error}"));
-    }
+    std::fs::copy(temp.path().join(DATABASE), destination.join(DATABASE))
+        .unwrap_or_else(|error| panic!("copy the generated SQLite fixture: {error}"));
     std::fs::write(
         destination.join("expected.json"),
         json_with_newline(&expected),
@@ -123,7 +118,7 @@ async fn regenerate_sqlite_durable_fixture() {
 /// or the fixture no longer matches what this generator believes it wrote.
 fn pin_attachment_write_token(core_path: &Path) {
     let connection = rusqlite::Connection::open(core_path)
-        .expect("open SQLite durable-core fixture to pin the attachment write token");
+        .expect("open the SQLite fixture to pin the attachment write token");
     let rewritten = connection
         .execute(
             "UPDATE attachment_pending_writes SET write_id = ?1 WHERE attachment_id = ?2",
@@ -151,38 +146,37 @@ fn pin_attachment_write_token(core_path: &Path) {
 /// the update rule only advances the stamp for a strictly newer release.
 fn pin_release_stamp_instant(core_path: &Path, timestamp_ms: u64) {
     let pinned = rusqlite::Connection::open(core_path)
-        .expect("open SQLite durable-core fixture for a deterministic release stamp")
+        .expect("open the SQLite fixture for a deterministic release stamp")
         .execute(
             "UPDATE release_stamp SET written_at_epoch_ms = ?1 WHERE singleton = 1",
             rusqlite::params![timestamp_ms as i64],
         )
-        .expect("pin the SQLite durable-core release stamp instant");
+        .expect("pin the SQLite release stamp instant");
     assert_eq!(
         pinned, 1,
-        "priming the durable core must have stamped exactly one release row; {pinned} were rewritten"
+        "priming the database must have stamped exactly one release row; {pinned} were rewritten"
     );
 }
 
 async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles {
     std::fs::create_dir_all(root).expect("create SQLite fixture root");
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
-    // Prime and reopen one coherent substrate: process pruning also reads
-    // durable-core referrer fences through the registry's attached catalog.
+    // Prime and reopen one coherent substrate.
     let options = SqliteStoreSetOptions {
         process_id_mint: lash_core_execution::ProcessIdMint::sequential_for_testing(),
         ..SqliteStoreSetOptions::default()
     };
     let priming = SqliteStoreSet::open_with_options_and_clock(
-        root,
+        root.join(DATABASE),
         options.clone(),
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
     .await
     .expect("prime SQLite fixture schemas");
     drop(priming);
-    pin_release_stamp_instant(&root.join("durable-core.db"), timestamp_ms);
+    pin_release_stamp_instant(&root.join(DATABASE), timestamp_ms);
     let stores = SqliteStoreSet::open_with_options_and_clock(
-        root,
+        root.join(DATABASE),
         options,
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
@@ -192,11 +186,11 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     let processes = stores.process_registry();
     let triggers = stores.trigger_store();
     drop(stores);
-    // The file handles retain their attachments after the assembly is dropped;
-    // take ownership only to pin the fixture's otherwise random identities.
+    // The handles outlive the dropped assembly; take ownership only to pin
+    // the fixture's otherwise random identities.
     let runtime = Arc::new(
         Arc::try_unwrap(runtime)
-            .unwrap_or_else(|_| panic!("fixture owns the durable-core handle"))
+            .unwrap_or_else(|_| panic!("fixture owns the catalog handle"))
             .with_commit_count_seed_for_testing(0),
     );
     let triggers = Arc::new(
@@ -217,9 +211,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
 
 fn versions_at(root: &Path) -> SqliteVersions {
     SqliteVersions {
-        durable_core: user_version(&root.join("durable-core.db")),
-        processes: user_version(&root.join("processes.db")),
-        triggers: user_version(&root.join("triggers.db")),
+        database: user_version(&root.join(DATABASE)),
     }
 }
 
@@ -230,32 +222,26 @@ fn user_version(path: &Path) -> i32 {
         .unwrap_or_else(|error| panic!("read {} schema version: {error}", path.display()))
 }
 
-fn checkpoint_files(root: &Path) {
-    for name in database_names() {
-        let path = root.join(name);
-        let connection = rusqlite::Connection::open(&path)
-            .unwrap_or_else(|error| panic!("open {} for WAL checkpoint: {error}", path.display()));
-        let busy: i64 = connection
-            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))
-            .unwrap_or_else(|error| panic!("checkpoint {}: {error}", path.display()));
-        assert_eq!(
-            busy,
-            0,
-            "WAL checkpoint remained busy for {}",
-            path.display()
-        );
-        drop(connection);
-        let wal = PathBuf::from(format!("{}-wal", path.display()));
-        assert!(
-            !wal.exists(),
-            "WAL file still exists after TRUNCATE checkpoint: {}",
-            wal.display()
-        );
-    }
-}
-
-fn database_names() -> [&'static str; 3] {
-    ["durable-core.db", "processes.db", "triggers.db"]
+fn checkpoint(root: &Path) {
+    let path = root.join(DATABASE);
+    let connection = rusqlite::Connection::open(&path)
+        .unwrap_or_else(|error| panic!("open {} for WAL checkpoint: {error}", path.display()));
+    let busy: i64 = connection
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))
+        .unwrap_or_else(|error| panic!("checkpoint {}: {error}", path.display()));
+    assert_eq!(
+        busy,
+        0,
+        "WAL checkpoint remained busy for {}",
+        path.display()
+    );
+    drop(connection);
+    let wal = PathBuf::from(format!("{}-wal", path.display()));
+    assert!(
+        !wal.exists(),
+        "WAL file still exists after TRUNCATE checkpoint: {}",
+        wal.display()
+    );
 }
 
 fn fixture_dir() -> PathBuf {

@@ -21,9 +21,10 @@ pub(crate) async fn sqlite_file(
     dirs: &Mutex<Vec<tempfile::TempDir>>,
 ) -> Arc<dyn DurableStore> {
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(dir.path(), clock)
-        .await
-        .expect("a file store set opens");
+    let stores =
+        lash_sqlite_store::SqliteStoreSet::open_with_clock(dir.path().join("lash.db"), clock)
+            .await
+            .expect("a file store set opens");
     dirs.lock_recover().push(dir);
     Arc::new(stores.durable_store())
 }

@@ -2,16 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use lash_sqlite_store::SqliteDatabase;
 use lash_sqlite_store::testing::{RawRow, read_rows_for_testing};
 use serde::Serialize;
 use serde_json::Value;
-
-const DATABASES: [SqliteDatabase; 3] = [
-    SqliteDatabase::DurableCore,
-    SqliteDatabase::ProcessRegistry,
-    SqliteDatabase::Triggers,
-];
 
 /// One obligation column family on one row (ADR 0109 §1.1). A row that owes
 /// nothing has `state: None`.
@@ -210,22 +203,13 @@ fn required(row: &RawRow, column: &str) -> String {
     text(row, column).unwrap_or_default()
 }
 
-fn read(
-    stores: &lash_sqlite_store::SqliteStoreSet,
-    database: SqliteDatabase,
-    sql: &str,
-) -> Result<Vec<RawRow>, String> {
-    read_rows_for_testing(stores, database, sql)
+fn read(stores: &lash_sqlite_store::SqliteStoreSet, sql: &str) -> Result<Vec<RawRow>, String> {
+    read_rows_for_testing(stores, sql)
 }
 
-fn has_table(
-    stores: &lash_sqlite_store::SqliteStoreSet,
-    database: SqliteDatabase,
-    table: &str,
-) -> Result<bool, String> {
+fn has_table(stores: &lash_sqlite_store::SqliteStoreSet, table: &str) -> Result<bool, String> {
     Ok(!read(
         stores,
-        database,
         &format!("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '{table}'"),
     )?
     .is_empty())
@@ -243,13 +227,9 @@ impl StoreSnapshot {
             label: label.into(),
             ..Self::default()
         };
-        for database in DATABASES {
-            snapshot.read_obligations(stores, database)?;
-        }
-        let core = SqliteDatabase::DurableCore;
+        snapshot.read_obligations(stores)?;
         for row in read(
             stores,
-            core,
             "SELECT session_id, input_id, state, admitted_run, obligation_state \
              FROM pending_turn_inputs ORDER BY session_id, enqueue_seq",
         )? {
@@ -264,7 +244,6 @@ impl StoreSnapshot {
         }
         for row in read(
             stores,
-            core,
             "SELECT session_id, batch_id, terminal_cause, admitted_run, obligation_state \
              FROM queued_work_batches ORDER BY session_id, enqueue_seq",
         )? {
@@ -279,7 +258,6 @@ impl StoreSnapshot {
         }
         for row in read(
             stores,
-            core,
             "SELECT session_id, run, admission_json IS NOT NULL AS admitted, terminal_kind \
              FROM session_runs ORDER BY session_id, run",
         )? {
@@ -292,7 +270,6 @@ impl StoreSnapshot {
         }
         for row in read(
             stores,
-            core,
             "SELECT session_id, input_id, run FROM session_run_inputs \
              ORDER BY session_id, input_id",
         )? {
@@ -304,7 +281,6 @@ impl StoreSnapshot {
         }
         for row in read(
             stores,
-            core,
             "SELECT r.namespace, r.artifact_ref, e.referrer_kind, e.referrer_id \
              FROM artifact_refs r LEFT JOIN artifact_referrer_edges e \
              ON e.namespace = r.namespace AND e.artifact_ref = r.artifact_ref \
@@ -326,7 +302,6 @@ impl StoreSnapshot {
         }
         for row in read(
             stores,
-            core,
             "SELECT session_id, node_id, parent_node_id, frame_node_id, node_json \
              FROM graph_nodes ORDER BY session_id, generation",
         )? {
@@ -351,7 +326,6 @@ impl StoreSnapshot {
         }
         for row in read(
             stores,
-            core,
             "SELECT session_id, leaf_node_id FROM session_head JOIN session_revisions USING (session_id, head_revision) \
              WHERE leaf_node_id IS NOT NULL ORDER BY session_id",
         )? {
@@ -361,7 +335,6 @@ impl StoreSnapshot {
         }
         for row in read(
             stores,
-            core,
             "SELECT referrer_kind, referrer_id FROM referrer_fences",
         )? {
             snapshot.fences.insert((
@@ -369,10 +342,9 @@ impl StoreSnapshot {
                 required(&row, "referrer_id"),
             ));
         }
-        if has_table(stores, core, "artifact_cleanup_obligations")? {
+        if has_table(stores, "artifact_cleanup_obligations")? {
             for row in read(
                 stores,
-                core,
                 "SELECT referrer_kind, referrer_id, obligation_state \
                  FROM artifact_cleanup_obligations ORDER BY referrer_kind, referrer_id",
             )? {
@@ -389,17 +361,14 @@ impl StoreSnapshot {
     fn read_obligations(
         &mut self,
         stores: &lash_sqlite_store::SqliteStoreSet,
-        database: SqliteDatabase,
     ) -> Result<(), String> {
         let tables = read(
             stores,
-            database,
             "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
         )?;
         for table in tables.iter().map(|row| required(row, "name")) {
             let columns = read(
                 stores,
-                database,
                 &format!("SELECT name, pk FROM pragma_table_info('{table}') ORDER BY cid"),
             )?;
             let mut key = columns
@@ -429,7 +398,6 @@ impl StoreSnapshot {
             for family in families {
                 for row in read(
                     stores,
-                    database,
                     &format!(
                         "SELECT {key} AS row_key, {family}obligation_id AS id, \
                          {family}obligation_state AS state, \
@@ -465,7 +433,6 @@ impl StoreSnapshot {
         let factory = stores.session_store_factory();
         let sessions = read(
             stores,
-            SqliteDatabase::DurableCore,
             "SELECT session_id FROM session_meta ORDER BY session_id",
         )?;
         for session in sessions.iter().map(|row| required(row, "session_id")) {

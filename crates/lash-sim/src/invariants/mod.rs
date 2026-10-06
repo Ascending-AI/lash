@@ -794,7 +794,6 @@ pub(crate) async fn settle_shifts(
 ) -> Result<(), String> {
     let sessions = lash_sqlite_store::testing::read_rows_for_testing(
         engine.stores(),
-        lash_sqlite_store::SqliteDatabase::DurableCore,
         "SELECT session_id FROM session_meta ORDER BY session_id",
     )?;
     for row in sessions {

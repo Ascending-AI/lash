@@ -1,7 +1,7 @@
 //! The SQLite writer fence (ADR 0115 §2.2–2.4): every write transaction reads
-//! its database's `lash_compat` row first, a finalize fences writers in every
-//! database, a stamp another process migrated is admitted again at the next
-//! write, and a migration holds the whole store exclusively, in order.
+//! the database's `lash_compat` row first, a finalize fences every writer, a
+//! stamp another process migrated is admitted again at the next write, and a
+//! migration holds the database exclusively.
 #![expect(
     clippy::expect_used,
     reason = "test module: clippy's allow-expect-in-tests only exempts #[test] functions, and the fixture helpers here are test code too"
@@ -25,11 +25,11 @@ use rusqlite::Connection;
 use crate::compat::AdvanceStep;
 use crate::conn::SqliteConnection;
 use crate::schema::ensure_versioned_schema;
-use crate::{SqliteDatabase, SqliteLocation, SqliteStoreSet};
+use crate::{SqliteLocation, SqliteStoreSet};
 
-fn raw(location: &SqliteLocation, database: SqliteDatabase) -> Connection {
+fn raw(location: &SqliteLocation) -> Connection {
     let connection = Connection::open_with_flags(
-        location.target(database).uri(),
+        location.target().uri(),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )
     .expect("open a second connection, as another process would");
@@ -39,19 +39,12 @@ fn raw(location: &SqliteLocation, database: SqliteDatabase) -> Connection {
     connection
 }
 
-fn count(location: &SqliteLocation, database: SqliteDatabase, table: &str) -> i64 {
-    raw(location, database)
+fn count(location: &SqliteLocation, table: &str) -> i64 {
+    raw(location)
         .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
             row.get(0)
         })
         .expect("count rows")
-}
-
-fn run_intent_exists(location: &SqliteLocation) -> bool {
-    match location {
-        SqliteLocation::File { root } => root.join("lash-finalize.json").exists(),
-        SqliteLocation::Memory { .. } => false,
-    }
 }
 
 fn session_meta(id: &str) -> SessionMeta {
@@ -65,44 +58,43 @@ fn session_meta(id: &str) -> SessionMeta {
 
 async fn file_set() -> (tempfile::TempDir, SqliteStoreSet) {
     let root = tempfile::tempdir().expect("store root");
-    let set = SqliteStoreSet::open(root.path())
+    let set = SqliteStoreSet::open(root.path().join("lash.db"))
         .await
         .expect("open the store set");
     (root, set)
 }
 
-/// A connection-level writer on `database`, admitted by its installer, and a
-/// table it can insert one row into.
-async fn writer(
-    location: &SqliteLocation,
-    database: SqliteDatabase,
-) -> (SqliteConnection, &'static str, &'static str) {
-    let connection = SqliteConnection::open(&location.target(database))
+/// A table of each family the database holds (the durable core, the process
+/// registry, the trigger store), and an insert of one row into it.
+const PROBES: [(&str, &str); 3] = [
+    (
+        "session_meta",
+        "INSERT INTO session_meta (session_id, relation_kind) \
+         VALUES ('fence-probe-' || (SELECT COUNT(*) FROM session_meta), 'root')",
+    ),
+    (
+        "draining_generations",
+        "INSERT INTO draining_generations (generation, marked_at_ms) \
+         VALUES ('fence-probe-' || (SELECT COUNT(*) FROM draining_generations), 0)",
+    ),
+    (
+        "trigger_mutation_receipts",
+        "INSERT INTO trigger_mutation_receipts \
+         (operation_id, owner_kind, owner_id, request_fingerprint, result_json, created_at_ms) \
+         VALUES ('fence-probe-' || (SELECT COUNT(*) FROM trigger_mutation_receipts), \
+                 'host', 'h', 'f', '{}', 0)",
+    ),
+];
+
+/// A connection-level writer on the database, admitted by its installer.
+async fn writer(location: &SqliteLocation) -> SqliteConnection {
+    let connection = SqliteConnection::open(&location.target())
         .await
         .expect("open a writer connection");
-    ensure_versioned_schema(&connection, database)
+    ensure_versioned_schema(&connection)
         .await
         .expect("the installer admits the database");
-    let (table, insert) = match database {
-        SqliteDatabase::DurableCore => (
-            "session_meta",
-            "INSERT INTO session_meta (session_id, relation_kind) \
-             VALUES ('fence-probe-' || (SELECT COUNT(*) FROM session_meta), 'root')",
-        ),
-        SqliteDatabase::ProcessRegistry => (
-            "draining_generations",
-            "INSERT INTO draining_generations (generation, marked_at_ms) \
-             VALUES ('fence-probe-' || (SELECT COUNT(*) FROM draining_generations), 0)",
-        ),
-        SqliteDatabase::Triggers => (
-            "trigger_mutation_receipts",
-            "INSERT INTO trigger_mutation_receipts \
-             (operation_id, owner_kind, owner_id, request_fingerprint, result_json, created_at_ms) \
-             VALUES ('fence-probe-' || (SELECT COUNT(*) FROM trigger_mutation_receipts), \
-                     'host', 'h', 'f', '{}', 0)",
-        ),
-    };
-    (connection, table, insert)
+    connection
 }
 
 async fn insert(connection: &SqliteConnection, sql: &'static str) -> Result<(), StoreError> {
@@ -120,14 +112,14 @@ fn is_fenced(error: &StoreError, recorded: u32) -> bool {
     )
 }
 
-/// After a finalize moves `F` past this build's writable range, a writer in
-/// each of the three databases, reached through the store's own ports, is
-/// refused `WriterFenced` and writes nothing.
+/// After a finalize moves `F` past this build's writable range, a writer of
+/// each family's tables, reached through the store's own ports, is refused
+/// `WriterFenced` and writes nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
+async fn sqlite_fence_refuses_a_writer_of_each_family_after_finalize() {
     let (_run, set) = file_set().await;
     let location = set.location().clone();
-    raw(&location, SqliteDatabase::Triggers)
+    raw(&location)
         .execute(
             "INSERT INTO trigger_mutation_receipts \
              (operation_id, owner_kind, owner_id, request_fingerprint, result_json, created_at_ms) \
@@ -143,11 +135,8 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
     )
     .await
     .expect("a writer before finalize commits");
-    let sessions_before = count(&location, SqliteDatabase::DurableCore, "session_meta");
-    let mut writers = Vec::new();
-    for database in SqliteDatabase::ALL {
-        writers.push((database, writer(&location, database).await));
-    }
+    let sessions_before = count(&location, "session_meta");
+    let connection = writer(&location).await;
 
     let writable = FleetFormat::writable();
     let next = writable.max() + 1;
@@ -165,12 +154,12 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
             ),
         )
         .await
-        .expect_err("the durable-core writer is fenced");
+        .expect_err("the session writer is fenced");
     assert!(is_fenced(&core_error, next), "{core_error}");
     assert_eq!(
-        count(&location, SqliteDatabase::DurableCore, "session_meta"),
+        count(&location, "session_meta"),
         sessions_before,
-        "a fenced durable-core writer wrote nothing"
+        "a fenced session writer wrote nothing"
     );
 
     let registry_error = set
@@ -180,11 +169,7 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
         .expect_err("the process-registry writer is fenced");
     assert!(is_fenced(&registry_error, next), "{registry_error}");
     assert_eq!(
-        count(
-            &location,
-            SqliteDatabase::ProcessRegistry,
-            "draining_generations"
-        ),
+        count(&location, "draining_generations"),
         0,
         "a fenced process-registry writer wrote nothing"
     );
@@ -206,104 +191,92 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
         "{trigger_error}"
     );
     assert_eq!(
-        count(
-            &location,
-            SqliteDatabase::Triggers,
-            "trigger_mutation_receipts"
-        ),
+        count(&location, "trigger_mutation_receipts"),
         1,
         "a fenced trigger writer journaled no receipt"
     );
 
-    // The fence reads each database's own row: every connection-level
-    // writer opened before finalize is refused typed, whichever database it
-    // holds.
-    for (database, (connection, table, sql)) in writers {
-        let before = count(&location, database, table);
+    // A connection-level writer opened before finalize is refused typed,
+    // whichever family's table it writes.
+    for (table, sql) in PROBES {
+        let before = count(&location, table);
         let error = insert(&connection, sql)
             .await
             .expect_err("a writer after finalize is fenced");
-        assert!(is_fenced(&error, next), "{database:?}: {error}");
-        assert_eq!(count(&location, database, table), before, "{database:?}");
+        assert!(is_fenced(&error, next), "{table}: {error}");
+        assert_eq!(count(&location, table), before, "{table}");
     }
 }
 
-/// Another process migrates a shared database while this one holds a
-/// connection. The next write admits the stamp again inside its own
-/// transaction: an expand is admitted and the write lands, and a contract
-/// past this build's floor is refused typed with nothing written.
+/// Another process migrates the database while this one holds a connection.
+/// The next write admits the stamp again inside its own transaction: an
+/// expand is admitted and the write lands, and a contract past this build's
+/// floor is refused typed with nothing written.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_fence_readmits_a_stamp_migrated_by_another_process() {
     let (_run, set) = file_set().await;
     let location = set.location().clone();
-    for database in SqliteDatabase::ALL {
-        let (connection, table, sql) = writer(&location, database).await;
-        insert(&connection, sql)
-            .await
-            .expect("a writer under the installed stamp commits");
+    let (table, sql) = PROBES[0];
+    let connection = writer(&location).await;
+    insert(&connection, sql)
+        .await
+        .expect("a writer under the installed stamp commits");
 
-        raw(&location, database)
-            .execute("UPDATE lash_compat SET version = version + 1", [])
-            .expect("another process expands the database");
-        let before = count(&location, database, table);
-        insert(&connection, sql)
-            .await
-            .expect("an expanded stamp under this build's floor is admitted");
-        assert_eq!(
-            count(&location, database, table),
-            before + 1,
-            "{database:?}"
-        );
+    raw(&location)
+        .execute("UPDATE lash_compat SET version = version + 1", [])
+        .expect("another process expands the database");
+    let before = count(&location, table);
+    insert(&connection, sql)
+        .await
+        .expect("an expanded stamp under this build's floor is admitted");
+    assert_eq!(count(&location, table), before + 1);
 
-        raw(&location, database)
-            .execute("UPDATE lash_compat SET min_reader = version", [])
-            .expect("another process contracts the database");
-        let error = insert(&connection, sql)
-            .await
-            .expect_err("a floor above this build refuses the write");
-        assert!(
-            matches!(
-                &error,
-                StoreError::Incompatible {
-                    refusal: CompatRefusal::ReaderFloorAbove { component, .. }
-                } if component == database.component().as_str()
-            ),
-            "{database:?}: {error}"
-        );
-        assert_eq!(
-            count(&location, database, table),
-            before + 1,
-            "{database:?}: a refused writer wrote nothing"
-        );
+    raw(&location)
+        .execute("UPDATE lash_compat SET min_reader = version", [])
+        .expect("another process contracts the database");
+    let error = insert(&connection, sql)
+        .await
+        .expect_err("a floor above this build refuses the write");
+    assert!(
+        matches!(
+            &error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::ReaderFloorAbove { component, .. }
+            } if component == crate::schema::COMPONENT.as_str()
+        ),
+        "{error}"
+    );
+    assert_eq!(
+        count(&location, table),
+        before + 1,
+        "a refused writer wrote nothing"
+    );
 
-        raw(&location, database)
-            .execute("DELETE FROM lash_compat", [])
-            .expect("another process deletes the stamp");
-        let error = insert(&connection, sql)
-            .await
-            .expect_err("a missing stamp fails closed");
-        assert!(
-            matches!(
-                &error,
-                StoreError::Incompatible {
-                    refusal: CompatRefusal::Unstamped { .. }
-                }
-            ),
-            "{database:?}: {error}"
-        );
-    }
+    raw(&location)
+        .execute("DELETE FROM lash_compat", [])
+        .expect("another process deletes the stamp");
+    let error = insert(&connection, sql)
+        .await
+        .expect_err("a missing stamp fails closed");
+    assert!(
+        matches!(
+            &error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::Unstamped { .. }
+            }
+        ),
+        "{error}"
+    );
 }
 
-/// A migration takes `BEGIN EXCLUSIVE` on every database in
-/// `SqliteDatabase::ALL` order and holds all three before it rewrites any,
-/// then commits in the same order. At each step a writer is excluded from
-/// exactly the databases the migration holds.
+/// A migration takes `BEGIN EXCLUSIVE` on the database before it rewrites
+/// it: a writer is excluded from the lock until the commit.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_migration_takes_every_database_exclusively_in_order() {
+async fn sqlite_migration_holds_the_database_exclusively() {
     let (_run, set) = file_set().await;
     let location = set.location().clone();
-    let writable = |database: SqliteDatabase| {
-        let probe = raw(&location, database);
+    let writable = || {
+        let probe = raw(&location);
         probe
             .busy_timeout(Duration::ZERO)
             .expect("probe busy timeout");
@@ -317,70 +290,36 @@ async fn sqlite_migration_takes_every_database_exclusively_in_order() {
             {
                 false
             }
-            Err(error) => panic!("probe {database:?}: {error}"),
+            Err(error) => panic!("probe: {error}"),
         }
     };
     let mut steps = Vec::new();
-    let rewritten = std::cell::RefCell::new(Vec::new());
-    crate::compat::advance_set_observed(
+    crate::compat::advance_observed(
         &location,
         Duration::from_secs(5),
-        |database, tx| {
-            rewritten.borrow_mut().push(database);
+        |tx| {
+            assert!(!writable(), "the rewrite runs under the exclusive lock");
             tx.execute("UPDATE lash_compat SET version = version + 1", [])
                 .map(drop)
         },
         |step| {
             steps.push(step);
-            let held: Vec<_> = SqliteDatabase::ALL
-                .into_iter()
-                .filter(|database| match step {
-                    AdvanceStep::Locked(locked) => database <= &locked,
-                    AdvanceStep::Committed(committed) => database > &committed,
-                })
-                .collect();
-            for database in SqliteDatabase::ALL {
-                assert_eq!(
-                    writable(database),
-                    !held.contains(&database),
-                    "at {step:?}, {database:?} is held exactly when the migration holds it"
-                );
-            }
-            if let AdvanceStep::Locked(SqliteDatabase::Triggers) = step {
-                assert!(
-                    rewritten.borrow().is_empty(),
-                    "no database is rewritten before all three are held"
-                );
-            }
+            assert_eq!(
+                writable(),
+                step == AdvanceStep::Committed,
+                "at {step:?}, the database is held exactly while the migration holds it"
+            );
             Ok(())
         },
     )
     .expect("migrate the store");
-    let order = SqliteDatabase::ALL;
-    assert_eq!(
-        steps,
-        order
-            .into_iter()
-            .map(AdvanceStep::Locked)
-            .chain(order.into_iter().map(AdvanceStep::Committed))
-            .collect::<Vec<_>>(),
-        "locks and commits both follow SqliteDatabase::ALL"
-    );
-    assert_eq!(
-        rewritten.into_inner(),
-        order.to_vec(),
-        "rewrites follow SqliteDatabase::ALL"
-    );
+    assert_eq!(steps, [AdvanceStep::Locked, AdvanceStep::Committed]);
 
-    // Every open writer admits the migrated stamp at its next fence, and a
-    // reopen sees a consistent set.
-    for database in SqliteDatabase::ALL {
-        let (connection, _, sql) = writer(&location, database).await;
-        insert(&connection, sql)
-            .await
-            .expect("the expanded database admits this build's writers");
-    }
-    crate::compat::check_set(&location).expect("the migrated set agrees");
+    // An open writer admits the migrated stamp at its next fence.
+    let connection = writer(&location).await;
+    insert(&connection, PROBES[0].1)
+        .await
+        .expect("the expanded database admits this build's writers");
 }
 
 /// A writer paused after its fence holds the database: finalize waits for
@@ -391,7 +330,7 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
     let root = tempfile::tempdir().expect("store root");
     let pauses = crate::testing::SqlitePauses::default();
     let set = SqliteStoreSet::open_with_options_and_clock(
-        root.path(),
+        root.path().join("lash.db"),
         crate::SqliteStoreSetOptions {
             pauses: Some(pauses.clone()),
             ..crate::SqliteStoreSetOptions::default()
@@ -444,7 +383,7 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
         .expect("finalize task")
         .expect("finalize commits after the writer");
     assert_eq!(
-        count(&location, SqliteDatabase::DurableCore, "session_meta"),
+        count(&location, "session_meta"),
         1,
         "the straddling writer's row is kept"
     );
@@ -465,7 +404,7 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
 #[tokio::test]
 async fn sqlite_fence_observes_a_writable_move_of_f() {
     let root = tempfile::tempdir().expect("store root");
-    let path = root.path().join(crate::DURABLE_CORE_DB_FILE);
+    let path = root.path().join("lash.db");
     let next = FleetFormat::writable().max() + 1;
     let writable = VersionRange::new(FleetFormat::writable().min(), next).expect("writable range");
     let store = crate::SqliteStore::open_with_fleet_writable_range_for_testing(&path, writable)
@@ -528,10 +467,7 @@ async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
         ),
         "{error:?}"
     );
-    assert_eq!(
-        count(set.location(), SqliteDatabase::DurableCore, "session_meta"),
-        1
-    );
+    assert_eq!(count(set.location(), "session_meta"), 1);
 }
 
 #[tokio::test]
@@ -540,7 +476,7 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
     let (_run, set) = file_set().await;
     let path = set
         .location()
-        .target(SqliteDatabase::DurableCore)
+        .target()
         .file_path()
         .expect("core file")
         .to_owned();
@@ -577,7 +513,7 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
         .await
         .expect("commit re-encodes under writable epoch");
     assert_ne!(receipt.schema_version, 7);
-    let stored: String = raw(set.location(), SqliteDatabase::DurableCore)
+    let stored: String = raw(set.location())
         .query_row(
             "SELECT result_json FROM runtime_turn_commits WHERE session_id = ?1",
             [session.as_str()],
@@ -610,194 +546,12 @@ impl DeploymentRegistry for Deployments {
     }
 }
 
-/// Exit the finalizing process after either partial-set commit, then recover
-/// with a fresh public open and no surviving SQLite handles.
-#[cfg(feature = "synthetic-next")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the crash law starts its own test executable and exits without dropping database handles"
-)]
-async fn sqlite_finalize_cold_reopen_completes_partial_epoch_flip() {
-    const TEST: &str = "fence_tests::sqlite_finalize_cold_reopen_completes_partial_epoch_flip";
-    const RUN: &str = "LASH_SQLITE_FINALIZE_CRASH_ROOT";
-    const CUT: &str = "LASH_SQLITE_FINALIZE_CRASH_CUT";
-    if let Some(root) = std::env::var_os(RUN) {
-        let cut = std::env::var(CUT).expect("child crash cut");
-        let options = crate::SqliteStoreSetOptions {
-            finalize_hook: Some(crate::testing::SqliteFinalizeHook::new(move |database| {
-                if database.file_name() == cut {
-                    std::process::exit(77);
-                }
-            })),
-            ..crate::SqliteStoreSetOptions::default()
-        };
-        let set = SqliteStoreSet::open_with_options_and_clock(
-            std::path::PathBuf::from(root),
-            options,
-            std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
-        )
-        .await
-        .expect("the successor opens before finalize");
-        set.finalize(
-            &BuildGeneration::for_test("cold-finalize-old"),
-            &Deployments::default(),
-            &[],
-            5,
-        )
-        .await
-        .expect("finalize reaches the crash cut");
-        panic!("the child did not crash");
-    }
-
-    let mut failures = Vec::new();
-    for cut in [SqliteDatabase::DurableCore, SqliteDatabase::ProcessRegistry] {
-        let (root, set) = file_set().await;
-        let location = set.location().clone();
-        set.generation_drain()
-            .mark_draining(&BuildGeneration::for_test("cold-finalize-old"), 1)
-            .await
-            .expect("drain the retired generation");
-        for database in SqliteDatabase::ALL {
-            raw(&location, database)
-                .execute(
-                    "INSERT INTO lash_synthetic_next (id, note) VALUES (7, 'keep-me')",
-                    [],
-                )
-                .expect("seed application rows");
-            let (connection, _, sql) = writer(&location, database).await;
-            let sql = if database == SqliteDatabase::ProcessRegistry {
-                "INSERT INTO draining_generations (generation, marked_at_ms) VALUES ('0123456789ab', 7)"
-            } else {
-                sql
-            };
-            insert(&connection, sql)
-                .await
-                .expect("seed production application rows");
-        }
-        let application_rows: Vec<_> = SqliteDatabase::ALL
-            .into_iter()
-            .map(|database| {
-                let table = match database {
-                    SqliteDatabase::DurableCore => "session_meta",
-                    SqliteDatabase::ProcessRegistry => "draining_generations",
-                    SqliteDatabase::Triggers => "trigger_mutation_receipts",
-                };
-                let sql = format!("SELECT * FROM {table} ORDER BY 1");
-                let rows = crate::testing::read_rows_for_testing(&set, database, &sql)
-                    .expect("snapshot production application rows");
-                (database, sql, rows)
-            })
-            .collect();
-        drop(set);
-        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
-            .args([TEST, "--exact", "--nocapture", "--test-threads=1"])
-            .env(RUN, root.path())
-            .env(CUT, cut.file_name())
-            .output()
-            .expect("run the finalizing process");
-        assert_eq!(
-            output.status.code(),
-            Some(77),
-            "{cut:?}: exit at the committed cut\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-        for database in SqliteDatabase::ALL {
-            let connection = raw(&location, database);
-            let (schema, fleet): (i64, i64) = connection
-                .query_row("SELECT version, fleet_format FROM lash_compat", [], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })
-                .expect("read the partial set");
-            assert_eq!(schema, database.expected_version());
-            assert_eq!(
-                fleet,
-                if database <= cut { 2 } else { 1 },
-                "{cut:?}: {database:?}"
-            );
-        }
-        let reopened = match SqliteStoreSet::open(root.path()).await {
-            Ok(set) => set,
-            Err(error) => {
-                failures.push(format!("after {cut:?}: {error}"));
-                continue;
-            }
-        };
-        for (database, sql, before) in application_rows {
-            assert_eq!(
-                crate::testing::read_rows_for_testing(&reopened, database, &sql)
-                    .expect("read recovered application rows"),
-                before,
-                "{cut:?}: {database:?} application rows stay unchanged"
-            );
-        }
-        for database in SqliteDatabase::ALL {
-            let mut connection = raw(reopened.location(), database);
-            let fleet: i64 = connection
-                .query_row("SELECT fleet_format FROM lash_compat", [], |row| row.get(0))
-                .expect("read recovered epoch");
-            assert_eq!(fleet, 2, "{cut:?}: {database:?}");
-            let note: String = connection
-                .query_row(
-                    "SELECT note FROM lash_synthetic_next WHERE id = 7",
-                    [],
-                    |row| row.get(0),
-                )
-                .expect("application row survived");
-            assert_eq!(note, "keep-me");
-            let tx = connection
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .expect("a fresh N writer starts its transaction");
-            let error = crate::sqlite_error(
-                crate::compat::fence(&tx, database, VersionRange::new(1, 1).expect("N range"))
-                    .expect_err("N cannot write the recovered epoch"),
-            );
-            assert!(
-                matches!(error, StoreError::WriterFenced { recorded: 2, .. }),
-                "{error}"
-            );
-        }
-        drop(reopened);
-        drop(
-            SqliteStoreSet::open(root.path())
-                .await
-                .expect("recovery is idempotent"),
-        );
-    }
-    assert!(
-        failures.is_empty(),
-        "cold recovery failed at both cuts: {failures:?}"
-    );
-}
-
-#[cfg(feature = "synthetic-next")]
-#[tokio::test]
-async fn sqlite_cold_open_refuses_partial_epoch_without_finalize_intent() {
-    let (root, set) = file_set().await;
-    raw(set.location(), SqliteDatabase::DurableCore)
-        .execute("UPDATE lash_compat SET fleet_format = 2", [])
-        .expect("make an unauthorized mixed set");
-    drop(set);
-    let error = SqliteStoreSet::open(root.path())
-        .await
-        .map(drop)
-        .expect_err("open refuses the mixed set");
-    assert!(matches!(
-        crate::sqlite_async_error(error),
-        StoreError::Incompatible {
-            refusal: CompatRefusal::PartiallyAdvanced { .. }
-        }
-    ));
-}
-
 /// The store set's finalize (FIG-3800 B): refused typed while the retired
-/// generation is undrained or still has a deployment, with `F` unchanged in
-/// every database and this build's writers still admitted. Once it moves
-/// `F` past this build's range, a writer of this build in each of the three
-/// databases — through the store's ports and through connections opened
-/// before the finalize — is refused `WriterFenced` and writes nothing. A
-/// rerun finds the set finalized.
+/// generation is undrained or still has a deployment, with `F` unchanged and
+/// this build's writers still admitted. Once it moves `F` past this build's
+/// range, a writer of this build — through the store's ports and through a
+/// connection opened before the finalize — is refused `WriterFenced` and
+/// writes nothing. A rerun finds the store finalized.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stale_writer_is_fenced_after_finalize() {
     let (_run, set) = file_set().await;
@@ -807,8 +561,8 @@ async fn a_stale_writer_is_fenced_after_finalize() {
     let successor = VersionRange::new(writable.min(), next).expect("writable range");
     let retired = BuildGeneration::for_test("sqlite-finalize-old");
     let deployments = Deployments::default();
-    let fleet = |database| {
-        raw(&location, database)
+    let fleet = || {
+        raw(&location)
             .query_row("SELECT fleet_format FROM lash_compat", [], |row| {
                 row.get::<_, i64>(0)
             })
@@ -822,10 +576,6 @@ async fn a_stale_writer_is_fenced_after_finalize() {
         Err(FinalizeError::Refused(FinalizeRefusal::GenerationNotDrained { .. })) => {}
         other => panic!("an undrained generation must refuse finalize: {other:?}"),
     }
-    assert!(
-        !run_intent_exists(&location),
-        "an undrained generation authorizes nothing"
-    );
     set.generation_drain()
         .mark_draining(&retired, 1)
         .await
@@ -845,13 +595,7 @@ async fn a_stale_writer_is_fenced_after_finalize() {
         Err(FinalizeError::Refused(FinalizeRefusal::DeploymentsRetained { .. })) => {}
         other => panic!("a retained deployment must refuse finalize: {other:?}"),
     }
-    assert!(
-        !run_intent_exists(&location),
-        "a retained deployment authorizes nothing"
-    );
-    for database in SqliteDatabase::ALL {
-        assert_eq!(fleet(database), i64::from(writable.min()), "{database:?}");
-    }
+    assert_eq!(fleet(), i64::from(writable.min()));
     let core = set.process_env_store();
     core.admit_session(
         &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
@@ -860,10 +604,7 @@ async fn a_stale_writer_is_fenced_after_finalize() {
     )
     .await
     .expect("this build writes while finalize is refused");
-    let mut writers = Vec::new();
-    for database in SqliteDatabase::ALL {
-        writers.push((database, writer(&location, database).await));
-    }
+    let connection = writer(&location).await;
 
     deployments.0.lock().expect("deployments").clear();
     let flip = set
@@ -877,11 +618,9 @@ async fn a_stale_writer_is_fenced_after_finalize() {
             to: next
         }
     );
-    for database in SqliteDatabase::ALL {
-        assert_eq!(fleet(database), i64::from(next), "{database:?}");
-    }
+    assert_eq!(fleet(), i64::from(next));
 
-    let sessions = count(&location, SqliteDatabase::DurableCore, "session_meta");
+    let sessions = count(&location, "session_meta");
     let error = core
         .admit_session(
             &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
@@ -889,25 +628,22 @@ async fn a_stale_writer_is_fenced_after_finalize() {
             ),
         )
         .await
-        .expect_err("the durable-core writer is fenced");
+        .expect_err("the session writer is fenced");
     assert!(is_fenced(&error, next), "{error}");
-    assert_eq!(
-        count(&location, SqliteDatabase::DurableCore, "session_meta"),
-        sessions
-    );
+    assert_eq!(count(&location, "session_meta"), sessions);
     let error = set
         .generation_drain()
         .mark_draining(&BuildGeneration::for_test("sqlite-stale-mark"), 2)
         .await
         .expect_err("the process-registry writer is fenced");
     assert!(is_fenced(&error, next), "{error}");
-    for (database, (connection, table, sql)) in writers {
-        let before = count(&location, database, table);
+    for (table, sql) in PROBES {
+        let before = count(&location, table);
         let error = insert(&connection, sql)
             .await
             .expect_err("a writer opened before finalize is fenced");
-        assert!(is_fenced(&error, next), "{database:?}: {error}");
-        assert_eq!(count(&location, database, table), before, "{database:?}");
+        assert!(is_fenced(&error, next), "{table}: {error}");
+        assert_eq!(count(&location, table), before, "{table}");
     }
 
     assert_eq!(

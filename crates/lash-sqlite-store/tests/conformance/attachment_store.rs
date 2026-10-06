@@ -86,7 +86,7 @@ fn state_referencing(session_id: &SessionId, reference: &AttachmentRef) -> Runti
 
 fn checkpoint_blob_count(backend: &TestBackend) -> i64 {
     backend
-        .raw(SqliteDatabase::DurableCore)
+        .raw()
         .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
         .expect("count checkpoint blobs")
 }

@@ -130,8 +130,7 @@ async fn double_with_hooks(
                     let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
                         .await
                         .expect("SQLite memory stores");
-                    *captured.lock().expect("inspection URI") =
-                        Some(stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore));
+                    *captured.lock().expect("inspection URI") = Some(stores.database_uri());
                     Ok(Arc::new(stores) as Arc<dyn lash::StoreSet>)
                 })
                 .await
@@ -154,9 +153,12 @@ async fn double_with_hooks(
             let double =
                 lash_restate_test::backend_with_store_set(seed, config, hooks, |clock| async {
                     Ok(Arc::new(
-                        lash_sqlite_store::SqliteStoreSet::open_with_clock(&path, clock)
-                            .await
-                            .expect("SQLite file stores"),
+                        lash_sqlite_store::SqliteStoreSet::open_with_clock(
+                            path.join("lash.db"),
+                            clock,
+                        )
+                        .await
+                        .expect("SQLite file stores"),
                     ) as Arc<dyn lash::StoreSet>)
                 })
                 .await
@@ -165,7 +167,7 @@ async fn double_with_hooks(
                 double,
                 artifacts: ArtifactProbe::Sqlite(format!(
                     "file:{}",
-                    path.join("durable-core.db").display()
+                    path.join("lash.db").display()
                 )),
                 _keep: vec![Box::new(root)],
             })

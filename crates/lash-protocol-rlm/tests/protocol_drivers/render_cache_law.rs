@@ -306,7 +306,7 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
         .expect("test runtime")
         .block_on(async {
             let dir = tempfile::tempdir().expect("SQLite directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(dir.path())
+            let stores = lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
                 .await
                 .expect("SQLite stores");
             let double = lash_restate_test::backend_with(

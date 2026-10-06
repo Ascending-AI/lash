@@ -109,7 +109,6 @@ fn end_frames_tx(
             tx,
             &lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), gate.cloned()),
             now_ms,
-            crate::obligation_ledger::CleanupStorage::DurableCore,
         )?;
     }
     Ok(())
@@ -938,9 +937,7 @@ use lash_core_execution::store::{
 fn tool_receipt_sql() -> &'static lash_store_sql::tool_receipts::ToolReceiptStatements {
     static SQL: std::sync::LazyLock<lash_store_sql::tool_receipts::ToolReceiptStatements> =
         std::sync::LazyLock::new(|| {
-            lash_store_sql::tool_receipts::ToolReceiptStatements::render(
-                crate::schema_layout::Schema::Main.dialect(),
-            )
+            lash_store_sql::tool_receipts::ToolReceiptStatements::render(crate::schema_layout::MAIN)
         });
     &SQL
 }

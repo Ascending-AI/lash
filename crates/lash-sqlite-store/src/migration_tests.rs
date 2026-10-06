@@ -1,5 +1,5 @@
 //! The open-time migration's laws, executed by the synthetic successor
-//! (ADR 0115 §6): this build writes every database one version past its
+//! (ADR 0115 §6): this build writes the database one version past its
 //! schema-version constant, and a store stamped at the constant without the
 //! successor's objects is the release before it.
 #![expect(
@@ -22,81 +22,71 @@ use super::{
     SqliteBackupLocation, SqliteMigrationBackup, SqliteMigrationFault, SqliteMigrationHook,
     SqliteMigrationStep,
 };
-use crate::{SqliteDatabase, SqliteStoreSet, SqliteStoreSetOptions};
+use crate::{SqliteStoreSet, SqliteStoreSetOptions};
 
 use SqliteMigrationStep::{
     BackupSealed, BackupStarted, Committed, Completed, Copied, Locked, Migrated, Owned,
-    RestoreCompleted, RestoreStarted, Restored,
 };
 
-const ALL: [SqliteDatabase; 3] = SqliteDatabase::ALL;
+const FILE: &str = "lash.db";
 
-/// The rows the predecessor fixture writes, one per database.
-fn fixture_row(database: SqliteDatabase) -> (&'static str, &'static str) {
-    match database {
-        SqliteDatabase::DurableCore => (
-            "session_meta",
-            "INSERT INTO session_meta (session_id, relation_kind) VALUES ('fixture-session', 'root')",
-        ),
-        SqliteDatabase::ProcessRegistry => (
-            "draining_generations",
-            "INSERT INTO draining_generations (generation, marked_at_ms) VALUES ('fixture', 7)",
-        ),
-        SqliteDatabase::Triggers => (
-            "trigger_mutation_receipts",
-            "INSERT INTO trigger_mutation_receipts \
-             (operation_id, owner_kind, owner_id, request_fingerprint, result_json, created_at_ms) \
-             VALUES ('fixture', 'host', 'h', 'f', '{}', 7)",
-        ),
-    }
+/// The rows the predecessor fixture writes, one per family of tables.
+const FIXTURE_ROWS: [(&str, &str); 3] = [
+    (
+        "session_meta",
+        "INSERT INTO session_meta (session_id, relation_kind) VALUES ('fixture-session', 'root')",
+    ),
+    (
+        "draining_generations",
+        "INSERT INTO draining_generations (generation, marked_at_ms) VALUES ('fixture', 7)",
+    ),
+    (
+        "trigger_mutation_receipts",
+        "INSERT INTO trigger_mutation_receipts \
+         (operation_id, owner_kind, owner_id, request_fingerprint, result_json, created_at_ms) \
+         VALUES ('fixture', 'host', 'h', 'f', '{}', 7)",
+    ),
+];
+
+fn database_path(root: &Path) -> PathBuf {
+    crate::location::canonical_path(root).join(FILE)
 }
 
-fn database_path(root: &Path, database: SqliteDatabase) -> PathBuf {
-    crate::location::canonical_path(root).join(database.file_name())
-}
-
-fn raw(root: &Path, database: SqliteDatabase) -> Connection {
-    let connection = Connection::open_with_flags(
-        database_path(root, database),
-        OpenFlags::SQLITE_OPEN_READ_WRITE,
-    )
-    .expect("open a raw connection");
+fn raw(root: &Path) -> Connection {
+    let connection =
+        Connection::open_with_flags(database_path(root), OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .expect("open a raw connection");
     connection
         .busy_timeout(Duration::from_secs(5))
         .expect("busy timeout");
     connection
 }
 
-/// Wait until no connection holds any database: the last close removes the
-/// write-ahead log, leaving each file the whole of its database.
+/// Wait until no connection holds the database: the last close removes the
+/// write-ahead log, leaving the file the whole of its database.
 fn quiesce(root: &Path) {
-    for database in ALL {
-        {
-            let connection = raw(root, database);
-            connection
-                .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .expect("checkpoint");
-        }
-        let log = super::sidecar(&database_path(root, database), "-wal");
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while log.exists() {
-            assert!(
-                Instant::now() < deadline,
-                "a connection to the {} never closed",
-                database.name()
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
+    {
+        let connection = raw(root);
+        connection
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("checkpoint");
+    }
+    let log = super::sidecar(&database_path(root), "-wal");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while log.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "a connection to the database never closed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
-fn bytes(root: &Path) -> Vec<Vec<u8>> {
+fn bytes(root: &Path) -> Vec<u8> {
     quiesce(root);
-    ALL.into_iter()
-        .map(|database| std::fs::read(database_path(root, database)).expect("read database"))
-        .collect()
+    std::fs::read(database_path(root)).expect("read database")
 }
 
 fn options(hook: Option<SqliteMigrationHook>) -> SqliteStoreSetOptions {
@@ -108,7 +98,7 @@ fn options(hook: Option<SqliteMigrationHook>) -> SqliteStoreSetOptions {
 
 async fn open(root: &Path, options: SqliteStoreSetOptions) -> Result<SqliteStoreSet, StoreError> {
     SqliteStoreSet::open_with_options_and_clock(
-        root,
+        root.join(FILE),
         options,
         Arc::new(lash_core_execution::facade_support::SystemClock),
     )
@@ -116,83 +106,81 @@ async fn open(root: &Path, options: SqliteStoreSetOptions) -> Result<SqliteStore
     .map_err(crate::sqlite_async_error)
 }
 
-/// A store the release before this build wrote: provisioned, one row in each
-/// database, the successor's objects absent and every stamp at 1. Answers
-/// the root and each database's bytes.
-async fn predecessor() -> (tempfile::TempDir, Vec<Vec<u8>>) {
+/// Turn the migrated store at `root` back into the shape the release before
+/// this build wrote: the successor's objects absent, the stamp one behind.
+fn rewind(root: &Path) {
+    raw(root)
+        .execute_batch(
+            "DROP INDEX idx_lash_synthetic_next_note;
+             DROP TABLE lash_synthetic_next;
+             UPDATE lash_compat SET version = version - 1 WHERE singleton = 1;",
+        )
+        .expect("write the predecessor's shape");
+}
+
+/// A store the release before this build wrote: provisioned, one row of each
+/// family, the successor's objects absent and the stamp at the predecessor's
+/// version. Answers the root and the database's bytes.
+async fn predecessor() -> (tempfile::TempDir, Vec<u8>) {
     let root = tempfile::tempdir().expect("store root");
     drop(
         open(root.path(), options(None))
             .await
             .expect("provision the store"),
     );
-    for database in ALL {
-        raw(root.path(), database)
-            .execute_batch(&format!(
-                "{};
-                 DROP INDEX idx_lash_synthetic_next_note;
-                 DROP TABLE lash_synthetic_next;
-                 UPDATE lash_compat SET version = version - 1 WHERE singleton = 1;",
-                fixture_row(database).1
-            ))
-            .expect("write the predecessor's shape");
+    for (_, insert) in FIXTURE_ROWS {
+        raw(root.path())
+            .execute_batch(insert)
+            .expect("write a predecessor row");
     }
+    rewind(root.path());
     let before = bytes(root.path());
-    assert_eq!(stamps(root.path()), vec![0, 0, 0]);
+    assert_eq!(stamp(root.path()), 0);
     (root, before)
 }
 
-/// The predecessor's version of `database` and the one this build writes.
-fn versions(database: SqliteDatabase) -> (i64, i64) {
-    let descriptor = lash_core_execution::compat::descriptor(database.component())
-        .expect("the build declares every database");
+/// The predecessor's version and the one this build writes.
+fn versions() -> (i64, i64) {
+    let descriptor = lash_core_execution::compat::descriptor(crate::schema::COMPONENT)
+        .expect("the build declares the database");
     (
         i64::from(descriptor.reads.min()),
         i64::from(descriptor.writes.max()),
     )
 }
 
-/// How far each database's stamp is past the predecessor's version: 0 before
-/// its migration, 1 after it.
-fn stamps(root: &Path) -> Vec<i64> {
-    ALL.into_iter()
-        .map(|database| {
-            let version: i64 = raw(root, database)
-                .query_row("SELECT version FROM lash_compat", [], |row| row.get(0))
-                .expect("read the stamp");
-            version - versions(database).0
-        })
-        .collect()
+/// How far the stamp is past the predecessor's version: 0 before the
+/// migration, 1 after it.
+fn stamp(root: &Path) -> i64 {
+    let version: i64 = raw(root)
+        .query_row("SELECT version FROM lash_compat", [], |row| row.get(0))
+        .expect("read the stamp");
+    version - versions().0
 }
 
 /// The store is at this build's version, kept every fixture row, carries the
 /// successor's objects, and its components read and write it.
 async fn assert_migrated(root: &Path) {
-    assert_eq!(stamps(root), vec![1, 1, 1], "every database is migrated");
-    for database in ALL {
-        let connection = raw(root, database);
-        let (table, _) = fixture_row(database);
+    assert_eq!(stamp(root), 1, "the database is migrated");
+    let connection = raw(root);
+    for (table, _) in FIXTURE_ROWS {
         let rows: i64 = connection
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                 row.get(0)
             })
             .expect("count fixture rows");
-        assert_eq!(rows, 1, "the {} kept its row", database.name());
-        let successor: i64 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_schema WHERE name IN \
-                 ('lash_synthetic_next', 'idx_lash_synthetic_next_note')",
-                [],
-                |row| row.get(0),
-            )
-            .expect("read the catalog");
-        assert_eq!(
-            successor,
-            2,
-            "the {} gained the successor's objects",
-            database.name()
-        );
+        assert_eq!(rows, 1, "{table} kept its row");
     }
+    let successor: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_schema WHERE name IN \
+             ('lash_synthetic_next', 'idx_lash_synthetic_next_note')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read the catalog");
+    assert_eq!(successor, 2, "the database gained the successor's objects");
+    drop(connection);
     let set = open(root, options(None))
         .await
         .expect("the migrated store opens");
@@ -203,7 +191,7 @@ async fn assert_migrated(root: &Path) {
             .await
             .expect("read the migrated catalog")
             .is_some(),
-        "the durable core serves its row after the migration"
+        "the store serves its row after the migration"
     );
     store
         .admit_session(
@@ -244,25 +232,17 @@ fn backups(root: &Path) -> Vec<(PathBuf, serde_json::Value)> {
     backups_in(&crate::location::canonical_path(root).join("migration-backups"))
 }
 
-/// The backup at `directory` holds every database, byte for byte as `before`.
-fn assert_backup_holds(directory: &Path, manifest: &serde_json::Value, before: &[Vec<u8>]) {
-    for (index, database) in ALL.into_iter().enumerate() {
-        let copy = std::fs::read(directory.join(database.file_name())).expect("read the copy");
-        assert!(
-            copy == before[index],
-            "the backup's {} is the database as it was before the migration",
-            database.name()
-        );
-        let entry = manifest["databases"]
-            .as_array()
-            .expect("manifest databases")
-            .iter()
-            .find(|entry| entry["file"] == database.file_name())
-            .expect("the manifest names every database");
-        assert_eq!(entry["from"], versions(database).0);
-        assert_eq!(entry["to"], versions(database).1);
-        assert_eq!(entry["bytes"], before[index].len());
-    }
+/// The backup at `directory` holds the database, byte for byte as `before`.
+fn assert_backup_holds(directory: &Path, manifest: &serde_json::Value, before: &[u8]) {
+    let copy = std::fs::read(directory.join(FILE)).expect("read the copy");
+    assert!(
+        copy == before,
+        "the backup is the database as it was before the migration"
+    );
+    assert_eq!(manifest["file"], FILE);
+    assert_eq!(manifest["from"], versions().0);
+    assert_eq!(manifest["to"], versions().1);
+    assert_eq!(manifest["bytes"], before.len());
 }
 
 /// A hook that records every step and answers `fault` for it.
@@ -278,33 +258,22 @@ fn recording(
     (hook, steps)
 }
 
-fn fresh_steps() -> Vec<SqliteMigrationStep> {
-    ALL.into_iter()
-        .map(Owned)
-        .chain([BackupStarted])
-        .chain(ALL.into_iter().map(Copied))
-        .chain([BackupSealed])
-        .chain(ALL.into_iter().map(Locked))
-        .chain(ALL.into_iter().map(Migrated))
-        .chain(ALL.into_iter().map(Committed))
-        .chain([Completed])
-        .collect()
-}
+const FRESH_STEPS: [SqliteMigrationStep; 8] = [
+    Owned,
+    BackupStarted,
+    Copied,
+    BackupSealed,
+    Locked,
+    Migrated,
+    Committed,
+    Completed,
+];
 
-fn restore_steps() -> Vec<SqliteMigrationStep> {
-    [RestoreStarted]
-        .into_iter()
-        .chain(ALL.into_iter().map(Owned))
-        .chain(ALL.into_iter().map(Restored))
-        .chain([RestoreCompleted])
-        .collect()
-}
-
-/// Opening a store older than the build copies all three databases, whole
-/// and synced, before the first lock or write of the migration; the copies
-/// are the store as it was, and the migrated store serves its rows.
+/// Opening a store older than the build copies the database, whole and
+/// synced, before the migration's lock or first write; the copy is the store
+/// as it was, and the migrated store serves its rows.
 #[tokio::test]
-async fn sqlite_open_backs_up_every_database_before_migrating() {
+async fn sqlite_open_backs_up_the_database_before_migrating() {
     let (root, before) = predecessor().await;
     let backup_at_seal = Arc::new(Mutex::new(Vec::new()));
     let at_seal = Arc::clone(&backup_at_seal);
@@ -315,12 +284,8 @@ async fn sqlite_open_backs_up_every_database_before_migrating() {
                 .pop()
                 .expect("the sealed backup exists");
             assert_eq!(manifest["state"], "migrating");
-            *at_seal.lock().expect("copies") = ALL
-                .into_iter()
-                .map(|database| {
-                    std::fs::read(directory.join(database.file_name())).expect("read the copy")
-                })
-                .collect();
+            *at_seal.lock().expect("copy") =
+                std::fs::read(directory.join(FILE)).expect("read the copy");
         }
         SqliteMigrationFault::Proceed
     });
@@ -329,15 +294,14 @@ async fn sqlite_open_backs_up_every_database_before_migrating() {
             .await
             .expect("the open migrates the store"),
     );
-    let steps = steps.lock().expect("steps").clone();
     assert_eq!(
-        steps,
-        fresh_steps(),
-        "every database is copied before any is locked"
+        steps.lock().expect("steps").clone(),
+        FRESH_STEPS,
+        "the database is copied before it is locked"
     );
     assert!(
-        *backup_at_seal.lock().expect("copies") == before,
-        "when the backup seals, it holds every database as it was"
+        *backup_at_seal.lock().expect("copy") == before,
+        "when the backup seals, it holds the database as it was"
     );
     let backups = backups(root.path());
     assert_eq!(backups.len(), 1, "one migration, one backup");
@@ -348,13 +312,11 @@ async fn sqlite_open_backs_up_every_database_before_migrating() {
 }
 
 /// A crash at any step of a migration leaves a store the next open
-/// completes: it resumes a migration some database committed, and starts
-/// one nothing committed again from a fresh backup. A crash at any step of
-/// a restore is finished by the next open, which leaves the store byte for
-/// byte as it was backed up; the open after that migrates it.
+/// completes: a migration whose transaction committed is recorded finished,
+/// and one that did not commit starts again from a fresh backup.
 #[tokio::test]
-async fn sqlite_migration_crash_at_every_step_resumes_or_restores() {
-    for crash_at in fresh_steps() {
+async fn sqlite_migration_crash_at_every_step_resumes() {
+    for crash_at in FRESH_STEPS {
         let (root, before) = predecessor().await;
         let (hook, _) = recording(move |step| {
             if step == crash_at {
@@ -387,346 +349,62 @@ async fn sqlite_migration_crash_at_every_step_resumes_or_restores() {
         assert_backup_holds(directory, manifest, &before);
         assert_migrated(root.path()).await;
     }
+}
 
-    for crash_at in restore_steps() {
+/// A migration that fails before its transaction commits changes nothing:
+/// the database is byte for byte what it was, its backup goes with the
+/// error, and the next open migrates.
+#[tokio::test]
+async fn sqlite_migration_failure_before_commit_changes_nothing() {
+    for fail_at in [Owned, BackupStarted, Copied, BackupSealed, Locked, Migrated] {
         let (root, before) = predecessor().await;
-        let restoring = Arc::new(Mutex::new(false));
-        let (hook, _) = recording(move |step| {
-            let mut restoring = restoring.lock().expect("restore flag");
-            *restoring |= step == RestoreStarted;
-            if step == Committed(SqliteDatabase::ProcessRegistry) {
+        let (hook, steps) = recording(move |step| {
+            if step == fail_at {
                 SqliteMigrationFault::Fail
-            } else if *restoring && step == crash_at {
-                SqliteMigrationFault::Crash
             } else {
                 SqliteMigrationFault::Proceed
             }
         });
-        let crashed = open(root.path(), options(Some(hook)))
+        let failed = open(root.path(), options(Some(hook)))
             .await
             .map(drop)
-            .expect_err("the restore crashed");
+            .expect_err("the migration fails");
         assert!(
-            crashed.to_string().contains("crashed"),
-            "{crash_at:?}: {crashed}"
+            failed.to_string().contains("injected"),
+            "{fail_at:?}: {failed}"
         );
-        match open(root.path(), options(None)).await {
-            Err(restored) => {
-                assert!(
-                    restored.to_string().contains("restored"),
-                    "{crash_at:?}: the next open finishes the restore and reports it: {restored}"
-                );
-                assert!(
-                    bytes(root.path()) == before,
-                    "{crash_at:?}: the finished restore is byte for byte the store as backed up"
-                );
-                drop(
-                    open(root.path(), options(None))
-                        .await
-                        .expect("the open after a restore migrates"),
-                );
-            }
-            // The crash came after the restore was recorded finished, so
-            // the next open migrated the restored store from a new backup.
-            Ok(set) => {
-                assert_eq!(crash_at, RestoreCompleted);
-                drop(set);
-            }
-        }
-        let backups = backups(root.path());
-        assert_eq!(
-            backups.len(),
-            2,
-            "{crash_at:?}: the restored and the migrated backup"
+        assert!(
+            !steps.lock().expect("steps").contains(&Committed),
+            "{fail_at:?}: nothing committed"
         );
-        assert_eq!(backups[0].1["state"], "restored", "{crash_at:?}");
-        assert_eq!(backups[1].1["state"], "migrated", "{crash_at:?}");
-        for (directory, manifest) in &backups {
-            assert_backup_holds(directory, manifest, &before);
-        }
+        assert!(
+            bytes(root.path()) == before,
+            "{fail_at:?}: the database is as it was"
+        );
+        assert!(
+            backups(root.path()).is_empty(),
+            "{fail_at:?}: the failed migration's backup goes with it"
+        );
+        drop(
+            open(root.path(), options(None))
+                .await
+                .expect("the next open migrates"),
+        );
         assert_migrated(root.path()).await;
     }
 }
 
-/// A failed resume restores the original complete set even though this
-/// invocation committed nothing. Every partial-commit cut is crossed with
-/// every observable failure before the resume commits and every restore cut.
+/// The migration owns the store: it takes the store's migrator lock,
+/// checkpoints and closes the database, and refuses a store another
+/// connection or another migrator holds, having changed nothing; then it
+/// holds the database exclusively from its lock to its commit.
 #[tokio::test]
-async fn sqlite_migration_resume_failure_restores_original_set() {
-    for committed in ALL.into_iter().take(2) {
-        let failures = ALL
-            .into_iter()
-            .filter(|database| *database > committed)
-            .map(Migrated)
-            .chain(ALL.into_iter().map(Owned))
-            .chain(ALL.into_iter().map(Locked))
-            .collect::<Vec<_>>();
-        for fail_at in &failures {
-            for restore_cut in std::iter::once(None).chain(restore_steps().into_iter().map(Some)) {
-                let fail_at = *fail_at;
-                let context =
-                    format!("after {committed:?}, fail {fail_at:?}, restore {restore_cut:?}");
-                let (root, before) = predecessor().await;
-                let (hook, _) = recording(move |step| {
-                    if step == Committed(committed) {
-                        SqliteMigrationFault::Crash
-                    } else {
-                        SqliteMigrationFault::Proceed
-                    }
-                });
-                let crashed = open(root.path(), options(Some(hook)))
-                    .await
-                    .map(drop)
-                    .expect_err("the initial migration crashed after a partial commit");
-                assert!(
-                    crashed.to_string().contains("crashed"),
-                    "{context}: {crashed}"
-                );
-                assert_eq!(
-                    stamps(root.path()),
-                    if committed == SqliteDatabase::DurableCore {
-                        vec![1, 0, 0]
-                    } else {
-                        vec![1, 1, 0]
-                    },
-                    "{context}: prior commits are durable"
-                );
-                let original = backups(root.path());
-                assert_eq!(original.len(), 1, "{context}");
-                assert_eq!(original[0].1["state"], "migrating", "{context}");
-                assert_backup_holds(&original[0].0, &original[0].1, &before);
-
-                let restoring = Arc::new(Mutex::new(false));
-                let (hook, steps) = recording(move |step| {
-                    let mut restoring = restoring.lock().expect("restore flag");
-                    *restoring |= step == RestoreStarted;
-                    if !*restoring && step == fail_at {
-                        SqliteMigrationFault::Fail
-                    } else if *restoring && Some(step) == restore_cut {
-                        SqliteMigrationFault::Crash
-                    } else {
-                        SqliteMigrationFault::Proceed
-                    }
-                });
-                let failed = open(root.path(), options(Some(hook)))
-                    .await
-                    .map(drop)
-                    .expect_err("the resumed migration fails before its first commit");
-                assert!(
-                    !steps
-                        .lock()
-                        .expect("steps")
-                        .iter()
-                        .any(|step| matches!(step, Committed(_))),
-                    "{context}: the resume committed nothing"
-                );
-                let kept = backups(root.path());
-                assert_eq!(
-                    kept.len(),
-                    1,
-                    "{context}: the original backup remains; live stamps {:?}; error {failed}",
-                    stamps(root.path())
-                );
-                if restore_cut.is_some() {
-                    assert!(
-                        failed.to_string().contains("crashed"),
-                        "{context}: {failed}"
-                    );
-                } else {
-                    assert!(
-                        failed.to_string().contains("restored from the backup"),
-                        "{context}: {failed}"
-                    );
-                }
-                assert_eq!(kept[0].0, original[0].0, "{context}: no replacement backup");
-                assert_backup_holds(&kept[0].0, &kept[0].1, &before);
-                assert!(
-                    kept[0].1["failure"]
-                        .as_str()
-                        .is_some_and(|failure| failure.contains("injected")),
-                    "{context}: the manifest records the resume failure"
-                );
-                let interrupted = restore_cut.is_some_and(|cut| cut != RestoreCompleted);
-                assert_eq!(
-                    kept[0].1["state"],
-                    if interrupted { "restoring" } else { "restored" },
-                    "{context}"
-                );
-                if interrupted {
-                    let restored = open(root.path(), options(None))
-                        .await
-                        .map(drop)
-                        .expect_err("a third cold open finishes the interrupted restore");
-                    assert!(
-                        restored.to_string().contains("restored from the backup"),
-                        "{context}: {restored}"
-                    );
-                    assert_eq!(backups(root.path())[0].1["state"], "restored", "{context}");
-                }
-                assert!(
-                    bytes(root.path()) == before,
-                    "{context}: every original byte returns"
-                );
-                for database in ALL {
-                    for suffix in ["-wal", "-shm"] {
-                        assert!(
-                            !super::sidecar(&database_path(root.path(), database), suffix).exists(),
-                            "{context}: no {suffix} for {database:?}"
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// A connection that prevents a failed resume's restore leaves the recovery
-/// manifest and original backup intact until a cold open can own the store.
-#[tokio::test]
-async fn sqlite_migration_resume_failure_retains_backup_until_store_is_owned() {
-    let (root, before) = predecessor().await;
-    let (hook, _) = recording(|step| {
-        if step == Committed(SqliteDatabase::DurableCore) {
-            SqliteMigrationFault::Crash
-        } else {
-            SqliteMigrationFault::Proceed
-        }
-    });
-    open(root.path(), options(Some(hook)))
-        .await
-        .map(drop)
-        .expect_err("the first migration crashes after a commit");
-    let original = backups(root.path());
-    let holder = Arc::new(Mutex::new(None));
-    let held = Arc::clone(&holder);
-    let probe_root = root.path().to_path_buf();
-    let (hook, _) = recording(move |step| {
-        if step == RestoreStarted {
-            let connection = raw(&probe_root, SqliteDatabase::Triggers);
-            connection
-                .query_row("SELECT COUNT(*) FROM lash_compat", [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .expect("hold the trigger database open during restore");
-            *held.lock().expect("holder") = Some(connection);
-        }
-        if step == Migrated(SqliteDatabase::ProcessRegistry) {
-            SqliteMigrationFault::Fail
-        } else {
-            SqliteMigrationFault::Proceed
-        }
-    });
-    let mut busy = options(Some(hook));
-    busy.store.connection_policy.busy_timeout = Duration::from_millis(100);
-    let refused = open(root.path(), busy)
-        .await
-        .map(drop)
-        .expect_err("restore cannot own the whole store");
-    assert!(refused.to_string().contains("open elsewhere"), "{refused}");
-    let pending = backups(root.path());
-    assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].0, original[0].0);
-    assert_eq!(pending[0].1["state"], "restoring");
-    assert_backup_holds(&pending[0].0, &pending[0].1, &before);
-    assert_eq!(stamps(root.path()), vec![1, 0, 0]);
-    drop(holder.lock().expect("holder").take());
-    let restored = open(root.path(), options(None))
-        .await
-        .map(drop)
-        .expect_err("a third cold open finishes the restore");
-    assert!(
-        restored.to_string().contains("restored from the backup"),
-        "{restored}"
-    );
-    assert!(bytes(root.path()) == before);
-    assert_eq!(backups(root.path())[0].1["state"], "restored");
-}
-
-/// A migration that fails after some databases committed restores every
-/// database from the backup: each file is byte for byte what it was before
-/// the open, with no write-ahead log beside it, and the open reports the
-/// failure. The next open migrates.
-#[tokio::test]
-async fn sqlite_backup_restores_byte_identical_state() {
-    let (root, before) = predecessor().await;
-    let (hook, steps) = recording(|step| {
-        if step == Committed(SqliteDatabase::ProcessRegistry) {
-            SqliteMigrationFault::Fail
-        } else {
-            SqliteMigrationFault::Proceed
-        }
-    });
-    let failed = open(root.path(), options(Some(hook)))
-        .await
-        .map(drop)
-        .expect_err("the migration fails");
-    assert!(
-        failed.to_string().contains("restored from the backup"),
-        "the open reports the restore: {failed}"
-    );
-    let steps = steps.lock().expect("steps").clone();
-    assert!(
-        steps.contains(&Committed(SqliteDatabase::DurableCore))
-            && !steps.contains(&Committed(SqliteDatabase::Triggers)),
-        "two databases committed before the failure, and the third did not"
-    );
-    assert_eq!(
-        steps[steps.len() - restore_steps().len()..],
-        restore_steps()[..],
-        "the failure restored every database, in order"
-    );
-    for database in ALL {
-        let path = database_path(root.path(), database);
-        for sidecar in ["-wal", "-shm"] {
-            assert!(
-                !super::sidecar(&path, sidecar).exists(),
-                "the restored {} has no {sidecar}",
-                database.name()
-            );
-        }
-    }
-    let restored: Vec<Vec<u8>> = ALL
-        .into_iter()
-        .map(|database| std::fs::read(database_path(root.path(), database)).expect("read"))
-        .collect();
-    assert!(
-        restored == before,
-        "every restored database is byte for byte the store before the migration"
-    );
-    let backups = backups(root.path());
-    assert_eq!(backups.len(), 1);
-    let (directory, manifest) = &backups[0];
-    assert_eq!(manifest["state"], "restored");
-    assert!(
-        manifest["failure"]
-            .as_str()
-            .is_some_and(|failure| failure.contains("injected")),
-        "the manifest records why the migration failed: {manifest}"
-    );
-    assert_backup_holds(directory, manifest, &before);
-
-    drop(
-        open(root.path(), options(None))
-            .await
-            .expect("the next open migrates"),
-    );
-    assert_migrated(root.path()).await;
-}
-
-/// The migration owns the whole store under its lock order: it takes the
-/// store's migrator lock, checkpoints and closes each database in
-/// [`SqliteDatabase::ALL`] order, and refuses a store another connection or
-/// another migrator holds, having changed nothing; then it takes
-/// `BEGIN EXCLUSIVE` on every database in that order before it writes any,
-/// holds each one exactly from its lock to its commit, and commits in the
-/// same order.
-#[tokio::test]
-async fn sqlite_migration_respects_lock_order_across_the_three_databases() {
+async fn sqlite_migration_owns_the_store_and_holds_it_exclusively() {
     let (root, before) = predecessor().await;
 
-    // Another connection on a later database: the migration waits for it,
-    // then refuses, and neither the store nor the backup location changed.
-    let holder = raw(root.path(), SqliteDatabase::ProcessRegistry);
+    // Another connection on the database: the migration waits for it, then
+    // refuses, and neither the store nor the backup location changed.
+    let holder = raw(root.path());
     holder
         .query_row("SELECT COUNT(*) FROM lash_compat", [], |row| {
             row.get::<_, i64>(0)
@@ -758,7 +436,9 @@ async fn sqlite_migration_respects_lock_order_across_the_three_databases() {
         .create(true)
         .truncate(false)
         .write(true)
-        .open(crate::location::canonical_path(root.path()).join(crate::store_ownership::LOCK))
+        .open(crate::store_ownership::lock_path(&database_path(
+            root.path(),
+        )))
         .expect("open the migrator lock");
     migrator.lock().expect("hold the migrator lock");
     let mut busy = options(None);
@@ -782,8 +462,8 @@ async fn sqlite_migration_respects_lock_order_across_the_three_databases() {
     );
 
     let probe_root = root.path().to_path_buf();
-    let writable = move |database: SqliteDatabase| {
-        let probe = raw(&probe_root, database);
+    let writable = move || {
+        let probe = raw(&probe_root);
         probe
             .busy_timeout(Duration::ZERO)
             .expect("probe busy timeout");
@@ -797,33 +477,16 @@ async fn sqlite_migration_respects_lock_order_across_the_three_databases() {
             {
                 false
             }
-            Err(error) => panic!("probe {database:?}: {error}"),
+            Err(error) => panic!("probe: {error}"),
         }
     };
     let (hook, steps) = recording(move |step| {
-        let held: Option<Vec<SqliteDatabase>> = match step {
-            Locked(locked) => Some(
-                ALL.into_iter()
-                    .filter(|database| *database <= locked)
-                    .collect(),
-            ),
-            Migrated(_) => Some(ALL.to_vec()),
-            Committed(committed) => Some(
-                ALL.into_iter()
-                    .filter(|database| *database > committed)
-                    .collect(),
-            ),
-            _ => None,
-        };
-        if let Some(held) = held {
-            for database in ALL {
-                assert_eq!(
-                    writable(database),
-                    !held.contains(&database),
-                    "at {step:?}, the {} is held exactly when the migration holds it",
-                    database.name()
-                );
-            }
+        if matches!(step, Locked | Migrated | Committed) {
+            assert_eq!(
+                writable(),
+                step == Committed,
+                "at {step:?}, the database is held exactly when the migration holds it"
+            );
         }
         SqliteMigrationFault::Proceed
     });
@@ -832,11 +495,7 @@ async fn sqlite_migration_respects_lock_order_across_the_three_databases() {
             .await
             .expect("the open migrates the store"),
     );
-    assert_eq!(
-        steps.lock().expect("steps").clone(),
-        fresh_steps(),
-        "ownership, copies, locks, migrations and commits all follow SqliteDatabase::ALL"
-    );
+    assert_eq!(steps.lock().expect("steps").clone(), FRESH_STEPS);
     assert_migrated(root.path()).await;
 }
 
@@ -845,29 +504,25 @@ async fn sqlite_migration_respects_lock_order_across_the_three_databases() {
 /// asks for.
 #[tokio::test]
 async fn sqlite_migration_backups_follow_the_configured_location_and_retention() {
-    let (root, before) = predecessor().await;
+    let (root, _) = predecessor().await;
     let elsewhere = tempfile::tempdir().expect("backup location");
-    let configured = |hook: Option<SqliteMigrationHook>| SqliteStoreSetOptions {
+    let configured = || SqliteStoreSetOptions {
         migration_backup: SqliteMigrationBackup {
             location: SqliteBackupLocation::Directory(elsewhere.path().to_path_buf()),
             retain: std::num::NonZeroUsize::MIN,
         },
-        ..options(hook)
+        ..options(None)
     };
-    let (fail, _) = recording(|step| {
-        if step == Committed(SqliteDatabase::DurableCore) {
-            SqliteMigrationFault::Fail
-        } else {
-            SqliteMigrationFault::Proceed
-        }
-    });
-    open(root.path(), configured(Some(fail)))
-        .await
-        .map(drop)
-        .expect_err("the first migration fails and restores");
-    assert_eq!(backups_in(elsewhere.path()).len(), 1);
     drop(
-        open(root.path(), configured(None))
+        open(root.path(), configured())
+            .await
+            .expect("the first migration succeeds"),
+    );
+    assert_eq!(backups_in(elsewhere.path()).len(), 1);
+    rewind(root.path());
+    let rewound = bytes(root.path());
+    drop(
+        open(root.path(), configured())
             .await
             .expect("the second migration succeeds"),
     );
@@ -882,7 +537,7 @@ async fn sqlite_migration_backups_follow_the_configured_location_and_retention()
         "retain = 1 keeps only the newest finished backup"
     );
     assert_eq!(kept[0].1["state"], "migrated");
-    assert_backup_holds(&kept[0].0, &kept[0].1, &before);
+    assert_backup_holds(&kept[0].0, &kept[0].1, &rewound);
     assert_migrated(root.path()).await;
 }
 
@@ -891,12 +546,11 @@ async fn sqlite_migration_backups_follow_the_configured_location_and_retention()
 #[tokio::test]
 async fn sqlite_component_open_refuses_an_unmigrated_database() {
     let (root, before) = predecessor().await;
-    let error =
-        crate::SqliteTriggerStore::open(&database_path(root.path(), SqliteDatabase::Triggers))
-            .await
-            .map(drop)
-            .map_err(crate::sqlite_async_error)
-            .expect_err("an unmigrated trigger database is refused");
+    let error = crate::SqliteTriggerStore::open(&database_path(root.path()))
+        .await
+        .map(drop)
+        .map_err(crate::sqlite_async_error)
+        .expect_err("an unmigrated database is refused");
     assert!(
         matches!(
             error,
@@ -906,7 +560,7 @@ async fn sqlite_component_open_refuses_an_unmigrated_database() {
                     target,
                     ..
                 }
-            } if (i64::from(found), i64::from(target)) == versions(SqliteDatabase::Triggers)
+            } if (i64::from(found), i64::from(target)) == versions()
         ),
         "{error}"
     );

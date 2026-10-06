@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 fn catalog_uri(root: &Path) -> PathBuf {
-    root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name())
+    root.join("lash.db")
 }
 
 async fn admit_store(
@@ -157,7 +157,11 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
 #[tokio::test]
 async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
     let root = unique_temp_dir("metadata");
-    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
+    let factory = std::sync::Arc::new(
+        SqliteStore::open(&catalog_uri(&root))
+            .await
+            .expect("open catalog"),
+    );
     let request = SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -222,7 +226,11 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
 #[tokio::test]
 async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     let root = unique_temp_dir("delete-session");
-    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
+    let factory = std::sync::Arc::new(
+        SqliteStore::open(&catalog_uri(&root))
+            .await
+            .expect("open catalog"),
+    );
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -274,10 +282,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .await
         .expect("delete session again");
 
-    assert!(
-        root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name())
-            .exists()
-    );
+    assert!(catalog_uri(&root).exists());
     assert!(
         factory
             .lookup_session(&SessionId::from("delete/me"))
@@ -317,7 +322,11 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
 #[tokio::test]
 async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let root = unique_temp_dir("global-node-id");
-    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
+    let factory = std::sync::Arc::new(
+        SqliteStore::open(&catalog_uri(&root))
+            .await
+            .expect("open catalog"),
+    );
     let store_for = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -412,7 +421,11 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
 #[tokio::test]
 async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let root = unique_temp_dir("leaf-scope");
-    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
+    let factory = std::sync::Arc::new(
+        SqliteStore::open(&catalog_uri(&root))
+            .await
+            .expect("open catalog"),
+    );
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -491,7 +504,11 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
 #[tokio::test]
 async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
     let root = unique_temp_dir("maintenance-scope");
-    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
+    let factory = std::sync::Arc::new(
+        SqliteStore::open(&catalog_uri(&root))
+            .await
+            .expect("open catalog"),
+    );
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -625,7 +642,11 @@ async fn commit_single_root_node(
 #[tokio::test]
 async fn sqlite_delete_reclaims_a_pinned_leaf_with_its_session() {
     let root = unique_temp_dir("pinned-at-delete");
-    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
+    let factory = std::sync::Arc::new(
+        SqliteStore::open(&catalog_uri(&root))
+            .await
+            .expect("open catalog"),
+    );
 
     let leaf = {
         let (store, leaf) =
@@ -672,7 +693,11 @@ async fn sqlite_delete_reclaims_a_pinned_leaf_with_its_session() {
 #[tokio::test]
 async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete() {
     let root = unique_temp_dir("orphan-fork-ancestry");
-    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
+    let factory = std::sync::Arc::new(
+        SqliteStore::open(&catalog_uri(&root))
+            .await
+            .expect("open catalog"),
+    );
 
     let parent_leaf = {
         let (store, leaf) =

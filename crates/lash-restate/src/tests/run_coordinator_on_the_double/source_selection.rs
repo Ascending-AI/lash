@@ -23,7 +23,7 @@ async fn backend(
     Arc<dyn lash_core::store::ToolMaterialStore>,
 ) {
     let stores = Arc::new(match dir {
-        Some(dir) => lash_sqlite_store::SqliteStoreSet::open(dir.path())
+        Some(dir) => lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
             .await
             .unwrap(),
         None => lash_sqlite_store::SqliteStoreSet::memory().await.unwrap(),

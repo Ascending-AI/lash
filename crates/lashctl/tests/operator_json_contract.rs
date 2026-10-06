@@ -25,7 +25,7 @@ fn run(args: &[&str], database_url: Option<&str>) -> (i32, Value) {
     // `drain` hands over through the deployment's engine; the catalogs these
     // contracts drain hold no work for it to reach.
     command
-        .env_remove("LASH_SQLITE_DIR")
+        .env_remove("LASH_SQLITE_PATH")
         .env("RESTATE_AUTHORITY_ID", "lashctl-contract-test")
         .env("RESTATE_NAMESPACE", "lashctl-contract-test")
         .env("RESTATE_INGRESS_URL", "http://127.0.0.1:1")
@@ -538,15 +538,17 @@ fn rolling_preflight_refuses_an_oversubscribed_budget() {
 /// resumable feed cursors, and returns typed park refusals in its JSON envelope.
 #[test]
 fn recovery_json_uses_sqlite_and_keeps_typed_refusals() {
-    let path = std::env::temp_dir().join(format!("lashctl-recovery-{}", uuid::Uuid::new_v4()));
+    let path = std::env::temp_dir()
+        .join(format!("lashctl-recovery-{}", uuid::Uuid::new_v4()))
+        .join("lash.db");
     let invoke = |args: &[&str]| {
         let output = Command::new(env!("CARGO_BIN_EXE_lashctl"))
             .args(args)
             .arg("--json")
-            .arg("--sqlite-dir")
+            .arg("--sqlite-path")
             .arg(&path)
             .env_remove("LASH_POSTGRES_DATABASE_URL")
-            .env_remove("LASH_SQLITE_DIR")
+            .env_remove("LASH_SQLITE_PATH")
             .env("RESTATE_AUTHORITY_ID", "lashctl-recovery-test")
             .env("RESTATE_NAMESPACE", "lashctl-recovery-test")
             .env("RESTATE_INGRESS_URL", "http://127.0.0.1:1")
@@ -753,5 +755,6 @@ fn recovery_json_uses_sqlite_and_keeps_typed_refusals() {
         1
     );
     assert_eq!(remaining["result"]["records"][0]["obligation_id"], ids[1]);
-    std::fs::remove_dir_all(path).expect("remove recovery store");
+    std::fs::remove_dir_all(path.parent().expect("the store's directory"))
+        .expect("remove recovery store");
 }

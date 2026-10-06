@@ -337,12 +337,8 @@ pub(crate) async fn store_backend_with_clock(
 pub(crate) fn turn_input_states(
     double: &lash_restate_test::RestateTestBackend,
 ) -> Vec<(String, String)> {
-    let connection = rusqlite::Connection::open(
-        double
-            .stores()
-            .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-    )
-    .expect("open the durable-core catalog");
+    let connection = rusqlite::Connection::open(double.stores().database_uri())
+        .expect("open the durable-core catalog");
     let mut statement = connection
         .prepare("SELECT input_id, state FROM pending_turn_inputs ORDER BY enqueue_seq")
         .expect("prepare the catalog read");

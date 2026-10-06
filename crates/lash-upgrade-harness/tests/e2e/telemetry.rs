@@ -200,7 +200,7 @@ async fn s34(leg: lash_upgrade_harness::e2e::case::Leg) -> Result<()> {
             .control(reqwest::Method::GET, "/control/s34/head/s34-session", None)
             .await?;
         let snapshot = read_only_head(
-            &lease.directory.join("consumer-data/durable-core.db"),
+            &lease.directory.join("consumer-data/lash.db"),
             "s34-session",
         )?;
         ensure!(
@@ -321,7 +321,7 @@ async fn s34(leg: lash_upgrade_harness::e2e::case::Leg) -> Result<()> {
         // The journal retains admission facts before observation emission.
         // The first-writer tool receipt selects and retains the SDK anchor.
         let receipt_snapshot = read_only_tool_receipt(
-            &lease.directory.join("consumer-data/durable-core.db"),
+            &lease.directory.join("consumer-data/lash.db"),
             "s34-session", &call,
         )?;
         let request: lash::persistence::ToolRequestReceipt =

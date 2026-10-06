@@ -44,7 +44,7 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
     let path = dir.path().to_path_buf();
     let pauses = lash_sqlite_store::testing::SqlitePauses::default();
     let stores = lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
-        &path,
+        path.join("lash.db"),
         lash_sqlite_store::SqliteStoreSetOptions {
             pauses: Some(pauses.clone()),
             ..Default::default()
@@ -184,9 +184,10 @@ async fn process_event_snapshot_competing_pruner() {
         .expect("the law's prune cutoff")
         .parse()
         .expect("a millisecond cutoff");
-    let stores = lash_sqlite_store::SqliteStoreSet::open(&root)
-        .await
-        .expect("open competing process registry writer");
+    let stores =
+        lash_sqlite_store::SqliteStoreSet::open(std::path::Path::new(&root).join("lash.db"))
+            .await
+            .expect("open competing process registry writer");
     let prune = stores
         .process_registry()
         .prune_terminal_processes(
@@ -211,7 +212,7 @@ fn trigger_subscription_owner_filter_is_pushed_down() {
 #[tokio::test]
 async fn fenced_process_and_trigger_registration_stays_typed() {
     let root = tempfile::tempdir().expect("store root");
-    let stores = lash_sqlite_store::SqliteStoreSet::open(root.path())
+    let stores = lash_sqlite_store::SqliteStoreSet::open(root.path().join("lash.db"))
         .await
         .expect("open older writer");
     // An epoch past this build's writable range: a newer release finalized.
@@ -220,28 +221,22 @@ async fn fenced_process_and_trigger_registration_stays_typed() {
         .expect("finalize newer fleet format");
     let snapshot = || {
         let mut rows = std::collections::BTreeMap::new();
-        for database in [
-            lash_sqlite_store::SqliteDatabase::DurableCore,
-            lash_sqlite_store::SqliteDatabase::ProcessRegistry,
-            lash_sqlite_store::SqliteDatabase::Triggers,
-        ] {
-            let connection = rusqlite::Connection::open(root.path().join(database.file_name()))
-                .expect("open snapshot");
-            let tables: Vec<String> = connection
-                .prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")
-                .expect("list tables")
-                .query_map([], |row| row.get(0))
-                .expect("query tables")
-                .collect::<rusqlite::Result<_>>()
-                .expect("table names");
-            for table in tables {
-                let count: i64 = connection
-                    .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |row| {
-                        row.get(0)
-                    })
-                    .expect("count rows");
-                rows.insert(format!("{}.{table}", database.name()), count);
-            }
+        let connection =
+            rusqlite::Connection::open(root.path().join("lash.db")).expect("open snapshot");
+        let tables: Vec<String> = connection
+            .prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")
+            .expect("list tables")
+            .query_map([], |row| row.get(0))
+            .expect("query tables")
+            .collect::<rusqlite::Result<_>>()
+            .expect("table names");
+        for table in tables {
+            let count: i64 = connection
+                .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |row| {
+                    row.get(0)
+                })
+                .expect("count rows");
+            rows.insert(table, count);
         }
         rows
     };

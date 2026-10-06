@@ -163,7 +163,7 @@ order.
 - **Layer 1 — rendered DOM, per tab:** `#timeline .message.user` / `.message.assistant`
   counts and body texts; the pill text and subtitle; the rails' rows.
 - **Layer 2 — durable state** (one session, so one copy shared by both tabs): the session
-  graph in `<data-dir>/lash-sessions/durable-core.db`, table `graph_nodes`, filtered to
+  graph in `<data-dir>/lash-sessions.db`, table `graph_nodes`, filtered to
   `session_id = <S> AND tombstoned = 0`, `kind = "event"` nodes whose
   `event.Conversation.role` is `User` or `Assistant`; the projection `GET
   /api/state?session_id=<S>.messages`; and `<data-dir>/product-events.json` keyed by
@@ -176,7 +176,7 @@ order.
   `m_ingress_ti:`; the `node_id` column is a content hash and is **not** the message id, so
   never join on it; and the graph's assistant count is a superset of the rendered one,
   because each turn contributes both `m_rlm_<turn>_<n>_assistant_content` and
-  `workbench-assistant:<turn>`. Stated that way each phase gate is a two-line query. **The store runs in WAL mode** — snapshot `durable-core.db` together with its
+  `workbench-assistant:<turn>`. Stated that way each phase gate is a two-line query. **The store runs in WAL mode** — snapshot `lash-sessions.db` together with its
   `-wal` and `-shm` siblings, or read the live file with `mode=ro`. Copying the main file
   alone reads as an empty graph and manufactures a phantom three-layer mismatch in every
   phase.

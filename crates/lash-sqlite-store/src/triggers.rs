@@ -5,11 +5,8 @@
 //! subscriptions and append-only trigger occurrences at deployment scope,
 //! outside any session database.
 //!
-//! The family lives in its own database file, which this store opens directly
-//! and never attaches anywhere, so every statement is rendered once, through
-//! the unqualified SQLite dialect — the text this store has always issued.
-//! The effect family needs a schema qualifier because its tables are also
-//! reached through an `ATTACH`ed name; this one does not.
+//! The family lives in the deployment's one database file, so every
+//! statement is rendered once, through the unqualified SQLite dialect.
 
 use super::*;
 use lash_sansio::{ProcessId, SessionId};
@@ -378,10 +375,8 @@ static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
 
 /// The trigger-family statements, rendered at first use and never again.
 ///
-/// One set, not one per schema: the trigger database is never attached to
-/// another connection, so these tables are never addressed through a
-/// qualifier. `retention.rs` issues `retention_sqlite` on the connection it
-/// opens to the trigger database, where the same unqualified names hold.
+/// One set: the deployment's one database holds these tables, and every
+/// connection addresses them unqualified.
 pub(crate) fn trigger_sql() -> &'static TriggerSql {
     &TRIGGER_SQL
 }
@@ -433,19 +428,30 @@ impl SqliteTriggerStore {
         .await
     }
 
-    pub(crate) async fn open_at(
+    async fn open_at(
         location: &crate::location::DatabaseLocation,
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open(location.target()).await?;
-        ensure_versioned_schema(&conn, SqliteDatabase::Triggers).await?;
+        ensure_versioned_schema(&conn).await?;
         apply_pragmas(&conn).await?;
-        Ok(Self {
+        Ok(Self::on_connection(conn, location.clone(), clock))
+    }
+
+    /// The trigger store over `conn`, a connection on the deployment's
+    /// database whose installer has run: its writes share the one writer
+    /// gate with every other table of the database.
+    pub(crate) fn on_connection(
+        conn: SqliteConnection,
+        location: crate::location::DatabaseLocation,
+        clock: Arc<dyn lash_core_execution::Clock>,
+    ) -> Self {
+        Self {
             conn,
-            _location: location.clone(),
+            _location: location,
             clock,
             fixed_incarnation: None,
-        })
+        }
     }
 
     /// Pin otherwise-random trigger incarnation identity for durable fixture generation.

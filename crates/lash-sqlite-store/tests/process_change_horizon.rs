@@ -11,7 +11,7 @@ mod file {
 
     lash_conformance::process_change_horizon_tests!({
         let dir = tempfile::tempdir().expect("prune-horizon tempdir");
-        let backend = SqliteStoreSet::open(dir.path())
+        let backend = SqliteStoreSet::open(dir.path().join("lash.db"))
             .await
             .expect("open the prune-horizon file backend");
         let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;

@@ -336,7 +336,7 @@ impl Harness {
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let tool_bytes = Arc::new(AtomicUsize::new(0));
 
-        let sqlite = lash::sqlite::SqliteStoreSet::open(scratch.path().join("sessions"))
+        let sqlite = lash::sqlite::SqliteStoreSet::open(scratch.path().join("sessions.db"))
             .await
             .context("open the SQLite store set")?;
         let (store, stores): (_, Arc<dyn lash::StoreSet>) =

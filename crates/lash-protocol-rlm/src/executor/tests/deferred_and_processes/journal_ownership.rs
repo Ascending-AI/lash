@@ -148,7 +148,7 @@ fn deferred_outcomes_recover_only_from_journal_sqlite_file() {
             Default::default(),
             |clock| async move {
                 Ok(Arc::new(
-                    lash_sqlite_store::SqliteStoreSet::open_with_clock(path, clock)
+                    lash_sqlite_store::SqliteStoreSet::open_with_clock(path.join("lash.db"), clock)
                         .await
                         .map_err(|e| lash_restate_test::BackendError::Stores(e.to_string()))?,
                 ) as Arc<dyn lash_core::StoreSet>)

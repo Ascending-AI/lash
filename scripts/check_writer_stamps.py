@@ -46,8 +46,6 @@ EXEMPT_CONSTANTS = {
     # instead (ADR 0115 §1.3).
     "POSTGRES_SCHEMA_VERSION": "store schema version; the fleet row lives inside the catalog it admits",
     "SQLITE_CORE_SCHEMA_VERSION": "store schema version; the fleet row lives inside the catalog it admits",
-    "SQLITE_REGISTRY_SCHEMA_VERSION": "store schema version; the fleet row lives inside the catalog it admits",
-    "SQLITE_TRIGGERS_SCHEMA_VERSION": "store schema version; the fleet row lives inside the catalog it admits",
     # The row every other writer consults has nothing upstream of it.
     "FLEET_FORMAT_VERSION": "the fleet-format row is what writers consult",
 }

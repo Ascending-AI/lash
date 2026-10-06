@@ -36,7 +36,7 @@ use lash_core::{
 };
 use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use lash_sansio::ToolIntentKind;
-use lash_sqlite_store::{SqliteDatabase, SqliteProcessRegistry, SqliteStoreSet};
+use lash_sqlite_store::{SqliteProcessRegistry, SqliteStoreSet};
 
 use super::{SingletonRunOutcome, decide_round, run_singleton};
 
@@ -476,8 +476,7 @@ impl Stores {
     /// Every process row in the law's SQLite registry.
     async fn rows(self) -> Vec<Row> {
         let set = self.set;
-        let connection =
-            rusqlite::Connection::open(set.database_uri(SqliteDatabase::ProcessRegistry)).unwrap();
+        let connection = rusqlite::Connection::open(set.database_uri()).unwrap();
         let mut statement = connection
             .prepare(
                 "SELECT process_id, start_key, record_json, consumer_hold_key,

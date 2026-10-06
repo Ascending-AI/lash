@@ -1,5 +1,4 @@
 use lash_core_execution::{RuntimeStore, SessionCatalogStore};
-use lash_sqlite_store::SqliteDatabase;
 use std::sync::Arc;
 
 use super::SUBSTRATE;
@@ -28,7 +27,7 @@ async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
             .await
             .unwrap();
         let case = law::prepare(store as Arc<dyn RuntimeStore>, entry).await;
-        let conn = backend.raw(SqliteDatabase::DurableCore);
+        let conn = backend.raw();
         let second = case.ids[1].replace('\'', "''");
         conn.execute_batch(&format!("CREATE TRIGGER lose_second_bind BEFORE UPDATE OF admitted_run ON queued_work_batches WHEN OLD.batch_id = '{second}' BEGIN SELECT RAISE(IGNORE); END;")).unwrap();
         assert!(
@@ -120,7 +119,7 @@ async fn a_final_commit_cannot_ignore_the_admitted_cancel_intent() {
         request,
         revision: 1,
     };
-    let connection = backend.raw(SqliteDatabase::DurableCore);
+    let connection = backend.raw();
     let encoded: String = connection
         .query_row(
             "SELECT admission_json FROM session_runs WHERE session_id = 'root' AND run = ?1",

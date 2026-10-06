@@ -51,9 +51,12 @@ pub async fn double(
             let double =
                 lash_restate_test::backend_with_store_set(seed, config, hooks(), |clock| async {
                     Ok(decorate(Arc::new(
-                        lash_sqlite_store::SqliteStoreSet::open_with_clock(&path, clock)
-                            .await
-                            .expect("SQLite file stores"),
+                        lash_sqlite_store::SqliteStoreSet::open_with_clock(
+                            path.join("lash.db"),
+                            clock,
+                        )
+                        .await
+                        .expect("SQLite file stores"),
                     )))
                 })
                 .await

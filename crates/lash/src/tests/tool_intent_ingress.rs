@@ -390,7 +390,7 @@ async fn host_register_trigger_realizes_and_fires_on_sqlite_memory() -> Result<(
 async fn host_register_trigger_realizes_and_fires_in_sqlite() -> Result<()> {
     let directory = tempfile::tempdir().expect("SQLite test directory");
     let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(directory.path())
+        lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
             .await
             .expect("open SQLite store set"),
     );

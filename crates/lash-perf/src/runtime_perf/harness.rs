@@ -1168,7 +1168,7 @@ pub(crate) async fn durable_sqlite_session_store_factory_without_commit_measurem
     Arc<dyn lash_core::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
 )> {
-    let sqlite = lash_sqlite_store::SqliteStoreSet::open(&sessions_root).await?;
+    let sqlite = lash_sqlite_store::SqliteStoreSet::open(sessions_root.join("lash.db")).await?;
     let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
         sqlite.session_store_factory(),
     );
@@ -1198,7 +1198,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let mut plugin_stack =
         runtime_perf_plugin_stack(scenario.uses_standard_compaction(), mode_id.is_standard());
     let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(&root)
+        lash_sqlite_store::SqliteStoreSet::open(root.join("lash.db"))
             .await
             .map_err(|err| anyhow::anyhow!(err.to_string()))?,
     );

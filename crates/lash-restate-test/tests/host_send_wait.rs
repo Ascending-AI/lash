@@ -370,7 +370,7 @@ async fn backend_over(
                     async move {
                         let stores =
                             lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
-                                root,
+                                root.join("lash.db"),
                                 lash_sqlite_store::SqliteStoreSetOptions {
                                     process_id_mint:
                                         lash_core::ProcessIdMint::sequential_for_testing(),

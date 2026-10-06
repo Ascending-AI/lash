@@ -1630,10 +1630,7 @@ mod recovery_tests {
             .get("suspend-exec-code")
             .expect("suspend engine");
         let connection = rusqlite::Connection::open_with_flags(
-            engine
-                .restate()
-                .stores()
-                .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+            engine.restate().stores().database_uri(),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )
         .expect("fault injection connection");

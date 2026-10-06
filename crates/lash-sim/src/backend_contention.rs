@@ -73,7 +73,7 @@ pub async fn run_backend_contention_report_against(
 
     let sqlite_root = artifact_root.join("sqlite-store");
     let sqlite_factory: Arc<dyn DeploymentStore> =
-        lash_sqlite_store::SqliteStoreSet::open(&sqlite_root)
+        lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("lash.db"))
             .await
             .map_err(|error| format!("open SQLite contention store: {error}"))?
             .session_store_factory();

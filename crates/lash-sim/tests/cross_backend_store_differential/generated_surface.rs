@@ -496,8 +496,7 @@ async fn surface_runners(
     // session-bound runtime store. The SQL effect engines are not storage
     // (ADR 0104); FIG-3667 and FIG-3668 delete them.
     let sqlite_runtime_root = root.join("runtime");
-    let sqlite_runtime_path =
-        sqlite_runtime_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
+    let sqlite_runtime_path = sqlite_runtime_root.join("lash.db");
     let sqlite_process_path = root.join("process.db");
     let sqlite_trigger_path = root.join("trigger.db");
     let session_request = SessionStoreCreateRequest {
@@ -512,7 +511,11 @@ async fn surface_runners(
         .into(),
         head: SessionCreationHead::Config,
     };
-    let sqlite_store = Arc::new(SqliteStore::open(&sqlite_runtime_root).await.unwrap());
+    let sqlite_store = Arc::new(
+        SqliteStore::open(&sqlite_runtime_root.join("lash.db"))
+            .await
+            .unwrap(),
+    );
     sqlite_store.admit_session(&session_request).await.unwrap();
     let sqlite_runtime: Arc<dyn RuntimeStore> = sqlite_store;
     // The two registrars mint the same ids in the same order, so the
@@ -920,9 +923,7 @@ async fn attachment_blob_store_differential_agrees() {
                 s3.delete(&id).await.unwrap();
             }
         }
-        let memory_rows = raw_sqlite_blobs(
-            &sqlite_memory_stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-        );
+        let memory_rows = raw_sqlite_blobs(&sqlite_memory_stores.database_uri());
         let file_rows = raw_file_blobs(root.path());
         let s3_rows = s3.raw_blobs_for_testing().await.unwrap();
         assert_eq!(

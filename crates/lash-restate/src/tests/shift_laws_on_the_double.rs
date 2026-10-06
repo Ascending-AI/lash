@@ -179,7 +179,7 @@ mod recorded_termination {
     ) {
         let directory = tempfile::tempdir().expect("SQLite file store directory");
         let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
-            lash_sqlite_store::SqliteStoreSet::open(directory.path())
+            lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
                 .await
                 .expect("open the SQLite file store set"),
         );

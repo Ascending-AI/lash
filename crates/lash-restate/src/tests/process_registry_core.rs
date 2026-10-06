@@ -40,7 +40,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
         )),
     );
     let store = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&dir.path().join("store"))
+        lash_sqlite_store::SqliteStore::open(&dir.path().join("store.db"))
             .await
             .expect("open session store"),
     );
@@ -96,7 +96,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
     assert_eq!(first_turn.llm_calls.len(), 1);
     assert_eq!(replay_turn.llm_calls, first_turn.llm_calls);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
-    let conn = rusqlite::Connection::open(dir.path().join("store").join("durable-core.db"))
+    let conn = rusqlite::Connection::open(dir.path().join("store.db"))
         .expect("open raw session sqlite store");
     let rows: i64 = conn
         .query_row(
@@ -158,7 +158,7 @@ pub(super) async fn restate_replay_shift_seal_takes_recorded_branch() {
     );
 
     let store = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&dir.path().join("store"))
+        lash_sqlite_store::SqliteStore::open(&dir.path().join("store.db"))
             .await
             .expect("open session store"),
     );
@@ -264,7 +264,7 @@ pub(super) async fn restate_replay_shift_seal_takes_recorded_branch() {
         "the dropped provider attempt is retried by the fresh worker"
     );
 
-    let conn = rusqlite::Connection::open(dir.path().join("store").join("durable-core.db"))
+    let conn = rusqlite::Connection::open(dir.path().join("store.db"))
         .expect("open raw session sqlite store");
     let rows: i64 = conn
         .query_row(

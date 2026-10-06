@@ -16,10 +16,9 @@ use lash_store_sql::process::processes::ProcessObligationStatements;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::{SqliteProcessRegistry, process_sqlite_error, tx_outcome};
-use crate::schema_layout::Schema;
 
 static STATEMENTS: LazyLock<ProcessObligationStatements> =
-    LazyLock::new(|| ProcessObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| ProcessObligationStatements::render(crate::schema_layout::MAIN));
 
 /// Arm `record`'s terminal publication in the transaction that saves it, if
 /// the record is terminal and its row owes nothing yet.

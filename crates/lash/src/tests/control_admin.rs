@@ -1285,7 +1285,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
             "file",
             lash_conformance::recording_backend_over(Arc::new(
                 lash_sqlite_store::SqliteStoreSet::open(
-                    sqlite_dir.path().join("managed-create-sessions"),
+                    sqlite_dir.path().join("managed-create-sessions.db"),
                 )
                 .await
                 .expect("open the file store set"),

@@ -72,7 +72,7 @@ the model's surrounding prose.
   visible assistant digest.
 - HTTP truth: `GET /healthz` and `GET /api/state?session_id=<S>`.
 - Disk truth: `<data-dir>/deferred-tool-grants.db`, the SQLite session graph in
-  `<data-dir>/lash-sessions/durable-core.db`, `<data-dir>/trace.jsonl`, and
+  `<data-dir>/lash-sessions.db`, `<data-dir>/trace.jsonl`, and
   `<data-dir>/lashlang-execution.jsonl`.
 - Teardown: `bash scripts/agent-workbench-dev.sh down --port <port>` with the same run/data variables, then
   verify the Workbench process and managed Restate container are gone.

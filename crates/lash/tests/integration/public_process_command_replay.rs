@@ -18,7 +18,7 @@ use lash_core::{ProcessId, StoreSet};
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet, testing::IsolatedDatabase};
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::{HandlerAttempt, RestateTestBackend, ServerConfig};
-use lash_sqlite_store::{SqliteDatabase, SqliteStoreSet};
+use lash_sqlite_store::SqliteStoreSet;
 use serde_json::{Value, json};
 
 const BOUND: Duration = Duration::from_secs(120);
@@ -101,18 +101,15 @@ impl Storage {
             StorageKind::Memory | StorageKind::File => {
                 let stores = match kind {
                     StorageKind::Memory => SqliteStoreSet::memory_with_clock(clock).await.unwrap(),
-                    StorageKind::File => {
-                        SqliteStoreSet::open_with_clock(self.directory.path(), clock)
-                            .await
-                            .unwrap()
-                    }
+                    StorageKind::File => SqliteStoreSet::open_with_clock(
+                        self.directory.path().join("lash.db"),
+                        clock,
+                    )
+                    .await
+                    .unwrap(),
                     StorageKind::Postgres => unreachable!(),
                 };
-                *sqlite_uri = Some(
-                    stores
-                        .database_uri(SqliteDatabase::ProcessRegistry)
-                        .to_owned(),
-                );
+                *sqlite_uri = Some(stores.database_uri().to_owned());
                 Arc::new(stores)
             }
             StorageKind::Postgres => Arc::new(PostgresStoreSet::with_clock(

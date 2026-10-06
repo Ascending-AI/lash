@@ -485,7 +485,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
 async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()> {
     let dir = tempfile::tempdir().expect("sqlite facade prune tempdir");
     let backend = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(dir.path())
+        lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
             .await
             .expect("open the SQLite facade prune backend"),
     );

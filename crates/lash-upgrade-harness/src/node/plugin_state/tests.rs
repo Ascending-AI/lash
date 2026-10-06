@@ -85,7 +85,7 @@ async fn rollback_callbacks_preserve_config_and_routes_sqlite_memory() -> Result
 async fn rollback_callbacks_preserve_config_and_routes_sqlite_file() -> Result<()> {
     let directory = tempfile::tempdir()?;
     rollback(Arc::new(
-        lash::sqlite::SqliteStoreSet::open(directory.path()).await?,
+        lash::sqlite::SqliteStoreSet::open(directory.path().join("lash.db")).await?,
     ))
     .await
 }
@@ -207,5 +207,6 @@ async fn retained_v1_plugin_history_survives_finalize_sqlite_memory() -> Result<
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn retained_v1_plugin_history_survives_finalize_sqlite_file() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    retained_history(lash::sqlite::SqliteStoreSet::open(directory.path()).await?).await
+    retained_history(lash::sqlite::SqliteStoreSet::open(directory.path().join("lash.db")).await?)
+        .await
 }

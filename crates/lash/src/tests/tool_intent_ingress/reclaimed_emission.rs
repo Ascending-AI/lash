@@ -216,7 +216,7 @@ async fn a_redelivered_emission_writes_no_reclaimed_row_back(
 async fn sqlite_file_backend() -> (tempfile::TempDir, lash_core::Backend) {
     let directory = tempfile::tempdir().expect("SQLite test directory");
     let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(directory.path())
+        lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
             .await
             .expect("open SQLite store set"),
     );

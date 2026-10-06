@@ -30,7 +30,7 @@ pub(crate) async fn run(args: LatencyWorkerArgs) -> Result<()> {
             .map_err(|error| anyhow::anyhow!("authority id: {error}"))?,
         source: "worker",
     };
-    let stores = lash::sqlite::SqliteStoreSet::open(&args.store_dir)
+    let stores = lash::sqlite::SqliteStoreSet::open(args.store_dir.join("lash.db"))
         .await
         .map_err(|error| anyhow::anyhow!("open worker store set: {error}"))?;
     let engine = restate.engine(Arc::new(stores));

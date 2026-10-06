@@ -59,13 +59,13 @@ pub(crate) async fn reclaim(
                     )
                     .map_err(sqlite_error)?;
                     let tool_sql = lash_store_sql::tool_receipts::ToolReceiptStatements::render(
-                        crate::schema_layout::Schema::Main.dialect(),
+                        crate::schema_layout::MAIN,
                     );
                     removed_receipt_count +=
                         crate::conn::cached_execute(tx, tool_sql.reclaim.sql(), params![cutoff])
                             .map_err(sqlite_error)?;
                     let wait_sql = lash_store_sql::wait_receipts::WaitReceiptStatements::render(
-                        crate::schema_layout::Schema::Main.dialect(),
+                        crate::schema_layout::MAIN,
                     );
                     removed_receipt_count +=
                         crate::conn::cached_execute(tx, wait_sql.reclaim.sql(), params![cutoff])
@@ -88,63 +88,38 @@ pub(crate) async fn reclaim(
         .await
         .map_err(|error| failed_before_any_work(sqlite_error(error)))?
         .map_err(failed_before_any_work)?;
-    if let Some(trigger_store) = store.trigger_store.as_ref() {
-        report.removed_trigger_mutation_receipt_count =
-            reclaim_trigger_mutation_receipts(store, trigger_store, cutoff)
-                .await
-                .map_err(|error| {
-                    Box::new(lash_core_execution::MaintenanceFailure::failed(
-                        error,
-                        report.clone(),
-                    ))
-                })?;
-    }
-    if let Some(process_registry) = store.process_registry.as_ref() {
-        report.removed_tool_intent_submission_count =
-            reclaim_tool_intent_submissions(store, process_registry, cutoff)
-                .await
-                .map_err(|error| {
-                    Box::new(lash_core_execution::MaintenanceFailure::failed(
-                        error,
-                        report.clone(),
-                    ))
-                })?;
-    }
+    report.removed_trigger_mutation_receipt_count =
+        reclaim_trigger_mutation_receipts(store, cutoff)
+            .await
+            .map_err(|error| {
+                Box::new(lash_core_execution::MaintenanceFailure::failed(
+                    error,
+                    report.clone(),
+                ))
+            })?;
+    report.removed_tool_intent_submission_count = reclaim_tool_intent_submissions(store, cutoff)
+        .await
+        .map_err(|error| {
+            Box::new(lash_core_execution::MaintenanceFailure::failed(
+                error,
+                report.clone(),
+            ))
+        })?;
     Ok(report)
 }
 
 /// The process registry's half of the sweep (FIG-1509): the host
 /// tool-intent submission ledger is retained evidence of its owner session.
-/// Like the trigger arm, the owner-death proof crosses databases at the Rust
-/// boundary: candidates come from the registry, and only owners the durable
-/// core reports deleted are fenced. A deletion is permanent, so the proof
-/// still holds when the registry's own transaction fences each owner and
+/// Like the trigger arm, the owner-death proof is read through
+/// `lookup_session`: candidates come from the registry's tables, and only
+/// owners the catalog reports deleted are fenced. A deletion is permanent,
+/// so the proof still holds when a later transaction fences each owner and
 /// deletes its rows older than the bound.
 async fn reclaim_tool_intent_submissions(
     store: &SqliteStore,
-    process_registry: &DatabaseTarget,
     cutoff: i64,
 ) -> Result<usize, StoreError> {
-    if !process_registry.exists() {
-        return Ok(0);
-    }
-    let conn =
-        SqliteConnection::open_with_policy(process_registry, store.options.connection_policy)
-            .await
-            .map_err(sqlite_async_error)?;
-    conn.install(
-        SqliteDatabase::ProcessRegistry,
-        lash_core_execution::FleetFormat::writable(),
-        |tx| {
-            crate::compat::fence(
-                tx,
-                SqliteDatabase::ProcessRegistry,
-                lash_core_execution::FleetFormat::writable(),
-            )
-        },
-    )
-    .await
-    .map_err(sqlite_error)?;
+    let conn = &store.conn;
     let candidates = conn
         .call(move |conn| {
             let mut stmt = conn.prepare_cached(
@@ -191,41 +166,17 @@ async fn reclaim_tool_intent_submissions(
     .map_err(sqlite_error)
 }
 
-/// The trigger database's half of the sweep (FIG-4108): mutation receipts are
+/// The trigger tables' half of the sweep (FIG-4108): mutation receipts are
 /// durable evidence, reclaimed by the same bound as every other kind, so the
-/// low-level per-kind primitive is gone. The trigger database is its own
-/// file in the store set, so — like the process-registry arm of
-/// `delete_session` — its writes go through a connection of their own that
-/// installs and fences `SqliteDatabase::Triggers` rather than an `ATTACH`ed
-/// name.
+/// low-level per-kind primitive is gone.
 async fn reclaim_trigger_mutation_receipts(
     store: &SqliteStore,
-    trigger_store: &DatabaseTarget,
     cutoff: i64,
 ) -> Result<usize, StoreError> {
-    if !trigger_store.exists() {
-        return Ok(0);
-    }
-    let conn = SqliteConnection::open_with_policy(trigger_store, store.options.connection_policy)
-        .await
-        .map_err(sqlite_async_error)?;
-    conn.install(
-        SqliteDatabase::Triggers,
-        lash_core_execution::FleetFormat::writable(),
-        |tx| {
-            crate::compat::fence(
-                tx,
-                SqliteDatabase::Triggers,
-                lash_core_execution::FleetFormat::writable(),
-            )
-        },
-    )
-    .await
-    .map_err(sqlite_error)?;
+    let conn = &store.conn;
     // Enumerate the session owners with a receipt older than the bound, then
-    // keep only the durably deleted ones: `deleted_sessions` lives in the
-    // durable core, so the proof crosses databases at the Rust boundary the
-    // reconcile driver already uses (`lookup_session` on each candidate).
+    // keep only the durably deleted ones, read through `lookup_session` on
+    // each candidate as the reconcile driver does.
     let session_owners = conn
         .call(move |conn| {
             let mut stmt = conn.prepare_cached(
@@ -259,7 +210,7 @@ async fn reclaim_trigger_mutation_receipts(
             backend: SQLITE_BACKEND,
             message: format!("encode deleted trigger owner ids: {error}"),
         })?;
-    sweep_trigger_mutation_receipts(&conn, cutoff, deleted_owner_ids_json).await
+    sweep_trigger_mutation_receipts(conn, cutoff, deleted_owner_ids_json).await
 }
 
 /// Delete every sweep-eligible receipt in one fenced write transaction: the

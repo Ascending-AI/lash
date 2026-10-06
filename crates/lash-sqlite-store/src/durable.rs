@@ -23,7 +23,6 @@ use lash_store_sql::durable::{ActorStatements, MailStatements, NodeStatements};
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::conn::{SqliteConnection, TxOutcome, cached_execute};
-use crate::schema_layout::Schema;
 
 /// The engine's tables, carried by the durable core.
 pub(crate) const DURABLE_TABLES: &str = "
@@ -104,7 +103,7 @@ struct Sql {
 }
 
 static SQL: LazyLock<Sql> = LazyLock::new(|| {
-    let dialect = Schema::Main.dialect();
+    let dialect = crate::schema_layout::MAIN;
     Sql {
         node: NodeStatements::render(dialect),
         actor: ActorStatements::render(dialect),

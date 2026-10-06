@@ -175,7 +175,7 @@ async fn native_restate_sqlite_memory_and_file_refuse_sparse_streams() -> Result
     .await?;
     let scratch = tempfile::tempdir()?;
     witness(
-        Arc::new(lash::sqlite::SqliteStoreSet::open(scratch.path().join("sessions")).await?),
+        Arc::new(lash::sqlite::SqliteStoreSet::open(scratch.path().join("sessions.db")).await?),
         "sqlite-file",
     )
     .await

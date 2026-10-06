@@ -538,12 +538,8 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         "every model call is journaled under the run or the follow turn: {llm_calls:?}"
     );
 
-    let conn = rusqlite::Connection::open(
-        double
-            .stores()
-            .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-    )
-    .expect("open session sqlite store");
+    let conn = rusqlite::Connection::open(double.stores().database_uri())
+        .expect("open session sqlite store");
     let mut stmt = conn
         .prepare(
             "SELECT turn_id FROM runtime_turn_commits

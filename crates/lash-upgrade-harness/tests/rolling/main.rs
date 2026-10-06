@@ -304,7 +304,7 @@ fn sqlite_drain(node: &NodeBinary, case: &Case, generation: &str) -> Result<()> 
 }
 
 /// The SQLite store set's migration backups (FIG-3801): each open that
-/// migrates first copies all three databases beside the store, into
+/// migrates first copies the database file beside it, into
 /// `migration-backups/sqlite-backup-*/`, and records the migration in the
 /// backup's `manifest.json`.
 fn sqlite_backups(case: &Case) -> Result<Vec<serde_json::Value>> {
@@ -329,25 +329,23 @@ fn sqlite_backups(case: &Case) -> Result<Vec<serde_json::Value>> {
         let manifest: serde_json::Value = serde_json::from_slice(
             &std::fs::read(&manifest).with_context(|| format!("read {}", manifest.display()))?,
         )?;
-        for database in manifest["databases"].as_array().into_iter().flatten() {
-            let copy = directory.join(database["file"].as_str().context("a backed-up file")?);
-            let bytes = std::fs::metadata(&copy)
-                .with_context(|| format!("stat the backup copy {}", copy.display()))?
-                .len();
-            ensure!(
-                Some(bytes) == database["bytes"].as_u64() && bytes > 0,
-                "{}: the backup copy is {bytes} bytes, its manifest records {}",
-                copy.display(),
-                database["bytes"]
-            );
-        }
+        let copy = directory.join(manifest["file"].as_str().context("a backed-up file")?);
+        let bytes = std::fs::metadata(&copy)
+            .with_context(|| format!("stat the backup copy {}", copy.display()))?
+            .len();
+        ensure!(
+            Some(bytes) == manifest["bytes"].as_u64() && bytes > 0,
+            "{}: the backup copy is {bytes} bytes, its manifest records {}",
+            copy.display(),
+            manifest["bytes"]
+        );
         backups.push(manifest);
     }
     Ok(backups)
 }
 
 /// N+1's first open migrated the store N provisioned, after one complete
-/// backup of every database at N's versions; nothing since migrated again.
+/// backup of the database at N's version; nothing since migrated again.
 fn require_one_migration_backup(case: &Case, step: &str) -> Result<()> {
     let backups = sqlite_backups(case)?;
     ensure!(
@@ -356,16 +354,9 @@ fn require_one_migration_backup(case: &Case, step: &str) -> Result<()> {
         case.name
     );
     let manifest = &backups[0];
-    let databases = manifest["databases"]
-        .as_array()
-        .context("backed-up databases")?;
     ensure!(
-        manifest["state"] == "migrated"
-            && databases.len() == 3
-            && databases
-                .iter()
-                .all(|database| database["from"].as_u64() < database["to"].as_u64()),
-        "{}: {step}: the backup does not record a completed migration of all three databases: {manifest}",
+        manifest["state"] == "migrated" && manifest["from"].as_u64() < manifest["to"].as_u64(),
+        "{}: {step}: the backup does not record a completed migration of the database: {manifest}",
         case.name
     );
     println!("{}: {step}: migration backup {manifest}", case.name);

@@ -22,14 +22,11 @@ use lash_core_execution::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
     AttachmentStoreFailureClass, AttachmentStorePersistence, StoredAttachment, StoredBlobRef,
 };
-use lash_store_sql::attachment::blob;
-use lash_store_sql::{Dialect, SchemaTables, TableLayout};
 use rusqlite::{OptionalExtension, params};
 
 use crate::SqliteStore;
 use crate::conn::SqliteConnection;
 use crate::location::DatabaseTarget;
-use crate::schema_layout::Schema;
 
 lash_store_sql::statements! {
     /// `attachment_blobs` statements. SQLite alone issues them: the table
@@ -61,13 +58,8 @@ lash_store_sql::statements! {
     }
 }
 
-/// The table lives in the session catalog's own file and is never reached
-/// through an `ATTACH`ed name.
-const CATALOG: TableLayout =
-    TableLayout::new(&[SchemaTables::new(Schema::Main.qualifier(), &[blob::TABLE])]);
-
 static ATTACHMENT_BLOB_SQL: LazyLock<AttachmentBlobSqliteStatements> =
-    LazyLock::new(|| AttachmentBlobSqliteStatements::render(Dialect::sqlite(CATALOG)));
+    LazyLock::new(|| AttachmentBlobSqliteStatements::render(crate::schema_layout::MAIN));
 
 /// The attachment-blob statements, rendered once at first use.
 pub(crate) fn attachment_blob_sql() -> &'static AttachmentBlobSqliteStatements {

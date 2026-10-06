@@ -6,7 +6,7 @@ lash_conformance::append_receipt_identity_corruption_tests!({
         backend,
         store as Arc<dyn RuntimeStore>,
         move || async move {
-            let conn = mutation.raw(SqliteDatabase::DurableCore);
+            let conn = mutation.raw();
             conn.execute(
                 "UPDATE runtime_turn_commits
                  SET identity_encoding_version = ?1

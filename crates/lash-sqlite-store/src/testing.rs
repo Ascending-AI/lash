@@ -8,18 +8,18 @@ use std::sync::{Arc, Condvar, Mutex};
 
 pub use crate::migration::{SqliteMigrationFault, SqliteMigrationHook, SqliteMigrationStep};
 
-/// Observes each database commit of finalize, including partial-set crash cuts.
+/// Observes finalize's commit.
 #[derive(Clone)]
-pub struct SqliteFinalizeHook(Arc<dyn Fn(crate::SqliteDatabase) + Send + Sync>);
+pub struct SqliteFinalizeHook(Arc<dyn Fn() + Send + Sync>);
 
 impl SqliteFinalizeHook {
-    /// Run `committed` immediately after each database commits its epoch.
-    pub fn new(committed: impl Fn(crate::SqliteDatabase) + Send + Sync + 'static) -> Self {
+    /// Run `committed` immediately after finalize commits its epoch.
+    pub fn new(committed: impl Fn() + Send + Sync + 'static) -> Self {
         Self(Arc::new(committed))
     }
 
-    pub(crate) fn committed(&self, database: crate::SqliteDatabase) {
-        (self.0)(database);
+    pub(crate) fn committed(&self) {
+        (self.0)();
     }
 }
 
@@ -40,40 +40,36 @@ pub fn trigger_subscription_list_sql(
     crate::triggers::subscription_list_sql(filter).to_string()
 }
 
-/// The shared-fragment DDL statements provisioning applies to `database`.
+/// The shared-fragment DDL statements provisioning applies to the database.
 /// Fixtures that shadow a schema table with their own declaration apply these
 /// to complete the fragment-carried catalog without duplicating DDL text.
-pub fn database_fragment_statements(
-    database: crate::SqliteDatabase,
-) -> impl Iterator<Item = &'static str> {
-    database.fragment_statements()
+pub fn database_fragment_statements() -> impl Iterator<Item = &'static str> {
+    crate::schema::FRAGMENTS.into_iter()
 }
 
-/// The full provisioning DDL for `database`: the schema body followed by the
-/// shared fragments, in application order.
+/// The full provisioning DDL for the database: the schema bodies followed by
+/// the shared fragments, in application order.
 ///
 /// Fixtures that shadow one schema table with their own declaration apply
 /// this to complete the catalog: `CREATE TABLE IF NOT EXISTS` leaves the
 /// shadowed declaration alone while every table declared outside the shared
 /// fragments — and the named CHECKs the constraint inspector requires of them —
 /// is created from the same text the store provisions.
-pub fn database_provisioning_statements(
-    database: crate::SqliteDatabase,
-) -> impl Iterator<Item = &'static str> {
-    database.provisioning_statements()
+pub fn database_provisioning_statements() -> impl Iterator<Item = &'static str> {
+    crate::schema::provisioning_statements()
 }
 
-/// The `CREATE TABLE` block for `table` cut out of `database`'s provisioning
-/// DDL, schema body and shared fragments alike.
+/// The `CREATE TABLE` block for `table` cut out of the database's
+/// provisioning DDL, schema bodies and shared fragments alike.
 ///
 /// Fixtures that shadow one table cannot apply the schema body whole — its
 /// indexes would name columns the shadow lacks — so they complete the catalog
 /// one statement at a time. Extracting from the provisioning text keeps the
 /// fixture on the same DDL bytes the store executes rather than a
 /// hand-duplicated copy that can drift.
-pub fn database_table_ddl(database: crate::SqliteDatabase, table: &str) -> &'static str {
+pub fn database_table_ddl(table: &str) -> &'static str {
     let marker = format!("CREATE TABLE IF NOT EXISTS {table} (");
-    for statement in database.provisioning_statements() {
+    for statement in crate::schema::provisioning_statements() {
         let Some(start) = statement.find(&marker) else {
             continue;
         };
@@ -83,7 +79,7 @@ pub fn database_table_ddl(database: crate::SqliteDatabase, table: &str) -> &'sta
             .unwrap_or_else(|| panic!("{table} DDL must end with a semicolon"));
         return &tail[..=end];
     }
-    panic!("{database:?} provisioning must declare {table}");
+    panic!("provisioning must declare {table}");
 }
 
 /// One row a raw test read returned: each selected column's name and value,
@@ -91,7 +87,7 @@ pub fn database_table_ddl(database: crate::SqliteDatabase, table: &str) -> &'sta
 /// kinds; a blob reads as its lowercase hex.
 pub type RawRow = Vec<(String, serde_json::Value)>;
 
-/// Every row `sql` selects from `database` of `stores`, over a fresh
+/// Every row `sql` selects from the database of `stores`, over a fresh
 /// read-only connection.
 ///
 /// An inspection hook for simulation checkers that judge a finished run's
@@ -99,24 +95,23 @@ pub type RawRow = Vec<(String, serde_json::Value)>;
 /// and no lash component reads through it.
 pub fn read_rows_for_testing(
     stores: &crate::SqliteStoreSet,
-    database: crate::SqliteDatabase,
     sql: &str,
 ) -> Result<Vec<RawRow>, String> {
     use rusqlite::types::ValueRef;
-    let target = stores.location().target(database);
+    let target = stores.location().target();
     let connection = rusqlite::Connection::open_with_flags(
         target.read_only_uri(),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
             | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
             | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )
-    .map_err(|error| format!("open {database:?} read-only: {error}"))?;
+    .map_err(|error| format!("open the database read-only: {error}"))?;
     connection
         .busy_timeout(crate::connection_sql::READ_ONLY_BUSY_TIMEOUT)
-        .map_err(|error| format!("set the busy timeout on {database:?}: {error}"))?;
+        .map_err(|error| format!("set the busy timeout: {error}"))?;
     let mut statement = connection
         .prepare(sql)
-        .map_err(|error| format!("prepare `{sql}` on {database:?}: {error}"))?;
+        .map_err(|error| format!("prepare `{sql}`: {error}"))?;
     let names = statement
         .column_names()
         .into_iter()
@@ -124,11 +119,11 @@ pub fn read_rows_for_testing(
         .collect::<Vec<_>>();
     let mut rows = statement
         .query([])
-        .map_err(|error| format!("run `{sql}` on {database:?}: {error}"))?;
+        .map_err(|error| format!("run `{sql}`: {error}"))?;
     let mut read = Vec::new();
     while let Some(row) = rows
         .next()
-        .map_err(|error| format!("read `{sql}` on {database:?}: {error}"))?
+        .map_err(|error| format!("read `{sql}`: {error}"))?
     {
         let mut columns = Vec::with_capacity(names.len());
         for (index, name) in names.iter().enumerate() {
@@ -157,8 +152,8 @@ pub fn read_rows_for_testing(
 /// bytes decode to as this store writes them.
 #[derive(Clone, Debug)]
 pub struct StoredCell {
-    /// `<database>/<table>.<column>#<row>`, or `<database>/schema/<table>`
-    /// for a table's own declaration.
+    /// `<table>.<column>#<row>`, or `schema/<table>` for a table's own
+    /// declaration.
     pub location: String,
     pub bytes: Vec<u8>,
     /// The value as JSON text, as a msgpack record, or as a blob envelope's
@@ -166,32 +161,31 @@ pub struct StoredCell {
     pub documents: Vec<serde_json::Value>,
 }
 
-/// Every table declaration and every non-null cell of every table in
-/// `database` of `stores`, with the documents each decodes to.
+/// Every table declaration and every non-null cell of every table in the
+/// database of `stores`, with the documents each decodes to.
 ///
 /// An inspection hook for simulation checkers that audit what a finished
 /// run persisted (lash-sim's crash-matrix catalog audit, FIG-4179). It never
 /// writes, and no lash component reads through it.
 pub fn read_stored_cells_for_testing(
     stores: &crate::SqliteStoreSet,
-    database: crate::SqliteDatabase,
 ) -> Result<Vec<StoredCell>, String> {
-    let target = stores.location().target(database);
+    let target = stores.location().target();
     let connection = rusqlite::Connection::open_with_flags(
         target.read_only_uri(),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
             | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
             | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )
-    .map_err(|error| format!("open {database:?} read-only: {error}"))?;
+    .map_err(|error| format!("open the database read-only: {error}"))?;
     connection
         .busy_timeout(crate::connection_sql::READ_ONLY_BUSY_TIMEOUT)
-        .map_err(|error| format!("set the busy timeout on {database:?}: {error}"))?;
+        .map_err(|error| format!("set the busy timeout: {error}"))?;
     let mut cells = Vec::new();
     let tables = {
         let mut statement = connection
             .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' ORDER BY name")
-            .map_err(|error| format!("list the tables of {database:?}: {error}"))?;
+            .map_err(|error| format!("list the tables: {error}"))?;
         statement
             .query_map([], |row| {
                 Ok((
@@ -200,17 +194,17 @@ pub fn read_stored_cells_for_testing(
                 ))
             })
             .and_then(Iterator::collect::<Result<Vec<_>, _>>)
-            .map_err(|error| format!("list the tables of {database:?}: {error}"))?
+            .map_err(|error| format!("list the tables: {error}"))?
     };
     for (table, declaration) in tables {
         cells.push(StoredCell {
-            location: format!("{database:?}/schema/{table}"),
+            location: format!("schema/{table}"),
             bytes: declaration.into_bytes(),
             documents: Vec::new(),
         });
         let mut statement = connection
             .prepare(&format!("SELECT * FROM \"{table}\""))
-            .map_err(|error| format!("read `{table}` of {database:?}: {error}"))?;
+            .map_err(|error| format!("read `{table}`: {error}"))?;
         let columns = statement
             .column_names()
             .into_iter()
@@ -218,11 +212,11 @@ pub fn read_stored_cells_for_testing(
             .collect::<Vec<_>>();
         let mut rows = statement
             .query([])
-            .map_err(|error| format!("read `{table}` of {database:?}: {error}"))?;
+            .map_err(|error| format!("read `{table}`: {error}"))?;
         let mut index = 0_usize;
         while let Some(row) = rows
             .next()
-            .map_err(|error| format!("read `{table}` of {database:?}: {error}"))?
+            .map_err(|error| format!("read `{table}`: {error}"))?
         {
             for (column_index, column) in columns.iter().enumerate() {
                 let bytes = match row
@@ -236,7 +230,7 @@ pub fn read_stored_cells_for_testing(
                     | rusqlite::types::ValueRef::Blob(bytes) => bytes.to_vec(),
                 };
                 cells.push(StoredCell {
-                    location: format!("{database:?}/{table}.{column}#{index}"),
+                    location: format!("{table}.{column}#{index}"),
                     documents: stored_documents(&bytes),
                     bytes,
                 });
@@ -264,8 +258,7 @@ fn stored_documents(bytes: &[u8]) -> Vec<serde_json::Value> {
 }
 
 /// Finalize the store at `location` as a build whose writable range is
-/// `[1, fleet]`, without authorizing cold recovery or checking retirement,
-/// for a test that races writers
+/// `[1, fleet]`, without checking retirement, for a test that races writers
 /// against it or stands in for a build other than the linked one.
 pub fn finalize_fleet_format(
     location: &crate::SqliteLocation,

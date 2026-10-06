@@ -1,11 +1,11 @@
 use lash_core_execution::StoreSchemaVerdict;
 use lash_core_execution::compat::CompatRefusal;
-use lash_sqlite_store::{SqliteDatabase, SqliteStore, verify_schema_at};
+use lash_sqlite_store::{SqliteStore, verify_schema_at};
 
 #[tokio::test]
 async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
     let dir = tempfile::tempdir().expect("SQLite predecessor-refusal tempdir");
-    let path = dir.path().join("durable-core.db");
+    let path = dir.path().join("lash.db");
     drop(
         SqliteStore::open_file_for_testing(&path)
             .await
@@ -41,7 +41,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
         .expect("stamp a retired predecessor");
     drop(connection);
 
-    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
+    let found = verify_schema_at(&path).await;
     assert_eq!(
         found.verdict,
         StoreSchemaVerdict::Refused {
@@ -68,7 +68,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
 #[tokio::test]
 async fn sqlite_graph_sequence_unique_constraint_is_rejected_without_migration() {
     let dir = tempfile::tempdir().expect("SQLite graph-sequence cutover tempdir");
-    let path = dir.path().join("durable-core.db");
+    let path = dir.path().join("lash.db");
     drop(
         SqliteStore::open_file_for_testing(&path)
             .await
@@ -96,7 +96,7 @@ async fn sqlite_graph_sequence_unique_constraint_is_rejected_without_migration()
         .expect("stamp an expanded catalog under this build's reader floor");
     drop(connection);
 
-    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
+    let found = verify_schema_at(&path).await;
     match &found.verdict {
         StoreSchemaVerdict::Refused {
             refusal:

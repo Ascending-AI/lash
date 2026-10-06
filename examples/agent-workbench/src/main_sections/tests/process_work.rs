@@ -337,7 +337,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         SessionScope,
     };
     let registry_dir = tempfile::tempdir().expect("process registry tempdir");
-    let stores = lash::sqlite::SqliteStoreSet::open(registry_dir.path())
+    let stores = lash::sqlite::SqliteStoreSet::open(registry_dir.path().join("lash.db"))
         .await
         .expect("open a durable registry store set");
     let registry: Arc<dyn lash::process::ProcessRegistry> = stores.process_registry();

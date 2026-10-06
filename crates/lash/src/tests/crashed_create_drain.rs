@@ -68,7 +68,7 @@ pub(super) async fn double_over(
         }
         Storage::SqliteFile => {
             let files = tempfile::tempdir().expect("a SQLite store directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(files.path())
+            let stores = lash_sqlite_store::SqliteStoreSet::open(files.path().join("lash.db"))
                 .await
                 .expect("open the SQLite file stores");
             let seams = stores.session_store_factory();

@@ -7,7 +7,7 @@ impl lash_conformance::WakeDeliveryIsolationBackend for SqliteWakeDeliveryIsolat
     async fn corrupt_source(&self, process_id: &lash_sansio::ProcessId) {
         assert_eq!(
             self.0
-                .raw(SqliteDatabase::ProcessRegistry)
+                .raw()
                 .execute(
                     "UPDATE processes SET record_json = '{}' WHERE process_id = ?1",
                     [process_id.as_str()],
@@ -60,7 +60,7 @@ impl lash_conformance::WakeRedeliveryFloorProbe for SqliteWakeRedeliveryFloors {
     ) -> Option<u64> {
         use rusqlite::OptionalExtension as _;
         self.0
-            .raw(SqliteDatabase::DurableCore)
+            .raw()
             .query_row(
                 "SELECT allocation_floor FROM wake_redelivery_fences
                  WHERE session_id = ?1 AND process_id = ?2",

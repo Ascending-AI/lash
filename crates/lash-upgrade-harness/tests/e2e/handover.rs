@@ -958,7 +958,7 @@ async fn material_rows(shared: &Shared, artifacts: &[String]) -> Result<Vec<serd
             counts
         }
         None => {
-            let path = shared.store_root.join("durable-core.db");
+            let path = shared.store_path.clone();
             let artifacts = artifacts.to_vec();
             tokio::task::spawn_blocking(move || -> Result<Vec<(i64, i64)>> {
                 let db = rusqlite::Connection::open_with_flags(
@@ -1006,7 +1006,7 @@ async fn remove_material(shared: &Shared, artifacts: &[String]) -> Result<serde_
             }
         }
         None => {
-            let path = shared.store_root.join("durable-core.db");
+            let path = shared.store_path.clone();
             let artifacts = artifacts.to_vec();
             removed = tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
                 let db = rusqlite::Connection::open(path)?;

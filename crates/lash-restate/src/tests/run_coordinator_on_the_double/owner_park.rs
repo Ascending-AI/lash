@@ -487,7 +487,7 @@ async fn owner_law(file: bool) {
             let server = RestateTestServer::new(ServerConfig::default().with_seed(4892)).unwrap();
             let stores: Arc<lash_sqlite_store::SqliteStoreSet> = if file {
                 Arc::new(
-                    lash_sqlite_store::SqliteStoreSet::open(directory.path())
+                    lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
                         .await
                         .unwrap(),
                 )
@@ -591,7 +591,7 @@ async fn owner_law(file: bool) {
                 let sources = probe.sources.lock().unwrap().clone();
                 drop(probe);
                 let reopened: Arc<lash_sqlite_store::SqliteStoreSet> = Arc::new(
-                    lash_sqlite_store::SqliteStoreSet::open(directory.path())
+                    lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
                         .await
                         .unwrap(),
                 );

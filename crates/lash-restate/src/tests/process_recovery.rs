@@ -8,7 +8,7 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
     let temp = tempfile::tempdir().expect("tempdir");
     let process_db = temp.path().join("processes.db");
     let store_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&temp.path().join("sessions"))
+        lash_sqlite_store::SqliteStore::open(&temp.path().join("sessions.db"))
             .await
             .expect("open the session catalog"),
     ) as Arc<dyn lash_core::DeploymentStore>;
@@ -148,7 +148,7 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
     let temp = tempfile::tempdir().expect("tempdir");
     let process_db = temp.path().join("processes.db");
     let store_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&temp.path().join("sessions"))
+        lash_sqlite_store::SqliteStore::open(&temp.path().join("sessions.db"))
             .await
             .expect("open the session catalog"),
     ) as Arc<dyn lash_core::DeploymentStore>;
@@ -847,7 +847,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     let temp = tempfile::tempdir().expect("tempdir");
     let process_db = temp.path().join("processes.db");
     let store_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&temp.path().join("sessions"))
+        lash_sqlite_store::SqliteStore::open(&temp.path().join("sessions.db"))
             .await
             .expect("open the session catalog"),
     ) as Arc<dyn lash_core::DeploymentStore>;

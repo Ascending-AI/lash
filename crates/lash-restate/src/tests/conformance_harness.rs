@@ -516,14 +516,8 @@ impl LiveConformanceHarness {
         Arc::clone(&self.stores)
     }
 
-    pub(super) fn sqlite_database_uri(
-        &self,
-        database: lash_sqlite_store::SqliteDatabase,
-    ) -> String {
-        self.sqlite
-            .as_ref()
-            .expect("SQLite tier")
-            .database_uri(database)
+    pub(super) fn sqlite_database_uri(&self) -> String {
+        self.sqlite.as_ref().expect("SQLite tier").database_uri()
     }
 
     /// A maker of fresh, unbound conformance handles on this endpoint's

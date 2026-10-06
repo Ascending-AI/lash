@@ -25,8 +25,6 @@ use lash_store_sql::turn_ingress::{
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
-use crate::schema_layout::Schema;
-
 mod family;
 mod pending_inputs;
 mod queued_work;
@@ -144,7 +142,7 @@ pub(crate) struct TurnIngressSql {
 
 impl TurnIngressSql {
     fn render() -> Self {
-        let dialect = Schema::Main.dialect().with_vocabulary(TURN_INPUT_LIFECYCLE);
+        let dialect = crate::schema_layout::MAIN.with_vocabulary(TURN_INPUT_LIFECYCLE);
         Self {
             family: TurnIngressStatements::render(dialect),
             family_sqlite: TurnIngressSqliteStatements::render(dialect),

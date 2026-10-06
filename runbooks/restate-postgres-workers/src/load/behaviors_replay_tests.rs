@@ -663,9 +663,12 @@ async fn law(storage: Storage, replay: bool, case: Advance) {
                 Default::default(),
                 |clock| async {
                     Ok(Arc::new(
-                        lash::sqlite::SqliteStoreSet::open_with_clock(root.path(), clock)
-                            .await
-                            .unwrap(),
+                        lash::sqlite::SqliteStoreSet::open_with_clock(
+                            root.path().join("lash.db"),
+                            clock,
+                        )
+                        .await
+                        .unwrap(),
                     ) as Arc<dyn lash::StoreSet>)
                 },
             )

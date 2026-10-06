@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 
 use lash_core_execution::DeploymentStore;
 use lash_sansio::sync::MutexExt;
-use lash_sqlite_store::SqliteDatabase;
 
 use super::Retained;
 use crate::backend_fixture::TestBackend;
@@ -25,7 +24,7 @@ impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedMani
             .lock_recover()
             .clone()
             .expect("the law makes a factory before breaking it")
-            .raw(SqliteDatabase::DurableCore);
+            .raw();
         let corrupted = conn
             .execute(
                 "UPDATE blobs SET content = X'FFFFFFFF'

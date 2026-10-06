@@ -241,9 +241,12 @@ async fn response_body_budget_current_turn_path_sqlite_memory_and_file() {
         lash_restate_test::DeploymentHooks::default(),
         |clock| async {
             Ok(Arc::new(
-                lash_sqlite_store::SqliteStoreSet::open_with_clock(root.path(), clock)
-                    .await
-                    .unwrap(),
+                lash_sqlite_store::SqliteStoreSet::open_with_clock(
+                    root.path().join("lash.db"),
+                    clock,
+                )
+                .await
+                .unwrap(),
             ) as Arc<dyn lash_core::StoreSet>)
         },
     )

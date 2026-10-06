@@ -191,25 +191,13 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
     ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
         lash_core_execution::store::validate_session_id(session_id)
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
-        let report = delete_session_from_catalog(
+        delete_session_from_catalog(
             &self.location,
             session_id,
             self.options.connection_policy,
             self.clock.timestamp_ms(),
         )
-        .await?;
-        if let Some(process_registry) = self.process_registry.as_ref() {
-            delete_wake_allocation_floors_from_process_registry(
-                process_registry,
-                session_id,
-                self.options.connection_policy,
-            )
-            .await
-            .map_err(|error| {
-                lash_core_execution::MaintenanceFailure::failed(error, report.clone())
-            })?;
-        }
-        Ok(report)
+        .await
     }
 }
 

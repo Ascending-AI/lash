@@ -84,9 +84,7 @@ use lash_core_execution::{
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use conn::SqliteConnection;
-use session_deletion::{
-    delete_session_from_catalog, delete_wake_allocation_floors_from_process_registry,
-};
+use session_deletion::delete_session_from_catalog;
 
 mod artifact_store;
 mod attachment_store;
@@ -152,15 +150,9 @@ pub use attachment_store::SqliteAttachmentStore;
 pub use backend::{SqliteStoreSet, SqliteStoreSetOptions};
 pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
 pub use durable::SqliteDurableStore;
+use location::DatabaseLocation;
 pub use location::SqliteLocation;
-use location::{DatabaseLocation, DatabaseTarget};
 pub use migration::{SqliteBackupLocation, SqliteMigrationBackup};
-
-/// File name of the one durable-core database under a session-store root.
-///
-/// Named once so the factory that creates it and the preflight that reads it
-/// cannot drift onto different files.
-pub(crate) const DURABLE_CORE_DB_FILE: &str = "durable-core.db";
 
 /// Backend name this store reports in shared fencing diagnostics.
 ///
@@ -171,7 +163,6 @@ pub(crate) const SQLITE_BACKEND: &str = "sqlite";
 
 use conn::TxOutcome;
 pub use preflight::{SqliteStorePreflight, verify_schema_at};
-pub use schema::SqliteDatabase;
 
 mod control_intent_ledger;
 use forks::*;
@@ -193,15 +184,10 @@ pub struct SqliteStore {
     /// [`lash_core_execution::FleetFormat::writer_version`] instead of binding
     /// the build's constants directly.
     conn: SqliteConnection,
-    /// The durable-core database this store is open on. Held so a store
-    /// opened on a memory backend keeps its database alive.
+    /// The database this store is open on. Held so a store opened on a
+    /// memory backend keeps its database alive.
     location: DatabaseLocation,
     turn_cancel_closure_owner: Mutex<Option<std::sync::Weak<dyn lash_core_execution::EffectHost>>>,
-    process_registry: Option<DatabaseTarget>,
-    /// The store set's trigger database: where the evidence-retention sweep
-    /// reclaims mutation receipts, on a connection of its own like the
-    /// process-registry arm of `delete_session` (FIG-4108).
-    trigger_store: Option<DatabaseTarget>,
     readers: Vec<SqliteConnection>,
     next_reader: AtomicU64,
     decoded_graph_node_bodies: Arc<AtomicU64>,
@@ -247,14 +233,11 @@ pub struct SqliteProcessRegistry {
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     /// Effect hosts whose scope fence registration lifts (ADR 0049).
     scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts,
-    /// This registry's database: bound effect hosts attach it and keep their
-    /// process-scope fences in it, beside the process rows (ADR 0049).
+    /// This registry's database, which also keeps bound effect hosts'
+    /// process-scope fences beside the process rows (ADR 0049).
     location: DatabaseLocation,
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
-    /// Whether registration reads the store set's trigger deliveries, which
-    /// a delivery's start is checked against (FIG-4369).
-    trigger_delivery_bindings: process_registry::TriggerDeliveryBindings,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {

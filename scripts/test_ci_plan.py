@@ -350,7 +350,7 @@ class PathClassifierTests(unittest.TestCase):
     def test_store_fixtures_select_stores_without_failing_open(self) -> None:
         for path in (
             "fixtures/durable-read/v1/postgres/fixture.sql",
-            "fixtures/durable-read/v1/sqlite/durable-core.db",
+            "fixtures/durable-read/v1/sqlite/lash.db",
         ):
             with self.subTest(path=path):
                 self.assertEqual(ci_plan.PathKind.DATA, self.kind(path))

@@ -35,7 +35,7 @@ static SESSION_LIST_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 lash_conformance::tool_access_persistence_tests!({
     let dir = tempfile::tempdir().expect("tool-access SQLite tempdir");
-    let stores = SqliteStoreSet::open(dir.path())
+    let stores = SqliteStoreSet::open(dir.path().join("lash.db"))
         .await
         .expect("open tool-access catalog");
     let catalog = stores.open_store().await.expect("open tool-access store");
@@ -323,7 +323,9 @@ async fn traced_session_list(store: &SqliteStore) -> (Vec<SessionView>, usize) {
 #[tokio::test]
 async fn session_listing_statement_count_is_session_count_invariant() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = SqliteStore::open(dir.path()).await.expect("open catalog");
+    let store = SqliteStore::open(&dir.path().join("lash.db"))
+        .await
+        .expect("open catalog");
     let mut expected_relations = BTreeMap::new();
 
     for index in 0..8 {
@@ -594,13 +596,8 @@ async fn real_locked_catalog_surfaces_typed_contention() {
 #[tokio::test]
 async fn live_attachment_refs_aborts_on_unreadable_catalog() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let root = dir.path().join("sessions");
-    std::fs::create_dir_all(&root).expect("mkdir sessions");
-    std::fs::write(
-        root.join(crate::SqliteDatabase::DurableCore.file_name()),
-        b"corrupt not-a-db",
-    )
-    .expect("write corrupt");
+    let root = dir.path().join("sessions.db");
+    std::fs::write(&root, b"corrupt not-a-db").expect("write corrupt");
 
     let result = SqliteStore::open(&root).await;
     assert!(
@@ -668,8 +665,7 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
         .admit_session(&request)
         .await
         .expect("create requested session");
-    let raw = rusqlite::Connection::open(root.join(crate::SqliteDatabase::DurableCore.file_name()))
-        .expect("open raw catalog");
+    let raw = rusqlite::Connection::open(&root).expect("open raw catalog");
     // `ck_session_meta_relation_kind` forbids this row on any ordinary write.
     // The refusal below is still the contract for a catalog that carries one
     // anyway — restored from a pre-CHECK dump, or ALTERed by a host.
@@ -989,7 +985,9 @@ async fn sqlite_artifact_view_does_not_resurrect_artifact_reclaimed_by_another_h
 #[tokio::test]
 async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
     let dir = tempfile::tempdir().expect("admission tempdir");
-    let store = SqliteStore::open(dir.path()).await.expect("open catalog");
+    let store = SqliteStore::open(&dir.path().join("lash.db"))
+        .await
+        .expect("open catalog");
     let request = |session_id: &str| SessionStoreCreateRequest {
         session_id: SessionId::fixture(session_id),
         relation: lash_core_execution::SessionRelation::Root,

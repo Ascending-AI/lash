@@ -41,7 +41,7 @@ impl Harness {
         let pool = storage.pool().clone();
         let scratch = std::env::var("LASH_OPERATOR_ARTIFACT_DIR")?;
         let attachments = lash::sqlite::SqliteStoreSet::open(
-            std::path::Path::new(&scratch).join("attachment-bytes"),
+            std::path::Path::new(&scratch).join("attachment-bytes.db"),
         )
         .await?;
         let stores = Arc::new(PostgresStoreSet::new(

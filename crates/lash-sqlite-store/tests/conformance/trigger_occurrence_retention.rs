@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use lash_conformance::TriggerOccurrenceRetentionFaultInjector;
 use lash_core_execution::{ProcessRegistry, TriggerStore};
-use lash_sqlite_store::SqliteDatabase;
 
 use super::{Retained, SUBSTRATE};
 use crate::backend_fixture::TestBackend;
@@ -16,7 +15,7 @@ struct SqliteTriggerOccurrenceRetentionFaultInjector {
 #[async_trait::async_trait]
 impl TriggerOccurrenceRetentionFaultInjector for SqliteTriggerOccurrenceRetentionFaultInjector {
     async fn fail_occurrence_delete(&self, occurrence_id: &str) {
-        let conn = self.backend.raw(SqliteDatabase::Triggers);
+        let conn = self.backend.raw();
         let occurrence_id = occurrence_id.replace('\'', "''");
         conn.execute_batch(&format!(
             "CREATE TRIGGER fail_fig1507_occurrence_delete
@@ -30,7 +29,7 @@ impl TriggerOccurrenceRetentionFaultInjector for SqliteTriggerOccurrenceRetentio
     }
 
     async fn clear_occurrence_delete_failure(&self) {
-        let conn = self.backend.raw(SqliteDatabase::Triggers);
+        let conn = self.backend.raw();
         conn.execute_batch("DROP TRIGGER IF EXISTS fail_fig1507_occurrence_delete")
             .expect("clear SQLite occurrence delete failure trigger");
     }

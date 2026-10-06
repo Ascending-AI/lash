@@ -49,7 +49,7 @@ const OPERATOR_POOL_MAX: u32 = 2;
 /// The most stalled obligations `drain-status` lists per kind, first by id;
 /// `stalled_obligations` still counts every one.
 const STALLED_LISTED_PER_KIND: std::num::NonZeroUsize = std::num::NonZeroUsize::new(100).unwrap();
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> --restate-admin-url <url> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] [--plugin-registrations <json-file>] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | park list|events [--after <json>] [--limit <n>] | park redrive|cancel|fork --target <json> --park-id <n> | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery and drain commands accept --sqlite-dir <path>) | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> --restate-admin-url <url> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] [--plugin-registrations <json-file>] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | park list|events [--after <json>] [--limit <n>] | park redrive|cancel|fork --target <json> --park-id <n> | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery and drain commands accept --sqlite-path <database-file>) | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -177,18 +177,18 @@ enum Command {
     /// through the deployment's engine, as a core's drain does (FIG-5059).
     Drain {
         generation: BuildGeneration,
-        sqlite_dir: Option<std::path::PathBuf>,
+        sqlite_path: Option<std::path::PathBuf>,
     },
     DrainStatus {
         generation: BuildGeneration,
         /// The engine's admin API: the unfinished invocations still pinned
         /// to the generation's deployments are read there (FIG-4454).
         restate_admin_url: String,
-        sqlite_dir: Option<std::path::PathBuf>,
+        sqlite_path: Option<std::path::PathBuf>,
     },
     EndDrain {
         generation: BuildGeneration,
-        sqlite_dir: Option<std::path::PathBuf>,
+        sqlite_path: Option<std::path::PathBuf>,
     },
     Finalize {
         retired: BuildGeneration,
@@ -287,7 +287,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
             Command::Migrate { phase, dry_run }
         }
         "drain" | "end-drain" | "drain-status" => {
-            let (words, sqlite_dir) = recovery::split_sqlite_dir(rest)?;
+            let (words, sqlite_path) = recovery::split_sqlite_path(rest)?;
             let Some((generation, options)) = words.split_first() else {
                 return Err(CliError::new(Exit::Usage, USAGE));
             };
@@ -296,16 +296,16 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
             match (verb, options) {
                 ("drain", []) => Command::Drain {
                     generation,
-                    sqlite_dir,
+                    sqlite_path,
                 },
                 ("end-drain", []) => Command::EndDrain {
                     generation,
-                    sqlite_dir,
+                    sqlite_path,
                 },
                 ("drain-status", ["--restate-admin-url", url]) => Command::DrainStatus {
                     generation,
                     restate_admin_url: (*url).to_owned(),
-                    sqlite_dir,
+                    sqlite_path,
                 },
                 ("drain-status", []) => {
                     return Err(CliError::new(
@@ -883,11 +883,11 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
         }
         Command::Drain {
             generation,
-            sqlite_dir,
+            sqlite_path,
         } => {
             // The same drain a core runs: the mark, then the hand-over that
             // wakes turns parked on durable waits (FIG-5059).
-            let stores = recovery::open_stores(sqlite_dir.as_deref()).await?;
+            let stores = recovery::open_stores(sqlite_path.as_deref()).await?;
             let backend = recovery::restate_backend(stores)?;
             let changed = lash::drain_generation(&backend, generation)
                 .await
@@ -902,9 +902,9 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
         }
         Command::EndDrain {
             generation,
-            sqlite_dir,
+            sqlite_path,
         } => {
-            let changed = recovery::open_stores(sqlite_dir.as_deref())
+            let changed = recovery::open_stores(sqlite_path.as_deref())
                 .await?
                 .generation_drain()
                 .clear_draining(generation)
@@ -918,9 +918,9 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
         Command::DrainStatus {
             generation,
             restate_admin_url,
-            sqlite_dir,
+            sqlite_path,
         } => {
-            let stores = recovery::open_stores(sqlite_dir.as_deref()).await?;
+            let stores = recovery::open_stores(sqlite_path.as_deref()).await?;
             let registry = lash_restate::RestateDeploymentRegistry::new(
                 lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(
                     restate_admin_url.clone(),

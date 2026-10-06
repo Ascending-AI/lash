@@ -184,10 +184,11 @@ CFG = r'(?P<attrs>(?:#\[cfg\([^\]]*\)\]\s*)*)'
 STORE_DESCRIPTOR = re.compile(
     r"\bstore\(\s*ComponentId::(?P<component>\w+)\s*,\s*(?P<constant>[A-Z][A-Z0-9_]*)\s*,?\s*\)"
 )
-DATABASE_COMPONENT = re.compile(r"Self::(\w+)\s*=>\s*ComponentId::(\w+)")
+DATABASE_COMPONENT = re.compile(
+    r"\bconst\s+COMPONENT\s*:[^=]*=\s*(?:\w+::)*ComponentId::(?P<component>\w+)\s*;"
+)
 SQLITE_STEP = re.compile(
-    CFG + r"SqliteMigration\s*\{\s*database:\s*SqliteDatabase::(?P<database>\w+),"
-    r"\s*from:\s*(?P<from>[^,{}]+),\s*to:\s*(?P<to>[^,{}]+),"
+    CFG + r"SqliteMigration\s*\{\s*from:\s*(?P<from>[^,{}]+),\s*to:\s*(?P<to>[^,{}]+),"
 )
 EXPAND_TABLE = re.compile(
     r"static\s+EXPAND_MIGRATIONS\s*:[^=]*?=\s*&\[(?P<body>.*?)\];", re.DOTALL,
@@ -268,33 +269,33 @@ def catalog_mismatches(catalog: Path, label: str, constant: str, value: int, row
 
 
 def sqlite_stamp_mismatches(repo: Path):
-    """Where a SQLite database's catalog and its schema version count differently.
+    """Where the SQLite database's catalog and its schema version count differently.
 
-    Each database's `lash_compat` row, its descriptor and its catalog steps
-    are in the one constant compat.rs declares for it. The backend must not
-    restate that number, every catalog step must lie inside the version's own
-    range, and the synthetic-next build's steps must carry the database from
-    the constant to the version after it.
+    A SQLite deployment is one database file: its `lash_compat` row, its
+    descriptor and its catalog steps are in the one constant compat.rs
+    declares for its component. The backend must not restate that number,
+    every catalog step must lie inside the version's own range, and the
+    synthetic-next build's steps must carry the database from the constant
+    to the version after it.
     """
     schema = (repo / SQLITE_SCHEMA).read_text()
-    components = dict(DATABASE_COMPONENT.findall(without_comments(schema)))
+    components = DATABASE_COMPONENT.findall(without_comments(schema))
     versions = store_versions(repo)
-    if not components or set(components.values()) - versions.keys():
-        raise BaselineError("cannot read the SQLite databases and their components")
+    if len(components) != 1 or components[0] not in versions:
+        raise BaselineError("cannot read the SQLite database's component")
     errors = [
         f"{SQLITE_SCHEMA}:{match['name']}: a SQLite schema version is restated outside {STORE_VERSIONS}"
         for match in definitions(schema) if match["name"].endswith("SCHEMA_VERSION")
     ]
     catalog = without_comments((repo / SQLITE_CATALOG).read_text())
-    for database, component in sorted(components.items()):
-        constant, value = versions[component]
-        where = f"{SQLITE_CATALOG}: {database}"
-        rows = [
-            (row["attrs"], step_bound(row["from"], {constant: value}, where),
-             step_bound(row["to"], {constant: value}, where))
-            for row in SQLITE_STEP.finditer(catalog) if row["database"] == database
-        ]
-        errors += catalog_mismatches(SQLITE_CATALOG, database, constant, value, rows)
+    constant, value = versions[components[0]]
+    where = f"{SQLITE_CATALOG}: the SQLite database"
+    rows = [
+        (row["attrs"], step_bound(row["from"], {constant: value}, where),
+         step_bound(row["to"], {constant: value}, where))
+        for row in SQLITE_STEP.finditer(catalog)
+    ]
+    errors += catalog_mismatches(SQLITE_CATALOG, "the SQLite database", constant, value, rows)
     return errors
 
 

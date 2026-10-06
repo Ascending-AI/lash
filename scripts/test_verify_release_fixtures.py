@@ -58,7 +58,7 @@ class ReleaseFixtureLaws(unittest.TestCase):
             path = root / "artifact.json"
             path.write_text('{"fixture": "retained"}\n')
             if leg.name in ("sqlite-stores", "session-at-rest"):
-                path = root / "durable-core.db"
+                path = root / "lash.db"
                 with sqlite3.connect(path) as db:
                     db.execute("CREATE TABLE fixture (value TEXT)")
                     db.execute("INSERT INTO fixture VALUES ('retained')")

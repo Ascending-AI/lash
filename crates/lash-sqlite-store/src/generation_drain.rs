@@ -1,9 +1,8 @@
 //! The SQLite build-generation drain (FIG-3799).
 //!
-//! The marks live in the process registry file beside the processes they
-//! move; the parked turns a generation still holds are counted in the durable
-//! core. Each read is its own statement: a work count is a status read, not
-//! one snapshot across the two files.
+//! The marks live in the deployment's database beside the processes they
+//! move and the parked turns a generation still holds. Each read is its own
+//! statement: a work count is a status read, not one snapshot.
 
 use std::num::NonZeroUsize;
 use std::sync::LazyLock;
@@ -16,11 +15,10 @@ use lash_core_execution::{ProcessId, SessionId};
 use lash_store_sql::draining_generations::DrainingGenerationStatements;
 
 use crate::conn::SqliteConnection;
-use crate::schema_layout::Schema;
 use crate::{StoreError, sqlite_error, stored_data_corrupt};
 
 static SQL: LazyLock<DrainingGenerationStatements> =
-    LazyLock::new(|| DrainingGenerationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| DrainingGenerationStatements::render(crate::schema_layout::MAIN));
 
 fn millis(field: &'static str, value: u64) -> Result<i64, StoreError> {
     i64::try_from(value)
@@ -31,16 +29,15 @@ fn count(value: i64) -> u64 {
     u64::try_from(value).unwrap_or(0)
 }
 
-/// The drain over one store set: its process registry and its durable core.
+/// The drain over one store set's database.
 #[derive(Clone)]
 pub(crate) struct SqliteGenerationDrain {
-    registry: SqliteConnection,
-    core: SqliteConnection,
+    conn: SqliteConnection,
 }
 
 impl SqliteGenerationDrain {
-    pub(crate) fn new(registry: SqliteConnection, core: SqliteConnection) -> Self {
-        Self { registry, core }
+    pub(crate) fn new(conn: SqliteConnection) -> Self {
+        Self { conn }
     }
 }
 
@@ -53,7 +50,7 @@ impl GenerationDrainStore for SqliteGenerationDrain {
     ) -> Result<bool, StoreError> {
         let generation = generation.as_str().to_owned();
         let now = millis("drain mark instant", now_ms)?;
-        self.registry
+        self.conn
             .write(move |tx| {
                 Ok(crate::conn::cached_execute(
                     tx,
@@ -67,7 +64,7 @@ impl GenerationDrainStore for SqliteGenerationDrain {
 
     async fn clear_draining(&self, generation: &BuildGeneration) -> Result<bool, StoreError> {
         let generation = generation.as_str().to_owned();
-        self.registry
+        self.conn
             .write(move |tx| {
                 Ok(
                     crate::conn::cached_execute(
@@ -83,7 +80,7 @@ impl GenerationDrainStore for SqliteGenerationDrain {
 
     async fn draining_generations(&self) -> Result<Vec<DrainingGeneration>, StoreError> {
         let rows = self
-            .registry
+            .conn
             .call(|conn| {
                 let mut statement = conn.prepare_cached(SQL.select_all.sql())?;
                 statement
@@ -111,7 +108,7 @@ impl GenerationDrainStore for SqliteGenerationDrain {
     ) -> Result<GenerationWork, StoreError> {
         let stamp = generation.as_str().to_owned();
         let (live_processes, parked_processes) = self
-            .registry
+            .conn
             .read(move |tx| {
                 let process = &crate::process_registry::sql::process_sql().process;
                 let live: i64 = tx.query_row(
@@ -130,7 +127,7 @@ impl GenerationDrainStore for SqliteGenerationDrain {
             .map_err(sqlite_error)?;
         let stamp = generation.as_str().to_owned();
         let (parked_turns, in_flight_turns): (i64, i64) = self
-            .core
+            .conn
             .call(move |conn| {
                 let ingress = crate::turn_ingress::turn_ingress_sql();
                 let parked: i64 = conn.query_row(
@@ -168,7 +165,7 @@ impl GenerationDrainStore for SqliteGenerationDrain {
         let after = after.map(ProcessId::to_string).unwrap_or_default();
         let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
         let ids = self
-            .registry
+            .conn
             .call(move |conn| {
                 let mut statement = conn.prepare_cached(
                     crate::process_registry::sql::process_sql()
@@ -201,7 +198,7 @@ impl GenerationDrainStore for SqliteGenerationDrain {
         let after = after.map(SessionId::to_string).unwrap_or_default();
         let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
         let ids = self
-            .core
+            .conn
             .call(move |conn| {
                 let mut statement = conn.prepare_cached(
                     crate::session_runs::session_runs_sql()

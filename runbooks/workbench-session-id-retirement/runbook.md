@@ -87,7 +87,7 @@ receipts, the rotated id, and the typed retirement response — never on model p
   `{"button":"Blue"}`; the `button` value is case-sensitive, so lowercase `red` or
   `blue` returns HTTP 422.
 - Durable truth on the default SQLite stack:
-  `<data-dir>/lash-sessions/durable-core.db`. The live id has a `session_meta` row; the
+  `<data-dir>/lash-sessions.db`. The live id has a `session_meta` row; the
   retired id has a `deleted_sessions` row and no live session metadata. Save query
   results as JSON artifacts rather than treating terminal output as the record.
 - Trigger truth: `/api/triggers?session_id=<S>` records expose

@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 584 rows over 403 files, 2075 laws.
-# By class: mechanical 104, semantic 99, delete 348, replace 33.
-# By lane: L9b 61, L9c 90, L9d 53, L9e 72, L9f 22, L9g 64, L9h 30, L11 12, L8 1, L10a 179.
-# By status: todo 584, ported 0, deleted 0.
+# 595 rows over 414 files, 2097 laws.
+# By class: mechanical 104, semantic 99, delete 359, replace 33.
+# By lane: L1b 11, L9b 61, L9c 90, L9d 53, L9e 72, L9f 22, L9g 64, L9h 30, L11 12, L8 1, L10a 179.
+# By status: todo 584, ported 0, deleted 11.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/restate-postgres-workers/tests/process_operations_replacement.rs
@@ -100,7 +100,8 @@
 #   or a SimNodes kill and resume; virtual time becomes SimClock; a forced-replay
 #   leg becomes a kill-and-resume leg), delete (the subject is removed
 #   machinery) or replace (a domain law whose only home is a deleted crate).
-# - lane: who ports or deletes it. First matching rule: crates/lash-sim -> L9f;
+# - lane: who ports or deletes it. L1b deleted the SQLite multi-file layout's
+#   own tests (FIG-5195). First matching rule: crates/lash-sim -> L9f;
 #   conformance instantiation sites -> L9g; examples, lash-perf and the E2E
 #   runner -> L9h; lash-upgrade-harness -> L11; the Restate runbook -> L8 for
 #   its live rows, L10a for the rest; rows that need cells -> L9e; processes
@@ -9397,3 +9398,168 @@ laws = [
 disposition = "subject-deleted"
 status = "todo"
 note = "L10a removes every dependency on the deleted crates (L10a step 2)"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/backend.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "an_incomplete_store_set_refuses_without_changing_its_databases",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. a partial three-file set has no successor; a directory in the retired layout is refused typed by backend.rs::a_directory_in_the_retired_layout_is_refused_unchanged"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/conn.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "writers_over_cross_attached_databases_queue_without_a_busy_sleep",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. no connection attaches a second database; every writer takes the one database's write gate"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/fence_tests.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "sqlite_cold_open_refuses_partial_epoch_without_finalize_intent",
+  "sqlite_fence_refuses_a_writer_after_finalize_in_each_database",
+  "sqlite_finalize_cold_reopen_completes_partial_epoch_flip",
+  "sqlite_migration_takes_every_database_exclusively_in_order",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. finalize is one transaction on one file, so no epoch flip is partial and no intent file exists; the per-database fence and lock-order laws are fence_tests.rs::sqlite_fence_refuses_a_writer_of_each_family_after_finalize and ::sqlite_migration_holds_the_database_exclusively"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/finalize.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "a_foreign_intent_is_refused_before_decoding_its_authorization",
+  "a_writer_move_cannot_repeat_its_source_range",
+  "authorization_requires_a_marked_and_drained_generation",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. the finalize intent file and its authorization are deleted; the drain precondition is finalize.rs::finalize_requires_a_marked_and_drained_generation"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/migration.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "only_failed_backup_states_carry_failure_data",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. a migration is one transaction, so no backup records a restore or failure; migration.rs::backup_states_carry_no_failure_data"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/migration_tests.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "sqlite_backup_restores_byte_identical_state",
+  "sqlite_migration_crash_at_every_step_resumes_or_restores",
+  "sqlite_migration_respects_lock_order_across_the_three_databases",
+  "sqlite_migration_resume_failure_restores_original_set",
+  "sqlite_migration_resume_failure_retains_backup_until_store_is_owned",
+  "sqlite_open_backs_up_every_database_before_migrating",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. a one-file migration commits or changes nothing, so restore, partial commit and cross-file lock order are gone; the surviving laws are migration_tests.rs::sqlite_open_backs_up_the_database_before_migrating, ::sqlite_migration_crash_at_every_step_resumes, ::sqlite_migration_failure_before_commit_changes_nothing and ::sqlite_migration_owns_the_store_and_holds_it_exclusively"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/obligation_ledger.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "process_record_cleanup_routes_to_registry_and_fences_at_arm",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. every artifact cleanup obligation lives in the one database; there is no routing between databases"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/plugin_writer_tests.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "a_plugin_only_finalize_survives_a_crash_between_the_database_files",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. there is no second database file to crash between"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/preflight/tests.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "a_partial_store_set_is_refused_as_incomplete",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. a store is one database file; preflight reports it alone"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/schema.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "sqlite_opens_each_expanded_database_under_its_floor",
+  "sqlite_refuses_a_partially_advanced_set",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. stamps cannot disagree across one file; the expanded-open law is schema.rs::sqlite_opens_an_expanded_database_under_its_floor"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/schema_check_constraint_tests.rs"
+test = "*"
+area = "sqlite-layout"
+needs = []
+class = "delete"
+lane = "L1b"
+laws = [
+  "cleanup_referrer_has_exactly_one_database_owner",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5195: a SQLite deployment is one database file (ADR 0132 §12); only the listed tests are deleted. the registry's duplicate artifact_cleanup_obligations table is deleted; one table holds every referrer kind"

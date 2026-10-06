@@ -58,7 +58,9 @@ async fn open_catalog(
         Ok(Arc::new(storage.store()))
     } else {
         let root = sqlite_root.ok_or_else(|| anyhow::anyhow!("SQLite root is required"))?;
-        Ok(Arc::new(lash_sqlite_store::SqliteStore::open(root).await?))
+        Ok(Arc::new(
+            lash_sqlite_store::SqliteStore::open(&root.join("lash.db")).await?,
+        ))
     }
 }
 

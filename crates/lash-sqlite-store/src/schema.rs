@@ -11,9 +11,6 @@
 use super::*;
 pub(crate) use crate::trigger_schema::TRIGGER_SCHEMA;
 
-mod database;
-pub use database::SqliteDatabase;
-
 /// Canonical SQLite schema for a factory-wide lash durable-core catalog.
 ///
 /// This is the *only* schema the store supports. Older durable-core databases
@@ -632,7 +629,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_referrer_edges_referrer
     ON artifact_referrer_edges(referrer_kind, referrer_id);
 
 CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_database CHECK (length(referrer_kind) > 0 AND referrer_kind <> 'process_record'),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (length(referrer_kind) > 0),
     referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
     obligation_id TEXT NOT NULL,
@@ -689,19 +686,10 @@ CREATE TABLE IF NOT EXISTS lash_plugin_writers (
 );
 ";
 
-// This database's schema version, and the history of what each value
-// changed, is `lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION`.
-
+/// The process registry's tables: processes, their events, observers, wake
+/// deliveries, segment handovers and tombstones. They are provisioned in the
+/// deployment's one database beside [`SCHEMA`].
 pub(crate) const PROCESS_SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS lash_compat (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    component TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    min_reader INTEGER NOT NULL,
-    fleet_format INTEGER NOT NULL,
-    CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version AND fleet_format >= 1)
-);
-
 CREATE TABLE IF NOT EXISTS processes (
     process_id            TEXT PRIMARY KEY,
     start_key             TEXT,
@@ -957,33 +945,6 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
 
--- Process-record cleanup is owned by this registry. Every other kind lives
--- in the durable core, whose vocabulary remains open (ADR 0115 section 5).
-CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_database CHECK (referrer_kind = 'process_record'),
-    referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
-    cleanup_json TEXT NOT NULL,
-    obligation_id TEXT NOT NULL,
-    obligation_state TEXT NOT NULL,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms INTEGER,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_artifact_cleanup_obligations_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms INTEGER,
-    PRIMARY KEY (referrer_kind, referrer_id),
-    CONSTRAINT ck_artifact_cleanup_obligations_obligation CHECK (((obligation_state = 'due' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'stalled' AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_id
-    ON artifact_cleanup_obligations(obligation_id);
-CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due
-    ON artifact_cleanup_obligations(obligation_due_at_ms, obligation_id)
-    WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
-    ON artifact_cleanup_obligations(obligation_id)
-    WHERE obligation_state = 'stalled';
-
 CREATE TABLE IF NOT EXISTS process_segment_handovers (
     process_id       TEXT NOT NULL,
     segment_ordinal  INTEGER NOT NULL,
@@ -1075,11 +1036,43 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 
 ";
 
-// This database's schema version, and the history of what each value
-// changed, is `lash_core_store::compat::SQLITE_REGISTRY_SCHEMA_VERSION`.
+// The database's schema version, and the history of what each value
+// changed, is `lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION`.
 
-// This database's schema version, and the history of what each value
-// changed, is `lash_core_store::compat::SQLITE_TRIGGERS_SCHEMA_VERSION`.
+/// The compatibility component of the deployment's one database file.
+pub(crate) const COMPONENT: lash_core_execution::compat::ComponentId =
+    lash_core_execution::compat::ComponentId::SQLITE_CORE;
+
+/// The name reports and refusals give the database.
+pub(crate) const DATABASE_NAME: &str = "SQLite database";
+
+/// This build's compatibility version for the database.
+pub(crate) fn expected_version() -> i64 {
+    lash_core_execution::compat::descriptor(COMPONENT)
+        .map_or(0, |descriptor| i64::from(descriptor.writes.max()))
+}
+
+/// The shared table sets provisioning applies after the schema bodies, in
+/// order; see [`crate::schema_fragments`].
+pub(crate) const FRAGMENTS: [&str; 3] = [
+    crate::schema_fragments::SESSION_INGRESS_TABLE,
+    crate::schema_fragments::SESSION_RUNS_TABLES,
+    crate::durable::DURABLE_TABLES,
+];
+
+/// Everything provisioning applies, in order: the durable core's, process
+/// registry's and trigger store's schema bodies, the shared fragments, then
+/// every step of the migration catalog up to this build's version
+/// ([`crate::migration::provisioning_steps`]), so a database this build
+/// creates has the shape a migrated one has. Fixtures that shadow one table
+/// apply this to complete the catalog: every statement is idempotent, so
+/// the shadowed declaration stands while every other table is created.
+pub(crate) fn provisioning_statements() -> impl Iterator<Item = &'static str> {
+    [SCHEMA, PROCESS_SCHEMA, TRIGGER_SCHEMA]
+        .into_iter()
+        .chain(FRAGMENTS)
+        .chain(crate::migration::provisioning_steps())
+}
 
 pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<()> {
     // WAL + busy_timeout are already applied in `SqliteConnection::open`. The
@@ -1099,100 +1092,60 @@ pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<(
 /// refuse a populated database that cannot be read by this build. Runs on the
 /// connection thread so admission and DDL share one transaction: the
 /// connection's installer, which arms its writer fence (ADR 0115 §2.2).
-pub(crate) async fn ensure_versioned_schema(
-    conn: &SqliteConnection,
-    database: SqliteDatabase,
-) -> rusqlite::Result<()> {
-    ensure_versioned_schema_with_writable(
-        conn,
-        database,
-        lash_core_execution::FleetFormat::writable(),
-    )
-    .await
+pub(crate) async fn ensure_versioned_schema(conn: &SqliteConnection) -> rusqlite::Result<()> {
+    ensure_versioned_schema_with_writable(conn, lash_core_execution::FleetFormat::writable()).await
 }
 
 pub(crate) async fn ensure_versioned_schema_with_writable(
     conn: &SqliteConnection,
-    database: SqliteDatabase,
     writable: lash_core_execution::compat::VersionRange,
 ) -> rusqlite::Result<()> {
-    conn.install(database, writable, move |tx| {
-        apply_versioned_schema_tx_with_writable(tx, database, writable)
+    conn.install(writable, move |tx| {
+        apply_versioned_schema_tx_with_writable(tx, writable)
     })
     .await
 }
 
 #[cfg(test)]
-pub(crate) fn prepare_versioned_schema<'connection>(
-    connection: &'connection mut Connection,
-    database: SqliteDatabase,
-) -> rusqlite::Result<Transaction<'connection>> {
+pub(crate) fn prepare_versioned_schema(
+    connection: &mut Connection,
+) -> rusqlite::Result<Transaction<'_>> {
     let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    apply_versioned_schema_tx(&tx, database)?;
+    apply_versioned_schema_tx(&tx)?;
     Ok(tx)
 }
 
 #[cfg(test)]
-fn apply_versioned_schema_tx(
-    tx: &Transaction<'_>,
-    database: SqliteDatabase,
-) -> rusqlite::Result<()> {
-    apply_versioned_schema_tx_with_writable(
-        tx,
-        database,
-        lash_core_execution::FleetFormat::writable(),
-    )
-    .map(drop)
+fn apply_versioned_schema_tx(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    apply_versioned_schema_tx_with_writable(tx, lash_core_execution::FleetFormat::writable())
+        .map(drop)
 }
 
 /// The installer's transaction body; answers the admitted `F`.
 fn apply_versioned_schema_tx_with_writable(
     tx: &Transaction<'_>,
-    database: SqliteDatabase,
     writable: lash_core_execution::compat::VersionRange,
 ) -> rusqlite::Result<lash_core_execution::FleetFormat> {
-    let apply_schema = |conn: &Transaction<'_>| -> rusqlite::Result<()> {
-        for statements in database.provisioning_statements() {
-            conn.execute_batch(statements)?;
-        }
-        Ok(())
-    };
-    let (admission, mut fleet) = crate::compat::admit(tx, database, writable)?;
+    let (admission, mut fleet) = crate::compat::admit(tx, writable)?;
     match admission {
         lash_core_execution::compat::CompatAdmission::Provision => {
-            apply_schema(tx)?;
-            crate::compat::provision(tx, database, writable)?;
+            for statements in provisioning_statements() {
+                tx.execute_batch(statements)?;
+            }
+            crate::compat::provision(tx, writable)?;
             // The handle answers the epoch the row was just seeded at, not
             // this build's newest: a synthetic N+1 seeds a fresh store at N.
             fleet = lash_core_execution::FleetFormat::seed(writable);
         }
         lash_core_execution::compat::CompatAdmission::Native => {
-            crate::compat::refuse_unmigrated(tx, database)?;
+            crate::compat::refuse_unmigrated(tx)?;
         }
         lash_core_execution::compat::CompatAdmission::Expanded { .. } => {
-            crate::compat::verify_tolerant(tx, database)?;
+            crate::compat::verify_tolerant(tx)?;
         }
     }
-    stamp_deployment_metadata(tx, database)?;
+    crate::release_stamp::write(tx)?;
     Ok(fleet)
-}
-
-/// Whether this database is the one that carries the deployment's release stamp.
-///
-/// All three databases have compatibility rows; only the durable core records
-/// the release that last wrote the store.
-pub(crate) fn deployment_metadata_holder(database: SqliteDatabase) -> bool {
-    database == SqliteDatabase::DurableCore
-}
-
-fn stamp_deployment_metadata(
-    tx: &Transaction<'_>,
-    database: SqliteDatabase,
-) -> rusqlite::Result<()> {
-    if deployment_metadata_holder(database) {
-        crate::release_stamp::write(tx)?;
-    }
-    Ok(())
 }
 
 pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<bool> {
@@ -1211,30 +1164,28 @@ mod compat_tests {
     use super::*;
     use lash_core_execution::compat::CompatRefusal;
 
-    fn provision(connection: &mut Connection, database: SqliteDatabase) {
+    fn provision(connection: &mut Connection) {
         connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .and_then(|tx| {
-                apply_versioned_schema_tx(&tx, database)?;
+                apply_versioned_schema_tx(&tx)?;
                 tx.commit()
             })
             .expect("provision SQLite database");
     }
 
     #[test]
-    fn sqlite_opens_each_expanded_database_under_its_floor() {
-        for database in SqliteDatabase::ALL {
-            let mut connection = Connection::open_in_memory().expect("open database");
-            provision(&mut connection, database);
-            connection
-                .execute_batch(
-                    "CREATE TABLE next_release_table (id INTEGER PRIMARY KEY); \
-                     ALTER TABLE lash_compat ADD COLUMN next_release_note TEXT; \
-                     UPDATE lash_compat SET version = version + 1",
-                )
-                .expect("expand catalog");
-            provision(&mut connection, database);
-        }
+    fn sqlite_opens_an_expanded_database_under_its_floor() {
+        let mut connection = Connection::open_in_memory().expect("open database");
+        provision(&mut connection);
+        connection
+            .execute_batch(
+                "CREATE TABLE next_release_table (id INTEGER PRIMARY KEY); \
+                 ALTER TABLE lash_compat ADD COLUMN next_release_note TEXT; \
+                 UPDATE lash_compat SET version = version + 1",
+            )
+            .expect("expand catalog");
+        provision(&mut connection);
     }
 
     /// The open-time migration seeds `F` at the opening build's writable
@@ -1245,95 +1196,56 @@ mod compat_tests {
     #[test]
     fn sqlite_provisioning_seeds_the_opening_build_s_fleet_floor() {
         use lash_core_execution::compat::VersionRange;
-        for database in SqliteDatabase::ALL {
-            for writable in [VersionRange::between(1, 2), VersionRange::between(2, 3)] {
-                let mut connection = Connection::open_in_memory().expect("open database");
-                for _ in 0..2 {
-                    connection
-                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                        .and_then(|tx| {
-                            apply_versioned_schema_tx_with_writable(&tx, database, writable)?;
-                            tx.commit()
-                        })
-                        .expect("open SQLite database");
-                    let fleet: u32 = connection
-                        .query_row(
-                            "SELECT fleet_format FROM lash_compat WHERE singleton = 1",
-                            [],
-                            |row| row.get(0),
-                        )
-                        .expect("read the seeded epoch");
-                    assert_eq!(
-                        fleet,
-                        writable.min(),
-                        "{} under {writable} seeded F={fleet}",
-                        database.name()
-                    );
-                }
+        for writable in [VersionRange::between(1, 2), VersionRange::between(2, 3)] {
+            let mut connection = Connection::open_in_memory().expect("open database");
+            for _ in 0..2 {
+                connection
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .and_then(|tx| {
+                        apply_versioned_schema_tx_with_writable(&tx, writable)?;
+                        tx.commit()
+                    })
+                    .expect("open SQLite database");
+                let fleet: u32 = connection
+                    .query_row(
+                        "SELECT fleet_format FROM lash_compat WHERE singleton = 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("read the seeded epoch");
+                assert_eq!(fleet, writable.min(), "under {writable} seeded F={fleet}");
             }
         }
     }
 
     #[test]
     fn sqlite_refuses_a_raised_floor_typed() {
-        for database in SqliteDatabase::ALL {
-            let above = lash_core_execution::compat::descriptor(database.component())
-                .expect("database descriptor")
-                .reads
-                .max()
-                + 1;
-            let mut connection = Connection::open_in_memory().expect("open database");
-            provision(&mut connection, database);
-            connection
-                .execute(
-                    "UPDATE lash_compat SET version = ?1, min_reader = ?1",
-                    [above],
-                )
-                .expect("raise floor");
-            let error = crate::sqlite_error(
-                apply_versioned_schema_tx(
-                    &connection
-                        .unchecked_transaction()
-                        .expect("start transaction"),
-                    database,
-                )
-                .expect_err("old reader must refuse"),
-            );
-            assert!(matches!(
-                error,
-                StoreError::Incompatible {
-                    refusal: CompatRefusal::ReaderFloorAbove { min_reader, .. }
-                } if min_reader == above
-            ));
-        }
-    }
-
-    #[test]
-    fn sqlite_refuses_a_partially_advanced_set() {
-        let root = tempfile::tempdir().expect("database run");
-        let location = crate::location::SqliteLocation::File {
-            root: root.path().to_path_buf(),
-        };
-        for database in SqliteDatabase::ALL {
-            let mut connection =
-                Connection::open(root.path().join(database.file_name())).expect("open database");
-            provision(&mut connection, database);
-        }
-        let connection = Connection::open(root.path().join(SqliteDatabase::Triggers.file_name()))
-            .expect("open trigger database");
+        let above = lash_core_execution::compat::descriptor(COMPONENT)
+            .expect("database descriptor")
+            .reads
+            .max()
+            + 1;
+        let mut connection = Connection::open_in_memory().expect("open database");
+        provision(&mut connection);
         connection
             .execute(
-                "UPDATE lash_compat SET version = ?1",
-                [SqliteDatabase::Triggers.expected_version() + 1],
+                "UPDATE lash_compat SET version = ?1, min_reader = ?1",
+                [above],
             )
-            .expect("advance one database");
-        let error =
-            crate::sqlite_error(crate::compat::check_set(&location).expect_err("set must refuse"));
+            .expect("raise floor");
+        let error = crate::sqlite_error(
+            apply_versioned_schema_tx(
+                &connection
+                    .unchecked_transaction()
+                    .expect("start transaction"),
+            )
+            .expect_err("old reader must refuse"),
+        );
         assert!(matches!(
             error,
             StoreError::Incompatible {
-                refusal: CompatRefusal::PartiallyAdvanced { .. }
-            }
+                refusal: CompatRefusal::ReaderFloorAbove { min_reader, .. }
+            } if min_reader == above
         ));
     }
 }
@@ -1349,7 +1261,7 @@ mod observer_intent_migration_tests {
     #[test]
     fn component_43_durable_core_is_refused_instead_of_migrated() {
         let mut connection = Connection::open_in_memory().expect("open migration fixture");
-        prepare_versioned_schema(&mut connection, SqliteDatabase::DurableCore)
+        prepare_versioned_schema(&mut connection)
             .expect("create current fixture")
             .commit()
             .expect("commit current fixture");
@@ -1385,14 +1297,13 @@ mod observer_intent_migration_tests {
             )
             .expect("build component-43 observer-intent fixture");
 
-        let production = prepare_versioned_schema(&mut connection, SqliteDatabase::DurableCore)
+        let production = prepare_versioned_schema(&mut connection)
             .expect_err("a component-43 stamp is refused at the current version");
         let verdict = crate::sqlite_error(production);
         // Which side of the build's range 43 falls on is the admission
         // rule's to say; either way the stamp is refused typed.
         let descriptor =
-            lash_core_execution::compat::descriptor(SqliteDatabase::DurableCore.component())
-                .expect("core descriptor");
+            lash_core_execution::compat::descriptor(COMPONENT).expect("database descriptor");
         let expected = lash_core_execution::compat::admit(
             descriptor,
             lash_core_execution::compat::StampRead::Present(
@@ -1446,7 +1357,7 @@ mod schema_version_tests {
     #[test]
     fn a_current_stamp_skips_the_schema_batch() {
         let mut connection = Connection::open_in_memory().expect("open schema fixture");
-        prepare_versioned_schema(&mut connection, SqliteDatabase::DurableCore)
+        prepare_versioned_schema(&mut connection)
             .expect("lay down the current schema")
             .commit()
             .expect("commit the fixture");
@@ -1454,7 +1365,7 @@ mod schema_version_tests {
             .execute_batch("DROP TABLE pending_turn_inputs")
             .expect("drop a stamped table");
 
-        prepare_versioned_schema(&mut connection, SqliteDatabase::DurableCore)
+        prepare_versioned_schema(&mut connection)
             .expect("a matching stamp opens without the schema batch")
             .commit()
             .expect("commit the stamp write");

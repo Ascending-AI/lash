@@ -91,9 +91,12 @@ async fn double(tier: Tier, seed: u64) -> Option<Double> {
             let double =
                 lash_restate_test::backend_with_store_set(seed, config, hooks(), |clock| async {
                     Ok(Arc::new(
-                        lash_sqlite_store::SqliteStoreSet::open_with_clock(&path, clock)
-                            .await
-                            .expect("SQLite file stores"),
+                        lash_sqlite_store::SqliteStoreSet::open_with_clock(
+                            path.join("lash.db"),
+                            clock,
+                        )
+                        .await
+                        .expect("SQLite file stores"),
                     ) as Arc<dyn lash_core::StoreSet>)
                 })
                 .await

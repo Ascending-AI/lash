@@ -690,7 +690,7 @@ pub(super) async fn compare_obligation_ledgers(
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open the SQLite memory obligation store set");
-    let file = lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("obligation-ledgers"))
+    let file = lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("obligation-ledgers.db"))
         .await
         .expect("open the SQLite file obligation store set");
     let attachments = tempfile::tempdir().expect("attachment directory");
@@ -713,8 +713,8 @@ pub(super) async fn compare_obligation_ledgers(
     .execute(postgres.pool())
     .await
     .expect("quiesce stale process-start obligations");
-    let memory_registry = memory.database_uri(lash_sqlite_store::SqliteDatabase::ProcessRegistry);
-    let file_registry = file.database_uri(lash_sqlite_store::SqliteDatabase::ProcessRegistry);
+    let memory_registry = memory.database_uri();
+    let file_registry = file.database_uri();
     let backends: [(&str, &dyn StoreSet, ProcessResidue<'_>); 3] = [
         (
             "sqlite-memory",

@@ -327,8 +327,8 @@ The judge answers each item from the bundle and cites the file:
    finalized fleet epoch.
 7. **SQLite backup before migrate.** The E2E log prints the SQLite roll's
    migration backup after N+1's first turn and again after finalize: one
-   `manifest.json` in state `migrated`, naming all three databases, each
-   moving from a lower to a higher version. No backup existed before N+1
+   `manifest.json` in state `migrated`, naming the database file and moving
+   it from a lower to a higher version. No backup existed before N+1
    opened the store.
 
 Phase B, from its run directory:

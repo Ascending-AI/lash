@@ -725,10 +725,9 @@ pub(super) async fn verify_independent_session_meta_layout(
     let cases = session_meta_layout_cases();
     let sqlite_case_root = sqlite_root.join("session-meta-relational-contract");
     std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite metadata root");
-    let sqlite_path =
-        sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
+    let sqlite_path = sqlite_case_root.join("lash.db");
     let sqlite_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&sqlite_case_root)
+        lash_sqlite_store::SqliteStore::open(&sqlite_case_root.join("lash.db"))
             .await
             .expect("open SQLite metadata store"),
     );

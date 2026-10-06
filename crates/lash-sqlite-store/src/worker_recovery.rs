@@ -1,11 +1,11 @@
-use crate::{SqliteStore, schema_layout::Schema, sqlite_error};
+use crate::{SqliteStore, sqlite_error};
 use lash_core_execution::store::worker_recovery::*;
 use lash_store_sql::worker_recovery::WorkerRecoveryStatements;
 use rusqlite::OptionalExtension;
 use std::sync::LazyLock;
 
 static SQL: LazyLock<WorkerRecoveryStatements> =
-    LazyLock::new(|| WorkerRecoveryStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| WorkerRecoveryStatements::render(crate::schema_layout::MAIN));
 #[async_trait::async_trait]
 impl WorkerRecoveryStore for SqliteStore {
     async fn reserve(

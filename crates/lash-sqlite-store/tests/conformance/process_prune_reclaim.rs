@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use lash_core_execution::{DeploymentStore, ProcessExecutionEnvStore, ProcessRegistry};
-use lash_sqlite_store::SqliteDatabase;
 
 use super::SUBSTRATE;
 use crate::backend_fixture::TestBackend;
@@ -17,7 +16,7 @@ lash_conformance::process_prune_reclaim_tests!({
     let factory = backend.store().await as Arc<dyn DeploymentStore>;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(crate::blob_probe::SqliteBlobProbe::new(
-        backend.database_uri(SqliteDatabase::DurableCore),
+        backend.database_uri(),
         "fail_process_prune_blob_delete",
         None,
     ));

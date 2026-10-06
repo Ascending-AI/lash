@@ -9,10 +9,7 @@ sqlite crates/lash-sqlite-store/src/conn.rs::open_readonly  # PRAGMAs on a SQLIT
 sqlite crates/lash-sqlite-store/src/conn.rs::checkpoint_for_migration  # recovers the journal and checkpoints committed pages before migration; changes no store row
 sqlite crates/lash-sqlite-store/src/conn.rs::checkpoint_if_needed  # WAL checkpoint on its own connection; copies committed pages, changes no row
 sqlite crates/lash-sqlite-store/src/schema.rs::apply_pragmas  # connection PRAGMAs only (synchronous, foreign_keys, cache_size)
-sqlite crates/lash-sqlite-store/src/lifecycle.rs::attach_process_registry  # ATTACH names a schema on this connection and reads the registry's stamp; no row changes
-sqlite crates/lash-sqlite-store/src/process_registry/support.rs::with_attached_trigger_store  # ATTACH DATABASE names trigger_store on this connection; no schema or store row changes
 sqlite crates/lash-sqlite-store/src/location.rs::pin  # anchor connections that keep memdb databases alive; they run no statement
-sqlite crates/lash-sqlite-store/src/compat.rs::check_set  # SQLITE_OPEN_READ_ONLY connections that read each database's lash_compat row
 sqlite crates/lash-sqlite-store/src/compat.rs::verify_tolerant  # writes only its private in-memory baseline catalog, never the store
 sqlite crates/lash-sqlite-store/src/preflight.rs::read_compat_verdict  # runs verify_tolerant, whose writes go to its private in-memory baseline
 sqlite crates/lash-sqlite-store/src/session_meta.rs::load_session_meta  # one snapshot for the metadata read; the transaction writes nothing

@@ -1016,7 +1016,7 @@ fn assert_remote_round_trip(item: ProcessObservationItem, process_id: &ProcessId
 async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
     let dir = tempfile::tempdir().expect("facade tempdir");
     let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(dir.path())
+        lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
             .await
             .expect("open the file store set"),
     );

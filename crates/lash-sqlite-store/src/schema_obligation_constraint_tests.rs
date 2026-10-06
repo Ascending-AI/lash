@@ -141,7 +141,7 @@ fn sqlite_obligation_checks_reject_incomplete_variants() {
             }
         }
     }
-    assert_eq!(constraints, 11, "exercise every physical SQLite CHECK");
+    assert_eq!(constraints, 10, "exercise every physical SQLite CHECK");
     assert!(
         mismatches.is_empty(),
         "{} incorrect verdicts across {constraints} constraints:\n{}",

@@ -8,9 +8,7 @@ use lash_core_execution::store::{
 fn sql() -> &'static lash_store_sql::wait_receipts::WaitReceiptStatements {
     static SQL: std::sync::LazyLock<lash_store_sql::wait_receipts::WaitReceiptStatements> =
         std::sync::LazyLock::new(|| {
-            lash_store_sql::wait_receipts::WaitReceiptStatements::render(
-                crate::schema_layout::Schema::Main.dialect(),
-            )
+            lash_store_sql::wait_receipts::WaitReceiptStatements::render(crate::schema_layout::MAIN)
         });
     &SQL
 }
@@ -125,7 +123,7 @@ impl WaitReceiptStore for SqliteStore {
                     params![owner, clamp_epoch_ms(retired_at_ms)],
                 )?;
                 let tool_sql = lash_store_sql::tool_receipts::ToolReceiptStatements::render(
-                    crate::schema_layout::Schema::Main.dialect(),
+                    crate::schema_layout::MAIN,
                 );
                 tx.execute(
                     tool_sql.retire.sql(),

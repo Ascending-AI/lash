@@ -312,11 +312,10 @@ impl SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    /// Open a standalone registry at `path`, outside any store set.
+    /// Open a standalone registry on the database file at `path`, outside
+    /// any store set.
     ///
-    /// Test-only: a standalone registry has no trigger store attached, so it
-    /// cannot check a delivery's start against the delivery's binding
-    /// (FIG-4369). Hosts get their registry from a store set
+    /// Test-only: hosts get their registry from a store set
     /// ([`SqliteStoreSet::process_registry`](crate::SqliteStoreSet::process_registry)).
     #[cfg(feature = "testing")]
     #[doc(hidden)]
@@ -336,63 +335,29 @@ impl SqliteProcessRegistry {
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         crate::location::validate_file_database_path(path, "SqliteProcessRegistry")?;
-        Self::open_at(&DatabaseLocation::standalone_file(path), clock, None).await
+        let location = DatabaseLocation::standalone_file(path);
+        let conn = SqliteConnection::open(location.target()).await?;
+        ensure_versioned_schema(&conn).await?;
+        apply_pragmas(&conn).await?;
+        Ok(Self::on_connection(conn, location, clock))
     }
 
-    /// The registry at `location`.
-    pub(crate) async fn open_at(
-        location: &DatabaseLocation,
+    /// The registry over `conn`, a connection on the deployment's database
+    /// whose installer has run: its writes share the one writer gate with
+    /// every other table of the database.
+    pub(crate) fn on_connection(
+        conn: SqliteConnection,
+        location: DatabaseLocation,
         clock: Arc<dyn lash_core_execution::Clock>,
-        #[cfg(feature = "testing")] pauses: Option<crate::testing::SqlitePauses>,
-    ) -> tokio_rusqlite::Result<Self> {
-        #[cfg(feature = "testing")]
-        let conn = SqliteConnection::open_with_pauses(
-            location.target(),
-            SqliteConnectionPolicy::default(),
-            pauses,
-        )
-        .await?;
-        #[cfg(not(feature = "testing"))]
-        let conn = SqliteConnection::open(location.target()).await?;
-        ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry).await?;
-        apply_pragmas(&conn).await?;
-        Ok(Self {
+    ) -> Self {
+        Self {
             conn,
             clock,
             wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
-            location: location.clone(),
+            location,
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
-            trigger_delivery_bindings: super::TriggerDeliveryBindings::Detached,
-        })
-    }
-
-    /// Attach the durable core so pruning arms its referrer fence atomically.
-    pub(crate) async fn with_attached_durable_core(
-        mut self,
-        core: &DatabaseLocation,
-    ) -> tokio_rusqlite::Result<Self> {
-        self.conn
-            .attach(crate::connection_sql::ATTACH_DURABLE_CORE, core.target())
-            .await?;
-        Ok(self)
-    }
-
-    /// Attach the store set's trigger store at `triggers` to this registry's
-    /// connection, so a delivery's start is registered against the
-    /// delivery's binding (FIG-4369).
-    pub(crate) async fn with_attached_trigger_store(
-        mut self,
-        triggers: &DatabaseLocation,
-    ) -> tokio_rusqlite::Result<Self> {
-        self.conn
-            .attach(
-                crate::connection_sql::ATTACH_TRIGGER_STORE,
-                triggers.target(),
-            )
-            .await?;
-        self.trigger_delivery_bindings = super::TriggerDeliveryBindings::Attached;
-        Ok(self)
+        }
     }
 
     /// Mint registered process ids from `mint` instead of at random: a fixture

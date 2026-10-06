@@ -86,7 +86,7 @@ async fn s17(permutation: Permutation) -> Result<()> {
             ready.protocol == 7 && ready.process.pid > 0,
             "workbench did not boot a real V7 process"
         );
-        let store_root = lease.directory.join("workbench-data/lash-sessions");
+        let store_path = lease.directory.join("workbench-data/lash-sessions.db");
         // One store set answers every store read of this case.
         let stores: Arc<dyn lash::StoreSet> = match &postgres_url {
             Some(url) => {
@@ -98,7 +98,7 @@ async fn s17(permutation: Permutation) -> Result<()> {
                     )),
                 ))
             },
-            None => Arc::new(lash::sqlite::SqliteStoreSet::open(&store_root).await?),
+            None => Arc::new(lash::sqlite::SqliteStoreSet::open(&store_path).await?),
         };
         let created = host
             .command(HostCommand::Process {

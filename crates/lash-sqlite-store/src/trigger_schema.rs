@@ -1,17 +1,10 @@
-//! The trigger store's database: subscriptions, occurrences and the
-//! tombstones of reclaimed ones, the deliveries an occurrence reserved (each a
-//! `TriggerDelivery` obligation, ADR 0109) and mutation receipts. Its version is `lash_core_store::compat::SQLITE_TRIGGERS_SCHEMA_VERSION`.
+//! The trigger store's tables: subscriptions, occurrences and the tombstones
+//! of reclaimed ones, the deliveries an occurrence reserved (each a
+//! `TriggerDelivery` obligation, ADR 0109) and mutation receipts. They are
+//! provisioned in the deployment's one database, versioned by
+//! `lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION`.
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS lash_compat (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    component TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    min_reader INTEGER NOT NULL,
-    fleet_format INTEGER NOT NULL,
-    CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version AND fleet_format >= 1)
-);
-
 CREATE TABLE IF NOT EXISTS trigger_subscription_change_clock (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     current_seq INTEGER NOT NULL CHECK (current_seq >= 0),

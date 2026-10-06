@@ -138,7 +138,7 @@ pub(super) struct Shared {
     namespace: String,
     stores: Arc<dyn lash::StoreSet>,
     pub(super) postgres: Option<lash_postgres_store::PostgresStorage>,
-    pub(super) store_root: PathBuf,
+    pub(super) store_path: PathBuf,
     pub(super) chat: Mutex<Option<String>>,
     artifacts: Vec<ArtifactIdentity>,
     /// The successor's advertised transport, when the row owns one.
@@ -233,7 +233,7 @@ impl Shared {
     fn store_identity(&self) -> serde_json::Value {
         match &self.postgres {
             Some(storage) => json!(format!("postgres:{}", storage.catalog_id())),
-            None => json!(self.store_root.join("durable-core.db")),
+            None => json!(self.store_path),
         }
     }
     async fn retained_cancel(&self, work: &WorkIdentity, evidence: &mut Evidence) -> Result<()> {
@@ -291,7 +291,7 @@ impl Shared {
                 .await?
             }
             None => {
-                let path = self.store_root.join("durable-core.db");
+                let path = self.store_path.clone();
                 tokio::task::spawn_blocking(move || -> Result<Vec<(String,String)>> {
                     let db = rusqlite::Connection::open_with_flags(path,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
                     let mut query = db.prepare("SELECT turn_id,result_json FROM runtime_turn_commits WHERE session_id=?1 ORDER BY change_seq")?;
@@ -570,7 +570,7 @@ impl Shared {
             .await?
             .flatten(),
             None => {
-                let path = self.store_root.join("durable-core.db");
+                let path = self.store_path.clone();
                 tokio::task::spawn_blocking(move || -> Result<Option<String>> {
                     let db = rusqlite::Connection::open_with_flags(
                         path,
@@ -1158,7 +1158,7 @@ pub async fn run(row: Row, permutation: Permutation) -> Result<()> {
         base + 11,
     )?
     .configure(environment)?;
-    let store_root = lease.directory.join("workbench-data/lash-sessions");
+    let store_path = lease.directory.join("workbench-data/lash-sessions.db");
     let (stores, postgres): (Arc<dyn lash::StoreSet>, _) = match permutation.store {
         StoreKind::PostgreSql => {
             let storage = lash_postgres_store::PostgresStorage::connect(
@@ -1178,7 +1178,7 @@ pub async fn run(row: Row, permutation: Permutation) -> Result<()> {
             )
         }
         StoreKind::SqliteFile => (
-            Arc::new(lash::sqlite::SqliteStoreSet::open(&store_root).await?),
+            Arc::new(lash::sqlite::SqliteStoreSet::open(&store_path).await?),
             None,
         ),
         StoreKind::SqliteMemory => bail!("H2 workbench rows need a persistent store"),
@@ -1201,7 +1201,7 @@ pub async fn run(row: Row, permutation: Permutation) -> Result<()> {
         namespace: lease.namespace.clone(),
         stores,
         postgres,
-        store_root,
+        store_path,
         chat: Mutex::new(None),
         artifacts: vec![server.clone(), artifact.clone()],
         successor_proxy: Mutex::new(successor_proxy),

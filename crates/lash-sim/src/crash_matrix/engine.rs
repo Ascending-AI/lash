@@ -511,23 +511,16 @@ impl Engine {
             },
             Self::Live(live) => Arc::clone(live.stores()),
         };
-        let mut cells = Vec::new();
-        for database in [
-            lash_sqlite_store::SqliteDatabase::DurableCore,
-            lash_sqlite_store::SqliteDatabase::ProcessRegistry,
-            lash_sqlite_store::SqliteDatabase::Triggers,
-        ] {
-            cells.extend(
-                lash_sqlite_store::testing::read_stored_cells_for_testing(&sqlite, database)?
-                    .into_iter()
-                    .map(|cell| StoredCell {
-                        location: format!("sqlite/{}", cell.location),
-                        bytes: cell.bytes,
-                        documents: cell.documents,
-                    }),
-            );
-        }
-        Ok(cells)
+        Ok(
+            lash_sqlite_store::testing::read_stored_cells_for_testing(&sqlite)?
+                .into_iter()
+                .map(|cell| StoredCell {
+                    location: format!("sqlite/{}", cell.location),
+                    bytes: cell.bytes,
+                    documents: cell.documents,
+                })
+                .collect(),
+        )
     }
 
     /// `id`'s journal commands, named.

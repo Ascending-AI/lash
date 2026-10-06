@@ -27,11 +27,8 @@
 //!   process-wide gate (FIG-3975), taken on the connection thread before
 //!   `BEGIN IMMEDIATE` and released when the transaction ends, so in-process
 //!   contention wakes on the gate's release rather than sleeping in SQLite's
-//!   busy handler. `BEGIN IMMEDIATE` write-locks every attached database too,
-//!   so a connection takes the gate of each database it has attached as
-//!   well, in one process-wide order (FIG-5061); otherwise two connections
-//!   that attach each other's databases lock them in opposite orders and
-//!   hold each other for the whole busy timeout. The gate is never held
+//!   busy handler. A deployment is one database file (ADR 0132 §12), so one
+//!   gate orders every writer of every table in it. The gate is never held
 //!   across an `.await`, so a suspended caller cannot keep it.
 //!   `busy_timeout` still stands for writers in other processes.
 //!
@@ -60,14 +57,13 @@ use std::path::PathBuf;
 #[cfg(feature = "perf-witness")]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, RwLock, Weak};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock, Weak};
 use std::time::Duration;
 #[cfg(feature = "perf-witness")]
 use std::time::Instant;
 mod worker;
 use worker::Connection as AsyncConnection;
 
-use crate::SqliteDatabase;
 use crate::location::DatabaseTarget;
 
 /// Outcome a write flow returns to decide commit vs rollback while still
@@ -249,43 +245,6 @@ fn write_gate(target: &DatabaseTarget) -> Arc<Mutex<()>> {
     gate
 }
 
-/// The write gates of every database a connection's `BEGIN IMMEDIATE` locks:
-/// its own and each one attached to it, because SQLite write-locks every
-/// attached database at `BEGIN IMMEDIATE` (FIG-5061). They are held in one
-/// process-wide order, by canonical name, so two connections that lock an
-/// overlapping set of databases take the gates they share in the same order.
-#[derive(Clone)]
-struct WriteGates(Arc<[(String, Arc<Mutex<()>>)]>);
-
-impl WriteGates {
-    fn of(target: &DatabaseTarget) -> Self {
-        Self(Arc::from([(target.canonical_name(), write_gate(target))]))
-    }
-
-    /// These gates and `target`'s, in order.
-    fn with(&self, target: &DatabaseTarget) -> Self {
-        let key = target.canonical_name();
-        if self.0.iter().any(|(name, _)| *name == key) {
-            return self.clone();
-        }
-        let mut gates = self.0.to_vec();
-        gates.push((key, write_gate(target)));
-        gates.sort_by(|(left, _), (right, _)| left.cmp(right));
-        Self(gates.into())
-    }
-
-    /// Take every gate in order; each is held until its guard drops.
-    fn lock(&self) -> Vec<MutexGuard<'_, ()>> {
-        self.0
-            .iter()
-            .map(|(_, gate)| {
-                gate.lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-            })
-            .collect()
-    }
-}
-
 fn read_gate(target: &DatabaseTarget) -> Arc<RwLock<()>> {
     let key = target.canonical_name();
     let mut gates = READ_GATES
@@ -427,8 +386,8 @@ fn is_busy(err: &rusqlite::Error) -> bool {
 
 /// A connection's writer fence (ADR 0115 §2.2), shared by its clones.
 ///
-/// The installer arms it with the database the connection writes and the
-/// build's writable range for `F`. Until then no write passes it.
+/// The installer arms it with the build's writable range for `F`. Until then
+/// no write passes it.
 #[derive(Debug)]
 struct WriterFence {
     armed: OnceLock<ArmedFence>,
@@ -440,7 +399,6 @@ struct WriterFence {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ArmedFence {
-    database: SqliteDatabase,
     writable: VersionRange,
 }
 
@@ -483,7 +441,7 @@ impl WriterFence {
                 },
             ));
         };
-        let fleet = crate::compat::fence(tx, armed.database, armed.writable)?;
+        let fleet = crate::compat::fence(tx, armed.writable)?;
         Ok(self.observe(fleet))
     }
 
@@ -546,10 +504,9 @@ impl<'c> std::ops::Deref for FencedTx<'c> {
 #[derive(Clone)]
 pub(crate) struct SqliteConnection {
     inner: AsyncConnection,
-    /// The gates every in-process writer to this connection's databases
-    /// queues on (FIG-3975): one per database, shared by all connections
-    /// that lock it.
-    write_gates: WriteGates,
+    /// The gate every in-process writer to this connection's database queues
+    /// on (FIG-3975), shared by all connections that open it.
+    write_gate: Arc<Mutex<()>>,
     read_gate: Arc<RwLock<()>>,
     checkpoint: Option<Arc<CheckpointState>>,
     fence: Arc<WriterFence>,
@@ -631,7 +588,7 @@ impl SqliteConnection {
         Ok(Self {
             inner,
             checkpoint: checkpoint_state(target, &gate, &reads, policy.wal_autocheckpoint_pages),
-            write_gates: WriteGates::of(target),
+            write_gate: gate,
             read_gate: reads,
             fence: WriterFence::new(),
             #[cfg(feature = "testing")]
@@ -662,7 +619,7 @@ impl SqliteConnection {
             .await?;
         Ok(Self {
             inner,
-            write_gates: WriteGates::of(target),
+            write_gate: write_gate(target),
             read_gate: read_gate(target),
             checkpoint: None,
             fence: WriterFence::new(),
@@ -674,14 +631,13 @@ impl SqliteConnection {
     /// Read a migration stamp without provisioning or changing the database.
     pub(crate) async fn migration_stamp(
         target: &DatabaseTarget,
-        database: SqliteDatabase,
         busy_timeout: Duration,
     ) -> rusqlite::Result<Option<lash_core_execution::compat::CompatStamp>> {
         let connection = flatten(Self::open_readonly(target).await.map(Ok))?;
         let result = connection
             .call(move |c| {
                 c.busy_timeout(busy_timeout)?;
-                crate::compat::read(c, database).map(|row| row.map(|(stamp, _)| stamp))
+                crate::compat::read(c).map(|row| row.map(|(stamp, _)| stamp))
             })
             .await;
         let closed = flatten(connection.inner.close().await.map(Ok));
@@ -783,23 +739,6 @@ impl SqliteConnection {
         )
     }
 
-    /// Attach `target` under the schema `attach_sql` names. `BEGIN
-    /// IMMEDIATE` write-locks every attached database, so this connection's
-    /// writers queue on `target`'s gate from now on as well (FIG-5061).
-    pub(crate) async fn attach(
-        &mut self,
-        attach_sql: &'static str,
-        target: &DatabaseTarget,
-    ) -> rusqlite::Result<()> {
-        let name = target.open_name();
-        self.call(move |conn| {
-            cached_execute(conn, attach_sql, rusqlite::params![name]).map(|_| ())
-        })
-        .await?;
-        self.write_gates = self.write_gates.with(target);
-        Ok(())
-    }
-
     /// The epoch `F` the most recent fence on this connection read (ADR 0115
     /// §2.3), or the installer's admitted `F` before any write.
     pub(crate) fn fleet(&self) -> FleetFormat {
@@ -821,18 +760,13 @@ impl SqliteConnection {
     /// database's `lash_compat` row exists, so it is not fenced. `f` admits
     /// or provisions the database's stamp and answers the admitted `F`,
     /// inside the same `BEGIN IMMEDIATE`; on success the fence is armed with
-    /// `database` and `writable`, and every later write on this connection or
-    /// its clones passes it.
-    pub(crate) async fn install<F>(
-        &self,
-        database: SqliteDatabase,
-        writable: VersionRange,
-        f: F,
-    ) -> rusqlite::Result<()>
+    /// `writable`, and every later write on this connection or its clones
+    /// passes it.
+    pub(crate) async fn install<F>(&self, writable: VersionRange, f: F) -> rusqlite::Result<()>
     where
         F: FnOnce(&Transaction<'_>) -> rusqlite::Result<FleetFormat> + Send + 'static,
     {
-        let write_gates = self.write_gates.clone();
+        let write_gate = Arc::clone(&self.write_gate);
         let read_gate = Arc::clone(&self.read_gate);
         let fleet = flatten(
             self.inner
@@ -840,7 +774,9 @@ impl SqliteConnection {
                     let _read_gate = read_gate
                         .read()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    let _write_gates = write_gates.lock();
+                    let _write_gate = write_gate
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
                     let fleet = f(&tx)?;
                     tx.commit()?;
@@ -848,11 +784,10 @@ impl SqliteConnection {
                 })
                 .await,
         )?;
-        let armed = ArmedFence { database, writable };
+        let armed = ArmedFence { writable };
         if *self.fence.armed.get_or_init(|| armed) != armed {
             return Err(crate::compat::malformed(
-                database,
-                "the connection is already armed for another database or range",
+                "the connection is already armed for another range",
             ));
         }
         self.fence.observe(fleet);
@@ -889,7 +824,7 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&FencedTx<'_>) -> rusqlite::Result<TxOutcome<T>> + Send + 'static,
     {
-        let write_gates = self.write_gates.clone();
+        let write_gate = Arc::clone(&self.write_gate);
         let read_gate = Arc::clone(&self.read_gate);
         let checkpoint = self.checkpoint.clone();
         let fence = Arc::clone(&self.fence);
@@ -903,7 +838,9 @@ impl SqliteConnection {
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     #[cfg(feature = "perf-witness")]
                     let waiting_since = Instant::now();
-                    let _write_gates = write_gates.lock();
+                    let write_gate = write_gate
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     #[cfg(feature = "perf-witness")]
                     let wait = waiting_since.elapsed();
                     #[cfg(feature = "perf-witness")]
@@ -935,7 +872,7 @@ impl SqliteConnection {
                     })();
                     #[cfg(feature = "perf-witness")]
                     let hold = holding_since.elapsed();
-                    drop(_write_gates);
+                    drop(write_gate);
                     #[cfg(feature = "perf-witness")]
                     record_gate_timing(wait, hold);
                     if result.is_ok()
@@ -981,7 +918,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     /// A connection to a bare scratch database whose installer laid down only
-    /// the durable core's `lash_compat` row, so its writes pass the fence.
+    /// its `lash_compat` row, so its writes pass the fence.
     async fn installed(
         target: &DatabaseTarget,
         policy: SqliteConnectionPolicy,
@@ -990,7 +927,7 @@ mod tests {
             .await
             .expect("open scratch connection");
         connection
-            .install(SqliteDatabase::DurableCore, FleetFormat::writable(), |tx| {
+            .install(FleetFormat::writable(), |tx| {
                 tx.execute_batch(
                     "CREATE TABLE IF NOT EXISTS lash_compat (
                              singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -1000,12 +937,8 @@ mod tests {
                              fleet_format INTEGER NOT NULL
                          )",
                 )?;
-                if crate::compat::read(tx, SqliteDatabase::DurableCore)?.is_none() {
-                    crate::compat::provision(
-                        tx,
-                        SqliteDatabase::DurableCore,
-                        FleetFormat::writable(),
-                    )?;
+                if crate::compat::read(tx)?.is_none() {
+                    crate::compat::provision(tx, FleetFormat::writable())?;
                 }
                 Ok(FleetFormat::current())
             })
@@ -1186,87 +1119,6 @@ mod tests {
             BUSY_SLEEPS.load(Ordering::SeqCst),
             0,
             "an in-process writer slept in SQLite's busy handler"
-        );
-    }
-
-    static CROSS_ATTACHED_BUSY_SLEEPS: AtomicUsize = AtomicUsize::new(0);
-
-    fn counting_cross_attached_busy_handler(previous_invocations: i32) -> bool {
-        CROSS_ATTACHED_BUSY_SLEEPS.fetch_add(1, Ordering::SeqCst);
-        std::thread::sleep(Duration::from_millis(1));
-        previous_invocations < 5_000
-    }
-
-    /// FIG-5061: `BEGIN IMMEDIATE` write-locks every attached database, and a
-    /// store set's durable core and process registry attach each other, so
-    /// their writers lock the same two files in opposite orders. A writer
-    /// that took only its own database's gate slept in SQLite's busy handler
-    /// while holding its first lock, and two such writers held each other
-    /// for the whole busy timeout. Writers on both sides must queue on the
-    /// gate of every database they lock, so none ever sleeps in SQLite.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn writers_over_cross_attached_databases_queue_without_a_busy_sleep() {
-        let dir = tempfile::tempdir().expect("cross-attach test tempdir");
-        let core = DatabaseTarget::File(dir.path().join("core.db"));
-        let registry = DatabaseTarget::File(dir.path().join("registry.db"));
-        for target in [&core, &registry] {
-            installed(target, SqliteConnectionPolicy::default())
-                .await
-                .write(|tx| {
-                    tx.execute_batch("CREATE TABLE writes_seen (n INTEGER)")?;
-                    Ok(())
-                })
-                .await
-                .expect("create the contention table");
-        }
-        let mut connections = Vec::with_capacity(8);
-        for (target, attached, attach_sql) in [
-            (
-                &core,
-                &registry,
-                crate::connection_sql::ATTACH_PROCESS_REGISTRY,
-            ),
-            (&registry, &core, crate::connection_sql::ATTACH_DURABLE_CORE),
-        ] {
-            for _ in 0..4 {
-                let mut connection = installed(target, SqliteConnectionPolicy::default()).await;
-                connection
-                    .attach(attach_sql, attached)
-                    .await
-                    .expect("attach the other database");
-                connection
-                    .call(|c| c.busy_handler(Some(counting_cross_attached_busy_handler)))
-                    .await
-                    .expect("install the counting busy handler");
-                connections.push(connection);
-            }
-        }
-        CROSS_ATTACHED_BUSY_SLEEPS.store(0, Ordering::SeqCst);
-        let mut writers = Vec::new();
-        for connection in connections {
-            writers.push(tokio::spawn(async move {
-                for _ in 0..50 {
-                    connection
-                        .write(|tx| {
-                            crate::conn::cached_execute(
-                                tx,
-                                "INSERT INTO main.writes_seen VALUES (1)",
-                                [],
-                            )?;
-                            Ok(())
-                        })
-                        .await
-                        .expect("queued write");
-                }
-            }));
-        }
-        for writer in writers {
-            writer.await.expect("writer task");
-        }
-        assert_eq!(
-            CROSS_ATTACHED_BUSY_SLEEPS.load(Ordering::SeqCst),
-            0,
-            "a writer over cross-attached databases slept in SQLite's busy handler"
         );
     }
 }

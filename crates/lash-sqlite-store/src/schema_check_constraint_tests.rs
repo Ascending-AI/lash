@@ -571,18 +571,6 @@ fn trigger_delivery_cannot_settle_without_binding() {
 }
 
 #[test]
-fn cleanup_referrer_has_exactly_one_database_owner() {
-    for (schema, refused) in [(SCHEMA, "process_record"), (PROCESS_SCHEMA, "host_pin")] {
-        let conn = Connection::open_in_memory().expect("cleanup fixture");
-        conn.execute_batch(schema).expect("schema");
-        assert_check_rejects(&conn, &format!("INSERT INTO artifact_cleanup_obligations
-            (referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms)
-            VALUES ('{refused}', 'referrer', '{{}}', 'obligation', 'due', 0)"),
-            "ck_artifact_cleanup_obligations_database");
-    }
-}
-
-#[test]
 fn park_feed_columns_refuse_mixed_variants_and_closing_generations() {
     let conn = Connection::open_in_memory().expect("park feed fixture");
     conn.execute_batch(SCHEMA).expect("schema");

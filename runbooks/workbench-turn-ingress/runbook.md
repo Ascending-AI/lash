@@ -63,7 +63,7 @@ structure rather than exact assistant wording.
   from `#runningActions`.
 - HTTP truth: `GET /api/state`, `POST /api/turn`, and `POST /api/turn/input` with
   `{ "text": "...", "ingress": "active_turn" | "next_turn" }`.
-- Disk truth: `<data-dir>/lash-sessions/durable-core.db`, table `pending_turn_inputs` — note
+- Disk truth: `<data-dir>/lash-sessions.db`, table `pending_turn_inputs` — note
   an ordinary composer **send** also lands there, with `ingress {"scope":"next_turn"}`, so a
   one-send run holds three rows, not two — and
   `<data-dir>/trace.jsonl` events named `agent_workbench.turn_input.enqueued` and

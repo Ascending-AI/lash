@@ -16,9 +16,7 @@ async fn open_factory_catalog(
     let conn = SqliteConnection::open_with_policy(catalog.target(), policy)
         .await
         .map_err(|err| lash_core_execution::StoreError::Backend(err.to_string()))?;
-    ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
-        .await
-        .map_err(sqlite_error)?;
+    ensure_versioned_schema(&conn).await.map_err(sqlite_error)?;
     Ok(conn)
 }
 
@@ -372,9 +370,7 @@ mod tests {
             cache_size: -4096,
         };
         let conn = open_factory_catalog(
-            &crate::location::DatabaseLocation::standalone_file(
-                &dir.path().join(crate::DURABLE_CORE_DB_FILE),
-            ),
+            &crate::location::DatabaseLocation::standalone_file(&dir.path().join("lash.db")),
             policy,
         )
         .await

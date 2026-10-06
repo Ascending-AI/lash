@@ -45,9 +45,9 @@ pub(crate) mod walk;
 
 use crate::conn::SqliteConnection;
 use crate::location::{DatabaseTarget, SqliteLocation};
-use crate::schema::SqliteDatabase;
+use crate::schema::COMPONENT;
 
-/// Read one SQLite database's recorded schema version and compare it against
+/// Read a SQLite database's recorded schema version and compare it against
 /// this build, without opening the store.
 ///
 /// This is SQLite's counterpart to `PostgresStorage::verify_schema_for`: it
@@ -55,33 +55,24 @@ use crate::schema::SqliteDatabase;
 /// drift. Every older generation is a refusal at the BLAKE3 boundary. A database that exists but cannot
 /// be read yields [`StoreSchemaVerdict::Unreadable`] carrying SQLite's own
 /// words, because an unreadable database is undecided rather than refused.
-///
-/// It answers for one file alone: whether the *set* the file belongs to is
-/// complete is [`SqliteStorePreflight`]'s question, not this one's.
-pub async fn verify_schema_at(path: &Path, database: SqliteDatabase) -> StoreSchemaDatabase {
-    verify_schema_target(&DatabaseTarget::File(path.to_path_buf()), database).await
+pub async fn verify_schema_at(path: &Path) -> StoreSchemaDatabase {
+    verify_schema_target(&DatabaseTarget::File(path.to_path_buf())).await
 }
 
-/// One store-set member's report row, read through its location-derived target.
-async fn verify_schema_target(
-    target: &DatabaseTarget,
-    database: SqliteDatabase,
-) -> StoreSchemaDatabase {
-    let (verdict, min_reader) = read_compat_verdict(target, database).await;
+/// The store's report row, read through its location-derived target.
+async fn verify_schema_target(target: &DatabaseTarget) -> StoreSchemaDatabase {
+    let (verdict, min_reader) = read_compat_verdict(target).await;
     StoreSchemaDatabase {
-        name: database.name().to_string(),
+        name: crate::schema::DATABASE_NAME.to_string(),
         location: target.to_string(),
-        expected: database.expected_version(),
+        expected: crate::schema::expected_version(),
         min_reader,
         verdict,
     }
 }
 
 /// Inspect the authoritative compatibility row without changing the file.
-async fn read_compat_verdict(
-    target: &DatabaseTarget,
-    database: SqliteDatabase,
-) -> (StoreSchemaVerdict, Option<i64>) {
+async fn read_compat_verdict(target: &DatabaseTarget) -> (StoreSchemaVerdict, Option<i64>) {
     if !target.exists() {
         return (StoreSchemaVerdict::Absent, None);
     }
@@ -104,12 +95,12 @@ async fn read_compat_verdict(
             // statement that would write fails here, including the implicit
             // ones a pragma could trigger.
             c.pragma_update(None, "query_only", true)?;
-            let Some((stamp, fleet)) = crate::compat::read(c, database)? else {
+            let Some((stamp, fleet)) = crate::compat::read(c)? else {
                 return if crate::schema::has_user_schema_objects(c)? {
                     Ok((
                         StoreSchemaVerdict::Refused {
                             refusal: lash_core_execution::compat::CompatRefusal::Unstamped {
-                                component: database.component().as_str().to_owned(),
+                                component: COMPONENT.as_str().to_owned(),
                                 writing_release: None,
                             },
                         },
@@ -119,7 +110,7 @@ async fn read_compat_verdict(
                     Ok((StoreSchemaVerdict::Absent, None))
                 };
             };
-            let descriptor = lash_core_execution::compat::descriptor(database.component())
+            let descriptor = lash_core_execution::compat::descriptor(COMPONENT)
                 .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
             let floor = Some(i64::from(stamp.min_reader));
             let admission = match lash_core_execution::compat::admit(
@@ -147,7 +138,7 @@ async fn read_compat_verdict(
             }
             let verdict = match admission {
                 lash_core_execution::compat::CompatAdmission::Expanded { .. } => {
-                    match crate::compat::verify_tolerant(c, database) {
+                    match crate::compat::verify_tolerant(c) {
                         Ok(()) => StoreSchemaVerdict::Expanded {
                             found: i64::from(stamp.version),
                         },
@@ -169,7 +160,7 @@ async fn read_compat_verdict(
                     }
                 }
                 lash_core_execution::compat::CompatAdmission::Native
-                    if stamp.version < crate::migration::target_version(database)? =>
+                    if stamp.version < crate::migration::target_version()? =>
                 {
                     StoreSchemaVerdict::Migratable {
                         found: i64::from(stamp.version),
@@ -190,7 +181,7 @@ async fn read_compat_verdict(
     })
 }
 
-/// Read the release stamp the durable core carries, read-only.
+/// Read the release stamp the database carries, read-only.
 ///
 /// An absent database reports [`StoreReleaseState::Unstamped`] on purpose: the
 /// deployment records no writing release, and that is the same answer a host
@@ -224,7 +215,7 @@ async fn read_release_state(target: &DatabaseTarget) -> StoreReleaseState {
     }
 }
 
-/// Read the fleet-format row the durable core carries, read-only.
+/// Read the fleet-format row the database carries, read-only.
 ///
 /// Same discipline as [`read_release_state`]: an absent database or an absent
 /// row is [`FleetFormatState::Unrecorded`] — the deployment records no fleet
@@ -256,41 +247,36 @@ async fn read_fleet_format_state(target: &DatabaseTarget) -> FleetFormatState {
     }
 }
 
-/// A read-only handle over a SQLite store set, built from the same
+/// A read-only handle over a SQLite store, built from the same
 /// [`SqliteLocation`] the open path opens.
 ///
 /// Construction opens nothing: the location is recorded and read only when
-/// [`StorePreflight::schema_status`] is called. The location owns the set's
-/// three database targets, so the probe answers for exactly the set
-/// `SqliteStoreSet::open` would open — including the case open refuses: a
-/// file root holding only some of the three databases reports the missing
-/// members as [`CompatRefusal::IncompleteStoreSet`](lash_core_execution::compat::CompatRefusal::IncompleteStoreSet)
-/// rather than [`StoreSchemaVerdict::Absent`], because no open will provision
-/// them.
+/// [`StorePreflight::schema_status`] is called, so the probe answers for
+/// exactly the database `SqliteStoreSet::open` would open.
 #[derive(Clone, Debug)]
 pub struct SqliteStorePreflight {
     location: SqliteLocation,
 }
 
 impl SqliteStorePreflight {
-    /// The store set at `location`, the same value `SqliteStoreSet` keeps.
+    /// The store at `location`, the same value `SqliteStoreSet` keeps.
     ///
-    /// A file root is canonicalized the way the open path canonicalizes it, so
-    /// the report's identity matches the store set's.
+    /// A file path is canonicalized the way the open path canonicalizes it,
+    /// so the report's identity matches the store set's.
     pub fn for_location(location: SqliteLocation) -> Self {
         let location = match location {
-            SqliteLocation::File { root } => SqliteLocation::File {
-                root: crate::location::canonical_path(&root),
+            SqliteLocation::File { path } => SqliteLocation::File {
+                path: crate::location::canonical_path(&path),
             },
             memory => memory,
         };
         Self { location }
     }
 
-    /// The file store set under `root` — the same root
+    /// The file store in the database file at `path`: the same path
     /// [`SqliteStoreSet::open`](crate::SqliteStoreSet::open) takes.
-    pub fn for_store_root(root: impl Into<std::path::PathBuf>) -> Self {
-        Self::for_location(SqliteLocation::File { root: root.into() })
+    pub fn for_database_file(path: impl Into<std::path::PathBuf>) -> Self {
+        Self::for_location(SqliteLocation::File { path: path.into() })
     }
 }
 
@@ -299,61 +285,26 @@ impl StorePreflight for SqliteStorePreflight {
     fn backend(&self) -> StoreBackend {
         StoreBackend::Sqlite {
             location: match &self.location {
-                SqliteLocation::File { root } => root
-                    .join(SqliteDatabase::DurableCore.file_name())
-                    .display()
-                    .to_string(),
+                SqliteLocation::File { path } => path.display().to_string(),
                 SqliteLocation::Memory { id } => format!("memory:{id}"),
             },
         }
     }
 
     async fn schema_status(&self) -> Result<StoreSchemaStatus, StoreError> {
-        let core = self.location.target(SqliteDatabase::DurableCore);
-        let release = read_release_state(&core).await;
-        let fleet_format = read_fleet_format_state(&core).await;
-        // The complete-set rule `SqliteStoreSet::open` enforces: a file root
-        // holding only some of the three databases is refused whole, before
-        // recovery or migration. A missing member of such a set is a typed
-        // refusal — the open will not provision it — so the probe reports the
-        // same refusal rather than an `Absent` that would read as ready.
-        let missing = crate::compat::missing_files(&self.location).map_err(crate::sqlite_error)?;
-        let incomplete = if missing.is_empty() || missing.len() == SqliteDatabase::ALL.len() {
-            None
-        } else {
-            Some(
-                lash_core_execution::compat::CompatRefusal::IncompleteStoreSet {
-                    missing: missing
-                        .iter()
-                        .map(|database| database.name().to_owned())
-                        .collect(),
-                    writing_release: release.release().map(str::to_owned),
-                },
-            )
-        };
-        let mut databases = Vec::with_capacity(SqliteDatabase::ALL.len());
-        for database in SqliteDatabase::ALL {
-            let mut row = verify_schema_target(&self.location.target(database), database).await;
-            // The stamp is the whole store's: every database's floor refusal
-            // reads against the release that wrote the set.
-            if let StoreSchemaVerdict::Refused { refusal } = row.verdict {
-                row.verdict = StoreSchemaVerdict::Refused {
-                    refusal: refusal.read_against_release(
-                        release.release(),
-                        crate::release_stamp::BUILD_RELEASE,
-                    ),
-                };
-            }
-            if let Some(refusal) = incomplete.as_ref().filter(|_| missing.contains(&database)) {
-                row.min_reader = None;
-                row.verdict = StoreSchemaVerdict::Refused {
-                    refusal: refusal.clone(),
-                };
-            }
-            databases.push(row);
+        let target = self.location.target();
+        let release = read_release_state(&target).await;
+        let fleet_format = read_fleet_format_state(&target).await;
+        let mut row = verify_schema_target(&target).await;
+        // A floor refusal reads against the release that wrote the store.
+        if let StoreSchemaVerdict::Refused { refusal } = row.verdict {
+            row.verdict = StoreSchemaVerdict::Refused {
+                refusal: refusal
+                    .read_against_release(release.release(), crate::release_stamp::BUILD_RELEASE),
+            };
         }
         Ok(StoreSchemaStatus {
-            databases,
+            databases: vec![row],
             release,
             fleet_format,
         })

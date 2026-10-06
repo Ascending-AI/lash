@@ -79,7 +79,7 @@ ReleaseBaselineTests.test_release_values_match_declared_baseline` through
 gate's selection. The tooling laws run against both the pre-cut and reset trees.
 
 Each store component has one schema version: the PostgreSQL schema and the
-three SQLite databases each have a guarded constant in
+SQLite database each have a guarded constant in
 `crates/lash-core-store/src/compat.rs`, and the component's compat descriptor,
 its stamp, its release-stamp entry and its catalog's step numbers all read it.
 The synthetic-next build writes the version after it, so its catalog steps are

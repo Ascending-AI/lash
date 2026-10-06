@@ -13,7 +13,8 @@ use lash_core_execution::{
 use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
 
 struct SqliteBackend {
-    root: tempfile::TempDir,
+    /// Keeps the database's directory alive.
+    _root: tempfile::TempDir,
     durable_core: PathBuf,
 }
 
@@ -47,7 +48,7 @@ impl FleetFormatDeployment for SqliteBackend {
     }
 
     async fn preflight(&self) -> Result<StoreSchemaStatus, StoreError> {
-        SqliteStorePreflight::for_store_root(self.root.path())
+        SqliteStorePreflight::for_database_file(&self.durable_core)
             .schema_status()
             .await
     }
@@ -56,8 +57,11 @@ impl FleetFormatDeployment for SqliteBackend {
 #[tokio::test]
 async fn sqlite_fleet_format_conformance() {
     let root = tempfile::tempdir().expect("scratch directory");
-    let durable_core = root.path().join("durable-core.db");
-    let backend = SqliteBackend { root, durable_core };
+    let durable_core = root.path().join("lash.db");
+    let backend = SqliteBackend {
+        _root: root,
+        durable_core,
+    };
     fleet_format_conformance(&backend).await;
 }
 
@@ -72,7 +76,7 @@ const SEEDED: u32 = FleetFormat::seed(FleetFormat::writable()).version();
 #[tokio::test]
 async fn sqlite_session_meta_stamps_the_version_the_fleet_format_selects() {
     let root = tempfile::tempdir().expect("scratch directory");
-    let durable_core = root.path().join("durable-core.db");
+    let durable_core = root.path().join("lash.db");
     let fleet = FleetFormat::from_version(SEEDED).with_writer_pins(&[WriterPin {
         constant: "CURRENT_SESSION_STATE_VERSION",
         generation: SEEDED,

@@ -11,7 +11,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use lash_sqlite_store::{SqliteDatabase, SqliteStore, SqliteStoreSet, SqliteStoreSetOptions};
+use lash_sqlite_store::{SqliteStore, SqliteStoreSet, SqliteStoreSetOptions};
 
 /// Which kind of SQLite substrate a suite instance runs on.
 #[expect(
@@ -97,7 +97,7 @@ impl TestBackend {
             Substrate::File => {
                 let dir = tempfile::tempdir().expect("file backend tempdir");
                 let stores = SqliteStoreSet::open_with_options_and_clock(
-                    dir.path(),
+                    dir.path().join("lash.db"),
                     configure(SqliteStoreSetOptions::default()),
                     clock,
                 )
@@ -163,7 +163,7 @@ impl TestBackend {
         }
     }
 
-    /// The durable-core catalog store shared by this store set.
+    /// The catalog store shared by this store set.
     pub(crate) async fn store(&self) -> Arc<SqliteStore> {
         self.stores
             .open_store()
@@ -177,9 +177,9 @@ impl TestBackend {
         sync_await(async move { backend.store().await })
     }
 
-    /// A raw connection to `database`, for fault injection and inspection.
-    pub(crate) fn raw(&self, database: SqliteDatabase) -> rusqlite::Connection {
-        raw_connection(self.database_uri(database))
+    /// A raw connection to the database, for fault injection and inspection.
+    pub(crate) fn raw(&self) -> rusqlite::Connection {
+        raw_connection(self.database_uri())
     }
 }
 

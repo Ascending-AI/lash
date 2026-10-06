@@ -41,7 +41,6 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         let consumer_hold = registration.consumer_hold.clone();
         let trigger_delivery_pin = registration.trigger_delivery_pin.clone();
         let wake_delivery_config = self.wake_delivery_config;
-        let trigger_delivery_bindings = self.trigger_delivery_bindings;
         self.conn
             .write_flow(move |tx| {
                 let fleet_format = tx.fleet();
@@ -85,7 +84,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                     // so a bind and prune that landed since this start's
                     // ingest are seen here (ADR 0107 §5, FIG-4369).
                     if let Some(pin) = trigger_delivery_pin.as_ref() {
-                        trigger_delivery_bindings.check_start_conn(tx, pin)?;
+                        super::delivery_binding::check_start_conn(tx, pin)?;
                     }
                     let registration = prepare_process_registration(registration)?;
                     // Admission against closure (FIG-3607 R11): a new start is

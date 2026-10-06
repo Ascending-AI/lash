@@ -344,7 +344,9 @@ impl Live {
             }
             StoreKind::SqliteFile | StoreKind::SqliteMemory => {
                 let directory = self.case.sqlite_dir().context("the case's SQLite store")?;
-                std::sync::Arc::new(lash::sqlite::SqliteStoreSet::open(directory).await?)
+                std::sync::Arc::new(
+                    lash::sqlite::SqliteStoreSet::open(directory.join("lash.db")).await?,
+                )
             }
         })
     }

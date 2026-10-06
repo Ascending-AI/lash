@@ -6,7 +6,7 @@ every upgrade law reads and never regenerate them. This tool assembles that
 corpus out of the fixture trees the committed regeneration utilities produce
 rather than serializing anything new:
 
-- ``sqlite-stores``: the durable-read fixture's SQLite catalogs
+- ``sqlite-stores``: the durable-read fixture's SQLite database
   (``fixtures/durable-read/v1/sqlite/``), as the tagged build writes them;
 - ``postgres-store``: the durable-read fixture's PostgreSQL dump, version
   manifest, and expectations;
@@ -113,7 +113,7 @@ LEGS = (
         source="fixtures/durable-read/v1/sqlite",
         regenerate=(SQLITE_REGENERATE,),
         note=(
-            "the SQLite catalogs the tagged build's generator writes; "
+            "the SQLite database the tagged build's generator writes; "
             "expected.json and versions.json come along"
         ),
     ),
@@ -129,7 +129,7 @@ LEGS = (
     ),
     Leg(
         name="session-at-rest",
-        source="fixtures/durable-read/v1/sqlite/durable-core.db",
+        source="fixtures/durable-read/v1/sqlite/lash.db",
         regenerate=(SQLITE_REGENERATE,),
         note=(
             "the seeded `durable-read-fixture` session catalog at rest: session-state "

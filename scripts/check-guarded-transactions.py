@@ -197,7 +197,7 @@ def line_of(text: str, offset: int) -> int:
 # * `SqliteConnection::install`, the installer: the one write before the
 #   database's `lash_compat` row exists. It admits or provisions the stamp and
 #   `F` itself, inside the same transaction, and arms the fence.
-# * `compat::advance_set_observed`, a migration or finalize: it holds every
+# * `compat::advance_observed`, a migration or finalize: it holds the
 #   database under `BEGIN EXCLUSIVE`, so no writer runs beside it.
 #
 # A rusqlite transaction opened anywhere else, a raw connection opened outside
@@ -210,7 +210,7 @@ SQLITE_TEST_FILES = re.compile(r"(^|/)(tests?|test_support|testing|\w+_tests)\.r
 SQLITE_GUARDS = {
     "crates/lash-sqlite-store/src/conn.rs::write_flow",
     "crates/lash-sqlite-store/src/conn.rs::install",
-    "crates/lash-sqlite-store/src/compat.rs::advance_set_observed",
+    "crates/lash-sqlite-store/src/compat.rs::advance_observed",
 }
 SQLITE_TRANSACTION_CALL = re.compile(
     r"\.\s*(?:transaction_with_behavior|unchecked_transaction|transaction|savepoint(?:_with_name)?)\s*\("

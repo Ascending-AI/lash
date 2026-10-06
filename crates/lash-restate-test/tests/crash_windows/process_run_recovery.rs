@@ -54,9 +54,12 @@ impl Stores {
                     .unwrap(),
             ),
             Storage::File => Arc::new(
-                lash_sqlite_store::SqliteStoreSet::open_with_clock(directory.path(), clock)
-                    .await
-                    .unwrap(),
+                lash_sqlite_store::SqliteStoreSet::open_with_clock(
+                    directory.path().join("lash.db"),
+                    clock,
+                )
+                .await
+                .unwrap(),
             ),
             Storage::Postgres => {
                 let url = std::env::var("LASH_POSTGRES_DATABASE_URL")

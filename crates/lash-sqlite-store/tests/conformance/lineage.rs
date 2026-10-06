@@ -7,7 +7,7 @@ struct SqliteLineageConformanceInjector {
 #[async_trait::async_trait]
 impl LineageConformanceInjector for SqliteLineageConformanceInjector {
     async fn force_lineage(&self, session_id: &SessionId, ancestor_node_id: &str) {
-        let conn = self.backend.raw(SqliteDatabase::DurableCore);
+        let conn = self.backend.raw();
         let (ancestor_session_id, generation): (String, i64) = conn
             .query_row(
                 "SELECT session_id, generation FROM graph_nodes WHERE node_id = ?1",
@@ -30,7 +30,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
     }
 
     async fn tombstone_node(&self, node_id: &str) {
-        let conn = self.backend.raw(SqliteDatabase::DurableCore);
+        let conn = self.backend.raw();
         assert_eq!(
             conn.execute(
                 "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
@@ -45,7 +45,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
         &self,
         session_id: &SessionId,
     ) -> Vec<lash_core_execution::store::ForkLineageAncestor> {
-        let conn = self.backend.raw(SqliteDatabase::DurableCore);
+        let conn = self.backend.raw();
         let mut stmt = conn
             .prepare(
                 "SELECT ancestor_session_id, fork_node_id, fork_generation FROM fork_lineage
@@ -67,7 +67,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
 
     async fn edge_path(&self, session_id: &SessionId) -> Vec<GraphFactObservation> {
         let mut facts = self.all_graph_facts().await;
-        let conn = self.backend.raw(SqliteDatabase::DurableCore);
+        let conn = self.backend.raw();
         let mut current = conn
             .query_row(
                 "SELECT leaf_node_id FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1",
@@ -94,7 +94,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
     }
 
     async fn all_graph_facts(&self) -> Vec<GraphFactObservation> {
-        let conn = self.backend.raw(SqliteDatabase::DurableCore);
+        let conn = self.backend.raw();
         let mut stmt = conn
             .prepare(
                 "SELECT node.node_id, node.parent_node_id, node.session_id,

@@ -93,7 +93,7 @@ async fn event_release_differential_on_sqlite_memory_and_file() {
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("SQLite memory store set");
-    let file = lash_sqlite_store::SqliteStoreSet::open(directory.path().join("file"))
+    let file = lash_sqlite_store::SqliteStoreSet::open(directory.path().join("file.db"))
         .await
         .expect("SQLite file store set");
     let (_, memory_releases) = release_observations(memory.process_registry().as_ref()).await;
@@ -623,7 +623,7 @@ async fn prepared_registration_scope_matches_across_backends() {
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .unwrap_or_else(|error| panic!("SQLite memory: {error}"));
-    let file = lash_sqlite_store::SqliteStoreSet::open(root.path())
+    let file = lash_sqlite_store::SqliteStoreSet::open(root.path().join("lash.db"))
         .await
         .unwrap_or_else(|error| panic!("SQLite file: {error}"));
     let attachments =
@@ -724,7 +724,7 @@ async fn segment_handover_commit_matches_across_backends() {
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .unwrap_or_else(|error| panic!("SQLite memory: {error}"));
-    let file = lash_sqlite_store::SqliteStoreSet::open(root.path())
+    let file = lash_sqlite_store::SqliteStoreSet::open(root.path().join("lash.db"))
         .await
         .unwrap_or_else(|error| panic!("SQLite file: {error}"));
     let pg = postgres.process_registry();

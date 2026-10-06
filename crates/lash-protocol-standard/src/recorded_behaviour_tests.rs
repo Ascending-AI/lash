@@ -309,7 +309,7 @@ async fn on_sqlite_file(
         config,
         lash_restate_test::DeploymentHooks::default(),
         move |_clock| async move {
-            let stores = lash_sqlite_store::SqliteStoreSet::open(&path)
+            let stores = lash_sqlite_store::SqliteStoreSet::open(path.join("lash.db"))
                 .await
                 .map_err(|error| lash_restate_test::BackendError::Stores(error.to_string()))?;
             Ok(Arc::new(stores) as Arc<dyn lash_core::StoreSet>)

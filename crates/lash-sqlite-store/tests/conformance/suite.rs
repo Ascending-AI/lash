@@ -26,7 +26,6 @@ use lash_core_execution::{
     ProcessRegistrar as _, ProcessRegistry, ProcessStatusFilter, SessionCatalogStore,
     SessionCommitStore, TriggerStore,
 };
-use lash_sqlite_store::SqliteDatabase;
 
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
@@ -458,7 +457,7 @@ async fn session_head_pointer_requires_a_revision() {
         .admit_session(&root_session_request("head-pointer"))
         .await
         .expect("create a session with revision zero");
-    let conn = backend.raw(SqliteDatabase::DurableCore);
+    let conn = backend.raw();
     conn.execute_batch("PRAGMA foreign_keys = ON; BEGIN IMMEDIATE")
         .expect("begin pointer publication");
     conn.execute(
@@ -557,7 +556,7 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         )
         .await
         .expect("materialize catalog");
-    let connection = backend.raw(SqliteDatabase::DurableCore);
+    let connection = backend.raw();
     connection
         .execute_batch(
             "PRAGMA ignore_check_constraints = ON;
@@ -636,7 +635,7 @@ impl lash_conformance::TriggerOccurrenceListingFaultInjector
     for SqliteTriggerOccurrenceListingFaultInjector
 {
     async fn insert_malformed_occurrence(&self) {
-        let conn = self.backend.raw(SqliteDatabase::Triggers);
+        let conn = self.backend.raw();
         conn.execute(
             "INSERT INTO trigger_occurrences (
                 occurrence_id, idempotency_key, source_type, source_key,
@@ -656,7 +655,7 @@ impl lash_conformance::TriggerOccurrenceListingFaultInjector
 
     async fn make_occurrence_query_unavailable(&self) {
         self.backend
-            .raw(SqliteDatabase::Triggers)
+            .raw()
             .execute_batch("DROP TABLE trigger_occurrences")
             .expect("make SQLite occurrence query unavailable");
     }
@@ -667,11 +666,8 @@ struct SqliteFenceIntegrityInjector {
 }
 
 impl SqliteFenceIntegrityInjector {
-    fn connection(&self, target: &FenceIntegrityTarget) -> rusqlite::Connection {
-        self.backend.raw(match target {
-            FenceIntegrityTarget::TriggerRevision { .. } => SqliteDatabase::Triggers,
-            _ => SqliteDatabase::DurableCore,
-        })
+    fn connection(&self, _target: &FenceIntegrityTarget) -> rusqlite::Connection {
+        self.backend.raw()
     }
 }
 
@@ -853,7 +849,7 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
         | lash_core_execution::ProcessCompletionOutcome::Superseded { stored: record } => record,
     };
 
-    let conn = backend.raw(SqliteDatabase::ProcessRegistry);
+    let conn = backend.raw();
     assert_eq!(
         conn.execute(
             "UPDATE processes SET updated_at_ms = 0 WHERE process_id = ?1",
@@ -900,7 +896,7 @@ lash_conformance::process_projection_repair_tests!({
         backend,
         registry as Arc<dyn ProcessRegistry>,
         move |stale: lash_core_execution::ProcessRecord| async move {
-            let conn = corruption.raw(SqliteDatabase::ProcessRegistry);
+            let conn = corruption.raw();
             let changed = conn
                 .execute(
                     "UPDATE processes SET record_json = ?2 WHERE process_id = ?1",
@@ -1105,7 +1101,7 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     };
     drop(store);
 
-    let conn = backend.raw(SqliteDatabase::Triggers);
+    let conn = backend.raw();
     conn.execute(
         "UPDATE trigger_subscriptions SET record_json = ?2 WHERE subscription_id = ?1",
         rusqlite::params![malformed.subscription_id(), "{not valid json"],
@@ -1194,7 +1190,7 @@ lash_conformance::append_head_switch_tests!({
         backend,
         store as Arc<dyn RuntimeStore>,
         move |leaf_node_id: lash_core_execution::NodeId| async move {
-            let conn = mutation.raw(SqliteDatabase::DurableCore);
+            let conn = mutation.raw();
             conn.execute_batch("PRAGMA foreign_keys = ON; BEGIN IMMEDIATE")
                 .expect("begin branch publication");
             conn.execute(
@@ -1221,7 +1217,7 @@ lash_conformance::append_tombstone_tests!({
         backend,
         store as Arc<dyn RuntimeStore>,
         move |node_id: lash_core_execution::NodeId| async move {
-            let conn = mutation.raw(SqliteDatabase::DurableCore);
+            let conn = mutation.raw();
             conn.execute(
                 "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
                 rusqlite::params![node_id.as_str()],
@@ -1243,7 +1239,7 @@ lash_conformance::append_receipt_rewrite_tests!({
         backend,
         store as Arc<dyn RuntimeStore>,
         move || async move {
-            let conn = mutation.raw(SqliteDatabase::DurableCore);
+            let conn = mutation.raw();
             let result_json: String = conn
                 .query_row(
                     "SELECT result_json FROM runtime_turn_commits
@@ -1278,7 +1274,7 @@ fn raw_count(conn: &rusqlite::Connection, sql: &str, name: &str) -> i64 {
 #[tokio::test]
 async fn sqlite_store_schema_excludes_embedded_turn_replay_tables() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    let conn = backend.raw(SqliteDatabase::DurableCore);
+    let conn = backend.raw();
     for removed in [
         concat!("runtime_", "turn_", "checkpoints"),
         concat!("runtime_", "effect_", "journal"),
@@ -1301,7 +1297,7 @@ async fn sqlite_store_schema_excludes_embedded_turn_replay_tables() {
 #[tokio::test]
 async fn sqlite_runtime_turn_receipt_identity_columns_are_nullable() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    let conn = backend.raw(SqliteDatabase::DurableCore);
+    let conn = backend.raw();
     let mut stmt = conn
         .prepare("PRAGMA table_info(runtime_turn_commits)")
         .expect("prepare receipt schema query");
@@ -1324,7 +1320,7 @@ async fn sqlite_runtime_turn_receipt_identity_columns_are_nullable() {
 #[tokio::test]
 async fn sqlite_runtime_turn_receipt_rejects_half_populated_append_identity() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    let conn = backend.raw(SqliteDatabase::DurableCore);
+    let conn = backend.raw();
     let error = conn
         .execute(
             "INSERT INTO runtime_turn_commits (
@@ -1364,7 +1360,7 @@ lash_conformance::attachment_referrer_tests!({
     let insert_edge: lash_conformance::InsertAttachmentEdge = Arc::new(move |id, kind, key| {
         let injector = injector.clone();
         Box::pin(async move {
-            injector.raw(lash_sqlite_store::SqliteDatabase::DurableCore)
+            injector.raw()
                 .execute("INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES (?1, ?2, ?3)", rusqlite::params![id.as_str(), kind, key])
                 .map(|_| ()).map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))
         })
@@ -1440,36 +1436,30 @@ async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical() {
         factory,
         || async {
             let mut snapshot = Vec::new();
-            for database in [
-                SqliteDatabase::DurableCore,
-                SqliteDatabase::ProcessRegistry,
-                SqliteDatabase::Triggers,
-            ] {
-                let connection = backend.raw(database);
-                let tables = connection
-                    .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")
-                    .expect("prepare complete table census")
-                    .query_map([], |row| row.get::<_, String>(0))
-                    .expect("read complete table census")
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .expect("collect complete table census");
-                for table in tables {
-                    let mut statement = connection
-                        .prepare(&format!("SELECT * FROM \"{table}\""))
-                        .expect("prepare table snapshot");
-                    let count = statement.column_count();
-                    let mut rows = statement
-                        .query_map([], |row| {
-                            (0..count)
-                                .map(|index| row.get::<_, rusqlite::types::Value>(index))
-                                .collect::<rusqlite::Result<Vec<_>>>()
-                        })
-                        .expect("read table snapshot")
-                        .map(|row| format!("{:?}", row.expect("read snapshot row")))
-                        .collect::<Vec<_>>();
-                    rows.sort();
-                    snapshot.push((format!("{database:?}.{table}"), rows.join("\n")));
-                }
+            let connection = backend.raw();
+            let tables = connection
+                .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")
+                .expect("prepare complete table census")
+                .query_map([], |row| row.get::<_, String>(0))
+                .expect("read complete table census")
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .expect("collect complete table census");
+            for table in tables {
+                let mut statement = connection
+                    .prepare(&format!("SELECT * FROM \"{table}\""))
+                    .expect("prepare table snapshot");
+                let count = statement.column_count();
+                let mut rows = statement
+                    .query_map([], |row| {
+                        (0..count)
+                            .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .expect("read table snapshot")
+                    .map(|row| format!("{:?}", row.expect("read snapshot row")))
+                    .collect::<Vec<_>>();
+                rows.sort();
+                snapshot.push((table, rows.join("\n")));
             }
             snapshot
         },

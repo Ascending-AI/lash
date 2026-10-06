@@ -5,11 +5,9 @@ async fn open_catalog(root: impl AsRef<std::path::Path>) -> Arc<lash::sqlite::Sq
     let root = root.as_ref();
     std::fs::create_dir_all(root).expect("create Restate closure catalog root");
     Arc::new(
-        lash::sqlite::SqliteStore::open(
-            &root.join(lash::sqlite::SqliteDatabase::DurableCore.file_name()),
-        )
-        .await
-        .expect("open Restate closure catalog"),
+        lash::sqlite::SqliteStore::open(&root.join("lash.db"))
+            .await
+            .expect("open Restate closure catalog"),
     )
 }
 

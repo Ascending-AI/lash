@@ -46,7 +46,6 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail, ensure};
-use lash_sqlite_store::SqliteDatabase;
 use lash_upgrade_harness::harness::{Case, LASHCTL_N_ENV, LASHCTL_NEXT_ENV, Operator, block_on};
 use lash_upgrade_harness::identity::BuildLabel;
 use lash_upgrade_harness::node::retention::{
@@ -91,9 +90,7 @@ impl Rows {
     fn of(case: &Case) -> Result<Self> {
         match (case.postgres_url(), case.sqlite_dir()) {
             (Some(url), _) => Ok(Self::Postgres(url.to_owned())),
-            (None, Some(dir)) => Ok(Self::Sqlite(
-                dir.join(SqliteDatabase::DurableCore.file_name()),
-            )),
+            (None, Some(dir)) => Ok(Self::Sqlite(dir.join("lash.db"))),
             (None, None) => bail!("{} has no store", case.name),
         }
     }

@@ -9,10 +9,8 @@ use std::sync::LazyLock;
 
 use lash_store_sql::session_ingress::SessionIngressStatements;
 
-use crate::schema_layout::Schema;
-
 static SESSION_INGRESS_SQL: LazyLock<SessionIngressStatements> =
-    LazyLock::new(|| SessionIngressStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| SessionIngressStatements::render(crate::schema_layout::MAIN));
 
 /// The session catalog's session-ingress statements, rendered once at first
 /// use.

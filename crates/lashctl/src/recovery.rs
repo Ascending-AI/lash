@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 pub(super) struct Invocation {
     pub(super) command: Command,
-    sqlite_dir: Option<PathBuf>,
+    sqlite_path: Option<PathBuf>,
 }
 
 pub(super) enum Command {
@@ -80,30 +80,30 @@ fn kind(value: &str) -> Result<ObligationKind, CliError> {
 }
 
 /// Consume backend selection separately so every recovery and drain verb
-/// addresses the same store: the words left over, and the SQLite directory
-/// `--sqlite-dir` names.
-pub(super) fn split_sqlite_dir(rest: &[String]) -> Result<(Vec<&str>, Option<PathBuf>), CliError> {
+/// addresses the same store: the words left over, and the SQLite database
+/// file `--sqlite-path` names.
+pub(super) fn split_sqlite_path(rest: &[String]) -> Result<(Vec<&str>, Option<PathBuf>), CliError> {
     let mut words = Vec::new();
-    let mut sqlite_dir = None;
+    let mut sqlite_path = None;
     let mut index = 0;
     while index < rest.len() {
-        if rest[index] == "--sqlite-dir" {
-            if sqlite_dir.is_some() || index + 1 == rest.len() || rest[index + 1].is_empty() {
+        if rest[index] == "--sqlite-path" {
+            if sqlite_path.is_some() || index + 1 == rest.len() || rest[index + 1].is_empty() {
                 return Err(usage());
             }
-            sqlite_dir = Some(PathBuf::from(&rest[index + 1]));
+            sqlite_path = Some(PathBuf::from(&rest[index + 1]));
             index += 2;
         } else {
             words.push(rest[index].as_str());
             index += 1;
         }
     }
-    Ok((words, sqlite_dir))
+    Ok((words, sqlite_path))
 }
 
 /// A cursor is opaque JSON; an obligation cursor is its plain id.
 pub(super) fn parse(verb: &str, rest: &[String]) -> Result<Invocation, CliError> {
-    let (words, sqlite_dir) = split_sqlite_dir(rest)?;
+    let (words, sqlite_path) = split_sqlite_path(rest)?;
     let command = match (verb, words.as_slice()) {
         ("park", [action @ ("list" | "events"), options @ ..]) => {
             let (after, limit) = page(options)?;
@@ -160,7 +160,7 @@ pub(super) fn parse(verb: &str, rest: &[String]) -> Result<Invocation, CliError>
     };
     Ok(Invocation {
         command,
-        sqlite_dir,
+        sqlite_path,
     })
 }
 
@@ -186,15 +186,15 @@ fn page<'a>(options: &[&'a str]) -> Result<(Option<&'a str>, NonZeroUsize), CliE
     Ok((after, limit))
 }
 
-/// The selected store: the SQLite directory `--sqlite-dir` or
-/// `LASH_SQLITE_DIR` names, else the PostgreSQL database.
+/// The selected store: the SQLite database file `--sqlite-path` or
+/// `LASH_SQLITE_PATH` names, else the PostgreSQL database.
 pub(super) async fn open_stores(
-    sqlite_dir: Option<&Path>,
+    sqlite_path: Option<&Path>,
 ) -> Result<Arc<dyn lash::StoreSet>, CliError> {
-    let sqlite_dir = sqlite_dir
+    let sqlite_path = sqlite_path
         .map(Path::to_path_buf)
-        .or_else(|| std::env::var_os("LASH_SQLITE_DIR").map(PathBuf::from));
-    Ok(if let Some(path) = sqlite_dir {
+        .or_else(|| std::env::var_os("LASH_SQLITE_PATH").map(PathBuf::from));
+    Ok(if let Some(path) = sqlite_path {
         Arc::new(
             lash::sqlite::SqliteStoreSet::open(path)
                 .await
@@ -247,7 +247,7 @@ pub(super) fn restate_backend(stores: Arc<dyn lash::StoreSet>) -> Result<lash::B
 
 impl Invocation {
     async fn core(&self) -> Result<lash::LashCore, CliError> {
-        let backend = restate_backend(open_stores(self.sqlite_dir.as_deref()).await?)?;
+        let backend = restate_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
         // This core sends control intents through Restate. It serves no model,
         // starts no host turn, and does not install an HTTP handler endpoint.
         lash::LashCore::standard_builder(backend)

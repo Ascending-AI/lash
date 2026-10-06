@@ -1,19 +1,15 @@
 //! The SQLite obligation ledgers (ADR 0109 §1.3): one generic ledger over
 //! each table's shared obligation statements.
 //!
-//! Ingress, intents, runs and the session catalog live in the durable core;
-//! parent-end plans and processes in the process registry file; trigger
-//! deliveries in the trigger store's file. Each ledger
-//! holds a connection to its own database. Ingress spans two tables, one
-//! ledger each, composed by [`crate::ingress_obligation`]. SQLite has one writer, so a due
-//! claim is one `BEGIN IMMEDIATE` transaction that reads the due page and
-//! claims each row with its compare-and-set; the recovery leader runs it
+//! Every ledger's table lives in the deployment's one database, and each
+//! ledger holds a connection to it. Ingress spans two tables, one ledger
+//! each, composed by [`crate::ingress_obligation`]. SQLite has one writer, so
+//! a due claim is one `BEGIN IMMEDIATE` transaction that reads the due page
+//! and claims each row with its compare-and-set; the recovery leader runs it
 //! (ADR 0109 §1.7).
 
 use std::num::NonZeroUsize;
-use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core_execution::store::{
     ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, ControlIntentState,
@@ -38,27 +34,26 @@ use rusqlite::types::Value;
 use rusqlite::{Row, params_from_iter};
 
 use crate::conn::SqliteConnection;
-use crate::schema_layout::Schema;
 use crate::{StoreError, sqlite_conversion_error, sqlite_error, stored_data_corrupt};
 
 static INTENTS: LazyLock<ControlIntentObligationStatements> =
-    LazyLock::new(|| ControlIntentObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| ControlIntentObligationStatements::render(crate::schema_layout::MAIN));
 static RUNS: LazyLock<SessionRunObligationStatements> =
-    LazyLock::new(|| SessionRunObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| SessionRunObligationStatements::render(crate::schema_layout::MAIN));
 static META: LazyLock<SessionMetaObligationStatements> =
-    LazyLock::new(|| SessionMetaObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| SessionMetaObligationStatements::render(crate::schema_layout::MAIN));
 static PLANS: LazyLock<ParentEndPlanObligationStatements> =
-    LazyLock::new(|| ParentEndPlanObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| ParentEndPlanObligationStatements::render(crate::schema_layout::MAIN));
 static PROCESSES: LazyLock<ProcessObligationStatements> =
-    LazyLock::new(|| ProcessObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| ProcessObligationStatements::render(crate::schema_layout::MAIN));
 static PROCESS_STARTS: LazyLock<ProcessStartObligationStatements> =
-    LazyLock::new(|| ProcessStartObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| ProcessStartObligationStatements::render(crate::schema_layout::MAIN));
 static DELIVERIES: LazyLock<DeliveryObligationStatements> =
-    LazyLock::new(|| DeliveryObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| DeliveryObligationStatements::render(crate::schema_layout::MAIN));
 static CLEANUPS: LazyLock<CleanupObligationStatements> =
-    LazyLock::new(|| CleanupObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| CleanupObligationStatements::render(crate::schema_layout::MAIN));
 static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
-    LazyLock::new(|| CleanupObligationLedgerStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| CleanupObligationLedgerStatements::render(crate::schema_layout::MAIN));
 
 /// The due instant a producer's own transaction arms at: `due` from the
 /// commit, so a claim never waits on a clock edge (ADR 0109 §1.5).
@@ -79,15 +74,6 @@ pub(crate) fn obligation_sql(kind: ObligationKind) -> ObligationSql<'static> {
         ObligationKind::ProcessTerminal => PROCESSES.obligation_sql(),
         ObligationKind::ArtifactCleanup => CLEANUP_LEDGER.obligation_sql(),
     }
-}
-
-/// Whether `kind`'s ledger lives in the process registry file rather than
-/// the durable core.
-pub(crate) const fn in_process_registry(kind: ObligationKind) -> bool {
-    matches!(
-        kind,
-        ObligationKind::ParentEnd | ObligationKind::ProcessStart | ObligationKind::ProcessTerminal
-    )
 }
 
 fn sql_i64(field: &'static str, value: u64) -> Result<i64, StoreError> {
@@ -172,8 +158,8 @@ pub(crate) fn claimed(
     })
 }
 
-/// One SQLite ledger: `kind`'s statements over the connection to the
-/// database that holds its table.
+/// One SQLite ledger: `kind`'s statements over a connection to the
+/// deployment's database.
 #[derive(Clone)]
 pub(crate) struct SqliteObligationLedger {
     kind: ObligationKind,
@@ -182,8 +168,7 @@ pub(crate) struct SqliteObligationLedger {
 }
 
 impl SqliteObligationLedger {
-    /// `kind`'s ledger on `conn`, which must be open on the database that
-    /// holds `kind`'s table.
+    /// `kind`'s ledger on `conn`.
     pub(crate) fn new(kind: ObligationKind, conn: SqliteConnection) -> Self {
         Self::over_table(kind, obligation_sql(kind), conn)
     }
@@ -562,48 +547,12 @@ impl ObligationLedger for SqliteObligationLedger {
 
 /// Arm a cleanup beside the end fact or first guarded edge. The caller owns
 /// the write transaction, so a competing end cannot interleave this decision.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CleanupStorage {
-    DurableCore,
-    ProcessRegistry,
-}
-
-impl CleanupStorage {
-    fn for_referrer(referrer: &ArtifactReferrer) -> Self {
-        if referrer.kind() == lash_core_execution::ArtifactReferrerKind::ProcessRecord {
-            Self::ProcessRegistry
-        } else {
-            Self::DurableCore
-        }
-    }
-}
-
-const REGISTRY_FENCE_LAYOUT: lash_store_sql::TableLayout =
-    lash_store_sql::TableLayout::new(&[lash_store_sql::SchemaTables::new(
-        "durable_core",
-        &["referrer_fences"],
-    )]);
-static REGISTRY_END_FENCES: std::sync::LazyLock<
-    lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements,
-> = std::sync::LazyLock::new(|| {
-    lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements::render(
-        lash_store_sql::Dialect::sqlite(REGISTRY_FENCE_LAYOUT),
-    )
-});
-
 pub(crate) fn arm_cleanup_tx(
     tx: &rusqlite::Connection,
     cleanup: &ArtifactCleanup,
     now_ms: u64,
-    storage: CleanupStorage,
 ) -> Result<ObligationId, StoreError> {
     use rusqlite::{OptionalExtension, params};
-    if storage != CleanupStorage::for_referrer(&cleanup.referrer()) {
-        return Err(StoreError::StoredDataCorrupt {
-            record_kind: "ArtifactCleanup",
-            message: "cleanup referrer belongs to a different database".to_string(),
-        });
-    }
     let kind = cleanup.referrer().kind().as_str();
     let referrer_id = cleanup.referrer().canonical_id();
     let row: Option<(String, String, String, String, String)> = tx
@@ -656,38 +605,23 @@ pub(crate) fn arm_cleanup_tx(
         CleanupUpsert::Keep => {}
     }
     if cleanup.is_ended() {
-        match storage {
-            CleanupStorage::DurableCore => {
-                crate::artifact_store::fence_artifact_referrer_tx(tx, &cleanup.referrer(), now_ms)
-                    .map_err(sqlite_error)?
-            }
-            CleanupStorage::ProcessRegistry => {
-                tx.execute(
-                    REGISTRY_END_FENCES.insert_fence.sql(),
-                    params![kind, referrer_id, crate::clamp_epoch_ms(now_ms)],
-                )
-                .map_err(sqlite_error)?;
-            }
-        }
+        crate::artifact_store::fence_artifact_referrer_tx(tx, &cleanup.referrer(), now_ms)
+            .map_err(sqlite_error)?;
     }
     Ok(id)
 }
 
-/// The durable-core and process-registry cleanup tables form one ledger. IDs
-/// are derived from referrers; each operation checks the owning ledgers.
+/// The artifact cleanup ledger: the cleanup table's obligations, each
+/// carrying the plan its referrer's end armed.
 #[derive(Clone)]
 pub(crate) struct SqliteArtifactCleanupLedger {
-    core: SqliteObligationLedger,
-    registry: SqliteObligationLedger,
-    registry_first: Arc<AtomicBool>,
+    ledger: SqliteObligationLedger,
 }
 
 impl SqliteArtifactCleanupLedger {
-    pub(crate) fn new(core: SqliteConnection, registry: SqliteConnection) -> Self {
+    pub(crate) fn new(conn: SqliteConnection) -> Self {
         Self {
-            core: SqliteObligationLedger::new(ObligationKind::ArtifactCleanup, core),
-            registry: SqliteObligationLedger::new(ObligationKind::ArtifactCleanup, registry),
-            registry_first: Arc::new(AtomicBool::new(false)),
+            ledger: SqliteObligationLedger::new(ObligationKind::ArtifactCleanup, conn),
         }
     }
 }
@@ -719,21 +653,7 @@ impl ObligationLedger for SqliteArtifactCleanupLedger {
         claim_ttl_ms: u64,
         limit: NonZeroUsize,
     ) -> Result<Vec<ClaimedObligation>, StoreError> {
-        let (first, second) = if self.registry_first.fetch_xor(true, Ordering::Relaxed) {
-            (&self.registry, &self.core)
-        } else {
-            (&self.core, &self.registry)
-        };
-        let first_quota = NonZeroUsize::new(limit.get().div_ceil(2))
-            .ok_or_else(|| StoreError::Backend("zero cleanup claim limit".into()))?;
-        let mut rows = first.claim_due(now_ms, claim_ttl_ms, first_quota).await?;
-        if let Some(remaining) = NonZeroUsize::new(limit.get() - rows.len()) {
-            rows.extend(second.claim_due(now_ms, claim_ttl_ms, remaining).await?);
-        }
-        if let Some(remaining) = NonZeroUsize::new(limit.get() - rows.len()) {
-            rows.extend(first.claim_due(now_ms, claim_ttl_ms, remaining).await?);
-        }
-        Ok(rows)
+        self.ledger.claim_due(now_ms, claim_ttl_ms, limit).await
     }
 
     async fn claim(
@@ -743,10 +663,7 @@ impl ObligationLedger for SqliteArtifactCleanupLedger {
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {
-        if let Some(claimed) = self.core.claim(id, token, now_ms, claim_ttl_ms).await? {
-            return Ok(Some(claimed));
-        }
-        self.registry.claim(id, token, now_ms, claim_ttl_ms).await
+        self.ledger.claim(id, token, now_ms, claim_ttl_ms).await
     }
 
     async fn settle(
@@ -756,22 +673,11 @@ impl ObligationLedger for SqliteArtifactCleanupLedger {
         settlement: ObligationSettlement,
         now_ms: u64,
     ) -> Result<SettleOutcome, StoreError> {
-        if self
-            .core
-            .settle(id, token, settlement.clone(), now_ms)
-            .await?
-            == SettleOutcome::Applied
-        {
-            return Ok(SettleOutcome::Applied);
-        }
-        self.registry.settle(id, token, settlement, now_ms).await
+        self.ledger.settle(id, token, settlement, now_ms).await
     }
 
     async fn rearm(&self, id: &ObligationId, now_ms: u64) -> Result<bool, StoreError> {
-        if self.core.rearm(id, now_ms).await? {
-            return Ok(true);
-        }
-        self.registry.rearm(id, now_ms).await
+        self.ledger.rearm(id, now_ms).await
     }
 
     async fn list_stalled(
@@ -779,22 +685,15 @@ impl ObligationLedger for SqliteArtifactCleanupLedger {
         after: Option<&ObligationId>,
         limit: NonZeroUsize,
     ) -> Result<Vec<StalledObligation>, StoreError> {
-        let mut rows = self.core.list_stalled(after, limit).await?;
-        rows.extend(self.registry.list_stalled(after, limit).await?);
-        rows.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
-        rows.truncate(limit.get());
-        Ok(rows)
+        self.ledger.list_stalled(after, limit).await
     }
 
     async fn count_stalled(&self) -> Result<u64, StoreError> {
-        Ok(self.core.count_stalled().await? + self.registry.count_stalled().await?)
+        self.ledger.count_stalled().await
     }
 
     async fn standing(&self, id: &ObligationId) -> Result<Option<ObligationStanding>, StoreError> {
-        if let Some(standing) = self.core.standing(id).await? {
-            return Ok(Some(standing));
-        }
-        self.registry.standing(id).await
+        self.ledger.standing(id).await
     }
 }
 
@@ -806,16 +705,9 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
         now_ms: u64,
     ) -> Result<ObligationId, StoreError> {
         let cleanup = cleanup.clone();
-        let storage = CleanupStorage::for_referrer(&cleanup.referrer());
-        let ledger = match storage {
-            CleanupStorage::DurableCore => &self.core,
-            CleanupStorage::ProcessRegistry => &self.registry,
-        };
-        ledger
+        self.ledger
             .conn
-            .write(move |tx| {
-                arm_cleanup_tx(tx, &cleanup, now_ms, storage).map_err(sqlite_conversion_error)
-            })
+            .write(move |tx| arm_cleanup_tx(tx, &cleanup, now_ms).map_err(sqlite_conversion_error))
             .await
             .map_err(sqlite_error)
     }
@@ -824,23 +716,8 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
         let kind = referrer.kind().as_str();
         let id = referrer.canonical_id();
         let due = sql_i64("artifact cleanup due instant", now_ms)?;
-        let core = self
-            .core
-            .conn
-            .write({
-                let id = id.clone();
-                move |tx| {
-                    crate::conn::cached_execute(
-                        tx,
-                        CLEANUPS.nudge.sql(),
-                        rusqlite::params![kind, id, due],
-                    )
-                }
-            })
-            .await
-            .map_err(sqlite_error)?;
-        let registry = self
-            .registry
+        let nudged = self
+            .ledger
             .conn
             .write(move |tx| {
                 crate::conn::cached_execute(
@@ -851,32 +728,27 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
             })
             .await
             .map_err(sqlite_error)?;
-        Ok(core + registry > 0)
+        Ok(nudged > 0)
     }
 
     async fn load_cleanup(&self, id: &ObligationId) -> Result<Option<ArtifactCleanup>, StoreError> {
         use rusqlite::OptionalExtension;
-        let mut row = None;
-        for ledger in [&self.core, &self.registry] {
-            let id = id.as_str().to_owned();
-            row = ledger
-                .conn
-                .call(move |conn| {
-                    conn.query_row(CLEANUPS.select_by_id.sql(), rusqlite::params![id], |row| {
-                        Ok((
-                            row.get::<_, String>(2)?,
-                            row.get::<_, String>(3)?,
-                            row.get::<_, String>(4)?,
-                        ))
-                    })
-                    .optional()
+        let id = id.as_str().to_owned();
+        let row = self
+            .ledger
+            .conn
+            .call(move |conn| {
+                conn.query_row(CLEANUPS.select_by_id.sql(), rusqlite::params![id], |row| {
+                    Ok((
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
                 })
-                .await
-                .map_err(sqlite_error)?;
-            if row.is_some() {
-                break;
-            }
-        }
+                .optional()
+            })
+            .await
+            .map_err(sqlite_error)?;
         // A referrer kind a newer build wrote is refused
         // `Incompatible(UnknownVocabulary)`, never read as corrupt or absent.
         row.map(|(kind, id, body)| {
@@ -895,53 +767,11 @@ mod artifact_cleanup_tests {
     use rusqlite::OptionalExtension;
 
     #[tokio::test]
-    async fn process_record_cleanup_routes_to_registry_and_fences_at_arm() {
-        use lash_core_execution::StoreSet as _;
-        let set = crate::SqliteStoreSet::memory()
-            .await
-            .expect("memory stores");
-        let referrer = ArtifactReferrer::ProcessRecord(
-            lash_sansio::ProcessId::parse("p_00000000000070008000000000000001")
-                .expect("minted process id"),
-        );
-        let cleanup = ArtifactCleanup::ended(referrer.clone(), Vec::new(), None);
-        let ledger = set.artifact_cleanup();
-        let id = ledger
-            .arm_cleanup(&cleanup, 7)
-            .await
-            .expect("arm process cleanup");
-        assert!(
-            cleanup_row(&set.process_env_store(), &referrer)
-                .await
-                .is_none()
-        );
-        assert!(ledger.load_cleanup(&id).await.expect("read").is_some());
-        assert!(fenced(&set.process_env_store(), &referrer).await);
-        let registry = set.process_registry();
-        registry
-            .conn
-            .call(move |conn| {
-                assert!(arm_cleanup_tx(conn, &cleanup, 8, CleanupStorage::ProcessRegistry).is_ok());
-                let count: i64 = conn
-                    .query_row(
-                        "SELECT COUNT(*) FROM artifact_cleanup_obligations",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .expect("registry count");
-                assert_eq!(count, 1);
-                Ok(())
-            })
-            .await
-            .expect("registry row");
-    }
-
-    #[tokio::test]
     async fn cleanup_kind_mismatch_is_stored_corruption() {
         use lash_core_execution::StoreSet as _;
         let memory = crate::SqliteStoreSet::memory().await.expect("memory store");
         let dir = tempfile::tempdir().expect("file root");
-        let file = crate::SqliteStoreSet::open(dir.path())
+        let file = crate::SqliteStoreSet::open(dir.path().join("lash.db"))
             .await
             .expect("file store");
         for set in [&memory, &file] {
@@ -1028,7 +858,7 @@ mod artifact_cleanup_tests {
             .await
             .expect("open the memory store set");
         let dir = tempfile::tempdir().expect("file store set root");
-        let file = crate::SqliteStoreSet::open(dir.path())
+        let file = crate::SqliteStoreSet::open(dir.path().join("lash.db"))
             .await
             .expect("open the file store set");
         for set in [&memory, &file] {
@@ -1183,17 +1013,13 @@ mod artifact_cleanup_tests {
             };
             journal
         }));
-        let first =
-            arm_cleanup_tx(&conn, &guard, 100, CleanupStorage::DurableCore).expect("arm guard");
-        let again =
-            arm_cleanup_tx(&conn, &guard, 101, CleanupStorage::DurableCore).expect("repeat guard");
+        let first = arm_cleanup_tx(&conn, &guard, 100).expect("arm guard");
+        let again = arm_cleanup_tx(&conn, &guard, 101).expect("repeat guard");
         assert_eq!(first, again);
         let ended = ArtifactCleanup::ended(referrer.clone(), Vec::new(), None);
-        let replaced =
-            arm_cleanup_tx(&conn, &ended, 102, CleanupStorage::DurableCore).expect("replace guard");
+        let replaced = arm_cleanup_tx(&conn, &ended, 102).expect("replace guard");
         assert_eq!(first, replaced);
-        arm_cleanup_tx(&conn, &guard, 103, CleanupStorage::DurableCore)
-            .expect("guard cannot replace end");
+        arm_cleanup_tx(&conn, &guard, 103).expect("guard cannot replace end");
         let (body, state, due): (String, String, i64) = conn.query_row(
             "SELECT cleanup_json, obligation_state, obligation_due_at_ms FROM artifact_cleanup_obligations",
             [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),

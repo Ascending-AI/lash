@@ -281,7 +281,7 @@ pub(super) async fn compare_ingress_ledgers(
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open the SQLite memory ingress store set");
-    let file = lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("ingress-ledgers"))
+    let file = lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("ingress-ledgers.db"))
         .await
         .expect("open the SQLite file ingress store set");
     let attachments = tempfile::tempdir().expect("attachment directory");

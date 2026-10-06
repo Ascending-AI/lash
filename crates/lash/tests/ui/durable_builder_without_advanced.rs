@@ -11,7 +11,7 @@ async fn durable_core_without_advanced(
 
     // A store set supplies durable ports to a test effect host.
     let stores = std::sync::Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(data_dir)
+        lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash.db"))
             .await
             .expect("sqlite store set"),
     );

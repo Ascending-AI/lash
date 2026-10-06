@@ -39,7 +39,7 @@ impl HarnessStoreTier {
             Self::SqliteFile => {
                 let directory = tempfile::tempdir().expect("the SQLite file tier's directory");
                 let stores =
-                    lash_sqlite_store::SqliteStoreSet::open(directory.path().join("sqlite"))
+                    lash_sqlite_store::SqliteStoreSet::open(directory.path().join("sqlite.db"))
                         .await
                         .expect("open the endpoint's SQLite file store set");
                 (

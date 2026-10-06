@@ -413,7 +413,7 @@ async fn sqlite_file_schema_backend() -> (
         Default::default(),
         Default::default(),
         move |clock| async move {
-            let stores = lash::sqlite::SqliteStoreSet::open_with_clock(root, clock)
+            let stores = lash::sqlite::SqliteStoreSet::open_with_clock(root.join("lash.db"), clock)
                 .await
                 .expect("open SQLite file stores");
             Ok(Arc::new(stores) as Arc<dyn lash::StoreSet>)
@@ -470,7 +470,7 @@ async fn live_schema_backend(
 #[ignore = "requires private live Restate"]
 async fn schema_admission_store_law_live_restate_sqlite_file() {
     let directory = tempfile::tempdir().expect("SQLite file stores");
-    let stores = lash::sqlite::SqliteStoreSet::open(directory.path())
+    let stores = lash::sqlite::SqliteStoreSet::open(directory.path().join("lash.db"))
         .await
         .expect("open SQLite file stores");
     let backend = live_schema_backend("admission-sqlite", Arc::new(stores)).await;
@@ -482,7 +482,7 @@ async fn schema_admission_store_law_live_restate_sqlite_file() {
 #[ignore = "requires private live Restate"]
 async fn resolved_tool_dialect_store_law_live_restate_sqlite_file() {
     let directory = tempfile::tempdir().expect("SQLite file stores");
-    let stores = lash::sqlite::SqliteStoreSet::open(directory.path())
+    let stores = lash::sqlite::SqliteStoreSet::open(directory.path().join("lash.db"))
         .await
         .expect("open SQLite file stores");
     let backend = live_schema_backend("dialect-sqlite", Arc::new(stores)).await;

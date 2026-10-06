@@ -1,10 +1,9 @@
 //! The SQLite store half of a session's two-phase delete (ADR 0109 §4).
 //!
-//! A session's delete obligation and its runs' scope closes live in the
-//! durable core; the parent-end plans of the scopes it owns live in the
-//! process registry file. The acknowledgement of a session's `CloseSession`
-//! intent arms its delete in the durable core's transaction
-//! ([`arm_on_close_acknowledged_conn`]).
+//! A session's delete obligation, its runs' scope closes and the parent-end
+//! plans of the scopes it owns live in the deployment's database. The
+//! acknowledgement of a session's `CloseSession` intent arms its delete in
+//! the transaction that writes it ([`arm_on_close_acknowledged_conn`]).
 
 use std::sync::LazyLock;
 
@@ -22,15 +21,14 @@ use lash_store_sql::session_runs::runs::SessionRunCleanupStatements;
 use rusqlite::OptionalExtension;
 
 use crate::conn::SqliteConnection;
-use crate::schema_layout::Schema;
 use crate::{StoreError, sqlite_error, stored_data_corrupt};
 
 static META: LazyLock<SessionMetaDeleteStatements> =
-    LazyLock::new(|| SessionMetaDeleteStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| SessionMetaDeleteStatements::render(crate::schema_layout::MAIN));
 static RUNS: LazyLock<SessionRunCleanupStatements> =
-    LazyLock::new(|| SessionRunCleanupStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| SessionRunCleanupStatements::render(crate::schema_layout::MAIN));
 static PLANS: LazyLock<ParentEndPlanCleanupStatements> =
-    LazyLock::new(|| ParentEndPlanCleanupStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| ParentEndPlanCleanupStatements::render(crate::schema_layout::MAIN));
 
 /// Arm session `next`'s `SessionDelete` obligation when `next` is its
 /// `CloseSession` intent's acknowledgement over `prior`, in the transaction
@@ -70,17 +68,15 @@ pub(crate) fn arm_on_close_acknowledged_conn(
     Ok(())
 }
 
-/// The SQLite session-delete ledger: the durable core and the process
-/// registry file, each through its own connection.
+/// The SQLite session-delete ledger over the deployment's database.
 #[derive(Clone)]
 pub(crate) struct SqliteSessionDeleteLedger {
-    core: SqliteConnection,
-    registry: SqliteConnection,
+    conn: SqliteConnection,
 }
 
 impl SqliteSessionDeleteLedger {
-    pub(crate) fn new(core: SqliteConnection, registry: SqliteConnection) -> Self {
-        Self { core, registry }
+    pub(crate) fn new(conn: SqliteConnection) -> Self {
+        Self { conn }
     }
 }
 
@@ -96,7 +92,7 @@ impl SessionDeleteLedger for SqliteSessionDeleteLedger {
     ) -> Result<Option<SessionDeleteObligation>, StoreError> {
         let session = session_id.as_str().to_owned();
         let row: Option<(String, String)> = self
-            .core
+            .conn
             .call(move |conn| {
                 conn.query_row(
                     META.delete_obligation.sql(),
@@ -122,7 +118,7 @@ impl SessionDeleteLedger for SqliteSessionDeleteLedger {
     ) -> Result<SessionCleanup, StoreError> {
         let session = session_id.as_str().to_owned();
         let scope_close: i64 = self
-            .core
+            .conn
             .call(move |conn| {
                 conn.query_row(
                     RUNS.count_undelivered_scope_close.sql(),
@@ -136,7 +132,7 @@ impl SessionDeleteLedger for SqliteSessionDeleteLedger {
         let (turns_from, turns_to) = EffectOpener::session_turn_encoding_range(session_id);
         let (drains_from, drains_to) = EffectOpener::session_operation_encoding_range(session_id);
         let parent_end: i64 = self
-            .registry
+            .conn
             .call(move |conn| {
                 conn.query_row(
                     PLANS.count_undelivered_for_session.sql(),
@@ -154,7 +150,7 @@ impl SessionDeleteLedger for SqliteSessionDeleteLedger {
 
     async fn count_closing(&self) -> Result<u64, StoreError> {
         let closing: i64 = self
-            .core
+            .conn
             .call(|conn| conn.query_row(META.count_closing.sql(), [], |row| row.get(0)))
             .await
             .map_err(sqlite_error)?;

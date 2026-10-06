@@ -25,35 +25,37 @@ contract.
 
 ## Choose the deployment shape
 
-**In-process SQLite.** One host owns the store's durable-core,
-process-registry and trigger databases. Stop that host before replacing its
-binary. Do not treat three separate files as one atomic transaction. The
-current `lashctl` store commands require `LASH_POSTGRES_DATABASE_URL` and do
-not migrate SQLite: SQLite migrates on open, after a backup.
+**In-process SQLite.** A SQLite deployment is one database file (ADR 0132
+§12): the host configures its path, and the session catalog, the process
+registry, the trigger store and the durability core all live in it, so one
+transaction commits rows of every family or none. One host owns the file.
+Stop that host before replacing its binary. The current `lashctl` store
+commands require `LASH_POSTGRES_DATABASE_URL` and do not migrate SQLite:
+SQLite migrates on open, after a backup. A configured path that is a
+directory holding the retired layout of three database files
+(`durable-core.db`, `process-registry.db`, `triggers.db`) is refused
+`retired_sqlite_layout`, unchanged; formats reset at 1.0 and no release
+migrates that layout.
 
-When `SqliteStoreSet::open` finds a database older than the build writes, it
-first needs the store to itself: it checkpoints and closes each database, and
-if another connection still holds one it waits up to the busy timeout and then
-refuses, changing nothing. It then copies all three database files, byte for
-byte and synced, into a new `sqlite-backup-NNNNNN` directory with a
-`manifest.json`, and only then migrates, taking every database exclusively in
-durable-core, process-registry, trigger order and committing in the same
-order. `SqliteStoreSetOptions::migration_backup` sets where the backups go
-(`BesideStore`, which is `migration-backups/` under the store root, or a
-directory of the host's) and how many finished backups of the store to keep
-(`retain`, default 2). A backup that an unfinished migration or restore still
-needs is never removed.
+When `SqliteStoreSet::open` finds the database older than the build writes,
+it first needs the store to itself: it takes the store's migrator lock
+(`<database>-migration.lock`), checkpoints and closes the database, and if
+another connection still holds it, waits up to the busy timeout and then
+refuses, changing nothing. It then copies the database file, byte for byte
+and synced, into a new `sqlite-backup-NNNNNN` directory with a
+`manifest.json`, and only then migrates, in one transaction that holds the
+database exclusively. `SqliteStoreSetOptions::migration_backup` sets where the
+backups go (`BesideStore`, which is `migration-backups/` beside the database
+file, or a directory of the host's) and how many finished backups of the
+store to keep (`retain`, default 2). A backup that an unfinished migration
+still needs is never removed.
 
-An interrupted migration is finished by the next open: a migration that some
-database already committed is completed forward, and one that nothing
-committed yet starts again from a fresh backup. A migration that fails after
-a database committed restores all three databases from the backup, byte for
-byte, and the open reports the failure; a restore that is interrupted is
-completed by the next open. A partially advanced set that no backup manifest
-explains is completed forward by a build with the needed migrations; an older
-build refuses it. A component opened on its own (`SqliteStore::open`,
-`SqliteTriggerStore::open` and the like) never migrates and refuses an older
-database with `migration_pending`.
+An interrupted migration is finished by the next open: one whose transaction
+committed is recorded finished, and one that did not commit starts again from
+a fresh backup. A migration that fails before its commit changes nothing; its
+backup goes with the error. A component opened on its own
+(`SqliteStore::open`, `SqliteTriggerStore::open` and the like) never migrates
+and refuses an older database with `migration_pending`.
 
 **PostgreSQL with Restate workers.** Workers share one PostgreSQL store and a
 Restate namespace. Run `lashctl` with `LASH_POSTGRES_DATABASE_URL` pointing at
@@ -116,8 +118,8 @@ reports the release, fleet epoch `F`'s writable range, each component's
 
 One release runs one worker feature set. If workers use mixed feature sets,
 they occupy separate generation lanes, and each lane must drain separately.
-A component is the PostgreSQL schema, one of the three SQLite databases, or
-a Restate object family. Each store stamp has a version and a
+A component is the PostgreSQL schema, the SQLite database, or a Restate
+object family. Each store stamp has a version and a
 `min_reader` floor. An older build admits a safely expanded component while
 the floor still allows it; an unsafe schema addition is refused. `F` selects
 the format all live writers emit. Before finalize, N+1 writes only shapes and
@@ -146,7 +148,7 @@ An incompatible store may report a typed refusal:
 | `shape_refused` | An addition would change how this build writes an expected table. Stop the roll and correct the migration. |
 | `fleet_outside_writable` | The recorded `F` is outside this build's writable range. Below it means a skipped release; above it means the fleet has advanced. Use the intervening or newer build as appropriate. |
 | `fleet_unrecorded` | The PostgreSQL store records no `F`. `lashctl migrate` seeds it and a worker open never records one. Run `lashctl migrate`, then open again. |
-| `partially_advanced` | The three SQLite databases disagree after a partial migration. Reopen with a build able to complete the set forward. |
+| `retired_sqlite_layout` | The configured SQLite path is a directory in the retired layout of three database files. Nothing migrates it: configure the path of a database file and recreate the store there. |
 | `unknown_vocabulary` | A stored kind or state is unknown to this build. Keep the record and route to a build that understands it. |
 | `pre_release` | A build from before 1.0 wrote the store, the Restate object or the call. 1.0 restarted every counter, so nothing reads or migrates it. Recreate the stores and serve this build from a Restate namespace no pre-release build has used. |
 
@@ -352,15 +354,12 @@ cursor, so a sweep that is interrupted can be run again: the objects it
 already upgraded answer `current`, and it upgrades the rest. The LashTurn
 outcome is session history and is read in place; the sweep never rewrites it.
 
-A SQLite store is not reached by `lashctl`. The host that owns it finalizes
-with `SqliteStoreSet::finalize`, which applies the same drain and retirement
-checks and seals `lash-finalize.json` durably before committing `F` in any
-of the three databases. Finalize and migration share the store's ownership
-lock. After a crash, a fresh `SqliteStoreSet::open` completes the recorded
-transition under exclusive database locks before migration or set admission,
-then removes the intent. Recovery needs no retained store handle. A changed
-schema stamp, unexpected epoch or mixed set without an authorized intent
-still refuses. A SQLite store has no operator hold.
+A SQLite store is not finalized by `lashctl`. The host that owns it
+finalizes with `SqliteStoreSet::finalize`, which applies the same drain and
+retirement checks and commits `F` and the plugin writer ranges in one
+transaction that holds the database exclusively, so a crash leaves the old
+epoch or the new one, never a mix. Finalize and migration share the store's
+ownership lock. A SQLite store has no operator hold.
 
 ## Roll back before finalize
 

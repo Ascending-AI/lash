@@ -1842,7 +1842,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
     std::fs::write(data_dir.join(RECOVERY_E2E_START_TURN), turn_id.as_str())
         .expect("ask the first owner to send the recovery E2E turn");
     let run_store: Arc<dyn lash::persistence::DeploymentStore> = match backend {
-        "sqlite" => lash::sqlite::SqliteStoreSet::open(data_dir.join("lash-sessions"))
+        "sqlite" => lash::sqlite::SqliteStoreSet::open(data_dir.join("lash-sessions.db"))
             .await
             .expect("recovery SQLite store")
             .session_store_factory(),
@@ -2270,12 +2270,8 @@ async fn session_shift_epoch(
 ) -> i64 {
     match backend {
         "sqlite" => {
-            // The backend keeps session metadata in its durable core, one of
-            // several databases under the sessions root; name it rather than
-            // take whichever `.db` the directory lists first.
-            let database_path = data_dir
-                .join("lash-sessions")
-                .join(lash::sqlite::SqliteDatabase::DurableCore.file_name());
+            // The backend keeps session metadata in its one database file.
+            let database_path = data_dir.join("lash-sessions.db");
             rusqlite::Connection::open_with_flags(
                 &database_path,
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,

@@ -531,7 +531,7 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
     // commits, then the shift's send fails.
     let backend = Arc::new(crate::RestateEngine::new(
         Arc::new(
-            lash_sqlite_store::SqliteStoreSet::open(dir.path().join("sessions"))
+            lash_sqlite_store::SqliteStoreSet::open(dir.path().join("sessions.db"))
                 .await
                 .expect("open FIG-430 store set"),
         ),

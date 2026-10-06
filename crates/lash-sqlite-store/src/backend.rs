@@ -1,11 +1,13 @@
 //! [`SqliteStoreSet`]: every storage port of one SQLite substrate, from one
 //! typed [`SqliteLocation`] (ADR 0102).
 //!
-//! A file store set keeps its three databases under one root directory; a
-//! memory store set keeps them as named `memdb` databases pinned by anchor
-//! connections. The location decides where each database is and what the
-//! store set is called. Every component is opened once and handed out as a
-//! shared handle.
+//! A SQLite deployment is one database (ADR 0132 §12): a file store set
+//! keeps it in the one database file its host configures, a memory store set
+//! as one named `memdb` database pinned by an anchor connection. Every
+//! component shares the store set's one writer connection, so a transaction
+//! that writes a process-registry row, a trigger row and a session row
+//! commits all of them or none. Every component is opened once and handed
+//! out as a shared handle.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -14,7 +16,7 @@ use lash_core_execution::Clock;
 
 use crate::location::{DatabaseLocation, MemoryAnchors, SqliteLocation};
 use crate::{
-    BuiltinBlobProfile, SqliteAttachmentStore, SqliteDatabase, SqliteProcessRegistry, SqliteStore,
+    BuiltinBlobProfile, SqliteAttachmentStore, SqliteProcessRegistry, SqliteStore,
     SqliteTriggerStore, StoreOptions,
 };
 
@@ -24,7 +26,7 @@ use crate::{
 pub struct SqliteStoreSetOptions {
     /// Physical store observations; SQLite has no connection-pool wait to report.
     pub observer: lash_core_execution::facade_support::StoreObserver,
-    /// Blob and connection policy for the durable-core catalog.
+    /// Blob and connection policy for the database.
     pub store: StoreOptions,
     /// Retention and staleness bounds of the process registry's wake
     /// deliveries.
@@ -90,58 +92,35 @@ struct StoreParts {
     recovery_leader: Arc<crate::recovery_leader::SqliteRecoveryLeader>,
 }
 
-/// Validate and create a file root, answering its canonical location.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a file backend creates the host-supplied root before naming its databases (FIG-2971)"
-)]
-pub(crate) fn file_location(
-    root: &Path,
-    owner: &'static str,
-) -> tokio_rusqlite::Result<SqliteLocation> {
-    crate::location::validate_file_database_path(root, owner)?;
-    std::fs::create_dir_all(root).map_err(|error| {
-        tokio_rusqlite::Error::Error(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
-            Some(format!(
-                "{owner} could not create its root {}: {error}",
-                root.display()
-            )),
-        ))
-    })?;
-    Ok(SqliteLocation::File {
-        root: crate::location::canonical_path(root),
-    })
-}
-
 fn system_clock() -> Arc<dyn Clock> {
     Arc::new(lash_core_execution::facade_support::SystemClock)
 }
 
 impl SqliteStoreSet {
-    /// The file store set under `root`, created if all databases are absent.
-    /// A root containing only some databases refuses with
-    /// [`CompatRefusal::IncompleteStoreSet`](lash_core_execution::compat::CompatRefusal::IncompleteStoreSet)
+    /// The file store set in the database file at `path`, created with
+    /// every table of the deployment if it is absent. A directory in the
+    /// retired three-file layout refuses with
+    /// [`CompatRefusal::RetiredSqliteLayout`](lash_core_execution::compat::CompatRefusal::RetiredSqliteLayout)
     /// in the error's source chain.
-    pub async fn open(root: impl AsRef<Path>) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_clock(root, system_clock()).await
+    pub async fn open(path: impl AsRef<Path>) -> tokio_rusqlite::Result<Self> {
+        Self::open_with_clock(path, system_clock()).await
     }
 
-    /// The file store set under `root` on `clock`.
+    /// The file store set at `path` on `clock`.
     pub async fn open_with_clock(
-        root: impl AsRef<Path>,
+        path: impl AsRef<Path>,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options_and_clock(root, SqliteStoreSetOptions::default(), clock).await
+        Self::open_with_options_and_clock(path, SqliteStoreSetOptions::default(), clock).await
     }
 
-    /// The file store set under `root` with explicit options and clock.
+    /// The file store set at `path` with explicit options and clock.
     pub async fn open_with_options_and_clock(
-        root: impl AsRef<Path>,
+        path: impl AsRef<Path>,
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        let location = file_location(root.as_ref(), "SqliteStoreSet")?;
+        let location = crate::location::file_location(path.as_ref(), "SqliteStoreSet")?;
         let identity: Arc<str> = Arc::from(location.identity());
         Self::assemble(location, identity, None, options, clock).await
     }
@@ -204,13 +183,8 @@ impl SqliteStoreSet {
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        crate::compat::check_set_files(&location).map_err(tokio_rusqlite::Error::Error)?;
-        crate::finalize::recover_on_open(&location, options.store.connection_policy.busy_timeout)
-            .await
-            .map_err(|error| tokio_rusqlite::Error::Error(crate::sqlite_conversion_error(error)))?;
         // A store older than this build is backed up whole and migrated
-        // before any component opens it; a set an interrupted migration left
-        // part way is completed or restored first.
+        // before any component opens it.
         #[cfg(feature = "testing")]
         let probe = crate::migration::Probe::hooked(options.migration_hook.clone());
         #[cfg(not(feature = "testing"))]
@@ -224,61 +198,35 @@ impl SqliteStoreSet {
         )
         .await
         .map_err(|error| tokio_rusqlite::Error::Error(crate::sqlite_conversion_error(error)))?;
-        crate::compat::check_set(&location).map_err(tokio_rusqlite::Error::Error)?;
-        let database = |database| {
-            DatabaseLocation::in_backend(&location, &identity, database, anchors.as_ref())
-        };
-        let core = database(SqliteDatabase::DurableCore);
-        let registry = database(SqliteDatabase::ProcessRegistry);
-        let triggers = database(SqliteDatabase::Triggers);
-
-        let mut process_env_store = SqliteStore::open_at(
-            &core,
-            options.store,
-            Arc::clone(&clock),
-            None,
-            None,
-            lash_core_execution::FleetFormat::writable(),
-            #[cfg(feature = "testing")]
-            options.pauses.clone(),
-        )
-        .await?;
-        // Each database carries its own copy of `F`, which its writer fence
-        // reads (ADR 0115 §1.2); `check_set` above refused a set whose copies
-        // disagree.
-        let process_registry = SqliteProcessRegistry::open_at(
-            &registry,
-            Arc::clone(&clock),
-            #[cfg(feature = "testing")]
-            options.pauses.clone(),
-        )
-        .await?
-        .with_wake_delivery_config(options.wake_delivery)
-        .with_process_id_mint_for_testing(options.process_id_mint.clone());
-        crate::lifecycle::attach_process_registry(
-            &mut process_env_store.conn,
-            registry.target(),
-            options.store.connection_policy,
-        )
-        .await?;
-        process_env_store.process_registry = Some(registry.target().clone());
-        // The evidence sweep reaches the trigger database on a connection of
-        // its own: a cross-database write goes through that database's own
-        // writer and fence, the same discipline `delete_session` uses for the
-        // process registry.
-        process_env_store.trigger_store = Some(triggers.target().clone());
-        let process_env_store = Arc::new(process_env_store);
-        let trigger_store =
-            Arc::new(SqliteTriggerStore::open_at(&triggers, Arc::clone(&clock)).await?);
-        // The registry reads a delivery's binding when it registers the
-        // delivery's start (FIG-4369).
-        let process_registry = Arc::new(
-            process_registry
-                .with_attached_durable_core(&core)
-                .await?
-                .with_attached_trigger_store(&triggers)
-                .await?,
+        let database = DatabaseLocation::in_backend(&location, anchors.as_ref());
+        // The store's installer provisions or admits every table of the
+        // database and arms the writer fence every component shares.
+        let process_env_store = Arc::new(
+            SqliteStore::open_at(
+                &database,
+                options.store,
+                Arc::clone(&clock),
+                None,
+                lash_core_execution::FleetFormat::writable(),
+                #[cfg(feature = "testing")]
+                options.pauses.clone(),
+            )
+            .await?,
         );
+        let process_registry = Arc::new(
+            SqliteProcessRegistry::on_connection(
+                process_env_store.conn.clone(),
+                database.clone(),
+                Arc::clone(&clock),
+            )
+            .with_wake_delivery_config(options.wake_delivery)
+            .with_process_id_mint_for_testing(options.process_id_mint.clone()),
+        );
+        let trigger_store = Arc::new(SqliteTriggerStore::on_connection(
+            process_env_store.conn.clone(),
+            database,
+            Arc::clone(&clock),
+        ));
         let attachment_store = Arc::new(SqliteAttachmentStore::for_store(&process_env_store));
         let recovery_leader = Arc::new(crate::recovery_leader::SqliteRecoveryLeader::new(
             process_env_store.conn.clone(),
@@ -300,7 +248,7 @@ impl SqliteStoreSet {
         })
     }
 
-    /// Where this store set's databases are.
+    /// Where this store set's database is.
     pub fn location(&self) -> &SqliteLocation {
         &self.inner.location
     }
@@ -309,25 +257,20 @@ impl SqliteStoreSet {
     /// 0106 §2, ADR 0115 §2.2): the last step of `retired`'s drain.
     ///
     /// It is refused typed unless `retired` reads drained in this store and
-    /// `registry` holds no deployment serving it. It then moves `F` in each
-    /// of the three databases to this build's `F_self`, holding all three
-    /// exclusively, and every writer whose writable range excludes the new
-    /// `F` is fenced from its next transaction on. A crash between the three
-    /// commits leaves the set partially finalized; a durable intent records
-    /// the checked retirement before any commit, and a fresh open completes
-    /// that authorized transition before admitting the store.
+    /// `registry` holds no deployment serving it. It then moves `F` to this
+    /// build's `F_self` in one exclusive transaction, and every writer whose
+    /// writable range excludes the new `F` is fenced from its next
+    /// transaction on.
     ///
     /// A SQLite store has no operator hold: the hold stops the fleet's
     /// automatic finalize, `lashctl finalize` over PostgreSQL, and a host
     /// that owns a SQLite store finalizes exactly when it calls this.
     ///
     /// `plugins` are the finalizing build's plugin registrations (FIG-4746):
-    /// the durable core's transaction that moves `F` also raises each
-    /// registered plugin's writer range to its native format, so the two
-    /// never disagree, and the sealed intent carries the ranges for the open
-    /// that completes a crashed finalize. A registration that would change a
-    /// recorded range while `F` already is this build's epoch is refused
-    /// typed, and nothing changes.
+    /// the transaction that moves `F` also raises each registered plugin's
+    /// writer range to its native format, so the two never disagree. A
+    /// registration that would change a recorded range while `F` already is
+    /// this build's epoch is refused typed, and nothing changes.
     pub async fn finalize(
         &self,
         retired: &lash_core_execution::engine::BuildGeneration,
@@ -383,9 +326,8 @@ impl SqliteStoreSet {
             let _ownership = ownership;
             crate::finalize::finalize(&location, busy_timeout, writable, drain, &plugins, |step| {
                 #[cfg(feature = "testing")]
-                if let (Some(hook), crate::compat::AdvanceStep::Committed(database)) = (&hook, step)
-                {
-                    hook.committed(database);
+                if let (Some(hook), crate::compat::AdvanceStep::Committed) = (&hook, step) {
+                    hook.committed();
                 }
                 #[cfg(not(feature = "testing"))]
                 let _ = step;
@@ -401,7 +343,7 @@ impl SqliteStoreSet {
         })?
     }
 
-    /// `sqlite:<canonical durable-core.db path>` or `sqlite-memory:<id>`.
+    /// `sqlite:<canonical database path>` or `sqlite-memory:<id>`.
     pub fn identity(&self) -> &str {
         &self.inner.identity
     }
@@ -411,37 +353,37 @@ impl SqliteStoreSet {
         &self.inner.options
     }
 
-    /// The URI a raw SQLite connection opens `database` through. An
+    /// The URI a raw SQLite connection opens the database through. An
     /// inspection affordance; see [`SqliteLocation::database_uri`].
-    pub fn database_uri(&self, database: SqliteDatabase) -> String {
-        self.inner.location.database_uri(database)
+    pub fn database_uri(&self) -> String {
+        self.inner.location.database_uri()
     }
 
     /// The factory every session of this store set is created and reopened
-    /// through, over the durable-core catalog.
+    /// through.
     pub fn session_store_factory(&self) -> Arc<SqliteStore> {
         Arc::clone(&self.inner.process_env_store)
     }
 
-    /// The process registry, pruning process-owned sessions out of the
-    /// store set's own catalog.
+    /// The process registry, on the store set's writer connection.
     pub fn process_registry(&self) -> Arc<SqliteProcessRegistry> {
         Arc::clone(&self.inner.process_registry)
     }
 
-    /// The trigger subscriptions and occurrences.
+    /// The trigger subscriptions and occurrences, on the store set's writer
+    /// connection.
     pub fn trigger_store(&self) -> Arc<SqliteTriggerStore> {
         Arc::clone(&self.inner.trigger_store)
     }
 
-    /// The durable-core [`SqliteStore`] that serves process execution environments
-    /// and Lashlang artifacts. Unbound to any session.
+    /// The [`SqliteStore`] that serves process execution environments and
+    /// Lashlang artifacts. Unbound to any session.
     pub fn process_env_store(&self) -> Arc<SqliteStore> {
         Arc::clone(&self.inner.process_env_store)
     }
 
-    /// The durability engine's store over the durable core, on the set's
-    /// writer connection and clock.
+    /// The durability engine's store, on the set's writer connection and
+    /// clock.
     pub fn durable_store(&self) -> crate::SqliteDurableStore {
         crate::SqliteDurableStore::new(
             self.inner.process_env_store.conn.clone(),
@@ -449,14 +391,13 @@ impl SqliteStoreSet {
         )
     }
 
-    /// The attachment byte store over the durable-core catalog, beside the
-    /// manifest its garbage collection reads.
+    /// The attachment byte store, beside the manifest its garbage collection
+    /// reads.
     pub fn attachment_store(&self) -> Arc<SqliteAttachmentStore> {
         Arc::clone(&self.inner.attachment_store)
     }
 
-    /// A new unbound [`SqliteStore`] on this store set's durable-core catalog, on
-    /// a connection of its own.
+    /// The unbound [`SqliteStore`] of this store set.
     pub async fn open_store(&self) -> tokio_rusqlite::Result<Arc<SqliteStore>> {
         Ok(Arc::clone(&self.inner.process_env_store))
     }
@@ -528,13 +469,10 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         self.inner.recovery_leader.clone()
     }
 
-    /// The drain marks and live processes live in the process registry
-    /// file; the parked turns it counts, in the durable core.
     fn generation_drain(
         &self,
     ) -> Arc<dyn lash_core_execution::store::generation_drain::GenerationDrainStore> {
         Arc::new(crate::generation_drain::SqliteGenerationDrain::new(
-            self.inner.process_registry.conn.clone(),
             self.inner.process_env_store.conn.clone(),
         ))
     }
@@ -543,35 +481,24 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         &self,
         kind: lash_core_execution::store::ObligationKind,
     ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
-        // Each kind's table lives in one database: the process registry file
-        // holds plans and processes, the trigger store's file deliveries, the
-        // durable core everything else.
-        // Ingress spans two tables of the durable core.
-        if kind == lash_core_execution::store::ObligationKind::Ingress {
-            return crate::ingress_obligation::ingress_ledger(&self.inner.process_env_store.conn);
+        let conn = self.inner.process_env_store.conn.clone();
+        match kind {
+            // Ingress spans two tables.
+            lash_core_execution::store::ObligationKind::Ingress => {
+                crate::ingress_obligation::ingress_ledger(&conn)
+            }
+            lash_core_execution::store::ObligationKind::ArtifactCleanup => Arc::new(
+                crate::obligation_ledger::SqliteArtifactCleanupLedger::new(conn),
+            ),
+            kind => Arc::new(crate::obligation_ledger::SqliteObligationLedger::new(
+                kind, conn,
+            )),
         }
-        if kind == lash_core_execution::store::ObligationKind::ArtifactCleanup {
-            return Arc::new(crate::obligation_ledger::SqliteArtifactCleanupLedger::new(
-                self.inner.process_env_store.conn.clone(),
-                self.inner.process_registry.conn.clone(),
-            ));
-        }
-        let conn = if kind == lash_core_execution::store::ObligationKind::TriggerDelivery {
-            self.inner.trigger_store.conn.clone()
-        } else if crate::obligation_ledger::in_process_registry(kind) {
-            self.inner.process_registry.conn.clone()
-        } else {
-            self.inner.process_env_store.conn.clone()
-        };
-        Arc::new(crate::obligation_ledger::SqliteObligationLedger::new(
-            kind, conn,
-        ))
     }
 
     fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
         Arc::new(crate::obligation_ledger::SqliteArtifactCleanupLedger::new(
             self.inner.process_env_store.conn.clone(),
-            self.inner.process_registry.conn.clone(),
         ))
     }
 
@@ -581,7 +508,6 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         Arc::new(
             crate::session_delete_ledger::SqliteSessionDeleteLedger::new(
                 self.inner.process_env_store.conn.clone(),
-                self.inner.process_registry.conn.clone(),
             ),
         )
     }
@@ -601,79 +527,50 @@ mod tests {
     use super::*;
     use lash_core_execution::SessionCatalogStore as _;
 
+    /// A SQLite deployment is one database file (FIG-5195): a directory in
+    /// the retired three-file layout is refused typed, naming the layout's
+    /// files it holds, and the open changes nothing in it.
     #[tokio::test]
     #[expect(
         clippy::disallowed_methods,
         reason = "test fixture: compare host database bytes before and after a refused open"
     )]
-    async fn an_incomplete_store_set_refuses_without_changing_its_databases() {
-        // Exercise every one- and two-file omission at the current tier and
-        // its oldest readable tier. An old partial set must not report a
-        // migration that cannot run, nor provision empty replacement files.
-        let mut versions = vec![
-            SqliteDatabase::DurableCore.expected_version(),
-            i64::from(
-                lash_core_execution::compat::descriptor(SqliteDatabase::DurableCore.component())
-                    .expect("core descriptor")
-                    .reads
-                    .min(),
-            ),
-        ];
-        versions.dedup();
-        for version in versions {
-            for mask in 1..7 {
-                let root = tempfile::tempdir().expect("store root");
-                let mut missing = Vec::new();
-                let mut surviving = Vec::new();
-                for (index, database) in SqliteDatabase::ALL.into_iter().enumerate() {
-                    let path = root.path().join(database.file_name());
-                    if mask & (1 << index) != 0 {
-                        missing.push(database);
-                        continue;
-                    }
-                    let mut connection = rusqlite::Connection::open(&path).expect("database");
-                    let tx = crate::schema::prepare_versioned_schema(&mut connection, database)
-                        .expect("provision the surviving database");
-                    tx.execute("UPDATE lash_compat SET version = ?1", [version])
-                        .expect("select the fixture tier");
-                    tx.commit().expect("commit fixture");
-                    drop(connection);
-                    surviving.push((path.clone(), std::fs::read(&path).expect("fixture bytes")));
-                }
-
-                let error = SqliteStoreSet::open(root.path())
-                    .await
-                    .expect_err("a partial set must refuse");
-                let tokio_rusqlite::Error::Error(rusqlite::Error::ToSqlConversionFailure(source)) =
-                    &error
-                else {
-                    panic!("the refusal must preserve its typed source: {error:?}");
-                };
-                let Some(lash_core_execution::StoreError::Incompatible {
-                    refusal:
-                        lash_core_execution::compat::CompatRefusal::IncompleteStoreSet {
-                            missing: reported,
-                            ..
-                        },
-                }) = source.downcast_ref::<lash_core_execution::StoreError>()
-                else {
-                    panic!("expected an incomplete set refusal: {error:?}");
-                };
-                let expected: Vec<String> = missing
-                    .iter()
-                    .map(|database| database.name().to_owned())
-                    .collect();
-                assert_eq!(reported, &expected, "fixture version {version}");
-                for database in missing {
-                    assert!(error.to_string().contains(database.name()), "{error}");
-                    assert!(!root.path().join(database.file_name()).exists());
-                }
-                for (path, before) in surviving {
-                    assert_eq!(std::fs::read(path).expect("surviving bytes"), before);
-                }
-                assert!(!root.path().join("migration-backups").exists());
-            }
+    async fn a_directory_in_the_retired_layout_is_refused_unchanged() {
+        let root = tempfile::tempdir().expect("store root");
+        let mut held = Vec::new();
+        for file in ["durable-core.db", "process-registry.db"] {
+            let path = root.path().join(file);
+            rusqlite::Connection::open(&path)
+                .and_then(|connection| connection.execute_batch("CREATE TABLE old (id INTEGER)"))
+                .expect("a retired-layout database");
+            held.push((path.clone(), std::fs::read(&path).expect("fixture bytes")));
         }
+
+        let error = SqliteStoreSet::open(root.path())
+            .await
+            .expect_err("a retired-layout directory must refuse");
+        let tokio_rusqlite::Error::Error(rusqlite::Error::ToSqlConversionFailure(source)) = &error
+        else {
+            panic!("the refusal must preserve its typed source: {error:?}");
+        };
+        let Some(lash_core_execution::StoreError::Incompatible {
+            refusal:
+                lash_core_execution::compat::CompatRefusal::RetiredSqliteLayout { location, files },
+        }) = source.downcast_ref::<lash_core_execution::StoreError>()
+        else {
+            panic!("expected a retired-layout refusal: {error:?}");
+        };
+        assert_eq!(location, &root.path().display().to_string());
+        assert_eq!(files, &["durable-core.db", "process-registry.db"]);
+        for (path, before) in held {
+            assert_eq!(std::fs::read(path).expect("held bytes"), before);
+        }
+        let mut entries: Vec<_> = std::fs::read_dir(root.path())
+            .expect("list the root")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        entries.sort();
+        assert_eq!(entries, ["durable-core.db", "process-registry.db"]);
     }
 
     fn catalog_table_count(uri: &str) -> i64 {
@@ -696,7 +593,7 @@ mod tests {
         let stores = SqliteStoreSet::memory()
             .await
             .expect("open the memory stores");
-        let uri = stores.database_uri(SqliteDatabase::DurableCore);
+        let uri = stores.database_uri();
         let store = stores.open_store().await.expect("open catalog");
         let request = lash_core_execution::testing::store_fixtures::session_store_request(
             &lash_core_execution::SessionId::from("memory-lifetime"),

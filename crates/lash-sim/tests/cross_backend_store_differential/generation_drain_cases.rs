@@ -360,7 +360,7 @@ pub(super) async fn compare_generation_drains(
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open the SQLite memory drain store set");
-    let file = lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("generation-drains"))
+    let file = lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("generation-drains.db"))
         .await
         .expect("open the SQLite file drain store set");
     let attachments = tempfile::tempdir().expect("attachment directory");

@@ -1578,70 +1578,27 @@
           "type": "object"
         },
         {
-          "description": "A SQLite store set holds some of its databases but not all: the open\nrefuses a partial set rather than provisioning the missing databases\nbeside the survivors.",
+          "description": "A SQLite store's configured path is a directory in the retired layout\nof three database files (FIG-5195). A SQLite deployment is one\ndatabase file (ADR 0132 \u00a712), and formats reset at 1.0, so no release\nmigrates the old layout: the open refuses it unchanged.",
           "properties": {
-            "missing": {
-              "description": "The operator-facing names of the absent databases, in store-set\norder \u2014 the same names the preflight report's database rows carry.",
+            "files": {
+              "description": "The retired layout's database files the directory holds.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
-            "refusal": {
-              "const": "incomplete_store_set",
+            "location": {
               "type": "string"
             },
-            "writing_release": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "refusal": {
+              "const": "retired_sqlite_layout",
+              "type": "string"
             }
           },
           "required": [
             "refusal",
-            "missing"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "The SQLite databases of one store disagree on their stamps or `F`.",
-          "properties": {
-            "databases": {
-              "items": {
-                "maxItems": 3,
-                "minItems": 3,
-                "prefixItems": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "$ref": "#/$defs/CompatStamp"
-                  },
-                  {
-                    "format": "uint32",
-                    "minimum": 0,
-                    "type": "integer"
-                  }
-                ],
-                "type": "array"
-              },
-              "type": "array"
-            },
-            "refusal": {
-              "const": "partially_advanced",
-              "type": "string"
-            },
-            "writing_release": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "refusal",
-            "databases"
+            "location",
+            "files"
           ],
           "type": "object"
         },
@@ -1789,26 +1746,6 @@
           "type": "object"
         }
       ]
-    },
-    "CompatStamp": {
-      "description": "A durable stamp.",
-      "properties": {
-        "min_reader": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "version": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "version",
-        "min_reader"
-      ],
-      "type": "object"
     },
     "ConfigRefusal": {
       "additionalProperties": false,

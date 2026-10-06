@@ -198,7 +198,7 @@ pub(super) async fn open(
                 .map_err(|error| error.to_string())?,
         ),
         Opening::SqliteFile(root) => Arc::new(
-            lash_sqlite_store::SqliteStoreSet::open_with_clock(root, clock)
+            lash_sqlite_store::SqliteStoreSet::open_with_clock(root.join("lash.db"), clock)
                 .await
                 .map_err(|error| error.to_string())?,
         ),

@@ -306,7 +306,7 @@ async fn retention_live(postgres: bool, path: &std::path::Path) -> RetentionEngi
                 ))
             } else {
                 Arc::new(
-                    lash_sqlite_store::SqliteStoreSet::open_with_clock(&path, clock)
+                    lash_sqlite_store::SqliteStoreSet::open_with_clock(path.join("lash.db"), clock)
                         .await
                         .map_err(|error| {
                             lash_restate_test::live::LiveError::Stores(error.to_string())
@@ -349,7 +349,7 @@ async fn retention_double(
                     ))
                 } else if let Some(path) = path {
                     Arc::new(
-                        lash_sqlite_store::SqliteStoreSet::open(&path)
+                        lash_sqlite_store::SqliteStoreSet::open(path.join("lash.db"))
                             .await
                             .map_err(|error| {
                                 lash_restate_test::BackendError::Stores(error.to_string())

@@ -290,7 +290,7 @@ pub(crate) async fn run_case(
     let topology = match spec.topology {
         Topology::SameProcess => {
             let stores_dir = case_dir.join("same");
-            let stores = lash::sqlite::SqliteStoreSet::open(&stores_dir)
+            let stores = lash::sqlite::SqliteStoreSet::open(stores_dir.join("lash.db"))
                 .await
                 .map_err(|error| anyhow::anyhow!("open case store set: {error}"))?;
             let engine = env.restate.engine(Arc::new(stores));
@@ -322,7 +322,7 @@ pub(crate) async fn run_case(
         Topology::CrossWorker => {
             let worker_dir = case_dir.join("worker");
             let worker = LatencyWorkerProcess::spawn(&worker_dir, env).await?;
-            let stores = lash::sqlite::SqliteStoreSet::open(&worker_dir)
+            let stores = lash::sqlite::SqliteStoreSet::open(worker_dir.join("lash.db"))
                 .await
                 .map_err(|error| anyhow::anyhow!("open host store set: {error}"))?;
             let engine = env.restate.engine(Arc::new(stores));
@@ -423,7 +423,7 @@ fn build_core(
 /// writer) so their cadence never serializes on the shift's own connections;
 /// it never serves an endpoint, so it can never work.
 async fn build_observer(restate: &LocalRestate, stores_dir: &Path) -> Result<lash::LashCore> {
-    let stores = lash::sqlite::SqliteStoreSet::open(stores_dir)
+    let stores = lash::sqlite::SqliteStoreSet::open(stores_dir.join("lash.db"))
         .await
         .map_err(|error| anyhow::anyhow!("open observer store set: {error}"))?;
     let backend = lash::Backend::new(restate.engine(Arc::new(stores)));

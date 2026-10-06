@@ -1,34 +1,30 @@
-//! Where a SQLite store set's three databases live, and the one identity they
-//! answer to (ADR 0102).
+//! Where a SQLite store's one database lives, and the one identity it
+//! answers to (ADR 0102, ADR 0132 §12).
 //!
-//! A store set is a directory of three database files or three named
-//! `memdb` databases. [`SqliteLocation`] owns both facts
-//! every component needs from that choice: how to reach each database (a path
-//! or a `file:/lash-<id>/<db>?vfs=memdb` URI) and the storage binding identity.
-//! Components also use the location to address databases for `ATTACH`. No
+//! A SQLite deployment is one database file or one named `memdb` database.
+//! [`SqliteLocation`] owns both facts every component needs from that
+//! choice: how to reach the database (a path or a
+//! `file:/lash-<id>/db?vfs=memdb` URI) and the storage binding identity. No
 //! component formats either on its own.
 //!
 //! A `memdb` database is shared by name across every connection in the
-//! process and disappears with its last connection. A memory store set
-//! therefore pins each database with one idle anchor connection
-//! ([`MemoryAnchors`]), and every component opened on it holds the anchors, so
-//! the data lives exactly as long as the store set or any handle taken from
-//! it.
+//! process and disappears with its last connection. A memory store therefore
+//! pins its database with one idle anchor connection ([`MemoryAnchors`]), and
+//! every component opened on it holds the anchor, so the data lives exactly
+//! as long as the store set or any handle taken from it.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::SqliteDatabase;
-
-/// The typed location of one SQLite store set.
+/// The typed location of one SQLite store.
 ///
 /// The only way to reach a SQLite database in memory: raw `:memory:` and
 /// `file:` strings are refused by every path-taking constructor.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SqliteLocation {
-    /// Three database files under a canonical directory.
-    File { root: PathBuf },
-    /// Three named `memdb` databases, alive while their anchors are held.
+    /// One database file, at its canonical path.
+    File { path: PathBuf },
+    /// One named `memdb` database, alive while its anchor is held.
     Memory { id: uuid::Uuid },
 }
 
@@ -41,34 +37,27 @@ impl SqliteLocation {
     }
 
     /// The identity every binding this backend writes is keyed on:
-    /// `sqlite:<canonical durable-core.db path>` or `sqlite-memory:<id>`.
-    ///
-    /// A file store set answers to its durable-core catalog path.
+    /// `sqlite:<canonical database path>` or `sqlite-memory:<id>`.
     pub fn identity(&self) -> String {
         match self {
-            Self::File { root } => format!(
-                "sqlite:{}",
-                root.join(SqliteDatabase::DurableCore.file_name()).display()
-            ),
+            Self::File { path } => format!("sqlite:{}", path.display()),
             Self::Memory { id } => format!("sqlite-memory:{id}"),
         }
     }
 
-    /// The URI a raw SQLite connection opens `database` through.
+    /// The URI a raw SQLite connection opens the database through.
     ///
     /// An inspection affordance: every lash component reaches the database
     /// through the backend, never through this string.
-    pub fn database_uri(&self, database: SqliteDatabase) -> String {
-        self.target(database).uri()
+    pub fn database_uri(&self) -> String {
+        self.target().uri()
     }
 
-    /// How a connection reaches `database` in this location.
-    pub(crate) fn target(&self, database: SqliteDatabase) -> DatabaseTarget {
+    /// How a connection reaches the database in this location.
+    pub(crate) fn target(&self) -> DatabaseTarget {
         match self {
-            Self::File { root } => DatabaseTarget::File(root.join(database.file_name())),
-            Self::Memory { id } => {
-                DatabaseTarget::Memory(format!("/lash-{id}/{}", database.memory_name()))
-            }
+            Self::File { path } => DatabaseTarget::File(path.clone()),
+            Self::Memory { id } => DatabaseTarget::Memory(format!("/lash-{id}/db")),
         }
     }
 }
@@ -153,22 +142,19 @@ fn escape_uri_path(path: &str) -> String {
         .replace('#', "%23")
 }
 
-/// One idle connection per `memdb` database of a memory store set. A
-/// `memdb` database disappears with its last connection; these keep all three
-/// alive until the last handle holding them drops.
+/// The idle connection that pins a memory store's `memdb` database, which
+/// disappears with its last connection, until the last handle holding the
+/// anchor drops.
 pub(crate) struct MemoryAnchors {
-    _connections: Mutex<Vec<rusqlite::Connection>>,
+    _connection: Mutex<rusqlite::Connection>,
 }
 
 impl MemoryAnchors {
-    /// Create the three databases of `location` and pin them.
+    /// Create the database of `location` and pin it.
     pub(crate) fn pin(location: &SqliteLocation) -> rusqlite::Result<Arc<Self>> {
-        let connections = SqliteDatabase::ALL
-            .into_iter()
-            .map(|database| rusqlite::Connection::open(location.target(database).open_name()))
-            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let connection = rusqlite::Connection::open(location.target().open_name())?;
         Ok(Arc::new(Self {
-            _connections: Mutex::new(connections),
+            _connection: Mutex::new(connection),
         }))
     }
 }
@@ -181,36 +167,29 @@ impl std::fmt::Debug for MemoryAnchors {
     }
 }
 
-/// One database of one backend, as a component opens it: where it is, the
-/// identity of the backend it belongs to, and — for a memory backend —
-/// the anchors that keep it alive while this handle does.
+/// A backend's database, as a component opens it: where it is and, for a
+/// memory backend, the anchor that keeps it alive while this handle does.
 #[derive(Clone, Debug)]
 pub(crate) struct DatabaseLocation {
     target: DatabaseTarget,
-    /// Held, never read: dropping the last handle releases the databases.
+    /// Held, never read: dropping the last handle releases the database.
     _anchors: Option<Arc<MemoryAnchors>>,
 }
 
 impl DatabaseLocation {
-    /// `database` in `location`, answering to the backend's `identity`
-    /// and pinned by `anchors` when in memory.
+    /// The database of `location`, pinned by `anchors` when in memory.
     pub(crate) fn in_backend(
         location: &SqliteLocation,
-        _identity: &Arc<str>,
-        database: SqliteDatabase,
         anchors: Option<&Arc<MemoryAnchors>>,
     ) -> Self {
         Self {
-            target: location.target(database),
+            target: location.target(),
             _anchors: anchors.cloned(),
         }
     }
 
     /// A database file a host opened on its own, outside any backend: the
-    /// file is its own location, and its identity is `sqlite:<canonical
-    /// path>`, stable across relative spellings and symlinks. A backend's
-    /// journal file answers to the same string (see
-    /// [`SqliteLocation::identity`]).
+    /// file is its own location.
     pub(crate) fn standalone_file(path: &Path) -> Self {
         Self {
             target: DatabaseTarget::File(path.to_path_buf()),
@@ -221,6 +200,71 @@ impl DatabaseLocation {
     pub(crate) fn target(&self) -> &DatabaseTarget {
         &self.target
     }
+}
+
+/// The database files of the retired three-file layout (FIG-5195), which a
+/// store directory held before a SQLite deployment became one file.
+const RETIRED_LAYOUT_FILES: [&str; 3] = ["durable-core.db", "process-registry.db", "triggers.db"];
+
+/// Validate `path` as a store's database file, create the directory it sits
+/// in, and answer its canonical location.
+///
+/// A directory is never a database file. One that holds the retired
+/// three-file layout is refused as [`CompatRefusal::RetiredSqliteLayout`]
+/// (typed in the error's source chain) and left unchanged.
+///
+/// [`CompatRefusal::RetiredSqliteLayout`]: lash_core_execution::compat::CompatRefusal::RetiredSqliteLayout
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a file backend creates the directory of the host-supplied database path (FIG-2971)"
+)]
+pub(crate) fn file_location(
+    path: &Path,
+    owner: &'static str,
+) -> tokio_rusqlite::Result<SqliteLocation> {
+    validate_file_database_path(path, owner)?;
+    if path.is_dir() {
+        let files: Vec<String> = RETIRED_LAYOUT_FILES
+            .into_iter()
+            .filter(|file| path.join(file).exists())
+            .map(str::to_owned)
+            .collect();
+        if !files.is_empty() {
+            return Err(tokio_rusqlite::Error::Error(
+                crate::sqlite_conversion_error(lash_core_execution::StoreError::Incompatible {
+                    refusal: lash_core_execution::compat::CompatRefusal::RetiredSqliteLayout {
+                        location: path.display().to_string(),
+                        files,
+                    },
+                }),
+            ));
+        }
+        return Err(cannot_open(format!(
+            "{owner} requires the path of a database file, and {} is a directory",
+            path.display()
+        )));
+    }
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            cannot_open(format!(
+                "{owner} could not create the directory of {}: {error}",
+                path.display()
+            ))
+        })?;
+    }
+    Ok(SqliteLocation::File {
+        path: canonical_path(path),
+    })
+}
+
+fn cannot_open(message: String) -> tokio_rusqlite::Error {
+    tokio_rusqlite::Error::Error(rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+        Some(message),
+    ))
 }
 
 /// Refuse a path-taking constructor a spelling that is not a database file:
@@ -234,15 +278,10 @@ pub(crate) fn validate_file_database_path(
 ) -> tokio_rusqlite::Result<()> {
     let rendered = path.to_string_lossy();
     if path.as_os_str().is_empty() || rendered == ":memory:" || rendered.starts_with("file:") {
-        return Err(tokio_rusqlite::Error::Error(
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
-                Some(format!(
-                    "{component} requires a file-backed database path, got `{rendered}`; \
-                     use SqliteStoreSet::memory() for a SQLite in-memory store set"
-                )),
-            ),
-        ));
+        return Err(cannot_open(format!(
+            "{component} requires a file-backed database path, got `{rendered}`; \
+             use SqliteStoreSet::memory() for a SQLite in-memory store set"
+        )));
     }
     Ok(())
 }

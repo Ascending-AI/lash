@@ -447,7 +447,7 @@ fn print(report: &impl Serialize) -> Result<()> {
 
 async fn open_sqlite(dir: &Path) -> Result<lash::sqlite::SqliteStoreSet> {
     std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-    lash::sqlite::SqliteStoreSet::open(dir)
+    lash::sqlite::SqliteStoreSet::open(dir.join("lash.db"))
         .await
         .with_context(|| format!("open the SQLite store set at {}", dir.display()))
 }

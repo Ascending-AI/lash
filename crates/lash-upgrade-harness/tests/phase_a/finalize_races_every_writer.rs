@@ -1,5 +1,5 @@
 //! `finalize_races_every_writer` (ADR 0115 §6): the writer fence against
-//! N+1's finalize, on PostgreSQL and on SQLite (each of its databases).
+//! N+1's finalize, on PostgreSQL and on SQLite.
 //!
 //! The writers are N: this leg's own process runs N's store library, the
 //! default build, whose writable range is `[1,1]`. The lash node binary has
@@ -8,7 +8,7 @@
 //! `lash-upgrade-node`. N+1's finalize is the production flip that
 //! `lashctl finalize` and `SqliteStoreSet::finalize` run, without their drain
 //! and retirement checks, which a race does not exercise: the fleet-format
-//! row read `FOR UPDATE` and moved on PostgreSQL, every database's
+//! row read `FOR UPDATE` and moved on PostgreSQL, the database's
 //! `lash_compat` row rewritten under `BEGIN EXCLUSIVE` on SQLite.
 //!
 //! On each backend:
@@ -40,7 +40,7 @@ use lash_postgres_store::testing::IsolatedDatabase;
 use lash_postgres_store::testing::{AfterFence, HeldFinalize};
 use lash_postgres_store::{MigrationPhase, PostgresStorage, PostgresStoreConfig, PostgresStoreSet};
 use lash_sqlite_store::testing::{SqlitePauses, finalize_fleet_format};
-use lash_sqlite_store::{SqliteDatabase, SqliteStoreSet, SqliteStoreSetOptions};
+use lash_sqlite_store::{SqliteStoreSet, SqliteStoreSetOptions};
 use serde::Serialize;
 use sqlx::PgPool;
 
@@ -49,13 +49,6 @@ use crate::support::ARTIFACT_DIR_ENV;
 /// N's epoch, and the one N+1's finalize moves the fleet to.
 const N_EPOCH: u32 = 1;
 const NEXT_EPOCH: u32 = 2;
-
-/// The three SQLite databases of one store.
-const SQLITE_DATABASES: [SqliteDatabase; 3] = [
-    SqliteDatabase::DurableCore,
-    SqliteDatabase::ProcessRegistry,
-    SqliteDatabase::Triggers,
-];
 
 /// Every row count of one store, by table.
 type Rows = BTreeMap<String, i64>;
@@ -241,19 +234,17 @@ async fn postgres_rows(pool: &PgPool) -> Result<Rows> {
 
 fn sqlite_rows(root: &Path) -> Result<Rows> {
     let mut rows = Rows::new();
-    for database in SQLITE_DATABASES {
-        let connection = rusqlite::Connection::open(root.join(database.file_name()))?;
-        let tables: Vec<String> = connection
-            .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")?
-            .query_map([], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        for table in tables {
-            let count: i64 =
-                connection.query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |row| {
-                    row.get(0)
-                })?;
-            rows.insert(format!("{}.{table}", database.name()), count);
-        }
+    let connection = rusqlite::Connection::open(root.join("lash.db"))?;
+    let tables: Vec<String> = connection
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")?
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for table in tables {
+        let count: i64 =
+            connection.query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |row| {
+                row.get(0)
+            })?;
+        rows.insert(table, count);
     }
     Ok(rows)
 }
@@ -437,7 +428,7 @@ async fn sqlite_leg(scratch: &Path) -> Result<BackendEvidence> {
     std::fs::create_dir_all(&root)?;
     let pauses = SqlitePauses::default();
     let stores = SqliteStoreSet::open_with_options_and_clock(
-        &root,
+        root.join("lash.db"),
         SqliteStoreSetOptions {
             pauses: Some(pauses.clone()),
             ..SqliteStoreSetOptions::default()
@@ -447,8 +438,8 @@ async fn sqlite_leg(scratch: &Path) -> Result<BackendEvidence> {
     .await?;
     let location = stores.location().clone();
 
-    // 1. The paused writer is ordered before finalize, in the durable core
-    // where the session writer runs; finalize holds every database.
+    // 1. The paused writer is ordered before finalize, which holds the
+    // database.
     let pause = pauses.pause_after_fence();
     let factory = stores.session_store_factory();
     let writer = tokio::spawn({
@@ -481,21 +472,17 @@ async fn sqlite_leg(scratch: &Path) -> Result<BackendEvidence> {
     finalize
         .await?
         .context("SQLite finalize commits after the writer")?;
-    for database in SQLITE_DATABASES {
-        let fleet: i64 = rusqlite::Connection::open(root.join(database.file_name()))?.query_row(
-            "SELECT fleet_format FROM lash_compat WHERE singleton = 1",
-            [],
-            |row| row.get(0),
-        )?;
-        ensure!(
-            fleet == 2,
-            "{} was not finalized: F={fleet}",
-            database.name()
-        );
-    }
+    let fleet: i64 = rusqlite::Connection::open(root.join("lash.db"))?.query_row(
+        "SELECT fleet_format FROM lash_compat WHERE singleton = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    ensure!(
+        fleet == 2,
+        "the SQLite database was not finalized: F={fleet}"
+    );
 
-    // 2. Every writer after finalize, in each database, is fenced and writes
-    // nothing.
+    // 2. Every writer after finalize is fenced and writes nothing.
     let before = sqlite_rows(&root)?;
     evidence.refused_after_finalize = every_writer_is_fenced(&stores, "sqlite").await?;
     let after = sqlite_rows(&root)?;
@@ -503,26 +490,23 @@ async fn sqlite_leg(scratch: &Path) -> Result<BackendEvidence> {
         before == after,
         "a fenced SQLite writer changed rows: {before:?} -> {after:?}"
     );
-    let kept: i64 = rusqlite::Connection::open(root.join(SqliteDatabase::DurableCore.file_name()))?
-        .query_row(
-            "SELECT count(*) FROM session_meta WHERE session_id = 'sqlite-straddles'",
-            [],
-            |row| row.get(0),
-        )?;
+    let kept: i64 = rusqlite::Connection::open(root.join("lash.db"))?.query_row(
+        "SELECT count(*) FROM session_meta WHERE session_id = 'sqlite-straddles'",
+        [],
+        |row| row.get(0),
+    )?;
     ensure!(kept == 1, "the straddling SQLite writer's row is gone");
     evidence.rows_unchanged_by_refused_writers = true;
     drop(factory);
     drop(stores);
 
-    for database in SQLITE_DATABASES {
-        rusqlite::Connection::open(root.join(database.file_name()))?.execute(
-            "UPDATE lash_compat SET fleet_format = 1 WHERE singleton = 1",
-            [],
-        )?;
-    }
+    rusqlite::Connection::open(root.join("lash.db"))?.execute(
+        "UPDATE lash_compat SET fleet_format = 1 WHERE singleton = 1",
+        [],
+    )?;
     const PINNED: u32 = 7;
     let store = lash_sqlite_store::SqliteStore::open_with_fleet_writable_range_for_testing(
-        &root.join(SqliteDatabase::DurableCore.file_name()),
+        &root.join("lash.db"),
         VersionRange::between(N_EPOCH, NEXT_EPOCH),
     )
     .await?
@@ -548,12 +532,11 @@ async fn sqlite_leg(scratch: &Path) -> Result<BackendEvidence> {
         receipt.schema_version != PINNED,
         "the receipt kept epoch 1's pin"
     );
-    let stored: String =
-        rusqlite::Connection::open(root.join(SqliteDatabase::DurableCore.file_name()))?.query_row(
-            "SELECT result_json FROM runtime_turn_commits WHERE session_id = ?1",
-            [session.as_str()],
-            |row| row.get(0),
-        )?;
+    let stored: String = rusqlite::Connection::open(root.join("lash.db"))?.query_row(
+        "SELECT result_json FROM runtime_turn_commits WHERE session_id = ?1",
+        [session.as_str()],
+        |row| row.get(0),
+    )?;
     let stored: serde_json::Value = serde_json::from_str(&stored)?;
     ensure!(
         stored["schema_version"] != serde_json::json!(PINNED),

@@ -300,7 +300,6 @@ mod rlm_testing_inventory {
 
 #[cfg(feature = "sqlite")]
 mod sqlite_inventory {
-    use lash::sqlite::SqliteDatabase as _;
     use lash::sqlite::SqliteLocation as _;
     use lash::sqlite::SqliteStore as _;
     use lash::sqlite::SqliteStoreSet as _;

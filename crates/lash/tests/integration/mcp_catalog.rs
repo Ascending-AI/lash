@@ -413,7 +413,7 @@ async fn make_stores(
                 .expect("SQLite memory"),
         ),
         Store::SqliteFile => Arc::new(
-            lash_sqlite_store::SqliteStoreSet::open_with_clock(root.join("stores"), clock)
+            lash_sqlite_store::SqliteStoreSet::open_with_clock(root.join("stores.db"), clock)
                 .await
                 .expect("SQLite file"),
         ),

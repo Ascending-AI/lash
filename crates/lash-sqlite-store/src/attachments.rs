@@ -1,6 +1,5 @@
 //! Attachment edges and external-byte write state in the durable-core catalog.
 use super::*;
-use crate::schema_layout::Schema;
 use lash_core_execution::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, SessionReferrerState};
 use lash_sansio::sync::MutexExt;
 use lash_store_sql::attachment::{
@@ -38,7 +37,7 @@ const ATTACHMENT_REFERRER_KINDS: lash_store_sql::Vocabulary =
     )]);
 
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
-    let dialect = Schema::Main.dialect();
+    let dialect = crate::schema_layout::MAIN;
     AttachmentSql {
         edges: AttachmentEdgeStatements::render(dialect.with_vocabulary(ATTACHMENT_REFERRER_KINDS)),
         pending: PendingWriteStatements::render(dialect),
@@ -135,12 +134,7 @@ pub(crate) fn acquire_attachment_refs_conn(
         insert_edge(tx, referrer, id)?;
     }
     if let Some(cleanup) = claim.guard_cleanup() {
-        crate::obligation_ledger::arm_cleanup_tx(
-            tx,
-            &cleanup,
-            now,
-            crate::obligation_ledger::CleanupStorage::DurableCore,
-        )?;
+        crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now)?;
     }
     Ok(())
 }
@@ -797,12 +791,7 @@ impl AttachmentReferrers for SqliteStore {
                     }
                     insert_edge(tx, referrer, &write.attachment_id)?;
                     if let Some(cleanup) = write.claim.guard_cleanup() {
-                        crate::obligation_ledger::arm_cleanup_tx(
-                            tx,
-                            &cleanup,
-                            now,
-                            crate::obligation_ledger::CleanupStorage::DurableCore,
-                        )?;
+                        crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now)?;
                     }
                     Ok(lash_core_execution::AttachmentWriteFence::Granted(
                         lash_core_execution::AttachmentWritePermit::new(token),

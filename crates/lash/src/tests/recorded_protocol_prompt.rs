@@ -202,7 +202,7 @@ async fn deployment(
         Stores::SqliteFile => {
             let dir = tempfile::tempdir().expect("SQLite file store directory");
             let stores = Arc::new(
-                lash_sqlite_store::SqliteStoreSet::open(dir.path())
+                lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
                     .await
                     .expect("open the SQLite file store set"),
             );

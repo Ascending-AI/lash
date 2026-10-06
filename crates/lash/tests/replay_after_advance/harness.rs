@@ -10,7 +10,7 @@ use lash_core::{ProcessId, StoreSet};
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet, testing::IsolatedDatabase};
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::{HandlerAttempt, RestateTestBackend, ServerConfig};
-use lash_sqlite_store::{SqliteDatabase, SqliteStoreSet};
+use lash_sqlite_store::SqliteStoreSet;
 use serde_json::{Value, json};
 
 /// How long any one step of a law may take before the law fails.
@@ -61,9 +61,11 @@ impl Storage {
             StorageKind::Memory => SqliteStoreSet::memory_with_clock(clock)
                 .await
                 .expect("SQLite memory stores"),
-            StorageKind::File => SqliteStoreSet::open_with_clock(self.directory.path(), clock)
-                .await
-                .expect("SQLite file stores"),
+            StorageKind::File => {
+                SqliteStoreSet::open_with_clock(self.directory.path().join("lash.db"), clock)
+                    .await
+                    .expect("SQLite file stores")
+            }
             StorageKind::Postgres => {
                 return Arc::new(PostgresStoreSet::with_clock(
                     &self.postgres.as_ref().expect("PostgreSQL storage").0,
@@ -75,11 +77,7 @@ impl Storage {
                 ));
             }
         };
-        *self.sqlite_uri.lock().expect("uri lock") = Some(
-            sqlite
-                .database_uri(SqliteDatabase::ProcessRegistry)
-                .to_owned(),
-        );
+        *self.sqlite_uri.lock().expect("uri lock") = Some(sqlite.database_uri().to_owned());
         Arc::new(sqlite)
     }
 
@@ -297,11 +295,8 @@ impl World {
             );
             let engine = Engine::live(tag).await;
             if let Engine::Live(live) = &engine {
-                *storage.sqlite_uri.lock().expect("uri lock") = Some(
-                    live.stores()
-                        .database_uri(SqliteDatabase::ProcessRegistry)
-                        .to_owned(),
-                );
+                *storage.sqlite_uri.lock().expect("uri lock") =
+                    Some(live.stores().database_uri().to_owned());
             }
             engine
         } else {

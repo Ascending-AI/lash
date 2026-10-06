@@ -17,7 +17,7 @@ pub(super) async fn cross_owner_attachment_adoption(
     let factories: [Arc<dyn DeploymentStore>; 3] = [
         memory.session_store_factory(),
         Arc::new(
-            lash_sqlite_store::SqliteStore::open(&sqlite_root.join("cross-owner"))
+            lash_sqlite_store::SqliteStore::open(&sqlite_root.join("cross-owner.db"))
                 .await
                 .expect("open SQLite cross-owner store"),
         ),
@@ -380,7 +380,7 @@ pub(super) async fn selected_observer_intents(
         (memory.session_store_factory(), memory.process_registry()),
         (
             Arc::new(
-                lash_sqlite_store::SqliteStore::open(&root)
+                lash_sqlite_store::SqliteStore::open(&root.join("lash.db"))
                     .await
                     .expect("open SQLite observer store"),
             ),

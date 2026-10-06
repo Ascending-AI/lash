@@ -1577,10 +1577,7 @@ impl BackendRunner {
                                 .expect("SQLite memory session must survive an independent reopen");
                         self.factory = Some(concrete_factory as Arc<dyn DeploymentStore>);
                         self.raw_reader = RawDurableReader::Sqlite {
-                            path: PathBuf::from(
-                                reopened_backend
-                                    .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-                            ),
+                            path: PathBuf::from(reopened_backend.database_uri()),
                             session_id: self.session_id.clone(),
                             store: Some(Arc::clone(&reopened)),
                         };
@@ -1593,7 +1590,7 @@ impl BackendRunner {
 
                         let concrete_factory = Arc::new(
                             lash_sqlite_store::SqliteStore::open_with_clock(
-                                &root,
+                                &root.join("lash.db"),
                                 Arc::clone(&self.clock),
                             )
                             .await
@@ -1603,8 +1600,7 @@ impl BackendRunner {
                             look_up_test_session(concrete_factory.clone(), &request.session_id)
                                 .await?
                                 .expect("SQLite session must survive an independent reopen");
-                        let path =
-                            root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
+                        let path = root.join("lash.db");
                         self.factory = Some(concrete_factory as Arc<dyn DeploymentStore>);
                         self.raw_reader = RawDurableReader::Sqlite {
                             path,
@@ -1936,10 +1932,9 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
     };
 
     let sqlite_case_root = sqlite_root.join("storage-failure-mapping");
-    let sqlite_path =
-        sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
+    let sqlite_path = sqlite_case_root.join("lash.db");
     let sqlite_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&sqlite_case_root)
+        lash_sqlite_store::SqliteStore::open(&sqlite_case_root.join("lash.db"))
             .await
             .expect("open SQLite storage-failure fixture"),
     );
@@ -2126,15 +2121,13 @@ async fn runners_for_case_with_clock(
         Some(expected_meta.clone())
     );
     let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn DeploymentStore>;
-    let memory_path = PathBuf::from(
-        sqlite_memory_stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-    );
+    let memory_path = PathBuf::from(sqlite_memory_stores.database_uri());
 
     let sqlite_case_root = sqlite_root.join(case.as_str());
     std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite differential run");
     let sqlite_backend = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
-            &sqlite_case_root,
+            sqlite_case_root.join("lash.db"),
             lash_sqlite_store::SqliteStoreSetOptions::default(),
             Arc::clone(&clock),
         )
@@ -2142,8 +2135,7 @@ async fn runners_for_case_with_clock(
         .expect("open the complete SQLite differential store set"),
     );
     let sqlite_factory = sqlite_backend.session_store_factory();
-    let sqlite_path =
-        sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
+    let sqlite_path = sqlite_case_root.join("lash.db");
     let sqlite_store = admit_test_session(sqlite_factory.clone(), &create_request)
         .await
         .expect("create SQLite differential store");

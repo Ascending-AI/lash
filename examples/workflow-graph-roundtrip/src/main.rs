@@ -14,9 +14,9 @@ async fn main() -> Result<()> {
         .context("invalid WORKFLOW_GRAPH_ADDR")?;
     let server = local_restate::LocalRestateServer::shared("workflow-graph").await?;
     let restate = server.core("workflow-graph")?;
-    let data =
-        std::env::var("WORKFLOW_GRAPH_DATA_DIR").unwrap_or_else(|_| ".workflow-graph".into());
-    let stores = lash::sqlite::SqliteStoreSet::open(&data)
+    let database = std::env::var("WORKFLOW_GRAPH_SQLITE_PATH")
+        .unwrap_or_else(|_| ".workflow-graph/lash.db".into());
+    let stores = lash::sqlite::SqliteStoreSet::open(database)
         .await
         .context("open workflow SQLite stores")?;
     let engine = restate.engine(Arc::new(stores));

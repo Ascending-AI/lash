@@ -29,7 +29,6 @@ mod terminal_publication;
 mod tool_intent_submission;
 mod wake_delivery;
 
-pub(crate) use delivery_binding::TriggerDeliveryBindings;
 use sql::process_sql;
 use support::cancel_requested_at_ms;
 use support::process_status_label;
@@ -1304,7 +1303,6 @@ impl lash_core_execution::ProcessClockRebind for SqliteProcessRegistry {
             scope_fence_hosts: self.scope_fence_hosts.clone(),
             location: self.location.clone(),
             process_id_mint: self.process_id_mint.clone(),
-            trigger_delivery_bindings: self.trigger_delivery_bindings,
         }))
     }
 }

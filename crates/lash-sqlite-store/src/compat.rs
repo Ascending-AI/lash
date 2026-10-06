@@ -1,4 +1,4 @@
-//! The compatibility row in each SQLite database.
+//! The compatibility row of the deployment's SQLite database.
 
 use lash_core_execution::compat::{
     self, CompatAdmission, CompatRefusal, CompatStamp, StampRead, VersionRange,
@@ -8,17 +8,14 @@ use lash_core_execution::store::fleet_finalize::FleetEpochFlip;
 use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-use crate::SqliteDatabase;
 use crate::location::SqliteLocation;
+use crate::schema::COMPONENT;
 
 fn incompatible(refusal: CompatRefusal) -> rusqlite::Error {
     crate::sqlite_conversion_error(StoreError::Incompatible { refusal })
 }
 
-pub(crate) fn writing_release(conn: &Connection, database: SqliteDatabase) -> Option<String> {
-    if database != SqliteDatabase::DurableCore {
-        return None;
-    }
+pub(crate) fn writing_release(conn: &Connection) -> Option<String> {
     crate::release_stamp::read_release(conn)
 }
 
@@ -31,23 +28,19 @@ fn attribute(refusal: CompatRefusal, release: Option<String>) -> CompatRefusal {
         .with_writing_release(release)
 }
 
-pub(crate) fn malformed(database: SqliteDatabase, detail: impl Into<String>) -> rusqlite::Error {
+pub(crate) fn malformed(detail: impl Into<String>) -> rusqlite::Error {
     incompatible(CompatRefusal::MalformedStamp {
-        component: database.component().as_str().to_owned(),
+        component: COMPONENT.as_str().to_owned(),
         detail: detail.into(),
         writing_release: None,
     })
 }
 
-fn malformed_on(
-    conn: &Connection,
-    database: SqliteDatabase,
-    detail: impl Into<String>,
-) -> rusqlite::Error {
+fn malformed_on(conn: &Connection, detail: impl Into<String>) -> rusqlite::Error {
     incompatible(CompatRefusal::MalformedStamp {
-        component: database.component().as_str().to_owned(),
+        component: COMPONENT.as_str().to_owned(),
         detail: detail.into(),
-        writing_release: writing_release(conn, database),
+        writing_release: writing_release(conn),
     })
 }
 
@@ -59,12 +52,9 @@ fn table_exists(conn: &Connection) -> rusqlite::Result<bool> {
     )
 }
 
-/// Read one database's complete stamp. No row or table is absence, never a
+/// Read the database's complete stamp. No row or table is absence, never a
 /// defaulted current version.
-pub(crate) fn read(
-    conn: &Connection,
-    database: SqliteDatabase,
-) -> rusqlite::Result<Option<(CompatStamp, u32)>> {
+pub(crate) fn read(conn: &Connection) -> rusqlite::Result<Option<(CompatStamp, u32)>> {
     if !table_exists(conn)? {
         return Ok(None);
     }
@@ -75,23 +65,18 @@ pub(crate) fn read(
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()
-        .map_err(|error| malformed_on(conn, database, error.to_string()))?;
+        .map_err(|error| malformed_on(conn, error.to_string()))?;
     let Some((component, version, min_reader, fleet_format)) = row else {
         return Ok(None);
     };
-    if component != database.component().as_str() {
-        return Err(malformed_on(
-            conn,
-            database,
-            format!("component is {component}"),
-        ));
+    if component != COMPONENT.as_str() {
+        return Err(malformed_on(conn, format!("component is {component}")));
     }
-    let version =
-        u32::try_from(version).map_err(|error| malformed_on(conn, database, error.to_string()))?;
-    let min_reader = u32::try_from(min_reader)
-        .map_err(|error| malformed_on(conn, database, error.to_string()))?;
-    let fleet_format = u32::try_from(fleet_format)
-        .map_err(|error| malformed_on(conn, database, error.to_string()))?;
+    let version = u32::try_from(version).map_err(|error| malformed_on(conn, error.to_string()))?;
+    let min_reader =
+        u32::try_from(min_reader).map_err(|error| malformed_on(conn, error.to_string()))?;
+    let fleet_format =
+        u32::try_from(fleet_format).map_err(|error| malformed_on(conn, error.to_string()))?;
     Ok(Some((
         CompatStamp {
             version,
@@ -101,26 +86,24 @@ pub(crate) fn read(
     )))
 }
 
+fn descriptor(conn: &Connection) -> rusqlite::Result<&'static compat::CompatDescriptor> {
+    compat::descriptor(COMPONENT)
+        .ok_or_else(|| malformed_on(conn, "the build has no descriptor for this database"))
+}
+
 pub(crate) fn admit(
     conn: &Connection,
-    database: SqliteDatabase,
     writable: VersionRange,
 ) -> rusqlite::Result<(CompatAdmission, FleetFormat)> {
-    let row = read(conn, database)?;
+    let row = read(conn)?;
     let stamp = row.map_or_else(
         || StampRead::Absent {
             populated: crate::schema::has_user_schema_objects(conn).unwrap_or(true),
         },
         |(stamp, _)| StampRead::Present(stamp),
     );
-    let descriptor = compat::descriptor(database.component()).ok_or_else(|| {
-        malformed_on(
-            conn,
-            database,
-            "the build has no descriptor for this database",
-        )
-    })?;
-    let release = writing_release(conn, database);
+    let descriptor = descriptor(conn)?;
+    let release = writing_release(conn);
     let admission = compat::admit(descriptor, stamp)
         .map_err(|refusal| incompatible(attribute(refusal, release.clone())))?;
     let fleet = match row {
@@ -150,11 +133,7 @@ const FENCE: &str =
 /// at the next open. A missing or malformed row fails closed. `F` outside
 /// `writable` is the terminal [`StoreError::WriterFenced`]; the caller's
 /// rollback leaves the transaction having written nothing.
-pub(crate) fn fence(
-    conn: &Connection,
-    database: SqliteDatabase,
-    writable: VersionRange,
-) -> rusqlite::Result<FleetFormat> {
+pub(crate) fn fence(conn: &Connection, writable: VersionRange) -> rusqlite::Result<FleetFormat> {
     let row: Option<(String, i64, i64, i64)> = conn
         .prepare_cached(FENCE)
         .and_then(|mut statement| {
@@ -164,43 +143,30 @@ pub(crate) fn fence(
                 })
                 .optional()
         })
-        .map_err(|error| malformed_on(conn, database, error.to_string()))?;
+        .map_err(|error| malformed_on(conn, error.to_string()))?;
     let Some((component, version, min_reader, fleet)) = row else {
         return Err(incompatible(CompatRefusal::Unstamped {
-            component: database.component().as_str().to_owned(),
-            writing_release: writing_release(conn, database),
+            component: COMPONENT.as_str().to_owned(),
+            writing_release: writing_release(conn),
         }));
     };
-    let descriptor = compat::descriptor(database.component()).ok_or_else(|| {
-        malformed_on(
-            conn,
-            database,
-            "the build has no descriptor for this database",
-        )
-    })?;
-    if component != database.component().as_str() {
-        return Err(malformed_on(
-            conn,
-            database,
-            format!("component is {component}"),
-        ));
+    let descriptor = descriptor(conn)?;
+    if component != COMPONENT.as_str() {
+        return Err(malformed_on(conn, format!("component is {component}")));
     }
     let stamp = CompatStamp {
-        version: u32::try_from(version)
-            .map_err(|error| malformed_on(conn, database, error.to_string()))?,
+        version: u32::try_from(version).map_err(|error| malformed_on(conn, error.to_string()))?,
         min_reader: u32::try_from(min_reader)
-            .map_err(|error| malformed_on(conn, database, error.to_string()))?,
+            .map_err(|error| malformed_on(conn, error.to_string()))?,
     };
     compat::admit(descriptor, StampRead::Present(stamp))
-        .map_err(|refusal| incompatible(attribute(refusal, writing_release(conn, database))))?;
-    let fleet =
-        u32::try_from(fleet).map_err(|error| malformed_on(conn, database, error.to_string()))?;
+        .map_err(|refusal| incompatible(attribute(refusal, writing_release(conn))))?;
+    let fleet = u32::try_from(fleet).map_err(|error| malformed_on(conn, error.to_string()))?;
     FleetFormat::fence(fleet, writable).map_err(crate::sqlite_conversion_error)
 }
 
-/// The fleet record's per-plugin writer ranges (FIG-4746), which the durable
-/// core carries beside `F`: every plugin namespace a SQLite store publishes
-/// is written to that database.
+/// The fleet record's per-plugin writer ranges (FIG-4746), which the
+/// database carries beside `F`.
 const PLUGIN_WRITERS: &str = "SELECT plugin_id, min_format, max_format FROM lash_plugin_writers";
 
 const RECORD_PLUGIN_WRITER: &str =
@@ -267,63 +233,45 @@ pub(crate) fn admit_plugin_writers(
     record_plugin_writers(tx, &seeded)
 }
 
-/// One step of [`advance_set`], as its observer sees it.
+/// One step of [`advance_observed`], as its observer sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AdvanceStep {
-    /// `BEGIN EXCLUSIVE` holds this database.
-    Locked(SqliteDatabase),
-    /// This database's rewrite committed.
-    Committed(SqliteDatabase),
+    /// `BEGIN EXCLUSIVE` holds the database.
+    Locked,
+    /// The rewrite committed.
+    Committed,
 }
 
-/// Advance the whole store: a migration or an authorized finalize (ADR 0115 §2.2).
+/// Advance the store: a migration or an authorized finalize (ADR 0115 §2.2).
 ///
-/// It takes `BEGIN EXCLUSIVE` on every database in [`SqliteDatabase::ALL`]
-/// order, and only once it holds all three does `rewrite` change each one
-/// (its DDL and its `lash_compat` row). It then commits in the same order.
-/// While it holds a database no writer there passes its fence, and a writer
-/// that was already past its fence finishes first under the old row. A crash
-/// between two commits leaves the databases disagreeing, and the next set
-/// open refuses that as `PartiallyAdvanced` ([`check_set`]) unless the
-/// opening build's migration or durable finalize intent completes it forward.
-/// Reports each lock and commit to `observe` as it
-/// happens. An error from `observe` stops the advance there: every
-/// transaction not yet committed rolls back, as a crash at that point would.
-pub(crate) fn advance_set_observed(
+/// It takes `BEGIN EXCLUSIVE` on the database, lets `rewrite` change it (its
+/// DDL and its `lash_compat` row) and commits. While it holds the database
+/// no writer passes its fence, and a writer that was already past its fence
+/// finishes first under the old row. The one transaction changes the whole
+/// store or nothing. Reports the lock and the commit to `observe` as they
+/// happen. An error from `observe` before the commit rolls the rewrite back,
+/// as a crash at that point would.
+pub(crate) fn advance_observed<T>(
     location: &SqliteLocation,
     busy_timeout: std::time::Duration,
-    mut rewrite: impl FnMut(SqliteDatabase, &Transaction<'_>) -> rusqlite::Result<()>,
+    rewrite: impl FnOnce(&Transaction<'_>) -> rusqlite::Result<T>,
     mut observe: impl FnMut(AdvanceStep) -> rusqlite::Result<()>,
-) -> rusqlite::Result<()> {
-    let mut connections = Vec::with_capacity(SqliteDatabase::ALL.len());
-    for database in SqliteDatabase::ALL {
-        let connection = Connection::open_with_flags(
-            location.target(database).uri(),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )?;
-        connection.busy_timeout(busy_timeout)?;
-        connections.push((database, connection));
-    }
-    let mut held = Vec::with_capacity(connections.len());
-    for (database, connection) in &mut connections {
-        held.push((
-            *database,
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)?,
-        ));
-        observe(AdvanceStep::Locked(*database))?;
-    }
-    for (database, tx) in &held {
-        rewrite(*database, tx)?;
-    }
-    for (database, tx) in held {
-        tx.commit()?;
-        observe(AdvanceStep::Committed(database))?;
-    }
-    Ok(())
+) -> rusqlite::Result<T> {
+    let mut connection = Connection::open_with_flags(
+        location.target().uri(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )?;
+    connection.busy_timeout(busy_timeout)?;
+    let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)?;
+    observe(AdvanceStep::Locked)?;
+    let value = rewrite(&tx)?;
+    tx.commit()?;
+    observe(AdvanceStep::Committed)?;
+    Ok(value)
 }
 
-/// A bare epoch flip for writer-fence tests. Production finalize seals a
-/// retirement authorization through [`crate::finalize`] instead.
+/// A bare epoch flip for writer-fence tests. Production finalize checks a
+/// retirement first through [`crate::finalize`].
 #[cfg(any(test, feature = "testing"))]
 pub(crate) fn flip_epoch_for_testing(
     location: &SqliteLocation,
@@ -331,32 +279,25 @@ pub(crate) fn flip_epoch_for_testing(
     writable: VersionRange,
 ) -> rusqlite::Result<FleetEpochFlip> {
     let target = writable.max();
-    let mut lowest = target;
-    advance_set_observed(
+    advance_observed(
         location,
         busy_timeout,
-        |database, tx| {
-            let recorded = fence(tx, database, writable)?.version();
-            lowest = lowest.min(recorded);
+        |tx| {
+            let recorded = fence(tx, writable)?.version();
             if recorded == target {
-                return Ok(());
+                return Ok(FleetEpochFlip::AlreadyFinalized { fleet: target });
             }
             tx.execute(
                 "UPDATE lash_compat SET fleet_format = ?1 WHERE singleton = 1",
                 [i64::from(target)],
             )?;
-            Ok(())
+            Ok(FleetEpochFlip::Finalized {
+                from: recorded,
+                to: target,
+            })
         },
         |_| Ok(()),
-    )?;
-    Ok(if lowest == target {
-        FleetEpochFlip::AlreadyFinalized { fleet: target }
-    } else {
-        FleetEpochFlip::Finalized {
-            from: lowest,
-            to: target,
-        }
-    })
+    )
 }
 
 /// Only the installer writes the row. An existing row is never changed by an
@@ -366,13 +307,8 @@ pub(crate) fn flip_epoch_for_testing(
 /// range `writable`, its floor: a compatibility release that provisions a
 /// database leaves it inside the rollback window, and only finalize moves `F`
 /// (ADR 0115 §2.1).
-pub(crate) fn provision(
-    tx: &Transaction<'_>,
-    database: SqliteDatabase,
-    writable: VersionRange,
-) -> rusqlite::Result<()> {
-    let descriptor = compat::descriptor(database.component())
-        .ok_or_else(|| malformed(database, "the build has no descriptor for this database"))?;
+pub(crate) fn provision(tx: &Transaction<'_>, writable: VersionRange) -> rusqlite::Result<()> {
+    let descriptor = descriptor(tx)?;
     tx.execute(
         "INSERT INTO lash_compat (singleton, component, version, min_reader, fleet_format)
          VALUES (1, ?1, ?2, ?3, ?4)",
@@ -388,22 +324,19 @@ pub(crate) fn provision(
 
 /// Refuse a database this build reads but has not migrated: its stamp is
 /// older than the version the build writes. Only the store's open migrates,
-/// every database together after a complete backup ([`crate::migration`]);
-/// a component's installer never does.
-pub(crate) fn refuse_unmigrated(
-    conn: &Connection,
-    database: SqliteDatabase,
-) -> rusqlite::Result<()> {
-    let Some((stamp, _)) = read(conn, database)? else {
+/// after a complete backup ([`crate::migration`]); a component's installer
+/// never does.
+pub(crate) fn refuse_unmigrated(conn: &Connection) -> rusqlite::Result<()> {
+    let Some((stamp, _)) = read(conn)? else {
         return Ok(());
     };
-    let target = crate::migration::target_version(database)?;
+    let target = crate::migration::target_version()?;
     if stamp.version < target {
         return Err(incompatible(CompatRefusal::MigrationPending {
-            component: database.component().as_str().to_owned(),
+            component: COMPONENT.as_str().to_owned(),
             found: stamp.version,
             target,
-            writing_release: writing_release(conn, database),
+            writing_release: writing_release(conn),
         }));
     }
     Ok(())
@@ -413,7 +346,7 @@ pub(crate) fn read_recorded(
     conn: &Connection,
     writable: VersionRange,
 ) -> rusqlite::Result<FleetFormat> {
-    let (_, fleet) = admit(conn, SqliteDatabase::DurableCore, writable)?;
+    let (_, fleet) = admit(conn, writable)?;
     Ok(fleet)
 }
 
@@ -423,105 +356,12 @@ pub(crate) fn recorded_or_current(conn: &Connection) -> rusqlite::Result<FleetFo
 }
 
 pub(crate) fn read_fleet_state(conn: &Connection) -> rusqlite::Result<FleetFormatState> {
-    match read(conn, SqliteDatabase::DurableCore) {
+    match read(conn) {
         Ok(Some((_, fleet))) => Ok(FleetFormatState::Recorded(FleetFormat::from_version(fleet))),
         Ok(None) => Ok(FleetFormatState::Unrecorded),
         Err(error) => Ok(FleetFormatState::Unreadable {
             reason: error.to_string(),
         }),
-    }
-}
-
-/// The store set's databases whose files are absent under a file root.
-///
-/// A memory location names `memdb` databases its backend creates and pins;
-/// there are no files to miss, so the answer is empty.
-pub(crate) fn missing_files(location: &SqliteLocation) -> rusqlite::Result<Vec<SqliteDatabase>> {
-    let SqliteLocation::File { root } = location else {
-        return Ok(Vec::new());
-    };
-    let mut missing = Vec::new();
-    for database in SqliteDatabase::ALL {
-        if !root
-            .join(database.file_name())
-            .try_exists()
-            .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
-        {
-            missing.push(database);
-        }
-    }
-    Ok(missing)
-}
-
-/// Answer whether every database file is absent. A partially present set
-/// refuses before any migration or component installer can mutate it.
-pub(crate) fn check_set_files(location: &SqliteLocation) -> rusqlite::Result<bool> {
-    let missing = missing_files(location)?;
-    if missing.is_empty() {
-        Ok(false)
-    } else if missing.len() == SqliteDatabase::ALL.len() {
-        Ok(true)
-    } else {
-        Err(incompatible(CompatRefusal::IncompleteStoreSet {
-            missing: missing
-                .iter()
-                .map(|database| database.name().to_owned())
-                .collect(),
-            writing_release: None,
-        }))
-    }
-}
-
-/// Whether the stamps of one store's databases, in [`SqliteDatabase::ALL`]
-/// order, agree.
-///
-/// Each database counts in its own schema version, so the numbers differ
-/// between databases of one consistent store. What a migration moves
-/// together is each stamp's distance from the version this build writes for
-/// its database, the reader floor's included: the set agrees when that
-/// distance is the same for every database.
-pub(crate) fn stamps_agree(stamps: &[CompatStamp]) -> rusqlite::Result<bool> {
-    let mut positions = Vec::with_capacity(stamps.len());
-    for (database, stamp) in SqliteDatabase::ALL.into_iter().zip(stamps) {
-        let written = i64::from(crate::migration::target_version(database)?);
-        positions.push((
-            i64::from(stamp.version) - written,
-            i64::from(stamp.min_reader) - written,
-        ));
-    }
-    Ok(positions.windows(2).all(|pair| pair[0] == pair[1]))
-}
-
-/// Detect a crash between the three independent database commits before any
-/// component open can mistake the set for a consistent fleet epoch.
-pub(crate) fn check_set(location: &SqliteLocation) -> rusqlite::Result<()> {
-    if check_set_files(location)? {
-        return Ok(());
-    }
-    let mut rows = Vec::new();
-    let mut release = None;
-    for database in SqliteDatabase::ALL {
-        let target = location.target(database);
-        let conn = Connection::open_with_flags(
-            target.uri(),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )?;
-        if database == SqliteDatabase::DurableCore {
-            release = writing_release(&conn, database);
-        }
-        let Some((stamp, fleet)) = read(&conn, database)? else {
-            return Ok(());
-        };
-        rows.push((database.name().to_owned(), stamp, fleet));
-    }
-    let stamps: Vec<CompatStamp> = rows.iter().map(|row| row.1).collect();
-    if !stamps_agree(&stamps)? || rows.windows(2).any(|pair| pair[0].2 != pair[1].2) {
-        Err(incompatible(CompatRefusal::PartiallyAdvanced {
-            databases: rows,
-            writing_release: release,
-        }))
-    } else {
-        Ok(())
     }
 }
 
@@ -592,9 +432,9 @@ fn signature(conn: &Connection, table: &str, sql: &str) -> rusqlite::Result<Vec<
 
 /// Expanded catalogs keep every required object and may add only write-safe
 /// columns, tables, views and non-unique indexes.
-pub(crate) fn verify_tolerant(conn: &Connection, database: SqliteDatabase) -> rusqlite::Result<()> {
+pub(crate) fn verify_tolerant(conn: &Connection) -> rusqlite::Result<()> {
     let baseline = Connection::open_in_memory()?;
-    for statements in database.provisioning_statements() {
+    for statements in crate::schema::provisioning_statements() {
         baseline.execute_batch(statements)?;
     }
     let mut tables = baseline.prepare(
@@ -671,9 +511,9 @@ pub(crate) fn verify_tolerant(conn: &Connection, database: SqliteDatabase) -> ru
         Ok(())
     } else {
         Err(incompatible(CompatRefusal::ShapeRefused {
-            component: database.component().as_str().to_owned(),
+            component: COMPONENT.as_str().to_owned(),
             findings,
-            writing_release: writing_release(conn, database),
+            writing_release: writing_release(conn),
         }))
     }
 }

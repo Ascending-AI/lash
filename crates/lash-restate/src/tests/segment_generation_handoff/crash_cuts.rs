@@ -12,7 +12,7 @@ impl Fixture {
     async fn sqlite(file: bool) -> Self {
         let directory = tempfile::tempdir().expect("SQLite fixture directory");
         let stores = if file {
-            lash_sqlite_store::SqliteStoreSet::open(directory.path().join("sqlite")).await
+            lash_sqlite_store::SqliteStoreSet::open(directory.path().join("sqlite.db")).await
         } else {
             lash_sqlite_store::SqliteStoreSet::memory().await
         }

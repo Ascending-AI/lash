@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use lash_core_execution::{StorePreflight, StoreSchemaOutcome, StoreSchemaVerdict};
 
-use super::{SqliteDatabase, SqliteStorePreflight, verify_schema_at};
+use super::{SqliteStorePreflight, verify_schema_at};
 use crate::{SqliteConnectionPolicy, SqliteStore, StoreOptions};
 
 fn temp_root() -> tempfile::TempDir {
@@ -23,7 +23,7 @@ fn temp_root() -> tempfile::TempDir {
 #[tokio::test]
 async fn open_creates_a_missing_database_and_preflight_does_not() {
     let root = temp_root();
-    let path = root.path().join("durable-core.db");
+    let path = root.path().join("lash.db");
 
     // Red side: today's only way to ask "will this open?" is to open, and the
     // open path carries `SQLITE_OPEN_CREATE`.
@@ -37,24 +37,22 @@ async fn open_creates_a_missing_database_and_preflight_does_not() {
         "the open path provisions the database it was asked about"
     );
 
-    // Green side: the same question over a root where nothing exists yet,
-    // answered without bringing one byte into existence. Every member is
-    // `Absent` — the next open provisions a fresh set — so nothing refuses.
+    // Green side: the same question where nothing exists yet, answered
+    // without bringing one byte into existence. The database is `Absent` —
+    // the next open provisions it — so nothing refuses.
     let empty = temp_root();
-    let status = SqliteStorePreflight::for_store_root(empty.path())
+    let status = SqliteStorePreflight::for_database_file(empty.path().join("lash.db"))
         .schema_status()
         .await
         .expect("read schema status");
-    assert_eq!(status.databases.len(), SqliteDatabase::ALL.len());
-    for database in &status.databases {
-        assert_eq!(database.verdict, StoreSchemaVerdict::Absent);
-    }
+    assert_eq!(status.databases.len(), 1);
+    assert_eq!(status.databases[0].verdict, StoreSchemaVerdict::Absent);
     assert!(
         std::fs::read_dir(empty.path())
             .expect("the root still exists")
             .next()
             .is_none(),
-        "preflight must not create any of the set's databases"
+        "preflight must not create the database"
     );
     assert_eq!(
         status.outcome(),
@@ -66,22 +64,21 @@ async fn open_creates_a_missing_database_and_preflight_does_not() {
 #[tokio::test]
 async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     let root = temp_root();
-    let path = root.path().join("durable-core.db");
+    let path = root.path().join("lash.db");
     SqliteStore::open_file_for_testing(&path)
         .await
         .expect("provision the database");
-    let expected = SqliteDatabase::DurableCore.expected_version();
+    let expected = crate::schema::expected_version();
     // Component 43 is a pre-1.0 SHA-256-era catalog. Both active tiers
     // refuse that retired stamp rather than running the deleted 43-to-44
     // upgrade. The reported target belongs to the opening build's tier.
     let descriptor =
-        lash_core_execution::compat::descriptor(SqliteDatabase::DurableCore.component())
-            .expect("core descriptor");
+        lash_core_execution::compat::descriptor(crate::schema::COMPONENT).expect("core descriptor");
     assert_eq!(expected, i64::from(descriptor.writes.max()));
 
     stamp_compat(&path, 43, 43);
 
-    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
+    let found = verify_schema_at(&path).await;
     // Which side of the build's range 43 falls on is the admission rule's
     // to say; either way the stamp is refused typed.
     let refusal = lash_core_execution::compat::admit(
@@ -103,11 +100,11 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
 #[tokio::test]
 async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     let root = temp_root();
-    let path = root.path().join("durable-core.db");
+    let path = root.path().join("lash.db");
     SqliteStore::open_file_for_testing(&path)
         .await
         .expect("provision the database");
-    let above = lash_core_execution::compat::descriptor(SqliteDatabase::DurableCore.component())
+    let above = lash_core_execution::compat::descriptor(crate::schema::COMPONENT)
         .expect("core descriptor")
         .reads
         .max()
@@ -136,12 +133,9 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
 
     // Green side: the read-only path takes a shared lock, so the same question
     // is answered under the same contention.
-    let answered = tokio::time::timeout(
-        Duration::from_secs(5),
-        verify_schema_at(&path, SqliteDatabase::DurableCore),
-    )
-    .await
-    .expect("preflight answers while the write lock is held");
+    let answered = tokio::time::timeout(Duration::from_secs(5), verify_schema_at(&path))
+        .await
+        .expect("preflight answers while the write lock is held");
     assert!(matches!(
         answered.verdict,
         StoreSchemaVerdict::Refused {
@@ -154,8 +148,8 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
 
 #[tokio::test]
 async fn a_sqlite_memory_store_set_preflights_through_its_location() {
-    // `SqliteLocation::Memory` names the same three databases the open pinned;
-    // the probe reads them while the set's handles hold the anchors.
+    // `SqliteLocation::Memory` names the same database the open pinned; the
+    // probe reads it while the set's handles hold the anchor.
     let set = crate::SqliteStoreSet::memory()
         .await
         .expect("open a memory store set");
@@ -165,20 +159,18 @@ async fn a_sqlite_memory_store_set_preflights_through_its_location() {
         .await
         .expect("read schema status");
 
-    assert_eq!(status.databases.len(), SqliteDatabase::ALL.len());
-    for database in &status.databases {
-        assert_eq!(database.verdict, StoreSchemaVerdict::Matches);
-    }
+    assert_eq!(status.databases.len(), 1);
+    assert_eq!(status.databases[0].verdict, StoreSchemaVerdict::Matches);
     assert_eq!(status.outcome(), StoreSchemaOutcome::Ready);
 }
 
 #[tokio::test]
 async fn a_file_that_is_not_a_database_is_undecided_rather_than_refused() {
     let root = temp_root();
-    let path = root.path().join("durable-core.db");
+    let path = root.path().join("lash.db");
     std::fs::write(&path, b"this is not a SQLite database").expect("write junk");
 
-    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
+    let found = verify_schema_at(&path).await;
     match &found.verdict {
         StoreSchemaVerdict::Unreadable { reason } => assert!(!reason.is_empty()),
         other => panic!("expected an undecided verdict, got {other:?}"),
@@ -196,7 +188,7 @@ async fn reading_a_hot_wal_database_leaves_its_bytes_untouched() {
     // file. The invariant is byte equality of the database itself, asserted
     // rather than described.
     let root = temp_root();
-    let path = root.path().join("durable-core.db");
+    let path = root.path().join("lash.db");
     // The fixture's own checkpointing is off (FIG-4089): with the default
     // policy the provisioning commits wake the store's checkpoint worker, whose
     // PASSIVE checkpoint can land between the before/after reads and rewrite
@@ -229,7 +221,7 @@ async fn reading_a_hot_wal_database_leaves_its_bytes_untouched() {
     );
 
     let before = std::fs::read(&path).expect("read the database before");
-    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
+    let found = verify_schema_at(&path).await;
     let after = std::fs::read(&path).expect("read the database after");
 
     assert_eq!(found.verdict, StoreSchemaVerdict::Matches);
@@ -252,91 +244,6 @@ fn stamp_compat(path: &std::path::Path, version: i64, min_reader: i64) {
     .expect("update compatibility stamp");
 }
 
-#[tokio::test]
-async fn a_partial_store_set_is_refused_as_incomplete() {
-    // FIG-4675/F71: the question preflight answers is the one open answers. A
-    // root holding some of the three databases is a set `SqliteStoreSet::open`
-    // refuses (FIG-4248), so the probe must say refused — a missing member of
-    // a partial set is not `Absent`, because no open will provision it.
-    for mask in 1..7 {
-        let root = temp_root();
-        let mut missing = Vec::new();
-        let mut surviving = Vec::new();
-        for (index, database) in SqliteDatabase::ALL.into_iter().enumerate() {
-            let path = root.path().join(database.file_name());
-            if mask & (1 << index) != 0 {
-                missing.push(database);
-                continue;
-            }
-            let mut connection = rusqlite::Connection::open(&path).expect("database");
-            let tx = crate::schema::prepare_versioned_schema(&mut connection, database)
-                .expect("provision the surviving database");
-            tx.commit().expect("commit fixture");
-            drop(connection);
-            surviving.push((path.clone(), std::fs::read(&path).expect("fixture bytes")));
-        }
-
-        let status = SqliteStorePreflight::for_store_root(root.path())
-            .schema_status()
-            .await
-            .expect("read schema status");
-
-        assert_eq!(
-            status.outcome(),
-            StoreSchemaOutcome::Refused,
-            "mask {mask}: a partial set is refused, as its open is"
-        );
-        let expected_missing: Vec<String> = missing
-            .iter()
-            .map(|database| database.name().to_owned())
-            .collect();
-        for database in SqliteDatabase::ALL {
-            let row = status
-                .databases
-                .iter()
-                .find(|row| row.name == database.name())
-                .expect("every set member is reported");
-            if missing.contains(&database) {
-                match &row.verdict {
-                    StoreSchemaVerdict::Refused {
-                        refusal:
-                            lash_core_execution::compat::CompatRefusal::IncompleteStoreSet {
-                                missing: reported,
-                                ..
-                            },
-                    } => assert_eq!(reported, &expected_missing, "mask {mask}"),
-                    other => panic!(
-                        "mask {mask}: a missing member of a partial set is refused, got {other:?}"
-                    ),
-                }
-            } else {
-                assert_eq!(
-                    row.verdict,
-                    StoreSchemaVerdict::Matches,
-                    "mask {mask}: the surviving members still report their own verdict"
-                );
-            }
-        }
-
-        // The answer must agree with the open, and the probe must not have
-        // touched anything: no missing file created, no survivor rewritten.
-        assert!(
-            crate::SqliteStoreSet::open(root.path()).await.is_err(),
-            "mask {mask}: the open the preflight precedes refuses the same set"
-        );
-        for database in &missing {
-            assert!(
-                !root.path().join(database.file_name()).exists(),
-                "mask {mask}: preflight must not create {:?}",
-                database.file_name()
-            );
-        }
-        for (path, before) in surviving {
-            assert_eq!(std::fs::read(path).expect("surviving bytes"), before);
-        }
-    }
-}
-
 /// The durable-payload walk: what is parked, whose it is, and what the walk
 /// refuses to do to find out.
 ///
@@ -352,7 +259,7 @@ mod walk {
     use lash_core_execution::{ProcessLifecycle as _, ProcessRegistrar as _};
     use lash_sansio::{ProcessId, SessionId};
 
-    use super::super::{SqliteDatabase, SqliteStorePreflight};
+    use super::super::SqliteStorePreflight;
     use crate::{SqliteProcessRegistry, SqliteStore};
 
     const EVERY_SURFACE: [DurableSurface; 6] = [
@@ -428,7 +335,8 @@ mod walk {
         // provisioned the deployment it was asked about would have answered a
         // different question.
         let root = super::temp_root();
-        let preflight = SqliteStorePreflight::for_store_root(root.path());
+        let path = root.path().join("lash.db");
+        let preflight = SqliteStorePreflight::for_database_file(&path);
 
         for surface in EVERY_SURFACE {
             let page = preflight
@@ -440,16 +348,13 @@ mod walk {
             assert_eq!(page.next, None, "{surface:?}");
         }
 
-        for database in super::SqliteDatabase::ALL {
-            let path = root.path().join(database.file_name());
-            assert!(!path.exists(), "the walk must not create {:?}", path);
-        }
+        assert!(!path.exists(), "the walk must not create {path:?}");
     }
 
     #[tokio::test]
     async fn module_artifact_surface_reads_the_persisted_json() {
         let root = super::temp_root();
-        let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
+        let core = root.path().join("lash.db");
         let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
@@ -471,7 +376,7 @@ mod walk {
         .await
         .expect("persist module artifact");
 
-        let page = SqliteStorePreflight::for_store_root(root.path())
+        let page = SqliteStorePreflight::for_database_file(root.path().join("lash.db"))
             .scan_durable(&DurableScan::first(DurableSurface::ModuleArtifact, 10))
             .await
             .expect("walk module artifacts");
@@ -490,9 +395,7 @@ mod walk {
     #[tokio::test]
     async fn a_parked_segment_is_listed_with_its_owner_and_a_terminal_one_is_not() {
         let root = super::temp_root();
-        let path = root
-            .path()
-            .join(SqliteDatabase::ProcessRegistry.file_name());
+        let path = root.path().join("lash.db");
         let registry = SqliteProcessRegistry::open_standalone_for_testing(&path)
             .await
             .expect("open registry");
@@ -515,7 +418,7 @@ mod walk {
         assert_eq!(parked, 1, "the terminal process must still hold its row");
         drop(raw);
 
-        let page = SqliteStorePreflight::for_store_root(root.path())
+        let page = SqliteStorePreflight::for_database_file(root.path().join("lash.db"))
             .scan_durable(&DurableScan::first(DurableSurface::ParkedSegment, 10))
             .await
             .expect("walk parked segments");
@@ -553,9 +456,7 @@ mod walk {
     #[tokio::test]
     async fn a_live_process_is_walked_with_its_record_and_a_terminal_one_is_not() {
         let root = super::temp_root();
-        let path = root
-            .path()
-            .join(SqliteDatabase::ProcessRegistry.file_name());
+        let path = root.path().join("lash.db");
         let registry = SqliteProcessRegistry::open_standalone_for_testing(&path)
             .await
             .expect("open registry");
@@ -572,7 +473,7 @@ mod walk {
         complete(&registry, &done).await;
         drop(registry);
 
-        let page = SqliteStorePreflight::for_store_root(root.path())
+        let page = SqliteStorePreflight::for_database_file(root.path().join("lash.db"))
             .scan_durable(&DurableScan::first(DurableSurface::StartedProcess, 10))
             .await
             .expect("walk started processes");
@@ -593,9 +494,7 @@ mod walk {
     #[tokio::test]
     async fn paging_returns_every_item_exactly_once() {
         let root = super::temp_root();
-        let path = root
-            .path()
-            .join(SqliteDatabase::ProcessRegistry.file_name());
+        let path = root.path().join("lash.db");
         let registry = SqliteProcessRegistry::open_standalone_for_testing(&path)
             .await
             .expect("open registry");
@@ -603,7 +502,7 @@ mod walk {
         let second_process = park_segment(&registry).await;
         drop(registry);
 
-        let preflight = SqliteStorePreflight::for_store_root(root.path());
+        let preflight = SqliteStorePreflight::for_database_file(root.path().join("lash.db"));
 
         let first = preflight
             .scan_durable(&DurableScan::first(DurableSurface::ParkedSegment, 1))
@@ -655,7 +554,7 @@ mod walk {
         // preflight can find, so it must survive the walk as a named item
         // instead of vanishing or taking the page down with it.
         let root = super::temp_root();
-        let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
+        let core = root.path().join("lash.db");
         SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
@@ -672,7 +571,7 @@ mod walk {
         .expect("install a dangling checkpoint reference");
         drop(raw);
 
-        let page = SqliteStorePreflight::for_store_root(root.path())
+        let page = SqliteStorePreflight::for_database_file(root.path().join("lash.db"))
             .scan_durable(&DurableScan::first(DurableSurface::SessionCheckpoint, 10))
             .await
             .expect("a dangling reference must not fail the page");
@@ -692,7 +591,7 @@ mod walk {
     #[tokio::test]
     async fn a_bare_checkpoint_blob_is_reported_missing_with_a_decode_reason() {
         let root = super::temp_root();
-        let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
+        let core = root.path().join("lash.db");
         SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
@@ -711,7 +610,7 @@ mod walk {
             .expect("install a session pointing at the bare blob");
         drop(raw);
 
-        let page = SqliteStorePreflight::for_store_root(root.path())
+        let page = SqliteStorePreflight::for_database_file(root.path().join("lash.db"))
             .scan_durable(&DurableScan::first(DurableSurface::SessionCheckpoint, 10))
             .await
             .expect("a corrupt envelope must not fail the page");
@@ -733,7 +632,7 @@ mod walk {
         // worth asserting: the walk must strip this crate's storage wrapper and
         // hand back what the format manifest describes.
         let root = super::temp_root();
-        let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
+        let core = root.path().join("lash.db");
         let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
@@ -766,7 +665,7 @@ mod walk {
         .expect("publish the checkpoint root");
         drop(raw);
 
-        let preflight = SqliteStorePreflight::for_store_root(root.path());
+        let preflight = SqliteStorePreflight::for_database_file(root.path().join("lash.db"));
 
         let manifests = preflight
             .scan_durable(&DurableScan::first(DurableSurface::SessionCheckpoint, 10))
@@ -823,7 +722,7 @@ mod walk {
         // so it must not appear as a `Missing` item — the report's unreadable
         // list is for things that should be there and are not.
         let root = super::temp_root();
-        let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
+        let core = root.path().join("lash.db");
         let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
@@ -854,7 +753,7 @@ mod walk {
         .expect("publish the checkpoint root");
         drop(raw);
 
-        let page = SqliteStorePreflight::for_store_root(root.path())
+        let page = SqliteStorePreflight::for_database_file(root.path().join("lash.db"))
             .scan_durable(&DurableScan::first(
                 DurableSurface::SessionExecutionState,
                 10,

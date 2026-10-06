@@ -26,7 +26,7 @@
 //!
 //! The framing a walk *does* unwrap is storage bookkeeping rather than durable
 //! payload format: the [`StoredBlobEnvelope`](crate::StoredBlobEnvelope) wrapper
-//! and its optional zlib frame. The durable-core schema version guards that
+//! and its optional zlib frame. The SQLite schema version guards that
 //! storage format. A caller handed the wrapped bytes would see SQLite framing
 //! instead of the payload. An item whose envelope
 //! cannot be read is reported as [`DurablePayload::Missing`], not as bare logical
@@ -53,7 +53,6 @@ use rusqlite::{Connection, params};
 use super::SqliteStorePreflight;
 use crate::conn::SqliteConnection;
 use crate::location::DatabaseTarget;
-use crate::schema::SqliteDatabase;
 
 /// Never returns `Err`: every failure this path can reach is attributable to a
 /// database (reported as [`ScanCoverage::NotScanned`]) or to an item (reported
@@ -67,14 +66,10 @@ pub(super) async fn scan_durable(
     let target: DatabaseTarget = match scan.surface {
         DurableSurface::ParkedSegment
         | DurableSurface::PendingWake
-        | DurableSurface::StartedProcess => {
-            preflight.location.target(SqliteDatabase::ProcessRegistry)
-        }
-        DurableSurface::ModuleArtifact
+        | DurableSurface::StartedProcess
+        | DurableSurface::ModuleArtifact
         | DurableSurface::SessionCheckpoint
-        | DurableSurface::SessionExecutionState => {
-            preflight.location.target(SqliteDatabase::DurableCore)
-        }
+        | DurableSurface::SessionExecutionState => preflight.location.target(),
         // `DurableSurface` is `#[non_exhaustive]`: a surface added upstream
         // before this backend learns to walk it must report that nobody looked,
         // never an empty page that reads as "nothing parked here".
@@ -87,7 +82,7 @@ pub(super) async fn scan_durable(
     };
 
     if !target.exists() {
-        // A set member that was never provisioned is *scanned*: nothing is
+        // A database that was never provisioned is *scanned*: nothing is
         // parked in a database that does not exist, and the walk reached that
         // conclusion by looking. Reporting it as unscanned would put a
         // deployment with genuinely nothing to drain on the "investigate this"

@@ -23,8 +23,6 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::session_sql::session_sql;
 
-use crate::schema::SqliteDatabase;
-
 /// The release this build stamps into every store it writes.
 ///
 /// `main` carries the honest `0.0.0-dev` placeholder in every manifest; the
@@ -32,22 +30,15 @@ use crate::schema::SqliteDatabase;
 /// building, so this constant *is* the release-time injection.
 pub(crate) const BUILD_RELEASE: &str = env!("CARGO_PKG_VERSION");
 
-/// What every SQLite component required when this build wrote the stamp:
-/// the version each database's compatibility descriptor writes.
-///
-/// One store carries all three databases, so the durable-core row can record
-/// the whole deployment's tuple even though only one database carries the
-/// stamp.
+/// What the SQLite database required when this build wrote the stamp: the
+/// version its compatibility descriptor writes.
 pub(crate) fn build_schema_versions() -> Vec<StoreComponentVersion> {
-    SqliteDatabase::ALL
-        .into_iter()
-        .filter_map(|database| {
-            let descriptor = lash_core_execution::compat::descriptor(database.component())?;
-            Some(StoreComponentVersion {
-                component: database.name().to_string(),
-                version: i64::from(descriptor.writes.max()),
-            })
+    lash_core_execution::compat::descriptor(crate::schema::COMPONENT)
+        .map(|descriptor| StoreComponentVersion {
+            component: crate::schema::DATABASE_NAME.to_string(),
+            version: i64::from(descriptor.writes.max()),
         })
+        .into_iter()
         .collect()
 }
 

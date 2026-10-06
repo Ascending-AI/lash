@@ -40,8 +40,8 @@ See the suite's
 for the judged browser journey. [RUNBOOK.md](RUNBOOK.md) remains as a stable
 compatibility link and records the deterministic integration command.
 
-SQLite process records live in `WORKFLOW_GRAPH_DATA_DIR`, default
-`.workflow-graph`. The backend starts a local Restate server and retains it while
+SQLite process records live in the database file `WORKFLOW_GRAPH_SQLITE_PATH`,
+default `.workflow-graph/lash.db`. The backend starts a local Restate server and retains it while
 serving. Its journal lasts for that server's lifetime. Editor versions remain
 in memory and reset when the backend restarts.
 

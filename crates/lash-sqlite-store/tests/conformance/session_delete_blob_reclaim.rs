@@ -6,7 +6,7 @@ lash_conformance::session_delete_blob_reclaim_tests!({
         let factory = backend.blocking_store();
         let attachments = backend.attachment_store();
         let probe = Arc::new(crate::blob_probe::SqliteBlobProbe::new(
-            backend.database_uri(SqliteDatabase::DurableCore),
+            backend.database_uri(),
             "fail_session_blob_delete",
             Some(Arc::new(backend)),
         ));

@@ -147,7 +147,7 @@ pub(super) async fn l20_an_exhausted_process_parks_and_completes_without_group_c
             .unwrap();
             let connection = super::run_owner_park::NoGroupCatalog::connection(&server);
             let stores = Arc::new(if file {
-                lash_sqlite_store::SqliteStoreSet::open(directory.path())
+                lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
                     .await
                     .unwrap()
             } else {
@@ -229,7 +229,7 @@ pub(super) async fn l20_an_exhausted_process_parks_and_completes_without_group_c
                     .unwrap();
                 drop(world);
                 let stores = Arc::new(
-                    lash_sqlite_store::SqliteStoreSet::open(directory.path())
+                    lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
                         .await
                         .unwrap(),
                 );

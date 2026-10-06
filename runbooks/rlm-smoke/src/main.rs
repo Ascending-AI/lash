@@ -475,7 +475,7 @@ async fn main() -> Result<()> {
     // and the compiled Lashlang artifacts; the local restate-server's engine
     // journals every turn over it (ADR 0104).
     let restate = local_restate::LocalRestate::from_env()?;
-    let stores = lash::sqlite::SqliteStoreSet::open(args.data_dir.join("sessions"))
+    let stores = lash::sqlite::SqliteStoreSet::open(args.data_dir.join("sessions.db"))
         .await
         .context("open the RLM smoke SQLite store set")?;
     let engine = restate.engine(Arc::new(stores));

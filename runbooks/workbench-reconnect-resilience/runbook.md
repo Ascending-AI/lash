@@ -182,7 +182,7 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
 - **Layer 1 — rendered DOM:** `#timeline .message.user` / `.message.assistant` counts and
   each row's body text; plus the phase pair from golden rule 2.
 - **Layer 2 — durable state:** the session graph in
-  `<data-dir>/lash-sessions/durable-core.db`, table `graph_nodes`, filtered to
+  `<data-dir>/lash-sessions.db`, table `graph_nodes`, filtered to
   `session_id = <S> AND tombstoned = 0`, reading `node_json` for `kind = "event"` nodes whose
   `event.Conversation.role` is `User` / `Assistant` **and whose node id is a committed-row id**
   — `m_ingress_ti:*` for user rows and `workbench-assistant:<turn>` for assistant rows.

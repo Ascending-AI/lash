@@ -40,7 +40,7 @@ def main():
         return [record for record in records if record.get("context", {}).get("session_id") == session]
 
     def store(session):
-        connection = sqlite3.connect(f"file:{data / 'lash-sessions/durable-core.db'}?mode=ro", uri=True)
+        connection = sqlite3.connect(f"file:{data / 'lash-sessions.db'}?mode=ro", uri=True)
         connection.row_factory = sqlite3.Row
         try:
             result = {}

@@ -14,11 +14,10 @@ use lash_store_sql::recovery_leader::RecoveryLeaderStatements;
 use rusqlite::{OptionalExtension, Row, Transaction};
 
 use crate::conn::SqliteConnection;
-use crate::schema_layout::Schema;
 use crate::{StoreError, sqlite_error};
 
 static SQL: LazyLock<RecoveryLeaderStatements> =
-    LazyLock::new(|| RecoveryLeaderStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| RecoveryLeaderStatements::render(crate::schema_layout::MAIN));
 
 fn lease_row(row: &Row<'_>) -> rusqlite::Result<LeaseRow> {
     Ok(LeaseRow {

@@ -19,13 +19,12 @@ use lash_store_sql::turn_ingress::queued_batches::QueuedBatchObligationStatement
 
 use crate::conn::SqliteConnection;
 use crate::obligation_ledger::{SqliteObligationLedger, arm_table_tx};
-use crate::schema_layout::Schema;
 use crate::{StoreError, sqlite_error, stored_data_corrupt};
 
 static TURN_INPUTS: LazyLock<PendingTurnInputObligationStatements> =
-    LazyLock::new(|| PendingTurnInputObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| PendingTurnInputObligationStatements::render(crate::schema_layout::MAIN));
 static QUEUED_BATCHES: LazyLock<QueuedBatchObligationStatements> =
-    LazyLock::new(|| QueuedBatchObligationStatements::render(Schema::Main.dialect()));
+    LazyLock::new(|| QueuedBatchObligationStatements::render(crate::schema_layout::MAIN));
 
 /// The turn-input table's obligation statements.
 pub(crate) fn turn_input_sql() -> ObligationSql<'static> {

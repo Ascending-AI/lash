@@ -271,7 +271,7 @@ pub(super) async fn compare_session_deletes(
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open the SQLite memory session-delete store set");
-    let file = lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("session-deletes"))
+    let file = lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("session-deletes.db"))
         .await
         .expect("open the SQLite file session-delete store set");
     let attachments = tempfile::tempdir().expect("attachment directory");

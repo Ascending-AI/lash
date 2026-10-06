@@ -23,7 +23,7 @@ impl WorkbenchStores {
     }
 
     pub(crate) async fn open_sqlite(data_dir: &std::path::Path) -> AnyhowResult<Self> {
-        let stores = lash::sqlite::SqliteStoreSet::open(data_dir.join("lash-sessions"))
+        let stores = lash::sqlite::SqliteStoreSet::open(data_dir.join("lash-sessions.db"))
             .await
             .context("open the SQLite store set")?;
         Ok(Self {

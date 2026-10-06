@@ -25,7 +25,7 @@ class StoreRows:
 
     @property
     def database(self) -> Path:
-        return self.data / "lash-sessions/durable-core.db"
+        return self.data / "lash-sessions.db"
 
     def sql(self, query: str, params: tuple = ()) -> list[dict[str, Any]]:
         with sqlite3.connect(f"file:{self.database}?mode=ro", uri=True) as connection:

@@ -4,7 +4,7 @@ use lash_core_store::compat::{
 };
 use lash_core_store::store::StoreError;
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig};
-use lash_sqlite_store::{SqliteDatabase, SqliteStore};
+use lash_sqlite_store::SqliteStore;
 use lash_upgrade_harness::harness::{Case, LASHCTL_N_ENV, NodeBuilds, Operator, Services};
 use sqlx::PgPool;
 
@@ -98,59 +98,38 @@ async fn skipped_compatibility_release_refused() -> Result<()> {
     pool.close().await;
 
     // SQLite migrates on open: N+1 provisioning a fresh store seeds its
-    // writable floor, F=1, in every database.
+    // writable floor, F=1, in its database.
     let sqlite_next = Case::sqlite("skipped-sqlite-next", &services, scratch.path())?;
     builds.next.probe(&sqlite_next, None)?;
-    for database in [
-        SqliteDatabase::DurableCore,
-        SqliteDatabase::ProcessRegistry,
-        SqliteDatabase::Triggers,
-    ] {
-        let path = scratch
-            .path()
-            .join("skipped-sqlite-next/stores")
-            .join(database.file_name());
-        let fleet: i64 = rusqlite::Connection::open(&path)?.query_row(
-            "SELECT fleet_format FROM lash_compat WHERE singleton = 1",
-            [],
-            |row| row.get(0),
-        )?;
-        ensure!(
-            fleet == 1,
-            "N+1's first open provisioned {} at F={fleet}",
-            database.name()
-        );
-    }
+    let fleet: i64 =
+        rusqlite::Connection::open(scratch.path().join("skipped-sqlite-next/stores/lash.db"))?
+            .query_row(
+                "SELECT fleet_format FROM lash_compat WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )?;
+    ensure!(
+        fleet == 1,
+        "N+1's first open provisioned the database at F={fleet}"
+    );
 
     let sqlite = Case::sqlite("skipped-sqlite", &services, scratch.path())?;
-    let root = scratch.path().join("skipped-sqlite/stores");
+    let core = scratch.path().join("skipped-sqlite/stores/lash.db");
     builds.n.probe(&sqlite, None)?;
-    let databases = [
-        (SqliteDatabase::DurableCore, ComponentId::SQLITE_CORE),
-        (
-            SqliteDatabase::ProcessRegistry,
-            ComponentId::SQLITE_REGISTRY,
-        ),
-        (SqliteDatabase::Triggers, ComponentId::SQLITE_TRIGGERS),
-    ];
-    for (database, component) in databases {
-        let path = root.join(database.file_name());
-        let connection = rusqlite::Connection::open(&path)?;
-        let (version, min_reader, fleet): (i64, i64, i64) = connection.query_row(
+    let (version, min_reader, fleet): (i64, i64, i64) = rusqlite::Connection::open(&core)?
+        .query_row(
             "SELECT version, min_reader, fleet_format FROM lash_compat WHERE singleton = 1",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
-        ensure!(fleet == 1, "{} started at F={fleet}", database.name());
-        skipped_component(
-            component,
-            CompatStamp {
-                version: u32::try_from(version)?,
-                min_reader: u32::try_from(min_reader)?,
-            },
-        )?;
-    }
-    let core = root.join(SqliteDatabase::DurableCore.file_name());
+    ensure!(fleet == 1, "the SQLite database started at F={fleet}");
+    skipped_component(
+        ComponentId::SQLITE_CORE,
+        CompatStamp {
+            version: u32::try_from(version)?,
+            min_reader: u32::try_from(min_reader)?,
+        },
+    )?;
     let error = SqliteStore::open_with_fleet_writable_range_for_testing(&core, skipped_f)
         .await
         .err()

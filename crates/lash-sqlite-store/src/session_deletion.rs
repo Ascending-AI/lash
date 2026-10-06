@@ -19,8 +19,8 @@ pub(super) async fn delete_session_from_catalog(
                 lash_core_execution::StoreError::Backend(err.to_string()),
             )
         })?;
-    conn.install(SqliteDatabase::DurableCore, FleetFormat::writable(), |tx| {
-        crate::compat::fence(tx, SqliteDatabase::DurableCore, FleetFormat::writable())
+    conn.install(FleetFormat::writable(), |tx| {
+        crate::compat::fence(tx, FleetFormat::writable())
     })
     .await
     .map_err(|err| {
@@ -135,12 +135,7 @@ pub(super) async fn delete_session_from_catalog(
                     .map_err(sqlite_error)?;
                 let cleanup =
                     lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), None);
-                crate::obligation_ledger::arm_cleanup_tx(
-                    tx,
-                    &cleanup,
-                    now_ms,
-                    crate::obligation_ledger::CleanupStorage::DurableCore,
-                )?;
+                crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms)?;
             }
             if existed {
                 crate::obligation_ledger::arm_cleanup_tx(
@@ -149,7 +144,6 @@ pub(super) async fn delete_session_from_catalog(
                         lash_core_execution::ReferrerGuard::SessionGraphRetired(session_id.clone()),
                     ),
                     now_ms,
-                    crate::obligation_ledger::CleanupStorage::DurableCore,
                 )?;
             }
             // What the session roots: its head, and every revision it still
@@ -254,15 +248,19 @@ pub(super) async fn delete_session_from_catalog(
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
-            crate::conn::cached_execute(
-                tx,
+            for statement in [
                 crate::process_registry::sql::process_sql()
                     .fence
                     .delete_by_session
                     .sql(),
-                params![session_id.as_str()],
-            )
-            .map_err(sqlite_error)?;
+                crate::process_registry::sql::process_sql()
+                    .floor
+                    .delete_by_session
+                    .sql(),
+            ] {
+                crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
+                    .map_err(sqlite_error)?;
+            }
             // A deleted session's parked turn is cancelled, and its feed event
             // outlives the session row: the ledger is the only place the park
             // transition stays durable (FIG-3659).
@@ -372,43 +370,4 @@ pub(super) async fn delete_session_from_catalog(
             lash_core_execution::StoreError::Backend(err.to_string()),
         )
     })?
-}
-
-pub(super) async fn delete_wake_allocation_floors_from_process_registry(
-    process_registry: &DatabaseTarget,
-    target_session_id: &SessionId,
-    policy: SqliteConnectionPolicy,
-) -> Result<(), StoreError> {
-    if !process_registry.exists() {
-        return Ok(());
-    }
-    let conn = SqliteConnection::open_with_policy(process_registry, policy)
-        .await
-        .map_err(sqlite_async_error)?;
-    conn.install(
-        SqliteDatabase::ProcessRegistry,
-        FleetFormat::writable(),
-        |tx| crate::compat::fence(tx, SqliteDatabase::ProcessRegistry, FleetFormat::writable()),
-    )
-    .await
-    .map_err(sqlite_error)?;
-    let target_session_id = SessionId::parse(target_session_id.to_string())?;
-    conn.write_flow(move |tx| {
-        let outcome = tx
-            .execute(
-                crate::process_registry::sql::process_sql()
-                    .floor
-                    .delete_by_session
-                    .sql(),
-                params![target_session_id.as_str()],
-            )
-            .map(|_| ())
-            .map_err(sqlite_error);
-        Ok(match outcome {
-            Ok(()) => TxOutcome::Commit(Ok(())),
-            Err(error) => TxOutcome::Rollback(Err(error)),
-        })
-    })
-    .await
-    .map_err(sqlite_error)?
 }

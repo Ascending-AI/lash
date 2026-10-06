@@ -273,7 +273,7 @@ impl BackendFaultLane {
                 .map_err(|error| format!("open SQLite memory fault store: {error}"))?
                 .session_store_factory()),
             BackendFaultKind::Sqlite => Ok(Arc::new(
-                lash_sqlite_store::SqliteStore::open(&case_root.join("store"))
+                lash_sqlite_store::SqliteStore::open(&case_root.join("store.db"))
                     .await
                     .map_err(|error| format!("open SQLite fault store: {error}"))?,
             )),

@@ -429,7 +429,7 @@ async fn an_undecodable_row_stalls_alone_and_its_page_delivers() {
     let dir = tempfile::tempdir().expect("tempdir");
     let clock = Arc::new(TestClock::new(1_000_000));
     let backend = lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
-        dir.path().join("store"),
+        dir.path().join("store.db"),
         lash_sqlite_store::SqliteStoreSetOptions::default(),
         clock.clone(),
     )
@@ -443,9 +443,7 @@ async fn an_undecodable_row_stalls_alone_and_its_page_delivers() {
         parent_kind: "turn".to_string(),
         parent_id: "bounds-session/corrupt-turn".to_string(),
     };
-    let registry_db = dir.path().join("store/process-registry.db");
-    let conn =
-        rusqlite::Connection::open(&registry_db).expect("open the process registry database");
+    let conn = rusqlite::Connection::open(dir.path().join("store.db")).expect("open the database");
     conn.execute(
         "INSERT INTO parent_end_plans (parent_kind, parent_id, parent_payload, ended_at_ms)
          VALUES ('turn', 'bounds-session/corrupt-turn', 'not-a-scope-payload', 0)",

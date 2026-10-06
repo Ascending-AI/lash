@@ -205,7 +205,7 @@ async fn attachment_owner_sweep_is_deterministic_across_memory_and_sqlite() {
     let tmp = tempfile::tempdir().expect("tempdir");
     lash_conformance::attachment_reference_lifecycle_with_store(
         std::sync::Arc::new(
-            lash_sqlite_store::SqliteStore::open(&tmp.path().join("sessions"))
+            lash_sqlite_store::SqliteStore::open(&tmp.path().join("sessions.db"))
                 .await
                 .expect("SQLite session store"),
         ),

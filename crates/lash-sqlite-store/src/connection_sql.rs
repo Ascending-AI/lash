@@ -1,11 +1,9 @@
 //! The SQLite SQL that names no lash table.
 //!
-//! Pragmas, `ATTACH`, and the three reads of SQLite's own catalog
-//! (`sqlite_master`/`sqlite_schema`, `pragma_database_list`) are statements
-//! issued against a production database that no table owns, because they are
-//! about the *connection* rather than about any row. Before FIG-3387 they sat
-//! at seven call sites and two of them — `ATTACH DATABASE ?1 AS
-//! process_registry` — were the same text written twice.
+//! Pragmas and the reads of SQLite's own catalog (`sqlite_master`) and clock
+//! are statements issued against a production database that no table owns,
+//! because they are about the *connection* rather than about any row. Before
+//! FIG-3387 they sat at scattered call sites, some written twice.
 //!
 //! This module is their named home, held
 //! to two rules: nothing here may name a table a family owns (that statement
@@ -52,27 +50,7 @@ pub(crate) const READ_ONLY_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
 /// enough that opening one to answer a question costs nothing to hold.
 pub(crate) const READ_ONLY_PRAGMAS: &str = "PRAGMA cache_size = -500;";
 
-/// Attach the process registry's database under the qualifier
-/// `Schema::ProcessRegistry.qualifier()` names.
-///
-/// `ATTACH` names a schema rather than qualifying a table, so the renderer has
-/// nothing to say about it; the durable-core open path issues this text.
-pub(crate) const ATTACH_PROCESS_REGISTRY: &str = "ATTACH DATABASE ?1 AS process_registry";
-
-/// Attach a store set's trigger store to its process registry's connection
-/// under the qualifier `Schema::TriggerStore.qualifier()` names, so a
-/// delivery's start reads the delivery's binding in its registration
-/// transaction (FIG-4369).
-pub(crate) const ATTACH_TRIGGER_STORE: &str = "ATTACH DATABASE ?1 AS trigger_store";
-
-/// The catalog read, not a read of the table itself: a registry mid-creation
-/// has the file and the version counter but not yet the rows, and asking the
-/// catalog distinguishes "not provisioned yet" from "provisioned and empty".
-pub(crate) const SELECT_PROCESS_REGISTRY_IS_PROVISIONED: &str =
-    "SELECT 1 FROM process_registry.sqlite_master
-     WHERE type = 'table' AND name = 'processes'";
-
-/// Whether the durable-core database carries the release-stamp table at all.
+/// Whether the database carries the release-stamp table at all.
 ///
 /// A pre-stamp database does not, and that is an absence rather than a read
 /// failure: it records no release because no build that stamps has written it.
@@ -84,6 +62,3 @@ pub(crate) const SELECT_RELEASE_STAMP_TABLE_EXISTS: &str =
 /// lease's expiry.
 pub(crate) const SELECT_DATABASE_EPOCH_MS: &str =
     "SELECT CAST(unixepoch('subsec') * 1000 AS INTEGER)";
-
-/// Attach the durable core so registry cleanup arms its end fence atomically.
-pub(crate) const ATTACH_DURABLE_CORE: &str = "ATTACH DATABASE ?1 AS durable_core";

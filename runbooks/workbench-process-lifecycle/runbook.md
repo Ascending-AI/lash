@@ -28,7 +28,7 @@ on surrounding model prose.
    change while both original process ids remain visible through `/api/work`. A process
    visible only in a stale screenshot does not pass.
 4. **Completion is durable.** The survivor must reach `completed`, with its terminal event
-   retained in `<data-dir>/processes.db`, after its originating session has been retired
+   retained in `<data-dir>/lash-sessions.db`, after its originating session has been retired
    from the shared durable catalog.
 5. **Cancel is cooperative and evidenced.** Use the cancellable card's **cancel** button.
    Require a `process.cancel_requested` event followed by a `cancelled` terminal for that
@@ -50,9 +50,9 @@ on surrounding model prose.
 - Backend truth: `GET /api/state`, `GET /api/work`, `POST
   /api/work/{process_id}/cancel`, and `DELETE /api/session` (or the reset control's
   equivalent `POST /api/reset`).
-- Disk truth: `<data-dir>/processes.db` tables `processes`, `process_events`, and
+- Disk truth: `<data-dir>/lash-sessions.db` tables `processes`, `process_events`, and
   `process_observers`; the shared SQLite session catalog at
-  `<data-dir>/lash-sessions/durable-core.db`; and `<data-dir>/trace.jsonl` event
+  `<data-dir>/lash-sessions.db`; and `<data-dir>/trace.jsonl` event
   `agent_workbench.reset.restate.session_deleted`, whose report includes the removed
   observer count.
 
@@ -98,7 +98,7 @@ produces that failure, the prompt did not pin the shape hard enough — say the 
 again, do not raise the driver tier.
 
 Poll `/api/work` until both named rows are non-terminal, capture their full process ids,
-and require matching running cards in the rendered work rail. Verify `processes.db`
+and require matching running cards in the rendered work rail. Verify `lash-sessions.db`
 contains both ids and observer rows for the owner session. Save `01-running-work.json`
 and the relevant database extraction as `01-running-store.json`; screenshot
 `01-two-running-processes.png`.
@@ -110,7 +110,7 @@ Use the reset/new-session control while capturing its HTTP response. Do not issu
 synchronously update the page's rendered session label. Poll until:
 
 - the rendered and `/api/state` session id changes;
-- `<data-dir>/lash-sessions/durable-core.db` remains in place, and a query for the old
+- `<data-dir>/lash-sessions.db` remains in place, and a query for the old
   session id finds no `session_meta` or `session_head` row and exactly one
   `deleted_sessions` tombstone;
 - the session-deleted trace report reports two removed observers;
@@ -151,7 +151,7 @@ every later turn on it. This phase proves the registration is released by cancel
 Do:
 
 1. **Record the durable-catalog baseline first.** In
-   `<data-dir>/lash-sessions/durable-core.db`, query row counts for the recorded child
+   `<data-dir>/lash-sessions.db`, query row counts for the recorded child
    session id in `session_meta`, `session_head`, active `graph_nodes`
    (`tombstoned = 0`), `pending_turn_inputs`, and `queued_work_batches`. Save the
    normalized result as `03b-sessions-before.json` and require at least one non-zero
@@ -167,7 +167,7 @@ Do:
    explicitly, then stop; a bounded single retry, not repeated re-prompting. Capture its process id **and its child session id** as
    `03b-subagent-running.json` — the child session id is the subagent's
    `child_session_id` in `/api/work` (equivalently the `session_id` on the subagent's
-   process row in `processes.db`); record it verbatim, the disk gate names it. Screenshot
+   process row in `lash-sessions.db`); record it verbatim, the disk gate names it. Screenshot
    `03b-subagent-running.png`.
 3. Cancel that subagent card through `POST /api/work/<process_id>/cancel`, as in Phase 3.
    Require `accepted: true` for that exact
@@ -218,8 +218,8 @@ the follow-up answer and the second subagent's terminal card as
 
 Without opening or recreating the deleted session, poll until `FIG425_survivor_<runid>`
 is terminal/completed in `/api/work` and in the rendered rail. Require its terminal
-success event and literal terminal marker in `processes.db`. Prove retention from
-`processes.db` — the `processes.status` row plus the `process.completed` /
+success event and literal terminal marker in `lash-sessions.db`. Prove retention from
+`lash-sessions.db` — the `processes.status` row plus the `process.completed` /
 `process.cancelled` event — and not by re-querying `/api/work`: that surface deliberately
 retires terminal rows about ten seconds after they settle, so a second `/api/work` read is
 expected to come back empty and proves nothing either way. Screenshot

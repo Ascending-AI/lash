@@ -110,7 +110,7 @@ This judged runbook retains the real-provider Phases 0–4 below.
   that is replaced when the committed copy arrives; only count after the settle gate, or a
   draft inflates the count.
 - **Layer 2 — durable state:** read `/api/state?session_id=<S>.transcript` and
-  `<data-dir>/lash-sessions/durable-core.db`, table `graph_nodes`, filtered by
+  `<data-dir>/lash-sessions.db`, table `graph_nodes`, filtered by
   `session_id = <S> AND tombstoned = 0`, ordered by generation. Require an exact
   node/row ID and timestamp match, including suppressed records. Count visible
   `user` rows and marked `assistant_reply` rows; raw assistant protocol records

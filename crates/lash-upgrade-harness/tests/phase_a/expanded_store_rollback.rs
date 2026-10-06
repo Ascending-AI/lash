@@ -3,23 +3,26 @@ use std::path::Path;
 use anyhow::{Context, Result, bail, ensure};
 use lash_core_store::compat::{CompatRefusal, ComponentId};
 use lash_core_store::store::StoreSchemaVerdict;
-use lash_sqlite_store::{SqliteDatabase, verify_schema_at};
+use lash_sqlite_store::verify_schema_at;
 use lash_upgrade_harness::harness::{
     Case, LASHCTL_N_ENV, LASHCTL_NEXT_ENV, NodeBuilds, Operator, Services,
 };
 use lash_upgrade_harness::node::served_by;
 use sqlx::{Connection, PgConnection};
 
-async fn sqlite_refusal(path: &Path, database: SqliteDatabase) -> Result<CompatRefusal> {
-    let report = verify_schema_at(path, database).await;
+async fn sqlite_refusal(path: &Path) -> Result<CompatRefusal> {
+    let report = verify_schema_at(path).await;
     match report.verdict {
         StoreSchemaVerdict::Refused { refusal } => Ok(refusal),
-        other => bail!("{} did not refuse: {other:?}", database.name()),
+        other => bail!("the SQLite database did not refuse: {other:?}"),
     }
 }
 
-fn sqlite_path(root: &Path, database: SqliteDatabase) -> std::path::PathBuf {
-    root.join(database.file_name())
+/// The version this build writes the SQLite database at.
+fn sqlite_expected_version() -> Result<i64> {
+    lash_core_store::compat::descriptor(ComponentId::SQLITE_CORE)
+        .map(|descriptor| i64::from(descriptor.writes.max()))
+        .context("the build declares the SQLite database")
 }
 
 fn sqlite_execute(path: &Path, sql: &str) -> Result<()> {
@@ -113,33 +116,19 @@ async fn expanded_store_rollback() -> Result<()> {
     ensure!(rows == 1, "N's PostgreSQL session row was not retained");
 
     let sqlite = Case::sqlite("expanded-sqlite", &services, scratch.path())?;
-    let sqlite_root = scratch.path().join("expanded-sqlite/stores");
+    let database = scratch.path().join("expanded-sqlite/stores/lash.db");
     builds.n.probe(&sqlite, None)?;
     builds.next.probe(&sqlite, None)?;
-    let databases = [
-        SqliteDatabase::DurableCore,
-        SqliteDatabase::ProcessRegistry,
-        SqliteDatabase::Triggers,
-    ];
-    for database in databases {
-        let path = sqlite_path(&sqlite_root, database);
-        let connection = rusqlite::Connection::open(&path)?;
-        let stamp: (i64, i64, i64) = connection.query_row(
-            "SELECT version, min_reader, fleet_format FROM lash_compat WHERE singleton = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-        ensure!(
-            stamp
-                == (
-                    database.expected_version() + 1,
-                    database.expected_version(),
-                    1
-                ),
-            "{} has stamp {stamp:?}",
-            database.name()
-        );
-    }
+    let expected = sqlite_expected_version()?;
+    let stamp: (i64, i64, i64) = rusqlite::Connection::open(&database)?.query_row(
+        "SELECT version, min_reader, fleet_format FROM lash_compat WHERE singleton = 1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    ensure!(
+        stamp == (expected + 1, expected, 1),
+        "the SQLite database has stamp {stamp:?}"
+    );
     let session = sqlite.session_id("rollback");
     let n = builds.n.serve(&sqlite)?;
     let n_generation = n.ready().context("N SQLite ready")?.generation.clone();
@@ -154,8 +143,7 @@ async fn expanded_store_rollback() -> Result<()> {
         read.session_present == Some(true),
         "N+1 did not read N's SQLite row: {read:?}"
     );
-    let core = sqlite_path(&sqlite_root, SqliteDatabase::DurableCore);
-    let rows: i64 = rusqlite::Connection::open(&core)?.query_row(
+    let rows: i64 = rusqlite::Connection::open(&database)?.query_row(
         "SELECT COUNT(*) FROM session_head WHERE session_id = ?1",
         [&session],
         |row| row.get(0),
@@ -208,7 +196,6 @@ async fn expanded_store_rollback() -> Result<()> {
         postgres_execute(&mut pg, cleanup).await?;
     }
 
-    let trigger_db = sqlite_path(&sqlite_root, SqliteDatabase::Triggers);
     let sqlite_unsafe = [
         (
             "not null without default",
@@ -237,10 +224,10 @@ async fn expanded_store_rollback() -> Result<()> {
         ),
     ];
     for (name, addition, cleanup) in sqlite_unsafe {
-        sqlite_execute(&trigger_db, addition).with_context(|| name.to_string())?;
+        sqlite_execute(&database, addition).with_context(|| name.to_string())?;
         ensure!(
             matches!(
-                sqlite_refusal(&trigger_db, SqliteDatabase::Triggers).await?,
+                sqlite_refusal(&database).await?,
                 CompatRefusal::ShapeRefused { .. }
             ),
             "SQLite admitted unsafe {name}"
@@ -252,7 +239,7 @@ async fn expanded_store_rollback() -> Result<()> {
             ),
             "N SQLite process admitted unsafe {name}"
         );
-        sqlite_execute(&trigger_db, cleanup)?;
+        sqlite_execute(&database, cleanup)?;
     }
 
     postgres_execute(
@@ -268,25 +255,14 @@ async fn expanded_store_rollback() -> Result<()> {
         ),
         "N admitted PostgreSQL above its reader floor"
     );
-    for database in databases {
-        let path = sqlite_path(&sqlite_root, database);
-        sqlite_execute(&path, "UPDATE lash_compat SET min_reader = version")?;
-        ensure!(
-            matches!(
-                sqlite_refusal(&path, database).await?,
-                CompatRefusal::ReaderFloorAbove { found, min_reader, .. } if min_reader == found
-            ),
-            "N admitted {} above its reader floor",
-            database.name()
-        );
-        sqlite_execute(&path, "UPDATE lash_compat SET min_reader = version - 1")?;
-    }
-    for database in databases {
-        sqlite_execute(
-            &sqlite_path(&sqlite_root, database),
-            "UPDATE lash_compat SET min_reader = version",
-        )?;
-    }
+    sqlite_execute(&database, "UPDATE lash_compat SET min_reader = version")?;
+    ensure!(
+        matches!(
+            sqlite_refusal(&database).await?,
+            CompatRefusal::ReaderFloorAbove { found, min_reader, .. } if min_reader == found
+        ),
+        "N admitted the SQLite database above its reader floor"
+    );
     ensure!(
         matches!(
             builds.n.probe_refusal(&sqlite)?,
@@ -294,12 +270,7 @@ async fn expanded_store_rollback() -> Result<()> {
         ),
         "N SQLite process admitted the raised reader floor"
     );
-    for database in databases {
-        sqlite_execute(
-            &sqlite_path(&sqlite_root, database),
-            "UPDATE lash_compat SET min_reader = version - 1",
-        )?;
-    }
+    sqlite_execute(&database, "UPDATE lash_compat SET min_reader = version - 1")?;
 
     postgres_execute(
         &mut pg,
@@ -313,35 +284,25 @@ async fn expanded_store_rollback() -> Result<()> {
         ),
         "N admitted populated PostgreSQL without a stamp"
     );
-    for database in databases {
-        let path = sqlite_path(&sqlite_root, database);
-        sqlite_execute(&path, "DELETE FROM lash_compat")?;
-        ensure!(
-            matches!(
-                sqlite_refusal(&path, database).await?,
-                CompatRefusal::Unstamped { .. }
-            ),
-            "N admitted populated {} without a stamp",
-            database.name()
-        );
-        ensure!(
-            matches!(
-                builds.n.probe_refusal(&sqlite)?,
-                CompatRefusal::Unstamped { .. }
-            ),
-            "N SQLite process admitted populated {} without a stamp",
-            database.name()
-        );
-        let component = match database {
-            SqliteDatabase::DurableCore => ComponentId::SQLITE_CORE,
-            SqliteDatabase::ProcessRegistry => ComponentId::SQLITE_REGISTRY,
-            SqliteDatabase::Triggers => ComponentId::SQLITE_TRIGGERS,
-        };
-        rusqlite::Connection::open(&path)?.execute(
-            "INSERT INTO lash_compat (singleton, component, version, min_reader, fleet_format) VALUES (1, ?1, ?2, ?3, 1)",
-            rusqlite::params![component.as_str(), database.expected_version() + 1, database.expected_version()],
-        )?;
-    }
+    sqlite_execute(&database, "DELETE FROM lash_compat")?;
+    ensure!(
+        matches!(
+            sqlite_refusal(&database).await?,
+            CompatRefusal::Unstamped { .. }
+        ),
+        "N admitted the populated SQLite database without a stamp"
+    );
+    ensure!(
+        matches!(
+            builds.n.probe_refusal(&sqlite)?,
+            CompatRefusal::Unstamped { .. }
+        ),
+        "N SQLite process admitted the populated database without a stamp"
+    );
+    rusqlite::Connection::open(&database)?.execute(
+        "INSERT INTO lash_compat (singleton, component, version, min_reader, fleet_format) VALUES (1, ?1, ?2, ?3, 1)",
+        rusqlite::params![ComponentId::SQLITE_CORE.as_str(), expected + 1, expected],
+    )?;
     pg.close().await?;
     Ok(())
 }

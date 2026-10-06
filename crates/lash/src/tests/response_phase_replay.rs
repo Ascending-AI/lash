@@ -288,12 +288,14 @@ async fn world(storage: Storage, always_replay: bool) -> Option<World> {
                     config,
                     hooks(),
                     |clock| async move {
-                        let stores =
-                            lash_sqlite_store::SqliteStoreSet::open_with_clock(root, clock)
-                                .await
-                                .map_err(|error| {
-                                    lash_restate_test::BackendError::Stores(error.to_string())
-                                })?;
+                        let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(
+                            root.join("lash.db"),
+                            clock,
+                        )
+                        .await
+                        .map_err(|error| {
+                            lash_restate_test::BackendError::Stores(error.to_string())
+                        })?;
                         Ok(Arc::new(stores) as Arc<dyn lash_core::StoreSet>)
                     },
                 )

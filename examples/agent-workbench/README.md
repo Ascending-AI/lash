@@ -823,8 +823,8 @@ failure text fails the safe-copy assertion.
 
 ## Recovery
 
-Use `lashctl` for deployment operations. Set `LASH_SQLITE_DIR` to the
-workbench's `<data-dir>/lash-sessions`, or `LASH_POSTGRES_DATABASE_URL` for a
+Use `lashctl` for deployment operations. Set `LASH_SQLITE_PATH` to the
+workbench's database file `<data-dir>/lash-sessions.db`, or `LASH_POSTGRES_DATABASE_URL` for a
 PostgreSQL store. Use the workbench's `RESTATE_AUTHORITY_ID`,
 `RESTATE_INGRESS_URL` and `RESTATE_ADMIN_URL`. Set lashctl’s `RESTATE_NAMESPACE`
 to the workbench’s `AGENT_WORKBENCH_RESTATE_NAMESPACE` so control
@@ -844,7 +844,8 @@ intents reach the engine that owns the work.
 - `drain <generation>`, `drain-status <generation> --restate-admin-url <url>`
   and `end-drain <generation>` remain the PostgreSQL generation drain verbs.
 
-Recovery commands also accept `--sqlite-dir <path>` instead of `LASH_SQLITE_DIR`.
+Recovery commands also accept `--sqlite-path <database-file>` instead of
+`LASH_SQLITE_PATH`.
 Page limits are nonzero and at most 200; retain `next` to read the next page.
 The standard lashctl JSON envelope and exit codes apply to every verb.
 

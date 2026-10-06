@@ -453,12 +453,12 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
     // opened on the same file, so every module it runs comes back through
     // the decoder.
     let cell_store = lashlang::LashlangArtifacts::new(Arc::new(
-        lash_sqlite_store::SqliteStore::open(&path)
+        lash_sqlite_store::SqliteStore::open(&path.join("lash.db"))
             .await
             .expect("open the publishing store"),
     ));
     let engine_store = lashlang::LashlangArtifacts::new(Arc::new(
-        lash_sqlite_store::SqliteStore::open(&path)
+        lash_sqlite_store::SqliteStore::open(&path.join("lash.db"))
             .await
             .expect("open the engine's store"),
     ));

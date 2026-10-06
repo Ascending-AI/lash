@@ -27,7 +27,7 @@ use lash_core_execution::{
 };
 use rusqlite::Connection;
 
-use crate::{SqliteDatabase, SqliteLocation, SqliteStoreSet};
+use crate::{SqliteLocation, SqliteStoreSet};
 
 const PLUGIN: &str = "format-probe";
 
@@ -43,9 +43,9 @@ fn registration(native: u32, writable: &[u32]) -> PluginWriterRegistration {
     }
 }
 
-fn raw(location: &SqliteLocation, database: SqliteDatabase) -> Connection {
+fn raw(location: &SqliteLocation) -> Connection {
     let connection = Connection::open_with_flags(
-        location.target(database).uri(),
+        location.target().uri(),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )
     .expect("open a second connection, as another process would");
@@ -57,7 +57,7 @@ fn raw(location: &SqliteLocation, database: SqliteDatabase) -> Connection {
 
 async fn file_set() -> (tempfile::TempDir, SqliteStoreSet) {
     let root = tempfile::tempdir().expect("store root");
-    let set = SqliteStoreSet::open(root.path())
+    let set = SqliteStoreSet::open(root.path().join("lash.db"))
         .await
         .expect("open the store set");
     (root, set)
@@ -69,7 +69,7 @@ fn store(set: &SqliteStoreSet) -> Arc<dyn RuntimeStore> {
 
 /// The recorded range of [`PLUGIN`], read as another process would.
 fn recorded_range(location: &SqliteLocation) -> Option<(i64, i64)> {
-    raw(location, SqliteDatabase::DurableCore)
+    raw(location)
         .query_row(
             "SELECT min_format, max_format FROM lash_plugin_writers WHERE plugin_id = ?1",
             [PLUGIN],
@@ -83,15 +83,15 @@ fn recorded_range(location: &SqliteLocation) -> Option<(i64, i64)> {
         .expect("read the writer range")
 }
 
-fn fleet(location: &SqliteLocation, database: SqliteDatabase) -> i64 {
-    raw(location, database)
+fn fleet(location: &SqliteLocation) -> i64 {
+    raw(location)
         .query_row("SELECT fleet_format FROM lash_compat", [], |row| row.get(0))
         .expect("read F")
 }
 
 /// Everything a refused publication must leave alone in the durable core.
 fn published(location: &SqliteLocation) -> (i64, i64, i64, Vec<(String, String)>) {
-    let connection = raw(location, SqliteDatabase::DurableCore);
+    let connection = raw(location);
     let count = |table: &str| -> i64 {
         connection
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
@@ -319,7 +319,7 @@ async fn a_malformed_writer_range_refuses_every_plugin_publication() {
     let (_run, set) = file_set().await;
     let location = set.location().clone();
     let store = store(&set);
-    raw(&location, SqliteDatabase::DurableCore)
+    raw(&location)
         .execute(
             "INSERT INTO lash_plugin_writers (plugin_id, min_format, max_format) VALUES (?1, 2, 1)",
             [PLUGIN],
@@ -452,9 +452,7 @@ async fn a_plugin_only_finalize_moves_f_and_the_range_together_and_fences_the_ol
             other => panic!("a range change without an epoch move must refuse: {other:?}"),
         }
         assert_eq!(recorded_range(&location), Some((1, 1)));
-        for database in SqliteDatabase::ALL {
-            assert_eq!(fleet_of(&location, database), seeded, "{database:?}");
-        }
+        assert_eq!(fleet(&location), seeded);
     }
 
     // The successor finalizes: `F` and the range move in one step.
@@ -469,16 +467,10 @@ async fn a_plugin_only_finalize_moves_f_and_the_range_together_and_fences_the_ol
             to: next
         }
     );
-    for database in SqliteDatabase::ALL {
-        assert_eq!(
-            fleet_of(&location, database),
-            i64::from(next),
-            "{database:?}"
-        );
-    }
+    assert_eq!(fleet(&location), i64::from(next));
     assert_eq!(recorded_range(&location), Some((1, 2)));
     assert_eq!(
-        raw(&location, SqliteDatabase::DurableCore)
+        raw(&location)
             .query_row("SELECT COUNT(*) FROM lash_plugin_writers", [], |row| row
                 .get::<_, i64>(0))
             .expect("count ranges"),
@@ -509,10 +501,6 @@ async fn a_plugin_only_finalize_moves_f_and_the_range_together_and_fences_the_ol
         .expect("rerun");
     assert_eq!(rerun, FleetEpochFlip::AlreadyFinalized { fleet: next });
     assert_eq!(recorded_range(&location), Some((1, 2)));
-}
-
-fn fleet_of(location: &SqliteLocation, database: SqliteDatabase) -> i64 {
-    fleet(location, database)
 }
 
 fn registration_for(plugin: &str, native: u32, writable: &[u32]) -> PluginWriterRegistration {
@@ -586,10 +574,7 @@ async fn a_deregistered_plugins_writer_entry_survives_finalize() {
         Some((1, 2)),
         "the registered plugin's range moved with `F`"
     );
-    assert_eq!(
-        fleet_of(&location, SqliteDatabase::DurableCore),
-        i64::from(next)
-    );
+    assert_eq!(fleet(&location), i64::from(next));
 }
 
 /// Deleting a plugin's writer entry un-provisions it (FIG-4859/L12): a write
@@ -606,13 +591,13 @@ async fn a_deleted_writer_entry_refuses_writes_and_publishes_nothing() {
 
     // The plugin's entry recorded [1, 2], as a finalize that admitted its
     // native format would leave it.
-    raw(&location, SqliteDatabase::DurableCore)
+    raw(&location)
         .execute(
             "INSERT INTO lash_plugin_writers (plugin_id, min_format, max_format) VALUES (?1, 1, 2)",
             [PLUGIN],
         )
         .expect("record the plugin's range");
-    raw(&location, SqliteDatabase::DurableCore)
+    raw(&location)
         .execute(
             "DELETE FROM lash_plugin_writers WHERE plugin_id = ?1",
             [PLUGIN],
@@ -696,137 +681,6 @@ async fn a_deleted_writer_entry_refuses_writes_and_publishes_nothing() {
         ),
         "{error:?}"
     );
-}
-
-/// A finalize that crashes between the database files is completed by the
-/// next open from the sealed intent alone: the opening process holds no
-/// plugin registrations, and the plugin's range still lands with `F`.
-#[cfg(feature = "synthetic-next")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the crash law starts its own test executable and exits without dropping database handles"
-)]
-async fn a_plugin_only_finalize_survives_a_crash_between_the_database_files() {
-    const TEST: &str =
-        "plugin_writer_tests::a_plugin_only_finalize_survives_a_crash_between_the_database_files";
-    const RUN: &str = "LASH_SQLITE_PLUGIN_FINALIZE_CRASH_RUN";
-    const CUT: &str = "LASH_SQLITE_PLUGIN_FINALIZE_CRASH_CUT";
-    let retired = BuildGeneration::for_test("plugin-crash-old");
-    if let Some(root) = std::env::var_os(RUN) {
-        let cut = std::env::var(CUT).expect("child crash cut");
-        let options = crate::SqliteStoreSetOptions {
-            finalize_hook: Some(crate::testing::SqliteFinalizeHook::new(move |database| {
-                if database.file_name() == cut {
-                    std::process::exit(77);
-                }
-            })),
-            ..crate::SqliteStoreSetOptions::default()
-        };
-        let set = SqliteStoreSet::open_with_options_and_clock(
-            std::path::PathBuf::from(root),
-            options,
-            Arc::new(lash_core_execution::facade_support::SystemClock),
-        )
-        .await
-        .expect("the successor opens before finalize");
-        set.finalize(&retired, &NoDeployments, &[registration(2, &[1, 2])], 5)
-            .await
-            .expect("finalize reaches the crash cut");
-        panic!("the child did not crash");
-    }
-
-    for (cut, rewind_core) in [
-        (SqliteDatabase::DurableCore, false),
-        (SqliteDatabase::ProcessRegistry, false),
-        // The durable core's commit undone: the state a crash after the seal
-        // and before the first commit leaves.
-        (SqliteDatabase::DurableCore, true),
-    ] {
-        let (root, set) = file_set().await;
-        let location = set.location().clone();
-        let store = store(&set);
-        assert_eq!(store.fleet_format().version(), 1, "the window is open");
-        store
-            .admit_session(&root_session_request(&SessionId::from("crash")))
-            .await
-            .expect("admit the session");
-        let mut state = state("crash");
-        state.set_plugin_state(Some(plugin_state(1, 1)));
-        commit(&store, &mut state)
-            .await
-            .expect("the window's format commits");
-        set.generation_drain()
-            .mark_draining(&retired, 1)
-            .await
-            .expect("drain the retired generation");
-        drop(store);
-        drop(set);
-
-        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
-            .args([TEST, "--exact", "--nocapture", "--test-threads=1"])
-            .env(RUN, root.path())
-            .env(CUT, cut.file_name())
-            .output()
-            .expect("run the finalizing process");
-        assert_eq!(
-            output.status.code(),
-            Some(77),
-            "{cut:?}: exit at the committed cut\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-        assert!(
-            root.path().join("lash-finalize.json").exists(),
-            "{cut:?}: the intent survives the crash"
-        );
-        // The durable core committed `F` and the range in one transaction.
-        assert_eq!(fleet(&location, SqliteDatabase::DurableCore), 2, "{cut:?}");
-        assert_eq!(recorded_range(&location), Some((1, 2)), "{cut:?}");
-        assert_eq!(fleet(&location, SqliteDatabase::Triggers), 1, "{cut:?}");
-        if rewind_core {
-            let core = raw(&location, SqliteDatabase::DurableCore);
-            core.execute("UPDATE lash_compat SET fleet_format = 1", [])
-                .expect("undo the epoch");
-            core.execute(
-                "UPDATE lash_plugin_writers SET max_format = 1 WHERE plugin_id = ?1",
-                [PLUGIN],
-            )
-            .expect("undo the range");
-        }
-
-        let set = SqliteStoreSet::open(root.path())
-            .await
-            .expect("a fresh open completes the authorized finalize");
-        assert!(
-            !root.path().join("lash-finalize.json").exists(),
-            "{cut:?}: completion clears the intent"
-        );
-        for database in SqliteDatabase::ALL {
-            assert_eq!(fleet(&location, database), 2, "{cut:?} {database:?}");
-        }
-        assert_eq!(recorded_range(&location), Some((1, 2)), "{cut:?}");
-        let store = self::store(&set);
-        assert_eq!(
-            store.plugin_writers().await.expect("read the ranges"),
-            lash_core_execution::store::plugin_writers::PluginWriterRanges::from_rows([(
-                PLUGIN.to_owned(),
-                1,
-                2
-            )])
-            .expect("ranges")
-        );
-        // The successor's native format commits after the recovered finalize.
-        store
-            .admit_session(&root_session_request(&SessionId::from("recovered")))
-            .await
-            .expect("admit a session after recovery");
-        let mut state = self::state("recovered");
-        state.set_plugin_state(Some(plugin_state(2, 2)));
-        commit(&store, &mut state)
-            .await
-            .expect("format 2 commits once the range moved");
-    }
 }
 
 /// A plugin that reads format 2 natively and still writes format 1.

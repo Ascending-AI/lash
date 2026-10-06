@@ -123,7 +123,7 @@ requests are composed by hand, that has to be a refusal, not a reading.
 
 Upload a small PNG and record its byte length and SHA-256. Do **not** send a turn
 yet. The backend creates the session catalog
-(`$work/data/lash-sessions/durable-core.db`) at boot, and the upload's bytes land
+(`$work/data/lash-sessions.db`) at boot, and the upload's bytes land
 in its `attachment_blobs` table beside the manifest the mark phase reads — there
 is no `attachments/` directory. The blind-root arm is therefore staged: move the
 catalog aside, run the
@@ -135,11 +135,11 @@ catalog beside the moved one.
 curl -s -X POST "http://127.0.0.1:$port/api/attachments" \
   -H 'content-type: application/json' \
   -d "{\"name\":\"probe.png\",\"mime\":\"image/png\",\"data_base64\":\"$(base64 -w0 probe.png)\"}"
-mkdir "$work/aside" && mv "$work/data/lash-sessions"/durable-core.db* "$work/aside/"
+mkdir "$work/aside" && mv "$work/data"/lash-sessions.db* "$work/aside/"
 curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-maintenance" \
   -H 'content-type: application/json' \
   -d '{"reclaim_attachments":{"grace_period_ms":604800000,"empty_root_set":"refuse"}}'
-mv "$work/aside"/durable-core.db* "$work/data/lash-sessions/" && rmdir "$work/aside"
+mv "$work/aside"/lash-sessions.db* "$work/data/" && rmdir "$work/aside"
 ```
 
 **Judge.** `409`, and the message must say that the root set *could not be
@@ -168,7 +168,7 @@ catalog's own counts beside it.
 ```sh
 curl -s -X POST "http://127.0.0.1:$port/api/turn" \
   -H 'content-type: application/json' -d '{"text":"hello"}'
-sqlite3 "$work/data/lash-sessions/durable-core.db" \
+sqlite3 "$work/data/lash-sessions.db" \
   "SELECT (SELECT count(*) FROM attachment_blobs),
           (SELECT count(*) FROM attachment_referrers WHERE committed_at_ms IS NOT NULL)"
 curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-maintenance" \
@@ -220,7 +220,7 @@ curl -s -X POST "http://127.0.0.1:$port/api/turn" -H 'content-type: application/
 # Wait for the COMMITTED reference, not the in-flight user row: poll until
 # /api/state.active_turns is empty and the attachment manifest row carries a
 # non-null committed_at_ms —
-#   sqlite3 "$work/data/lash-sessions/durable-core.db" \
+#   sqlite3 "$work/data/lash-sessions.db" \
 #     "SELECT committed_at_ms FROM attachment_referrers WHERE attachment_id = '<id>'"
 # (equivalently, until the attachment appears as a
 # graph_nodes reference). committed_at_ms is what promotes the blob to a root.
@@ -246,9 +246,9 @@ curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-ma
   -d '{"reclaim_attachments":{"grace_period_ms":0,"empty_root_set":"refuse"}}'
 curl -s -o referenced.png -w '%{http_code}\n' "http://127.0.0.1:$port/api/attachments/<referenced-id>"
 curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:$port/api/attachments/<orphan-id>"
-sqlite3 "$work/data/lash-sessions/durable-core.db" \
+sqlite3 "$work/data/lash-sessions.db" \
   "SELECT attachment_id, length(content) FROM attachment_blobs"
-sqlite3 "$work/data/lash-sessions/durable-core.db" \
+sqlite3 "$work/data/lash-sessions.db" \
   "SELECT lower(hex(content)) FROM attachment_blobs WHERE attachment_id = '<referenced-id>'"
 od -An -v -tx1 probe.png | tr -d ' \n'; echo
 ```

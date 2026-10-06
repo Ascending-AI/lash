@@ -11,9 +11,9 @@
 //!   move them in), not borrows of `self`.
 
 use super::*;
+use crate::location::DatabaseLocation;
 #[cfg(any(test, feature = "testing"))]
 use crate::location::validate_file_database_path;
-use crate::location::{DatabaseLocation, DatabaseTarget};
 use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 
@@ -63,7 +63,6 @@ impl SqliteStore {
             options,
             clock,
             None,
-            None,
             lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
             None,
@@ -71,6 +70,8 @@ impl SqliteStore {
         .await
     }
 
+    /// Open the database file at `path`, creating it with every table of the
+    /// deployment if it is absent.
     pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
         Self::open_direct(
             path,
@@ -122,30 +123,25 @@ impl SqliteStore {
     }
 
     async fn open_direct(
-        root: &Path,
+        path: &Path,
         options: StoreOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
         constructor: &'static str,
     ) -> tokio_rusqlite::Result<Self> {
-        let location = crate::backend::file_location(root, constructor)?;
-        let identity: Arc<str> = location.identity().into();
-        let core =
-            DatabaseLocation::in_backend(&location, &identity, SqliteDatabase::DurableCore, None);
-        let store = Self::open_at(
-            &core,
+        let location = crate::location::file_location(path, constructor)?;
+        Self::open_at(
+            &DatabaseLocation::in_backend(&location, None),
             options,
             clock,
-            None,
             None,
             lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
             None,
         )
-        .await?;
-        Ok(store)
+        .await
     }
 
-    /// Open the durable-core database admitting `writable` as the opening
+    /// Open the database file at `path` admitting `writable` as the opening
     /// build's fleet-format writable range.
     ///
     /// Testing seam for FIG-3796's rollout proofs: the recorded row is read
@@ -165,7 +161,6 @@ impl SqliteStore {
             StoreOptions::default(),
             Arc::new(lash_core_execution::facade_support::SystemClock),
             None,
-            None,
             writable,
             None,
         )
@@ -174,9 +169,8 @@ impl SqliteStore {
         Ok(store)
     }
 
-    /// Open the durable-core database at `core`, attaching the process
-    /// registry at `process_registry` when given. Internal opens inherit the
-    /// factory's warning or the direct entry's warning.
+    /// Open the deployment's database at `core`, provisioning every table of
+    /// it when it is new.
     ///
     /// `writable` is the opening build's fleet-format writable range: the
     /// recorded row is admitted against it, so a generation the build cannot
@@ -185,27 +179,18 @@ impl SqliteStore {
         core: &DatabaseLocation,
         options: StoreOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
-        process_registry: Option<&DatabaseTarget>,
         turn_cancel_closure_owner: Option<std::sync::Weak<dyn lash_core_execution::EffectHost>>,
         writable: lash_core_execution::compat::VersionRange,
         #[cfg(feature = "testing")] pauses: Option<crate::testing::SqlitePauses>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
-        let mut conn =
+        let conn =
             SqliteConnection::open_with_pauses(core.target(), options.connection_policy, pauses)
                 .await?;
         #[cfg(not(feature = "testing"))]
-        let mut conn =
+        let conn =
             SqliteConnection::open_with_policy(core.target(), options.connection_policy).await?;
-        crate::schema::ensure_versioned_schema_with_writable(
-            &conn,
-            SqliteDatabase::DurableCore,
-            writable,
-        )
-        .await?;
-        if let Some(process_registry) = process_registry {
-            attach_process_registry(&mut conn, process_registry, options.connection_policy).await?;
-        }
+        crate::schema::ensure_versioned_schema_with_writable(&conn, writable).await?;
         let mut readers = Vec::with_capacity(options.connection_policy.read_connections.get());
         for _ in 0..options.connection_policy.read_connections.get() {
             readers.push(SqliteConnection::open_readonly(core.target()).await?);
@@ -214,8 +199,6 @@ impl SqliteStore {
             conn,
             location: core.clone(),
             turn_cancel_closure_owner: Mutex::new(turn_cancel_closure_owner),
-            process_registry: process_registry.cloned(),
-            trigger_store: None,
             readers,
             next_reader: AtomicU64::new(0),
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
@@ -243,8 +226,6 @@ impl SqliteStore {
             conn,
             location: core.clone(),
             turn_cancel_closure_owner: Mutex::new(None),
-            process_registry: None,
-            trigger_store: None,
             readers,
             next_reader: AtomicU64::new(0),
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
@@ -334,92 +315,4 @@ impl SqliteStore {
             .await
             .map_err(sqlite_error)
     }
-}
-
-/// Attach the configured process registry as `process_registry` and verify it
-/// is a Lash process registry at this build's schema version. A registry still
-/// being created (version 0, no tables) is waited for up to the connection's
-/// busy timeout.
-pub(crate) async fn attach_process_registry(
-    conn: &mut SqliteConnection,
-    process_registry: &DatabaseTarget,
-    policy: SqliteConnectionPolicy,
-) -> rusqlite::Result<()> {
-    if !process_registry.exists() {
-        return Err(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
-            Some(format!(
-                "configured Lash process registry does not exist: {process_registry}"
-            )),
-        ));
-    }
-    conn.attach(
-        crate::connection_sql::ATTACH_PROCESS_REGISTRY,
-        process_registry,
-    )
-    .await?;
-    conn.call(move |conn| {
-        let deadline = std::time::Instant::now() + policy.busy_timeout;
-        loop {
-            let has_processes = conn
-                .query_row(
-                    crate::connection_sql::SELECT_PROCESS_REGISTRY_IS_PROVISIONED,
-                    [],
-                    |_| Ok(()),
-                )
-                .optional()?
-                .is_some();
-            if has_processes {
-                break;
-            }
-            if std::time::Instant::now() < deadline {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                continue;
-            }
-            return Err(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISMATCH),
-                Some("configured database has no Lash process registry table".to_owned()),
-            ));
-        }
-        let row: Option<(String, i64, i64, i64)> = conn
-            .query_row(
-                "SELECT component, version, min_reader, fleet_format
-             FROM process_registry.lash_compat WHERE singleton = 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .optional()?;
-        let descriptor = lash_core_execution::compat::descriptor(
-            lash_core_execution::compat::ComponentId::SQLITE_REGISTRY,
-        )
-        .ok_or(rusqlite::Error::InvalidQuery)?;
-        let stamp = match row {
-            Some((component, version, min_reader, _fleet))
-                if component == descriptor.component.as_str() =>
-            {
-                match (u32::try_from(version), u32::try_from(min_reader)) {
-                    (Ok(version), Ok(min_reader)) => {
-                        lash_core_execution::compat::StampRead::Present(
-                            lash_core_execution::compat::CompatStamp {
-                                version,
-                                min_reader,
-                            },
-                        )
-                    }
-                    _ => lash_core_execution::compat::StampRead::Unreadable(format!(
-                        "version {version}, min_reader {min_reader} is negative"
-                    )),
-                }
-            }
-            Some((component, ..)) => lash_core_execution::compat::StampRead::Unreadable(format!(
-                "component is {component}"
-            )),
-            None => lash_core_execution::compat::StampRead::Absent { populated: true },
-        };
-        lash_core_execution::compat::admit(descriptor, stamp).map_err(|refusal| {
-            crate::sqlite_conversion_error(StoreError::Incompatible { refusal })
-        })?;
-        Ok(())
-    })
-    .await
 }

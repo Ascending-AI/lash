@@ -148,7 +148,7 @@ async fn sqlite_prune_cleanup_obligation_survives_reopen() {
     drop(registry);
 
     let reopened = backend.reopen().await;
-    let conn = reopened.raw(SqliteDatabase::ProcessRegistry);
+    let conn = reopened.raw();
     let (obligation_id, state, kind, referrer_id, body): (String, String, String, String, String) =
         conn.query_row(
             "SELECT obligation_id, obligation_state, referrer_kind, referrer_id, cleanup_json \

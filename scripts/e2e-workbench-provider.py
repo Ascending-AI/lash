@@ -101,7 +101,7 @@ def browser(args):
     projection = module_from_spec(spec)
     spec.loader.exec_module(projection)
     directory = args.directory
-    database = directory / "workbench-data/lash-sessions/durable-core.db"
+    database = directory / "workbench-data/lash-sessions.db"
     rows = projection.StoreRows("sqlite_file", directory / "workbench-data")
     trace_path = directory / "workbench-data/trace.jsonl"
 

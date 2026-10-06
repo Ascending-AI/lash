@@ -1,12 +1,12 @@
 use super::{SqliteProcessRegistry, SqliteTriggerStore};
 use lash_core_execution::StoreSchemaVerdict;
 use lash_core_execution::compat::CompatRefusal;
-use lash_sqlite_store::{SqliteDatabase, SqliteStore, verify_schema_at};
+use lash_sqlite_store::{SqliteStore, verify_schema_at};
 
 #[tokio::test]
 async fn sqlite_open_refusal_names_the_writing_release() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("durable-core.db");
+    let path = dir.path().join("lash.db");
     drop(
         SqliteStore::open_file_for_testing(&path)
             .await
@@ -47,7 +47,7 @@ async fn sqlite_open_refusal_names_the_writing_release() {
 #[tokio::test]
 async fn sqlite_malformed_stamp_refusal_names_the_writing_release() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("durable-core.db");
+    let path = dir.path().join("lash.db");
     drop(
         SqliteStore::open_file_for_testing(&path)
             .await
@@ -78,12 +78,12 @@ async fn sqlite_process_registry_refuses_an_unstamped_populated_catalog_before_s
         .expect("leave a pre-stamp process table");
     drop(conn);
 
-    let status = verify_schema_at(&path, SqliteDatabase::ProcessRegistry).await;
+    let status = verify_schema_at(&path).await;
     assert_eq!(
         status.verdict,
         StoreSchemaVerdict::Refused {
             refusal: CompatRefusal::Unstamped {
-                component: "sqlite-registry".to_owned(),
+                component: "sqlite-core".to_owned(),
                 writing_release: None,
             },
         }
@@ -116,12 +116,12 @@ async fn sqlite_trigger_store_refuses_an_unstamped_populated_catalog_before_serv
     .expect("leave a pre-stamp trigger table");
     drop(conn);
 
-    let status = verify_schema_at(&path, SqliteDatabase::Triggers).await;
+    let status = verify_schema_at(&path).await;
     assert_eq!(
         status.verdict,
         StoreSchemaVerdict::Refused {
             refusal: CompatRefusal::Unstamped {
-                component: "sqlite-triggers".to_owned(),
+                component: "sqlite-core".to_owned(),
                 writing_release: None,
             },
         }

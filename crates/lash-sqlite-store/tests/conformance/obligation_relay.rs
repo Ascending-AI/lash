@@ -41,7 +41,7 @@ async fn an_unknown_referrer_kind_is_refused_typed_and_stalled() {
     let backend = TestBackend::open(SUBSTRATE).await;
     let label = lash_core_execution::SYNTHETIC_NEXT_REFERRER_KIND;
     let id = "core:obligation-written-by-a-later-build";
-    let raw = backend.raw(lash_sqlite_store::SqliteDatabase::DurableCore);
+    let raw = backend.raw();
     raw.execute(
         "INSERT INTO artifact_cleanup_obligations \
              (referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, \

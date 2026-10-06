@@ -141,7 +141,7 @@ fn assert_resident_in_fresh_compaction_frame(
 
 /// The frame the durable head's leaf belongs to.
 fn sqlite_leaf_frame(stores: &lash_sqlite_store::SqliteStoreSet, session_id: &str) -> String {
-    rusqlite::Connection::open(stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore))
+    rusqlite::Connection::open(stores.database_uri())
         .expect("open SQLite session catalog")
         .query_row(
             "SELECT g.frame_node_id FROM session_head h JOIN session_revisions r USING (session_id, head_revision)
@@ -498,10 +498,8 @@ fn sqlite_recovery_records(
     store_factory: &lash_sqlite_store::SqliteStoreSet,
     session_id: &str,
 ) -> Vec<(String, String, serde_json::Value)> {
-    let conn = rusqlite::Connection::open(
-        store_factory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-    )
-    .expect("open SQLite session catalog");
+    let conn = rusqlite::Connection::open(store_factory.database_uri())
+        .expect("open SQLite session catalog");
     let mut stmt = conn
         .prepare(
             "SELECT node_id, parent_node_id, node_json, frame_node_id FROM graph_nodes
@@ -814,10 +812,8 @@ fn sqlite_head_and_max_generation(
     stores: &lash_sqlite_store::SqliteStoreSet,
     session_id: &SessionId,
 ) -> (String, i64) {
-    let conn = rusqlite::Connection::open(
-        stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-    )
-    .expect("open SQLite session catalog");
+    let conn =
+        rusqlite::Connection::open(stores.database_uri()).expect("open SQLite session catalog");
     let leaf = conn
         .query_row(
             "SELECT leaf_node_id FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1",
@@ -840,10 +836,8 @@ fn sqlite_nodes(
     stores: &lash_sqlite_store::SqliteStoreSet,
     session_id: &SessionId,
 ) -> Vec<lash_core::SessionNodeRecord> {
-    let conn = rusqlite::Connection::open(
-        stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-    )
-    .expect("open SQLite session catalog");
+    let conn =
+        rusqlite::Connection::open(stores.database_uri()).expect("open SQLite session catalog");
     let mut stmt = conn
         .prepare(
             "SELECT node_id, parent_node_id, node_json FROM graph_nodes
@@ -998,10 +992,8 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .output()
         .await?;
 
-    let conn = rusqlite::Connection::open(
-        store_factory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-    )
-    .expect("open SQLite session catalog");
+    let conn = rusqlite::Connection::open(store_factory.database_uri())
+        .expect("open SQLite session catalog");
     let first_threshold_parent = conn
         .query_row(
             "SELECT parent_node_id FROM graph_nodes
@@ -1102,10 +1094,8 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .id(crate::TurnId::parse("standard-compaction-reopened").expect("nonblank host identity"))
         .output()
         .await?;
-    let conn = rusqlite::Connection::open(
-        store_factory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-    )
-    .expect("reopen SQLite session catalog");
+    let conn = rusqlite::Connection::open(store_factory.database_uri())
+        .expect("reopen SQLite session catalog");
     let reopened_first_parent = conn
         .query_row(
             "SELECT parent_node_id FROM graph_nodes
@@ -1478,10 +1468,8 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         Some(&serde_json::json!("continued"))
     );
 
-    let conn = rusqlite::Connection::open(
-        store_factory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-    )
-    .expect("open SQLite session catalog");
+    let conn = rusqlite::Connection::open(store_factory.database_uri())
+        .expect("open SQLite session catalog");
     let first_switch_parent = conn
         .query_row(
             "SELECT parent_node_id FROM graph_nodes
@@ -1502,10 +1490,8 @@ fn sqlite_node_rows(
     stores: &lash_sqlite_store::SqliteStoreSet,
     session_id: &SessionId,
 ) -> Vec<(String, Option<String>, i64)> {
-    let conn = rusqlite::Connection::open(
-        stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-    )
-    .expect("open SQLite session catalog");
+    let conn =
+        rusqlite::Connection::open(stores.database_uri()).expect("open SQLite session catalog");
     let mut stmt = conn
         .prepare(
             "SELECT node_id, parent_node_id, generation FROM graph_nodes

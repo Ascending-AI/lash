@@ -33,7 +33,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
         .expect("test runtime")
         .block_on(async {
             let dir = tempfile::tempdir().expect("SQLite directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(dir.path())
+            let stores = lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
                 .await
                 .expect("SQLite stores");
             let double = lash_restate_test::backend_with(

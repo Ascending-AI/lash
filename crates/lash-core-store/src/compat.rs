@@ -1,7 +1,7 @@
 //! The component compatibility descriptor (ADR 0115 §1).
 //!
-//! Every versioned stored component (the PostgreSQL schema, each SQLite
-//! database, each Restate object family) carries a durable stamp
+//! Every versioned stored component (the PostgreSQL schema, the SQLite
+//! database file, each Restate object family) carries a durable stamp
 //! `{version, min_reader}`. A build declares which stamps it opens and which
 //! versions it produces in one [`CompatDescriptor`] per component, and every
 //! open runs [`admit`] on the stamp before it takes traffic. A refusal is a
@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 
 pub use lash_sansio::VersionRange;
 
-/// One versioned stored component: a PostgreSQL schema, one SQLite
-/// database, or one Restate object family.
+/// One versioned stored component: a PostgreSQL schema, a SQLite database
+/// file, or one Restate object family.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ComponentId(&'static str);
 
@@ -24,12 +24,9 @@ impl ComponentId {
     /// The PostgreSQL schema; its stamp is `lash_schema_versions` row
     /// `lash-postgres-store`.
     pub const POSTGRES: Self = Self("postgres");
-    /// The SQLite durable-core database; its stamp is its `lash_compat` row.
+    /// A SQLite deployment's one database file; its stamp is its
+    /// `lash_compat` row.
     pub const SQLITE_CORE: Self = Self("sqlite-core");
-    /// The SQLite process-registry database; its stamp is its `lash_compat` row.
-    pub const SQLITE_REGISTRY: Self = Self("sqlite-registry");
-    /// The SQLite trigger database; its stamp is its `lash_compat` row.
-    pub const SQLITE_TRIGGERS: Self = Self("sqlite-triggers");
     /// Every `LashDurableWaitIndex` object; its stamp is the object's `_compat`.
     pub const RESTATE_DURABLE_WAIT_REGISTRY: Self = Self("restate-durable-wait-registry");
 
@@ -95,8 +92,10 @@ pub struct CompatDescriptor {
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
 pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 
-/// The SQLite durable-core database's version: its `lash_compat` row and its
-/// entry in the release stamp.
+/// The SQLite database's version: its `lash_compat` row and its entry in the
+/// release stamp. A SQLite deployment is one database file (ADR 0132 §12),
+/// so this one number versions every table the file holds: the durable core,
+/// the process registry and the trigger store.
 ///
 /// Its history follows. Before the catalog existed each value was a
 /// reject-and-recreate boundary: an older database is deleted before
@@ -477,220 +476,12 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// and trigger registration (FIG-4057, changed in place under the version
 /// freeze): a catalog whose kind CHECK predates them rejects both kinds, so
 /// recreate it.
-/// version_guard(
-///     roots(
-///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope,
-///         BlobArtifactDescriptor, BlobStorageHint, BlobCompression,
-///     ),
-///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
-///     items(
-///         path = "crates/lash-sqlite-store/src/schema.rs", SCHEMA,
-///         elide = "sql_idempotent_index",
-///     ),
-///     items(
-///         path = "crates/lash-sqlite-store/src/schema_fragments.rs", SESSION_INGRESS_TABLE,
-///         SESSION_RUNS_TABLES, elide = "sql_idempotent_index",
-///     ),
-///     catalog(
-///         path = "crates/lash-sqlite-store/src/migration.rs", CATALOG,
-///         rows = "SqliteDatabase::DurableCore",
-///     ),
-/// )
-/// version_surface = "migrate"
-/// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
-/// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 99;
-
-/// The SQLite process-registry database's version: its `lash_compat` row and
-/// its entry in the release stamp.
-///
-/// Bumped to 10: ADR 0020 added a per-store process-row `change_seq` plus the
-/// process change clock. There is no migration chain — pre-10 process databases
-/// are rejected at open and must be recreated.
-///
-/// Bumped to 11 for the completion-authority cutover (ADR 0027): terminal
-/// `process_events` now carry a `completion_authority` in their payload, so the
-/// replay-key payload hash of a pre-cutover terminal event no longer matches the
-/// hash a cross-version retry would compute — a replay would spuriously diverge.
-/// Rejecting pre-11 process databases and recreating them removes that hazard.
-///
-/// Bumped to 13 for the second completion-authority payload cutover (ADR 0027):
-/// the external-owner authority no longer carried the unverified `granted_to` field, changing
-/// the replay-key payload hash again. Pre-13 process databases are rejected and
-/// recreated so retries cannot compare terminal events across payload formats.
-///
-/// Bumped to 14 for the durable process-wake outbox and removal of the wake-ack
-/// lane. Pre-14 process registries are rejected and recreated.
-///
-/// Bumped to 15 so terminal wake deliveries retain a durable exact-evidence
-/// cleanup reconciliation bit. Pre-15 registries are rejected and recreated.
-///
-/// Bumped to 17 for FIG-661: observer edges replace the former visibility table, wake targets
-/// are indexed subscription state, filter columns are extracted, and pruning
-/// leaves payload-free tombstones.
-/// Bumped to 19 for per-attempt wake-delivery claim tokens.
-/// Bumped to 18 for wake-delivery claims and raw session originator ids.
-/// Version 20 stores separately versioned registration fingerprints and v2
-/// process-environment content addresses.
-/// Version 21 stores shared-framing wake identities and compares replayed event
-/// payloads structurally instead of retaining a payload-hash column.
-/// Version 22 stores v3 process-environment refs whose content-addressed policy
-/// payload includes the required per-turn budget.
-/// Version 23 indexes the bounded non-terminal registry scan by process id.
-/// Version 24 durably retains pending process-parent teardown beside terminal completion.
-/// Version 25 switches durable process identities to domain-tagged BLAKE3.
-/// Version 26 adds DDL-enforced process status, wake state/discard reason, and
-/// tool-intent kind vocabularies. Existing process registries are rejected.
-/// Version 27 removes the unread process-lease owner-liveness column. Existing
-/// process registries are rejected rather than migrated.
-/// Version 28 stores process-event time only in the event JSON as epoch
-/// milliseconds and removes the unread companion column. Existing process
-/// registries are rejected rather than migrated.
-/// Version 29 makes the registration change sequence the structural process
-/// incarnation and carries it through events, observer edges, wake deliveries,
-/// and tombstones. Version-28 registries are rejected rather than rebound.
-/// Version 30 folds the newest event sequence into every process row and
-/// persists the Process Prune horizon established by Tombstone Compaction.
-/// Version-29 registries are rejected rather than migrated.
-/// Version 31 removes the unread process waiting projection and its index.
-/// Version-30 registries are rejected rather than migrated.
-/// Version 33 persists full admitted effect addresses and optional truthful
-/// attribution in process registration and wake payloads. Older registries are
-/// rejected rather than fabricating an execution scope or session owner.
-/// Version 34 requires the host-declared lifecycle policy in every process record.
-/// Earlier process registries are rejected rather than inventing a policy.
-/// Version 35 replaces prose cancellation events with a typed, record-folded fact.
-/// Earlier registries are rejected so an accepted cancellation is never lost.
-/// Version 36 makes Process Prune retain exact artifact-release evidence until
-/// every configured artifact store acknowledges owner severance. Version-35
-/// registries are rejected rather than inventing cleanup acknowledgements.
-/// Version 37 replaces the process-keyed parent-end plan table with a ledger
-/// keyed by the parent scope itself, and folds the parent scope, the
-/// on-parent-end policy and the cancel request into indexed process columns so
-/// the sweep selects children by index instead of decoding every record.
-/// Version-36 registries are rejected rather than migrated.
-/// Version 38 replaces the boolean `cancel_requested` column with
-/// `cancel_requested_at_ms`, the timestamp of the first accepted cancel, so a
-/// pending-cancel list reads one column through one partial index instead of
-/// decoding every record. Version-37 registries carry a boolean this schema no
-/// longer has, so they are rejected rather than migrated.
-/// Version 40 names the formerly-anonymous CHECKs (FIG-3261) so the
-/// required-constraints gate can see them; a pre-40 registry is rejected at
-/// open and recreated.
-/// Version 41 (FIG-3376) moves the durable `SessionCreateRequest` stored in
-/// process payloads to the spawn-time plugin-init cutover and drops
-/// `usage_source`; a pre-41 registry is rejected at open and recreated.
-/// Version 42 (FIG-3418) makes the parent scope a typed fact: `parent_end_plans`
-/// gains the versioned `parent_payload` column the ledger decodes instead of
-/// parsing its `(parent_kind, parent_id)` key, both kind CHECKs admit every
-/// opener arm, and `parent_scope_id` becomes a collision-free canonical
-/// projection rather than a delimiter-joined rendering. A pre-42 registry
-/// holds non-injective ids and payload-less ledger rows, so it is rejected at
-/// open and recreated.
-/// Version 43 (FIG-3588) gives `process_segment_handovers` the nullable
-/// `started_json` start marker a Restate segment's admission writes
-/// set-if-absent before its first effect. A pre-43 registry lacks the column,
-/// so it is rejected at open and recreated.
-/// Version 44 (FIG-3607) names a process by its minted, never-reused process
-/// id: `processes` drops `incarnation` and `registration_fingerprint` and gains
-/// the nullable `start_key`, unique while retained, and every table keyed by
-/// `(process_id, incarnation)` is keyed by `process_id` alone. A pre-44
-/// registry holds reusable names, so it is rejected at open and recreated.
-/// Version 44 also records what ends a process (FIG-3607 PR-2, changed in
-/// place under the pre-1.0 version freeze, FIG-3846): `processes` replaces
-/// `parent_scope_kind`/`parent_scope_id`/`on_parent_end` with the recorded
-/// `lifetime` (`until` or `detached`) and the scope it names, which may be a
-/// session, and `parent_end_plans` admits a session scope. A registry written
-/// before the change holds ADR 0094 lifecycle policies this build does not
-/// read; recreate it.
-///
-/// Version 44 also stamps process rows with drain generations (FIG-3795,
-/// changed in place under the same freeze): `processes` gains
-/// `segment_generation` — the build generation that admitted the process's
-/// current segment — and `park_build_generation` — the build generation of
-/// the checkpoint a parked process resumes — each indexed; and
-/// `process_segment_handovers` gains `written_generation` and `route`, both
-/// non-null: every write names the generation that made it and the route
-/// its send took. A registry without the columns is recreated.
-///
-/// Version 44 also holds the drain marks (FIG-3799, changed in place under
-/// the same freeze): `draining_generations` names each build generation an
-/// operator marked draining. A registry written before the change lacks the
-/// table until it is next opened, which creates it empty.
-///
-/// Version 44 also carries consumer holds (ADR 0116 §3.6, changed in place
-/// under the same freeze): `processes` gains `consumer_hold_key` and the
-/// owning scope's `consumer_hold_scope_kind` and `consumer_hold_scope_id`,
-/// set together or not at all, and indexed by owner, with
-/// `consumer_hold_cancels` saying whether the holding call owes the process a
-/// cancel when it is abandoned. A held row is never
-/// pruned. A registry written before the change lacks the columns; recreate
-/// it. `abandoned_consumer_holds` marks the holds whose call was abandoned,
-/// so a registration under one is refused; a registry written before it
-/// lacks the table until it is next opened, which creates it empty.
-///
-/// Version 44 also carries trigger delivery pins (FIG-4203, changed in place
-/// under the same freeze): `processes` gains
-/// `trigger_delivery_pin_occurrence_id` and
-/// `trigger_delivery_pin_subscription_id`, set together or not at all and
-/// indexed while set. A delivery's registration writes the pin, and the
-/// router releases it once the delivery's bind commits. A pinned row is never
-/// pruned. A registry written before the change lacks the columns; recreate
-/// it.
-///
-/// version_guard(
-///     items(
-///         path = "crates/lash-sqlite-store/src/schema.rs", PROCESS_SCHEMA,
-///         elide = "sql_idempotent_index",
-///     ),
-///     catalog(
-///         path = "crates/lash-sqlite-store/src/migration.rs", CATALOG,
-///         rows = "SqliteDatabase::ProcessRegistry",
-///     ),
-/// )
-/// version_surface = "migrate"
-/// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
-/// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const SQLITE_REGISTRY_SCHEMA_VERSION: u32 = 44;
-
-/// The SQLite trigger database's version: its `lash_compat` row and its entry
-/// in the release stamp.
-///
-/// Version 4 stores FIG-915 trigger identities and compares occurrence requests
-/// structurally instead of retaining a request-hash column. There is
-/// deliberately no compatibility read path.
-/// Version 5 stores v3 process-environment refs and the resulting trigger
-/// definition fingerprints after the required per-turn budget cutover.
-/// Version 6 durably arms occurrence reclaim eligibility at fan-out terminality.
-/// Version 7 switches durable trigger identities to domain-tagged BLAKE3.
-/// Version 8 prevents a tombstoned trigger subscription from remaining enabled.
-/// Version 9 (FIG-1951) replaces the `enabled`/`tombstoned` boolean pair with
-/// one `lifecycle` column over `enabled`/`disabled`/`tombstoned` and a
-/// `deleted_at_ms` column paired to it by CHECK, so the three legal states are
-/// the only representable ones and the deletion time stops living solely inside
-/// `record_json`. Existing trigger stores are rejected rather than migrated.
-/// Version 10 (FIG-1956) gives the mutation-receipt table typed NOT NULL
-/// `owner_kind`/`owner_id` columns with a named owner-kind CHECK, deleting the
-/// `_owner_scope_namespace` JSON encoding entirely. Existing trigger stores
-/// are rejected rather than migrated.
-/// Version 11 (FIG-3376) moves the `SessionCreateRequest` carried in trigger
-/// targets to the spawn-time plugin-init cutover and drops `usage_source`;
-/// existing trigger stores are rejected rather than migrated.
-/// Version 12 (FIG-3607) makes a delivery's `process_id` its nullable binding:
-/// the reservation starts unbound, and the minted id of the process its start
-/// key registered is bound before the delivery is reported. Existing trigger
-/// stores hold precomputed process names, so they are rejected rather than
-/// migrated.
-/// Version 12 also carries the delivery's `TriggerDelivery` obligation
-/// (FIG-4090, changed in place under the version freeze): the reserving insert
-/// arms it and the binding delivers it, so a reservation a crash left unbound
-/// is started by the relay rather than by a re-emit. A trigger store written
-/// before the change lacks the columns; recreate it.
-/// Version 12 also carries `trigger_occurrence_tombstones` (FIG-4513, changed
-/// in place under the version freeze): every delete of an occurrence leaves
-/// its tombstone, and an ingest that finds one writes nothing back. A trigger
-/// store written before the change lacks the table; recreate it.
-///
+/// Version 99 also holds the process registry and the trigger store
+/// (FIG-5195, changed in place under the version freeze): their tables, once
+/// two databases of their own beside this one, are provisioned in the one
+/// database file, so a producer's transaction spans every table it writes. A
+/// store in the three-file layout is refused as
+/// [`CompatRefusal::RetiredSqliteLayout`]; recreate it.
 /// version_guard(
 ///     shapes(
 ///         path = "crates/lash-core-execution/src/runtime/effect/envelope.rs",
@@ -699,19 +490,29 @@ pub const SQLITE_REGISTRY_SCHEMA_VERSION: u32 = 44;
 ///             RuntimeEffectOutcome,
 ///         ),
 ///     ),
+///     roots(
+///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope,
+///         BlobArtifactDescriptor, BlobStorageHint, BlobCompression,
+///     ),
+///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
+///     items(
+///         path = "crates/lash-sqlite-store/src/schema.rs", SCHEMA, PROCESS_SCHEMA,
+///         elide = "sql_idempotent_index",
+///     ),
 ///     items(
 ///         path = "crates/lash-sqlite-store/src/trigger_schema.rs", TRIGGER_SCHEMA,
 ///         elide = "sql_idempotent_index",
 ///     ),
-///     catalog(
-///         path = "crates/lash-sqlite-store/src/migration.rs", CATALOG,
-///         rows = "SqliteDatabase::Triggers",
+///     items(
+///         path = "crates/lash-sqlite-store/src/schema_fragments.rs", SESSION_INGRESS_TABLE,
+///         SESSION_RUNS_TABLES, elide = "sql_idempotent_index",
 ///     ),
+///     catalog(path = "crates/lash-sqlite-store/src/migration.rs", CATALOG),
 /// )
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const SQLITE_TRIGGERS_SCHEMA_VERSION: u32 = 12;
+pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 99;
 
 /// What this build declares about a store component whose provisioning DDL
 /// is at `version`: it reads and writes exactly that version.
@@ -743,8 +544,6 @@ const fn store(component: ComponentId, version: u32) -> CompatDescriptor {
 pub const DESCRIPTORS: &[CompatDescriptor] = &[
     store(ComponentId::POSTGRES, POSTGRES_SCHEMA_VERSION),
     store(ComponentId::SQLITE_CORE, SQLITE_CORE_SCHEMA_VERSION),
-    store(ComponentId::SQLITE_REGISTRY, SQLITE_REGISTRY_SCHEMA_VERSION),
-    store(ComponentId::SQLITE_TRIGGERS, SQLITE_TRIGGERS_SCHEMA_VERSION),
     CompatDescriptor {
         component: ComponentId::RESTATE_DURABLE_WAIT_REGISTRY,
         reads: RESTATE_OBJECT_FAMILY_FORMATS,
@@ -945,35 +744,21 @@ pub enum CompatRefusal {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         writing_release: Option<String>,
     },
-    /// A SQLite store set holds some of its databases but not all: the open
-    /// refuses a partial set rather than provisioning the missing databases
-    /// beside the survivors.
+    /// A SQLite store's configured path is a directory in the retired layout
+    /// of three database files (FIG-5195). A SQLite deployment is one
+    /// database file (ADR 0132 §12), and formats reset at 1.0, so no release
+    /// migrates the old layout: the open refuses it unchanged.
     #[error(
-        "the store set is incomplete: {} not found beside the surviving databases. An open \
-         refuses a partial set rather than provisioning the missing databases in place; \
-         restore them from a backup, or remove the whole set and let the next open \
-         provision it fresh{}",
-        .missing.join(", "),
-        release_suffix(.writing_release)
+        "{location} is a directory in the retired SQLite layout of three database files ({}): \
+         a SQLite deployment is one database file, and no release migrates the old layout. \
+         The directory is left unchanged; configure the path of a database file and recreate \
+         the store there",
+        .files.join(", ")
     )]
-    IncompleteStoreSet {
-        /// The operator-facing names of the absent databases, in store-set
-        /// order — the same names the preflight report's database rows carry.
-        missing: Vec<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        writing_release: Option<String>,
-    },
-    /// The SQLite databases of one store disagree on their stamps or `F`.
-    #[error(
-        "the store's databases disagree on their stamps ({}): a migration or finalize stopped \
-         part way. Run `lashctl migrate` from the build that advanced them to complete the set{}",
-         describe_databases(.databases),
-        release_suffix(.writing_release)
-    )]
-    PartiallyAdvanced {
-        databases: Vec<(String, CompatStamp, u32)>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        writing_release: Option<String>,
+    RetiredSqliteLayout {
+        location: String,
+        /// The retired layout's database files the directory holds.
+        files: Vec<String>,
     },
     /// State or a call a pre-release build wrote (FIG-4819). The 1.0 cut
     /// restarted every counter, so its numbers do not mean what this
@@ -1076,16 +861,11 @@ impl CompatRefusal {
             | Self::FleetUnrecorded {
                 writing_release, ..
             }
-            | Self::IncompleteStoreSet {
-                writing_release, ..
-            }
-            | Self::PartiallyAdvanced {
-                writing_release, ..
-            }
             | Self::PreRelease {
                 writing_release, ..
             } => *writing_release = release,
             Self::WriterFloorAbove { .. }
+            | Self::RetiredSqliteLayout { .. }
             | Self::UnknownVocabulary { .. }
             | Self::PluginWriterOutsideRange { .. }
             | Self::PluginWriterUnprovisioned { .. }
@@ -1121,19 +901,6 @@ impl CompatRefusal {
             other => other,
         }
     }
-}
-
-fn describe_databases(databases: &[(String, CompatStamp, u32)]) -> String {
-    databases
-        .iter()
-        .map(|(database, stamp, fleet)| {
-            format!(
-                "{database} at version {} floor {} epoch {fleet}",
-                stamp.version, stamp.min_reader
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 fn release_suffix(release: &Option<String>) -> String {

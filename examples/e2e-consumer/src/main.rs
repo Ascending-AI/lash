@@ -223,7 +223,7 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&root)?;
     let stores = Arc::new(match required("E2E_CONSUMER_STORE")?.as_str() {
         "memory" => lash::sqlite::SqliteStoreSet::memory().await?,
-        "file" => lash::sqlite::SqliteStoreSet::open(&root).await?,
+        "file" => lash::sqlite::SqliteStoreSet::open(root.join("lash.db")).await?,
         store => anyhow::bail!("unsupported consumer store {store}"),
     });
     let engine = Arc::new(lash::restate::RestateEngine::new(stores.clone(), config));

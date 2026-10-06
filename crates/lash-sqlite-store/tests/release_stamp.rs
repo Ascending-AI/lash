@@ -16,7 +16,8 @@ use lash_core_execution::{
 use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
 
 struct SqliteBackend {
-    root: tempfile::TempDir,
+    /// Keeps the database's directory alive.
+    _root: tempfile::TempDir,
     durable_core: PathBuf,
 }
 
@@ -37,7 +38,7 @@ impl ReleaseStampDeployment for SqliteBackend {
     }
 
     async fn preflight(&self) -> Result<StoreSchemaStatus, StoreError> {
-        SqliteStorePreflight::for_store_root(self.root.path())
+        SqliteStorePreflight::for_database_file(&self.durable_core)
             .schema_status()
             .await
     }
@@ -72,8 +73,11 @@ fn raise_reader_floor_above_this_build(connection: &rusqlite::Connection) -> u32
 #[tokio::test]
 async fn sqlite_release_stamp_conformance() {
     let root = tempfile::tempdir().expect("scratch directory");
-    let durable_core = root.path().join("durable-core.db");
-    let backend = SqliteBackend { root, durable_core };
+    let durable_core = root.path().join("lash.db");
+    let backend = SqliteBackend {
+        _root: root,
+        durable_core,
+    };
     release_stamp_conformance(&backend).await;
 }
 
@@ -81,7 +85,7 @@ async fn sqlite_release_stamp_conformance() {
 #[tokio::test]
 async fn a_refused_open_names_the_release_that_wrote_the_store() {
     let root = tempfile::tempdir().expect("scratch directory");
-    let path = root.path().join("durable-core.db");
+    let path = root.path().join("lash.db");
     drop(
         SqliteStore::open_file_for_testing(&path)
             .await
@@ -92,7 +96,7 @@ async fn a_refused_open_names_the_release_that_wrote_the_store() {
     let above = raise_reader_floor_above_this_build(&connection);
     drop(connection);
 
-    let status = SqliteStorePreflight::for_store_root(root.path())
+    let status = SqliteStorePreflight::for_database_file(&path)
         .schema_status()
         .await
         .expect("inspect refused store");
@@ -118,7 +122,7 @@ async fn a_refused_open_names_the_release_that_wrote_the_store() {
 #[tokio::test]
 async fn an_unstamped_store_is_refused_without_inventing_a_release() {
     let root = tempfile::tempdir().expect("scratch directory");
-    let path = root.path().join("durable-core.db");
+    let path = root.path().join("lash.db");
     drop(
         SqliteStore::open_file_for_testing(&path)
             .await
@@ -132,7 +136,7 @@ async fn an_unstamped_store_is_refused_without_inventing_a_release() {
     let above = raise_reader_floor_above_this_build(&connection);
     drop(connection);
 
-    let status = SqliteStorePreflight::for_store_root(root.path())
+    let status = SqliteStorePreflight::for_database_file(&path)
         .schema_status()
         .await
         .expect("inspect refused store");
@@ -159,7 +163,7 @@ async fn an_unstamped_store_is_refused_without_inventing_a_release() {
 #[tokio::test]
 async fn a_store_stamped_by_a_pre_release_build_is_refused_as_pre_release() {
     let root = tempfile::tempdir().expect("scratch directory");
-    let path = root.path().join("durable-core.db");
+    let path = root.path().join("lash.db");
     drop(
         SqliteStore::open_file_for_testing(&path)
             .await
@@ -178,7 +182,7 @@ async fn a_store_stamped_by_a_pre_release_build_is_refused_as_pre_release() {
     raise_reader_floor_above_this_build(&connection);
     drop(connection);
 
-    let status = SqliteStorePreflight::for_store_root(root.path())
+    let status = SqliteStorePreflight::for_database_file(&path)
         .schema_status()
         .await
         .expect("inspect refused store");

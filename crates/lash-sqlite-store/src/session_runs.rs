@@ -25,7 +25,6 @@ use lash_store_sql::session_runs::{
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::conn::TxOutcome;
-use crate::schema_layout::Schema;
 use crate::{StoreError, sqlite_error, stored_data_corrupt};
 
 /// Every logical-run statement the session catalog issues.
@@ -38,9 +37,8 @@ pub(crate) struct SessionRunsSql {
 
 static SESSION_RUNS_SQL: LazyLock<SessionRunsSql> = LazyLock::new(|| {
     // The run verbs name the turn-input lifecycle.
-    let dialect = Schema::Main
-        .dialect()
-        .with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE);
+    let dialect =
+        crate::schema_layout::MAIN.with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE);
     SessionRunsSql {
         runs: SessionRunStatements::render(dialect),
         verbs: RunVerbStatements::render(

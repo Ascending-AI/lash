@@ -706,20 +706,17 @@ impl lash_conformance::WakeRedeliveryFloorProbe for DoubleWakeRedeliveryFloors {
         process_id: &lash_core::ProcessId,
     ) -> Option<u64> {
         use rusqlite::OptionalExtension as _;
-        rusqlite::Connection::open(
-            self.0
-                .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-        )
-        .expect("open the memory catalog")
-        .query_row(
-            "SELECT allocation_floor FROM wake_redelivery_fences
+        rusqlite::Connection::open(self.0.database_uri())
+            .expect("open the memory catalog")
+            .query_row(
+                "SELECT allocation_floor FROM wake_redelivery_fences
              WHERE session_id = ?1 AND process_id = ?2",
-            rusqlite::params![session_id.as_str(), process_id.as_str()],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()
-        .expect("read the receiver floor")
-        .map(|floor| u64::try_from(floor).expect("non-negative receiver floor"))
+                rusqlite::params![session_id.as_str(), process_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .expect("read the receiver floor")
+            .map(|floor| u64::try_from(floor).expect("non-negative receiver floor"))
     }
 }
 
@@ -1860,7 +1857,7 @@ async fn live_attachment_materialization_turn_witnesses() {
         (
             "file",
             Arc::new(
-                lash_sqlite_store::SqliteStoreSet::open(directory.path())
+                lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
                     .await
                     .expect("SQLite file"),
             ),

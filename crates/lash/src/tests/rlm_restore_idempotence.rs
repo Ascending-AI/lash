@@ -533,7 +533,7 @@ impl Backend {
 
     async fn sqlite() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
-        let stores = lash_sqlite_store::SqliteStoreSet::open(dir.path())
+        let stores = lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
             .await
             .expect("open a SQLite file store set");
         let double = lash_restate_test::backend_with(

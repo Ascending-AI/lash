@@ -3,7 +3,7 @@ use std::sync::Arc;
 use lash_core::StoreSet;
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet, testing::IsolatedDatabase};
 use lash_restate_test::{RestateTestBackend, ServerConfig, backend_with_store_set};
-use lash_sqlite_store::{SqliteDatabase, SqliteStoreSet, SqliteStoreSetOptions};
+use lash_sqlite_store::{SqliteStoreSet, SqliteStoreSetOptions};
 
 /// A Restate double over the explicitly selected store.
 #[derive(Clone, Copy)]
@@ -105,7 +105,7 @@ impl Fixture {
                         .await
                         .expect("SQLite stores"),
                     );
-                    uri = Some(stores.database_uri(SqliteDatabase::DurableCore).to_owned());
+                    uri = Some(stores.database_uri().to_owned());
                     Ok(stores as Arc<dyn StoreSet>)
                 },
             )

@@ -16,10 +16,8 @@ async fn corrupt_registry_read_is_refused_identically_by_store_and_engine_contro
         .register_process(held_registration())
         .await
         .expect("process");
-    let connection = rusqlite::Connection::open(
-        harness.sqlite_database_uri(lash_sqlite_store::SqliteDatabase::ProcessRegistry),
-    )
-    .expect("SQL observer");
+    let connection =
+        rusqlite::Connection::open(harness.sqlite_database_uri()).expect("SQL observer");
     assert_eq!(
         connection
             .execute(

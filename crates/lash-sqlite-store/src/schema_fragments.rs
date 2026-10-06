@@ -1,11 +1,7 @@
-//! DDL fragments a SQLite database definition applies after its own schema:
-//! the durable core's session ingress.
-//!
-//! A table declared here is applied by the database whose
-//! [`crate::schema::SqliteDatabase`] definition lists it.
+//! DDL fragments provisioning applies after the schema bodies
+//! ([`crate::schema::FRAGMENTS`]): the session ingress and the logical runs.
 
-/// The session ingress's one per-session order (ADR 0101 §5, amended),
-/// carried by the durable core alone.
+/// The session ingress's one per-session order (ADR 0101 §5, amended).
 ///
 /// Both admission tables, `pending_turn_inputs` and `queued_work_batches`,
 /// draw their `enqueue_seq` from this counter under the database write lock,

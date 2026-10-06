@@ -153,7 +153,7 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
   `innerText` is empty) for this assertion.
 - **Layer 2 — API and durable graph:** save `/api/state?session_id=<S>`, the `<S>` entry in
   `product-events.json`, and all non-tombstoned `<S>` rows from
-  `lash-sessions/durable-core.db.graph_nodes`. Decode `node_json`; reconstruct the active
+  `lash-sessions.db`, table `graph_nodes`. Decode `node_json`; reconstruct the active
   ancestry and both frame-scoped read models rather than treating all raw nodes as visible.
 - **Layer 3 — trace and runtime stream:** filter `trace.jsonl` and
   `GET /api/observations?session_id=<S>` by session `<S>`. Preserve the
