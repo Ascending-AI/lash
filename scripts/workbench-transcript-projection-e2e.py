@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 
 from playwright.sync_api import sync_playwright
@@ -58,20 +59,82 @@ def assert_three_layers(page, state: dict, store: StoreRows, artifact: Path, *, 
     page.wait_for_function("() => !document.querySelector('#send').disabled")
     def scrape_dom() -> list[dict]:
         page.wait_for_function("count => document.querySelectorAll('#timeline [data-transcript-row-id]').length === count", arg=sum(expected.values()))
-        dom = page.locator("#timeline [data-transcript-row-id]").evaluate_all("nodes => nodes.map(node => ({id:node.dataset.transcriptRowId, turn:node.dataset.turnId, text:node.textContent}))")
+        # The keyed timeline retains live durations, graph controls and full
+        # tool receipts on nodes the reader watched. A cold view has only the
+        # committed tool summaries. Compare the canonical payload, not that
+        # intentionally different presentation furniture (FIG-5086/5094).
+        dom = page.locator("#timeline [data-transcript-row-id]").evaluate_all("""nodes => nodes.map(node => {
+            const code = node.classList.contains('code-block');
+            const reasoning = node.classList.contains('reasoning');
+            const text = node.querySelector('.msg-text');
+            const body = node.cloneNode(true);
+            body.querySelectorAll('.msg-time, .copy-btn').forEach(child => child.remove());
+            return {
+                id: node.dataset.transcriptRowId, turn: node.dataset.turnId,
+                kind: code ? 'code' : reasoning ? 'reasoning' : 'message',
+                text: code ? null : reasoning ? node.querySelector('pre').textContent
+                    : text ? text.textContent : body.textContent,
+                html: node.classList.contains('assistant') ? text.innerHTML : null,
+                attachments: [...node.querySelectorAll('.message-attachments > a')].map(link => ({
+                    id: link.dataset.attachmentId, path: new URL(link.href).pathname
+                })),
+                code: code ? {
+                    language: node.querySelector('summary span').textContent.split(' ')[0],
+                    source: node.querySelector('.code-source').textContent,
+                    output: node.querySelector('.code-output').textContent,
+                    failed: node.classList.contains('fail')
+                } : null
+            };
+        })""")
         assert Counter(node["id"] for node in dom) == expected, "settled DOM dropped or duplicated a canonical row"
+        reasoning = {}
         for node in dom:
             row = next(row for row in visible if row["row_id"] == node["id"])
+            content = row["content"]
             assert node["turn"] == (row["provenance"]["turn_id"] or ""), "DOM lost typed provenance"
-            if row["kind"] == "assistant_reply":
-                assert row["content"]["text"] in node["text"], "DOM changed the committed reply"
+            if node["kind"] == "reasoning":
+                reasoning.setdefault(row["row_id"], []).append(node["text"])
+                continue
+            attachments = [{"id": attachment["id"], "path": "/api/attachments/" +
+                            urllib.parse.quote(attachment["id"], safe="")} for attachment in content["attachments"]]
+            assert node["attachments"] == attachments, "DOM changed committed attachments"
+            if row["kind"] == "user":
+                assert node["text"] == content["text"], "DOM changed the committed input"
+            elif row["kind"] == "assistant_reply":
+                rendered = page.evaluate("""text => {
+                    const body = document.createElement('div');
+                    body.innerHTML = renderMarkdownBlocks(text);
+                    return body.innerHTML;
+                }""", content["text"])
+                assert node["html"] == rendered, "DOM changed the committed reply"
+            elif row["kind"] == "code_block":
+                assert node["code"] == {
+                    "language": content["language"] or "code", "source": content["code"] or "",
+                    "output": "\n".join(value for value in (content["output"], content["error"]) if value),
+                    "failed": bool(content["error"]),
+                }, "DOM changed committed code or its result"
+        assert reasoning == {row["row_id"]: row["content"]["reasoning"] for row in visible
+                             if row["content"]["reasoning"]}, "DOM changed committed reasoning"
         return dom
 
     before = scrape_dom()
     page.reload(wait_until=navigation_wait)
     after = scrape_dom()
-    assert after == before, "reload changed canonical identity, provenance, content or source order"
+    tools = page.locator("#timeline .code-block[data-transcript-row-id]").evaluate_all("""nodes => nodes.map(node => ({
+        id: node.dataset.transcriptRowId,
+        retained: [...node.querySelectorAll('.tool:not(.omitted)')].map(tool => ({
+            operation: tool.querySelector('strong').textContent,
+            status: JSON.parse(tool.querySelector('.payload pre').textContent).status
+        })),
+        omitted: [...node.querySelectorAll('.tool.omitted')].reduce((count, tool) =>
+            count + Number(tool.textContent.split(' ')[0]), 0)
+    }))""")
     artifact.write_text(json.dumps({"api":state,"sql":nodes,"dom_before":before,"dom_after":after}, indent=2) + "\n")
+    assert after == before, "reload changed canonical identity, provenance, content or display order"
+    for block in tools:
+        content = next(row["content"] for row in visible if row["row_id"] == block["id"])
+        assert block["retained"] == content["tools"], "reload changed committed tool outcomes"
+        assert block["omitted"] == content["tools_omitted"], "reload changed the named tool omission"
 
 
 def main() -> None:
