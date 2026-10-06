@@ -298,10 +298,8 @@ impl ProcessResidue<'_> {
 }
 
 /// The `process_start` ledger's leg (FIG-3964): registration is its producer
-/// arm, so the script registers engine-owned processes — armed in the
-/// registration transaction under the derived id — and an externally-owned
-/// one, which owes no start and is the one row the repair arm can still
-/// take. Claim, settle, stall, re-arm and listing calls then run the same
+/// arm, so the script registers engine processes, each armed in the
+/// registration transaction under the derived id. Claim, settle, stall, re-arm and listing calls then run the same
 /// course as the `session_delete` script above, each refused answer checked
 /// for residue on the `start_obligation_*` family.
 #[expect(
@@ -357,25 +355,6 @@ async fn process_start_transcript(
         ids.insert(alias, id);
         processes.insert(alias, record.id);
     }
-    let external = registry
-        .register_process(registration(lash_core::ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        }))
-        .await
-        .expect("register an external process");
-    out.push(format!(
-        "register external -> {:?}",
-        ledger
-            .state(
-                &lash_core::store::ObligationKey::ProcessStart {
-                    process_id: external.id.clone()
-                }
-                .id()
-            )
-            .await
-            .expect("read the unarmed state")
-    ));
-    processes.insert("d", external.id);
     let process_ids = || -> Vec<String> {
         processes
             .values()
@@ -418,17 +397,6 @@ async fn process_start_transcript(
         &before,
         &residue.digest(&process_ids()).await,
     ));
-    let armed = ledger
-        .arm(
-            &ObligationKey::ProcessStart {
-                process_id: processes["d"].clone(),
-            },
-            T0,
-        )
-        .await
-        .expect("arm the unarmed row");
-    out.push(format!("arm external -> {}", armed.is_some()));
-    ids.insert("d", armed.expect("an unarmed row arms"));
     let stalled_before = ledger.count_stalled().await.expect("count stalled");
 
     let mut claimed = ledger
@@ -475,7 +443,6 @@ async fn process_start_transcript(
                 ),
             },
         ),
-        ("d", ObligationSettlement::Delivered),
     ];
     for (alias, settlement) in settlements {
         let outcome = ledger
@@ -593,7 +560,7 @@ async fn process_start_transcript(
         &before,
         &residue.digest(&process_ids()).await,
     ));
-    for alias in ["a", "b", "c", "d"] {
+    for alias in ["a", "b", "c"] {
         let standing = ledger.standing(&ids[alias]).await.expect("standing");
         out.push(format!("standing {alias} -> {standing:?}"));
     }

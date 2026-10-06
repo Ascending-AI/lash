@@ -107,9 +107,7 @@ fn registration(label: &str, engine_owned: bool) -> lash_core::ProcessRegistrati
             payload: serde_json::Value::Null,
         }
     } else {
-        lash_core::ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        }
+        lash_core::testing::held_engine_input(serde_json::Value::Null)
     };
     let registration = lash_core::ProcessRegistration::new(
         input,
@@ -131,6 +129,7 @@ fn registration(label: &str, engine_owned: bool) -> lash_core::ProcessRegistrati
             ))
     } else {
         registration
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
     }
 }
 
@@ -149,7 +148,7 @@ impl Fixture {
 
     async fn with_config(name: &str, engine_owned: bool, config: ProcessObservationConfig) -> Self {
         // Engine-owned summary events exercise the SQLite registry path; the
-        // external fixture only needs the shared store port.
+        // held fixture only needs the shared store port.
         let (dir, registry): (_, Arc<dyn ProcessRegistry>) = if engine_owned {
             let dir = tempfile::tempdir().expect("L8 tempdir");
             let registry = Arc::new(
@@ -613,7 +612,7 @@ async fn l8_prune_and_a_successor_are_typed_retention_gaps() {
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&fixture.process_id),
         )
         .await
         .expect("complete");

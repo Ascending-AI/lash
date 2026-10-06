@@ -592,10 +592,8 @@ async fn measure_process_prune(
     let prune_scope = format!("perf-prune:{run_id}:{turn_index}");
     for index in 0..HARDENING_PRUNE_BATCH {
         let process_id = registry
-            .register_process(lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::json!({"index": index}),
-                },
+            .register_process(lash_core::testing::held_engine_registration(
+                serde_json::json!({"index": index}),
                 lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
                     &prune_scope,
                 )),
@@ -609,7 +607,7 @@ async fn measure_process_prune(
                 lash_core::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(serde_json::json!({"done": index})),
                 ),
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await?;
     }
@@ -688,10 +686,8 @@ mod store_hardening_tests {
             .expect("open a SQLite memory store set")
             .process_registry();
         let unrelated_process_id = registry
-            .register_process(lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::json!({}),
-                },
+            .register_process(lash_core::testing::held_engine_registration(
+                serde_json::json!({}),
                 lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
                     "unrelated",
                 )),
@@ -706,7 +702,7 @@ mod store_hardening_tests {
                 lash_core::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(serde_json::json!({})),
                 ),
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core::ProcessCompletionAuthority::workflow_key(&unrelated_process_id),
             )
             .await
             .expect("complete unrelated process");

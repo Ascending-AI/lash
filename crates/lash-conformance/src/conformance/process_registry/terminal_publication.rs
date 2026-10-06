@@ -82,26 +82,24 @@ pub(super) async fn a_terminal_write_arms_its_publication_once(registry: Arc<dyn
         "a replayed terminal keeps the one obligation its first commit armed"
     );
 
-    // An external owner arms the same obligation through its explicit authority.
+    // Another process arms its own obligation through its explicit authority.
     let external = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
         .await
-        .expect("register the externally owned process")
+        .expect("register the second process")
         .id;
     registry
         .complete_process(
             &external,
             settled_success(serde_json::json!({ "ended": "leased" })),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&external),
         )
         .await
-        .expect("complete the externally owned process");
+        .expect("complete the second process");
     let external_publication = publication(&registry, &external)
         .await
         .expect("the external terminal arms its publication");

@@ -7,8 +7,9 @@ fn process() -> crate::ProcessId {
 }
 fn start() -> RemoteProcessStartRequest {
     RemoteProcessStartRequest::new(
-        RemoteProcessStartTarget::Input(RemoteProcessInput::External {
-            metadata: serde_json::json!({"job": 17}),
+        RemoteProcessStartTarget::Input(RemoteProcessInput::Engine {
+            kind: "job".to_string(),
+            payload: serde_json::json!({"job": 17}),
         }),
         RemoteStartLifetime::Detached,
         RemoteProcessOriginator::Host { scope: None },

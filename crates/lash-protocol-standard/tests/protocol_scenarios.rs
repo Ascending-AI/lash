@@ -791,11 +791,12 @@ impl lash_core::ToolProvider for StandardIntentProvider {
             lash_core::ToolIntents::v3(vec![
                 lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
                     owner: owner.clone(),
-                    declaration: lash_core::ProcessStartDeclaration::external(
+                    declaration: lash_core::ProcessStartDeclaration::new(
+                        lash_core::testing::held_engine_input(serde_json::json!({"kind": "start"})),
                         lash_core::ProcessOriginator::host_scoped("standard-scenario"),
-                        serde_json::json!({"kind": "start"}),
                         lash_core::Lifetime::Detached,
-                    ),
+                    )
+                    .with_env_ref(lash_core::testing::process_execution_env_fixture_ref()),
                 })),
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
                     owner: owner.clone(),
@@ -818,6 +819,19 @@ impl lash_core::ToolProvider for StandardIntentProvider {
     }
 }
 
+/// `config` with the held test engine registered beside its own engines.
+fn with_held_engine(
+    mut config: lash_core::facade_support::RuntimeHostConfig,
+) -> lash_core::facade_support::RuntimeHostConfig {
+    config.process_engines =
+        config
+            .process_engines
+            .with_registration(lash_core::ProcessEngineRegistration::accepting(Arc::new(
+                lash_core::testing::HeldProcessEngine,
+            )));
+    config
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback() {
     // The turn's effects run on the Restate double (D1 F2): the intents the
@@ -828,12 +842,13 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         .expect("build the Restate server double");
     let backend = double.lash_backend();
     let registry = backend.process_registry();
+    // The provider's start runs the held test engine under the fixture
+    // environment it declares.
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let standard_intent_target_id = registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -928,11 +943,11 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
             factories.clone(),
-            lash_core::facade_support::RuntimeHostConfig::new(
+            with_held_engine(lash_core::facade_support::RuntimeHostConfig::new(
                 backend.clone(),
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
-            ),
+            )),
             process_wiring.clone(),
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
@@ -942,11 +957,11 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
     double.install_process_worker(worker);
     let mut runtime = Box::pin(
         lash_core::facade_support::LashRuntime::builder(
-            lash_core::facade_support::RuntimeHostConfig::new(
+            with_held_engine(lash_core::facade_support::RuntimeHostConfig::new(
                 backend.clone(),
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
-            ),
+            )),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_id("standard-protocol-scenario")

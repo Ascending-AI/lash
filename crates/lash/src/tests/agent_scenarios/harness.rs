@@ -340,10 +340,8 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         let process_id = runtime
             .process_registry
             .register_process_with_observers(
-                lash_core::ProcessRegistration::new(
-                    lash_core::ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
+                lash_core::testing::held_engine_registration(
+                    serde_json::Value::Null,
                     lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
                         &case.session_id,
                     )),
@@ -363,7 +361,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
             .complete_process(
                 &process_id,
                 output,
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await?;
         runtime.response_substitutions.lock_recover().push((

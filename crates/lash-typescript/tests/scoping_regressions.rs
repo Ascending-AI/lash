@@ -207,7 +207,7 @@ fn mutually_recursive_declarations_reject_with_their_cycle() {
     // A cycle nested inside a function body has the same lowering problem and
     // takes the same rejection, with the names the author wrote.
     let error = lash_typescript::testing::compile(
-        "function shell(n: number): number { function up(k: number): number { if (k === 0) { return 0; } return down(k - 1) + 1; } function down(k: number): number { return up(k); } return up(n); } finish(shell(5));",
+        "function outer(n: number): number { function up(k: number): number { if (k === 0) { return 0; } return down(k - 1) + 1; } function down(k: number): number { return up(k); } return up(n); } finish(outer(5));",
     )
     .expect_err("a nested cycle must reject too");
     assert_eq!(

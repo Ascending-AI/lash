@@ -1214,7 +1214,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     // lifetime, so the registry must hold it for the effect to reach the journal.
     let process_registry = sequential_process_registry();
     let fig1767_proc_id = process_registry
-        .register_process(external_registration().with_extra_event_types([
+        .register_process(held_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),
                 payload_schema: lash_core::JsonSchema::any(),
@@ -1346,7 +1346,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     // lifetime, so the registry must hold it for the effect to reach the journal.
     let recorded_registry = sequential_process_registry();
     let fig1767_proc_id = recorded_registry
-        .register_process(external_registration().with_extra_event_types([
+        .register_process(held_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),
                 payload_schema: lash_core::JsonSchema::any(),
@@ -1379,7 +1379,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     context.replaying.store(true, Ordering::SeqCst);
     let replay_registry = sequential_process_registry();
     let fig1767_proc_id = replay_registry
-        .register_process(external_registration().with_extra_event_types([
+        .register_process(held_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "fig1767.sample".to_string(),
                 payload_schema: lash_core::JsonSchema::any(),
@@ -1630,11 +1630,10 @@ pub(super) fn completed_tool_record(call_id: &str, tool_name: &str) -> lash_core
     }
 }
 
-pub(super) fn external_registration() -> ProcessRegistration {
-    ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+/// A held process: an engine input of the held fixture kind.
+pub(super) fn held_registration() -> ProcessRegistration {
+    lash_core::testing::held_engine_registration(
+        serde_json::Value::Null,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

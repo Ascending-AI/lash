@@ -37,20 +37,24 @@ async fn generated_trigger_delivery_is_bound_and_settled(stores: Arc<dyn StoreSe
         .expect("read delivery's start key")
         .expect("the delivery's process is registered");
     assert_eq!(&process.id, process_id);
-    assert!(process.input.is_externally_owned());
+    assert!(matches!(
+        process.input.as_ref(),
+        lash_core::ProcessInput::Engine { .. }
+    ));
     assert_eq!(first["started_process"], true);
     assert!(
         stores
             .obligation_ledger(ObligationKind::ProcessStart)
-            .claim_due(
-                stores.clock().timestamp_ms(),
-                60_000,
-                std::num::NonZeroUsize::MIN
+            .state(
+                &lash_core::store::ObligationKey::ProcessStart {
+                    process_id: process_id.clone(),
+                }
+                .id()
             )
             .await
-            .expect("read engine start obligations")
-            .is_empty(),
-        "the scheduler owns the process, so no engine start is owed"
+            .expect("read the engine start obligation")
+            == Some(lash_core::store::ObligationState::Delivered),
+        "the boundary delivers its registered process's engine start"
     );
     assert!(
         ledger

@@ -82,11 +82,6 @@ pub fn retired_process_status_predicate_sql(column: &str) -> String {
 }
 
 /// The terminal process statuses spelled as the body of a SQL `IN (...)` list.
-///
-/// Terminal is not the complement of live:
-/// [`ProcessStatus::CallerDeparted`](crate::ProcessStatus::CallerDeparted) is
-/// neither live nor terminal, so it appears in neither list and a
-/// nonterminal predicate must select it.
 pub(crate) fn terminal_process_statuses_sql() -> String {
     let terminal = ProcessStatus::ALL
         .iter()
@@ -97,13 +92,11 @@ pub(crate) fn terminal_process_statuses_sql() -> String {
 }
 
 /// `<column> NOT IN (<terminal statuses>)`: the rows whose outcome is still
-/// open, including `caller_departed`.
+/// open.
 ///
 /// Spelled as the negation of the terminal set for the same reason
 /// [`retired_process_status_predicate_sql`] negates the live set: a status
-/// that is neither live nor terminal must land on this side of the predicate
-/// without an edit here, and `caller_departed` is exactly that status. A
-/// pending-cancel row in that state still carries an unanswered request.
+/// added later lands on this side of the predicate without an edit here.
 pub fn nonterminal_process_status_predicate_sql(column: &str) -> String {
     let terminal = terminal_process_statuses_sql();
     if terminal.is_empty() {

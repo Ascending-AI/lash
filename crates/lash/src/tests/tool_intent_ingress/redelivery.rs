@@ -133,9 +133,9 @@ async fn redelivered_start_realizes_one_process_and_a_changed_declaration_return
     let lash_core::ToolIntent::StartProcess(intent) = &mut changed else {
         unreachable!("fixture is a start intent")
     };
-    intent.declaration.input = lash_core::ProcessInput::External {
-        metadata: serde_json::json!({"law": "changed-under-a-bound-identity"}),
-    }
+    intent.declaration.input = lash_core::testing::held_engine_input(
+        serde_json::json!({"law": "changed-under-a-bound-identity"}),
+    )
     .into();
     let coalesced = ingress_of(&changed_invocation)?.submit(key, changed).await;
     assert_replayed(&coalesced, true, "a changed declaration under a bound key");
@@ -151,9 +151,7 @@ async fn redelivered_start_realizes_one_process_and_a_changed_declaration_return
     assert_eq!(retained.created_at_ms, created_at);
     assert_eq!(
         retained.input.as_ref(),
-        &lash_core::ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+        &lash_core::testing::held_engine_input(serde_json::Value::Null),
         "the changed declaration never reaches the recorded row"
     );
     Ok(())
@@ -309,10 +307,8 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
     // the other four shapes use, and the second process is never cancelled.
     let other = registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ),

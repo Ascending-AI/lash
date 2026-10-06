@@ -1674,21 +1674,6 @@
             "turn_input"
           ],
           "type": "object"
-        },
-        {
-          "properties": {
-            "metadata": {
-              "default": null
-            },
-            "type": {
-              "const": "external",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -1743,20 +1728,6 @@
           "required": [
             "state",
             "wait"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`].\nA variant with fields, so that a decode refuses a wait, a park or an\noutcome beside it as it does for every other state.",
-          "properties": {
-            "state": {
-              "const": "caller_departed",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state"
           ],
           "type": "object"
         },

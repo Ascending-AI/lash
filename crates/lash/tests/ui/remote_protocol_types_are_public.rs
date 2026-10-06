@@ -102,8 +102,9 @@ fn main() {
 
     let process_start = lash::remote::processes::RemoteProcessStartRequest {
         start_key: Some("start-key".to_string()),
-        input: lash::remote::processes::RemoteProcessInput::External {
-            metadata: serde_json::json!({}),
+        input: lash::remote::processes::RemoteProcessInput::Engine {
+            kind: "job".to_string(),
+            payload: serde_json::json!({}),
         }
         .into(),
         env_ref: Some(

@@ -545,10 +545,8 @@ async fn register_intent_target(
 ) {
     let intent_process = registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )

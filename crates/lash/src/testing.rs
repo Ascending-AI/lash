@@ -30,6 +30,13 @@ pub use lash_core::testing::tool_registry_with_live_provider;
 /// host's scoped controllers with the layer in front of their seam operations,
 /// and every group and journal operation stays the inner host's.
 pub use lash_core::testing::{EffectLayer, LayeredEffectHost};
+/// A held process for host tests: an engine input of [`HeldProcessEngine`]'s
+/// kind, a registration of one under the fixture environment, and the plugin
+/// factory that contributes the engine to a host's core. A held process runs
+/// until it is cancelled.
+pub use lash_core::testing::{
+    HeldProcessEngine, held_engine_input, held_engine_registration, process_engine_plugin_fixture,
+};
 pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
     mock_attempt_context_with_execution_binding, test_code_protocol_factories,

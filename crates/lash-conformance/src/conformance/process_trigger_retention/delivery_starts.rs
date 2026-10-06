@@ -50,10 +50,8 @@ fn pinned_registration(
     start_key: &crate::StartKey,
     pin: &crate::TriggerDeliveryPin,
 ) -> ProcessRegistration {
-    ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+    lash_core::testing::held_engine_registration(
+        serde_json::Value::Null,
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -76,7 +74,7 @@ async fn complete(handles: &ProcessTriggerRetentionHandles, process_id: &Process
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(process_id),
         )
         .await
         .expect("complete the process");
@@ -103,10 +101,8 @@ pub(super) async fn a_trigger_delivery_pin_holds_its_row_until_released(
         .expect("register a pinned process")
         .id;
     let unpinned = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))

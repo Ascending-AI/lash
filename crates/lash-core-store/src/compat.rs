@@ -515,7 +515,7 @@ pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 99;
 /// Rejecting pre-11 process databases and recreating them removes that hazard.
 ///
 /// Bumped to 13 for the second completion-authority payload cutover (ADR 0027):
-/// `ExternalOwner` no longer carries the unverified `granted_to` field, changing
+/// the external-owner authority no longer carried the unverified `granted_to` field, changing
 /// the replay-key payload hash again. Pre-13 process databases are rejected and
 /// recreated so retries cannot compare terminal events across payload formats.
 ///

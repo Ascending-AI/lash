@@ -10,10 +10,8 @@ async fn release_observations(
 ) -> (lash_sansio::ProcessId, Vec<lash_core::ProcessEventRelease>) {
     let process_id = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -183,10 +181,8 @@ pub(super) async fn compare_bounded_process_event_pages(
     // The differential verifies ordered Full/Lite pages of at most 127 events over 10,000 rows on both backends; bounded memory is inferred from the limited SQL reads (rendered-SQL pin), not measured.
     const EVENT_COUNT: u64 = 10_000;
     let registration = || {
-        lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )
@@ -529,10 +525,8 @@ async fn prepared_registration_race(
     registry: &dyn lash_core::ProcessRegistry,
     nonce: &str,
 ) -> String {
-    let registration = lash_core::ProcessRegistration::new(
-        lash_core::ProcessInput::External {
-            metadata: serde_json::json!({"start": "race"}),
-        },
+    let registration = lash_core::testing::held_engine_registration(
+        serde_json::json!({"start": "race"}),
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -657,10 +651,8 @@ async fn segment_handover_commit_law(
     continuations: &dyn lash_core::ProcessContinuationStore,
 ) -> (bool, bool, bool) {
     let process = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))

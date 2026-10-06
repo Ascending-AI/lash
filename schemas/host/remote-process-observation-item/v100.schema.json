@@ -885,24 +885,15 @@
       "type": "object"
     },
     "RemoteProcessStatus": {
-      "oneOf": [
-        {
-          "enum": [
-            "running",
-            "waiting",
-            "completed",
-            "failed",
-            "cancelled",
-            "abandoned"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "caller_departed",
-          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably\ndistinguishable, deliberately never terminal.",
-          "type": "string"
-        }
-      ]
+      "enum": [
+        "running",
+        "waiting",
+        "completed",
+        "failed",
+        "cancelled",
+        "abandoned"
+      ],
+      "type": "string"
     },
     "RemoteRetiredProcessStatus": {
       "description": "Mirrors [`lash_core::RetiredProcessStatus`]: the status a pruned process\nended in, which its tombstone keeps.",
@@ -910,8 +901,7 @@
         "completed",
         "failed",
         "cancelled",
-        "abandoned",
-        "caller_departed"
+        "abandoned"
       ],
       "type": "string"
     },

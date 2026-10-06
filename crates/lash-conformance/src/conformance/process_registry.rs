@@ -1,7 +1,6 @@
 //! Cross-backend conformance for the durable process registry.
 
 use lash_sansio::ProcessId;
-mod caller_departure;
 mod cancellation;
 mod completion_authority;
 mod consumer_holds;
@@ -55,7 +54,6 @@ pub mod status_filters;
 mod terminal_publication;
 mod turn_parent_end;
 
-use super::process_change_horizon::changes_after_full_relist_if_required;
 use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
@@ -133,7 +131,7 @@ pub async fn long_cancellation_requester_replay_is_backend_safe(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn external_completion_replay_repairs_projection<C, Fut>(
+pub async fn completion_replay_repairs_projection<C, Fut>(
     registry: Arc<dyn ProcessRegistry>,
     corrupt_projection: C,
 ) where
@@ -141,22 +139,20 @@ pub async fn external_completion_replay_repairs_projection<C, Fut>(
     Fut: std::future::Future<Output = ()>,
 {
     let base = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
         .await
-        .expect("register external replay repair process");
+        .expect("register replay repair process");
     let process_id = base.id.clone();
     let output = settled_success(serde_json::json!({"repaired": true}));
     let committed = registry
         .complete_process(
             &process_id,
             output.clone(),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("commit external terminal event");
@@ -180,7 +176,7 @@ pub async fn external_completion_replay_repairs_projection<C, Fut>(
         .complete_process(
             &process_id,
             output,
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("replay external terminal event");
@@ -193,10 +189,10 @@ pub async fn external_completion_replay_repairs_projection<C, Fut>(
         registry
             .get_process(&process_id)
             .await
-            .expect("read repaired external replay projection")
+            .expect("read repaired replay projection")
             .expect("repaired process exists")
             .is_terminal(),
-        "external completion replay must persist the repaired terminal projection"
+        "completion replay must persist the repaired terminal projection"
     );
 }
 
@@ -236,7 +232,7 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
             .complete_process(
                 process_id,
                 settled_success(serde_json::Value::Null),
-                ProcessCompletionAuthority::external_owner(),
+                ProcessCompletionAuthority::workflow_key(process_id),
             )
             .await
             .expect("complete scoped prune process");
@@ -380,7 +376,7 @@ pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) 
             .complete_process(
                 &process_id,
                 output.clone(),
-                ProcessCompletionAuthority::external_owner(),
+                ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await
             .expect("complete batch-prune process");
@@ -462,10 +458,8 @@ pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) 
 }
 
 pub(super) fn registration(id: &str) -> ProcessRegistration {
-    ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+    lash_core::testing::held_engine_registration(
+        serde_json::Value::Null,
         ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -480,8 +474,8 @@ pub(super) fn registration(id: &str) -> ProcessRegistration {
     ))
 }
 
-/// A process lash executes: an engine input with its captured execution env.
-/// [`registration`] is an externally-owned row lash never executes.
+/// A process of the `conformance` engine kind, under an execution env of its
+/// own id.
 pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
         ProcessInput::Engine {
@@ -541,24 +535,18 @@ pub async fn record_fold_and_retention_hold_for_every_registry_writer(
     )
     .await;
     let base = registry
-        .register_process(registration("refold-departure"))
+        .register_process(registration("refold-completed"))
         .await
-        .expect("register external writer");
-    registry
-        .record_caller_departure(&base.id)
-        .await
-        .expect("abandon the external caller");
-    assert_refold_matches_stored_projection(&registry, &base, &base.id, "caller departure").await;
+        .expect("register completed writer");
     registry
         .complete_process(
             &base.id,
             settled_success(serde_json::Value::Null),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&base.id),
         )
         .await
-        .expect("reconcile abandoned caller");
-    assert_refold_matches_stored_projection(&registry, &base, &base.id, "external reconciliation")
-        .await;
+        .expect("complete the writer");
+    assert_refold_matches_stored_projection(&registry, &base, &base.id, "completed").await;
     for (name, output) in [
         (
             "failed",
@@ -589,7 +577,7 @@ pub async fn record_fold_and_retention_hold_for_every_registry_writer(
             .complete_process(
                 &terminal_base.id,
                 output.clone(),
-                ProcessCompletionAuthority::external_owner(),
+                ProcessCompletionAuthority::workflow_key(&terminal_base.id),
             )
             .await
             .expect("terminal variant commits");
@@ -717,22 +705,12 @@ pub async fn a_terminal_write_arms_its_publication_once(registry: Arc<dyn Proces
     terminal_publication::a_terminal_write_arms_its_publication_once(registry).await;
 }
 
-/// ADR 0027, granted half: each completion authority commits on the input
-/// class it names, and the terminal event records it as audit evidence.
-pub async fn a_completion_authority_matching_its_input_class_commits(
+/// ADR 0027: each workflow authority commits on a process lash executes, and
+/// the committed terminal event records it as audit evidence.
+pub async fn a_completion_authority_commits_and_records_its_evidence(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    completion_authority::a_completion_authority_matching_its_input_class_commits(registry).await;
-}
-
-/// ADR 0027, refused half: an external owner never closes an engine-executed
-/// row and a workflow authority never closes an externally-owned row; the
-/// refusal is typed and writes no terminal.
-pub async fn a_completion_authority_for_the_wrong_input_class_is_refused(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    completion_authority::a_completion_authority_for_the_wrong_input_class_is_refused(registry)
-        .await;
+    completion_authority::a_completion_authority_commits_and_records_its_evidence(registry).await;
 }
 
 /// A turn scope has no terminal row to ride, so its ledger row is recorded
@@ -827,7 +805,7 @@ pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
         .complete_process(
             &boundary_id,
             settled_success(serde_json::json!({"completed_between_pages": true})),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&boundary_id),
         )
         .await
         .expect("complete page-boundary process");
@@ -1001,7 +979,7 @@ pub async fn non_terminal_page_excludes_rows_terminalized_before_a_later_page(
         .complete_process(
             &terminalized_id,
             settled_success(serde_json::json!({"terminalized_before_page": true})),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&terminalized_id),
         )
         .await
         .expect("terminalize row before its page");
@@ -1714,7 +1692,7 @@ pub async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry
         .complete_process(
             &process_id,
             expected.clone(),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("complete process");
@@ -1796,7 +1774,7 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
         .complete_process(
             &process_id,
             settled_success(serde_json::Value::Null),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("create terminal process");
@@ -1886,7 +1864,7 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
             .complete_process(
                 &process_id,
                 settled_success(serde_json::Value::Null),
-                ProcessCompletionAuthority::external_owner(),
+                ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
@@ -1984,210 +1962,6 @@ pub async fn process_registry_reopen_conformance(handles: ReopenableProcessRegis
         .expect("process counts conserve after reopen");
 }
 
-/// The complete caller-departure state machine, pinned identically on every
-/// backend (FIG-1383).
-///
-/// Every transition in the model is exercised here, legal and illegal alike:
-/// the state is durable, reachable only from a running Externally-Owned row,
-/// idempotent, refused from every other source state and input class, closable
-/// by external reconciliation, and never retracts a reconciled terminal state.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
-    let observer_session = "caller-departure-observer";
-    let registered = registry
-        .register_process_with_observers(
-            registration("caller-departure-machine"),
-            &[SessionId::from(observer_session)],
-        )
-        .await
-        .expect("register externally-owned audit row");
-    let process_id = registered.id.clone();
-    assert_eq!(registered.status(), ProcessStatus::Running);
-
-    // running -> caller_departed.
-    let departed = registry
-        .record_caller_departure(&process_id)
-        .await
-        .expect("running externally-owned row records a caller departure");
-    assert_eq!(departed.status(), ProcessStatus::CallerDeparted);
-    assert!(
-        !departed.is_terminal(),
-        "the state must never claim an outcome lash cannot observe"
-    );
-    assert!(
-        departed.outcome().is_none(),
-        "a caller-departed row carries no outcome"
-    );
-    assert!(departed.status().is_retired());
-
-    // The transition is a durable event, so the fold reproduces it.
-    let events = registry
-        .full_event_window(&process_id, 0)
-        .await
-        .expect("read caller-departure events");
-    assert!(
-        events
-            .iter()
-            .any(|event| event.event_type == "process.caller_departed"),
-        "the transition must be an appended lifecycle event, not a silent column write"
-    );
-    assert_refold_matches_stored_projection(
-        &registry,
-        &registered,
-        &process_id,
-        "caller departure",
-    )
-    .await;
-
-    // caller_departed -> caller_departed is idempotent.
-    let again = registry
-        .record_caller_departure(&process_id)
-        .await
-        .expect("repeat departure is idempotent");
-    assert_eq!(again.status(), ProcessStatus::CallerDeparted);
-    assert_eq!(again.updated_at_ms, departed.updated_at_ms);
-
-    // A caller-departed row is not live: recovery must never pick it up, and a
-    // live listing must not present it as work still in flight.
-    let page = registry
-        .list_non_terminal_processes_page(
-            std::num::NonZeroUsize::new(256).expect("non-zero page size"),
-            None,
-        )
-        .await
-        .expect("read non-terminal registry page")
-        .records;
-    assert!(
-        !page.iter().any(|record| record.id == process_id),
-        "recovery may never act on a caller-departed row"
-    );
-    let live = registry
-        .list_processes(&ProcessListFilter {
-            status: crate::ProcessStatusFilter::any_of([crate::ProcessStatus::Running]),
-            ..ProcessListFilter::default()
-        })
-        .await
-        .expect("list running rows");
-    assert!(!live.iter().any(|record| record.id == process_id));
-    // The session-scoped live view is the same partition: a caller-departed
-    // row is retired, so every ProcessListMode::Live reader must stop showing
-    // it as in flight, while the unfiltered observation view still carries it.
-    let live_observed = registry
-        .list_live_observed_by(&SessionId::from(observer_session))
-        .await
-        .expect("list live observed rows");
-    assert!(
-        !live_observed.iter().any(|record| record.id == process_id),
-        "a caller-departed row must never appear in a live observation listing"
-    );
-    let all_observed = registry
-        .list_observed_by(
-            &SessionId::from(observer_session),
-            &lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("list all observed rows");
-    assert!(
-        all_observed.iter().any(|record| record.id == process_id),
-        "the observer edge survives the departure; only the live partition drops it"
-    );
-    // ...but external reconciliation can enumerate it by name on any backend.
-    let departed_rows = registry
-        .list_processes(&ProcessListFilter {
-            status: crate::ProcessStatusFilter::any_of([crate::ProcessStatus::CallerDeparted]),
-            ..ProcessListFilter::default()
-        })
-        .await
-        .expect("list caller-departed rows");
-    assert!(
-        departed_rows.iter().any(|record| record.id == process_id),
-        "external reconciliation must be able to find the state on every backend"
-    );
-
-    // An externally-owned row has no engine invocation authority, so it cannot
-    // enter an execution wait state after caller departure.
-    let wait_refusal = registry
-        .set_process_wait(
-            &process_id,
-            WaitState {
-                since_ms: departed.updated_at_ms,
-                kind: WaitKind::Signal {
-                    name: "resume".to_string(),
-                    event_type: "signal.resume".to_string(),
-                    key: format!("{process_id}:signal.resume:1"),
-                    ordinal: 1,
-                },
-            },
-        )
-        .await;
-    assert!(
-        wait_refusal.is_err(),
-        "a caller-departed row must not enter a wait state"
-    );
-
-    // Illegal: departures belong to rows lash never executes.
-    let executed_id = registry
-        .register_process(executed_registration("caller-departure-executed"))
-        .await
-        .expect("register a lash-executed row")
-        .id;
-    let ownership_refusal = registry.record_caller_departure(&executed_id).await;
-    assert!(
-        ownership_refusal.is_err(),
-        "only an externally-owned row can record a caller departure"
-    );
-
-    // Illegal: an unknown row.
-    assert!(
-        registry
-            .record_caller_departure(&crate::ProcessId::fixture("caller-departure-missing"))
-            .await
-            .is_err(),
-        "an unknown process cannot record a caller departure"
-    );
-
-    // Legal: external reconciliation closes the row with observed truth.
-    registry
-        .complete_process(
-            &process_id,
-            settled_success(serde_json::json!({"reconciled": true})),
-            ProcessCompletionAuthority::external_owner(),
-        )
-        .await
-        .expect("external reconciliation closes a caller-departed row");
-    let closed = registry
-        .get_process(&process_id)
-        .await
-        .expect("read reconciled row")
-        .expect("reconciled row remains stored");
-    assert_eq!(
-        closed.status(),
-        ProcessStatus::Completed,
-        "reconciliation, not lash, supplies the outcome"
-    );
-
-    // Replaying the earlier departure is a no-op once reconciliation appended
-    // a later terminal event. The terminal projection must not go back.
-    let terminal_replay = registry
-        .record_caller_departure(&process_id)
-        .await
-        .expect("the earlier non-tail departure replays without repair");
-    assert_eq!(
-        terminal_replay, closed,
-        "a recorded outcome cannot be retracted into a caller departure"
-    );
-}
-
-pub async fn caller_departed_rows_are_reclaimed_by_retention(registry: Arc<dyn ProcessRegistry>) {
-    caller_departure::caller_departed_rows_are_reclaimed_by_retention(registry).await;
-}
-
 #[derive(Default)]
 struct RefoldSink(std::sync::Mutex<Vec<crate::ProcessEvent>>);
 #[async_trait::async_trait]
@@ -2259,7 +2033,7 @@ pub async fn signals_refuse_undeclared_invalid_and_terminal_sends(
         .complete_process(
             &base.id,
             settled_success(serde_json::json!("done")),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&base.id),
         )
         .await
         .expect("terminal writer");
@@ -2367,7 +2141,7 @@ impl crate::ProcessWorkSubstrate for ReattachingWorkPort {
     clippy::expect_used,
     reason = "conformance fixture establishes each result"
 )]
-pub async fn work_wait_seam_covers_unknown_pruned_departed_and_external_processes(
+pub async fn work_wait_seam_covers_unknown_pruned_and_backend_owned_processes(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     use crate::ProcessWorkSubstrate as _;
@@ -2413,47 +2187,36 @@ pub async fn work_wait_seam_covers_unknown_pruned_departed_and_external_processe
     assert!(
         matches!(work.await_process_terminal(&unknown).await, Err(PluginError::ProcessUnknown { process_id }) if process_id == unknown)
     );
-    let external = registry
-        .register_process(registration("wait-external"))
+    let completed = registry
+        .register_process(registration("wait-completed"))
         .await
-        .expect("external process");
-    let output = settled_success(serde_json::json!({"external":true}));
+        .expect("registered process");
+    let output = settled_success(serde_json::json!({"completed":true}));
     let completion = async {
         registry
             .complete_process(
-                &external.id,
+                &completed.id,
                 output.clone(),
-                ProcessCompletionAuthority::external_owner(),
+                ProcessCompletionAuthority::workflow_key(&completed.id),
             )
             .await
-            .expect("external completion");
+            .expect("engine completion");
     };
     let (wait, ()) = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        tokio::join!(work.await_process_terminal(&external.id), completion)
+        tokio::join!(work.await_process_terminal(&completed.id), completion)
     })
     .await
-    .expect("external wait bounded");
+    .expect("registry wait bounded");
     assert_eq!(
-        wait.expect("external result"),
+        wait.expect("registry result"),
         crate::ProcessTerminalWait::Terminal(output)
     );
     registry
         .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
         .await
-        .expect("prune external");
+        .expect("prune completed");
     assert!(
-        matches!(work.await_process_terminal(&external.id).await.expect("pruned information"), crate::ProcessTerminalWait::Terminal(ProcessAwaitOutput::NoLongerRetained { terminal_label, .. }) if terminal_label == crate::RetiredProcessStatus::Completed)
-    );
-    let departed = registry
-        .register_process(registration("wait-departed"))
-        .await
-        .expect("departed process");
-    registry
-        .record_caller_departure(&departed.id)
-        .await
-        .expect("caller departure");
-    assert!(
-        matches!(work.await_process_terminal(&departed.id).await, Err(PluginError::ProcessCallerDeparted { process_id }) if process_id == departed.id)
+        matches!(work.await_process_terminal(&completed.id).await.expect("pruned information"), crate::ProcessTerminalWait::Terminal(ProcessAwaitOutput::NoLongerRetained { terminal_label, .. }) if terminal_label == crate::RetiredProcessStatus::Completed)
     );
 }
 

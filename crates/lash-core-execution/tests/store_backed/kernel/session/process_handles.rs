@@ -10,7 +10,6 @@ mod tests {
     use crate::{
         PreparedToolCall, ToolCall, ToolDefinition, ToolOutcome, ToolPrepareCall, ToolProvider,
     };
-    use crate::{ProcessInput, ProcessRegistration};
     use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
     use lash_sansio::sync::MutexExt as _;
     use serde_json::json;
@@ -81,15 +80,13 @@ mod tests {
                 .with_process_registry(Arc::clone(&registry)),
         );
         let process = registry
-            .register_process(ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            .register_process(crate::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             ))
             .await
-            .expect("register external process");
+            .expect("register held process");
         registry
             .add_observer(
                 &SessionId::from("session"),
@@ -97,7 +94,7 @@ mod tests {
                 crate::ProcessObserverBy::host("process-await-attachment-test"),
             )
             .await
-            .expect("observe external process");
+            .expect("observe held process");
         registry
             .complete_process(
                 &process.id,
@@ -106,10 +103,10 @@ mod tests {
                         source.clone(),
                     )),
                 ),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&process.id),
             )
             .await
-            .expect("complete external process with attachment");
+            .expect("complete held process with attachment");
 
         let factory = backend.session_store_factory();
         let request = crate::SessionStoreCreateRequest {
@@ -208,14 +205,14 @@ mod tests {
     async fn assert_external_process_attachment_denied(source: crate::AttachmentSource) {
         let (reply, _persistence, attachment_backend, policy) =
             await_external_process_attachment(source.clone()).await;
-        let record = reply.record.expect("external process await is recorded");
+        let record = reply.record.expect("process await is recorded");
         assert_eq!(
             record.call_id,
             lash_core_execution::ToolCallId::fixture("await-external-attachment")
         );
         assert_eq!(record.tool, "await_process");
         let crate::ToolCallOutcome::Failure(failure) = record.output.outcome else {
-            panic!("denied external process attachment must replace the recorded result");
+            panic!("denied process attachment must replace the recorded result");
         };
         assert_eq!(failure.code, "attachment_source_policy_denied");
         assert_eq!(
@@ -481,10 +478,8 @@ mod tests {
         );
         let hidden_process = registry
             .register_process(
-                ProcessRegistration::new(
-                    ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
+                crate::testing::held_engine_registration(
+                    serde_json::Value::Null,
                     crate::ProcessProvenance::host(),
                     crate::Lifetime::Detached,
                 )
@@ -619,10 +614,8 @@ mod tests {
 
         let mut local_ids = BTreeMap::new();
         for label in ["local-signal", "local-cancel", "local-await"] {
-            let mut registration = ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            let mut registration = crate::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             );
@@ -646,7 +639,7 @@ mod tests {
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
                     "local done"
                 ))),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&local_ids["local-await"]),
             )
             .await
             .expect("complete run-local await process");
@@ -698,7 +691,7 @@ mod tests {
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
                     "done"
                 ))),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&hidden_process.id),
             )
             .await
             .expect("complete observed process");
@@ -848,10 +841,8 @@ mod tests {
                 .with_process_registry(Arc::clone(&registry)),
         );
         let started = registry
-            .register_process(ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            .register_process(crate::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             ))
@@ -864,7 +855,7 @@ mod tests {
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
                     "child done"
                 ))),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&child),
             )
             .await
             .expect("complete the started child");

@@ -180,7 +180,7 @@ impl HttpTransport for NoIngress {
         _request: HttpRequest,
         _timeout: Option<Duration>,
     ) -> Result<HttpResponse, LlmTransportError> {
-        panic!("retained outcomes and unresolved CallerDeparted waits never contact ingress");
+        panic!("retained outcomes never contact ingress");
     }
 }
 
@@ -190,7 +190,7 @@ async fn a_wait_answers_the_record_state_on_every_host(fixture: &Fixture) {
     ));
     let registry: Arc<dyn ProcessRegistry> = faults.clone();
     let mut record = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register");
     let process_id = record.id.clone();
@@ -214,42 +214,28 @@ async fn a_wait_answers_the_record_state_on_every_host(fixture: &Fixture) {
         ),
     ];
     let expected = process_success(serde_json::json!({ "retained": true }));
-    for outcome in [Some(expected.clone()), None] {
-        // A record holds one state: its outcome, or its caller's departure.
-        record.lifecycle = match &outcome {
-            Some(outcome) => lash_core::ProcessLifecycleState::Terminal {
-                outcome: outcome.clone().try_into().expect("a terminal outcome"),
-            },
-            None => lash_core::ProcessLifecycleState::CallerDeparted {},
-        };
-        for (host, work) in &hosts {
-            faults.set_process_read_override(record.clone());
-            let reads = faults.process_point_reads();
-            let result = tokio::time::timeout(
-                Duration::from_secs(5),
-                work.await_process_terminal(&process_id),
-            )
-            .await
-            .expect("wait resolves immediately");
-            assert_eq!(
-                faults.process_point_reads(),
-                reads + 1,
-                "{host}: one point read resolves the wait"
-            );
-            if let Some(outcome) = &outcome {
-                assert_eq!(
-                    result.expect(host),
-                    lash_core::ProcessTerminalWait::Terminal(outcome.clone()),
-                    "{host}: a retained outcome resolves the wait"
-                );
-            } else {
-                assert!(
-                    matches!(result, Err(PluginError::ProcessCallerDeparted { process_id: refused })
-                    if refused == process_id),
-                    "{host}: unresolved departure is refused"
-                );
-            }
-        }
+    record.lifecycle = lash_core::ProcessLifecycleState::Terminal {
+        outcome: expected.clone().try_into().expect("a terminal outcome"),
+    };
+    for (host, work) in &hosts {
+        faults.set_process_read_override(record.clone());
+        let reads = faults.process_point_reads();
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            work.await_process_terminal(&process_id),
+        )
+        .await
+        .expect("wait resolves immediately");
+        assert_eq!(
+            faults.process_point_reads(),
+            reads + 1,
+            "{host}: one point read resolves the wait"
+        );
+        assert_eq!(
+            result.expect(host),
+            lash_core::ProcessTerminalWait::Terminal(expected.clone()),
+            "{host}: a retained outcome resolves the wait"
+        );
     }
 }
 
@@ -386,17 +372,17 @@ async fn postgres_ingress_handover_crash_cuts_with_forced_replay() {
 }
 
 #[tokio::test]
-async fn a_wait_answers_the_outcome_or_the_departure_on_sqlite_memory() {
+async fn a_wait_answers_the_retained_outcome_on_sqlite_memory() {
     a_wait_answers_the_record_state_on_every_host(&Fixture::sqlite(false).await).await;
 }
 
 #[tokio::test]
-async fn a_wait_answers_the_outcome_or_the_departure_on_sqlite_file() {
+async fn a_wait_answers_the_retained_outcome_on_sqlite_file() {
     a_wait_answers_the_record_state_on_every_host(&Fixture::sqlite(true).await).await;
 }
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL; run in kiln gate with pg16"]
-async fn postgres_ingress_a_wait_answers_the_outcome_or_the_departure() {
+async fn postgres_ingress_a_wait_answers_the_retained_outcome() {
     a_wait_answers_the_record_state_on_every_host(&Fixture::postgres().await).await;
 }

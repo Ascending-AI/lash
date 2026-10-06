@@ -36,9 +36,11 @@ fn host_registration(input: ProcessInput) -> ProcessRegistration {
 
 /// A registration core accepts, and the base every fixture below mutates.
 pub fn accepted_process_registration() -> ProcessRegistration {
-    host_registration(ProcessInput::External {
-        metadata: serde_json::Value::Null,
+    host_registration(ProcessInput::Engine {
+        kind: "fixture-engine".to_string(),
+        payload: serde_json::Value::Null,
     })
+    .with_execution_env_ref(env_ref())
 }
 
 fn env_ref() -> Option<ProcessExecutionEnvRef> {
@@ -116,12 +118,6 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
                 }),
                 host_registration(session_turn_input("fixture-definition")),
             ]
-        }
-        // The arm that must not: external.
-        ProcessRegistrationRefusal::ExecutionEnvNotAllowed => {
-            let mut external = accepted_process_registration();
-            external.env_ref = env_ref();
-            vec![external]
         }
         ProcessRegistrationRefusal::EmptySessionTurnDefinitionKey => {
             vec![host_registration(session_turn_input("  "))]

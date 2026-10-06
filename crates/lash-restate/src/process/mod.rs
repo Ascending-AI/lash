@@ -22,7 +22,7 @@ use std::sync::Arc;
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, PluginError, ProcessAwaitOutput,
     ProcessCompletionAuthority, ProcessExecutionContext, ProcessExternalRef, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStatus, ProcessTerminalWait, ProcessWorkSubstrate,
+    ProcessRegistration, ProcessRegistry, ProcessTerminalWait, ProcessWorkSubstrate,
     ProcessWorkWiring, Resolution, RuntimeError, RuntimeErrorCode, ScopedEffectController,
     facade_support::ProcessEventSink, facade_support::watch_process_registry_with_sink,
 };
@@ -536,15 +536,6 @@ impl RestateProcessIngressRunner {
     /// on the workflow key below.
     async fn submit_record(&self, record: &ProcessRecord) -> Result<(), PluginError> {
         let process_id = record.id.clone();
-        // Externally-owned rows are never executed by Lash (ADR 0110).
-        // Defensively refuse to POST a run for one even when reached directly,
-        // so a direct caller is safe; their closure comes
-        // from their external owner calling `complete_process`.
-        if record.input.is_externally_owned() {
-            return Err(PluginError::Session(format!(
-                "externally owned process `{process_id}` cannot be started by Lash"
-            )));
-        }
         // Idempotent by process id: never re-submit a finished process.
         if record.is_terminal() {
             return Ok(());
@@ -791,17 +782,6 @@ impl RestateProcessIngressRunner {
         let record = self.registry.get_process(process_id).await?;
         if let Some(output) = record.as_ref().and_then(|record| record.outcome()) {
             return Ok(ProcessTerminalWait::Terminal(output));
-        }
-        // FIG-1383: a row whose caller departed before any outcome has no
-        // actor left to end it, and lash never invents its outcome, so a
-        // wait on it is refused rather than parked.
-        if record
-            .as_ref()
-            .is_some_and(|record| record.status() == ProcessStatus::CallerDeparted)
-        {
-            return Err(PluginError::ProcessCallerDeparted {
-                process_id: process_id.clone(),
-            });
         }
         let outcome = self
             .ingress

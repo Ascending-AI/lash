@@ -2,8 +2,8 @@
 //!
 //! `ResidentCheckpointComponent` is either `Unchanged` — the next commit
 //! reuses its durable descriptor — or `Changed` — the next commit writes a
-//! body whose payload is present by construction. The released-body shell of
-//! an unchanged component is `ResidentCheckpointComponentBody`'s payload
+//! body whose payload is present by construction. An unchanged component
+//! whose body was released holds `ResidentCheckpointComponentBody`'s payload
 //! `None`.
 
 use std::sync::Arc;
@@ -74,7 +74,7 @@ impl PendingCheckpointComponentBody {
 #[derive(Clone, Debug, serde::Serialize)]
 pub(super) enum ResidentCheckpointComponent {
     /// The next commit reuses `descriptor`; `body` is the still-resident copy
-    /// or a released shell (payload `None`).
+    /// or a released body (payload `None`).
     Unchanged {
         descriptor: crate::CheckpointComponentDescriptor,
         body: ResidentCheckpointComponentBody,

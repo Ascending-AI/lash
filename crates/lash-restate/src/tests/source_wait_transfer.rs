@@ -109,7 +109,7 @@ impl RestateProcessRunner for NoRun {
         _: Option<lash_core::SegmentHandover>,
         _: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        unreachable!("these laws use externally owned sources")
+        unreachable!("these laws use held sources")
     }
 }
 
@@ -392,9 +392,9 @@ async fn native_retirement(crash: Option<lash_restate_test::CrashPoint>, cancel:
         .expect("N");
     let process = stores
         .process_registry()
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
-        .expect("external process")
+        .expect("held process")
         .id;
     let owner = lash_core::EffectOpener::turn("native-source-session", "logical-run");
     let call_id = lash_core::ToolCallId::fixture("retirement-call");

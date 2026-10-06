@@ -361,10 +361,8 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
         .await?;
     let process_id = source_registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::session(session.observe().process_scope()),
                 lash_core::Lifetime::Detached,
             ),

@@ -4235,11 +4235,6 @@
                           "semantics": {}
                         },
                         {
-                          "name": "process.caller_departed",
-                          "payload_schema": {},
-                          "semantics": {}
-                        },
-                        {
                           "name": "process.observer_added",
                           "payload_schema": {},
                           "semantics": {}
@@ -4304,10 +4299,11 @@
                         }
                       ],
                       "input": {
-                        "metadata": {
+                        "kind": "testing-held",
+                        "payload": {
                           "durable_key": "sleep/session-001/001"
                         },
-                        "type": "external"
+                        "type": "engine"
                       },
                       "lifetime": {
                         "lifetime": "detached"
@@ -6755,11 +6751,6 @@
                           "semantics": {}
                         },
                         {
-                          "name": "process.caller_departed",
-                          "payload_schema": {},
-                          "semantics": {}
-                        },
-                        {
                           "name": "process.observer_added",
                           "payload_schema": {},
                           "semantics": {}
@@ -6824,10 +6815,11 @@
                         }
                       ],
                       "input": {
-                        "metadata": {
+                        "kind": "testing-held",
+                        "payload": {
                           "durable_key": "sleep/session-001/002"
                         },
-                        "type": "external"
+                        "type": "engine"
                       },
                       "lifetime": {
                         "lifetime": "detached"
@@ -8255,11 +8247,6 @@
                           "semantics": {}
                         },
                         {
-                          "name": "process.caller_departed",
-                          "payload_schema": {},
-                          "semantics": {}
-                        },
-                        {
                           "name": "process.observer_added",
                           "payload_schema": {},
                           "semantics": {}
@@ -8324,10 +8311,11 @@
                         }
                       ],
                       "input": {
-                        "metadata": {
+                        "kind": "testing-held",
+                        "payload": {
                           "durable_key": "sleep/session-003/001"
                         },
-                        "type": "external"
+                        "type": "engine"
                       },
                       "lifetime": {
                         "lifetime": "detached"
@@ -9470,11 +9458,6 @@
                           "semantics": {}
                         },
                         {
-                          "name": "process.caller_departed",
-                          "payload_schema": {},
-                          "semantics": {}
-                        },
-                        {
                           "name": "process.observer_added",
                           "payload_schema": {},
                           "semantics": {}
@@ -9539,10 +9522,11 @@
                         }
                       ],
                       "input": {
-                        "metadata": {
+                        "kind": "testing-held",
+                        "payload": {
                           "durable_key": "sleep/session-004/001"
                         },
-                        "type": "external"
+                        "type": "engine"
                       },
                       "lifetime": {
                         "lifetime": "detached"
@@ -17665,7 +17649,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:23.898431636+00:00"
+              "timestamp": "2026-10-06T12:42:27.011498176Z"
             }
           ]
         },
@@ -17738,7 +17722,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:23.898431636+00:00"
+              "timestamp": "2026-10-06T12:42:27.011498176Z"
             }
           ],
           "turn_state": {
@@ -17894,7 +17878,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/dd169c5fec9bfe9e2ac41a241ae05c1649149e331619f45910aaf13b1a4c5c68",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:25.253144425+00:00"
+              "timestamp": "2026-10-06T12:42:28.350984833Z"
             }
           ]
         },
@@ -17981,7 +17965,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/dd169c5fec9bfe9e2ac41a241ae05c1649149e331619f45910aaf13b1a4c5c68",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:25.253144425+00:00"
+              "timestamp": "2026-10-06T12:42:28.350984833Z"
             }
           ],
           "turn_state": {
@@ -18147,7 +18131,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/50396f7734a16457129eb4e00143f72ef940bfa98ae05dc4d6d0dfb79af6bec9",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:25.432478678+00:00"
+              "timestamp": "2026-10-06T12:42:28.521225653Z"
             }
           ]
         },
@@ -18234,7 +18218,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/50396f7734a16457129eb4e00143f72ef940bfa98ae05dc4d6d0dfb79af6bec9",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:25.432478678+00:00"
+              "timestamp": "2026-10-06T12:42:28.521225653Z"
             }
           ],
           "turn_state": {
@@ -18400,7 +18384,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/7a9c995692155c49599e37d2bb675c468d6cab9e13b4d19207f35282c3b68775",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:25.816244963+00:00"
+              "timestamp": "2026-10-06T12:42:28.905542512Z"
             }
           ]
         },
@@ -18487,7 +18471,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/7a9c995692155c49599e37d2bb675c468d6cab9e13b4d19207f35282c3b68775",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:25.816244963+00:00"
+              "timestamp": "2026-10-06T12:42:28.905542512Z"
             }
           ],
           "turn_state": {
@@ -18620,7 +18604,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
               "reason": "initial",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -18644,7 +18628,7 @@
               "kind": "event",
               "node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
               "parent_node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -18746,7 +18730,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
               "reason": "initial",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -18770,7 +18754,7 @@
               "kind": "event",
               "node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
               "parent_node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -18936,7 +18920,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/80d6070f56591ba27f5d5c08db3a3d28da9a4cbfd6da521a2516dbca9d1debc8",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:26.229164043+00:00"
+              "timestamp": "2026-10-06T12:42:29.291974653Z"
             }
           ]
         },
@@ -19023,7 +19007,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/80d6070f56591ba27f5d5c08db3a3d28da9a4cbfd6da521a2516dbca9d1debc8",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:26.229164043+00:00"
+              "timestamp": "2026-10-06T12:42:29.291974653Z"
             }
           ],
           "turn_state": {
@@ -19179,7 +19163,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/1c3c01cf92aff7832bc9acae785d5fd684944ff93b494643bfb8e58d6f4b2cdd",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:26.820727578+00:00"
+              "timestamp": "2026-10-06T12:42:29.885224793Z"
             }
           ]
         },
@@ -19266,7 +19250,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/1c3c01cf92aff7832bc9acae785d5fd684944ff93b494643bfb8e58d6f4b2cdd",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:26.820727578+00:00"
+              "timestamp": "2026-10-06T12:42:29.885224793Z"
             }
           ],
           "turn_state": {
@@ -19422,7 +19406,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/f33c7a09e9b4c1c49eeaf1a6a8add194fe8566cf69937bf80992a0d6d54efbbb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:27.353629030+00:00"
+              "timestamp": "2026-10-06T12:42:30.413795073Z"
             }
           ]
         },
@@ -19509,7 +19493,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/f33c7a09e9b4c1c49eeaf1a6a8add194fe8566cf69937bf80992a0d6d54efbbb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:27.353629030+00:00"
+              "timestamp": "2026-10-06T12:42:30.413795073Z"
             }
           ],
           "turn_state": {
@@ -19644,7 +19628,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
               "reason": "initial",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -19748,7 +19732,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
               "reason": "initial",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -19916,7 +19900,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/1c98e507119a99cb217909500982abf5bc87f8f1d633751af885b79c0aac3e91",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:27.705907691+00:00"
+              "timestamp": "2026-10-06T12:42:30.760575187Z"
             }
           ]
         },
@@ -20005,7 +19989,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/1c98e507119a99cb217909500982abf5bc87f8f1d633751af885b79c0aac3e91",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:27.705907691+00:00"
+              "timestamp": "2026-10-06T12:42:30.760575187Z"
             }
           ],
           "turn_state": {
@@ -20161,7 +20145,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/05098316e02a842fc1c5cf44e498f67514aeabdf42d63417a82e5248c9cb8725",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:28.162266986+00:00"
+              "timestamp": "2026-10-06T12:42:31.181535982Z"
             }
           ]
         },
@@ -20248,7 +20232,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/05098316e02a842fc1c5cf44e498f67514aeabdf42d63417a82e5248c9cb8725",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:28.162266986+00:00"
+              "timestamp": "2026-10-06T12:42:31.181535982Z"
             }
           ],
           "turn_state": {
@@ -20394,7 +20378,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/69bcbfd656f2d52e00499a6df571856319496b9d0f0c2b047443262a38bcf32d",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:28.617723540+00:00"
+              "timestamp": "2026-10-06T12:42:31.606910393Z"
             }
           ]
         },
@@ -20481,7 +20465,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/69bcbfd656f2d52e00499a6df571856319496b9d0f0c2b047443262a38bcf32d",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:28.617723540+00:00"
+              "timestamp": "2026-10-06T12:42:31.606910393Z"
             }
           ],
           "turn_state": {
@@ -20585,7 +20569,7 @@
               "kind": "event",
               "node_id": "n_c405a6dd8a0567a7d97c0170b4cc8cee41bea53cf8ee68c018c4eca43b119ca5",
               "parent_node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -20608,7 +20592,7 @@
               "kind": "event",
               "node_id": "n_06a499dff3eec661a0d1b8b15eb583e087fec7cef62cc45c1628c35867da93c5",
               "parent_node_id": "n_c405a6dd8a0567a7d97c0170b4cc8cee41bea53cf8ee68c018c4eca43b119ca5",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -20688,7 +20672,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:23.898431636+00:00"
+              "timestamp": "2026-10-06T12:42:27.011498176Z"
             },
             {
               "event": {
@@ -20712,7 +20696,7 @@
               "kind": "event",
               "node_id": "n_c405a6dd8a0567a7d97c0170b4cc8cee41bea53cf8ee68c018c4eca43b119ca5",
               "parent_node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -20735,7 +20719,7 @@
               "kind": "event",
               "node_id": "n_06a499dff3eec661a0d1b8b15eb583e087fec7cef62cc45c1628c35867da93c5",
               "parent_node_id": "n_c405a6dd8a0567a7d97c0170b4cc8cee41bea53cf8ee68c018c4eca43b119ca5",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -20894,7 +20878,7 @@
               "kind": "event",
               "node_id": "n_7ad153b756628ccb95eeae8f879be5a29af7b8963dd8daabde5af2fe6a9b468f",
               "parent_node_id": "frame-node/v3/dd169c5fec9bfe9e2ac41a241ae05c1649149e331619f45910aaf13b1a4c5c68",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -20926,7 +20910,7 @@
               "kind": "event",
               "node_id": "n_0e164fbf4c65a353ca93a9c0e14c655302e5445808f4dda0d6b9fb0c25e6ae75",
               "parent_node_id": "n_7ad153b756628ccb95eeae8f879be5a29af7b8963dd8daabde5af2fe6a9b468f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -20957,7 +20941,7 @@
               "kind": "event",
               "node_id": "n_8d43411f7427ed1d07044daeeb044db240344dd05311ac15830efd3c1d7d8320",
               "parent_node_id": "n_0e164fbf4c65a353ca93a9c0e14c655302e5445808f4dda0d6b9fb0c25e6ae75",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -20987,7 +20971,7 @@
               "kind": "event",
               "node_id": "n_c7d5229fc0dff9a17f20ecfa44741ecd5dad7d433f452d37ac291422c401e2e6",
               "parent_node_id": "n_8d43411f7427ed1d07044daeeb044db240344dd05311ac15830efd3c1d7d8320",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -21074,7 +21058,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/dd169c5fec9bfe9e2ac41a241ae05c1649149e331619f45910aaf13b1a4c5c68",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:25.253144425+00:00"
+              "timestamp": "2026-10-06T12:42:28.350984833Z"
             },
             {
               "event": {
@@ -21098,7 +21082,7 @@
               "kind": "event",
               "node_id": "n_7ad153b756628ccb95eeae8f879be5a29af7b8963dd8daabde5af2fe6a9b468f",
               "parent_node_id": "frame-node/v3/dd169c5fec9bfe9e2ac41a241ae05c1649149e331619f45910aaf13b1a4c5c68",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21130,7 +21114,7 @@
               "kind": "event",
               "node_id": "n_0e164fbf4c65a353ca93a9c0e14c655302e5445808f4dda0d6b9fb0c25e6ae75",
               "parent_node_id": "n_7ad153b756628ccb95eeae8f879be5a29af7b8963dd8daabde5af2fe6a9b468f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21161,7 +21145,7 @@
               "kind": "event",
               "node_id": "n_8d43411f7427ed1d07044daeeb044db240344dd05311ac15830efd3c1d7d8320",
               "parent_node_id": "n_0e164fbf4c65a353ca93a9c0e14c655302e5445808f4dda0d6b9fb0c25e6ae75",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21191,7 +21175,7 @@
               "kind": "event",
               "node_id": "n_c7d5229fc0dff9a17f20ecfa44741ecd5dad7d433f452d37ac291422c401e2e6",
               "parent_node_id": "n_8d43411f7427ed1d07044daeeb044db240344dd05311ac15830efd3c1d7d8320",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -21360,7 +21344,7 @@
               "kind": "event",
               "node_id": "n_d6d384fe0d179ac5028107f02b01f3d86e7772bd5baeb561ed89cccdd2bbfe20",
               "parent_node_id": "frame-node/v3/50396f7734a16457129eb4e00143f72ef940bfa98ae05dc4d6d0dfb79af6bec9",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21392,7 +21376,7 @@
               "kind": "event",
               "node_id": "n_7bdb0db4987a6655f31ab6d2fbd6d606fbdf8f4a2c13488d8502597f850ea5ca",
               "parent_node_id": "n_d6d384fe0d179ac5028107f02b01f3d86e7772bd5baeb561ed89cccdd2bbfe20",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21431,7 +21415,7 @@
               "kind": "event",
               "node_id": "n_6bc5a7be0aa1930c1b878d3c9207c6b54afa512866a9171cc83d1072fe1dcdeb",
               "parent_node_id": "n_7bdb0db4987a6655f31ab6d2fbd6d606fbdf8f4a2c13488d8502597f850ea5ca",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21461,7 +21445,7 @@
               "kind": "event",
               "node_id": "n_c339cf2910dc45bdd7c754071ec9ac6b643961d75431aa91d9c8c73464439b8a",
               "parent_node_id": "n_6bc5a7be0aa1930c1b878d3c9207c6b54afa512866a9171cc83d1072fe1dcdeb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -21548,7 +21532,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/50396f7734a16457129eb4e00143f72ef940bfa98ae05dc4d6d0dfb79af6bec9",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:25.432478678+00:00"
+              "timestamp": "2026-10-06T12:42:28.521225653Z"
             },
             {
               "event": {
@@ -21572,7 +21556,7 @@
               "kind": "event",
               "node_id": "n_d6d384fe0d179ac5028107f02b01f3d86e7772bd5baeb561ed89cccdd2bbfe20",
               "parent_node_id": "frame-node/v3/50396f7734a16457129eb4e00143f72ef940bfa98ae05dc4d6d0dfb79af6bec9",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21604,7 +21588,7 @@
               "kind": "event",
               "node_id": "n_7bdb0db4987a6655f31ab6d2fbd6d606fbdf8f4a2c13488d8502597f850ea5ca",
               "parent_node_id": "n_d6d384fe0d179ac5028107f02b01f3d86e7772bd5baeb561ed89cccdd2bbfe20",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21643,7 +21627,7 @@
               "kind": "event",
               "node_id": "n_6bc5a7be0aa1930c1b878d3c9207c6b54afa512866a9171cc83d1072fe1dcdeb",
               "parent_node_id": "n_7bdb0db4987a6655f31ab6d2fbd6d606fbdf8f4a2c13488d8502597f850ea5ca",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21673,7 +21657,7 @@
               "kind": "event",
               "node_id": "n_c339cf2910dc45bdd7c754071ec9ac6b643961d75431aa91d9c8c73464439b8a",
               "parent_node_id": "n_6bc5a7be0aa1930c1b878d3c9207c6b54afa512866a9171cc83d1072fe1dcdeb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -21842,7 +21826,7 @@
               "kind": "event",
               "node_id": "n_86b61ac44a6faf7ca6334ec09dac303994417610c299bba7b71e6c18d18a3ff9",
               "parent_node_id": "frame-node/v3/7a9c995692155c49599e37d2bb675c468d6cab9e13b4d19207f35282c3b68775",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21874,7 +21858,7 @@
               "kind": "event",
               "node_id": "n_5ed45fd9119fda305b09078f745736eb7837f30c81de8488a6deefac970a2a26",
               "parent_node_id": "n_86b61ac44a6faf7ca6334ec09dac303994417610c299bba7b71e6c18d18a3ff9",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21911,7 +21895,7 @@
               "kind": "event",
               "node_id": "n_df72009b568e62d0762eb8fe6ad3127c567e75bb6ae394f7ec01af99a00a83d0",
               "parent_node_id": "n_5ed45fd9119fda305b09078f745736eb7837f30c81de8488a6deefac970a2a26",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -21941,7 +21925,7 @@
               "kind": "event",
               "node_id": "n_a8df1b26cbcb54a8cd4c104435a5ed6746f8cfde6794ac5cbc20732e7e5cbece",
               "parent_node_id": "n_df72009b568e62d0762eb8fe6ad3127c567e75bb6ae394f7ec01af99a00a83d0",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -22028,7 +22012,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/7a9c995692155c49599e37d2bb675c468d6cab9e13b4d19207f35282c3b68775",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:25.816244963+00:00"
+              "timestamp": "2026-10-06T12:42:28.905542512Z"
             },
             {
               "event": {
@@ -22052,7 +22036,7 @@
               "kind": "event",
               "node_id": "n_86b61ac44a6faf7ca6334ec09dac303994417610c299bba7b71e6c18d18a3ff9",
               "parent_node_id": "frame-node/v3/7a9c995692155c49599e37d2bb675c468d6cab9e13b4d19207f35282c3b68775",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -22084,7 +22068,7 @@
               "kind": "event",
               "node_id": "n_5ed45fd9119fda305b09078f745736eb7837f30c81de8488a6deefac970a2a26",
               "parent_node_id": "n_86b61ac44a6faf7ca6334ec09dac303994417610c299bba7b71e6c18d18a3ff9",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -22121,7 +22105,7 @@
               "kind": "event",
               "node_id": "n_df72009b568e62d0762eb8fe6ad3127c567e75bb6ae394f7ec01af99a00a83d0",
               "parent_node_id": "n_5ed45fd9119fda305b09078f745736eb7837f30c81de8488a6deefac970a2a26",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -22151,7 +22135,7 @@
               "kind": "event",
               "node_id": "n_a8df1b26cbcb54a8cd4c104435a5ed6746f8cfde6794ac5cbc20732e7e5cbece",
               "parent_node_id": "n_df72009b568e62d0762eb8fe6ad3127c567e75bb6ae394f7ec01af99a00a83d0",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -22385,7 +22369,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
               "reason": "initial",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -22409,7 +22393,7 @@
               "kind": "event",
               "node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
               "parent_node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -22539,7 +22523,7 @@
               "kind": "event",
               "node_id": "n_f0c2cc39fc6da4f60818c4bb1617cdff8771bfcd8aa99a27253e018c81696aca",
               "parent_node_id": "frame-node/v3/80d6070f56591ba27f5d5c08db3a3d28da9a4cbfd6da521a2516dbca9d1debc8",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -22571,7 +22555,7 @@
               "kind": "event",
               "node_id": "n_468e91f3d1dbdceea315d4811f87123294fd9706f731273cb7d492a1c43c0420",
               "parent_node_id": "n_f0c2cc39fc6da4f60818c4bb1617cdff8771bfcd8aa99a27253e018c81696aca",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -22610,7 +22594,7 @@
               "kind": "event",
               "node_id": "n_2cd6fe831c02856269382e2344fd9a3c76325d91b2ce646dcf9565c16d016e1f",
               "parent_node_id": "n_468e91f3d1dbdceea315d4811f87123294fd9706f731273cb7d492a1c43c0420",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -22640,7 +22624,7 @@
               "kind": "event",
               "node_id": "n_b30c1f2cb55d100ecd354ce75a9246d1fc5cf25418158b937b89dbad34e83fdd",
               "parent_node_id": "n_2cd6fe831c02856269382e2344fd9a3c76325d91b2ce646dcf9565c16d016e1f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -22727,7 +22711,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/80d6070f56591ba27f5d5c08db3a3d28da9a4cbfd6da521a2516dbca9d1debc8",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:26.229164043+00:00"
+              "timestamp": "2026-10-06T12:42:29.291974653Z"
             },
             {
               "event": {
@@ -22751,7 +22735,7 @@
               "kind": "event",
               "node_id": "n_f0c2cc39fc6da4f60818c4bb1617cdff8771bfcd8aa99a27253e018c81696aca",
               "parent_node_id": "frame-node/v3/80d6070f56591ba27f5d5c08db3a3d28da9a4cbfd6da521a2516dbca9d1debc8",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -22783,7 +22767,7 @@
               "kind": "event",
               "node_id": "n_468e91f3d1dbdceea315d4811f87123294fd9706f731273cb7d492a1c43c0420",
               "parent_node_id": "n_f0c2cc39fc6da4f60818c4bb1617cdff8771bfcd8aa99a27253e018c81696aca",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -22822,7 +22806,7 @@
               "kind": "event",
               "node_id": "n_2cd6fe831c02856269382e2344fd9a3c76325d91b2ce646dcf9565c16d016e1f",
               "parent_node_id": "n_468e91f3d1dbdceea315d4811f87123294fd9706f731273cb7d492a1c43c0420",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -22852,7 +22836,7 @@
               "kind": "event",
               "node_id": "n_b30c1f2cb55d100ecd354ce75a9246d1fc5cf25418158b937b89dbad34e83fdd",
               "parent_node_id": "n_2cd6fe831c02856269382e2344fd9a3c76325d91b2ce646dcf9565c16d016e1f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -23011,7 +22995,7 @@
               "kind": "event",
               "node_id": "n_0ca25e306c204a1c34446c5ec7dde7cc2fc268f7f0d9cbc01f7debd407b268fd",
               "parent_node_id": "frame-node/v3/1c3c01cf92aff7832bc9acae785d5fd684944ff93b494643bfb8e58d6f4b2cdd",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23043,7 +23027,7 @@
               "kind": "event",
               "node_id": "n_0641341c506b28ff8f64e3d544c6c16d6b1e1daba9261cb85cc460ddb813797b",
               "parent_node_id": "n_0ca25e306c204a1c34446c5ec7dde7cc2fc268f7f0d9cbc01f7debd407b268fd",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23082,7 +23066,7 @@
               "kind": "event",
               "node_id": "n_4d992d3d118cb3aa494dfa5c5c1884dcce347f30a8f3e43f48f728f6e41978e6",
               "parent_node_id": "n_0641341c506b28ff8f64e3d544c6c16d6b1e1daba9261cb85cc460ddb813797b",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23112,7 +23096,7 @@
               "kind": "event",
               "node_id": "n_96a8cc0efd91456bea7751913e36d64177accc5b2f2c46d537a079d46a97a2cb",
               "parent_node_id": "n_4d992d3d118cb3aa494dfa5c5c1884dcce347f30a8f3e43f48f728f6e41978e6",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -23199,7 +23183,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/1c3c01cf92aff7832bc9acae785d5fd684944ff93b494643bfb8e58d6f4b2cdd",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:26.820727578+00:00"
+              "timestamp": "2026-10-06T12:42:29.885224793Z"
             },
             {
               "event": {
@@ -23223,7 +23207,7 @@
               "kind": "event",
               "node_id": "n_0ca25e306c204a1c34446c5ec7dde7cc2fc268f7f0d9cbc01f7debd407b268fd",
               "parent_node_id": "frame-node/v3/1c3c01cf92aff7832bc9acae785d5fd684944ff93b494643bfb8e58d6f4b2cdd",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23255,7 +23239,7 @@
               "kind": "event",
               "node_id": "n_0641341c506b28ff8f64e3d544c6c16d6b1e1daba9261cb85cc460ddb813797b",
               "parent_node_id": "n_0ca25e306c204a1c34446c5ec7dde7cc2fc268f7f0d9cbc01f7debd407b268fd",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23294,7 +23278,7 @@
               "kind": "event",
               "node_id": "n_4d992d3d118cb3aa494dfa5c5c1884dcce347f30a8f3e43f48f728f6e41978e6",
               "parent_node_id": "n_0641341c506b28ff8f64e3d544c6c16d6b1e1daba9261cb85cc460ddb813797b",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23324,7 +23308,7 @@
               "kind": "event",
               "node_id": "n_96a8cc0efd91456bea7751913e36d64177accc5b2f2c46d537a079d46a97a2cb",
               "parent_node_id": "n_4d992d3d118cb3aa494dfa5c5c1884dcce347f30a8f3e43f48f728f6e41978e6",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -23483,7 +23467,7 @@
               "kind": "event",
               "node_id": "n_99348c23d7646165333e27e19b4c22aef2501bcae4c325a11dfaf8fad92c413b",
               "parent_node_id": "frame-node/v3/f33c7a09e9b4c1c49eeaf1a6a8add194fe8566cf69937bf80992a0d6d54efbbb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23515,7 +23499,7 @@
               "kind": "event",
               "node_id": "n_c4f608142864beba64bf321cf43585c3af8e2e0b2ca293c97de5cd47a1a49d08",
               "parent_node_id": "n_99348c23d7646165333e27e19b4c22aef2501bcae4c325a11dfaf8fad92c413b",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23554,7 +23538,7 @@
               "kind": "event",
               "node_id": "n_32129ba94b2554ab39ed97e3f1332a55fc59d5c170645e7dbb53a66216f5c10c",
               "parent_node_id": "n_c4f608142864beba64bf321cf43585c3af8e2e0b2ca293c97de5cd47a1a49d08",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23584,7 +23568,7 @@
               "kind": "event",
               "node_id": "n_cc1a1a7dd55abd53f9d79c1ca77a85062a12242716d9131814832be025b5864b",
               "parent_node_id": "n_32129ba94b2554ab39ed97e3f1332a55fc59d5c170645e7dbb53a66216f5c10c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -23671,7 +23655,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/f33c7a09e9b4c1c49eeaf1a6a8add194fe8566cf69937bf80992a0d6d54efbbb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:27.353629030+00:00"
+              "timestamp": "2026-10-06T12:42:30.413795073Z"
             },
             {
               "event": {
@@ -23695,7 +23679,7 @@
               "kind": "event",
               "node_id": "n_99348c23d7646165333e27e19b4c22aef2501bcae4c325a11dfaf8fad92c413b",
               "parent_node_id": "frame-node/v3/f33c7a09e9b4c1c49eeaf1a6a8add194fe8566cf69937bf80992a0d6d54efbbb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23727,7 +23711,7 @@
               "kind": "event",
               "node_id": "n_c4f608142864beba64bf321cf43585c3af8e2e0b2ca293c97de5cd47a1a49d08",
               "parent_node_id": "n_99348c23d7646165333e27e19b4c22aef2501bcae4c325a11dfaf8fad92c413b",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23766,7 +23750,7 @@
               "kind": "event",
               "node_id": "n_32129ba94b2554ab39ed97e3f1332a55fc59d5c170645e7dbb53a66216f5c10c",
               "parent_node_id": "n_c4f608142864beba64bf321cf43585c3af8e2e0b2ca293c97de5cd47a1a49d08",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -23796,7 +23780,7 @@
               "kind": "event",
               "node_id": "n_cc1a1a7dd55abd53f9d79c1ca77a85062a12242716d9131814832be025b5864b",
               "parent_node_id": "n_32129ba94b2554ab39ed97e3f1332a55fc59d5c170645e7dbb53a66216f5c10c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -24032,7 +24016,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
               "reason": "initial",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -24162,7 +24146,7 @@
               "kind": "event",
               "node_id": "n_73ebfa0a062d4c1f0235fde7d95e0daf6dea46e8375ee2f41715b2ef225dc84a",
               "parent_node_id": "frame-node/v3/1c98e507119a99cb217909500982abf5bc87f8f1d633751af885b79c0aac3e91",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -24194,7 +24178,7 @@
               "kind": "event",
               "node_id": "n_34512ff63b341e895cdfb3c8cdee3e8bcc58da0001f45c99f59d523d6c102660",
               "parent_node_id": "n_73ebfa0a062d4c1f0235fde7d95e0daf6dea46e8375ee2f41715b2ef225dc84a",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -24226,7 +24210,7 @@
               "kind": "event",
               "node_id": "n_ebe10b93cffbbf549591df200aaab7fcaea94f01f28c02460fe46e8c0e39612c",
               "parent_node_id": "n_34512ff63b341e895cdfb3c8cdee3e8bcc58da0001f45c99f59d523d6c102660",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -24315,7 +24299,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/1c98e507119a99cb217909500982abf5bc87f8f1d633751af885b79c0aac3e91",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:27.705907691+00:00"
+              "timestamp": "2026-10-06T12:42:30.760575187Z"
             },
             {
               "event": {
@@ -24339,7 +24323,7 @@
               "kind": "event",
               "node_id": "n_73ebfa0a062d4c1f0235fde7d95e0daf6dea46e8375ee2f41715b2ef225dc84a",
               "parent_node_id": "frame-node/v3/1c98e507119a99cb217909500982abf5bc87f8f1d633751af885b79c0aac3e91",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -24371,7 +24355,7 @@
               "kind": "event",
               "node_id": "n_34512ff63b341e895cdfb3c8cdee3e8bcc58da0001f45c99f59d523d6c102660",
               "parent_node_id": "n_73ebfa0a062d4c1f0235fde7d95e0daf6dea46e8375ee2f41715b2ef225dc84a",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -24403,7 +24387,7 @@
               "kind": "event",
               "node_id": "n_ebe10b93cffbbf549591df200aaab7fcaea94f01f28c02460fe46e8c0e39612c",
               "parent_node_id": "n_34512ff63b341e895cdfb3c8cdee3e8bcc58da0001f45c99f59d523d6c102660",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -24540,7 +24524,7 @@
               "kind": "event",
               "node_id": "n_33434f0fbe2c948617388d79fd9fa1d775fd3f59e331f1f3f1c36226f200b4aa",
               "parent_node_id": "frame-node/v3/05098316e02a842fc1c5cf44e498f67514aeabdf42d63417a82e5248c9cb8725",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -24572,7 +24556,7 @@
               "kind": "event",
               "node_id": "n_dc6b2d967e3df89332e647c5213013546cb346db704a337bde86649ced19f9f1",
               "parent_node_id": "n_33434f0fbe2c948617388d79fd9fa1d775fd3f59e331f1f3f1c36226f200b4aa",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -24622,7 +24606,7 @@
               "kind": "event",
               "node_id": "n_2515c5bdd57b5db42bdf54157ff387df65b3203171d12c795513b4032b2bdb41",
               "parent_node_id": "n_dc6b2d967e3df89332e647c5213013546cb346db704a337bde86649ced19f9f1",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -24652,7 +24636,7 @@
               "kind": "event",
               "node_id": "n_b60b963e95d3b081d1a6236d8de2c7c04804d8e27359db619059d49b5f2d8f14",
               "parent_node_id": "n_2515c5bdd57b5db42bdf54157ff387df65b3203171d12c795513b4032b2bdb41",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -24739,7 +24723,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/05098316e02a842fc1c5cf44e498f67514aeabdf42d63417a82e5248c9cb8725",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:28.162266986+00:00"
+              "timestamp": "2026-10-06T12:42:31.181535982Z"
             },
             {
               "event": {
@@ -24763,7 +24747,7 @@
               "kind": "event",
               "node_id": "n_33434f0fbe2c948617388d79fd9fa1d775fd3f59e331f1f3f1c36226f200b4aa",
               "parent_node_id": "frame-node/v3/05098316e02a842fc1c5cf44e498f67514aeabdf42d63417a82e5248c9cb8725",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -24795,7 +24779,7 @@
               "kind": "event",
               "node_id": "n_dc6b2d967e3df89332e647c5213013546cb346db704a337bde86649ced19f9f1",
               "parent_node_id": "n_33434f0fbe2c948617388d79fd9fa1d775fd3f59e331f1f3f1c36226f200b4aa",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -24845,7 +24829,7 @@
               "kind": "event",
               "node_id": "n_2515c5bdd57b5db42bdf54157ff387df65b3203171d12c795513b4032b2bdb41",
               "parent_node_id": "n_dc6b2d967e3df89332e647c5213013546cb346db704a337bde86649ced19f9f1",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -24875,7 +24859,7 @@
               "kind": "event",
               "node_id": "n_b60b963e95d3b081d1a6236d8de2c7c04804d8e27359db619059d49b5f2d8f14",
               "parent_node_id": "n_2515c5bdd57b5db42bdf54157ff387df65b3203171d12c795513b4032b2bdb41",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -25024,7 +25008,7 @@
               "kind": "event",
               "node_id": "n_1619651ecba95c2b58222e58be9d9655dd38456f5e248d24b517185f50317dca",
               "parent_node_id": "frame-node/v3/69bcbfd656f2d52e00499a6df571856319496b9d0f0c2b047443262a38bcf32d",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25056,7 +25040,7 @@
               "kind": "event",
               "node_id": "n_4150bf955f82ab95e404eab6cf7db89e9d52242757c7470c5b12188b92d0665c",
               "parent_node_id": "n_1619651ecba95c2b58222e58be9d9655dd38456f5e248d24b517185f50317dca",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25098,7 +25082,7 @@
               "kind": "event",
               "node_id": "n_9b44cf44b540fb3f674cc5464be60fad62ceb7bbb42bbc69d72ba96f9978d5d6",
               "parent_node_id": "n_4150bf955f82ab95e404eab6cf7db89e9d52242757c7470c5b12188b92d0665c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25128,7 +25112,7 @@
               "kind": "event",
               "node_id": "n_36a46f070250046e9ff79eb662241048da4c1eb4edeef495a4e1a0cdc7692a6c",
               "parent_node_id": "n_9b44cf44b540fb3f674cc5464be60fad62ceb7bbb42bbc69d72ba96f9978d5d6",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -25215,7 +25199,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/69bcbfd656f2d52e00499a6df571856319496b9d0f0c2b047443262a38bcf32d",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:28.617723540+00:00"
+              "timestamp": "2026-10-06T12:42:31.606910393Z"
             },
             {
               "event": {
@@ -25239,7 +25223,7 @@
               "kind": "event",
               "node_id": "n_1619651ecba95c2b58222e58be9d9655dd38456f5e248d24b517185f50317dca",
               "parent_node_id": "frame-node/v3/69bcbfd656f2d52e00499a6df571856319496b9d0f0c2b047443262a38bcf32d",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25271,7 +25255,7 @@
               "kind": "event",
               "node_id": "n_4150bf955f82ab95e404eab6cf7db89e9d52242757c7470c5b12188b92d0665c",
               "parent_node_id": "n_1619651ecba95c2b58222e58be9d9655dd38456f5e248d24b517185f50317dca",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25313,7 +25297,7 @@
               "kind": "event",
               "node_id": "n_9b44cf44b540fb3f674cc5464be60fad62ceb7bbb42bbc69d72ba96f9978d5d6",
               "parent_node_id": "n_4150bf955f82ab95e404eab6cf7db89e9d52242757c7470c5b12188b92d0665c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25343,7 +25327,7 @@
               "kind": "event",
               "node_id": "n_36a46f070250046e9ff79eb662241048da4c1eb4edeef495a4e1a0cdc7692a6c",
               "parent_node_id": "n_9b44cf44b540fb3f674cc5464be60fad62ceb7bbb42bbc69d72ba96f9978d5d6",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -25540,7 +25524,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:23.898431636+00:00"
+              "timestamp": "2026-10-06T12:42:27.011498176Z"
             },
             {
               "event": {
@@ -25564,7 +25548,7 @@
               "kind": "event",
               "node_id": "n_c405a6dd8a0567a7d97c0170b4cc8cee41bea53cf8ee68c018c4eca43b119ca5",
               "parent_node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25587,7 +25571,7 @@
               "kind": "event",
               "node_id": "n_06a499dff3eec661a0d1b8b15eb583e087fec7cef62cc45c1628c35867da93c5",
               "parent_node_id": "n_c405a6dd8a0567a7d97c0170b4cc8cee41bea53cf8ee68c018c4eca43b119ca5",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -25756,7 +25740,7 @@
               "kind": "event",
               "node_id": "n_8d1815d99332cc500d02558ab1eaf6da6df6cd39e335071c517a17b3ebd6b2be",
               "parent_node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25788,7 +25772,7 @@
               "kind": "event",
               "node_id": "n_ec29d1a0426731f2477d2c73380530c0ea73c664e259ba4f1097d46d860ee838",
               "parent_node_id": "n_8d1815d99332cc500d02558ab1eaf6da6df6cd39e335071c517a17b3ebd6b2be",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25813,7 +25797,7 @@
               "kind": "event",
               "node_id": "n_e91458b4982540bd1345d12bf734746d4441a3774c92cec681bc86435875e434",
               "parent_node_id": "n_ec29d1a0426731f2477d2c73380530c0ea73c664e259ba4f1097d46d860ee838",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25843,7 +25827,7 @@
               "kind": "event",
               "node_id": "n_6cf995bde6f4cfc8b2c43563baa478f1968325eb33f1c703c8993608a5604fc6",
               "parent_node_id": "n_e91458b4982540bd1345d12bf734746d4441a3774c92cec681bc86435875e434",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -25945,7 +25929,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
               "reason": "initial",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25969,7 +25953,7 @@
               "kind": "event",
               "node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
               "parent_node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -25993,7 +25977,7 @@
               "kind": "event",
               "node_id": "n_8d1815d99332cc500d02558ab1eaf6da6df6cd39e335071c517a17b3ebd6b2be",
               "parent_node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26025,7 +26009,7 @@
               "kind": "event",
               "node_id": "n_ec29d1a0426731f2477d2c73380530c0ea73c664e259ba4f1097d46d860ee838",
               "parent_node_id": "n_8d1815d99332cc500d02558ab1eaf6da6df6cd39e335071c517a17b3ebd6b2be",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26050,7 +26034,7 @@
               "kind": "event",
               "node_id": "n_e91458b4982540bd1345d12bf734746d4441a3774c92cec681bc86435875e434",
               "parent_node_id": "n_ec29d1a0426731f2477d2c73380530c0ea73c664e259ba4f1097d46d860ee838",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26080,7 +26064,7 @@
               "kind": "event",
               "node_id": "n_6cf995bde6f4cfc8b2c43563baa478f1968325eb33f1c703c8993608a5604fc6",
               "parent_node_id": "n_e91458b4982540bd1345d12bf734746d4441a3774c92cec681bc86435875e434",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -26249,7 +26233,7 @@
               "kind": "event",
               "node_id": "n_a2109d8648ed0f16438fd6bc08b5fecd27eded299f791847bfe70b816c6c2984",
               "parent_node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26281,7 +26265,7 @@
               "kind": "event",
               "node_id": "n_4594d826a7f178da494b3b5c3e373be32ceba3fe4af3307c01a2beba4e937d65",
               "parent_node_id": "n_a2109d8648ed0f16438fd6bc08b5fecd27eded299f791847bfe70b816c6c2984",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26309,7 +26293,7 @@
               "kind": "event",
               "node_id": "n_db039b3b81b10b6f17149ba3ef470179e33fda02afad53254125e167ef136346",
               "parent_node_id": "n_4594d826a7f178da494b3b5c3e373be32ceba3fe4af3307c01a2beba4e937d65",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -26413,7 +26397,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
               "reason": "initial",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26437,7 +26421,7 @@
               "kind": "event",
               "node_id": "n_a2109d8648ed0f16438fd6bc08b5fecd27eded299f791847bfe70b816c6c2984",
               "parent_node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26469,7 +26453,7 @@
               "kind": "event",
               "node_id": "n_4594d826a7f178da494b3b5c3e373be32ceba3fe4af3307c01a2beba4e937d65",
               "parent_node_id": "n_a2109d8648ed0f16438fd6bc08b5fecd27eded299f791847bfe70b816c6c2984",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26497,7 +26481,7 @@
               "kind": "event",
               "node_id": "n_db039b3b81b10b6f17149ba3ef470179e33fda02afad53254125e167ef136346",
               "parent_node_id": "n_4594d826a7f178da494b3b5c3e373be32ceba3fe4af3307c01a2beba4e937d65",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -26617,7 +26601,7 @@
               "kind": "event",
               "node_id": "n_fc26e205560781beeb42ecb989fe998e2058bf8c10a3bef425b4003e3739eed2",
               "parent_node_id": "n_06a499dff3eec661a0d1b8b15eb583e087fec7cef62cc45c1628c35867da93c5",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26640,7 +26624,7 @@
               "kind": "event",
               "node_id": "n_111afd5efb74b5030419eeea544bf8424c88053ef4f94c26de890d42e686f1c1",
               "parent_node_id": "n_fc26e205560781beeb42ecb989fe998e2058bf8c10a3bef425b4003e3739eed2",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -26720,7 +26704,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:23.898431636+00:00"
+              "timestamp": "2026-10-06T12:42:27.011498176Z"
             },
             {
               "event": {
@@ -26744,7 +26728,7 @@
               "kind": "event",
               "node_id": "n_c405a6dd8a0567a7d97c0170b4cc8cee41bea53cf8ee68c018c4eca43b119ca5",
               "parent_node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26767,7 +26751,7 @@
               "kind": "event",
               "node_id": "n_06a499dff3eec661a0d1b8b15eb583e087fec7cef62cc45c1628c35867da93c5",
               "parent_node_id": "n_c405a6dd8a0567a7d97c0170b4cc8cee41bea53cf8ee68c018c4eca43b119ca5",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26791,7 +26775,7 @@
               "kind": "event",
               "node_id": "n_fc26e205560781beeb42ecb989fe998e2058bf8c10a3bef425b4003e3739eed2",
               "parent_node_id": "n_06a499dff3eec661a0d1b8b15eb583e087fec7cef62cc45c1628c35867da93c5",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -26814,7 +26798,7 @@
               "kind": "event",
               "node_id": "n_111afd5efb74b5030419eeea544bf8424c88053ef4f94c26de890d42e686f1c1",
               "parent_node_id": "n_fc26e205560781beeb42ecb989fe998e2058bf8c10a3bef425b4003e3739eed2",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -27015,7 +26999,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:23.963810098+00:00"
+              "timestamp": "2026-10-06T12:42:27.077128685Z"
             }
           ]
         },
@@ -27088,7 +27072,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:23.963810098+00:00"
+              "timestamp": "2026-10-06T12:42:27.077128685Z"
             }
           ],
           "turn_state": {
@@ -27192,7 +27176,7 @@
               "kind": "event",
               "node_id": "n_4b8d38db22920564d79a132f54fa9fc401fee0d08e96ca1728bb3e8f263db8a9",
               "parent_node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -27225,7 +27209,7 @@
               "kind": "event",
               "node_id": "n_d30cea869be5a870ce6c5ab15495101e52cb250cd69cd4136b4e3478e9d17483",
               "parent_node_id": "n_4b8d38db22920564d79a132f54fa9fc401fee0d08e96ca1728bb3e8f263db8a9",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -27305,7 +27289,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:23.963810098+00:00"
+              "timestamp": "2026-10-06T12:42:27.077128685Z"
             },
             {
               "event": {
@@ -27329,7 +27313,7 @@
               "kind": "event",
               "node_id": "n_4b8d38db22920564d79a132f54fa9fc401fee0d08e96ca1728bb3e8f263db8a9",
               "parent_node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -27362,7 +27346,7 @@
               "kind": "event",
               "node_id": "n_d30cea869be5a870ce6c5ab15495101e52cb250cd69cd4136b4e3478e9d17483",
               "parent_node_id": "n_4b8d38db22920564d79a132f54fa9fc401fee0d08e96ca1728bb3e8f263db8a9",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -27569,7 +27553,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:23.963810098+00:00"
+              "timestamp": "2026-10-06T12:42:27.077128685Z"
             },
             {
               "event": {
@@ -27593,7 +27577,7 @@
               "kind": "event",
               "node_id": "n_4b8d38db22920564d79a132f54fa9fc401fee0d08e96ca1728bb3e8f263db8a9",
               "parent_node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -27626,7 +27610,7 @@
               "kind": "event",
               "node_id": "n_d30cea869be5a870ce6c5ab15495101e52cb250cd69cd4136b4e3478e9d17483",
               "parent_node_id": "n_4b8d38db22920564d79a132f54fa9fc401fee0d08e96ca1728bb3e8f263db8a9",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -27778,7 +27762,7 @@
               "kind": "event",
               "node_id": "n_a85889bfd198034dff6a8fcee95009deff18955306e1334e7e0fc760da3ed5b7",
               "parent_node_id": "n_d30cea869be5a870ce6c5ab15495101e52cb250cd69cd4136b4e3478e9d17483",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -27811,7 +27795,7 @@
               "kind": "event",
               "node_id": "n_7672595bed029bfb8068b11c4321b0365161729a3d20990a148173686bbf1b7e",
               "parent_node_id": "n_a85889bfd198034dff6a8fcee95009deff18955306e1334e7e0fc760da3ed5b7",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -27891,7 +27875,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:23.963810098+00:00"
+              "timestamp": "2026-10-06T12:42:27.077128685Z"
             },
             {
               "event": {
@@ -27915,7 +27899,7 @@
               "kind": "event",
               "node_id": "n_4b8d38db22920564d79a132f54fa9fc401fee0d08e96ca1728bb3e8f263db8a9",
               "parent_node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -27948,7 +27932,7 @@
               "kind": "event",
               "node_id": "n_d30cea869be5a870ce6c5ab15495101e52cb250cd69cd4136b4e3478e9d17483",
               "parent_node_id": "n_4b8d38db22920564d79a132f54fa9fc401fee0d08e96ca1728bb3e8f263db8a9",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -27972,7 +27956,7 @@
               "kind": "event",
               "node_id": "n_a85889bfd198034dff6a8fcee95009deff18955306e1334e7e0fc760da3ed5b7",
               "parent_node_id": "n_d30cea869be5a870ce6c5ab15495101e52cb250cd69cd4136b4e3478e9d17483",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -28005,7 +27989,7 @@
               "kind": "event",
               "node_id": "n_7672595bed029bfb8068b11c4321b0365161729a3d20990a148173686bbf1b7e",
               "parent_node_id": "n_a85889bfd198034dff6a8fcee95009deff18955306e1334e7e0fc760da3ed5b7",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -28226,7 +28210,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.034263558+00:00"
+              "timestamp": "2026-10-06T12:42:27.145767316Z"
             }
           ]
         },
@@ -28299,7 +28283,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.034263558+00:00"
+              "timestamp": "2026-10-06T12:42:27.145767316Z"
             }
           ],
           "turn_state": {
@@ -28403,7 +28387,7 @@
               "kind": "event",
               "node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
               "parent_node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -28426,7 +28410,7 @@
               "kind": "event",
               "node_id": "n_ae93d7db9109e6e6884d329313c5a3db75020d340c2020a93cae97a871b94775",
               "parent_node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -28506,7 +28490,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.034263558+00:00"
+              "timestamp": "2026-10-06T12:42:27.145767316Z"
             },
             {
               "event": {
@@ -28530,7 +28514,7 @@
               "kind": "event",
               "node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
               "parent_node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -28553,7 +28537,7 @@
               "kind": "event",
               "node_id": "n_ae93d7db9109e6e6884d329313c5a3db75020d340c2020a93cae97a871b94775",
               "parent_node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -28750,7 +28734,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.034263558+00:00"
+              "timestamp": "2026-10-06T12:42:27.145767316Z"
             },
             {
               "event": {
@@ -28774,7 +28758,7 @@
               "kind": "event",
               "node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
               "parent_node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -28797,7 +28781,7 @@
               "kind": "event",
               "node_id": "n_ae93d7db9109e6e6884d329313c5a3db75020d340c2020a93cae97a871b94775",
               "parent_node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -28939,7 +28923,7 @@
               "kind": "event",
               "node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
               "parent_node_id": "n_ae93d7db9109e6e6884d329313c5a3db75020d340c2020a93cae97a871b94775",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -28962,7 +28946,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -29042,7 +29026,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.034263558+00:00"
+              "timestamp": "2026-10-06T12:42:27.145767316Z"
             },
             {
               "event": {
@@ -29066,7 +29050,7 @@
               "kind": "event",
               "node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
               "parent_node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29089,7 +29073,7 @@
               "kind": "event",
               "node_id": "n_ae93d7db9109e6e6884d329313c5a3db75020d340c2020a93cae97a871b94775",
               "parent_node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29113,7 +29097,7 @@
               "kind": "event",
               "node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
               "parent_node_id": "n_ae93d7db9109e6e6884d329313c5a3db75020d340c2020a93cae97a871b94775",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29136,7 +29120,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -29364,7 +29348,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.034263558+00:00"
+              "timestamp": "2026-10-06T12:42:27.145767316Z"
             },
             {
               "event": {
@@ -29388,7 +29372,7 @@
               "kind": "event",
               "node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
               "parent_node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29411,7 +29395,7 @@
               "kind": "event",
               "node_id": "n_ae93d7db9109e6e6884d329313c5a3db75020d340c2020a93cae97a871b94775",
               "parent_node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29435,7 +29419,7 @@
               "kind": "event",
               "node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
               "parent_node_id": "n_ae93d7db9109e6e6884d329313c5a3db75020d340c2020a93cae97a871b94775",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29458,7 +29442,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -29631,7 +29615,7 @@
               "kind": "event",
               "node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
               "parent_node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29654,7 +29638,7 @@
               "kind": "event",
               "node_id": "n_c0c71a9bb847ab472abefba00a4caaf91232ad5aee6c9efdb5cc20b38f1dc25f",
               "parent_node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -29734,7 +29718,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.034263558+00:00"
+              "timestamp": "2026-10-06T12:42:27.145767316Z"
             },
             {
               "event": {
@@ -29758,7 +29742,7 @@
               "kind": "event",
               "node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
               "parent_node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29781,7 +29765,7 @@
               "kind": "event",
               "node_id": "n_ae93d7db9109e6e6884d329313c5a3db75020d340c2020a93cae97a871b94775",
               "parent_node_id": "n_502f281bda45b660b4d592663aadaedfbefae546829451028b793f76e28c4d0c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29805,7 +29789,7 @@
               "kind": "event",
               "node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
               "parent_node_id": "n_ae93d7db9109e6e6884d329313c5a3db75020d340c2020a93cae97a871b94775",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29828,7 +29812,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29852,7 +29836,7 @@
               "kind": "event",
               "node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
               "parent_node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -29875,7 +29859,7 @@
               "kind": "event",
               "node_id": "n_c0c71a9bb847ab472abefba00a4caaf91232ad5aee6c9efdb5cc20b38f1dc25f",
               "parent_node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -30107,7 +30091,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.096878515+00:00"
+              "timestamp": "2026-10-06T12:42:27.214780431Z"
             }
           ]
         },
@@ -30180,7 +30164,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.096878515+00:00"
+              "timestamp": "2026-10-06T12:42:27.214780431Z"
             }
           ],
           "turn_state": {
@@ -30284,7 +30268,7 @@
               "kind": "event",
               "node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
               "parent_node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -30307,7 +30291,7 @@
               "kind": "event",
               "node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
               "parent_node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -30387,7 +30371,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.096878515+00:00"
+              "timestamp": "2026-10-06T12:42:27.214780431Z"
             },
             {
               "event": {
@@ -30411,7 +30395,7 @@
               "kind": "event",
               "node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
               "parent_node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -30434,7 +30418,7 @@
               "kind": "event",
               "node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
               "parent_node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -30631,7 +30615,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.096878515+00:00"
+              "timestamp": "2026-10-06T12:42:27.214780431Z"
             },
             {
               "event": {
@@ -30655,7 +30639,7 @@
               "kind": "event",
               "node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
               "parent_node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -30678,7 +30662,7 @@
               "kind": "event",
               "node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
               "parent_node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -30820,7 +30804,7 @@
               "kind": "event",
               "node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
               "parent_node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -30843,7 +30827,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -30923,7 +30907,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.096878515+00:00"
+              "timestamp": "2026-10-06T12:42:27.214780431Z"
             },
             {
               "event": {
@@ -30947,7 +30931,7 @@
               "kind": "event",
               "node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
               "parent_node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -30970,7 +30954,7 @@
               "kind": "event",
               "node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
               "parent_node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -30994,7 +30978,7 @@
               "kind": "event",
               "node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
               "parent_node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -31017,7 +31001,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -31245,7 +31229,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.096878515+00:00"
+              "timestamp": "2026-10-06T12:42:27.214780431Z"
             },
             {
               "event": {
@@ -31269,7 +31253,7 @@
               "kind": "event",
               "node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
               "parent_node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -31292,7 +31276,7 @@
               "kind": "event",
               "node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
               "parent_node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -31316,7 +31300,7 @@
               "kind": "event",
               "node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
               "parent_node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -31339,7 +31323,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -31512,7 +31496,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -31535,7 +31519,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -31615,7 +31599,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.096878515+00:00"
+              "timestamp": "2026-10-06T12:42:27.214780431Z"
             },
             {
               "event": {
@@ -31639,7 +31623,7 @@
               "kind": "event",
               "node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
               "parent_node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -31662,7 +31646,7 @@
               "kind": "event",
               "node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
               "parent_node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -31686,7 +31670,7 @@
               "kind": "event",
               "node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
               "parent_node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -31709,7 +31693,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -31733,7 +31717,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -31756,7 +31740,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -32015,7 +31999,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.096878515+00:00"
+              "timestamp": "2026-10-06T12:42:27.214780431Z"
             },
             {
               "event": {
@@ -32039,7 +32023,7 @@
               "kind": "event",
               "node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
               "parent_node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32062,7 +32046,7 @@
               "kind": "event",
               "node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
               "parent_node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32086,7 +32070,7 @@
               "kind": "event",
               "node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
               "parent_node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32109,7 +32093,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32133,7 +32117,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32156,7 +32140,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -32360,7 +32344,7 @@
               "kind": "event",
               "node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
               "parent_node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32383,7 +32367,7 @@
               "kind": "event",
               "node_id": "n_3c1b0d3e5a7a05994e5912786f2c6b052de8c8b785c04b0db48abfe169ebbc50",
               "parent_node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -32463,7 +32447,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.096878515+00:00"
+              "timestamp": "2026-10-06T12:42:27.214780431Z"
             },
             {
               "event": {
@@ -32487,7 +32471,7 @@
               "kind": "event",
               "node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
               "parent_node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32510,7 +32494,7 @@
               "kind": "event",
               "node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
               "parent_node_id": "n_fa527dcc85491635ef73647b5ae86bd78dd3dea3e588531f1ddee3e35768f75c",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32534,7 +32518,7 @@
               "kind": "event",
               "node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
               "parent_node_id": "n_cb0f199d54b574b99bbf488cfa284e5e6823f44f7ef8fd96bfe7efd9609ecc42",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32557,7 +32541,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32581,7 +32565,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32604,7 +32588,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32628,7 +32612,7 @@
               "kind": "event",
               "node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
               "parent_node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -32651,7 +32635,7 @@
               "kind": "event",
               "node_id": "n_3c1b0d3e5a7a05994e5912786f2c6b052de8c8b785c04b0db48abfe169ebbc50",
               "parent_node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -32924,7 +32908,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/0ce499e3253231fe5a37e7963f3f4ab0ece09c347c162764418b023cf073ec2d",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.227106052+00:00"
+              "timestamp": "2026-10-06T12:42:27.353451876Z"
             }
           ]
         },
@@ -32997,7 +32981,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/0ce499e3253231fe5a37e7963f3f4ab0ece09c347c162764418b023cf073ec2d",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.227106052+00:00"
+              "timestamp": "2026-10-06T12:42:27.353451876Z"
             }
           ],
           "turn_state": {
@@ -33111,7 +33095,7 @@
               "kind": "event",
               "node_id": "n_738546ea3f7a36c99f118856efaa3550b65b2db66536c5a5509464765a52a701",
               "parent_node_id": "frame-node/v3/0ce499e3253231fe5a37e7963f3f4ab0ece09c347c162764418b023cf073ec2d",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33133,7 +33117,7 @@
               "kind": "event",
               "node_id": "n_270eccff0ba95d649c0ca05487d60c80587269c1fa55f7fd6669a941cc0d50db",
               "parent_node_id": "n_738546ea3f7a36c99f118856efaa3550b65b2db66536c5a5509464765a52a701",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33159,7 +33143,7 @@
               "kind": "event",
               "node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
               "parent_node_id": "n_270eccff0ba95d649c0ca05487d60c80587269c1fa55f7fd6669a941cc0d50db",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33182,7 +33166,7 @@
               "kind": "event",
               "node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
               "parent_node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -33255,7 +33239,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/0ce499e3253231fe5a37e7963f3f4ab0ece09c347c162764418b023cf073ec2d",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.227106052+00:00"
+              "timestamp": "2026-10-06T12:42:27.353451876Z"
             },
             {
               "event": {
@@ -33279,7 +33263,7 @@
               "kind": "event",
               "node_id": "n_738546ea3f7a36c99f118856efaa3550b65b2db66536c5a5509464765a52a701",
               "parent_node_id": "frame-node/v3/0ce499e3253231fe5a37e7963f3f4ab0ece09c347c162764418b023cf073ec2d",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33301,7 +33285,7 @@
               "kind": "event",
               "node_id": "n_270eccff0ba95d649c0ca05487d60c80587269c1fa55f7fd6669a941cc0d50db",
               "parent_node_id": "n_738546ea3f7a36c99f118856efaa3550b65b2db66536c5a5509464765a52a701",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33327,7 +33311,7 @@
               "kind": "event",
               "node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
               "parent_node_id": "n_270eccff0ba95d649c0ca05487d60c80587269c1fa55f7fd6669a941cc0d50db",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33350,7 +33334,7 @@
               "kind": "event",
               "node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
               "parent_node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -33555,7 +33539,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/80837f7413f19b9ad3b02ee1e4305fdd93d313761b442632854bcc3b7af88dcf",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.291963533+00:00"
+              "timestamp": "2026-10-06T12:42:27.428280146Z"
             }
           ]
         },
@@ -33628,7 +33612,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/80837f7413f19b9ad3b02ee1e4305fdd93d313761b442632854bcc3b7af88dcf",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.291963533+00:00"
+              "timestamp": "2026-10-06T12:42:27.428280146Z"
             }
           ],
           "turn_state": {
@@ -33742,7 +33726,7 @@
               "kind": "event",
               "node_id": "n_a7e2248a668ea49fe93267497c5bc4ccfdfedd6dbcd770e3ffd8a4807e0aae7b",
               "parent_node_id": "frame-node/v3/80837f7413f19b9ad3b02ee1e4305fdd93d313761b442632854bcc3b7af88dcf",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33764,7 +33748,7 @@
               "kind": "event",
               "node_id": "n_ccc2ad193b10f29f3e638a7a75cccf47bf4d8f0d9caf5c9b4451d2fc28dffc69",
               "parent_node_id": "n_a7e2248a668ea49fe93267497c5bc4ccfdfedd6dbcd770e3ffd8a4807e0aae7b",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33790,7 +33774,7 @@
               "kind": "event",
               "node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
               "parent_node_id": "n_ccc2ad193b10f29f3e638a7a75cccf47bf4d8f0d9caf5c9b4451d2fc28dffc69",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33813,7 +33797,7 @@
               "kind": "event",
               "node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
               "parent_node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -33886,7 +33870,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/80837f7413f19b9ad3b02ee1e4305fdd93d313761b442632854bcc3b7af88dcf",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.291963533+00:00"
+              "timestamp": "2026-10-06T12:42:27.428280146Z"
             },
             {
               "event": {
@@ -33910,7 +33894,7 @@
               "kind": "event",
               "node_id": "n_a7e2248a668ea49fe93267497c5bc4ccfdfedd6dbcd770e3ffd8a4807e0aae7b",
               "parent_node_id": "frame-node/v3/80837f7413f19b9ad3b02ee1e4305fdd93d313761b442632854bcc3b7af88dcf",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33932,7 +33916,7 @@
               "kind": "event",
               "node_id": "n_ccc2ad193b10f29f3e638a7a75cccf47bf4d8f0d9caf5c9b4451d2fc28dffc69",
               "parent_node_id": "n_a7e2248a668ea49fe93267497c5bc4ccfdfedd6dbcd770e3ffd8a4807e0aae7b",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33958,7 +33942,7 @@
               "kind": "event",
               "node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
               "parent_node_id": "n_ccc2ad193b10f29f3e638a7a75cccf47bf4d8f0d9caf5c9b4451d2fc28dffc69",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -33981,7 +33965,7 @@
               "kind": "event",
               "node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
               "parent_node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -34186,7 +34170,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/ac05290cbb5b481dc281e62ba6776b33814f2a862b7cca709c85f07a28ec6a40",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.160963791+00:00"
+              "timestamp": "2026-10-06T12:42:27.277987249Z"
             }
           ]
         },
@@ -34259,7 +34243,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/ac05290cbb5b481dc281e62ba6776b33814f2a862b7cca709c85f07a28ec6a40",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.160963791+00:00"
+              "timestamp": "2026-10-06T12:42:27.277987249Z"
             }
           ],
           "turn_state": {
@@ -34373,7 +34357,7 @@
               "kind": "event",
               "node_id": "n_1a0b61d070751ed2f7695dd11dcbeb205542bbee40a5a59976e26b30dfdd1e7f",
               "parent_node_id": "frame-node/v3/ac05290cbb5b481dc281e62ba6776b33814f2a862b7cca709c85f07a28ec6a40",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -34395,7 +34379,7 @@
               "kind": "event",
               "node_id": "n_808f443440c2b4e6259cf792f26133b585c444d27be079000d531c5857ab4f66",
               "parent_node_id": "n_1a0b61d070751ed2f7695dd11dcbeb205542bbee40a5a59976e26b30dfdd1e7f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -34421,7 +34405,7 @@
               "kind": "event",
               "node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
               "parent_node_id": "n_808f443440c2b4e6259cf792f26133b585c444d27be079000d531c5857ab4f66",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -34444,7 +34428,7 @@
               "kind": "event",
               "node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
               "parent_node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ]
         },
@@ -34517,7 +34501,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/ac05290cbb5b481dc281e62ba6776b33814f2a862b7cca709c85f07a28ec6a40",
               "reason": "initial",
-              "timestamp": "2026-10-05T18:14:24.160963791+00:00"
+              "timestamp": "2026-10-06T12:42:27.277987249Z"
             },
             {
               "event": {
@@ -34541,7 +34525,7 @@
               "kind": "event",
               "node_id": "n_1a0b61d070751ed2f7695dd11dcbeb205542bbee40a5a59976e26b30dfdd1e7f",
               "parent_node_id": "frame-node/v3/ac05290cbb5b481dc281e62ba6776b33814f2a862b7cca709c85f07a28ec6a40",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -34563,7 +34547,7 @@
               "kind": "event",
               "node_id": "n_808f443440c2b4e6259cf792f26133b585c444d27be079000d531c5857ab4f66",
               "parent_node_id": "n_1a0b61d070751ed2f7695dd11dcbeb205542bbee40a5a59976e26b30dfdd1e7f",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -34589,7 +34573,7 @@
               "kind": "event",
               "node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
               "parent_node_id": "n_808f443440c2b4e6259cf792f26133b585c444d27be079000d531c5857ab4f66",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             },
             {
               "event": {
@@ -34612,7 +34596,7 @@
               "kind": "event",
               "node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
               "parent_node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
-              "timestamp": "2027-01-15T08:00:00+00:00"
+              "timestamp": "2027-01-15T08:00:00.000000000Z"
             }
           ],
           "turn_state": {
@@ -34733,7 +34717,7 @@
       "status": "passed",
       "oracle_id": "sim.oracle.global-invariants.v1",
       "observation_class": "real_observation",
-      "message": "generated/fast-random seed 0x657e58b5c761c1c4: 0 violation(s), 0 quarantined; judged completion-ownership=6 effect-at-least-once-window=17 obligations-settled-or-stalled=54 artifact-reachable-or-collected=3 tool-call-identity=6 input-settles-exactly-once=17 an-existing-start-is-answered-only-to-its-originator=0 frames-form-one-chain=7 host-admission=0 transcript-order=0 redrive-resumes=0; 0 deletion downgrade(s)"
+      "message": "generated/fast-random seed 0x657e58b5c761c1c4: 0 violation(s), 0 quarantined; judged completion-ownership=6 effect-at-least-once-window=17 obligations-settled-or-stalled=71 artifact-reachable-or-collected=20 tool-call-identity=6 input-settles-exactly-once=17 an-existing-start-is-answered-only-to-its-originator=0 frames-form-one-chain=7 host-admission=0 transcript-order=0 redrive-resumes=0; 0 deletion downgrade(s)"
     },
     {
       "status": "passed",

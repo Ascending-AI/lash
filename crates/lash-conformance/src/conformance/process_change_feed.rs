@@ -177,7 +177,7 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
                     ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                         serde_json::json!({ "writer": writer_index }),
                     )),
-                    crate::ProcessCompletionAuthority::external_owner(),
+                    crate::ProcessCompletionAuthority::workflow_key(&process_id),
                 )
                 .await
                 .expect("concurrent writer complete");

@@ -43,10 +43,8 @@ async fn a_ledger_row_decodes_its_typed_payload() {
     ) as Arc<dyn ProcessRegistry>;
 
     let process_parent = registry
-        .register_process(lash_core_execution::ProcessRegistration::new(
-            lash_core_execution::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core_execution::ProcessProvenance::session(
                 lash_core_execution::SessionScope::new("payload-session"),
             ),

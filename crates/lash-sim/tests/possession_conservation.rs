@@ -72,7 +72,7 @@ struct PossessionWorld {
     /// Registry rows a possession-conferring start channel realized, keyed to
     /// the opener that realized them.
     realized: BTreeMap<ProcessId, &'static str>,
-    /// Registry rows no run realized — observer/external rows. They are
+    /// Registry rows no run realized: rows the law registered directly. They are
     /// session-visible, never run-local: legitimately possessed by no opener.
     registered_only: BTreeSet<ProcessId>,
     /// The minted id behind each scenario label (`"{opener}-{child}"` for a
@@ -438,10 +438,8 @@ impl PossessionWorld {
     async fn register_observed_only(&mut self, label: &str) {
         let process_id = self
             .registry
-            .register_process(ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            .register_process(lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 ProcessProvenance::host(),
                 Lifetime::Detached,
             ))

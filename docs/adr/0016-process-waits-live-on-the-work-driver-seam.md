@@ -14,7 +14,7 @@ accepted
 
 Transient ingress errors return `Reattach` without writing a process outcome. Connection refusal or reset, response-read EOF, truncated JSON, timeout, HTTP 408/429 and ingress-generated 5xx failures are transient. Reattachment observes the same durable process. Definitive targets, typed refusals, local encoding errors and complete malformed responses remain errors. An invocation-sourced failure stays definitive even when its HTTP status is 5xx. Cancel watches and bounded sends use the same classifier; retries retain workflow identity, payload and any send idempotency key.
 
-`CallerDeparted` refuses an unresolved wait before contacting ingress. A retained terminal outcome is returned from durable state. Engine errors do not fall back silently to database polling.
+A retained terminal outcome is returned from durable state. Engine errors do not fall back silently to database polling.
 
 ## Why and consequences
 

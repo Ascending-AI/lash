@@ -2332,10 +2332,8 @@ pub async fn fenced_process_and_trigger_registration_stays_typed(
     triggers: Arc<dyn crate::TriggerStore>,
 ) {
     let process = registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         ))

@@ -162,16 +162,14 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                         ],
                     )
                     .map_err(process_sqlite_error)?;
-                    if !record.input.is_externally_owned() {
-                        crate::obligation_ledger::arm_obligation_tx(
-                            tx,
-                            &lash_core_execution::store::ObligationKey::ProcessStart {
-                                process_id: record.id.clone(),
-                            },
-                            crate::obligation_ledger::DUE_AT_ONCE_MS,
-                        )
-                        .map_err(lash_core_execution::PluginError::from)?;
-                    }
+                    crate::obligation_ledger::arm_obligation_tx(
+                        tx,
+                        &lash_core_execution::store::ObligationKey::ProcessStart {
+                            process_id: record.id.clone(),
+                        },
+                        crate::obligation_ledger::DUE_AT_ONCE_MS,
+                    )
+                    .map_err(lash_core_execution::PluginError::from)?;
                     let mut record = record;
                     let process_id = record.id.clone();
                     for session_id in &observers {

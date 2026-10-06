@@ -760,9 +760,9 @@ mod tests {
             ToolIntentKind::StartProcess => {
                 ToolIntent::StartProcess(Box::new(StartProcessIntent {
                     owner: crate::RuntimeOwner::Session(session_id),
-                    declaration: crate::ProcessStartDeclaration::external(
+                    declaration: crate::ProcessStartDeclaration::new(
+                        crate::testing::held_engine_input(serde_json::Value::Null),
                         crate::ProcessOriginator::host(),
-                        serde_json::Value::Null,
                         crate::Lifetime::Detached,
                     ),
                 }))
@@ -953,9 +953,9 @@ mod tests {
 
     #[test]
     fn start_process_intent_without_a_lifetime_is_refused() {
-        let declaration = crate::ProcessStartDeclaration::external(
+        let declaration = crate::ProcessStartDeclaration::new(
+            crate::testing::held_engine_input(serde_json::Value::Null),
             crate::ProcessOriginator::host(),
-            serde_json::Value::Null,
             crate::Lifetime::Detached,
         );
         let mut payload = serde_json::to_value(declaration).expect("serialize start declaration");

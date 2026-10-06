@@ -53,9 +53,6 @@ pub struct StoreContractHandles {
 pub enum StoreContractOp {
     Register {
         process: u8,
-        /// An externally-owned row (lash never executes it) rather than one
-        /// the engine runs.
-        external: bool,
         wake_target: Option<u8>,
     },
     FirstStart {
@@ -538,34 +535,19 @@ fn session_id(index: u8) -> SessionId {
     SessionId::fixture(format!("prop-session-{}", index % SESSION_COUNT))
 }
 
-/// A generated process: externally owned (an `External` input lash never
-/// executes) or one the engine runs (an `Engine` input with its execution env).
-fn registration(
-    label: &str,
-    external: bool,
-    wake_target: Option<SessionId>,
-) -> ProcessRegistration {
-    let registration = if external {
-        ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::json!({ "label": label }),
-            },
-            ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        )
-    } else {
-        ProcessRegistration::new(
-            ProcessInput::Engine {
-                kind: "store-contract-property".to_string(),
-                payload: serde_json::Value::Null,
-            },
-            ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        )
-        .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-            "process-env:fixture-{label}"
-        ))))
-    };
+/// A generated process: an `Engine` input with its execution env.
+fn registration(label: &str, wake_target: Option<SessionId>) -> ProcessRegistration {
+    let registration = ProcessRegistration::new(
+        ProcessInput::Engine {
+            kind: "store-contract-property".to_string(),
+            payload: serde_json::Value::Null,
+        },
+        ProcessProvenance::host(),
+        lash_core::Lifetime::Detached,
+    )
+    .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
+        "process-env:fixture-{label}"
+    ))));
     registration
         .with_extra_event_types([
             ProcessEventType {
@@ -630,7 +612,6 @@ async fn apply_operation(
     match operation {
         StoreContractOp::Register {
             process,
-            external,
             wake_target,
         } => {
             let slot = *process % PROCESS_COUNT;
@@ -638,7 +619,7 @@ async fn apply_operation(
             let result = handles
                 .registry
                 .register_process(
-                    registration(&format!("prop-process-{slot}"), *external, target.clone())
+                    registration(&format!("prop-process-{slot}"), target.clone())
                         .with_start_key(Some(slot_start_key(slot))),
                 )
                 .await;
@@ -850,11 +831,8 @@ async fn apply_operation(
             let id = model.slot_id(*process);
             let output = terminal_output(*terminal);
             if let Ok(Some(record)) = handles.registry.get_process(&id).await {
-                let authority = if record.input.is_externally_owned() {
-                    ProcessCompletionAuthority::external_owner()
-                } else {
-                    ProcessCompletionAuthority::workflow_key(format!("property:{id}"))
-                };
+                let authority =
+                    ProcessCompletionAuthority::workflow_key(format!("property:{}", record.id));
                 if let Ok(ProcessCompletionOutcome::Committed(_)) = handles
                     .registry
                     .complete_process(&id, output.clone(), authority)
@@ -1362,7 +1340,7 @@ async fn assert_replay_key_idempotency(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let id = registry
-        .register_process(registration("law-replay-key", true, None))
+        .register_process(registration("law-replay-key", None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1416,8 +1394,7 @@ async fn assert_replay_key_idempotency(
 
 /// The registry keeps the execution-started fact consistent; the engine alone
 /// decides whether a start may run (ADR 0110). The same execution is
-/// idempotent, a successor execution takes exactly the next attempt, and an
-/// externally-owned row never starts at all.
+/// idempotent, and a successor execution takes exactly the next attempt.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1426,7 +1403,7 @@ async fn assert_attempt_monotonicity(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let executed = registry
-        .register_process(registration("law-attempt-monotonicity", false, None))
+        .register_process(registration("law-attempt-monotonicity", None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1465,23 +1442,6 @@ async fn assert_attempt_monotonicity(
         "Attempt monotonicity: a start that skipped an attempt was accepted"
     );
 
-    let external = registry
-        .register_process(registration("law-external-never-starts", true, None))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .id;
-    let authority = invocation_authority(&external, 1, 1);
-    prop_assert!(
-        registry
-            .record_first_started_with_authority(
-                &external,
-                authority.invocation_started().expect("bound invocation"),
-                &authority,
-            )
-            .await
-            .is_err(),
-        "Attempt monotonicity: an externally-owned row started an execution"
-    );
     Ok(())
 }
 
@@ -1493,7 +1453,7 @@ async fn assert_stale_authority_non_mutation(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let id = registry
-        .register_process(registration("law-stale-authority", false, None))
+        .register_process(registration("law-stale-authority", None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1546,7 +1506,6 @@ async fn assert_wake_group_order_and_claim_ownership(
     let id = registry
         .register_process(registration(
             "law-wake-order",
-            true,
             Some(SessionId::from("law-wake-session")),
         ))
         .await
@@ -1811,12 +1770,8 @@ async fn assert_prune_reregister_wake_fence(
     let process = handles
         .registry
         .register_process(
-            registration(
-                "law-prune-reregister-wake-process",
-                true,
-                Some(session.clone()),
-            )
-            .with_start_key(Some(start_key.clone())),
+            registration("law-prune-reregister-wake-process", Some(session.clone()))
+                .with_start_key(Some(start_key.clone())),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -1893,7 +1848,7 @@ async fn assert_prune_reregister_wake_fence(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!("old incarnation done"),
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&process),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
@@ -1912,12 +1867,8 @@ async fn assert_prune_reregister_wake_fence(
     let restarted = handles
         .registry
         .register_process(
-            registration(
-                "law-prune-reregister-wake-process",
-                true,
-                Some(session.clone()),
-            )
-            .with_start_key(Some(start_key)),
+            registration("law-prune-reregister-wake-process", Some(session.clone()))
+                .with_start_key(Some(start_key)),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -1962,7 +1913,7 @@ async fn assert_prune_tombstone_watermark_safety(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let live_id = registry
-        .register_process(registration("law-prune-live-must-survive", false, None))
+        .register_process(registration("law-prune-live-must-survive", None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1975,7 +1926,7 @@ async fn assert_prune_tombstone_watermark_safety(
         "Prune/tombstone/watermark safety: live process was pruned"
     );
     let eligible_id = registry
-        .register_process(registration("law-prune-watermark-eligible", true, None))
+        .register_process(registration("law-prune-watermark-eligible", None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1985,12 +1936,12 @@ async fn assert_prune_tombstone_watermark_safety(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&eligible_id),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let id = registry
-        .register_process(registration("law-prune-watermark", true, None))
+        .register_process(registration("law-prune-watermark", None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -2004,7 +1955,7 @@ async fn assert_prune_tombstone_watermark_safety(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&id),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
@@ -2098,7 +2049,6 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         .register_process(
             registration(
                 "law-prune-reregister",
-                true,
                 Some(SessionId::from("law-prune-reregister-old")),
             )
             .with_start_key(Some(start_key.clone())),
@@ -2123,7 +2073,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!({"identity": "old"}),
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&id),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
@@ -2151,7 +2101,6 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         .register_process(
             registration(
                 "law-prune-reregister",
-                false,
                 Some(SessionId::from("law-prune-reregister-new")),
             )
             .with_start_key(Some(start_key)),

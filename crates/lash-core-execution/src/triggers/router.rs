@@ -70,12 +70,12 @@ fn trigger_subscription_address_preimage(
 ///
 /// Owners: 1 session, 2 host, 3 platform.
 /// Actors: 1 host, 2 session.
-/// Process inputs: 1 burned, 2 engine, 3 session turn, 4 external.
+/// Process inputs: 1 burned, 2 engine, 3 session turn, 4 burned.
 /// Tool output contracts: 1 static, 2 from-input-schema.
 /// Arbitrary JSON and schemas are each one canonical opaque bytes leaf.
 /// Value selectors: 1 payload, 2 pointer, 3 const, 4 template, 5 present.
 /// Process statuses: 1 running, 2 waiting, 3 completed, 4 failed, 5 cancelled, 6 abandoned, 7
-/// caller departed.
+/// burned.
 /// Retired tags remain burned.
 fn trigger_subscription_definition_preimage(
     owner_scope: &TriggerOwnerScope,
@@ -285,10 +285,6 @@ fn project_trigger_process_input(
                     );
                 }
             }
-        }
-        crate::ProcessInput::External { metadata } => {
-            identity.tag(4);
-            project_process_payload_leaf(identity, metadata);
         }
     }
 }
@@ -1499,13 +1495,12 @@ fn apply_trigger_inputs(
             object.insert("args".to_string(), serde_json::Value::Object(args));
             Ok(target)
         }
-        crate::ProcessStartTarget::Input(
-            other
-            @ (crate::ProcessInput::SessionTurn { .. } | crate::ProcessInput::External { .. }),
-        ) => Err(PluginError::Session(format!(
-            "trigger target must be an engine process, got {}",
-            other.engine_kind()
-        ))),
+        crate::ProcessStartTarget::Input(other @ crate::ProcessInput::SessionTurn { .. }) => {
+            Err(PluginError::Session(format!(
+                "trigger target must be an engine process, got {}",
+                other.engine_kind()
+            )))
+        }
     }
 }
 

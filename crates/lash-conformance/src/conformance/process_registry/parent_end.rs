@@ -13,10 +13,8 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
 ) {
     let originator = SessionScope::new("parent-end-retention-session");
     let parent = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         ))
@@ -25,10 +23,8 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
     let process_id = parent.id.clone();
     let parent_scope = lash_core::ScopeId::process(parent.id.clone());
     let child = crate::started_until_starter(
-        ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         ),
@@ -42,7 +38,7 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         .complete_process(
             &process_id,
             settled_success(serde_json::json!({"parent": "done"})),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("terminal write and ledger row commit atomically");
@@ -130,10 +126,8 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
 
     // A `Cancel` child registering after the ledger row exists is fenced.
     let late = crate::started_until_starter(
-        ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         ),
@@ -225,10 +219,8 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
 ) {
     let originator = SessionScope::new("parent-end-reclaim-session");
     let parent = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         ))
@@ -237,10 +229,8 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
     let parent_scope = lash_core::ScopeId::process(parent.id.clone());
     let child = registry
         .register_process(crate::started_until_starter(
-            ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 ProcessProvenance::session(originator.clone()),
                 lash_core::Lifetime::Detached,
             ),
@@ -298,7 +288,7 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
     );
 }
 
-/// Execute one externally owned process to a terminal outcome.
+/// Execute one held process to a terminal outcome.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -308,7 +298,7 @@ async fn complete_process(registry: &Arc<dyn ProcessRegistry>, process_id: &Proc
         .complete_process(
             process_id,
             settled_success(serde_json::json!({"done": true})),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(process_id),
         )
         .await
         .expect("complete process");
@@ -333,10 +323,8 @@ pub(super) async fn a_session_scope_closes_only_through_its_close_row(
     let turn = lash_core::ScopeId::turn(session.clone(), crate::TurnId::from("session-close-turn"));
     let session_scope = lash_core::ScopeId::session(session.clone());
     let registration = || {
-        ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         )

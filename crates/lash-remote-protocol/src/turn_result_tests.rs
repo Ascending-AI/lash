@@ -105,7 +105,6 @@ fn process_status_sets_pin_vocabulary_and_refuse_removed_fields() {
         (RemoteProcessStatus::Failed, "failed"),
         (RemoteProcessStatus::Cancelled, "cancelled"),
         (RemoteProcessStatus::Abandoned, "abandoned"),
-        (RemoteProcessStatus::CallerDeparted, "caller_departed"),
     ] {
         let filter = RemoteProcessStatusFilter::any_of([status]);
         let core: lash_core::ProcessStatusFilter = filter.clone().into();

@@ -293,10 +293,8 @@ mod tests {
             .process_registry();
         let ghost_id = lash_core_execution::mint_process_id();
         let process_id = registry
-            .register_process(ProcessRegistration::new(
-                lash_core_execution::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            .register_process(lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core_execution::ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             ))
@@ -309,7 +307,7 @@ mod tests {
                 ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
                     serde_json::Value::Null,
                 )),
-                lash_core_execution::ProcessCompletionAuthority::external_owner(),
+                lash_core_execution::ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await
             .expect("complete rollback process");

@@ -67,9 +67,9 @@ pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
     // A derived key is trusted: a retry whose content changed returns the
     // retained process untouched, never a refusal and never an overwrite.
     let mut changed = registration("start-key-disposition").with_start_key(Some(key.clone()));
-    changed.input = std::sync::Arc::new(ProcessInput::External {
-        metadata: serde_json::json!({"suite": "changed-content-retry"}),
-    });
+    changed.input = std::sync::Arc::new(lash_core::testing::held_engine_input(
+        serde_json::json!({"suite": "changed-content-retry"}),
+    ));
     let retried = registry
         .register_process_reporting_outcome(changed, &[])
         .await
@@ -88,9 +88,9 @@ fn host_keyed(bytes: &str, session: &str, wake: Option<&str>) -> ProcessRegistra
     let mut registration = registration("host-key")
         .with_start_key(Some(crate::StartKey::for_host(bytes)))
         .with_wake_session_id(wake.map(SessionId::fixture));
-    registration.input = std::sync::Arc::new(ProcessInput::External {
-        metadata: serde_json::json!({"report": "nightly", "secret": "input-metadata-of-a"}),
-    });
+    registration.input = std::sync::Arc::new(lash_core::testing::held_engine_input(
+        serde_json::json!({"report": "nightly", "secret": "input-metadata-of-a"}),
+    ));
     registration.provenance = ProcessProvenance::new(crate::ProcessOriginator::session(
         crate::SessionScope::new(SessionId::fixture(session.to_string())),
     ));
@@ -145,9 +145,9 @@ pub async fn a_host_start_key_is_global_and_fences_its_originator(
     assert_eq!(repeat.record.id, first.record.id);
 
     let mut changed = host_keyed(bytes, "host-key-session-a", None);
-    changed.input = std::sync::Arc::new(ProcessInput::External {
-        metadata: serde_json::json!({"suite": "changed-host-content"}),
-    });
+    changed.input = std::sync::Arc::new(lash_core::testing::held_engine_input(
+        serde_json::json!({"suite": "changed-host-content"}),
+    ));
     let error = registry
         .register_process_reporting_outcome(changed, &[])
         .await
@@ -278,7 +278,7 @@ pub async fn a_host_start_key_after_prune_starts_new_for_any_originator(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!({"process": "a"}),
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&first.id),
         )
         .await
         .expect("complete A's process");
@@ -439,9 +439,9 @@ pub async fn concurrent_starts_under_one_key_register_one_process(
             racers.push(crate::task::spawn(async move {
                 let mut racer = registration("concurrent-start-key").with_start_key(Some(key));
                 if differing_content {
-                    racer.input = std::sync::Arc::new(ProcessInput::External {
-                        metadata: serde_json::json!({"racer": index}),
-                    });
+                    racer.input = std::sync::Arc::new(lash_core::testing::held_engine_input(
+                        serde_json::json!({"racer": index}),
+                    ));
                 }
                 start.wait().await;
                 registry
@@ -491,7 +491,7 @@ pub async fn a_start_key_after_prune_starts_a_new_process(registry: Arc<dyn Proc
         .complete_process(
             &first.id,
             settled_success(serde_json::json!({"process": "first"})),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&first.id),
         )
         .await
         .expect("complete the first process");

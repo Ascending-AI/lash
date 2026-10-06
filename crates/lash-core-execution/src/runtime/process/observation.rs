@@ -509,6 +509,6 @@ fn terminal_error(outcome: Option<&ProcessAwaitOutput>) -> Option<String> {
 fn child_session_id(input: &ProcessInput) -> Option<SessionId> {
     match input {
         ProcessInput::SessionTurn { create_request, .. } => create_request.session_id.clone(),
-        ProcessInput::Engine { .. } | ProcessInput::External { .. } => None,
+        ProcessInput::Engine { .. } => None,
     }
 }

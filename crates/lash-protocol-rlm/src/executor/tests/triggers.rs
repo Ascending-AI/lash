@@ -1055,15 +1055,18 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
 pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
     block_on(async {
         let mut state = RlmExecutionState::new();
-        let registration = lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        let registration = lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         );
         let double =
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        // The environment the held registration captures.
+        lash_core::testing::process_execution_env_fixture(
+            double.lash_backend().process_env_store().as_ref(),
+        )
+        .await;
         let handler = double
             .open_handler(crate::testing::default_cell_scope())
             .await
@@ -1415,10 +1418,10 @@ async fn execute_trigger_process_with_originator(
     // A host-origin process starts its child under the same host authority.
     // The recorded start reads dispatch provenance, rather than a service override.
     let (ctx, parent_id) = if let Some(originator) = &originator_override {
-        let parent = lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        // The environment the held parent captures.
+        lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
+        let parent = lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core::ProcessProvenance::new(originator.clone()),
             lash_core::Lifetime::Detached,
         );
@@ -1530,10 +1533,8 @@ async fn execute_trigger_process_with_originator(
 #[test]
 pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
     block_on(async {
-        let registration = lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        let registration = lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         );

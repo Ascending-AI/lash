@@ -77,9 +77,7 @@ pub struct ProcessListFilter {
     /// `(kind, id)` pair the stores index.
     pub until: Option<super::ScopeId>,
     /// Selects nonterminal rows whose cancellation request was recorded
-    /// strictly before this timestamp. `caller_departed` is nonterminal and
-    /// is selected: nothing may terminalize such a row, so a cancel request
-    /// on it stays unanswered and is exactly what this filter is for.
+    /// strictly before this timestamp.
     pub cancel_pending_before_ms: Option<u64>,
     pub identity_kind: Option<String>,
     pub identity_label: Option<String>,

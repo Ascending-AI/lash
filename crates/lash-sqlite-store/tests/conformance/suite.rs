@@ -22,9 +22,9 @@ use lash_conformance::{
 use lash_core_execution::store::{ConformanceDeployment, RuntimeStore};
 use lash_core_execution::{
     DeploymentStore, ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity,
-    ProcessInput, ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
-    ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
-    SessionCatalogStore, SessionCommitStore, TriggerStore,
+    ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
+    ProcessRegistrar as _, ProcessRegistry, ProcessStatusFilter, SessionCatalogStore,
+    SessionCommitStore, TriggerStore,
 };
 use lash_sqlite_store::SqliteDatabase;
 
@@ -823,10 +823,8 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
     let registry = backend.process_registry();
     let recent_pushdown_id = registry
         .register_process(
-            ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             )
@@ -845,7 +843,7 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
             lash_core_execution::ProcessAwaitOutput::from_tool_output(
                 lash_core_execution::ToolCallOutput::success(serde_json::json!({})),
             ),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&recent_pushdown_id),
         )
         .await
         .expect("complete recently retired pushdown fixture");

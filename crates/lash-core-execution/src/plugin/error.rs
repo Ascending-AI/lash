@@ -820,23 +820,6 @@ define_plugin_errors! {
         => Self::ProcessNoLongerRetained { .. }
         => "process_no_longer_retained"
         => crate::ToolFailureClass::InvalidRequest;
-/// A wait was requested on a row whose registering caller departed before
-    /// any outcome could be recorded (FIG-1383).
-    ///
-    /// The wait is refused rather than parked: the row is non-terminal, no
-    /// actor is left to terminalize it, and lash may never invent an outcome
-    /// for it. Closure comes from external reconciliation writing the observed
-    /// truth, or from retention reclaiming the row.
-    #[error(
-        "process `{process_id}` recorded a caller departure before any outcome; awaiting it would never resolve"
-    )]
-    ProcessCallerDeparted { process_id: ProcessId }
-        => PluginError::ProcessCallerDeparted { process_id }
-        => { process_id: ProcessId }
-        => Self::ProcessCallerDeparted { process_id: process_id.clone() }
-        => Self::ProcessCallerDeparted { .. }
-        => "process_caller_departed"
-        => crate::ToolFailureClass::InvalidRequest;
 /// A recovery would end a process that a later segment already carries
     /// (FIG-3820).
     #[error("process `{process_id}` is carried by its segment {segment_ordinal}")]
@@ -1147,7 +1130,6 @@ impl PluginError {
             | Self::ProcessEventsReleased { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessNoLongerRetained { .. }
-            | Self::ProcessCallerDeparted { .. }
             | Self::ProcessHandedOver { .. }
             | Self::ProcessAlreadyTerminal { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }

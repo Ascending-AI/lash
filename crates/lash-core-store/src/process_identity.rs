@@ -475,31 +475,9 @@ impl ProcessExecutionEnvSpec {
 }
 /// Durable lifecycle status of a process row.
 ///
-/// # Rollout: adding a variant is a one-way door for readers
-///
-/// This enum has no `#[serde(other)]` fallback arm, by design — a store that
+/// This enum has no `#[serde(other)]` fallback arm, by design: a store that
 /// silently folded an unknown status into a known one would corrupt the very
-/// fold the registry exists to keep honest. The consequence is that a variant
-/// is only readable by binaries that know it: an older binary sharing a
-/// registry with a newer one hard-errors with `unknown variant
-/// caller_departed` on any read that touches such a row. That includes
-/// [`ProcessRegistry::processes_changed_since`](crate::ProcessRegistry::processes_changed_since),
-/// where the failure is not "skip one row" but a stalled feed — the projector
-/// stops advancing its cursor at all.
-///
-/// [`ProcessStatus::CallerDeparted`] therefore ships without a store schema
-/// bump, deliberately: no column shape changed, and every backend already
-/// filters the `status` column it is written to. For SQLite that is also the
-/// only tenable choice — its stores have no migration chain and refuse any
-/// database whose `user_version` does not match exactly, so a bump would make
-/// every existing process database unopenable to buy nothing. Postgres *does*
-/// have a migration ladder, so a bump was possible there; it was skipped for
-/// rollout simplicity and vocabulary parity across backends, not because it
-/// could not be done.
-///
-/// Operationally: upgrade readers before any writer can emit a new status.
-/// A mixed-version fleet sharing one registry must roll all binaries forward
-/// first; rolling a writer out ahead of its readers stalls their feeds.
+/// fold the registry exists to keep honest.
 #[derive(
     Clone,
     Copy,
@@ -522,17 +500,6 @@ pub enum ProcessStatus {
     Failed,
     Cancelled,
     Abandoned,
-    /// The caller that registered an Externally-Owned row departed after the
-    /// row committed and before any outcome was recorded.
-    ///
-    /// Deliberately **not** terminal: lash cannot observe whether the external
-    /// work it was recording ever happened, and writing `Cancelled` or
-    /// `Failed` would assert an outcome lash never saw. The row is instead
-    /// durably distinguishable from an Externally-Owned row whose caller is
-    /// still present, so external reconciliation can close it with the truth,
-    /// awaits can refuse instead of parking forever, and retention can reclaim
-    /// it (see [`ProcessStatus::is_retired`]).
-    CallerDeparted,
 }
 impl ProcessStatus {
     /// Whether the row belongs to the non-terminal process partition.
@@ -545,16 +512,12 @@ impl ProcessStatus {
     pub fn is_live(&self) -> bool {
         match self {
             Self::Running | Self::Waiting => true,
-            Self::Completed
-            | Self::Failed
-            | Self::Cancelled
-            | Self::Abandoned
-            | Self::CallerDeparted => false,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned => false,
         }
     }
 
     /// Lets process-store implementors apply retention only to completed, failed, cancelled, or
-    /// abandoned rows; running, waiting, and caller-departed rows are never terminal.
+    /// abandoned rows; running and waiting rows are never terminal.
     pub fn is_terminal(&self) -> bool {
         self.terminal().is_some()
     }
@@ -568,17 +531,14 @@ impl ProcessStatus {
             Self::Failed => Some(TerminalProcessStatus::Failed),
             Self::Cancelled => Some(TerminalProcessStatus::Cancelled),
             Self::Abandoned => Some(TerminalProcessStatus::Abandoned),
-            Self::Running | Self::Waiting | Self::CallerDeparted => None,
+            Self::Running | Self::Waiting => None,
         }
     }
 
     /// Lets process-store implementors select the rows retention may reclaim.
     ///
     /// Retention reclaims a row; it never asserts an outcome. Terminal rows
-    /// qualify because their outcome is recorded, and
-    /// [`ProcessStatus::CallerDeparted`] qualifies because lash can never
-    /// record one: leaving those rows out would let a host accumulate them
-    /// without bound, since nothing may honestly terminalize them.
+    /// qualify because their outcome is recorded.
     pub fn is_retired(&self) -> bool {
         self.retired().is_some()
     }
@@ -592,7 +552,6 @@ impl ProcessStatus {
             Self::Failed => Some(RetiredProcessStatus::Failed),
             Self::Cancelled => Some(RetiredProcessStatus::Cancelled),
             Self::Abandoned => Some(RetiredProcessStatus::Abandoned),
-            Self::CallerDeparted => Some(RetiredProcessStatus::CallerDeparted),
             Self::Running | Self::Waiting => None,
         }
     }
@@ -666,8 +625,7 @@ impl fmt::Display for TerminalProcessStatus {
 ///
 /// A tombstone and every "no longer retained" answer carry one, so a pruned
 /// process still says how it ended: a `failed` one is never reported as
-/// completed, and a `caller_departed` one is never reported as having an
-/// outcome at all.
+/// completed.
 #[derive(
     Clone,
     Copy,
@@ -687,7 +645,6 @@ pub enum RetiredProcessStatus {
     Failed,
     Cancelled,
     Abandoned,
-    CallerDeparted,
 }
 
 impl RetiredProcessStatus {
@@ -697,7 +654,6 @@ impl RetiredProcessStatus {
         Self::Failed,
         Self::Cancelled,
         Self::Abandoned,
-        Self::CallerDeparted,
     ];
 
     /// This status in the whole lifecycle vocabulary.
@@ -707,7 +663,6 @@ impl RetiredProcessStatus {
             Self::Failed => ProcessStatus::Failed,
             Self::Cancelled => ProcessStatus::Cancelled,
             Self::Abandoned => ProcessStatus::Abandoned,
-            Self::CallerDeparted => ProcessStatus::CallerDeparted,
         }
     }
 
@@ -1026,7 +981,6 @@ lifecycle_vocabulary!(ProcessStatus, label, by_ref {
     Failed => "failed",
     Cancelled => "cancelled",
     Abandoned => "abandoned",
-    CallerDeparted => "caller_departed",
 });
 
 lifecycle_vocabulary!(WakeDeliveryState, as_str, by_value {

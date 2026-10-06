@@ -351,7 +351,7 @@ macro_rules! process_registry_tests {
                 (session_delete_preserves_process_bytes, "session-delete-bytes"),
                 (record_fold_and_retention_hold_for_every_registry_writer, "registry-writer-fold-retention"),
                 (signals_refuse_undeclared_invalid_and_terminal_sends, "signal-refusals"),
-                (work_wait_seam_covers_unknown_pruned_departed_and_external_processes, "work-wait-matrix"),
+                (work_wait_seam_covers_unknown_pruned_and_backend_owned_processes, "work-wait-matrix"),
                 (tombstones_make_pruned_processes_distinguishable, "tombstones"),
                 (a_start_key_after_prune_starts_a_new_process, "start-key-after-prune"),
                 (watched_process_registry_start_key_after_prune_starts_a_new_process, "watched-start-key-after-prune"),
@@ -369,13 +369,10 @@ macro_rules! process_registry_tests {
                 (retired_process_shapes_refuse_before_registration_or_effects, "retired-process-shapes"),
                 (keyless_starts_are_always_new, "keyless-starts"),
                 (concurrent_starts_under_one_key_register_one_process, "concurrent-start-key"),
-                (caller_departure_state_machine, "caller-departure"),
-                (caller_departed_rows_are_reclaimed_by_retention, "caller-departed-retention"),
                 (terminal_completion_atomically_retains_parent_end_plan, "parent-end-plan"),
                 (settled_parent_end_plans_are_reclaimed_by_retention, "parent-end-plan-reclaim"),
                 (a_terminal_write_arms_its_publication_once, "process-terminal-publication"),
-                (a_completion_authority_matching_its_input_class_commits, "completion-authority-granted"),
-                (a_completion_authority_for_the_wrong_input_class_is_refused, "completion-authority-refused"),
+                (a_completion_authority_commits_and_records_its_evidence, "completion-authority-granted"),
                 (terminal_completion_replay_keeps_original_authority_and_writes_nothing, "terminal-completion-authority-replay"),
                 (a_session_scope_closes_only_through_its_close_row, "session-scope-close"),
                 (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
@@ -669,12 +666,12 @@ macro_rules! process_change_horizon_tests {
     };
 }
 
-/// Register the external-completion projection-repair law.
+/// Register the completion projection-repair law.
 #[macro_export]
 macro_rules! process_projection_repair_tests {
     ($fixture:block) => {
         $crate::process_projection_repair_tests!(@catalogue $fixture; [
-            (external_completion_replay_repairs_projection, "external-completion-projection-repair"),
+            (completion_replay_repairs_projection, "completion-projection-repair"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

@@ -1354,10 +1354,8 @@ async fn register_turn_child(
     session_id: &str,
     turn_id: &str,
 ) -> lash::ProcessId {
-    let mut registration = lash::process::ProcessRegistration::new(
-        lash::process::ProcessInput::External {
-            metadata: json!({ "awaited": true }),
-        },
+    let mut registration = lash::testing::held_engine_registration(
+        json!({ "awaited": true }),
         lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
             SessionId::fixture(session_id.to_string()),
         )),

@@ -334,12 +334,8 @@ pub trait ProcessObserverRegistry: ProcessQuery {
 
     /// List the observed rows that are still live for the session.
     ///
-    /// "Live" is the un-retired partition — exactly the rows the recovery
-    /// non-terminal page keeps (`status IN ('running', 'waiting')`), not merely the
-    /// non-terminal ones. A [`ProcessStatus::CallerDeparted`](super::model::ProcessStatus::CallerDeparted) row is
-    /// non-terminal yet retired: lash will never observe an outcome for it, so
-    /// presenting it as live would show a caller a launch still in flight that
-    /// nothing can ever advance.
+    /// "Live" is the un-retired partition: exactly the rows the recovery
+    /// non-terminal page keeps (`status IN ('running', 'waiting')`).
     async fn list_live_observed_by(
         &self,
         session_id: &SessionId,
@@ -521,21 +517,20 @@ pub struct ProcessTerminalPublication {
 
 /// Durable execution lifecycle transitions.
 ///
-/// The started fact, wait markers, the abandon request and caller-departure
-/// markers, authority-bound terminal completion, and the
+/// The started fact, wait markers, the abandon request, authority-bound
+/// terminal completion, and the
 /// parent-end teardown plans retained atomically with a terminal outcome.
 #[async_trait::async_trait]
 pub trait ProcessLifecycle: Send + Sync {
     /// Complete a process under an explicit, auditable completion authority.
     ///
     /// This path is reserved for writers whose single-writer discipline lives
-    /// outside the process engine: an external actor closing an externally-owned
-    /// row, or a workflow-key-coalesced substrate completing a row it ran. The
-    /// [`ProcessCompletionAuthority`] names which of these applies; the
-    /// implementation MUST call
+    /// outside the process engine: a workflow-key-coalesced substrate
+    /// completing a row it ran. The [`ProcessCompletionAuthority`] names the
+    /// discipline; the implementation MUST call
     /// [`authority.validate`](ProcessCompletionAuthority::validate) against the
-    /// row's ownership (its input class) inside this operation, so a mismatched authority is rejected with a typed
-    /// error before any terminal event is appended, and MUST record the
+    /// row inside this operation, so a refused authority is rejected with a
+    /// typed error before any terminal event is appended, and MUST record the
     /// authority on the terminal event as audit evidence (via
     /// [`terminal_append_request`](super::events::terminal_append_request)).
     ///
@@ -678,7 +673,6 @@ pub trait ProcessLifecycle: Send + Sync {
     /// retained fact with the next consecutive attempt; any other attempt is
     /// refused. Whether a start may run at all is the engine's decision, made
     /// before this write: lash never re-runs started work from scratch.
-    /// An externally-owned row never starts.
     async fn record_first_started_with_authority(
         &self,
         process_id: &ProcessId,
@@ -726,26 +720,6 @@ pub trait ProcessLifecycle: Send + Sync {
             .await?;
         Ok((record, crate::StoreRealization::Realized))
     }
-
-    /// Record that the caller which registered an Externally-Owned row
-    /// departed before any outcome could be written (FIG-1383).
-    ///
-    /// This is the honest closure of the audit-before-side-effect window: the
-    /// row committed, the caller then vanished, and lash cannot observe
-    /// whether the external work it was recording ever happened. Writing
-    /// `Cancelled` or `Failed` here would assert an outcome lash never saw, so
-    /// the row instead moves to the durable, non-terminal
-    /// [`ProcessStatus::CallerDeparted`](super::model::ProcessStatus::CallerDeparted),
-    /// which external reconciliation can
-    /// find, awaits refuse instead of parking on, and retention may reclaim.
-    ///
-    /// Idempotent: a row already in that state is returned unchanged. Refused
-    /// for rows that are not Externally-Owned and for rows that already
-    /// recorded a terminal outcome.
-    async fn record_caller_departure(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<ProcessRecord, PluginError>;
 
     /// Enter `wait` (`process.waiting`) as a run boundary (FIG-3571): the
     /// run's pending `prelude` is appended ahead of the transition in the same

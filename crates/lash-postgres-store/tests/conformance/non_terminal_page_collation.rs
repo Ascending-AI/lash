@@ -1,5 +1,5 @@
 use super::*;
-use lash_core_execution::{ProcessInput, ProcessProvenance, ProcessRegistration};
+use lash_core_execution::ProcessProvenance;
 
 const REGISTERED: usize = 10;
 
@@ -10,10 +10,8 @@ async fn registered_and_paged_ids(registry: &dyn ProcessRegistry) -> (Vec<String
     for _ in 0..REGISTERED {
         registered.push(
             registry
-                .register_process(ProcessRegistration::new(
-                    ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
+                .register_process(lash_core::testing::held_engine_registration(
+                    serde_json::Value::Null,
                     ProcessProvenance::host(),
                     lash_core_execution::Lifetime::Detached,
                 ))

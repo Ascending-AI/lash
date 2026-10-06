@@ -1065,19 +1065,6 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash_core::facade_support::SessionObserverIntent| {
         let _ = &value.process_id;
     });
-    // W0722: lash::plugins::PluginError::ProcessCallerDeparted [variant]
-    variant_witness(|value: &lash::plugins::PluginError| {
-        matches!(
-            value,
-            lash::plugins::PluginError::ProcessCallerDeparted { .. }
-        )
-    });
-    // W0723: lash::plugins::PluginError::ProcessCallerDeparted::process_id [field]
-    field_witness(|value: &lash::plugins::PluginError| {
-        if let lash::plugins::PluginError::ProcessCallerDeparted { process_id, .. } = value {
-            let _ = process_id;
-        }
-    });
     // W0724: lash::plugins::PluginError::ProcessUnknown [variant]
     variant_witness(|value: &lash::plugins::PluginError| {
         matches!(value, lash::plugins::PluginError::ProcessUnknown { .. })
@@ -1088,21 +1075,8 @@ fn processes_area_witnesses_b() {
             let _ = process_id;
         }
     });
-    // W0726: lash::process::ProcessEventAppendRequest::caller_departed [function]
-    let _ = lash::process::ProcessEventAppendRequest::caller_departed;
-    // W0727: lash::process::ProcessService::report_caller_departure [function]
-    fn meth_0727<T: lash::process::ProcessService>(_: &T) {
-        let _ = T::report_caller_departure;
-    }
     // W0728: lash::process::ProcessStatus::is_retired [function]
     let _ = lash::process::ProcessStatus::is_retired;
-    // W0730: lash::remote::processes::RemoteProcessStatus::CallerDeparted [variant]
-    variant_witness(|value: &lash::remote::processes::RemoteProcessStatus| {
-        matches!(
-            value,
-            lash::remote::processes::RemoteProcessStatus::CallerDeparted
-        )
-    });
     // W0732: lash::durability::ProcessLocalExecution::execute [function]
     let _ = lash::durability::ProcessLocalExecution::execute;
     // W0733: lash::durability::TriggerLocalExecution::execute [function]

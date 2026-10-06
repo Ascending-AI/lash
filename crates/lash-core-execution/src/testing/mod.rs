@@ -127,6 +127,83 @@ pub fn host_pin_claim_for_testing() -> crate::ReferrerClaim {
     .expect("a host pin is an unguarded referrer")
 }
 
+/// The kind [`HeldProcessEngine`] runs.
+#[cfg(any(test, feature = "testing"))]
+pub const HELD_PROCESS_ENGINE_KIND: &str = "testing-held";
+
+/// An engine input of [`HeldProcessEngine`]'s kind: the trivial process a law
+/// registers when it is about the row rather than about what runs it.
+#[cfg(any(test, feature = "testing"))]
+pub fn held_engine_input(payload: serde_json::Value) -> crate::ProcessInput {
+    crate::ProcessInput::Engine {
+        kind: HELD_PROCESS_ENGINE_KIND.to_string(),
+        payload,
+    }
+}
+
+/// A registration of [`held_engine_input`] under the fixture execution
+/// environment reference, which every registration carries.
+#[cfg(any(test, feature = "testing"))]
+pub fn held_engine_registration(
+    payload: serde_json::Value,
+    provenance: crate::ProcessProvenance,
+    lifetime: impl Into<crate::LifetimeDecision>,
+) -> crate::ProcessRegistration {
+    crate::ProcessRegistration::new(held_engine_input(payload), provenance, lifetime)
+        .with_execution_env_ref(Some(process_execution_env_fixture_ref()))
+}
+
+/// Engine fixture whose process runs until it is cancelled, and then answers
+/// its cancellation: a process that stays open until the law ends it.
+#[cfg(any(test, feature = "testing"))]
+pub struct HeldProcessEngine;
+
+#[cfg(any(test, feature = "testing"))]
+#[async_trait::async_trait]
+impl crate::ProcessEngine for HeldProcessEngine {
+    fn kind(&self) -> &'static str {
+        HELD_PROCESS_ENGINE_KIND
+    }
+
+    async fn run(
+        &self,
+        context: crate::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
+        context.cancellation_token().cancelled().await;
+        Ok(
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
+                crate::ToolCancellation::runtime("the held process was cancelled"),
+            ))
+            .into(),
+        )
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &crate::ReferrerClaim,
+        artifact_ref: &str,
+    ) -> Result<(), crate::PluginError> {
+        Err(crate::PluginError::Session(format!(
+            "the held engine stores no artifact `{artifact_ref}`"
+        )))
+    }
+}
+
 /// Engine fixture for trigger-delivery tests that need to exercise the real
 /// engine-only start contract without publishing unrelated language artifacts.
 #[cfg(any(test, feature = "testing"))]
@@ -179,9 +256,13 @@ impl crate::ProcessEngine for FixtureProcessEngine {
 
 #[cfg(any(test, feature = "testing"))]
 pub fn process_engine_fixture() -> crate::ProcessEngineRegistry {
-    crate::ProcessEngineRegistry::new().with_registration(
-        crate::ProcessEngineRegistration::accepting(Arc::new(FixtureProcessEngine)),
-    )
+    crate::ProcessEngineRegistry::new()
+        .with_registration(crate::ProcessEngineRegistration::accepting(Arc::new(
+            FixtureProcessEngine,
+        )))
+        .with_registration(crate::ProcessEngineRegistration::accepting(Arc::new(
+            HeldProcessEngine,
+        )))
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -211,9 +292,10 @@ impl crate::PluginFactory for FixtureProcessEngineFactory {
         &self,
         _context: &crate::ProcessEngineContributionContext<'_>,
     ) -> Result<Vec<crate::ProcessEngineRegistration>, crate::PluginError> {
-        Ok(vec![crate::ProcessEngineRegistration::accepting(Arc::new(
-            FixtureProcessEngine,
-        ))])
+        Ok(vec![
+            crate::ProcessEngineRegistration::accepting(Arc::new(FixtureProcessEngine)),
+            crate::ProcessEngineRegistration::accepting(Arc::new(HeldProcessEngine)),
+        ])
     }
 
     fn build(
@@ -231,7 +313,8 @@ impl crate::plugin::PluginDefinition for FixtureProcessEngineFactory {
     }
 }
 
-/// Plugin factory that contributes [`FixtureProcessEngine`] to a facade host.
+/// Plugin factory that contributes [`FixtureProcessEngine`] and
+/// [`HeldProcessEngine`] to a facade host.
 #[cfg(any(test, feature = "testing"))]
 pub fn process_engine_plugin_fixture() -> Arc<dyn crate::PluginFactory> {
     Arc::new(FixtureProcessEngineFactory)
@@ -1643,29 +1726,6 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
-    async fn complete_external(
-        &self,
-        session_id: &SessionId,
-        process_id: &ProcessId,
-        await_output: crate::ProcessAwaitOutput,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
-        match self
-            .execute(
-                scope,
-                crate::ProcessCommand::CompleteExternal {
-                    session_scope: crate::SessionScope::new(session_id),
-                    process_id: process_id.clone(),
-                    output: await_output,
-                },
-            )
-            .await?
-        {
-            crate::ProcessEffectOutcome::CompleteExternal { completion } => Ok(*completion),
-            _ => unreachable!("completion command returns completion outcome"),
-        }
-    }
-
     async fn await_process(
         &self,
         process_id: &ProcessId,
@@ -2125,21 +2185,15 @@ impl crate::ProcessService for MockSessionManager {
                     registration.refusal_name()
                 ))
             })?;
-        // This mock stands in as the executor, so it completes the row under the
-        // authority its declared disposition permits: externally-owned rows close
-        // via their external owner, lash-executed rows via the workflow-key path.
-        let externally_owned = registration.input.is_externally_owned();
+        // This mock stands in as the executor, so it completes the row under
+        // the workflow-key authority an executing substrate holds.
         let observers = options.initial_observers;
         let id = self
             .registry()?
             .register_process_with_observers(registration, &observers)
             .await?
             .id;
-        let authority = if externally_owned {
-            crate::ProcessCompletionAuthority::external_owner()
-        } else {
-            crate::ProcessCompletionAuthority::workflow_key(&id)
-        };
+        let authority = crate::ProcessCompletionAuthority::workflow_key(&id);
         self.registry()?
             .complete_process(
                 &id,

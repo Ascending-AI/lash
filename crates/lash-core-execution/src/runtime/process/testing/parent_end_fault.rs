@@ -221,13 +221,6 @@ impl ProcessLifecycle for ParentEndFault {
             .await
     }
 
-    async fn record_caller_departure(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<ProcessRecord, PluginError> {
-        self.inner.record_caller_departure(process_id).await
-    }
-
     async fn set_process_wait_with_authority(
         &self,
         process_id: &ProcessId,

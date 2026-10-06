@@ -1,7 +1,7 @@
 //! Runtime kernel for Lash.
 //!
-//! The process kernel understands `SessionTurn` and `External` to coordinate
-//! child-session turns and externally completed work. Executable process bodies
+//! The process kernel understands `SessionTurn` to coordinate child-session
+//! turns. Executable process bodies, including work a host runs outside lash,
 //! use `ProcessInput::Engine { kind, payload }` and call ordinary recorded tool
 //! attempts under their process journal.
 //!

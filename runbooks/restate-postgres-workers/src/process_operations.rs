@@ -6,13 +6,16 @@ use std::sync::Arc;
 use anyhow::{Context, Result, ensure};
 use lash::plugins::{
     PluginDeclaration, PluginError, PluginFactory, PluginOperation, PluginQuery, PluginRegistrar,
-    PluginSessionContext, SessionParam, SessionPlugin, StateCommands,
+    PluginSessionContext, ProcessEngine, ProcessEngineContributionContext,
+    ProcessEngineRegistration, ProcessEngineRunContext, ProcessInfraError, ProcessRunOutcome,
+    SessionParam, SessionPlugin, StateCommands,
 };
 use lash::process::{
-    Lifetime, ObservedProcessEvent, ProcessCursor, ProcessEventPageEvents, ProcessEventPageMore,
-    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemanticsSpec, ProcessEventType,
-    ProcessEventsFrom, ProcessOriginator, ProcessRegistrationOutcome, ProcessSignal,
-    ProcessSignalIdentity, ProcessStartReceipt, ProcessStartRequest,
+    Lifetime, ObservedProcessEvent, ProcessAwaitOutput, ProcessCursor, ProcessEventPageEvents,
+    ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
+    ProcessEventSemanticsSpec, ProcessEventType, ProcessEventsFrom, ProcessInput,
+    ProcessOriginator, ProcessRegistrationOutcome, ProcessSignal, ProcessSignalIdentity,
+    ProcessStartReceipt, ProcessStartRequest,
 };
 use lash::runtime::ScopedEffectController;
 use lash::{Backend, LashCore, SessionCreation, SessionSpec, TurnInput, TurnOutcome};
@@ -23,6 +26,57 @@ const MODEL: &str = "process-operations-mock";
 pub const SESSION_ID: &str = "process-operations-plugin-state";
 const START_KEY: &str = "process-operations-replacement-start";
 const STATE_KEY: &str = "replacement-value";
+const REPLACEMENT_ENGINE: &str = "process-operations-replacement";
+const SIGNAL_EVENT: &str = "signal.replacement";
+
+/// The replacement process's engine: it runs until it is cancelled, receiving
+/// the signals the runbook sends it across a worker replacement.
+struct ReplacementEngine;
+
+#[lash::async_trait]
+impl ProcessEngine for ReplacementEngine {
+    fn kind(&self) -> &'static str {
+        REPLACEMENT_ENGINE
+    }
+
+    async fn run(
+        &self,
+        context: ProcessEngineRunContext<'_>,
+        _payload: Value,
+    ) -> Result<ProcessRunOutcome, ProcessInfraError> {
+        context.cancellation_token().cancelled().await;
+        Ok(
+            ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::cancelled(
+                lash::tools::ToolCancellation::runtime("the replacement process was cancelled"),
+            ))
+            .into(),
+        )
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &Value,
+    ) -> Result<Vec<lash::persistence::ArtifactName>, PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &lash::persistence::ResolvedArtifactCleanup,
+    ) -> Result<(), lash::persistence::ArtifactStoreError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &lash::persistence::ReferrerClaim,
+        artifact_ref: &str,
+    ) -> Result<(), PluginError> {
+        Err(PluginError::Session(format!(
+            "the replacement engine stores no artifact `{artifact_ref}`"
+        )))
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct StatePlugin {}
@@ -64,6 +118,15 @@ impl StatePlugin {
 impl PluginFactory for StatePlugin {
     fn id(&self) -> &'static str {
         "process-operations-state"
+    }
+
+    fn process_engine_contributions(
+        &self,
+        _context: &ProcessEngineContributionContext<'_>,
+    ) -> Result<Vec<ProcessEngineRegistration>, PluginError> {
+        Ok(vec![ProcessEngineRegistration::accepting(Arc::new(
+            ReplacementEngine,
+        ))])
     }
 
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
@@ -146,18 +209,40 @@ pub fn core(backend: Backend, plugin: StatePlugin) -> Result<LashCore> {
         ))?)
 }
 
-fn start_request() -> ProcessStartRequest {
-    ProcessStartRequest::external(
+/// The replacement start, under the execution environment the host publishes
+/// for it. The environment's reference is its content digest, so every worker
+/// presents the same start under the key.
+async fn start_request(core: &LashCore) -> Result<ProcessStartRequest> {
+    // A host pin keeps the environment alive for the process (ADR 0113).
+    let pin = lash::process::HostArtifactPin::mint();
+    let env_ref = core
+        .host_artifacts()
+        .publish_process_env(
+            &pin,
+            &lash::process::ProcessExecutionEnvSpec::new(
+                lash::plugins::AdmittedPluginConfig::default(),
+                lash::runtime::SessionPolicy::new(
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(1024),
+                ),
+            ),
+        )
+        .await?;
+    Ok(ProcessStartRequest::new(
+        ProcessInput::Engine {
+            kind: REPLACEMENT_ENGINE.into(),
+            payload: json!({"runbook": "process-operations", "phase": "replacement"}),
+        },
         ProcessOriginator::host(),
-        json!({"runbook": "process-operations", "phase": "replacement"}),
         Lifetime::Detached,
     )
     .with_host_start_key(START_KEY)
+    .with_env_ref(env_ref)
     .with_extra_event_types([ProcessEventType {
-        name: "signal.replacement".into(),
+        name: SIGNAL_EVENT.into(),
         payload_schema: lash::schema::JsonSchema::any(),
         semantics: ProcessEventSemanticsSpec::default(),
-    }])
+    }]))
 }
 
 async fn signal(
@@ -170,12 +255,27 @@ async fn signal(
         .signal(
             ProcessSignal::new(
                 ProcessSignalIdentity::new(process.clone(), "replacement", id)?,
-                json!({"marker": id}),
+                marker(id),
             ),
             scoped,
         )
         .await?;
     Ok(())
+}
+
+/// The payload a signal of marker `id` carries.
+fn marker(id: &str) -> Value {
+    json!({"marker": id})
+}
+
+/// The runbook's signal payloads, in feed order. The engine's own lifecycle
+/// events interleave with them wherever its run lands.
+fn signal_markers(events: &[ObservedProcessEvent]) -> Vec<Value> {
+    events
+        .iter()
+        .filter(|event| event.event_type == SIGNAL_EVENT)
+        .map(|event| event.payload.clone())
+        .collect()
 }
 
 async fn events(
@@ -222,11 +322,11 @@ pub async fn prepare(
 ) -> Result<ReplacementBaseline> {
     let first = core
         .processes()
-        .start(start_request(), scoped.clone())
+        .start(start_request(core).await?, scoped.clone())
         .await?;
     let repeated = core
         .processes()
-        .start(start_request(), scoped.clone())
+        .start(start_request(core).await?, scoped.clone())
         .await?;
     ensure!(first.disposition == ProcessRegistrationOutcome::Created);
     ensure!(first.start_key.is_some());
@@ -243,8 +343,9 @@ pub async fn prepare(
     }
     let (events, cursor) = events(core, ProcessEventsFrom::Start(first.process_id.clone())).await?;
     ensure!(
-        events.len() == 3 && cursor.sequence() == 3,
-        "expected the start reference and two pre-replacement signals"
+        signal_markers(&events) == ["before-1", "before-2"].map(marker)
+            && events.last().map(|last| last.sequence) == Some(cursor.sequence()),
+        "expected the two pre-replacement signals, in order, and the cursor at the feed's end"
     );
     ensure!(
         events[0].event_type == "process.external_ref_set"
@@ -293,7 +394,7 @@ pub async fn recover(
 ) -> Result<()> {
     let repeated = core
         .processes()
-        .start(start_request(), scoped.clone())
+        .start(start_request(core).await?, scoped.clone())
         .await?;
     ensure!(
         repeated == before.repeated,
@@ -319,26 +420,23 @@ pub async fn recover(
     let saved_cursor: ProcessCursor =
         serde_json::from_str(&serde_json::to_string(&before.cursor)?)?;
     let (tail, cursor) = events(core, ProcessEventsFrom::After(saved_cursor)).await?;
+    let after_count = signal_markers(&tail).len();
     ensure!(
-        tail.len() == 2,
-        "expected exactly two post-replacement events"
+        after_count == 2,
+        "expected exactly two post-replacement signals"
     );
-    let after_count = tail.len();
     let mut all = before.events.clone();
     all.extend(tail);
     ensure!(
-        all.iter().map(|event| event.sequence).eq(1..=5),
+        all.iter()
+            .map(|event| event.sequence)
+            .eq(1..=cursor.sequence()),
         "event feed has a gap or duplicate"
     );
     ensure!(
-        all[1..]
-            .iter()
-            .zip(["before-1", "before-2", "after-1", "after-2"])
-            .all(|(event, id)| event.event_type == "signal.replacement"
-                && event.payload == json!({"marker": id})),
+        signal_markers(&all) == ["before-1", "before-2", "after-1", "after-2"].map(marker),
         "event feed changed or reordered its payloads"
     );
-    ensure!(cursor.sequence() == 5);
     let (empty, end) = events(core, ProcessEventsFrom::After(cursor.clone())).await?;
     ensure!(
         empty.is_empty() && end.sequence() == cursor.sequence(),

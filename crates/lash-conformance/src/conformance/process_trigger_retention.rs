@@ -800,7 +800,7 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!("done"),
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("complete delivery process");
@@ -970,10 +970,8 @@ async fn start_and_bind_delivery(
     let process_id = handles
         .registry
         .register_process(
-            ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -1147,7 +1145,7 @@ async fn process_prune_only_deletes_deliveries_for_pruned_processes(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!("done"),
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&pruned_id),
         )
         .await
         .expect("complete prunable delivery process");
@@ -1217,7 +1215,7 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!("done"),
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("complete delivery process");

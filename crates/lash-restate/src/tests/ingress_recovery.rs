@@ -80,7 +80,7 @@ async fn process_wait_reattaches_after_ingress_failure_to_the_real_outcome() {
         let ingress = ScriptedIngress::new(vec![failure, reply(expected.clone())]);
         let registry = process_registry();
         let process = registry
-            .register_process(external_registration())
+            .register_process(held_registration())
             .await
             .expect("register the process whose outcome remains unknown");
         let runner = RestateProcessIngressRunner::new(
@@ -140,7 +140,7 @@ async fn a_definitive_process_target_failure_keeps_its_typed_error() {
         let ingress = ScriptedIngress::new(vec![response(status, body)]);
         let registry = process_registry();
         let process = registry
-            .register_process(external_registration())
+            .register_process(held_registration())
             .await
             .expect("register the target");
         let runner = RestateProcessIngressRunner::new(
@@ -173,37 +173,6 @@ async fn a_definitive_process_target_failure_keeps_its_typed_error() {
                 .is_none()
         );
     }
-}
-
-#[tokio::test]
-async fn caller_departure_refuses_the_wait_without_contacting_ingress() {
-    let ingress = ScriptedIngress::new(Vec::new());
-    let registry = process_registry();
-    let process = registry
-        .register_process(external_registration())
-        .await
-        .expect("register");
-    registry
-        .record_caller_departure(&process.id)
-        .await
-        .expect("record the durable departure");
-    let runner = RestateProcessIngressRunner::new(
-        ingress.connection(),
-        registry.clone(),
-        continuation_store(),
-        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
-    );
-
-    assert!(matches!(runner.await_process_terminal(&process.id).await,
-        Err(PluginError::ProcessCallerDeparted { process_id }) if process_id == process.id));
-    assert!(ingress.requests.lock_recover().is_empty());
-    let record = registry
-        .get_process(&process.id)
-        .await
-        .expect("read")
-        .expect("retained");
-    assert_eq!(record.status(), lash_core::ProcessStatus::CallerDeparted);
-    assert!(record.outcome().is_none());
 }
 
 #[tokio::test]

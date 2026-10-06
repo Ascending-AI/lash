@@ -348,9 +348,7 @@ impl RegisteredProcessStart {
             ProcessStartTarget::Input(ProcessInput::SessionTurn { .. }) => {
                 registration.with_input(Arc::clone(&self.record.input))
             }
-            ProcessStartTarget::Input(
-                input @ (ProcessInput::Engine { .. } | ProcessInput::External { .. }),
-            ) => {
+            ProcessStartTarget::Input(input @ ProcessInput::Engine { .. }) => {
                 let input = Arc::new(input.clone());
                 registration.with_input(input)
             }

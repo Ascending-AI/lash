@@ -904,41 +904,6 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    async fn record_caller_departure(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
-        let process_id = process_id.clone();
-        let now = self.clock.timestamp_ms();
-        let wake_delivery_config = self.wake_delivery_config;
-        self.conn
-            .write_flow(move |tx| {
-                let fleet_format = tx.fleet();
-                Ok(tx_outcome((|| {
-                    let mut record = Self::require_process_conn(tx, &process_id)?;
-                    match lash_core_execution::runtime::prepare_process_transition(
-                        &record,
-                        ProcessTransition::RecordCallerDeparture,
-                    )? {
-                        ProcessTransitionPlan::Unchanged => return Ok(record),
-                        ProcessTransitionPlan::Append(append) => {
-                            Self::append_event_conn(
-                                tx,
-                                &mut record,
-                                *append,
-                                now,
-                                wake_delivery_config,
-                                fleet_format,
-                            )?;
-                        }
-                    }
-                    Ok(record)
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
     async fn set_process_wait_with_authority(
         &self,
         process_id: &ProcessId,

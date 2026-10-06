@@ -136,10 +136,8 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
 fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
     let mut turn = crate::testing::mock_assembled_turn(&SessionId::from("failing-child"), "unused");
     turn.outcome = crate::TurnOutcome::Stopped(stop);
-    crate::ProcessRegistration::new(
-        crate::ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+    crate::testing::held_engine_registration(
+        serde_json::Value::Null,
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     );
@@ -273,10 +271,8 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
 #[tokio::test]
 async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_result() {
     let child_session_id = crate::SessionId::from("child-turn-cancellation-evidence");
-    let registration = crate::ProcessRegistration::new(
-        crate::ProcessInput::External {
-            metadata: serde_json::json!({"fixture": "child-turn-cancellation-evidence"}),
-        },
+    let registration = crate::testing::held_engine_registration(
+        serde_json::json!({"fixture": "child-turn-cancellation-evidence"}),
         crate::ProcessProvenance::host(),
         crate::Lifetime::Detached,
     );
@@ -314,7 +310,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         .complete_process(
             &process_id,
             crate::ProcessAwaitOutput::from_tool_output(runner_output),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("persist child-turn cancellation");

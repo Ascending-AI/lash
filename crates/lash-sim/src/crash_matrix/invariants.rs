@@ -414,10 +414,7 @@ impl ObligationProbe for ProcessStartProbe {
             .backend()
             .obligation_ledger(ObligationKind::ProcessStart);
         let mut unsettled = Vec::new();
-        for record in processes
-            .iter()
-            .filter(|record| !record.input.is_externally_owned())
-        {
+        for record in &processes {
             let id = lash_core::store::ObligationKey::ProcessStart {
                 process_id: record.id.clone(),
             }

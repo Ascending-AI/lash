@@ -46,9 +46,9 @@ impl crate::ToolProvider for Spawning {
             call.context,
             crate::StartProcessIntent {
                 owner,
-                declaration: crate::ProcessStartDeclaration::external(
+                declaration: crate::ProcessStartDeclaration::new(
+                    crate::testing::held_engine_input(serde_json::Value::Null),
                     crate::ProcessOriginator::host(),
-                    serde_json::Value::Null,
                     crate::Lifetime::Detached,
                 ),
             },
@@ -91,7 +91,7 @@ impl crate::ProcessService for Launches {
             .complete_process(
                 &record.id,
                 output.clone(),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&record.id),
             )
             .await?;
         self.work

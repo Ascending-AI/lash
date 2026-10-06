@@ -27,10 +27,8 @@ mod tests {
     }
 
     fn registration() -> ProcessRegistration {
-        ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::json!({}),
-            },
+        crate::testing::held_engine_registration(
+            serde_json::json!({}),
             ProcessProvenance::host(),
             crate::Lifetime::Detached,
         )
@@ -91,7 +89,7 @@ mod tests {
             .complete_process(
                 &registered.id,
                 success(serde_json::json!("done")),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&registered.id),
             )
             .await
             .expect("complete");
@@ -223,7 +221,7 @@ mod tests {
             .complete_process(
                 &record.id,
                 success(serde_json::json!("done")),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&record.id),
             )
             .await
             .expect("complete");
@@ -342,7 +340,7 @@ mod tests {
             .complete_process(
                 &proc_record.id,
                 success(serde_json::json!("done")),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&proc_record.id),
             )
             .await
             .expect("complete");
@@ -508,7 +506,7 @@ mod tests {
             .complete_process(
                 &proc_record.id,
                 success(serde_json::json!("ready")),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&proc_record.id),
             )
             .await
             .expect("complete");
@@ -518,34 +516,6 @@ mod tests {
             .await
             .expect("await terminal");
         assert_eq!(output, success(serde_json::json!("ready")));
-    }
-
-    /// A caller-departed row is refused because no writer can terminalize it.
-    #[tokio::test]
-    async fn native_awaiter_refuses_await_on_caller_departed_row() {
-        let raw = memory_registry().await;
-        let (registry, hub) = watched_parts(watch_process_registry(raw));
-        let awaiter = ProcessRegistryAwaiter::new(Arc::clone(&registry), hub);
-        let proc_record = registry
-            .register_process(registration())
-            .await
-            .expect("register");
-        registry
-            .record_caller_departure(&proc_record.id)
-            .await
-            .expect("record caller departure");
-
-        let error = awaiter
-            .await_terminal(&proc_record.id)
-            .await
-            .expect_err("awaiting a caller-departed row must be refused, not parked");
-        assert!(
-            matches!(
-                error,
-                PluginError::ProcessCallerDeparted { ref process_id } if process_id == proc_record.id.clone()
-            ),
-            "unexpected refusal: {error}"
-        );
     }
 
     /// Sim-style race: many waiters attach to one process and completion fires
@@ -581,7 +551,7 @@ mod tests {
             .complete_process(
                 &proc_record.id,
                 output.clone(),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&proc_record.id),
             )
             .await
             .expect("complete");

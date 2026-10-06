@@ -44,6 +44,11 @@ fn assert_replayed_as_recorded(family: &str, advance: Advance, original: Value, 
 /// admission's, ADR 0105 §1).
 pub async fn process_start(kind: StorageKind, live: bool, advance: Advance) {
     let world = World::new(kind, live, "start").await;
+    // The environment the start declares.
+    lash_core::testing::process_execution_env_fixture(
+        world.engine.backend().process_env_store().as_ref(),
+    )
+    .await;
     let scope = world
         .core
         .processes()
@@ -55,11 +60,16 @@ pub async fn process_start(kind: StorageKind, live: bool, advance: Advance) {
         let session_id = world.session_id.clone();
         Arc::new(move |scoped| {
             let core = core.clone();
-            let request = lash_core::ProcessStartRequest::external(
+            // The fixture engine completes at once, so the law's deliveries settle.
+            let request = lash_core::ProcessStartRequest::new(
+                lash_core::ProcessInput::Engine {
+                    kind: "testing-fixture".to_string(),
+                    payload: json!({"law": "replay-after-advance"}),
+                },
                 lash_core::ProcessOriginator::host(),
-                json!({"law": "replay-after-advance"}),
                 lash_core::Lifetime::Until(scope.clone()),
             )
+            .with_env_ref(lash_core::testing::process_execution_env_fixture_ref())
             .with_observers([session_id.clone()]);
             Box::pin(async move { receipt(core.processes().start(request, scoped).await) })
         })
@@ -554,81 +564,6 @@ pub async fn cancel_all(kind: StorageKind, live: bool) {
     assert_replayed_as_recorded("cancel-all", Advance::PruneAndCompact, original, replayed);
 }
 
-/// The runtime's external completion returns the original admission after
-/// retention removes the row or a transfer removes the observer edge.
-pub async fn external_completion(kind: StorageKind, live: bool, transfer: bool) {
-    let world = World::new(kind, live, "external-completion").await;
-    let target = world.target().await;
-    let runtime = lash_core::testing::runtime_helpers::TestRuntime::new(
-        &world.engine.backend(),
-        lash_core::testing::TestProvider::builder().build(),
-    )
-    .with_session_id(world.session_id.clone())
-    .build()
-    .await;
-    let processes = runtime
-        .process_service()
-        .expect("the runtime's process service");
-    let operation: Operation = {
-        let session_id = world.session_id.clone();
-        let target = target.clone();
-        Arc::new(move |scoped| {
-            let processes = Arc::clone(&processes);
-            let session_id = session_id.clone();
-            let target = target.clone();
-            Box::pin(async move {
-                receipt(
-                    processes
-                        .complete_external(
-                            &session_id,
-                            &target,
-                            lash_core::ProcessAwaitOutput::from_tool_output(
-                                lash_core::ToolCallOutput::success(json!({"completed": true})),
-                            ),
-                            lash_core::ProcessOpScope::new(scoped),
-                        )
-                        .await,
-                )
-            })
-        })
-    };
-    let (original, replayed) = replay_leg(
-        &world,
-        "raa-external-completion",
-        operation,
-        async |_: &Value| {
-            if transfer {
-                world
-                    .registry()
-                    .transfer_observers(
-                        &world.session_id,
-                        &lash_core::SessionId::from("raa-new-observer"),
-                        std::slice::from_ref(&target),
-                        lash_core::ProcessObserverBy::host("replay-law-transfer"),
-                    )
-                    .await
-                    .expect("transfer the observer edge");
-                assert!(
-                    !world
-                        .registry()
-                        .is_observer(&world.session_id, &target)
-                        .await
-                        .expect("the former observer")
-                );
-            } else {
-                world.end_and_prune(&target, true).await;
-            }
-        },
-    )
-    .await;
-    assert_replayed_as_recorded(
-        "external completion",
-        Advance::PruneAndCompact,
-        original,
-        replayed,
-    );
-}
-
 /// A process await answers its recorded terminal output after the awaited
 /// process is pruned and compacted: the await's existence guard and its
 /// terminal are recorded, and the replay reads them back.
@@ -642,7 +577,7 @@ pub async fn attach_await(kind: StorageKind, live: bool) {
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 json!({"awaited": true}),
             )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&target),
         )
         .await
         .expect("end the awaited target");

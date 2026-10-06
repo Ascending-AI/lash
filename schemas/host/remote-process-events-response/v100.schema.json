@@ -1919,13 +1919,12 @@
       "type": "object"
     },
     "RetiredProcessStatus": {
-      "description": "The status a process row had when retention reclaimed it: the retired\nsubset of [`ProcessStatus`].\n\nA tombstone and every \"no longer retained\" answer carry one, so a pruned\nprocess still says how it ended: a `failed` one is never reported as\ncompleted, and a `caller_departed` one is never reported as having an\noutcome at all.",
+      "description": "The status a process row had when retention reclaimed it: the retired\nsubset of [`ProcessStatus`].\n\nA tombstone and every \"no longer retained\" answer carry one, so a pruned\nprocess still says how it ended: a `failed` one is never reported as\ncompleted.",
       "enum": [
         "completed",
         "failed",
         "cancelled",
-        "abandoned",
-        "caller_departed"
+        "abandoned"
       ],
       "type": "string"
     },

@@ -145,7 +145,7 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
         .complete_process(
             &parent.id,
             settled_success(serde_json::json!("done")),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&parent.id),
         )
         .await
         .expect("complete action-free parent");
@@ -317,42 +317,6 @@ pub(super) async fn a_resume_event_cannot_return_an_ended_process_to_running(
 pub(super) async fn lifecycle_transition_refusals_are_backend_invariant(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let departed_id = "transition-refusal-departed-wait";
-    let departed = registry
-        .register_process(executed_registration(departed_id))
-        .await
-        .expect("register departed-wait-refusal process");
-    let departed_id = departed.id.clone();
-    let authority = crate::ProcessExecutionWriteAuthority::invocation(
-        departed_id.clone(),
-        "transition-refusal:execution",
-    )
-    .bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
-            &departed_id,
-            authority
-                .invocation_started()
-                .expect("a bound invocation names its execution"),
-            &authority,
-        )
-        .await
-        .expect("record departed-wait process execution start");
-    assert_session_refusal(
-        registry.record_caller_departure(&departed_id).await,
-        &format!(
-            "process `{departed_id}` is not externally-owned and cannot record a caller departure"
-        ),
-    );
-    registry
-        .complete_process(
-            &departed_id,
-            settled_success(serde_json::Value::Null),
-            ProcessCompletionAuthority::workflow_key(departed_id.as_str()),
-        )
-        .await
-        .expect("reconcile departed-wait-refusal process");
-
     let external_ref_id = "transition-refusal-external-ref";
     let transition_refusal_external_ref_record = registry
         .register_process(registration(external_ref_id))

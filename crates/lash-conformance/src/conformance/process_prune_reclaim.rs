@@ -58,10 +58,8 @@ pub async fn process_prune_preserves_independent_session_checkpoint_roots(
 )]
 async fn register_process(registry: &dyn crate::ProcessRegistry) -> ProcessId {
     registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -81,7 +79,7 @@ async fn prune_completed_process(registry: &dyn crate::ProcessRegistry, process_
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(process_id),
         )
         .await
         .expect("complete the process under prune");

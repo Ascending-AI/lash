@@ -28,16 +28,19 @@ use crate::crash_matrix::invariants::{AcceptedInput, ChildOf, Expected};
 use crate::crash_matrix::world::CrashWorld;
 use crate::crash_matrix::{CrashPoint, Seam};
 
-/// Register a child of `session` that lives until `parent` ends.
+/// Register a held child of `session` that lives until `parent` ends: it runs
+/// until it is cancelled, so only the parent-end cancel of its scope settles
+/// it.
 pub(super) async fn register_until_child(
     world: &CrashWorld,
     session: &SessionId,
     parent: &ScopeId,
 ) -> Result<ProcessId, String> {
-    let mut registration = lash_core::ProcessRegistration::new(
-        lash_core::ProcessInput::External {
-            metadata: serde_json::json!({ "crash_matrix": "child" }),
-        },
+    // The environment the held child captures.
+    lash_core::testing::process_execution_env_fixture(world.backend().process_env_store().as_ref())
+        .await;
+    let mut registration = lash_core::testing::held_engine_registration(
+        serde_json::json!({ "crash_matrix": "child" }),
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(session.clone())),
         lash_core::Lifetime::Detached,
     );
@@ -397,20 +400,16 @@ pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Sta
         CrashPoint::DeliveryRefused => {
             // A page of plans whose only child refuses every cancel, then a
             // victim plan behind them whose child accepts it.
+            let mut poisoned = Vec::new();
             for index in 0..POISONED_PLANS {
                 let run = format!("poisoned-{index}");
                 let parent = ScopeId::turn(session.clone(), TurnId::fixture(run.as_str()));
                 let child = register_until_child(&world, &session, &parent).await?;
-                world.faults().always_matching(
-                    HostSite::DeliverCancelBefore,
-                    ArmEffect::Refuse,
-                    format!("{child}/"),
-                );
                 expected.children.push(ChildOf {
-                    child,
+                    child: child.clone(),
                     parent: parent.clone(),
                 });
-                produce_parent_end(&world, &session, &run).await?;
+                poisoned.push((run, child));
             }
             let victim = ScopeId::turn(session.clone(), TurnId::from("victim"));
             let child = register_until_child(&world, &session, &victim).await?;
@@ -418,6 +417,17 @@ pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Sta
                 child: child.clone(),
                 parent: victim.clone(),
             });
+            // The children run before their parents end, so the recovery pass
+            // the bound counts delivers parent ends, not the children's starts.
+            world.tick().await?;
+            for (run, poisoned_child) in poisoned {
+                world.faults().always_matching(
+                    HostSite::DeliverCancelBefore,
+                    ArmEffect::Refuse,
+                    format!("{poisoned_child}/"),
+                );
+                produce_parent_end(&world, &session, &run).await?;
+            }
             expected.closed_scopes.push(victim);
             // The victim's own close dies before it delivers, so only a
             // recovery pass can reach it.

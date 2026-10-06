@@ -400,12 +400,11 @@ for engine recovery. A lost V acknowledgement may omit the observation. The X ca
 **Declared starts (K5, FIG-4884).** A final may declare one process start.
 Its attempt record owns the start's obligation as material: the body's
 registration under its stable start key, bound by the Run to the Run's
-environment when lash executes the process (an externally owned one runs
-under none) and to a consumer hold, owned by the Run's opener, that carries
+environment and to a consumer hold, owned by the Run's opener, that carries
 the call's recorded cancel policy, narrowed by the cancel hint of the wait a
 pending call parks on: under `Ignore` the call's cancel never cancels the
-child (ADR 0116 §3.4). A keyless start, or a lash-executed one in
-a Run that owns no environment, is the attempt's typed `StartRefused`; a start the admitted
+child (ADR 0116 §3.4). A keyless start, or one in a Run that owns
+no environment, is the attempt's typed `StartRefused`; a start the admitted
 declaration does not name is its `UndeclaredIntent` refusal. The start
 drains inside the final's declarations: `declare` admits it with them
 (`StartAdmitted`), then eagerly issues one concurrent `start:prepare` run.

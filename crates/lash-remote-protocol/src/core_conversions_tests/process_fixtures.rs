@@ -20,10 +20,8 @@ pub(super) fn process_event_type() -> lash_core::ProcessEventType {
 }
 
 pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord {
-    let registration = lash_core::ProcessRegistration::new(
-        lash_core::ProcessInput::External {
-            metadata: serde_json::json!({ "label": "External" }),
-        },
+    let registration = lash_core::testing::held_engine_registration(
+        serde_json::json!({ "label": "Held" }),
         lash_core::ProcessProvenance::host().with_caused_by(Some(
             lash_core::CausalRef::TriggerOccurrence {
                 occurrence_id: "trigger:1".to_string(),
@@ -72,9 +70,7 @@ pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
         updated_at_ms: 2,
         first_started: None,
         cancel_request: None,
-        input: lash_core::ProcessInput::External {
-            metadata: serde_json::json!({ "label": "External" }),
-        },
+        input: lash_core::testing::held_engine_input(serde_json::json!({ "label": "Held" })),
         originator: lash_core::ProcessOriginator::host(),
         env_ref: None,
         caused_by: None,

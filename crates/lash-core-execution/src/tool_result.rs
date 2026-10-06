@@ -679,9 +679,9 @@ mod tests {
     fn declared_start() -> crate::PendingResolver {
         let start = crate::StartProcessIntent {
             owner: crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
-            declaration: crate::ProcessStartDeclaration::external(
+            declaration: crate::ProcessStartDeclaration::new(
+                crate::testing::held_engine_input(serde_json::Value::Null),
                 crate::ProcessOriginator::host(),
-                serde_json::Value::Null,
                 crate::Lifetime::Detached,
             ),
         };

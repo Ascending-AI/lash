@@ -641,14 +641,14 @@ async fn l02_l12_process_terminal_source_keeps_material_after_producer_pruning()
         ),
     ] {
         let process = registry
-            .register_process(external_registration())
+            .register_process(held_registration())
             .await
             .unwrap();
         registry
             .complete_process(
                 &process.id,
                 output.clone(),
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core::ProcessCompletionAuthority::workflow_key(&process.id),
             )
             .await
             .unwrap();

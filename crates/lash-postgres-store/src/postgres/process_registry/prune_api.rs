@@ -65,9 +65,7 @@ pub(super) async fn prunable_terminal_processes(
 /// settles it. Past the same cutoff the process rows themselves are pruned
 /// under, a settled scope with no live child can no longer be the parent of
 /// anything lash will act on, so keeping the row would only grow the table by
-/// one row per committed turn forever. A `caller_departed` child is not live
-/// by construction: lash may never act on such a row, so it can never need a
-/// parent-end cancel.
+/// one row per committed turn forever.
 ///
 /// Reclaiming a row lifts the fence it was: once it is gone, a `Cancel` child
 /// registering under that scope is admitted again rather than refused

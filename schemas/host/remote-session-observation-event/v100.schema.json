@@ -4530,25 +4530,16 @@
       "type": "integer"
     },
     "ProcessStatus": {
-      "description": "Durable lifecycle status of a process row.\n\n# Rollout: adding a variant is a one-way door for readers\n\nThis enum has no `#[serde(other)]` fallback arm, by design \u2014 a store that\nsilently folded an unknown status into a known one would corrupt the very\nfold the registry exists to keep honest. The consequence is that a variant\nis only readable by binaries that know it: an older binary sharing a\nregistry with a newer one hard-errors with `unknown variant\ncaller_departed` on any read that touches such a row. That includes\n[`ProcessRegistry::processes_changed_since`](crate::ProcessRegistry::processes_changed_since),\nwhere the failure is not \"skip one row\" but a stalled feed \u2014 the projector\nstops advancing its cursor at all.\n\n[`ProcessStatus::CallerDeparted`] therefore ships without a store schema\nbump, deliberately: no column shape changed, and every backend already\nfilters the `status` column it is written to. For SQLite that is also the\nonly tenable choice \u2014 its stores have no migration chain and refuse any\ndatabase whose `user_version` does not match exactly, so a bump would make\nevery existing process database unopenable to buy nothing. Postgres *does*\nhave a migration ladder, so a bump was possible there; it was skipped for\nrollout simplicity and vocabulary parity across backends, not because it\ncould not be done.\n\nOperationally: upgrade readers before any writer can emit a new status.\nA mixed-version fleet sharing one registry must roll all binaries forward\nfirst; rolling a writer out ahead of its readers stalls their feeds.",
-      "oneOf": [
-        {
-          "enum": [
-            "running",
-            "waiting",
-            "completed",
-            "failed",
-            "cancelled",
-            "abandoned"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "caller_departed",
-          "description": "The caller that registered an Externally-Owned row departed after the\nrow committed and before any outcome was recorded.\n\nDeliberately **not** terminal: lash cannot observe whether the external\nwork it was recording ever happened, and writing `Cancelled` or\n`Failed` would assert an outcome lash never saw. The row is instead\ndurably distinguishable from an Externally-Owned row whose caller is\nstill present, so external reconciliation can close it with the truth,\nawaits can refuse instead of parking forever, and retention can reclaim\nit (see [`ProcessStatus::is_retired`]).",
-          "type": "string"
-        }
-      ]
+      "description": "Durable lifecycle status of a process row.\n\nThis enum has no `#[serde(other)]` fallback arm, by design: a store that\nsilently folded an unknown status into a known one would corrupt the very\nfold the registry exists to keep honest.",
+      "enum": [
+        "running",
+        "waiting",
+        "completed",
+        "failed",
+        "cancelled",
+        "abandoned"
+      ],
+      "type": "string"
     },
     "ProtocolBreach": {
       "description": "A parent, its worker or the pool between them broke the protocol. A fresh\nworker may keep it, so the owning invocation is redriven.",
@@ -6557,21 +6548,6 @@
             "turn_input"
           ],
           "type": "object"
-        },
-        {
-          "properties": {
-            "metadata": {
-              "default": null
-            },
-            "type": {
-              "const": "external",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -6626,20 +6602,6 @@
           "required": [
             "state",
             "wait"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`].\nA variant with fields, so that a decode refuses a wait, a park or an\noutcome beside it as it does for every other state.",
-          "properties": {
-            "state": {
-              "const": "caller_departed",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state"
           ],
           "type": "object"
         },
@@ -7108,24 +7070,15 @@
       "type": "object"
     },
     "RemoteProcessStatus": {
-      "oneOf": [
-        {
-          "enum": [
-            "running",
-            "waiting",
-            "completed",
-            "failed",
-            "cancelled",
-            "abandoned"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "caller_departed",
-          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably\ndistinguishable, deliberately never terminal.",
-          "type": "string"
-        }
-      ]
+      "enum": [
+        "running",
+        "waiting",
+        "completed",
+        "failed",
+        "cancelled",
+        "abandoned"
+      ],
+      "type": "string"
     },
     "RemoteProcessTerminal": {
       "description": "Mirrors [`lash_core::ProcessTerminal`]: the outcome a process ended in,\nwhich a terminal record and a terminal event carry. Its status is derived\nfrom it ([`Self::status`]) and carried nowhere beside it.",
@@ -8236,25 +8189,6 @@
             },
             "type": {
               "const": "cancel_requested",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "sequence"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "caller_departed",
               "type": "string"
             }
           },
@@ -10436,13 +10370,12 @@
       "type": "object"
     },
     "RetiredProcessStatus": {
-      "description": "The status a process row had when retention reclaimed it: the retired\nsubset of [`ProcessStatus`].\n\nA tombstone and every \"no longer retained\" answer carry one, so a pruned\nprocess still says how it ended: a `failed` one is never reported as\ncompleted, and a `caller_departed` one is never reported as having an\noutcome at all.",
+      "description": "The status a process row had when retention reclaimed it: the retired\nsubset of [`ProcessStatus`].\n\nA tombstone and every \"no longer retained\" answer carry one, so a pruned\nprocess still says how it ended: a `failed` one is never reported as\ncompleted.",
       "enum": [
         "completed",
         "failed",
         "cancelled",
-        "abandoned",
-        "caller_departed"
+        "abandoned"
       ],
       "type": "string"
     },
@@ -14818,33 +14751,6 @@
             },
             "type": {
               "const": "process_no_longer_retained",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A wait was requested on a row whose registering caller departed before\nany outcome could be recorded (FIG-1383).\n\nThe wait is refused rather than parked: the row is non-terminal, no\nactor is left to terminalize it, and lash may never invent an outcome\nfor it. Closure comes from external reconciliation writing the observed\ntruth, or from retention reclaiming the row.",
-          "properties": {
-            "message": {
-              "additionalProperties": false,
-              "properties": {
-                "process_id": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "process_id"
-              ],
-              "type": "object"
-            },
-            "type": {
-              "const": "process_caller_departed",
               "type": "string"
             }
           },

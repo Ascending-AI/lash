@@ -38,8 +38,8 @@ Engine SQL is written once per dialect, in one module, behind a gate that
 refuses engine-table SQL anywhere else. No engine statement is mirrored by
 hand across dialects.
 
-Lash runs no OS programs, starts no shell and writes no local files beyond the
-configured SQLite database.
+Lash runs no OS programs and writes no local files beyond the configured
+SQLite database.
 
 ### 2. The no-replay rule
 

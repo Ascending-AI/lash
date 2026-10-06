@@ -4,8 +4,8 @@ use crate::plugin::PluginError;
 
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
-    ProcessCancelReceipt, ProcessCompletionOutcome, ProcessHandleView, ProcessListMode,
-    ProcessRecord, ProcessStartOptions, ProcessStartRegistration, ProcessStartRequest,
+    ProcessCancelReceipt, ProcessHandleView, ProcessListMode, ProcessRecord, ProcessStartOptions,
+    ProcessStartRegistration, ProcessStartRequest,
 };
 use super::op_scope::ProcessOpScope;
 
@@ -115,45 +115,6 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
 
-    /// Write the terminal outcome for an Externally-Owned process the session
-    /// observes (ADR 0110). Closure for work lash never executes — a
-    /// detached command records its immediately-terminal launch fact here. Only
-    /// Externally-Owned rows may be completed this way. The typed completion
-    /// outcome tells the caller whether this write committed, replayed an
-    /// identical terminal, or lost to a different stored terminal.
-    async fn complete_external(
-        &self,
-        session_id: &SessionId,
-        process_id: &ProcessId,
-        await_output: ProcessAwaitOutput,
-        scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessCompletionOutcome, PluginError> {
-        let _ = (session_id, process_id, await_output, scope);
-        Err(PluginError::Session(
-            "external process completion is unavailable in this service".to_string(),
-        ))
-    }
-
-    /// Record that the caller which registered an Externally-Owned row this
-    /// session observes departed before any outcome could be written
-    /// (FIG-1383).
-    ///
-    /// Controller-free on purpose. This is the one process write whose whole
-    /// reason to exist is that the caller's effect scope is already gone: it
-    /// runs *because* the borrowed tool/effect scope was torn down, so it can
-    /// take no `ProcessOpScope`. It is a reconciliation write, not a journaled
-    /// effect, and it is idempotent, so nothing about replay depends on it.
-    async fn report_caller_departure(
-        &self,
-        session_id: &SessionId,
-        process_id: &ProcessId,
-    ) -> Result<ProcessRecord, PluginError> {
-        let _ = (session_id, process_id);
-        Err(PluginError::Session(
-            "caller-departure reporting is unavailable in this service".to_string(),
-        ))
-    }
-
     async fn await_process(
         &self,
         process_id: &ProcessId,
@@ -189,8 +150,7 @@ pub trait ProcessService: Send + Sync {
     /// Releases a parked call's hold on the process whose terminal it
     /// consumed (ADR 0116 §3.6), keyed by the call's completion key id.
     ///
-    /// Controller-free and idempotent, like a caller departure: the release
-    /// is a reconciliation write that every redrive may repeat, and nothing
+    /// Controller-free and idempotent: the release is a reconciliation write that every redrive may repeat, and nothing
     /// about replay depends on it. The default refuses: only a service whose
     /// starts register holds can release them.
     async fn release_consumer_hold(

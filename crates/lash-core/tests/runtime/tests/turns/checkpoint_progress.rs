@@ -1052,10 +1052,8 @@ pub(super) async fn next_turn_input_turn_admits_process_wake_at_active_checkpoin
     let target_scope = lash_core::SessionScope::new("root");
     let registered = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )
@@ -1249,10 +1247,8 @@ pub(super) async fn wake_admitted_at_a_terminal_checkpoint_executes_a_follow_on_
     let target_scope = lash_core::SessionScope::new(SESSION_ID);
     let registered = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )
@@ -1454,10 +1450,8 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
     let target_scope = lash_core::SessionScope::new(session_id);
     let registered = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )
@@ -1615,10 +1609,8 @@ pub(super) async fn process_wake_admitted_at_checkpoint_is_completed_when_turn_i
     let target_scope = lash_core::SessionScope::new(SESSION_ID);
     let registered = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )

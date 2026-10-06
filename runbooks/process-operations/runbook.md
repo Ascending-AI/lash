@@ -126,7 +126,7 @@ API/durable messages, trace executions, and the literal outcome below.
 
 | Row | Call/program and literal oracle | Required Restate journal shape after worker replacement |
 |---|---|---|
-| `process-start-detach` | In TypeScript, define a deterministic process, invoke its `start` construct once, retain the returned process handle, and await that handle after worker replacement. Require the exact returned value and the same process id before and after recovery. The historical `-detach` row name is retained for artifact continuity; the RLM surface has no detach mode, so do not assert detached ownership or an externally owned terminal status. | One direct `StartProcess` command for the prepared process id and one direct await of that same handle; recovery retains the single launcher identity and result, with no duplicate launch, no `ToolAttempt`-nested process command, and no FIG-1127 refusal. |
+| `process-start-detach` | In TypeScript, define a deterministic process, invoke its `start` construct once, retain the returned process handle, and await that handle after worker replacement. Require the exact returned value and the same process id before and after recovery. The historical `-detach` row name is retained for artifact continuity; the RLM surface has no detach mode, so do not assert detached ownership. | One direct `StartProcess` command for the prepared process id and one direct await of that same handle; recovery retains the single launcher identity and result, with no duplicate launch, no `ToolAttempt`-nested process command, and no FIG-1127 refusal. |
 | `process-signal` | In TypeScript, author a process literal that awaits a `ping` signal, start it with `await processes.start({ process })`, and send literal payload `"ping"` with `await processes.signal({ handle, name: "ping", payload: "ping" })`. Require the process's returned value to be the one observed payload; do not expect a public `process.signal` result wrapper. | One `processes.start` leaf call and one `SignalProcess` command for the same prepared process id, with signal `ping` and payload `"ping"`; recovery delivers the signal once and the process returns the observed payload once. |
 | `processes-cancel` | Start a long-lived tracked process, call `processes.cancel` for its exact id, and require `{"process_id":<started-id>,"status":"cancelled"}`. | One `CancelProcess` command and one `process.cancel_requested` event for the exact id; redrive emits neither a duplicate event nor an ordinal-tier refusal. |
 | `spawn-agent` | Call `spawn_agent` with a schema requiring `{"answer":"str"}` and require one matching child result. | One `ToolAttempt` whose recorded outcome is `Pending` with a declared start; the start's `process:start` admission under the call's lineage, one `process:attach-terminal` arming and one await of that child's terminal. Recovery reuses the same child (the start key is the attempt's intent identity) and creates one child session/result; the tool record's one intent outcome names the child process. |
@@ -275,7 +275,7 @@ before permanent deletion and the final-delivery fence.
 
 ## Phase 8 — A host start key returns one process across replacement
 
-The companion starts an external process twice through `core.processes().start(..)` with the
+The companion starts a host engine process twice through `core.processes().start(..)` with the
 same host start key. `08-replacement-prepare.jsonl` carries `replacement_prepared`, including
 the first `Created` receipt and the second `Existing` receipt. Both must name the same minted
 process id and start key. The first worker then exits. The replacement container builds a fresh
@@ -284,8 +284,8 @@ from a new workflow execution.
 
 Read `start_key_reused_after_replacement` in `08-replacement-recovered.jsonl`. Its `after`
 receipt must equal `second`, including `Existing`, and `distinct_process_ids` must be `1`.
-The process is externally owned, so this phase proves registration idempotency without executing
-its body. ADR 0107 owns the start-key contract; ADR 0110 owns execution recovery.
+The process is a host engine process that runs until it is cancelled, so this phase proves
+registration idempotency, not its body. ADR 0107 owns the start-key contract; ADR 0110 owns execution recovery.
 
 **Fail if:** either retry mints another id, changes the start key, or answers `Created`.
 
@@ -297,10 +297,11 @@ It saves the returned cursor in `08-replacement-baseline.json`, outside the work
 After replacement it sends `after-1` and `after-2` and resumes from that serialized cursor.
 
 Read `process_feed_resumed_after_replacement` in `08-replacement-recovered.jsonl`. Require
-`before_count = 3`, `after_count = 2`, `total_count = 5`, and `end_count = 0`. Sequence `1`
-records `process.external_ref_set` with the Restate backend and segment ordinal `0`.
-Sequences `2, 3, 4, 5` carry `signal.replacement` and the four named marker payloads in order.
-The saved cursor's sequence is `3`; the resumed cursor's sequence is `5`; one more read from it is empty
+`after_count = 2` and `end_count = 0`. Sequence `1` records `process.external_ref_set` with the
+Restate backend and segment ordinal `0`. The engine's own lifecycle events interleave wherever its
+run lands; the `signal.replacement` events carry the four named marker payloads in order. The
+sequences run `1..=total_count` with no gap or duplicate, the saved cursor is the last sequence
+read before replacement, the resumed cursor is `total_count`, and one more read from it is empty
 and keeps that sequence. Every page must be typed `Retained` with Full events. This is the
 durable feed; a replacement of the best-effort live publisher has its own gap contract.
 

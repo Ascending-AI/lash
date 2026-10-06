@@ -4,10 +4,8 @@ use super::materialization::select_value;
 use super::*;
 
 fn registration(_id: &str) -> ProcessRegistration {
-    ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+    crate::testing::held_engine_registration(
+        serde_json::Value::Null,
         ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )
@@ -21,8 +19,8 @@ fn process_event_old_system_time_json_is_rejected() {
     );
     let plan = prepare_process_event_append(
         &record,
-        ProcessEventAppendRequest::new("process.caller_departed", serde_json::Value::Null)
-            .with_replay_key("process-old-time-shape:caller-departed"),
+        ProcessEventAppendRequest::new("process.resumed", serde_json::Value::Null)
+            .with_replay_key("process-old-time-shape:resumed"),
         1,
         None,
         None,

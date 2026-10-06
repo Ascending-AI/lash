@@ -63,10 +63,8 @@ async fn register_intent_law_target_observed_by(
 ) -> ProcessId {
     registry
         .register_process_with_observers(
-            crate::ProcessRegistration::new(
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            crate::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )
@@ -245,11 +243,12 @@ fn recorded_start_intents() -> crate::ToolIntents {
     crate::ToolIntents::v3(vec![crate::ToolIntent::StartProcess(Box::new(
         crate::StartProcessIntent {
             owner: crate::RuntimeOwner::Session(SessionId::from("session")),
-            declaration: crate::ProcessStartDeclaration::external(
+            declaration: crate::ProcessStartDeclaration::new(
+                crate::testing::held_engine_input(json!({"step": "start"})),
                 crate::ProcessOriginator::host_scoped("intent-law"),
-                json!({"step": "start"}),
                 crate::Lifetime::Detached,
-            ),
+            )
+            .with_env_ref(crate::testing::process_execution_env_fixture_ref()),
         },
     ))])
 }
@@ -374,7 +373,7 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
                 "terminal after the first drain"
             ))),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&target),
         )
         .await
         .expect("terminalize the target between public-caller drains");
@@ -527,10 +526,8 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
         .expect("serialize first refusal-after-success evidence");
 
     registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(crate::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         ))
@@ -660,10 +657,8 @@ async fn retry_drains_only_the_final_attempts_intents() {
     let registry = Arc::clone(&world.registry);
     let target = registry
         .register_process(
-            crate::ProcessRegistration::new(
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            crate::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )

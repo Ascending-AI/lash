@@ -26,8 +26,8 @@ use lash_core::store::{
 use lash_core::testing::TestClock;
 use lash_core::{
     Ancestry, CancelRequest, ClockWallTime, Lifetime, LifetimeDecision, NoProcessWork, PluginError,
-    ProcessId, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-    ProcessTerminalWait, ProcessWorkSubstrate, ScopeGrant, ScopeId, SessionScope,
+    ProcessId, ProcessProvenance, ProcessRegistry, ProcessTerminalWait, ProcessWorkSubstrate,
+    ScopeGrant, ScopeId, SessionScope,
 };
 
 /// A `ProcessWorkSubstrate` whose `deliver_cancel` pops a scripted error
@@ -156,10 +156,8 @@ impl World {
     async fn parent_scope(&self, session: &str, label: &str) -> ScopeId {
         let parent = self
             .registry
-            .register_process(ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            .register_process(lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 ProcessProvenance::session(SessionScope::new(lash_core::SessionId::fixture(
                     session.to_string(),
                 ))),
@@ -188,10 +186,8 @@ impl World {
     /// Register a live `Until` child of `scope` — the child the plan owes a
     /// `ParentEnded` cancel.
     async fn until_child(&self, session: &str, scope: &ScopeId) -> ProcessId {
-        let mut registration = ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        let mut registration = lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::session(SessionScope::new(lash_core::SessionId::fixture(
                 session.to_string(),
             ))),

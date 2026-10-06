@@ -94,10 +94,8 @@ async fn a_host_that_journals_nothing_binds_a_cancel_identity_to_its_first_targe
     let (core, registry, process) = recording_ingress_core().await?;
     let other = registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ),

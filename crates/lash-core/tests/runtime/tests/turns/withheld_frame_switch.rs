@@ -136,10 +136,8 @@ pub(super) async fn work_withheld_before_a_frame_switch_waits_for_its_follow_on(
     let target_scope = lash_core::SessionScope::new(SESSION_ID);
     let registered = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
                 lash_core::Lifetime::Detached,
             )

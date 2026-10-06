@@ -16,10 +16,8 @@ async fn memory_registry() -> Arc<dyn ProcessRegistry> {
 }
 
 fn registration(_id: &str) -> ProcessRegistration {
-    ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+    crate::testing::held_engine_registration(
+        serde_json::Value::Null,
         ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )

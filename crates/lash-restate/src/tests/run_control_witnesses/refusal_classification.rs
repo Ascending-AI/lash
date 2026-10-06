@@ -1,7 +1,7 @@
 //! Engine-control refusals over SQLite files and the Restate double.
 use super::*;
 use crate::tests::{
-    conformance_and_poison::external_registration, harness_store_tiers::HarnessStoreTier,
+    conformance_and_poison::held_registration, harness_store_tiers::HarnessStoreTier,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -13,7 +13,7 @@ async fn corrupt_registry_read_is_refused_identically_by_store_and_engine_contro
     .await;
     let registry = harness.law_stores().process_registry();
     let record = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("process");
     let connection = rusqlite::Connection::open(

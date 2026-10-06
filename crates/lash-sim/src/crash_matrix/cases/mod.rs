@@ -108,6 +108,8 @@ pub(crate) fn held_core(held: Arc<AtomicUsize>) -> CoreBuild {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .recovery_lease(recovery_lease())
+            // Held children run until their scope's parent-end cancel.
+            .plugin(lash_core::testing::process_engine_plugin_fixture())
             .serve_test_llm_profile(scripted_provider(Arc::clone(&held)), model)
             .build(owner)
             .map_err(|error| format!("build the lash core: {error}"))

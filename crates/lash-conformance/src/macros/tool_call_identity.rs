@@ -21,8 +21,6 @@ macro_rules! tool_call_identity_tests {
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             suspended_tool_keeps_turn_and_history_head_until_resolution);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
-            external_completion_without_observer_writes_nothing);
-        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             live_and_durable_queue_paths_share_results_and_capability_refusals);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             reported_failure_retry_preserves_call_id);

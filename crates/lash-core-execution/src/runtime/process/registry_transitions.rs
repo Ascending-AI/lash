@@ -153,29 +153,15 @@ pub fn absent_process_error(
 /// fragment on purpose: the registries keep their literal SQL, and
 /// `process_status_labels_partition_live_from_retired` is what fails if a new
 /// variant would silently land on the wrong side.
-///
-/// Live is **not** the complement of terminal.
-/// [`ProcessStatus::CallerDeparted`](crate::ProcessStatus::CallerDeparted) is
-/// neither: lash may never act on such a row and may never assert an outcome
-/// for it, so it is excluded here (recovery must not pick it up) and included
-/// in [`RETIRED_PROCESS_STATUS_LABELS`] (retention may reclaim it).
 pub const LIVE_PROCESS_STATUS_LABELS: [&str; 2] = ["running", "waiting"];
 
 /// The `status` column labels retention may reclaim, i.e. the exact complement
 /// of [`LIVE_PROCESS_STATUS_LABELS`] that both registries' prune SQL selects
 /// with `status NOT IN ('running', 'waiting')`.
 ///
-/// Reclaiming a row is a retention act, never an outcome claim, which is why
-/// the non-terminal `caller_departed` label belongs here: nothing may ever
-/// honestly terminalize such a row, so excluding it would let a host
-/// accumulate unresolvable rows without bound.
-pub const RETIRED_PROCESS_STATUS_LABELS: [&str; 5] = [
-    "completed",
-    "failed",
-    "cancelled",
-    "abandoned",
-    "caller_departed",
-];
+/// Reclaiming a row is a retention act, never an outcome claim.
+pub const RETIRED_PROCESS_STATUS_LABELS: [&str; 4] =
+    ["completed", "failed", "cancelled", "abandoned"];
 
 // ---------------------------------------------------------------------------
 // Wake reconciliation vocabulary

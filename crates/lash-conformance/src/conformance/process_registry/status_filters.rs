@@ -124,7 +124,6 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
                 crate::ProcessStatus::Failed,
                 crate::ProcessStatus::Cancelled,
                 crate::ProcessStatus::Abandoned,
-                crate::ProcessStatus::CallerDeparted,
             ]),
             false,
             true,

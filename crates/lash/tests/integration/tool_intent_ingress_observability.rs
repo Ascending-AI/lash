@@ -22,10 +22,8 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
     for _ in 0..2 {
         let process = registry
             .register_process_with_observers(
-                lash::process::ProcessRegistration::new(
-                    lash::process::ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
+                lash_core::testing::held_engine_registration(
+                    serde_json::Value::Null,
                     lash::process::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 ),

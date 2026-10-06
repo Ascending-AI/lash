@@ -486,10 +486,8 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     let wake_process_id = handles
         .processes
         .register_process(
-            ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::json!({"fixture": "wake"}),
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::json!({"fixture": "wake"}),
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -527,10 +525,8 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
 
     let tombstone_process_id = handles
         .processes
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::json!({"fixture": "tombstone"}),
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::json!({"fixture": "tombstone"}),
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -545,7 +541,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!({ "fixture": "retired" }),
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&tombstone_process_id),
         )
         .await
         .expect("complete fixture process to prune");

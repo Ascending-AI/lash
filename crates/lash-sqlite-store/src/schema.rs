@@ -753,7 +753,7 @@ CREATE TABLE IF NOT EXISTS processes (
     CONSTRAINT ck_processes_start_obligation CHECK (((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
-    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
+    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
     CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'session_operation', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
 );
@@ -808,9 +808,7 @@ CREATE INDEX IF NOT EXISTS idx_processes_wake_session
     ON processes(wake_session_id);
 -- The pending-cancel sweep's scan: rows whose cancel request is older than a
 -- horizon and whose outcome is still open. The predicate is the negation of
--- the terminal statuses, so `caller_departed` is in: nothing may ever
--- terminalize such a row, so a cancel request on it stays unanswered forever
--- and is exactly what an operator asks this index for. It must stay
+-- the terminal statuses. It must stay
 -- byte-identical to the generated nonterminal predicate, or SQLite plans
 -- the query without it.
 CREATE INDEX IF NOT EXISTS idx_processes_pending_cancel
@@ -820,9 +818,7 @@ CREATE INDEX IF NOT EXISTS idx_processes_pending_cancel
 -- The scope-close sweep's only scan: processes living `Until` one closed
 -- scope that still owe a cancel. The predicate names the live statuses rather than a NOT
 -- IN so a status added later cannot silently widen the index; it is exactly
--- `LIVE_PROCESS_STATUS_LABELS`, so `caller_departed` is out for the reason it
--- is out of every other worklist - lash may never act on such a row nor
--- assert an outcome for it, and a cancel request is both.
+-- `LIVE_PROCESS_STATUS_LABELS`.
 CREATE INDEX IF NOT EXISTS idx_processes_lifetime_scope
     ON processes(lifetime_scope_kind, lifetime_scope_id, process_id);
 CREATE INDEX IF NOT EXISTS idx_processes_lifetime_pending
@@ -956,7 +952,7 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
     terminal_label      TEXT NOT NULL,
     pruned_at_ms        INTEGER NOT NULL,
     pruned_change_seq   INTEGER NOT NULL,
-    CONSTRAINT ck_process_tombstones_terminal_label CHECK (terminal_label IN ('completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))
+    CONSTRAINT ck_process_tombstones_terminal_label CHECK (terminal_label IN ('completed', 'failed', 'cancelled', 'abandoned'))
 );
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);

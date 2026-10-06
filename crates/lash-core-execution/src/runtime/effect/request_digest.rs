@@ -452,9 +452,7 @@ mod tests {
         let start = |trace: lash_trace::TraceScopeOffer| {
             process_effect(crate::ProcessCommand::Start {
                 registration: crate::ProcessStartRegistration::of_target(
-                    crate::ProcessInput::External {
-                        metadata: serde_json::json!({"report": "nightly"}),
-                    },
+                    crate::testing::held_engine_input(serde_json::json!({"report": "nightly"})),
                     crate::ProcessProvenance::host(),
                     crate::Lifetime::Detached,
                 )

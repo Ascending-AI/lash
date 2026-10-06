@@ -206,12 +206,12 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
         .with_tracing(lash_core::facade_support::TraceRuntime::default().with_trace_sink(sink_dyn));
     let registry = process_registry();
     let await_record = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register");
     let signal_record = registry
         .register_process(
-            external_registration()
+            held_registration()
                 .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
                 .with_extra_event_types([lash_core::ProcessEventType {
                     name: "signal.notify".to_string(),
@@ -226,7 +226,7 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
         .complete_process(
             &await_record.id,
             awaited_output.clone(),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&await_record.id),
         )
         .await
         .expect("complete");
@@ -469,7 +469,7 @@ pub(super) async fn restate_cancel_redrive_after_completion_replays_journaled_ad
     let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let registry = process_registry();
     let record = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register cancellation target");
     let invocation = runtime_invocation(RuntimeEffectKind::Process, "cancel-redrive");
@@ -517,7 +517,7 @@ pub(super) async fn restate_cancel_redrive_after_completion_replays_journaled_ad
         .complete_process(
             &record.id,
             process_success(serde_json::json!({ "completed": true })),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&record.id),
         )
         .await
         .expect("complete after cancellation admission");
@@ -572,11 +572,11 @@ pub(super) async fn restate_cancel_replay_refuses_journaled_command_identity_dri
     let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let registry = process_registry();
     let first_record = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register first cancellation target");
     let second_record = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register second cancellation target");
     let invocation = runtime_invocation(RuntimeEffectKind::Process, "cancel-identity-drift");
@@ -638,7 +638,7 @@ pub(super) async fn restate_cancel_replay_refuses_incompatible_journal_payloads(
         let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
         let registry = process_registry();
         let record = registry
-            .register_process(external_registration())
+            .register_process(held_registration())
             .await
             .expect("register cancellation target");
         let effect_id = format!("cancel-payload-{mutation}");

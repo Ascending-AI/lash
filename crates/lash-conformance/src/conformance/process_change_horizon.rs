@@ -5,39 +5,6 @@ use super::*;
 use crate::{PluginError, ProjectionWatermark};
 use pretty_assertions::assert_eq;
 
-/// Test-consumer model for the typed Process Change Feed recovery contract:
-/// a pruned cursor requires a complete relist before resuming at the reported
-/// Tombstone Compaction horizon.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(super) async fn changes_after_full_relist_if_required(
-    registry: &Arc<dyn ProcessRegistry>,
-    limit: usize,
-) -> (Vec<ProcessChange>, ProcessChangeCursor) {
-    match registry
-        .processes_changed_since(ProcessChangeCursor::initial(), limit)
-        .await
-    {
-        Ok(result) => result,
-        Err(PluginError::ProcessChangeCursorPruned {
-            tombstone_compaction_horizon,
-            ..
-        }) => {
-            registry
-                .list_processes(&crate::ProcessListFilter::default())
-                .await
-                .expect("full relist after a pruned Process Change Feed cursor");
-            registry
-                .processes_changed_since(tombstone_compaction_horizon, limit)
-                .await
-                .expect("resume Process Change Feed at the compaction horizon")
-        }
-        Err(error) => panic!("read Process Change Feed from its oldest retained cursor: {error}"),
-    }
-}
-
 /// Prove Tombstone Compaction records a read-side horizon even when the host
 /// explicitly declares that no projector constrains deletion.
 #[expect(
@@ -59,7 +26,7 @@ pub async fn process_change_cursor_below_tombstone_compaction_horizon_is_refused
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("complete prune-horizon process");

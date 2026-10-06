@@ -287,17 +287,17 @@ mod llm_profile_passthrough;
 
 #[test]
 fn process_start_requests_round_trip_core_values() {
-    let external = lash_core::ProcessStartRequest::external(
+    let held = lash_core::ProcessStartRequest::new(
+        lash_core::testing::held_engine_input(serde_json::json!({ "label": "Held" })),
         lash_core::ProcessOriginator::host(),
-        serde_json::json!({ "label": "External" }),
         lash_core::Lifetime::Detached,
     )
     .with_wake_session_id(Some(SessionId::from("session-a")))
     .with_observers([SessionId::from("session-a")])
     .with_event_types([process_event_type()]);
-    assert_process_start_roundtrip(external.clone());
+    assert_process_start_roundtrip(held.clone());
     // A host start's session-lookup grant crosses as `until_session`.
-    let mut until_session = external.clone();
+    let mut until_session = held.clone();
     until_session.originator =
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new("session-a"));
     until_session.lifetime = lash_core::LifetimeDecision::Until {
@@ -315,7 +315,7 @@ fn process_start_requests_round_trip_core_values() {
         lash_core::ScopeId::process(lash_sansio::ProcessId::fixture("parent")),
         lash_core::ScopeId::Session(SessionId::from("session-a")),
     ] {
-        let mut scoped = external.clone();
+        let mut scoped = held.clone();
         scoped.lifetime = lash_core::LifetimeDecision::Until {
             scope,
             grant: lash_core::ScopeGrant::Ancestor,
@@ -835,7 +835,6 @@ fn journaled_process_lifecycle_kinds_keep_their_sequence_on_the_wire() {
         "process.waiting",
         "process.resumed",
         "process.cancel_requested",
-        "process.caller_departed",
         "process.completed",
         "process.failed",
         "process.cancelled",
@@ -1188,13 +1187,12 @@ fn demo_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant {
 #[test]
 fn a_remote_start_key_is_global_and_never_rehashed() {
     let remote_start = |session: &'static str, start_key: &str| {
-        let mut remote =
-            RemoteProcessStartRequest::try_from(lash_core::ProcessStartRequest::external(
-                lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session)),
-                serde_json::json!({ "label": "External" }),
-                lash_core::Lifetime::Detached,
-            ))
-            .expect("remote start");
+        let mut remote = RemoteProcessStartRequest::try_from(lash_core::ProcessStartRequest::new(
+            lash_core::testing::held_engine_input(serde_json::json!({ "label": "Held" })),
+            lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session)),
+            lash_core::Lifetime::Detached,
+        ))
+        .expect("remote start");
         remote.start_key = Some(start_key.to_string());
         remote
     };

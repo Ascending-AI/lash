@@ -103,18 +103,6 @@ macro_rules! backend_laws {
 
             #[tokio::test]
             $(#[ignore = $service])?
-            async fn external_completion_replay_after_compaction_returns_recorded_outcome() {
-                families::external_completion(StorageKind::$kind, $live, false).await;
-            }
-
-            #[tokio::test]
-            $(#[ignore = $service])?
-            async fn external_completion_replay_after_observer_transfer_returns_recorded_outcome() {
-                families::external_completion(StorageKind::$kind, $live, true).await;
-            }
-
-            #[tokio::test]
-            $(#[ignore = $service])?
             async fn facade_signal_replay_after_compaction_returns_recorded_event() {
                 families::signal(
                     StorageKind::$kind,

@@ -286,8 +286,8 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let registration = external_registration()
-        .with_start_key(Some(lash_core::StartKey::for_host("background-start")));
+    let registration =
+        held_registration().with_start_key(Some(lash_core::StartKey::for_host("background-start")));
     let outcome = host
         .execute_effect(
             RuntimeEffectEnvelope::new(
@@ -752,7 +752,7 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "process-start-replay"),
             RuntimeEffectCommand::process(ProcessCommand::Start {
-                registration: external_registration()
+                registration: held_registration()
                     .with_start_key(Some(lash_core::StartKey::for_host("process-start-replay")))
                     .into(),
                 observers: Vec::new(),
@@ -784,7 +784,7 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
         .complete_process(
             &process_id,
             terminal.clone(),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("complete child process");
@@ -867,7 +867,7 @@ pub(super) async fn restate_controller_start_after_prune_sends_a_new_workflow() 
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, effect_id),
             RuntimeEffectCommand::process(ProcessCommand::Start {
-                registration: external_registration()
+                registration: held_registration()
                     .with_start_key(Some(lash_core::StartKey::for_host("restart-after-prune")))
                     .into(),
                 observers: Vec::new(),
@@ -897,7 +897,7 @@ pub(super) async fn restate_controller_start_after_prune_sends_a_new_workflow() 
         .complete_process(
             &first,
             process_success(serde_json::json!({ "run": "first" })),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&first),
         )
         .await
         .expect("complete the first run");
@@ -924,7 +924,7 @@ pub(super) async fn restate_controller_start_emits_send_when_external_ref_alread
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let registration = external_registration().with_start_key(Some(lash_core::StartKey::for_host(
+    let registration = held_registration().with_start_key(Some(lash_core::StartKey::for_host(
         "process-start-existing-ref",
     )));
     let process_id = registry
@@ -979,7 +979,7 @@ pub(super) async fn run_parent_shaped_start_await_suspend_flow(
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "parent-flow-start-child"),
                 RuntimeEffectCommand::process(ProcessCommand::Start {
-                    registration: external_registration()
+                    registration: held_registration()
                         .with_start_key(Some(lash_core::StartKey::for_host("parent-flow-child")))
                         .into(),
                     observers: Vec::new(),

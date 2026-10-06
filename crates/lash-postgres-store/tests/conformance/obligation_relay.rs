@@ -52,10 +52,8 @@ async fn a_registry_armed_obligation_is_due_for_a_relay_clock_behind_the_databas
     let (_attachments, stores) = pg_law_stores(&storage);
     let registry = stores.process_registry();
     let process = registry
-        .register_process(lash_core_execution::ProcessRegistration::new(
-            lash_core_execution::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core_execution::ProcessProvenance::host(),
             lash_core_execution::Lifetime::Detached,
         ))
@@ -68,7 +66,7 @@ async fn a_registry_armed_obligation_is_due_for_a_relay_clock_behind_the_databas
             lash_core_execution::ProcessAwaitOutput::from_tool_output(
                 lash_core_execution::ToolCallOutput::success(serde_json::json!({ "ended": true })),
             ),
-            lash_core_execution::ProcessCompletionAuthority::external_owner(),
+            lash_core_execution::ProcessCompletionAuthority::workflow_key(&process),
         )
         .await
         .expect("complete the process");

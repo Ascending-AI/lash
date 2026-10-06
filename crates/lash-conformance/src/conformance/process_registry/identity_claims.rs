@@ -110,7 +110,7 @@ pub async fn consumer_hold_prevents_destructive_prune_until_settlement(
         .complete_process(
             &id,
             settled_success(serde_json::json!("retained")),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&id),
         )
         .await
         .expect("complete held child");
@@ -410,7 +410,7 @@ pub async fn retired_process_shapes_refuse_before_registration_or_effects(
         .len();
     for value in [
         serde_json::json!({"type":"lashlang","module":"old-module","process":"old-process"}),
-        serde_json::json!({"type":"shell","command":"echo legacy"}),
+        serde_json::json!({"type":"external","metadata":{"job":"legacy"}}),
         serde_json::json!({"type":"subagent","task":"legacy"}),
         serde_json::json!({"type":"workflow","workflow_id":"old"}),
     ] {

@@ -716,12 +716,11 @@ fn validate_trigger_target(target: &crate::ProcessStartTarget) -> Result<(), Plu
     match target {
         crate::ProcessStartTarget::Input(crate::ProcessInput::Engine { .. })
         | crate::ProcessStartTarget::Definition { .. } => Ok(()),
-        crate::ProcessStartTarget::Input(
-            input
-            @ (crate::ProcessInput::SessionTurn { .. } | crate::ProcessInput::External { .. }),
-        ) => Err(PluginError::InvalidTriggerTarget {
-            kind: input.engine_kind().to_string(),
-        }),
+        crate::ProcessStartTarget::Input(input @ crate::ProcessInput::SessionTurn { .. }) => {
+            Err(PluginError::InvalidTriggerTarget {
+                kind: input.engine_kind().to_string(),
+            })
+        }
     }
 }
 

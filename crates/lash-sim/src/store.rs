@@ -921,9 +921,9 @@ impl ModelStore {
                     owner: lash_core::RuntimeOwner::Session(SessionId::fixture(
                         event.actor_alias.clone(),
                     )),
-                    declaration: lash_core::ProcessStartDeclaration::external(
+                    declaration: lash_core::ProcessStartDeclaration::new(
+                        lash_core::testing::held_engine_input(json!({"durable_key": durable_key})),
                         lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
-                        json!({"durable_key": durable_key}),
                         lash_core::Lifetime::Detached,
                     ),
                 },

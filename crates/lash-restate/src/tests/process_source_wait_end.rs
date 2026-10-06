@@ -38,9 +38,9 @@ impl World {
             .expect("endpoint");
         let process = stores
             .process_registry()
-            .register_process(external_registration())
+            .register_process(held_registration())
             .await
-            .expect("external process")
+            .expect("held process")
             .id;
         let session = SessionId::fixture(format!("process-source-{seed}"));
         let run = TurnId::fixture("run");

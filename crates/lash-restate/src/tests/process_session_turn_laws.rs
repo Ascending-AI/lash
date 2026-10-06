@@ -165,6 +165,16 @@ async fn parent_runtime_with_llm_profiles(
     factory: Arc<dyn lash_core::DeploymentStore>,
     models: Arc<dyn lash_core::LlmProfiles>,
 ) -> lash_core::facade_support::LashRuntime {
+    parent_runtime_with_engines(registry, factory, models, Vec::new()).await
+}
+
+/// The parent session's runtime on a deployment that also registers `engines`.
+async fn parent_runtime_with_engines(
+    registry: Arc<dyn ProcessRegistry>,
+    factory: Arc<dyn lash_core::DeploymentStore>,
+    models: Arc<dyn lash_core::LlmProfiles>,
+    engines: Vec<lash_core::ProcessEngineRegistration>,
+) -> lash_core::facade_support::LashRuntime {
     let parent = SessionId::from("test-parent");
     let policy = recovery_session_policy();
     let store = lash_core::runtime::admit_session_view(
@@ -199,6 +209,9 @@ async fn parent_runtime_with_llm_profiles(
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.models = models;
+    for engine in engines {
+        host.process_engines = host.process_engines.with_registration(engine);
+    }
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             host,
@@ -1496,7 +1509,16 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
 async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session() {
     let registry = process_registry();
     let factory = memory_session_store_factory().await;
-    let parent = parent_runtime(Arc::clone(&registry), Arc::clone(&factory)).await;
+    // The later start runs the held test engine, which the deployment registers.
+    let parent = parent_runtime_with_engines(
+        Arc::clone(&registry),
+        Arc::clone(&factory),
+        lash_core::testing::standard_test_llm_profiles(answering_provider("parent lives")),
+        vec![lash_core::ProcessEngineRegistration::accepting(Arc::new(
+            lash_core::testing::HeldProcessEngine,
+        ))],
+    )
+    .await;
     let parent_id = SessionId::from("test-parent");
     let parent_turn = lash_core::ScopeId::turn(parent_id.clone(), TurnId::from("owner-start-turn"));
     let child = SessionId::from("process-owned-worker-child");
@@ -1557,9 +1579,7 @@ async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session(
         .scoped_effect_controller(durable_admission(&durable_turn_scope(&child, &owned_turn)))
         .expect("scope a later owned-session turn");
     let request = lash_core::ProcessStartRequest::new(
-        lash_core::ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+        lash_core::testing::held_engine_input(serde_json::Value::Null),
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new(child.clone())),
         lash_core::Lifetime::Detached,
     )

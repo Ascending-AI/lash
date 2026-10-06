@@ -425,9 +425,9 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
 
     // Changed content under the key is the typed conflict it always was.
     let mut changed = start(offer(FIRST, FIRST_ANCHOR));
-    changed.input = Arc::new(crate::ProcessInput::External {
-        metadata: serde_json::json!({"changed": true}),
-    });
+    changed.input = Arc::new(lash_core::testing::held_engine_input(
+        serde_json::json!({"changed": true}),
+    ));
     match registry
         .register_process_reporting_outcome(changed, &[])
         .await

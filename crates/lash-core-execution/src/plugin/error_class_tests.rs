@@ -218,7 +218,6 @@ plugin_error_samples! {
         terminal_label: crate::RetiredProcessStatus::Completed,
         pruned_at_ms: 1,
     },
-    ProcessCallerDeparted { .. } => PluginError::ProcessCallerDeparted { process_id: process() },
     ProcessHandedOver { .. } => PluginError::ProcessHandedOver {
         process_id: process(),
         segment_ordinal: 1,

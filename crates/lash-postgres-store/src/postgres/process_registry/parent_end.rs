@@ -319,9 +319,7 @@ pub(super) async fn list_unrecorded_opener_parents(
 /// Processes living `Until` one closed scope that still owe a cancel.
 ///
 /// The predicate is exactly the pending-cancel partial index: `Until` lifetime,
-/// no cancel request yet, and a live status. `caller_departed` is excluded for
-/// the reason it is excluded from every non-terminal registry scan — lash may never act on
-/// such a row nor assert an outcome for it, and a cancel request is both.
+/// no cancel request yet, and a live status.
 pub(super) async fn children(
     pool: &PgPool,
     parent: &ScopeId,

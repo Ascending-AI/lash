@@ -24,10 +24,8 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
     let registry = crate::testing::ProcessRegistryFaults::new(backend.process_registry());
     let session_id = SessionId::from(SESSION_ID);
     let process_id = registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -96,10 +94,8 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
     );
 
     let second = registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -107,10 +103,8 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
         .expect("register second selected process")
         .id;
     let pruned = registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -123,7 +117,7 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&pruned),
         )
         .await
         .expect("complete pruned selection");

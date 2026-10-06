@@ -105,7 +105,7 @@ enum Producer {
 /// The tool name of [`DeclaringProbe`].
 const PROBE_TOOL: &str = "conformance_declared_start_probe";
 
-/// The metadata key a probe's external child carries its session under.
+/// The payload key a probe's child carries its session under.
 const PROBE_MARKER: &str = "declared_start_probe";
 
 /// What a [`DeclaringProbe`] call declares: the call's arguments.
@@ -312,7 +312,7 @@ fn probe_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:conformance_declared_start_probe",
         PROBE_TOOL,
-        "Declares one external child start and resolves on its terminal.",
+        "Declares one child start and resolves on its terminal.",
         object.clone(),
         object,
     )
@@ -325,8 +325,8 @@ fn probe_tool() -> crate::ToolDefinition {
     )
 }
 
-/// A tool whose `Pending` declares one externally owned child: nothing runs
-/// it, so the law controls its lifetime, the wait's cancel hint and the
+/// A tool whose `Pending` declares one held child: it runs until it is
+/// cancelled, so the law controls its lifetime, the wait's cancel hint and the
 /// attempt that declares it.
 #[derive(Default)]
 struct DeclaringProbe {
@@ -399,15 +399,15 @@ impl DeclaringProbe {
         } else {
             crate::lifetime::starter(&context.start_cx().map_err(|error| error.to_string())?)
         };
-        let declaration = crate::ProcessStartDeclaration::external(
+        let declaration = crate::ProcessStartDeclaration::new(
+            lash_core::testing::held_engine_input(serde_json::json!({
+                PROBE_MARKER: session_id.as_str(),
+                "attempt": context.attempt_number(),
+            })),
             crate::ProcessOriginator::Session {
                 session_id: session_id.clone(),
                 agent_frame_id: Some(agent_frame_id),
             },
-            serde_json::json!({
-                PROBE_MARKER: session_id.as_str(),
-                "attempt": context.attempt_number(),
-            }),
             lifetime,
         )
         .with_declared_identity(crate::DeclaredProcessIdentity::labelled(
@@ -836,6 +836,7 @@ impl World {
             .into_iter()
             .chain([(tier.subagents)()])
             .chain(tools)
+            .chain([crate::testing::process_engine_plugin_fixture()])
             .collect::<Vec<_>>();
         // The worker installs the same plugin set as the parent's core, one
         // of them under another default: the facts a child runs under are its
@@ -1091,7 +1092,7 @@ impl World {
         }
     }
 
-    /// The external children this world's probe declared.
+    /// The children this world's probe declared.
     async fn probes(&self) -> Vec<crate::ProcessRecord> {
         self.registry
             .list_processes(&crate::ProcessListFilter {
@@ -1104,8 +1105,8 @@ impl World {
             .filter(|record| {
                 matches!(
                     record.input.as_ref(),
-                    crate::ProcessInput::External { metadata }
-                        if metadata[PROBE_MARKER] == self.session_id.as_str()
+                    crate::ProcessInput::Engine { payload, .. }
+                        if payload[PROBE_MARKER] == self.session_id.as_str()
                 )
             })
             .collect()
@@ -2003,11 +2004,11 @@ pub async fn declared_start_discarded_retry_launches_nothing(tier: DeclaredStart
         .await;
     let probes = world.probes().await;
     assert_eq!(probes.len(), 1, "one child: {probes:#?}");
-    let crate::ProcessInput::External { metadata } = probe.input.as_ref() else {
-        panic!("the probe's child is external: {probe:#?}");
+    let crate::ProcessInput::Engine { payload, .. } = probe.input.as_ref() else {
+        panic!("the probe's child is an engine process: {probe:#?}");
     };
     assert_eq!(
-        metadata["attempt"], 2,
+        payload["attempt"], 2,
         "the child is the final attempt's: {probe:#?}"
     );
 }

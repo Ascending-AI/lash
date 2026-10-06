@@ -85,15 +85,6 @@ impl RuntimeSessionServices {
                 }
                 outcome
             }
-            // Externally-owned rows are never executed by lash (ADR 0110): the
-            // worker's run path rejects them before dispatch, so this
-            // is defensively unreachable. Never fabricate a success outcome for
-            // work lash did not observe completing — surface a loud failure.
-            crate::ProcessInput::External { .. } => Err(crate::ProcessInfraError::new(
-                crate::PluginError::attempt_fault(
-                    "externally-owned process must not be executed by lash".to_string(),
-                ),
-            )),
         }
     }
 }

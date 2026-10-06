@@ -754,7 +754,7 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     CONSTRAINT ck_processes_start_obligation CHECK (((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
-    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
+    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
     CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'session_operation', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
 );
@@ -820,9 +820,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_wake_session
     ON lash_processes(wake_session_id);
 -- The pending-cancel sweep's scan: rows whose cancel request is older than a
 -- horizon and whose outcome is still open. The predicate is the negation of
--- the terminal statuses, so `caller_departed` is in: nothing may ever
--- terminalize such a row, so a cancel request on it stays unanswered forever
--- and is exactly what an operator asks this index for. It must stay
+-- the terminal statuses. It must stay
 -- byte-identical to `nonterminal_process_status("status")`, or the planner
 -- refuses the partial index.
 CREATE INDEX IF NOT EXISTS idx_lash_processes_pending_cancel
@@ -833,9 +831,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_lifetime_scope
     ON lash_processes(lifetime_scope_kind, lifetime_scope_id, process_id);
 -- The scope-close sweep's only scan. The predicate names the live statuses
 -- rather than a NOT IN so a status added later cannot silently widen the
--- index; it is exactly LIVE_PROCESS_STATUS_LABELS, so `caller_departed` is out
--- for the reason it is out of every other worklist: lash may never act on such
--- a row nor assert an outcome for it, and a cancel request is both.
+-- index; it is exactly LIVE_PROCESS_STATUS_LABELS.
 CREATE INDEX IF NOT EXISTS idx_lash_processes_lifetime_pending
     ON lash_processes(lifetime_scope_kind, lifetime_scope_id, process_id)
     WHERE lifetime = 'until'
@@ -954,7 +950,7 @@ CREATE TABLE IF NOT EXISTS lash_process_tombstones (
     terminal_label TEXT NOT NULL,
     pruned_at_ms BIGINT NOT NULL,
     pruned_change_seq BIGINT NOT NULL,
-    CONSTRAINT ck_process_tombstones_terminal_label CHECK (terminal_label IN ('completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))
+    CONSTRAINT ck_process_tombstones_terminal_label CHECK (terminal_label IN ('completed', 'failed', 'cancelled', 'abandoned'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_process_tombstones_change
     ON lash_process_tombstones(pruned_change_seq);

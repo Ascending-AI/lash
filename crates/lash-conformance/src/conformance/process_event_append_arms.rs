@@ -15,13 +15,12 @@ use pretty_assertions::assert_eq;
 /// sequences past a wake that was already allocated and delivered, for a call
 /// that persisted nothing.
 ///
-/// Each backend spells the sequence once and reaches it from three entry points
-/// — the unfenced host append, external-owner completion, and workflow-key
-/// completion. All three are exercised here. The completion paths
-/// settle their repeat call on the already-terminal row rather than the replay
-/// arm proper; the observable contract is the same either way, and asserting it
-/// per entry point is what catches a floor advance or an event row escaping
-/// onto a path that persisted nothing.
+/// Each backend spells the sequence once and reaches it from two entry points
+/// — the unfenced host append and workflow-key completion. Both are exercised
+/// here. The completion path settles its repeat call on the already-terminal
+/// row rather than the replay arm proper; the observable contract is the same
+/// either way, and asserting it per entry point is what catches a floor advance
+/// or an event row escaping onto a path that persisted nothing.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -101,58 +100,7 @@ pub async fn process_event_append_arms_are_ordered(
         "the replay arm writes no event row and leaves the floor where the latest insert put it"
     );
 
-    // Entry point 2: terminal completion under an explicit authority.
-    let authority_id = registry
-        .register_process(
-            registration("append-arm-authority-completion")
-                .with_wake_session_id(Some(target_session_id.clone())),
-        )
-        .await
-        .expect("register authority-completion arm process")
-        .id;
-    let authority_output = ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-        serde_json::json!({"append_arm": "authority"}),
-    ));
-    assert!(matches!(
-        registry
-            .complete_process(
-                &authority_id,
-                authority_output.clone(),
-                ProcessCompletionAuthority::external_owner(),
-            )
-            .await
-            .expect("authority completion takes the insert arm"),
-        crate::ProcessCompletionOutcome::Committed(_)
-    ));
-    let authority_footprint =
-        append_arm_footprint(&registry, &authority_id, &target_session_id).await;
-    assert_eq!(
-        authority_footprint.0, 1,
-        "authority completion writes exactly one terminal event row"
-    );
-    assert_eq!(
-        authority_footprint.1,
-        Some(terminal_sequence(&registry, &authority_id).await),
-        "authority completion advances the floor to its terminal event"
-    );
-    assert!(matches!(
-        registry
-            .complete_process(
-                &authority_id,
-                authority_output,
-                ProcessCompletionAuthority::external_owner(),
-            )
-            .await
-            .expect("authority completion is idempotent"),
-        crate::ProcessCompletionOutcome::AlreadyApplied { .. }
-    ));
-    assert_eq!(
-        append_arm_footprint(&registry, &authority_id, &target_session_id).await,
-        authority_footprint,
-        "a repeated authority completion writes no event row and does not move the floor"
-    );
-
-    // Entry point 3: workflow-key completion.
+    // Entry point 2: workflow-key completion.
     let workflow_id = registry
         .register_process(
             executed_registration("append-arm-workflow-key-completion")

@@ -33,8 +33,9 @@ workload's seed, on virtual time (`backend::SimEngine`). SQLite is storage
 only. Server attempts run concurrently, so sessions interleave as they would
 against a real server. A failed run records its full history.
 
-Generated trigger boundaries register scheduler-owned external processes in
-the world's process registry under the reservation's stable start key. Each
+Generated trigger boundaries register the subscription's engine process in
+the world's process registry under the reservation's stable start key; it
+owes its engine start, which the boundary leaves to the deployment. Each
 boundary binds its process before reporting success, which delivers the
 trigger-delivery obligation. A replay binds the same process. These boundaries
 model trigger routing; the runtime relay's engine-start recovery and typed

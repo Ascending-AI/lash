@@ -72,9 +72,7 @@ await of a pruned process refuses or answers `NoLongerRetained` from the
 recorded guard or admission, and a replay after a prune returns what the first
 run recorded. A host-wide cancel-all records its running-process selection as a
 `ProcessCommand::List` before issuing cancels from those recorded rows.
-`CompleteExternal` records the observer verdict, attachment acquisition and
-external-owner terminal write together, and returns that completion outcome
-on replay. `ValidateVisible` records the session-observer or process-starter
+`ValidateVisible` records the session-observer or process-starter
 verdict before a handle command runs. Compaction and observer transfer cannot
 change any of these recorded decisions.
 

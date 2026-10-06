@@ -494,11 +494,12 @@ impl ToolProvider for AttemptIntentTools {
             crate::ToolIntents::v3(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
                     owner: crate::RuntimeOwner::Session(SessionId::from("session")),
-                    declaration: crate::ProcessStartDeclaration::external(
+                    declaration: crate::ProcessStartDeclaration::new(
+                        crate::testing::held_engine_input(json!({"source": "recorded-attempt"})),
                         crate::ProcessOriginator::host_scoped("attempt-intents-test"),
-                        json!({"source": "recorded-attempt"}),
                         crate::Lifetime::Detached,
-                    ),
+                    )
+                    .with_env_ref(crate::testing::process_execution_env_fixture_ref()),
                 })),
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
                     owner: crate::RuntimeOwner::Session(SessionId::from("session")),
@@ -1579,10 +1580,8 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
         .collect::<Vec<_>>();
     let registered = registry
         .register_process_with_observers(
-            crate::ProcessRegistration::new(
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            crate::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )
@@ -1597,6 +1596,18 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
     context.processes = crate::testing::effect_backed_process_service(
         Arc::clone(&registry),
         backend.process_env_store(),
+    );
+    // The recorded start declares the captured environment, which the
+    // attempt holds through the engines' artifact ports.
+    context.process_engines = crate::testing::process_engine_fixture().with_artifact_ports(
+        crate::runtime::ArtifactReferrerPorts::new(
+            crate::StoreSet::module_artifacts(backend.as_ref()),
+            backend.process_env_store(),
+            crate::StoreSet::definition_store(backend.as_ref()),
+            crate::StoreSet::attachment_referrers(backend.as_ref()),
+            crate::StoreSet::artifact_cleanup(backend.as_ref()),
+            Arc::new(crate::SystemClock),
+        ),
     );
     context.trigger_router = Some(crate::TriggerRouter::new(
         backend.trigger_store(),

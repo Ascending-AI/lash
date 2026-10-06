@@ -43,7 +43,7 @@ pub async fn a_same_start_key_successor_after_prune_has_independent_attachment_r
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!({"lifetime":"first"}),
             )),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&first.id),
         )
         .await
         .expect("complete first process");
@@ -89,7 +89,7 @@ pub async fn a_same_start_key_successor_after_prune_has_independent_attachment_r
         .complete_process(
             &second.record.id,
             output.clone(),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&second.record.id),
         )
         .await
         .expect("complete successor");

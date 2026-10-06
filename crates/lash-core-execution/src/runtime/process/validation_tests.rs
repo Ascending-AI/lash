@@ -7,15 +7,13 @@ use crate::runtime::process::{
     ProcessEffectOutcomeClass, validate_generic_process_event_append,
 };
 use crate::{
-    ProcessEventAppendRequest, ProcessExternalRef, ProcessInput, ProcessProvenance, ProcessRecord,
+    ProcessEventAppendRequest, ProcessExternalRef, ProcessProvenance, ProcessRecord,
     ProcessRegistration, ProcessStarted, WaitKind, WaitState,
 };
 
 fn fixture_registration(_label: &str) -> ProcessRegistration {
-    ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+    crate::testing::held_engine_registration(
+        serde_json::Value::Null,
         ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )
@@ -211,10 +209,6 @@ fn a_process_record_decodes_one_lifecycle_state() {
         (
             "a waiting state without a wait",
             serde_json::json!({"state": "waiting"}),
-        ),
-        (
-            "a caller-departed state with an outcome",
-            serde_json::json!({"state": "caller_departed", "outcome": outcome}),
         ),
         (
             "a pruned answer as an outcome",

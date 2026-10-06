@@ -624,9 +624,6 @@ impl ToolIntentIngress {
                         return Err(Self::outside_protocol_outcome("definition"));
                     }
                 },
-                lash_core::ProcessEffectOutcome::CompleteExternal { .. } => {
-                    return Err(Self::outside_protocol_outcome("complete_external"));
-                }
                 lash_core::ProcessEffectOutcome::ValidateVisible { .. } => {
                     return Err(Self::outside_protocol_outcome("validate_visible"));
                 }

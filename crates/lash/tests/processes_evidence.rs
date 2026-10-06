@@ -438,13 +438,6 @@ fn processes_area_witnesses() {
     let _ = lash::process::ProcessChangeHub::notify;
     // W0156: lash::process::ProcessChangeHub::subscribe [function]
     let _ = lash::process::ProcessChangeHub::subscribe;
-    // W0157: lash::process::ProcessCompletionAuthority::ExternalOwner [variant]
-    variant_witness(|value: &lash::process::ProcessCompletionAuthority| {
-        matches!(
-            value,
-            lash::process::ProcessCompletionAuthority::ExternalOwner
-        )
-    });
     // W0159: lash::process::ProcessCompletionAuthority::WorkflowKey [variant]
     variant_witness(|value: &lash::process::ProcessCompletionAuthority| {
         matches!(
@@ -774,10 +767,6 @@ fn processes_area_witnesses() {
     fn meth_0263<T: lash::process::ProcessService>(_: &T) {
         let _ = T::cancel_all_visible;
     }
-    // W0264: lash::process::ProcessService::complete_external [function]
-    fn meth_0264<T: lash::process::ProcessService>(_: &T) {
-        let _ = T::complete_external;
-    }
     // W0265: lash::process::ProcessService::list_visible [function]
     fn meth_0265<T: lash::process::ProcessService>(_: &T) {
         let _ = T::list_visible;
@@ -864,12 +853,6 @@ fn processes_area_witnesses() {
     field_witness(|value: &lash::process::ProcessStartRequest| {
         let _ = &value.event_types;
     });
-    // W0290: lash::process::ProcessStartRequest::external [function]
-    let _ = lash::process::ProcessStartRequest::external(
-        todo!(),
-        todo!(),
-        lash::process::LifetimeDecision::Detached,
-    );
     // W0292: lash::process::ProcessStartRequest::identity [field]
     field_witness(|value: &lash::process::ProcessStartRequest| {
         let _ = &value.identity;

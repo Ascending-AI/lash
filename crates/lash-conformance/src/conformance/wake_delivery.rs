@@ -169,7 +169,7 @@ async fn assert_process_terminal_wait<BeforeTerminal, BeforeTerminalFuture>(
         .complete_process(
             &process_id,
             terminal.clone(),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("complete terminal-wait conformance process");
@@ -1399,7 +1399,7 @@ async fn complete_and_prune(registry: &Arc<dyn crate::ProcessRegistry>, process_
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!("done"),
             )),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(process_id),
         )
         .await
         .expect("complete old process incarnation");

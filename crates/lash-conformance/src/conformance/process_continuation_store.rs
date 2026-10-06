@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use crate::{
     BoundaryReason, PersistedSegmentHandover, ProcessAwaitOutput, ProcessCompletionAuthority,
-    ProcessContinuationStore, ProcessInput, ProcessProvenance, ProcessRegistration,
-    ProcessRegistry, ProjectionWatermark, SegmentHandover,
+    ProcessContinuationStore, ProcessProvenance, ProcessRegistry, ProjectionWatermark,
+    SegmentHandover,
 };
 
 #[expect(
@@ -18,10 +18,8 @@ pub async fn process_continuation_store(
     store: Arc<dyn ProcessContinuationStore>,
 ) {
     let continuation_conformance_record = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -264,10 +262,8 @@ pub async fn process_continuation_store(
     );
 
     let pruned_continuation_conformance_record = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -295,7 +291,7 @@ pub async fn process_continuation_store(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&pruned_process_id),
         )
         .await
         .expect("complete prunable continuation owner");

@@ -32,7 +32,7 @@ async fn end_and_prune(registry: &Arc<dyn ProcessRegistry>, process_id: &Process
         .complete_process(
             process_id,
             process_success(serde_json::json!({ "done": true })),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(process_id),
         )
         .await
         .expect("end the process");
@@ -81,7 +81,7 @@ pub(super) async fn a_signal_replayed_after_its_target_is_pruned_answers_as_reco
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
     let record = registry
-        .register_process(external_registration().with_extra_event_types([
+        .register_process(held_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "signal.notify".to_string(),
                 payload_schema: lash_core::JsonSchema::any(),
@@ -149,7 +149,7 @@ pub(super) async fn a_list_replayed_after_the_listed_processes_change_answers_as
     let registry = process_registry();
     let scope = lash_core::SessionScope::new("fig3827-list-session");
     let listed = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register the listed process")
         .id;
@@ -189,12 +189,12 @@ pub(super) async fn a_list_replayed_after_the_listed_processes_change_answers_as
         .complete_process(
             &listed,
             process_success(serde_json::json!({ "done": true })),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&listed),
         )
         .await
         .expect("the listed process ends");
     let started = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register a second process")
         .id;
@@ -235,7 +235,7 @@ pub(super) async fn a_start_replayed_after_its_child_is_pruned_answers_as_record
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "fig3827-start"),
             RuntimeEffectCommand::process(ProcessCommand::Start {
-                registration: external_registration()
+                registration: held_registration()
                     .with_start_key(Some(lash_core::StartKey::for_host("fig3827-started-child")))
                     .into(),
                 observers: Vec::new(),
@@ -285,7 +285,7 @@ pub(super) async fn a_transfer_replayed_after_its_process_is_pruned_answers_as_r
     let from = lash_core::SessionScope::new("fig3827-transfer-from");
     let to = lash_core::SessionScope::new("fig3827-transfer-to");
     let moved = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register the transferred process")
         .id;
@@ -353,7 +353,7 @@ pub(super) async fn a_session_delete_replayed_after_the_session_observes_again_a
         }
     };
     let first_observed = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register the first observed process")
         .id;
@@ -383,7 +383,7 @@ pub(super) async fn a_session_delete_replayed_after_the_session_observes_again_a
     );
 
     let observed_again = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register a process the session observes again")
         .id;

@@ -198,10 +198,8 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
     let prefix = crate::Target::Revision(state.head_revision);
     factory.pin(&id, &prefix).await.expect("pin prefix");
     let process = registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host().with_caused_by(Some(crate::CausalRef::SessionNode {
                 session_id: id.clone(),
                 node_id: leaf.to_string(),

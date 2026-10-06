@@ -87,11 +87,13 @@ impl From<&str> for SessionScopeId {
 
 /// Durable executable input for a process.
 ///
-/// `SessionTurn` and `External` are kernel process primitives: core owns
-/// their durable representation and execution semantics to coordinate child
-/// sessions and externally completed work. `Engine` is the extension point for deployment-specific
-/// process runtimes; those rows require a matching [`crate::ProcessEngine`] in
-/// the host's process engine registry.
+/// `SessionTurn` is the kernel process primitive: core owns its durable
+/// representation and execution semantics to coordinate child sessions.
+/// `Engine` is the extension point for deployment-specific process runtimes;
+/// those rows require a matching [`crate::ProcessEngine`] in the host's
+/// process engine registry. Work a host runs outside lash is an engine
+/// process that awaits that work's completion durably: lash executes every
+/// process it registers.
 /// A registered engine gives the work independent process lifetime; an
 /// engine input by itself is not an OS process boundary, and any hard
 /// isolation is the registered engine's own.
@@ -115,10 +117,6 @@ pub enum ProcessInput {
         turn_input: Box<crate::TurnInput>,
         /// What the runner answers when the child turn finishes.
         result: SessionTurnOutcome,
-    },
-    External {
-        #[serde(default)]
-        metadata: serde_json::Value,
     },
 }
 
@@ -172,16 +170,6 @@ impl ProcessStartTarget {
         match self {
             Self::Input(input) => input.stored_attachment_ids(),
             Self::Definition { .. } => Vec::new(),
-        }
-    }
-
-    /// Whether lash never executes a process started from this target
-    /// ([`ProcessInput::is_externally_owned`]). A definition is resolved to
-    /// an engine start, which lash executes.
-    pub fn is_externally_owned(&self) -> bool {
-        match self {
-            Self::Input(input) => input.is_externally_owned(),
-            Self::Definition { .. } => false,
         }
     }
 
@@ -239,9 +227,6 @@ impl Clone for ProcessInput {
                 turn_input: turn_input.clone(),
                 result: result.clone(),
             },
-            Self::External { metadata } => Self::External {
-                metadata: metadata.clone(),
-            },
         }
     }
 }
@@ -259,7 +244,7 @@ impl ProcessInput {
     pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
         match self {
             Self::SessionTurn { turn_input, .. } => turn_input.stored_attachment_ids(),
-            Self::Engine { .. } | Self::External { .. } => Vec::new(),
+            Self::Engine { .. } => Vec::new(),
         }
     }
 
@@ -268,7 +253,6 @@ impl ProcessInput {
         match self {
             Self::Engine { .. } => "engine",
             Self::SessionTurn { .. } => "session_turn",
-            Self::External { .. } => "external",
         }
     }
 
@@ -277,15 +261,6 @@ impl ProcessInput {
             Self::Engine { kind, .. } => Some(kind.as_str()),
             _ => None,
         }
-    }
-
-    /// Whether lash never executes a process of this input. An `External`
-    /// input names work an actor outside lash runs and closes; every other
-    /// input is executed by the effect engine, which owns its recovery
-    /// (ADR 0110). The input class is the whole fact: there is no separate
-    /// declaration that could contradict it.
-    pub fn is_externally_owned(&self) -> bool {
-        matches!(self, Self::External { .. })
     }
 }
 
@@ -1213,7 +1188,7 @@ impl WaitState {
 }
 
 /// The kind and label a host declares for a start whose input core owns
-/// outright — a session turn, a tool call, an external placeholder.
+/// outright: a session turn or a tool call.
 ///
 /// A declaration carries no definition reference, by construction: only the
 /// engine registry can put one on a durable row, and only after resolving it.
@@ -1321,15 +1296,6 @@ impl ProcessIdentity {
                     .map(|subagent| subagent.capability.clone())
                     .or_else(|| create_request.session_id.clone().map(Into::into));
                 Self::labelled("session_turn", label)
-            }
-            ProcessInput::External { metadata } => {
-                let label = metadata
-                    .get("label")
-                    .or_else(|| metadata.get("name"))
-                    .or_else(|| metadata.get("title"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string);
-                Self::labelled("external", label)
             }
         }
     }
@@ -1697,11 +1663,6 @@ pub enum ProcessLifecycleState {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         park: Option<Box<crate::store::ProcessPark>>,
     },
-    /// The caller that registered an externally-owned row departed before
-    /// any outcome was recorded ([`ProcessStatus::CallerDeparted`]).
-    /// A variant with fields, so that a decode refuses a wait, a park or an
-    /// outcome beside it as it does for every other state.
-    CallerDeparted {},
     Terminal {
         outcome: ProcessTerminal,
     },
@@ -1734,7 +1695,6 @@ impl ProcessLifecycleState {
                 },
                 park: None,
             },
-            ProcessStatus::CallerDeparted => Self::CallerDeparted {},
             ProcessStatus::Completed => {
                 settled(crate::ToolCallOutput::success(serde_json::Value::Null))
             }
@@ -1767,7 +1727,6 @@ impl ProcessLifecycleState {
         match self {
             Self::Running { .. } => ProcessStatus::Running,
             Self::Waiting { .. } => ProcessStatus::Waiting,
-            Self::CallerDeparted {} => ProcessStatus::CallerDeparted,
             Self::Terminal { outcome } => outcome.status().into(),
         }
     }
@@ -1776,7 +1735,7 @@ impl ProcessLifecycleState {
     pub fn wait(&self) -> Option<&WaitState> {
         match self {
             Self::Waiting { wait, .. } => Some(wait),
-            Self::Running { .. } | Self::CallerDeparted {} | Self::Terminal { .. } => None,
+            Self::Running { .. } | Self::Terminal { .. } => None,
         }
     }
 
@@ -1784,7 +1743,7 @@ impl ProcessLifecycleState {
     pub fn park(&self) -> Option<&crate::store::ProcessPark> {
         match self {
             Self::Running { park } | Self::Waiting { park, .. } => park.as_deref(),
-            Self::CallerDeparted {} | Self::Terminal { .. } => None,
+            Self::Terminal { .. } => None,
         }
     }
 
@@ -1792,7 +1751,7 @@ impl ProcessLifecycleState {
     pub(super) fn park_mut(&mut self) -> Option<&mut Option<Box<crate::store::ProcessPark>>> {
         match self {
             Self::Running { park } | Self::Waiting { park, .. } => Some(park),
-            Self::CallerDeparted {} | Self::Terminal { .. } => None,
+            Self::Terminal { .. } => None,
         }
     }
 
@@ -1800,7 +1759,7 @@ impl ProcessLifecycleState {
     pub fn terminal(&self) -> Option<&ProcessTerminal> {
         match self {
             Self::Terminal { outcome } => Some(outcome),
-            Self::Running { .. } | Self::Waiting { .. } | Self::CallerDeparted {} => None,
+            Self::Running { .. } | Self::Waiting { .. } => None,
         }
     }
 }
@@ -1820,7 +1779,7 @@ fn recorded_lineage(
                 .clone()
                 .unwrap_or_else(|| process_child_session_id(process_id)),
         ),
-        ProcessInput::Engine { .. } | ProcessInput::External { .. } => None,
+        ProcessInput::Engine { .. } => None,
     };
     ProcessLineage::of_process(
         process_id,

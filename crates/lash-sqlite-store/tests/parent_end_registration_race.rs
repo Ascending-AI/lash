@@ -34,10 +34,8 @@ fn cancel_child(
     index: usize,
     parent: lash_core_execution::ScopeId,
 ) -> lash_core_execution::ProcessRegistration {
-    let mut registration = lash_core_execution::ProcessRegistration::new(
-        lash_core_execution::ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+    let mut registration = lash_core::testing::held_engine_registration(
+        serde_json::Value::Null,
         lash_core_execution::ProcessProvenance::session(lash_core_execution::SessionScope::new(
             lash_sansio::SessionId::fixture(session_name(index)),
         )),

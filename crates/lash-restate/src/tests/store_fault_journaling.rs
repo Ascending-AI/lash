@@ -62,7 +62,7 @@ pub(super) async fn an_emit_whose_append_meets_a_store_fault_is_never_journaled_
         let stores = memory_process_stores().await;
         let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
         let process_id = registry
-            .register_process(external_registration().with_extra_event_types([tick_type()]))
+            .register_process(held_registration().with_extra_event_types([tick_type()]))
             .await
             .expect("register the emitting process")
             .id;
@@ -112,7 +112,7 @@ pub(super) async fn an_await_whose_read_meets_a_store_fault_is_never_journaled_a
         let stores = memory_process_stores().await;
         let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
         let process_id = registry
-            .register_process(external_registration())
+            .register_process(held_registration())
             .await
             .expect("register the awaited process")
             .id;
@@ -121,7 +121,7 @@ pub(super) async fn an_await_whose_read_meets_a_store_fault_is_never_journaled_a
             .complete_process(
                 &process_id,
                 output.clone(),
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await
             .expect("complete the awaited process");
@@ -174,7 +174,7 @@ pub(super) async fn a_refused_append_is_the_steps_journaled_answer() {
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
     let process_id = registry
-        .register_process(external_registration().with_extra_event_types([tick_type()]))
+        .register_process(held_registration().with_extra_event_types([tick_type()]))
         .await
         .expect("register the emitting process")
         .id;

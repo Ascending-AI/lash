@@ -585,10 +585,8 @@ async fn until_run(
 ) -> crate::ProcessRecord {
     registry
         .register_process(crate::started_until_starter(
-            crate::ProcessRegistration::new(
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::session(crate::SessionScope::new(session_id.clone())),
                 lash_core::Lifetime::Detached,
             ),
@@ -1129,10 +1127,8 @@ pub async fn a_run_end_closes_its_turn_scope_in_the_process_registry(
     let run = TurnId::from("run-registry-close");
     let turn = lash_core::ScopeId::turn(parts.session_id.clone(), run.clone());
     let registration = || {
-        crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::session(crate::SessionScope::new(parts.session_id.clone())),
             lash_core::Lifetime::Detached,
         )

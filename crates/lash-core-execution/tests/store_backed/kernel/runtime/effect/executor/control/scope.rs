@@ -20,10 +20,8 @@ mod admitted_scope_tests {
             .await
             .process_registry();
         let registration = || {
-            crate::ProcessRegistration::new(
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            crate::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )
@@ -38,7 +36,7 @@ mod admitted_scope_tests {
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                     serde_json::json!("old"),
                 )),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&old.id),
             )
             .await
             .expect("complete the first process");

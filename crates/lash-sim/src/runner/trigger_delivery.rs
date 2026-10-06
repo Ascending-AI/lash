@@ -1,11 +1,15 @@
 use super::*;
 
-/// Trigger boundaries whose external processes the scheduler owns. A
+/// Trigger boundaries that register their subscription's engine process. A
 /// successful boundary registers and binds its process in the world's stores;
-/// the bind delivers the reservation's obligation (ADR 0109).
+/// the bind delivers the reservation's obligation (ADR 0109). The scripted
+/// world has no engine relay, so the boundary also delivers the process's
+/// start, standing in for the deployment that runs the trigger's engine.
 pub(super) struct SimTriggerHarness {
     store: Arc<dyn lash_core::TriggerStore>,
     registry: Arc<dyn lash_core::ProcessRegistry>,
+    starts: Arc<dyn lash_core::store::ObligationLedger>,
+    clock: Arc<dyn lash_core::Clock>,
     registered_source_keys: BTreeSet<String>,
 }
 
@@ -14,6 +18,8 @@ impl SimTriggerHarness {
         Self {
             store: stores.trigger_store(),
             registry: stores.process_registry(),
+            starts: stores.obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+            clock: stores.clock(),
             registered_source_keys: BTreeSet::new(),
         }
     }
@@ -89,24 +95,23 @@ impl SimTriggerHarness {
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         for reservation in &ingress.reservations {
             let subscription = &reservation.subscription;
-            // These are externally owned simulated processes, so their
-            // registration captures no engine environment and owes no
-            // ProcessStart. Replaying the boundary finds the same start key,
-            // including when registration landed but the bind did not.
+            // The subscription's own engine target, under its captured
+            // environment: the process owes its engine start, which this
+            // boundary delivers once the process is bound.
+            // Replaying the boundary finds the same start key, including when
+            // registration landed but the bind did not.
+            let input = match &subscription.target {
+                lash_core::ProcessStartTarget::Input(
+                    input @ lash_core::ProcessInput::Engine { .. },
+                ) => input.clone(),
+                target => {
+                    return Err(FixedScriptRunnerError::Runtime(format!(
+                        "simulation trigger requires an Engine target, received {target:?}"
+                    )));
+                }
+            };
             let registration = lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: match &subscription.target {
-                        lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::Engine {
-                            payload,
-                            ..
-                        }) => payload.clone(),
-                        target => {
-                            return Err(FixedScriptRunnerError::Runtime(format!(
-                                "simulation trigger requires an Engine target, received {target:?}"
-                            )));
-                        }
-                    },
-                },
+                input,
                 lash_core::ProcessProvenance::new(subscription.registrant.clone()).with_caused_by(
                     Some(lash_core::CausalRef::TriggerOccurrence {
                         occurrence_id: reservation.occurrence.occurrence_id.clone(),
@@ -117,6 +122,7 @@ impl SimTriggerHarness {
                 ),
                 lash_core::Lifetime::Detached,
             )
+            .with_execution_env_ref(Some(subscription.env_ref.clone()))
             .with_start_key(Some(lash_core::facade_support::trigger_delivery_start_key(
                 reservation,
             )))
@@ -148,6 +154,7 @@ impl SimTriggerHarness {
                 )
                 .await
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+            self.deliver_start(&process.record.id).await?;
         }
         Ok(json!({
             "session": session,
@@ -157,6 +164,37 @@ impl SimTriggerHarness {
             "reservation_count": ingress.reservations.len(),
             "started_process": !ingress.reservations.is_empty(),
         }))
+    }
+
+    /// Claims and delivers the process's `ProcessStart`. A replay finds it
+    /// already delivered and leaves it.
+    async fn deliver_start(
+        &self,
+        process_id: &lash_core::ProcessId,
+    ) -> Result<(), FixedScriptRunnerError> {
+        let id = lash_core::store::ObligationKey::ProcessStart {
+            process_id: process_id.clone(),
+        }
+        .id();
+        let token = lash_core::store::ClaimToken::mint();
+        let now_ms = self.clock.timestamp_ms();
+        let claimed = self
+            .starts
+            .claim(&id, &token, now_ms, 60_000)
+            .await
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        if claimed.is_some() {
+            self.starts
+                .settle(
+                    &id,
+                    &token,
+                    lash_core::store::ObligationSettlement::Delivered,
+                    now_ms,
+                )
+                .await
+                .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        }
+        Ok(())
     }
 }
 

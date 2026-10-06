@@ -9,19 +9,15 @@ fn start_hold_key(call_id: &ToolCallId) -> String {
     format!("{call_id}:start")
 }
 
-/// Bind a body's declared start to the Run: the Run's environment, when lash
-/// executes the process, and a consumer hold, owned by the Run's opener, that
-/// cancels the process with its call when `cancels` (see [`cancels_work`]).
+/// Bind a body's declared start to the Run: the Run's environment, and a
+/// consumer hold, owned by the Run's opener, that cancels the process with its
+/// call when `cancels` (see [`cancels_work`]).
 pub(super) fn bind_start(
     call: &SingletonToolCall,
     cancels: bool,
     mut registration: ProcessStartRegistration,
 ) -> Result<DeclaredStartObligation, DeclaredStartObligationRefusal> {
-    registration.env_ref = if registration.input.is_externally_owned() {
-        None
-    } else {
-        call.environment.clone()
-    };
+    registration.env_ref = call.environment.clone();
     registration.consumer_hold = Some(ConsumerHold {
         key: start_hold_key(&call.call_id),
         owner: ScopeId::Opener(call.owner.clone()),

@@ -747,15 +747,6 @@ async fn start_root_segment(
     plugins: &(impl Fn() -> PluginAdmissionFuture + ?Sized),
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
-    if record.input.is_externally_owned() {
-        // Not an admission invariant: an externally owned process's terminal
-        // belongs to its owner, and the workflow-key authority is refused on
-        // it, so the invocation fails without writing one (FIG-3819).
-        return Err(TerminalError::new(format!(
-            "process `{process_id}` is externally owned and is never executed by lash"
-        ))
-        .into());
-    }
     if let Some(existing) = record.first_started.as_deref() {
         // Restate never runs one workflow key twice at once, so the only
         // writer that can have recorded a start since the verdict is this

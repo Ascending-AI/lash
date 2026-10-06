@@ -160,10 +160,10 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
         ("schema.sql", include_str!("../../schema.sql")),
     ];
     // The third site kind: the pending-cancel index excludes the terminal
-    // statuses rather than naming the live ones, because `caller_departed` is
-    // neither live nor terminal and a departed caller's row still owes its
-    // cancel. Its literal is generated, so the expectation here is the
-    // generator's own output rather than a second spelling of it.
+    // statuses rather than naming the live ones, so a status added later
+    // lands among the rows that still owe their cancel. Its literal is
+    // generated, so the expectation here is the generator's own output rather
+    // than a second spelling of it.
     let nonterminal =
         lash_core_execution::store_backend_support::nonterminal_process_status_predicate_sql(
             "status",

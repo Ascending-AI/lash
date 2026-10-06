@@ -198,14 +198,6 @@ impl DurableProcessWorker {
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
-        // Externally-owned rows are never executed by lash (ADR 0110): refuse
-        // before touching a runtime.
-        if registration.input.is_externally_owned() {
-            return Err(PluginError::Session(format!(
-                "process `{}` is externally-owned and must not be executed by lash",
-                process_id
-            )));
-        }
         // The substrate's handler minted this controller from its own context;
         // it crosses this worker's effect host's stack here, once (FIG-3738).
         let scoped_effect_controller = self

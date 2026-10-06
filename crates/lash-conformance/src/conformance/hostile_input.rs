@@ -230,10 +230,8 @@ pub async fn process_namespace(registry: Arc<dyn crate::ConformanceProcessRegist
     // stored opaquely: each hostile key finds its own process again and no
     // two alias.
     let registration = |raw: &str| {
-        crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )

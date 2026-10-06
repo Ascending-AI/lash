@@ -227,8 +227,8 @@ pub trait SessionShifts: Send + Sync {
 pub trait ProcessWorkSubstrate: Send + Sync {
     /// Submit `record`'s registered process to the engine: the delivery of
     /// its `ProcessStart` obligation (ADR 0109). The relay supplies the armed
-    /// row's record as of the claim, already filtered of terminal and
-    /// externally owned processes; a workflow engine coalesces a repeated
+    /// row's record as of the claim, already filtered of terminal processes;
+    /// a workflow engine coalesces a repeated
     /// send on the process's workflow key.
     async fn deliver_process_start(&self, record: &crate::ProcessRecord)
     -> Result<(), PluginError>;

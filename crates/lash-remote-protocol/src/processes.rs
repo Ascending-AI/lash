@@ -264,10 +264,6 @@ pub enum RemoteProcessInput {
         #[serde(default, skip_serializing_if = "RemoteSessionTurnOutcome::is_turn")]
         result: RemoteSessionTurnOutcome,
     },
-    External {
-        #[serde(default)]
-        metadata: serde_json::Value,
-    },
 }
 
 /// What a remote start names to run: an executable input, or the immutable
@@ -340,18 +336,6 @@ impl RemoteProcessInput {
                 require_non_empty(type_name, "definition_key", definition_key)?;
                 turn_input.validate()
             }
-            Self::External { metadata: _ } => Ok(()),
-        }
-    }
-
-    /// Whether core requires a captured execution env for this input kind.
-    ///
-    /// Mirrors `validate_process_registration`: executable inputs carry an env
-    /// ref and declarative ones must not (FIG-2985).
-    fn requires_execution_env(&self) -> bool {
-        match self {
-            Self::Engine { .. } | Self::SessionTurn { .. } => true,
-            Self::External { .. } => false,
         }
     }
 }
@@ -368,9 +352,6 @@ pub enum RemoteProcessStatus {
     Failed,
     Cancelled,
     Abandoned,
-    /// Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably
-    /// distinguishable, deliberately never terminal.
-    CallerDeparted,
 }
 
 /// Mirrors [`lash_core::RetiredProcessStatus`]: the status a pruned process
@@ -384,7 +365,6 @@ pub enum RemoteRetiredProcessStatus {
     Failed,
     Cancelled,
     Abandoned,
-    CallerDeparted,
 }
 
 impl RemoteProcessStatus {
@@ -639,10 +619,6 @@ pub enum RemoteProcessLifecycleState {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         park: Option<RemoteProcessPark>,
     },
-    /// Mirrors [`lash_core::ProcessStatus::CallerDeparted`].
-    /// A variant with fields, so that a decode refuses a wait, a park or an
-    /// outcome beside it as it does for every other state.
-    CallerDeparted {},
     Terminal {
         outcome: RemoteProcessTerminal,
     },
@@ -654,7 +630,6 @@ impl RemoteProcessLifecycleState {
         match self {
             Self::Running { .. } => RemoteProcessStatus::Running,
             Self::Waiting { .. } => RemoteProcessStatus::Waiting,
-            Self::CallerDeparted {} => RemoteProcessStatus::CallerDeparted,
             Self::Terminal { outcome } => outcome.status().into(),
         }
     }
@@ -669,7 +644,6 @@ impl RemoteProcessLifecycleState {
                 park.as_ref()
                     .map_or(Ok(()), |park| park.validate(type_name))
             }
-            Self::CallerDeparted {} => Ok(()),
             Self::Terminal { outcome } => outcome.validate(type_name),
         }
     }
@@ -718,24 +692,15 @@ impl RemoteProcessRecord {
             }
         }
         self.provenance.validate(type_name)?;
-        match (self.input.requires_execution_env(), self.env_ref.is_some()) {
-            (true, false) => {
-                return Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name,
-                    message: "this input kind requires a captured execution env".to_string(),
-                });
-            }
-            (false, true) => {
-                return Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name,
-                    message: "this input kind must not capture an execution env".to_string(),
-                });
-            }
-            (true, true) | (false, false) => {}
-        }
-        if let Some(env_ref) = &self.env_ref {
-            env_ref.validate(type_name)?;
-        }
+        // Mirrors `validate_process_registration`: every process runs under
+        // the execution env its start captured (FIG-2985).
+        let Some(env_ref) = &self.env_ref else {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: "a process requires a captured execution env".to_string(),
+            });
+        };
+        env_ref.validate(type_name)?;
         if let Some(external_ref) = &self.external_ref {
             external_ref.validate(type_name)?;
         }

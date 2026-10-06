@@ -58,35 +58,46 @@ async fn crash_recovery_process(
         .context("the crash-recovery process is not registered")
 }
 
-fn registration() -> ProcessRegistration {
+/// A runbook process: an engine input under the runbook's environment
+/// reference. This worker drives its rows through the registry directly; no
+/// engine runs them here.
+fn runbook_registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: json!({"runbook": "process-operations"}),
+        ProcessInput::Engine {
+            kind: "process-operations-runbook".to_string(),
+            payload: json!({"runbook": "process-operations"}),
         },
         ProcessProvenance::host(),
         lash::process::Lifetime::Detached,
     )
-    .with_admitted_identity(lash::process::AdmittedProcessIdentity::pinned(
-        ProcessIdentity::for_definition(
-            lash::process::ProcessDefinitionRef::unclaimed(
-                "runbook",
-                json!({"scenario": "worker-crash-recovery"}),
+    .with_execution_env_ref(Some(lash::process::ProcessExecutionEnvRef::new(
+        "process-env:process-operations-runbook",
+    )))
+}
+
+fn registration() -> ProcessRegistration {
+    runbook_registration()
+        .with_admitted_identity(lash::process::AdmittedProcessIdentity::pinned(
+            ProcessIdentity::for_definition(
+                lash::process::ProcessDefinitionRef::unclaimed(
+                    "runbook",
+                    json!({"scenario": "worker-crash-recovery"}),
+                ),
+                Some(PROCESS_ID),
             ),
-            Some(PROCESS_ID),
-        ),
-    ))
-    .with_extra_event_types([ProcessEventType {
-        name: EVENT_TYPE.to_string(),
-        payload_schema: lash::schema::JsonSchema::any(),
-        semantics: ProcessEventSemanticsSpec {
-            wake: Some(ProcessWakeSpec {
-                when: None,
-                input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-            }),
-            ..ProcessEventSemanticsSpec::default()
-        },
-    }])
-    .with_wake_session_id(Some(SessionId::from(SESSION_ID)))
+        ))
+        .with_extra_event_types([ProcessEventType {
+            name: EVENT_TYPE.to_string(),
+            payload_schema: lash::schema::JsonSchema::any(),
+            semantics: ProcessEventSemanticsSpec {
+                wake: Some(ProcessWakeSpec {
+                    when: None,
+                    input: ProcessValueSelector::Pointer("/wake_input".to_string()),
+                }),
+                ..ProcessEventSemanticsSpec::default()
+            },
+        }])
+        .with_wake_session_id(Some(SessionId::from(SESSION_ID)))
 }
 
 async fn process_events(
@@ -177,28 +188,22 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
     let registry = registry(storage);
     let retarget_process = registry
         .register_process(
-            ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: json!({"runbook": "process-operations"}),
-                },
-                ProcessProvenance::host(),
-                lash::process::Lifetime::Detached,
-            )
-            .with_admitted_identity(lash::process::AdmittedProcessIdentity::pinned(
-                ProcessIdentity::new("runbook-retarget"),
-            ))
-            .with_extra_event_types([ProcessEventType {
-                name: EVENT_TYPE.to_string(),
-                payload_schema: lash::schema::JsonSchema::any(),
-                semantics: ProcessEventSemanticsSpec {
-                    wake: Some(ProcessWakeSpec {
-                        when: None,
-                        input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-                    }),
-                    ..ProcessEventSemanticsSpec::default()
-                },
-            }])
-            .with_wake_session_id(Some(SessionId::parse(OLD_SESSION_ID.to_string())?)),
+            runbook_registration()
+                .with_admitted_identity(lash::process::AdmittedProcessIdentity::pinned(
+                    ProcessIdentity::new("runbook-retarget"),
+                ))
+                .with_extra_event_types([ProcessEventType {
+                    name: EVENT_TYPE.to_string(),
+                    payload_schema: lash::schema::JsonSchema::any(),
+                    semantics: ProcessEventSemanticsSpec {
+                        wake: Some(ProcessWakeSpec {
+                            when: None,
+                            input: ProcessValueSelector::Pointer("/wake_input".to_string()),
+                        }),
+                        ..ProcessEventSemanticsSpec::default()
+                    },
+                }])
+                .with_wake_session_id(Some(SessionId::parse(OLD_SESSION_ID.to_string())?)),
         )
         .await
         .context("register retarget process")?

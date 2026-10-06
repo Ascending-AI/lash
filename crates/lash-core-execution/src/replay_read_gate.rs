@@ -151,7 +151,6 @@ const STORE_WRITES: &[&str] = &[
     "record_first_started_with_authority",
     "request_process_cancel",
     "request_process_cancel_reporting_realization",
-    "record_caller_departure",
     "set_process_wait_with_authority",
     "clear_process_wait_with_authority",
     "park_process_with_authority",

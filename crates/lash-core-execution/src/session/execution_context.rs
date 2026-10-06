@@ -1037,12 +1037,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self,
         registration: crate::ProcessStartRegistration,
     ) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
-        if registration.env_ref.is_some()
-            || matches!(
-                registration.input.as_ref(),
-                crate::ProcessStartTarget::Input(crate::ProcessInput::External { .. })
-            )
-        {
+        if registration.env_ref.is_some() {
             return Ok(registration);
         }
         let claim = execution_claim_of(self.dispatch.effect_controller.execution_scope())?;

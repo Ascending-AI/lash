@@ -5,9 +5,8 @@
 //! A call that starts a process records one obligation before the start
 //! can launch: a stable [`StartKey`], the registration that fixes the
 //! process binding, lifetime and environment, and the consumer hold that
-//! keeps the child from pruning while the call may redrive. Only a process
-//! lash executes runs under a captured environment; an externally owned one
-//! has none. A cancel before
+//! keeps the child from pruning while the call may redrive. Every process
+//! runs under a captured environment. A cancel before
 //! admission forbids the start; a cancel after admission recovers that
 //! same start under its key and discharges its cancel policy and hold. An
 //! isolated call is such a start from the beginning, with no inline body.
@@ -96,8 +95,8 @@ impl DeclaredStartObligation {
     ///
     /// # Errors
     ///
-    /// [`DeclaredStartObligationRefusal`] for a keyless start, a start lash
-    /// executes without its environment, or one without its consumer hold.
+    /// [`DeclaredStartObligationRefusal`] for a keyless start, a start
+    /// without its environment, or one without its consumer hold.
     pub fn new(
         call_id: ToolCallId,
         registration: ProcessStartRegistration,
@@ -107,7 +106,7 @@ impl DeclaredStartObligation {
             .as_ref()
             .ok_or(DeclaredStartObligationRefusal::Keyless)?
             .clone();
-        if registration.env_ref.is_none() && !registration.input.is_externally_owned() {
+        if registration.env_ref.is_none() {
             return Err(DeclaredStartObligationRefusal::NoEnvironment);
         }
         let consumer_hold = registration
@@ -153,7 +152,6 @@ mod tests {
         ConsumerHold, Lifetime, ProcessExecutionEnvRef, ProcessInput, ProcessProvenance, ScopeId,
     };
     use super::*;
-    use std::sync::Arc;
 
     fn registration(cancels: bool) -> ProcessStartRegistration {
         let mut registration = ProcessStartRegistration::of_target(
@@ -234,20 +232,6 @@ mod tests {
         assert_eq!(
             DeclaredStartObligation::new(call_id.clone(), no_env).unwrap_err(),
             DeclaredStartObligationRefusal::NoEnvironment
-        );
-        let mut external = registration(false).with_input(Arc::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            }
-            .into(),
-        ));
-        external.env_ref = None;
-        let external = DeclaredStartObligation::new(call_id.clone(), external).unwrap();
-        let decoded: DeclaredStartObligation =
-            serde_json::from_value(serde_json::to_value(external).unwrap()).unwrap();
-        assert!(
-            decoded.registration.env_ref.is_none(),
-            "an externally owned start runs under no environment"
         );
         let mut unheld = registration(false);
         unheld.consumer_hold = None;

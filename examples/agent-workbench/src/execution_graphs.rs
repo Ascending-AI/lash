@@ -746,10 +746,8 @@ mod tests {
             .await
             .expect("observe current process");
         let old_process_id = registry
-            .register_process(lash::process::ProcessRegistration::new(
-                RuntimeInput::External {
-                    metadata: json!({ "old": true }),
-                },
+            .register_process(lash::testing::held_engine_registration(
+                json!({ "old": true }),
                 lash::process::ProcessProvenance::host(),
                 lash::process::Lifetime::Detached,
             ))

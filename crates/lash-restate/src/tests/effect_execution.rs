@@ -69,139 +69,6 @@ pub(super) async fn start_delivery_addresses_latest_segment_without_a_segment_ze
     assert!(!requests[0].starts_with("POST /LashProcessWorkflow/mid-chain/run/send "));
 }
 
-#[tokio::test]
-pub(super) async fn start_delivery_refuses_externally_owned_rows() {
-    // ADR 0110 at the Restate tier: no delivery path POSTs a run for an
-    // externally-owned row (Lash does not execute it) and never closes one: its
-    // external owner does. A lash-executed row alongside them still submits, so
-    // exactly one ingress call fires and it is for that row.
-    let registry = process_registry();
-    let ext_first_id = registry
-        .register_process(external_registration())
-        .await
-        .expect("register the first externally-owned row")
-        .id;
-    let ext_second_id = registry
-        .register_process(external_registration())
-        .await
-        .expect("register the second externally-owned row")
-        .id;
-    let executed_id = registry
-        .register_process(executed_registration())
-        .await
-        .expect("register a lash-executed row")
-        .id;
-
-    // The capture server accepts exactly one connection: if any externally
-    // owned row were submitted, a second connect would be attempted and the
-    // extra submit would fail, so the single-response server also proves they
-    // are not.
-    let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
-        status: "202 Accepted",
-        body: r#"{"invocationId":"inv_executed","status":"Accepted"}"#,
-    }])
-    .await;
-    let runner = RestateProcessIngressRunner::new(
-        base_url,
-        Arc::clone(&registry),
-        continuation_store(),
-        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
-    );
-    let executed = registry
-        .get_process(&executed_id)
-        .await
-        .expect("read the executed row")
-        .expect("the executed row is retained");
-    runner
-        .deliver_process_start(&executed)
-        .await
-        .expect("submit the executed row");
-    server.await.expect("mock ingress server task");
-
-    // Skipped is not silent: an externally-owned row is a typed terminal
-    // refusal on this tier too — the relay refuses it before the port is
-    // reached (`DeliveryFailure::Refused`, never `Retryable`), and the port's
-    // own defensive refusal is the same typed `PluginError::Session`.
-    for id in [&ext_first_id, &ext_second_id] {
-        let refusal = runner
-            .deliver_process_start(
-                &registry
-                    .get_process(id)
-                    .await
-                    .expect("read the externally-owned row")
-                    .expect("the externally-owned row is retained"),
-            )
-            .await
-            .expect_err("the port refuses it");
-        assert!(
-            matches!(refusal, PluginError::Session(ref message) if message.contains("externally owned")),
-            "the port's defensive refusal stays typed: {refusal:?}"
-        );
-    }
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("open a store set for the relay's ledger");
-    let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
-        stores.obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
-        Arc::clone(&registry),
-        Arc::new(runner),
-        stores.clock(),
-    );
-    for id in [&ext_first_id, &ext_second_id] {
-        let failure = lash_core::runtime::shift::relay::ObligationRelay::deliver(
-            &relay,
-            lash_core::runtime::shift::relay::ObligationDelivery {
-                id: &lash_core::store::ObligationKey::ProcessStart {
-                    process_id: id.clone(),
-                }
-                .id(),
-                key: &lash_core::store::ObligationKey::ProcessStart {
-                    process_id: id.clone(),
-                },
-                token: &lash_core::store::ClaimToken::mint(),
-                attempt: 1,
-                started_ms: 0,
-            },
-        )
-        .await
-        .expect_err("an externally-owned row is refused, not delivered");
-        assert!(
-            matches!(
-                failure,
-                lash_core::runtime::shift::relay::DeliveryFailure::Refused(_)
-            ),
-            "the refusal is the typed terminal one: {failure:?}"
-        );
-    }
-
-    let requests = captured.lock_recover().clone();
-    assert_eq!(
-        requests.len(),
-        1,
-        "only the lash-executed row is submitted; externally-owned rows are never POSTed"
-    );
-    assert!(
-        requests[0].starts_with(&format!(
-            "POST /LashProcessWorkflow/{executed_id}/run/send "
-        )),
-        "the single submit is the Lash-executed row: {}",
-        requests[0]
-    );
-
-    // Both externally-owned rows are left untouched for their external owner.
-    for id in [&ext_first_id, &ext_second_id] {
-        let row = registry
-            .get_process(id)
-            .await
-            .expect("read process")
-            .expect("get externally-owned row");
-        assert!(
-            !row.is_terminal(),
-            "the start path never closes an externally-owned row"
-        );
-    }
-}
-
 pub(super) struct MockHttpResponse {
     pub(super) status: &'static str,
     pub(super) body: &'static str,
@@ -906,7 +773,7 @@ pub(super) async fn restate_process_terminal_wait_reenters_after_a_bounded_timeo
     .await;
     let registry = process_registry();
     let record = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register reattach target");
     let process_ref = record.id.clone();
@@ -1011,14 +878,14 @@ pub(super) async fn restate_driver_short_circuits_terminal_without_ingress_call(
     let driver = deployment.test_process_work();
     let output = process_success(serde_json::json!("already-terminal"));
     let record = registry
-        .register_process(external_registration())
+        .register_process(held_registration())
         .await
         .expect("register");
     registry
         .complete_process(
             &record.id,
             output.clone(),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&record.id),
         )
         .await
         .expect("complete");
@@ -1067,7 +934,7 @@ pub(super) async fn restate_deployment_sink_funnel_feeds_appended_events() {
     );
     let registry = deployment.test_registry();
     let sink_funnel_id = registry
-        .register_process(external_registration().with_extra_event_types([
+        .register_process(held_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "producer.tick".to_string(),
                 payload_schema: lash_core::JsonSchema::any(),
@@ -1088,7 +955,7 @@ pub(super) async fn restate_deployment_sink_funnel_feeds_appended_events() {
         .complete_process(
             &sink_funnel_id,
             process_success(serde_json::Value::Null),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&sink_funnel_id),
         )
         .await
         .expect("complete");

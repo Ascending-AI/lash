@@ -15,15 +15,21 @@ reconstruct an engine journal.
 
 ## Decision
 
-### 1. Execution ownership comes from the input
+### 1. Lash executes every process it registers
 
-`ProcessInput::External` is externally owned. Lash does not execute or
-submit it, and its external owner records its completion. An engine input
-is work the engine executes. Registration carries no separate recovery
-disposition, so ownership cannot contradict the input's class.
+Every process input is work the engine executes: an engine input runs on the
+host-registered `ProcessEngine` of its kind, and a session turn runs its
+child session. Every registration captures the execution environment it
+runs under and arms its `ProcessStart` obligation. Registration carries no
+recovery disposition and no ownership class.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/validation.rs:156`
-and `crates/lash-restate/src/process/admission.rs:586`.
+Work a host runs outside lash is a process of a host-registered engine that
+awaits that work's completion durably. Its deadline, cancellation and
+recovery are the process's own, so there is no second kind of row that lash
+never runs and only its host can close.
+
+Evidence: `crates/lash-core-execution/src/runtime/process/validation.rs`
+and `crates/lash-restate/src/process/admission.rs`.
 
 ### 2. Recovery is the engine's replay
 
@@ -39,7 +45,7 @@ Restate journals the admission verdict and nonce. The run's execution-start
 write binds attempt 1. Successor segments use their retained handover and
 set-if-absent segment-start marker. Retrying the same execution is
 idempotent; a successor execution takes the next attempt. The registry
-refuses other attempts and refuses starts of external inputs.
+refuses other attempts.
 
 Recovery reads live processes in bounded pages and asks Restate about their
 current segments. A run that finishes with failure without a process
@@ -97,20 +103,18 @@ Evidence: `crates/lash-restate/src/process/park_reconcile.rs:94` and
 records its own lost-work outcome. Lash writes a resume refusal when it
 cannot safely continue the execution.
 
-`ProcessCompletionAuthority` is `ExternalOwner`, `WorkflowKey`, or
-`WorkflowKeyRecovery`. Backends validate the authority against the input's
-ownership. Recovery also names the segment ordinal, so it cannot end a
-process a later segment carries.
+`ProcessCompletionAuthority` is `WorkflowKey` or `WorkflowKeyRecovery`.
+Recovery names the segment ordinal, so it cannot end a process a later
+segment carries.
 
 Evidence: `crates/lash-core-execution/src/runtime/process/events.rs:71`
 and `crates/lash-core-execution/src/runtime/process/events.rs:130`.
 
-### 6. Operators use cancellation or external completion
+### 6. Operators use cancellation
 
-An operator stops engine-owned work through cancellation. A lost execution
-ends through the engine's resume refusal. The external owner, including an
-operator acting for that owner, completes an external process with its
-observed outcome, including `Abandoned { Producer }`.
+An operator stops a process through cancellation. A lost execution ends
+through the engine's resume refusal. A host engine whose external work was
+lost ends its process with its own `Abandoned { Producer }` outcome.
 
 These operations record the outcome directly. There is no separate abandon
 request waiting for a Lash lease to expire, and closing a host does not
@@ -148,7 +152,8 @@ Evidence: `crates/lash/src/tests/isolated_tool_route.rs`.
 
 A registry row cannot authorize re-execution from scratch. Losing an engine
 journal yields an explicit terminal instead of a best-effort reconstruction.
-External ownership is explicit in the input and completion authority.
+Host-run external work has one path, a host engine process, so it gets the
+same deadline, cancellation and recovery as every other process.
 
 A per-process recovery disposition would offer different answers to the
 same missing-journal problem without providing the journal. An at-most-once

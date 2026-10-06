@@ -206,12 +206,9 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
     let turn_id = TurnId::fixture(format!("{prefix}-turn"));
     let target = registry
         .register_process_with_observers(
-            crate::ProcessRegistration::new(
-                crate::ProcessInput::External {
-                    metadata: serde_json::json!({ "fixture": "migrated-tools" }),
-                },
-                // A fixture-owned external process: the worker must not try to
-                // recover an input it does not own.
+            // A held process: it runs until the cancel the law sends ends it.
+            lash_core::testing::held_engine_registration(
+                serde_json::json!({ "fixture": "migrated-tools" }),
                 crate::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ),

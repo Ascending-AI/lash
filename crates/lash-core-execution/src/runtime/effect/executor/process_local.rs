@@ -237,48 +237,6 @@ impl ProcessLocalExecution {
                     crate::StoreRealization::Realized,
                 ))
             }
-            ProcessCommand::CompleteExternal {
-                session_scope,
-                process_id,
-                output,
-            } => {
-                if !registry
-                    .is_observer(&session_scope.session_id, &process_id)
-                    .await?
-                {
-                    return Err(crate::PluginError::ProcessNotVisible { process_id }.into());
-                }
-                if let Some(attachments) = attachments.as_ref() {
-                    crate::runtime::attachment_delivery::acquire_completion_output(
-                        attachments.as_ref(),
-                        &process_id,
-                        &output,
-                    )
-                    .await?;
-                }
-                let completion = registry
-                    .complete_process(
-                        &process_id,
-                        output,
-                        crate::ProcessCompletionAuthority::ExternalOwner,
-                    )
-                    .await?;
-                let realization = match &completion {
-                    crate::ProcessCompletionOutcome::Committed(_) => {
-                        crate::StoreRealization::Realized
-                    }
-                    crate::ProcessCompletionOutcome::AlreadyApplied { .. }
-                    | crate::ProcessCompletionOutcome::Superseded { .. } => {
-                        crate::StoreRealization::Coalesced
-                    }
-                };
-                Ok((
-                    ProcessEffectOutcome::CompleteExternal {
-                        completion: Box::new(completion),
-                    },
-                    realization,
-                ))
-            }
             ProcessCommand::ValidateVisible { owner, process_ids } => {
                 let mut not_visible = None;
                 for process_id in process_ids {

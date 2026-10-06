@@ -198,10 +198,8 @@ async fn two_starts_of_one_definition_differ_only_in_the_declared_label() {
 
 #[test]
 fn a_started_definition_is_the_definition_processes_list_filters_by() {
-    let registration = lash_core::ProcessRegistration::new(
-        lash_core::ProcessInput::External {
-            metadata: Value::Null,
-        },
+    let registration = lash_core::testing::held_engine_registration(
+        Value::Null,
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     );

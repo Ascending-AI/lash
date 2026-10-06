@@ -119,7 +119,8 @@ pub struct Counts {
 }
 
 /// The deployment every epoch runs: the standard protocol answering from the
-/// shared scripted model, a Lashlang process engine, and a recovery lease
+/// shared scripted model, a Lashlang process engine and the held child
+/// engine, and a recovery lease
 /// that competes at the rank of the build it runs. `drain` is how much
 /// eligible turn-lane work one run takes.
 pub(super) fn soak_core(
@@ -297,7 +298,14 @@ impl lash_core::plugin::PluginFactory for LashlangProcesses {
         &self,
         ctx: &lash_core::ProcessEngineContributionContext<'_>,
     ) -> Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError> {
-        lash_core::plugin::PluginFactory::process_engine_contributions(&self.rlm, ctx)
+        let mut engines =
+            lash_core::plugin::PluginFactory::process_engine_contributions(&self.rlm, ctx)?;
+        // The soak's registered children run until their scope's parent-end
+        // cancel ends them.
+        engines.push(lash_core::ProcessEngineRegistration::accepting(Arc::new(
+            lash_core::testing::HeldProcessEngine,
+        )));
+        Ok(engines)
     }
 
     fn build(
@@ -1395,18 +1403,19 @@ impl Driver {
     }
 }
 
-/// Register an externally-owned child process of `session` that lives until
-/// `parent` ends: a row lash never executes, so it pins no build, and only
-/// the parent-end cancel of its scope settles it.
+/// Register a held child process of `session` that lives until `parent` ends:
+/// it runs until it is cancelled, so only the parent-end cancel of its scope
+/// settles it.
 pub(super) async fn register_child(
     world: &CrashWorld,
     session: &SessionId,
     parent: &ScopeId,
 ) -> Result<ProcessId, String> {
-    let mut registration = lash_core::ProcessRegistration::new(
-        lash_core::ProcessInput::External {
-            metadata: serde_json::json!({ "chaos_soak": "child" }),
-        },
+    // The environment the held child captures.
+    lash_core::testing::process_execution_env_fixture(world.backend().process_env_store().as_ref())
+        .await;
+    let mut registration = lash_core::testing::held_engine_registration(
+        serde_json::json!({ "chaos_soak": "child" }),
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(session.clone())),
         lash_core::Lifetime::Detached,
     );

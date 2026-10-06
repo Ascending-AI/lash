@@ -82,9 +82,6 @@ impl From<lash_core::SessionProcessEventKind> for RemoteSessionProcessEventKind 
             lash_core::SessionProcessEventKind::CancelRequested { sequence } => {
                 Self::CancelRequested { sequence }
             }
-            lash_core::SessionProcessEventKind::CallerDeparted { sequence } => {
-                Self::CallerDeparted { sequence }
-            }
             lash_core::SessionProcessEventKind::Completed { sequence } => {
                 Self::Completed { sequence }
             }

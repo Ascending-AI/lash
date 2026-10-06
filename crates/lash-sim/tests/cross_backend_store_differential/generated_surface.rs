@@ -741,7 +741,6 @@ async fn generated_cross_backend_surface_differential_agrees() {
         SurfaceOperation::TriggerOccurrenceNullSource { key: 0 },
         SurfaceOperation::StoreContract(StoreContractOp::Register {
             process: 0,
-            external: false,
             wake_target: None,
         }),
         SurfaceOperation::ProcessSignalZero { negative: true },

@@ -285,7 +285,7 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!({"age": "old"}),
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&recent_ids[1]),
         )
         .await
         .expect("complete old terminal process");
@@ -309,7 +309,7 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!({"age": "fresh"}),
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&recent_filter_fresh_id),
         )
         .await
         .expect("complete fresh terminal process")
@@ -655,7 +655,7 @@ pub async fn list_processes_filters_by_until_scope_and_pending_cancel(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
                 lash_core::ToolCancellation::runtime("cancel honoured"),
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&child_one),
         )
         .await
         .expect("settle the cancelled process");

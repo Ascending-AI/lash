@@ -1196,9 +1196,8 @@ pub(super) async fn segment_continuation_reuses_root_invocation_identity() {
 /// the lost-run scan reaches a lost workflow whose reference still names it.
 #[tokio::test]
 pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_the_repeat_scan() {
-    // A non-terminal, Lash-executed process is the durable registry row the
-    // ingress runner must submit. Externally-owned rows are never submitted
-    // (ADR 0110), so the submittable case uses a lash-executed row.
+    // A non-terminal process is the durable registry row the ingress runner
+    // must submit.
     let stores = memory_process_stores().await;
     let registry = stores.registry.clone() as Arc<dyn ProcessRegistry>;
     let task_1_id = registry

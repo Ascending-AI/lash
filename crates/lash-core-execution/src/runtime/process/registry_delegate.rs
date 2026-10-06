@@ -454,16 +454,6 @@ macro_rules! delegate_process_lifecycle {
                 $event_hook
             }
 
-            async fn record_caller_departure(
-                &self,
-                process_id: &$crate::ProcessId,
-            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self.$inner.record_caller_departure(process_id);
-                $event_hook
-            }
-
             async fn set_process_wait_with_authority(
                 &self,
                 process_id: &$crate::ProcessId,

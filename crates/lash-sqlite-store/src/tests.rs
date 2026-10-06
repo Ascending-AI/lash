@@ -30,8 +30,6 @@ use lash_core_execution::{
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
 
-use lash_core_execution::ProcessInput;
-
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static SESSION_LIST_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -553,10 +551,8 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
 }
 
 fn registration() -> ProcessRegistration {
-    ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+    lash_core::testing::held_engine_registration(
+        serde_json::Value::Null,
         lash_core_execution::ProcessProvenance::session(lash_core_execution::SessionScope::new(
             "session",
         )),

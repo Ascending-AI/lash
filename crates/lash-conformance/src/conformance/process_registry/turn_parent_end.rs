@@ -34,10 +34,8 @@ async fn register_child(
     starter: &lash_core::ScopeId,
     lives: Lives,
 ) -> Result<ProcessRecord, crate::PluginError> {
-    let registration = ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
+    let registration = lash_core::testing::held_engine_registration(
+        serde_json::Value::Null,
         ProcessProvenance::session(originator.clone()),
         lash_core::Lifetime::Detached,
     );
@@ -507,10 +505,8 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     // process scope's row rides the terminal write that ends it, so reporting
     // one here would hand the sweep a candidate it must never write.
     let process_parent = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
             lash_core::Lifetime::Detached,
         ))

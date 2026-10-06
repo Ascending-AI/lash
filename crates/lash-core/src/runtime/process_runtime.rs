@@ -41,16 +41,6 @@ impl ProcessRuntimeContext {
     ) -> Result<Self, crate::PluginError> {
         let process_id = admitted.process_id.clone();
         let registration = &admitted.registration;
-        match registration.input.as_ref() {
-            crate::ProcessInput::Engine { .. } | crate::ProcessInput::SessionTurn { .. } => {}
-            // Externally-owned rows are rejected before dispatch (ADR 0110):
-            // lash never executes them, so they have no runtime.
-            crate::ProcessInput::External { .. } => {
-                return Err(crate::PluginError::Session(format!(
-                    "process `{process_id}` is externally-owned and has no execution runtime"
-                )));
-            }
-        }
         let Some(env_ref) = registration.env_ref.as_ref() else {
             return Err(crate::PluginError::Session(format!(
                 "process `{process_id}` is missing a captured execution env"

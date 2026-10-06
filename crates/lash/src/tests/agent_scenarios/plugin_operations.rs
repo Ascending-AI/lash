@@ -205,11 +205,11 @@ fn a_session_lifetime_process_survives_operation_completion() -> Result<()> {
                     .start_cx()
                     .map_err(|error| error.to_string())?
                     .expect("an operation is an opener");
-                let request = lash_core::ProcessStartRequest::external(
+                let request = lash_core::ProcessStartRequest::new(
+                    lash_core::testing::held_engine_input(serde_json::Value::Null),
                     lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
                         session.clone(),
                     )),
-                    serde_json::Value::Null,
                     lash_core::lifetime::session_or_starter(&cx),
                 )
                 .with_host_start_key("operation-session-process:child");
@@ -225,6 +225,7 @@ fn a_session_lifetime_process_survives_operation_completion() -> Result<()> {
         let registry = backend.process_registry();
         let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
             .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(lash_core::testing::process_engine_plugin_fixture())
             .plugin(Arc::new(StaticPluginFactory::new(
                 lash_core::plugin::PluginDeclaration::initial("accept"),
                 spec,

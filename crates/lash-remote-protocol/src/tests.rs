@@ -512,7 +512,7 @@ fn remote_process_env_spec_rejects_unknown_product_metadata_fields() {
 #[test]
 fn remote_process_starts_reject_inline_environment_specs() {
     let request = serde_json::json!({
-        "input": {"type": "external", "metadata": {}},
+        "input": {"type": "engine", "kind": "job", "payload": {}},
         "lifetime": {"type": "detached"},
         "originator": {"type": "host"},
         "env_spec": {},
@@ -751,11 +751,20 @@ fn remote_trigger_registration_refuses_non_engine_target() {
         canonical_env_ref().parse().expect("canonical env ref"),
         "source",
         "key",
-        RemoteProcessStartTarget::Input(RemoteProcessInput::External {
-            metadata: serde_json::Value::Null,
-        }),
+        RemoteProcessStartTarget::Input(
+            RemoteProcessInput::try_from(lash_core::ProcessInput::SessionTurn {
+                definition_key: "child".to_string(),
+                create_request: Box::new(lash_core::SessionCreateRequest::root(
+                    lash_core::SessionStartPoint::Empty,
+                    lash_core::PluginOptions::default(),
+                )),
+                turn_input: Box::new(lash_core::TurnInput::empty()),
+                result: lash_core::SessionTurnOutcome::Turn,
+            })
+            .expect("a session-turn input converts"),
+        ),
         RemoteProcessIdentity {
-            kind: "external".to_string(),
+            kind: "session_turn".to_string(),
             label: None,
             definition_id: None,
         },

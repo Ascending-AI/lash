@@ -84,8 +84,11 @@ Declare long work `isolated` instead: the call starts a lash process that
 the host's registered `ProcessEngine` runs in its own invocation, on the
 host's nodes. How that engine waits on long work is the engine's business;
 an engine that suspends its invocation on durable timers while the work runs
-is never aborted by the invoker's timeouts. Lash ships no engine that runs
-OS programs. Its cancellation of a process is cooperative, and a host that
+is never aborted by the invoker's timeouts. Work a host runs outside lash
+takes the same path: the host's engine submits it and awaits its completion
+durably, so it has the process's deadline, cancellation and recovery. Lash
+has no process row it never runs. Lash ships no engine that runs OS
+programs. Its cancellation of a process is cooperative, and a host that
 needs hard isolation (an OS kill and reap) builds it into its own engine.
 
 Size the server's two timeouts above the longest inline tool body you admit.

@@ -296,7 +296,7 @@ pub(crate) async fn end_lost_process_runs(
     let segments: Vec<(String, &ProcessRecord)> = page
         .records
         .iter()
-        .filter(|record| !record.input.is_externally_owned() && !record.is_refusing_park())
+        .filter(|record| !record.is_refusing_park())
         .filter_map(|record| {
             let reference = record.external_ref.as_ref()?;
             (reference.backend == "restate").then(|| {

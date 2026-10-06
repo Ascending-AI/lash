@@ -11,10 +11,8 @@ fn held(
     cancels: bool,
 ) -> ProcessRegistration {
     crate::started_detached(
-        ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             ProcessProvenance::session(SessionScope::new(session.clone())),
             lash_core::Lifetime::Detached,
         ),

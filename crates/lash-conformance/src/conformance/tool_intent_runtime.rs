@@ -83,10 +83,8 @@ pub async fn public_signal_intent_wakes_parked_process(
     let turn_id = TurnId::fixture(format!("{prefix}-turn"));
     let registered = registry
         .register_process_with_observers(
-            crate::ProcessRegistration::new(
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -325,7 +323,7 @@ pub async fn public_signal_intent_wakes_parked_process(
         .complete_process(
             &process_id,
             terminal.clone(),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("terminalize the public signal-intent target");

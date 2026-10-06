@@ -45,7 +45,7 @@ pub(super) async fn run_once_process_list_stress(
                                     serde_json::json!({ "index": index }),
                                 ),
                             ),
-                            lash_core::ProcessCompletionAuthority::external_owner(),
+                            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
                         )
                         .await?;
                 }
@@ -56,10 +56,8 @@ pub(super) async fn run_once_process_list_stress(
             let signal_event_type = lash_core::facade_support::process_signal_event_type("stress")?;
             let signal_process_id = registry
                 .register_process(
-                    lash_core::ProcessRegistration::new(
-                        lash_core::ProcessInput::External {
-                            metadata: serde_json::json!({ "label": "signal stress" }),
-                        },
+                    lash_core::testing::held_engine_registration(
+                        serde_json::json!({ "label": "signal stress" }),
                         lash_core::ProcessProvenance::host(),
                         lash_core::Lifetime::Detached,
                     )
@@ -338,10 +336,8 @@ fn process_list_stress_registration(
     session_scope: lash_core::SessionScope,
     index: usize,
 ) -> lash_core::ProcessRegistration {
-    lash_core::ProcessRegistration::new(
-        lash_core::ProcessInput::External {
-            metadata: serde_json::json!({ "index": index }),
-        },
+    lash_core::testing::held_engine_registration(
+        serde_json::json!({ "index": index }),
         lash_core::ProcessProvenance::session(session_scope),
         lash_core::Lifetime::Detached,
     )

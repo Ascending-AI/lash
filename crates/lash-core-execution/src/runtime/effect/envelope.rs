@@ -703,11 +703,6 @@ pub enum ProcessCommand {
     List {
         selection: ProcessListSelection,
     },
-    CompleteExternal {
-        session_scope: SessionScope,
-        process_id: ProcessId,
-        output: ProcessAwaitOutput,
-    },
     ValidateVisible {
         owner: crate::RuntimeOwner,
         process_ids: Vec<ProcessId>,
@@ -785,11 +780,6 @@ enum ProcessCommandDecode {
     List {
         selection: ProcessListSelection,
     },
-    CompleteExternal {
-        session_scope: SessionScope,
-        process_id: ProcessId,
-        output: ProcessAwaitOutput,
-    },
     ValidateVisible {
         owner: crate::RuntimeOwner,
         process_ids: Vec<ProcessId>,
@@ -858,15 +848,6 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 execution_context,
             },
             ProcessCommandDecode::List { selection } => Self::List { selection },
-            ProcessCommandDecode::CompleteExternal {
-                session_scope,
-                process_id,
-                output,
-            } => Self::CompleteExternal {
-                session_scope,
-                process_id,
-                output,
-            },
             ProcessCommandDecode::ValidateVisible { owner, process_ids } => {
                 Self::ValidateVisible { owner, process_ids }
             }
@@ -992,14 +973,6 @@ impl ProcessCommand {
                 } => format!("process:list:{}:{}", session_scope.id(), mode.as_str()),
                 ProcessListSelection::HostRunning => "process:list:host:running".to_string(),
             },
-            Self::CompleteExternal {
-                session_scope,
-                process_id,
-                ..
-            } => format!(
-                "process:complete-external:{}:{process_id}",
-                session_scope.id()
-            ),
             Self::ValidateVisible { owner, process_ids } => {
                 let digest = process_transfer_set_identity(process_ids);
                 format!("process:validate-visible:{owner}:{digest}")
@@ -1071,9 +1044,6 @@ pub enum ProcessEffectOutcome {
     },
     List {
         entries: Vec<ProcessRecord>,
-    },
-    CompleteExternal {
-        completion: Box<crate::ProcessCompletionOutcome>,
     },
     ValidateVisible {
         not_visible: Option<ProcessId>,

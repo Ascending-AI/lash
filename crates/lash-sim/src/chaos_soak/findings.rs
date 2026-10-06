@@ -125,7 +125,7 @@ pub const FIXED: &[Finding] = &[
     // deployment claimed a due obligation again.
     Finding {
         id: "FIG-3873 S5",
-        summary: "after a deployment kill, a cancelled run whose externally owned \
+        summary: "after a deployment kill, a cancelled run whose held \
                   child it ended never finishes its scope close: the run's \
                   scope-close obligation stays Claimed and its parent-end \
                   obligation stays Due, neither delivered nor stalled",

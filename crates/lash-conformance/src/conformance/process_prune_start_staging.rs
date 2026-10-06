@@ -155,10 +155,8 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
 ) {
     let key = crate::StartKey::for_host("refused-start-concurrent-stager");
     let external = || {
-        crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )
@@ -186,7 +184,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&ended.id),
         )
         .await
         .expect("end the starter");
@@ -343,10 +341,8 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
 
     // A's starter: a process that has ended, so a start it makes is refused.
     let ended = registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -358,7 +354,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&ended.id),
         )
         .await
         .expect("end the starter");

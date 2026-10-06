@@ -365,10 +365,8 @@ mod walk {
     ];
 
     fn registration() -> lash_core_execution::ProcessRegistration {
-        lash_core_execution::ProcessRegistration::new(
-            lash_core_execution::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core_execution::ProcessProvenance::session(
                 lash_core_execution::SessionScope::new("session"),
             ),
@@ -416,7 +414,7 @@ mod walk {
                 lash_core_execution::ProcessAwaitOutput::from_tool_output(
                     lash_core_execution::ToolCallOutput::success(serde_json::json!({"ok": true})),
                 ),
-                lash_core_execution::ProcessCompletionAuthority::external_owner(),
+                lash_core_execution::ProcessCompletionAuthority::workflow_key(process_id),
             )
             .await
             .expect("complete process");

@@ -879,15 +879,9 @@ pub(crate) async fn settle_retired_slot(
 const WORK_RAIL_RETIRED_WINDOW_MS: u64 = 10_000;
 
 /// The runtime-wide work snapshot: every process whose outcome is still open,
-/// plus the rows that retired recently.
-///
-/// The recent-retirement window is not enough on its own. `retired` in the
-/// registry means "not live", which includes the non-terminal
-/// `caller_departed` status, so a row whose caller went away — exactly what a
-/// dropped foreground await leaves behind — aged off the rail within the
-/// window while its outcome was still open, and the operator lost the work
-/// item (FIG-3155). The non-terminal pass is unwindowed for that reason: a row
-/// leaves the rail when its outcome is recorded, never because time passed.
+/// plus the rows that retired recently. Live rows are eligible regardless of
+/// age, so a row leaves the rail when its outcome is recorded, never because
+/// time passed (FIG-3155).
 async fn runtime_wide_work(
     state: &AppState,
 ) -> Result<Vec<lash::process::ObservedWorkItem>, AppError> {
@@ -903,27 +897,6 @@ async fn runtime_wide_work(
         .await
         // Audited: runtime-wide process observation reads the global registry without a session store.
         .map_err(AppError::internal)?;
-    let seen = observed
-        .iter()
-        .map(|item| item.process.process_id.clone())
-        .collect::<BTreeSet<_>>();
-    let open = state
-        .process_observer
-        .snapshot_all(&lash::process::ProcessListFilter {
-            status: lash::process::ProcessStatusFilter::any_of([
-                lash::process::ProcessStatus::Running,
-                lash::process::ProcessStatus::Waiting,
-                lash::process::ProcessStatus::CallerDeparted,
-            ]),
-            ..lash::process::ProcessListFilter::default()
-        })
-        .await
-        // Audited: runtime-wide process observation reads the global registry without a session store.
-        .map_err(AppError::internal)?;
-    observed.extend(
-        open.into_iter()
-            .filter(|item| !seen.contains(&item.process.process_id)),
-    );
     observed.sort_by(|left, right| {
         right
             .process

@@ -146,10 +146,8 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
     };
     let registered = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
                 lash_core::Lifetime::Detached,

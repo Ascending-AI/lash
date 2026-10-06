@@ -10,10 +10,8 @@ mod tests {
     use crate::support::sqlite_memory_store_set;
 
     fn external_registration() -> crate::ProcessRegistration {
-        crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        crate::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         )
@@ -33,7 +31,7 @@ mod tests {
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                     serde_json::Value::Null,
                 )),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&old.id),
             )
             .await
             .expect("complete the first process");

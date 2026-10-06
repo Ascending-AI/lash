@@ -348,11 +348,12 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
             lash_core::ToolIntents::v3(vec![
                 lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
                     owner: lash_core::RuntimeOwner::Session(SessionId::fixture(session_id.clone())),
-                    declaration: lash_core::ProcessStartDeclaration::external(
+                    declaration: lash_core::ProcessStartDeclaration::new(
+                        lash_core::testing::held_engine_input(serde_json::json!({"kind": "start"})),
                         lash_core::ProcessOriginator::host_scoped("runtime-scenario"),
-                        serde_json::json!({"kind": "start"}),
                         lash_core::Lifetime::Detached,
-                    ),
+                    )
+                    .with_env_ref(lash_core::testing::process_execution_env_fixture_ref()),
                 })),
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
                     owner: lash_core::RuntimeOwner::Session(SessionId::fixture(session_id.clone())),
@@ -375,6 +376,19 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
     }
 }
 
+/// `config` with the held test engine registered beside its own engines.
+fn with_held_engine(
+    mut config: lash_core::facade_support::RuntimeHostConfig,
+) -> lash_core::facade_support::RuntimeHostConfig {
+    config.process_engines =
+        config
+            .process_engines
+            .with_registration(lash_core::ProcessEngineRegistration::accepting(Arc::new(
+                lash_core::testing::HeldProcessEngine,
+            )));
+    config
+}
+
 #[tokio::test]
 async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
     let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
@@ -395,11 +409,11 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
                         Arc::clone(&tool_provider),
                     ),
                 ),
-                lash_core::facade_support::RuntimeHostConfig::new(
+                with_held_engine(lash_core::facade_support::RuntimeHostConfig::new(
                     backend.clone(),
                     lash_core::CommitBudget::bounded(1024 * 1024, 512),
                     lash_core::QueuedWorkBatchingConfig::new(1),
-                ),
+                )),
                 backend.process_work(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
@@ -442,8 +456,18 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
             }
         })
         .build();
-    let mut runtime =
-        runtime_with_plugins_and_tools(&backend, Vec::new(), tool_provider, transport).await;
+    // The provider's start runs the held test engine under the fixture
+    // environment it declares.
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    let mut host = lash_core::testing::runtime_helpers::test_host_config(&backend);
+    host.core = with_held_engine(host.core);
+    let mut runtime = lash_core::testing::runtime_helpers::runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        tool_provider,
+        transport,
+        host,
+    )
+    .await;
     let registry = runtime
         .host
         .process_registry()
@@ -451,10 +475,8 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         .expect("runtime scenario process registry");
     let registered = registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -544,8 +566,8 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
             .iter()
             .any(|record| matches!(
                 record.input.as_ref(),
-                lash_core::ProcessInput::External { metadata }
-                    if *metadata == serde_json::json!({"kind": "start"})
+                lash_core::ProcessInput::Engine { payload, .. }
+                    if *payload == serde_json::json!({"kind": "start"})
             )),
         "the StartProcess declaration must realize through the runtime"
     );

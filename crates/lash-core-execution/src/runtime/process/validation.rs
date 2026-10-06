@@ -95,8 +95,6 @@ pub enum ProcessTransition {
     SetExternalRef(ProcessExternalRef),
     /// Record a typed process cancellation request.
     RequestCancel(CancelRequest),
-    /// Record that the caller of an externally-owned process departed.
-    RecordCallerDeparture,
     /// Enter a durable wait state.
     EnterWait(WaitState),
     ClearWait,
@@ -169,12 +167,6 @@ pub fn prepare_process_start(
     if record.is_terminal() {
         return Err(PluginError::Session(format!(
             "terminal process `{}` cannot start an execution attempt",
-            record.id
-        )));
-    }
-    if record.input.is_externally_owned() {
-        return Err(PluginError::Session(format!(
-            "externally-owned process `{}` cannot start an execution attempt",
             record.id
         )));
     }
@@ -267,18 +259,12 @@ pub fn prepare_process_transition(
             }
             append
         }
-        ProcessTransition::RecordCallerDeparture => {
-            if record.status() == ProcessStatus::CallerDeparted {
-                return Ok(ProcessTransitionPlan::Unchanged);
-            }
-            ProcessEventAppendRequest::caller_departed(&record.id)
-        }
         ProcessTransition::EnterWait(wait) => {
             if record.wait() == Some(&wait) {
                 return Ok(ProcessTransitionPlan::Unchanged);
             }
             let mut append = ProcessEventAppendRequest::wait_entered(&record.id, &wait);
-            if record.is_terminal() || record.status() == ProcessStatus::CallerDeparted {
+            if record.is_terminal() {
                 route_transition_refusal_to_fold(&mut append)?;
             }
             append
@@ -295,7 +281,7 @@ pub fn prepare_process_transition(
             }
             let mut append =
                 ProcessEventAppendRequest::parked(&record.id, &park, record.last_event_sequence);
-            if record.is_terminal() || record.status() == ProcessStatus::CallerDeparted {
+            if record.is_terminal() {
                 route_transition_refusal_to_fold(&mut append)?;
             }
             append
@@ -325,44 +311,6 @@ fn route_transition_refusal_to_fold(
     })?;
     replay.key.push_str(FOLD_VALIDATION_REPLAY_KEY_SUFFIX);
     Ok(())
-}
-
-/// Apply the caller-departure transition to a process record fold.
-///
-/// The legal transitions are exactly `running -> caller_departed` and the
-/// idempotent `caller_departed -> caller_departed`. Everything else is
-/// refused, which is what keeps the state honest:
-///
-/// * only an `ExternallyOwned` row can reach it, because only a row lash never
-///   executes can outlive the caller that registered it with no outcome
-///   anybody could write;
-/// * a terminal row can never reach it, because an outcome is already
-///   recorded and departure cannot retract it;
-/// * a waiting row can never reach it, because waiting is an execution state
-///   an externally-owned row never enters.
-pub(super) fn apply_caller_departure(record: &mut ProcessRecord) -> Result<(), PluginError> {
-    if !record.input.is_externally_owned() {
-        return Err(PluginError::Session(format!(
-            "process `{}` is not externally-owned and cannot record a caller departure",
-            record.id
-        )));
-    }
-    match &record.lifecycle {
-        ProcessLifecycleState::CallerDeparted {} => Ok(()),
-        ProcessLifecycleState::Running { .. } => {
-            record.lifecycle = ProcessLifecycleState::CallerDeparted {};
-            Ok(())
-        }
-        ProcessLifecycleState::Terminal { .. } => Err(PluginError::Session(format!(
-            "terminal process `{}` cannot record a caller departure",
-            record.id
-        ))),
-        ProcessLifecycleState::Waiting { .. } => Err(PluginError::Session(format!(
-            "process `{}` cannot record a caller departure from `{}`",
-            record.id,
-            record.status().label()
-        ))),
-    }
 }
 
 /// Apply one persisted event to the process record fold.
@@ -408,12 +356,6 @@ pub fn apply_process_event_projection(
                     record.id
                 )));
             }
-            ProcessLifecycleState::CallerDeparted {} => {
-                return Err(PluginError::Session(format!(
-                    "caller-departed process `{}` cannot enter a wait state",
-                    record.id
-                )));
-            }
             ProcessLifecycleState::Running { .. } | ProcessLifecycleState::Waiting { .. } => {
                 record.lifecycle = ProcessLifecycleState::Waiting {
                     wait: lifecycle_payload(event, "wait")?,
@@ -429,12 +371,6 @@ pub fn apply_process_event_projection(
                     process_id: record.id.clone(),
                     status: record.status(),
                 });
-            }
-            ProcessLifecycleState::CallerDeparted {} => {
-                return Err(PluginError::Session(format!(
-                    "caller-departed process `{}` cannot resume",
-                    record.id
-                )));
             }
             ProcessLifecycleState::Running { .. } | ProcessLifecycleState::Waiting { .. } => {
                 record.lifecycle = ProcessLifecycleState::running();
@@ -497,9 +433,6 @@ pub fn apply_process_event_projection(
                     });
                 }
             }
-        }
-        ProcessEventKind::CallerDeparted => {
-            apply_caller_departure(record)?;
         }
         ProcessEventKind::Parked => {
             let status = record.status();
@@ -1243,7 +1176,6 @@ pub enum ProcessRegistrationRefusal {
     HostGrantOutsideRoot,
     SessionCapabilityUnreachable,
     ExecutionEnvMissing,
-    ExecutionEnvNotAllowed,
     EmptySessionTurnDefinitionKey,
     EmptyEventTypeName,
     DuplicateEventType,
@@ -1258,7 +1190,6 @@ impl ProcessRegistrationRefusal {
         Self::HostGrantOutsideRoot,
         Self::SessionCapabilityUnreachable,
         Self::ExecutionEnvMissing,
-        Self::ExecutionEnvNotAllowed,
         Self::EmptySessionTurnDefinitionKey,
         Self::EmptyEventTypeName,
         Self::DuplicateEventType,
@@ -1350,17 +1281,6 @@ pub(crate) fn classify_process_registration(
                     ProcessRegistrationRefusal::ExecutionEnvMissing,
                     format!(
                         "process `{}` requires a captured execution env",
-                        registration_name(registration)
-                    ),
-                ));
-            }
-        }
-        super::model::ProcessInput::External { .. } => {
-            if registration.env_ref.is_some() {
-                return Err(refuse(
-                    ProcessRegistrationRefusal::ExecutionEnvNotAllowed,
-                    format!(
-                        "process `{}` must not capture an execution env for this input kind",
                         registration_name(registration)
                     ),
                 ));

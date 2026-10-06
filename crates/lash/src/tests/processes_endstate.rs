@@ -251,10 +251,8 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     let core = process_test_core(backend.clone()).await?;
     let process_id = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -270,7 +268,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!("done"),
             )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await?;
 
@@ -556,10 +554,8 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
     assert_eq!(ingress.reservations.len(), 1);
     let process_id = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -586,16 +582,14 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!("done"),
             )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await?;
 
     // A retention filter carrying the `ProcessListFilter` default status selects
     // `running`, which no prunable row can hold. Refusing it is what keeps a
     // scoped retention call from reporting a silent zero (ADR 0023). The
-    // refusal is scoped to the two live statuses, not to "non-terminal": a
-    // caller-departed row is non-terminal and prunable, so retention policy can
-    // name it (see `caller_departed_rows_are_selectable_retention_policy`).
+    // refusal is scoped to the two live statuses.
     let refused = core
         .processes()
         .prune(
@@ -651,10 +645,8 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
     assert_eq!(orphaned.reservations.len(), 1);
     let orphaned_process_id = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -680,7 +672,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!("done"),
             )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&orphaned_process_id),
         )
         .await?;
     registry
@@ -1239,10 +1231,6 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
         .expect("child exists")
         .process_id;
     let child = registry.get_process(child_id).await?.expect("child record");
-    assert!(
-        !child.input.is_externally_owned(),
-        "a body-started child is a process lash executes"
-    );
     // Started by the parent's body; with no session above it, the host's
     // `session_or_starter` policy keeps it only until its starter.
     let parent_scope = lash_core::ScopeId::process(parent.id);
@@ -1746,7 +1734,6 @@ impl lash_core::facade_support::ProcessEventSink for CollectingProcessEventSink 
     }
 }
 
-mod caller_departure;
 mod event_pages;
 mod lifecycle_observation;
 mod native_process_await;

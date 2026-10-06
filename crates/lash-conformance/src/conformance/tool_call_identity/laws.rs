@@ -1,7 +1,6 @@
 //! The tool-call identity laws. See the module documentation of
 //! [`super`] for the world they run in.
 
-use crate::ProcessEventLogTestSupport as _;
 use crate::SessionId;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -425,117 +424,6 @@ pub async fn suspended_tool_keeps_turn_and_history_head_until_resolution(
     receipts.assert_since(before.head_revision, after.head_revision, 0, 1, 0, 1);
     assert_eq!(world.witness.of("suspended").len(), 1);
     assert_eq!(outputs(&assembled).len(), 1);
-}
-
-#[expect(clippy::expect_used, reason = "conformance fixture assertions")]
-pub async fn external_completion_without_observer_writes_nothing(tier: ToolCallIdentityTier) {
-    let mut world = World::new(&tier, "external-observer");
-    let registry = tier.stores.process_registry();
-    world.process_registry = Some(registry.clone());
-    let runtime = world.runtime(None).await;
-    let process = registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::json!("foreign"),
-            },
-            crate::ProcessProvenance::host(),
-            crate::Lifetime::Detached,
-        ))
-        .await
-        .expect("register foreign external process");
-    let before = serde_json::to_value(&process).expect("process before");
-    let events = serde_json::to_value(
-        registry
-            .full_event_window(&process.id, 0)
-            .await
-            .expect("events before"),
-    )
-    .expect("encode events");
-    let service = runtime.process_service().expect("session service");
-    let output = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-        serde_json::json!("terminal"),
-    ));
-    let complete = async |operation: &str| {
-        let (send, mut received) = tokio::sync::mpsc::unbounded_channel();
-        let id = process.id.clone();
-        let owned_service = service.clone();
-        let session = world.session_id.clone();
-        let output = output.clone();
-        tier.runner
-            .run_turn(
-                crate::admit(crate::ExecutionScope::runtime_operation(operation)),
-                Arc::new(move |scope| {
-                    let (service, id, session, output, send) = (
-                        owned_service.clone(),
-                        id.clone(),
-                        session.clone(),
-                        output.clone(),
-                        send.clone(),
-                    );
-                    Box::pin(async move {
-                        send.send(
-                            service
-                                .complete_external(
-                                    &session,
-                                    &id,
-                                    output,
-                                    crate::ProcessOpScope::new(scope),
-                                )
-                                .await,
-                        )
-                        .expect("report completion");
-                        crate::ConformanceTurnEnd::Settled
-                    })
-                }),
-            )
-            .await;
-        received.recv().await.expect("handler attempted completion")
-    };
-    let refused = complete("unobserved-external-completion").await;
-    assert!(
-        matches!(refused, Err(crate::PluginError::RuntimeEffectController(ref error)) if error.code == crate::RuntimeErrorCode::ProcessNotVisible),
-        "{refused:?}"
-    );
-    assert_eq!(
-        serde_json::to_value(
-            registry
-                .get_process(&process.id)
-                .await
-                .expect("process after")
-                .expect("process retained")
-        )
-        .expect("encode row"),
-        before
-    );
-    assert_eq!(
-        serde_json::to_value(
-            registry
-                .full_event_window(&process.id, 0)
-                .await
-                .expect("events after")
-        )
-        .expect("encode events"),
-        events
-    );
-    assert!(
-        registry
-            .terminal_publication(&process.id)
-            .await
-            .expect("publication")
-            .is_none()
-    );
-    registry
-        .add_observer(
-            &world.session_id,
-            &process.id,
-            crate::ProcessObserverBy::host("observer-law"),
-        )
-        .await
-        .expect("add observer");
-    complete("observed-external-completion")
-        .await
-        .expect("observed external process completes");
-    runtime.park().await.expect("park runtime");
 }
 
 #[expect(clippy::expect_used, reason = "conformance fixture assertions")]

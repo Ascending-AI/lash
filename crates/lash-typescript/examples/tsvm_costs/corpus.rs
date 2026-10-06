@@ -143,10 +143,10 @@ pub fn load(root: &Path) -> Vec<Case> {
             &host,
         ));
     }
-    let shell = "const payload = ''; console.log(payload.length);";
+    let template = "const payload = ''; console.log(payload.length);";
     let source = format!(
         "const payload = '{}'; console.log(payload.length);",
-        "x".repeat(65536 - shell.len())
+        "x".repeat(65536 - template.len())
     );
     assert_eq!(source.len(), 65536);
     let mut state = State::new();

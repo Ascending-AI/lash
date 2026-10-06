@@ -2,20 +2,15 @@ use super::*;
 
 #[tokio::test]
 async fn trigger_registration_refuses_non_engine_target() {
-    let targets = [
-        crate::ProcessInput::External {
-            metadata: serde_json::json!({}),
-        },
-        crate::ProcessInput::SessionTurn {
-            definition_key: "child".to_string(),
-            create_request: Box::new(crate::SessionCreateRequest::root(
-                crate::SessionStartPoint::Empty,
-                crate::PluginOptions::default(),
-            )),
-            turn_input: Box::new(crate::TurnInput::empty()),
-            result: crate::SessionTurnOutcome::Turn,
-        },
-    ];
+    let targets = [crate::ProcessInput::SessionTurn {
+        definition_key: "child".to_string(),
+        create_request: Box::new(crate::SessionCreateRequest::root(
+            crate::SessionStartPoint::Empty,
+            crate::PluginOptions::default(),
+        )),
+        turn_input: Box::new(crate::TurnInput::empty()),
+        result: crate::SessionTurnOutcome::Turn,
+    }];
     for target in targets {
         let expected = target.engine_kind();
         let mut draft = incarnation_fixture_draft();

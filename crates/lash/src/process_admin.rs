@@ -989,9 +989,7 @@ impl Processes {
     /// Host-scheduled retention lever (ADR 0017): physically delete retired
     /// process rows (and their events, observer edges, leases) older than
     /// `cutoff_epoch_ms`, returning what was reclaimed. Retired is the terminal
-    /// outcomes plus
-    /// [`ProcessStatus::CallerDeparted`](lash_core::ProcessStatus::CallerDeparted),
-    /// which nothing may ever honestly terminalize. The configured trigger
+    /// outcomes. The configured trigger
     /// store then removes exact delivery reservations for processes now
     /// represented by tombstones. In the same trigger-store transaction it
     /// reclaims empty-fan-out occurrences and trigger rows whose session owner

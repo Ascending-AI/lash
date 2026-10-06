@@ -6,8 +6,8 @@ mod tests {
     use serde_json::json;
 
     use crate::runtime::process::{
-        ObservedWorkItemState, ProcessAwaitOutput, ProcessInput, ProcessListFilter,
-        ProcessRegistryFaults, ProcessWorkObserver,
+        ObservedWorkItemState, ProcessAwaitOutput, ProcessListFilter, ProcessRegistryFaults,
+        ProcessWorkObserver,
     };
     use crate::{
         ProcessEventAppendRequest, ProcessObserverBy, ProcessProvenance, ProcessRegistration,
@@ -26,10 +26,8 @@ mod tests {
     }
 
     fn external_registration(label: &str) -> ProcessRegistration {
-        ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: json!({ "label": label }),
-            },
+        crate::testing::held_engine_registration(
+            json!({ "label": label }),
             ProcessProvenance::host(),
             crate::Lifetime::Detached,
         )
@@ -73,7 +71,7 @@ mod tests {
             .complete_process(
                 &process_id,
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await
             .expect("complete process between record and event-tail reads");
@@ -111,7 +109,7 @@ mod tests {
             .complete_process(
                 &process_id,
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await
             .expect("complete process between record and event-tail reads");
@@ -232,7 +230,7 @@ mod tests {
                         "failed loudly",
                     ),
                 )),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&ids["failed"]),
             )
             .await
             .expect("fail process");
@@ -242,7 +240,7 @@ mod tests {
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
                     crate::ToolCancellation::runtime("cancelled intentionally"),
                 )),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&ids["cancelled"]),
             )
             .await
             .expect("cancel process");

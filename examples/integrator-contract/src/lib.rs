@@ -1116,12 +1116,6 @@ impl ProcessLifecycle for Integrator {
     ) -> Result<(ProcessRecord, StoreRealization), PluginError> {
         unreachable!("external signature witness")
     }
-    async fn record_caller_departure(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<ProcessRecord, PluginError> {
-        unreachable!("external signature witness")
-    }
     async fn set_process_wait_with_authority(
         &self,
         process_id: &ProcessId,

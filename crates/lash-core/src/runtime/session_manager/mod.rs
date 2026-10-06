@@ -761,10 +761,8 @@ mod process_visibility_tests {
         for _ in ["visible", "hidden"] {
             let process_id = registry
                 .register_process_with_observers(
-                    crate::ProcessRegistration::new(
-                        crate::ProcessInput::External {
-                            metadata: serde_json::Value::Null,
-                        },
+                    crate::testing::held_engine_registration(
+                        serde_json::Value::Null,
                         crate::ProcessProvenance::host(),
                         crate::Lifetime::Detached,
                     )

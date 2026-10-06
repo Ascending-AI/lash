@@ -161,10 +161,8 @@ impl OwnershipTools {
         let child = self
             .registry
             .register_process(crate::started_until_starter(
-                crate::ProcessRegistration::new(
-                    crate::ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
+                lash_core::testing::held_engine_registration(
+                    serde_json::Value::Null,
                     crate::ProcessProvenance::session(crate::SessionScope::new(
                         self.session_id.clone(),
                     )),
@@ -712,10 +710,8 @@ pub async fn every_driver_turn_is_owned_by_its_run(
     let turn = crate::ScopeId::turn(parked.parts.session_id.clone(), parked.run.clone());
     let child = registry
         .register_process(crate::started_until_starter(
-            crate::ProcessRegistration::new(
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::session(crate::SessionScope::new(
                     parked.parts.session_id.clone(),
                 )),

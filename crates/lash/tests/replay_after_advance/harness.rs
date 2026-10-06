@@ -378,15 +378,13 @@ impl World {
         self.engine.backend().process_registry()
     }
 
-    /// Register an externally owned process the law's session observes, able
+    /// Register a held process the law's session observes, able
     /// to receive the law's signal.
     pub async fn target(&self) -> ProcessId {
         self.registry()
             .register_process_with_observers(
-                lash_core::ProcessRegistration::new(
-                    lash_core::ProcessInput::External {
-                        metadata: json!({"law": "replay-after-advance"}),
-                    },
+                lash_core::testing::held_engine_registration(
+                    json!({"law": "replay-after-advance"}),
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )
@@ -402,7 +400,7 @@ impl World {
             .id
     }
 
-    /// End `process_id` as its external owner, then prune it; with
+    /// End `process_id` under its workflow key, then prune it; with
     /// `compact`, compact its tombstone too, so nothing names it any more.
     pub async fn end_and_prune(&self, process_id: &ProcessId, compact: bool) {
         let registry = self.registry();
@@ -411,13 +409,8 @@ impl World {
             .await
             .expect("read the target")
             .expect("the target is retained");
-        // An externally owned row is closed by its owner; a row lash runs is
-        // closed by its workflow key, the engine's single writer.
-        let authority = if record.input.is_externally_owned() {
-            lash_core::ProcessCompletionAuthority::external_owner()
-        } else {
-            lash_core::ProcessCompletionAuthority::workflow_key(process_id.to_string())
-        };
+        // The row is closed by its workflow key, the engine's single writer.
+        let authority = lash_core::ProcessCompletionAuthority::workflow_key(record.id.to_string());
         let ended = match registry
             .complete_process(
                 process_id,

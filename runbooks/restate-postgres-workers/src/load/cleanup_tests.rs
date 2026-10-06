@@ -82,6 +82,7 @@ fn services(backend: lash::Backend, authority: lash::restate::RestateAuthorityId
     let core = lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .plugin(lash::testing::process_engine_plugin_fixture())
         .serve_test_llm_profile(
             provider,
             lash::LlmProfileMetadata::builder("mock-model")
@@ -100,10 +101,8 @@ fn services(backend: lash::Backend, authority: lash::restate::RestateAuthorityId
 async fn child(backend: lash::Backend, session: &str) -> lash::ProcessId {
     backend
         .process_registry()
-        .register_process(lash::process::ProcessRegistration::new(
-            lash::process::ProcessInput::External {
-                metadata: Value::Null,
-            },
+        .register_process(lash::testing::held_engine_registration(
+            Value::Null,
             lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                 SessionId::fixture(session),
             )),
@@ -690,8 +689,9 @@ async fn cancelled_turn_cleanup_settles_parked_children_and_preserves_other_sess
     let key = "retired-session";
     let cancelled = child(double.lash_backend(), key).await;
     let sibling = child(double.lash_backend(), "other-session").await;
-    // An external owner stays parked until cancellation, then publishes its
-    // terminal through the SQL registry and the Restate process substrate.
+    // The law stands in for the child's engine: it waits for the
+    // cancellation, then publishes the child's terminal through the SQL
+    // registry and the Restate process substrate.
     let owner = tokio::spawn({
         let backend = double.lash_backend();
         let cancelled = cancelled.clone();
@@ -720,7 +720,7 @@ async fn cancelled_turn_cleanup_settles_parked_children_and_preserves_other_sess
                 .complete_process(
                     &cancelled,
                     output.clone(),
-                    lash::process::ProcessCompletionAuthority::external_owner(),
+                    lash::process::ProcessCompletionAuthority::workflow_key(&cancelled),
                 )
                 .await
                 .unwrap();

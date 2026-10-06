@@ -224,10 +224,8 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
         .await;
         let process_id = registry
             .register_process(
-                lash::process::ProcessRegistration::new(
-                    lash::process::ProcessInput::External {
-                        metadata: Value::Null,
-                    },
+                lash::testing::held_engine_registration(
+                    Value::Null,
                     lash::process::ProcessProvenance::host(),
                     lash::process::Lifetime::Detached,
                 )
@@ -348,10 +346,8 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
         .await;
         let workbench_expiring_wake_process_id = expiry_registry
             .register_process(
-                lash::process::ProcessRegistration::new(
-                    lash::process::ProcessInput::External {
-                        metadata: Value::Null,
-                    },
+                lash::testing::held_engine_registration(
+                    Value::Null,
                     lash::process::ProcessProvenance::host(),
                     lash::process::Lifetime::Detached,
                 )
@@ -446,10 +442,8 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
         .await;
         let workbench_target_gone_wake_process_id = target_gone_registry
             .register_process(
-                lash::process::ProcessRegistration::new(
-                    lash::process::ProcessInput::External {
-                        metadata: Value::Null,
-                    },
+                lash::testing::held_engine_registration(
+                    Value::Null,
                     lash::process::ProcessProvenance::host(),
                     lash::process::Lifetime::Detached,
                 )
@@ -547,10 +541,8 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
         let registry = state.core.process_registry();
         let process_id = registry
             .register_process(
-                lash::process::ProcessRegistration::new(
-                    lash::process::ProcessInput::External {
-                        metadata: Value::Null,
-                    },
+                lash::testing::held_engine_registration(
+                    Value::Null,
                     lash::process::ProcessProvenance::host(),
                     lash::process::Lifetime::Detached,
                 )
@@ -764,10 +756,8 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         let registry = state.core.process_registry();
         let process_id = registry
             .register_process(
-                lash::process::ProcessRegistration::new(
-                    lash::process::ProcessInput::External {
-                        metadata: Value::Null,
-                    },
+                lash::testing::held_engine_registration(
+                    Value::Null,
                     lash::process::ProcessProvenance::host(),
                     lash::process::Lifetime::Detached,
                 )

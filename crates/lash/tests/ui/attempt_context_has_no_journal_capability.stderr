@@ -21,9 +21,3 @@ error[E0599]: no method named `await_process` found for struct `AttemptProcessRe
   |
 5 |     let _ = context.processes().await_process("process-1").await;
   |                                 ^^^^^^^^^^^^^ method not found in `AttemptProcessReads`
-
-error[E0599]: no method named `complete_external` found for struct `AttemptProcessReads` in the current scope
- --> tests/ui/attempt_context_has_no_journal_capability.rs:6:33
-  |
-6 |     let _ = context.processes().complete_external("process-1").await;
-  |                                 ^^^^^^^^^^^^^^^^^ method not found in `AttemptProcessReads`

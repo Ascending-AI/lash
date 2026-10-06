@@ -82,7 +82,7 @@ impl RestateProcessRunner for NoRun {
         _: Option<lash_core::SegmentHandover>,
         _: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        panic!("the await laws register externally owned children")
+        panic!("the await laws register held children")
     }
 }
 
@@ -195,14 +195,14 @@ impl World {
     async fn terminal(&self, output: &ProcessAwaitOutput) -> ProcessId {
         let record = self
             .registry
-            .register_process(external_registration())
+            .register_process(held_registration())
             .await
             .expect("register the child");
         self.registry
             .complete_process(
                 &record.id,
                 output.clone(),
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core::ProcessCompletionAuthority::workflow_key(&record.id),
             )
             .await
             .expect("record the child terminal");

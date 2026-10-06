@@ -9,7 +9,6 @@ impl From<lash_core::ProcessStatus> for RemoteProcessStatus {
             lash_core::ProcessStatus::Failed => Self::Failed,
             lash_core::ProcessStatus::Cancelled => Self::Cancelled,
             lash_core::ProcessStatus::Abandoned => Self::Abandoned,
-            lash_core::ProcessStatus::CallerDeparted => Self::CallerDeparted,
         }
     }
 }
@@ -23,7 +22,6 @@ impl From<RemoteProcessStatus> for lash_core::ProcessStatus {
             RemoteProcessStatus::Failed => Self::Failed,
             RemoteProcessStatus::Cancelled => Self::Cancelled,
             RemoteProcessStatus::Abandoned => Self::Abandoned,
-            RemoteProcessStatus::CallerDeparted => Self::CallerDeparted,
         }
     }
 }
@@ -87,7 +85,6 @@ impl TryFrom<lash_core::ProcessLifecycleState> for RemoteProcessLifecycleState {
                 wait: wait.into(),
                 park: park(parked)?,
             },
-            lash_core::ProcessLifecycleState::CallerDeparted {} => Self::CallerDeparted {},
             lash_core::ProcessLifecycleState::Terminal { outcome } => Self::Terminal {
                 outcome: outcome.try_into()?,
             },
@@ -111,7 +108,6 @@ impl TryFrom<RemoteProcessLifecycleState> for lash_core::ProcessLifecycleState {
                 wait: wait.into(),
                 park: park(parked)?,
             },
-            RemoteProcessLifecycleState::CallerDeparted {} => Self::CallerDeparted {},
             RemoteProcessLifecycleState::Terminal { outcome } => Self::Terminal {
                 outcome: outcome.try_into()?,
             },
@@ -126,7 +122,6 @@ impl From<lash_core::RetiredProcessStatus> for RemoteRetiredProcessStatus {
             lash_core::RetiredProcessStatus::Failed => Self::Failed,
             lash_core::RetiredProcessStatus::Cancelled => Self::Cancelled,
             lash_core::RetiredProcessStatus::Abandoned => Self::Abandoned,
-            lash_core::RetiredProcessStatus::CallerDeparted => Self::CallerDeparted,
         }
     }
 }
@@ -138,7 +133,6 @@ impl From<RemoteRetiredProcessStatus> for lash_core::RetiredProcessStatus {
             RemoteRetiredProcessStatus::Failed => Self::Failed,
             RemoteRetiredProcessStatus::Cancelled => Self::Cancelled,
             RemoteRetiredProcessStatus::Abandoned => Self::Abandoned,
-            RemoteRetiredProcessStatus::CallerDeparted => Self::CallerDeparted,
         }
     }
 }
@@ -335,7 +329,6 @@ impl TryFrom<lash_core::ProcessInput> for RemoteProcessInput {
                 turn_input: RemoteTurnInput::try_from(*turn_input)?,
                 result: result.into(),
             }),
-            lash_core::ProcessInput::External { metadata } => Ok(Self::External { metadata }),
         }
     }
 }
@@ -400,7 +393,6 @@ impl TryFrom<RemoteProcessInput> for lash_core::ProcessInput {
                 turn_input: Box::new(lash_core::TurnInput::try_from(turn_input)?),
                 result: result.into(),
             }),
-            RemoteProcessInput::External { metadata } => Ok(Self::External { metadata }),
         }
     }
 }

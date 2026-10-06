@@ -89,10 +89,8 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     let delivery_expiry_ms = registry.wake_delivery_config().delivery_expiry_ms;
     let builder_clock_process_id = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -381,10 +379,8 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
 
     let fork_visible_process_id = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -539,10 +535,8 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         ),
     );
     let fork_pruned_process_id = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -555,7 +549,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&fork_pruned_process_id),
         )
         .await
         .expect("complete inherited process before recovery");
@@ -652,10 +646,8 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
 
     let fork_selective_process_id = registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ),
@@ -815,10 +807,8 @@ async fn duplicate_only_fork_intents_are_canonical(
 
     let process_id = registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ),
@@ -877,10 +867,8 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
     let process_id = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         ))
@@ -999,10 +987,8 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
         let mut registered = Vec::new();
         for _ in 0..2 {
             let process_id = registry
-                .register_process(lash_core::ProcessRegistration::new(
-                    lash_core::ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
+                .register_process(lash_core::testing::held_engine_registration(
+                    serde_json::Value::Null,
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 ))

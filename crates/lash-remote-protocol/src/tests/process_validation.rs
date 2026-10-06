@@ -5,7 +5,6 @@ fn remote_terminal_semantics_cannot_name_a_non_terminal_status() {
     for (status, terminal) in [
         ("running", false),
         ("waiting", false),
-        ("caller_departed", false),
         ("completed", true),
         ("failed", true),
         ("cancelled", true),
@@ -48,10 +47,6 @@ fn remote_process_record_decodes_one_lifecycle_state() {
             serde_json::json!({"state": "waiting", "wait": wait}),
         ),
         (
-            RemoteProcessStatus::CallerDeparted,
-            serde_json::json!({"state": "caller_departed"}),
-        ),
-        (
             RemoteProcessStatus::Completed,
             serde_json::json!({"state": "terminal", "outcome": outcome}),
         ),
@@ -80,10 +75,6 @@ fn remote_process_record_decodes_one_lifecycle_state() {
         (
             "a waiting state without a wait",
             serde_json::json!({"state": "waiting"}),
-        ),
-        (
-            "a caller-departed state with an outcome",
-            serde_json::json!({"state": "caller_departed", "outcome": outcome}),
         ),
         (
             "a pruned answer as an outcome",

@@ -157,10 +157,8 @@ mod served_only_outside_a_run {
                         key,
                     )
                 };
-                let registration = lash_core::ProcessRegistration::new(
-                    lash_core::ProcessInput::External {
-                        metadata: serde_json::json!({ "fixture": "served-only" }),
-                    },
+                let registration = lash_core::testing::held_engine_registration(
+                    serde_json::json!({ "fixture": "served-only" }),
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )
@@ -180,9 +178,10 @@ mod served_only_outside_a_run {
                         RuntimeEffectLocalExecutor::processes(
                             registry,
                             Arc::new(NoopProcessWork),
-                            lash_core::ProcessEngineRegistry::new(),
+                            lash_core::testing::process_engine_fixture(),
                             lash_core::runtime::HostStartAdmission::default(),
-                        ),
+                        )
+                        .with_process_env_store(crate::tests::fixture_env_store()),
                     )
                     .await
                     .map(|_| ());

@@ -11,10 +11,8 @@ mod tests {
         let backend = sqlite_memory_store_set().await;
         let registry = backend.process_registry();
         let registered = registry
-            .register_process(crate::ProcessRegistration::new(
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            .register_process(crate::testing::held_engine_registration(
+                serde_json::Value::Null,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             ))
@@ -26,7 +24,7 @@ mod tests {
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                     serde_json::Value::Null,
                 )),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&registered.id),
             )
             .await
             .expect("complete process before pruning");
@@ -68,10 +66,8 @@ mod tests {
     async fn a_selected_pruned_process_never_retargets_to_a_later_process() {
         let backend = sqlite_memory_store_set().await;
         let registry = backend.process_registry();
-        let registration = crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        let registration = crate::testing::held_engine_registration(
+            serde_json::Value::Null,
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
         );
@@ -86,7 +82,7 @@ mod tests {
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                     serde_json::Value::Null,
                 )),
-                crate::ProcessCompletionAuthority::external_owner(),
+                crate::ProcessCompletionAuthority::workflow_key(&first.id),
             )
             .await
             .expect("finish first run");

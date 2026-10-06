@@ -174,11 +174,6 @@ impl ObligationRelay for ProcessStartRelay {
         if record.is_terminal() {
             return Ok(());
         }
-        if record.input.is_externally_owned() {
-            return Err(DeliveryFailure::row_invariant(format!(
-                "externally owned process `{process_id}` has a start obligation"
-            )));
-        }
         self.port
             .deliver_process_start(&record)
             .await

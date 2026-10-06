@@ -4,8 +4,8 @@
   "status": "promoted_deterministic_regression_guard",
   "trace": "trace.json",
   "generator_version": "lash-sim.generated-workload.v11",
-  "source": "Regenerated through lash-sim run and write_trace on 2026-10-05 from b4982e685a with the FIG-5072 storage-probe fixture corrections, retaining the original seed, workload version, regression contract and semantic oracles. The promoted JSON has its trailing newline normalized.",
-  "source_trace_sha256": "d485cf24abf6bc77a3a0b4697aecd94ae3e34888fc8e252459328fb15cb4d0e9",
+  "source": "Regenerated through lash-sim run and write_trace on 2026-10-06 for FIG-5159, where the trigger boundary registers its subscription's engine process and simulated runtime processes run the held test engine, retaining the original seed, workload version, regression contract and semantic oracles. The promoted JSON has its trailing newline normalized.",
+  "source_trace_sha256": "54d93470576c9407549a1d2d96ed47d62fb383f88a66a67ea303c03954019f93",
   "historical_production_regression": false,
   "regression_contract": "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle admission can surface it",
   "required_boundary_kinds": [
@@ -22,5 +22,5 @@
     "model"
   ],
   "replay_command": "kiln run //crates/lash-sim:lash-sim__bin -- replay \"$PWD/crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json\"",
-  "regeneration_command": "kiln run //crates/lash-sim:lash-sim__bin -- run --out \"$PWD/.kiln/FIG-5072/replay-regenerated\" --profile fast-random --seed 7313380382653661636"
+  "regeneration_command": "kiln run //crates/lash-sim:lash-sim__bin -- run --out \"$PWD/.kiln/FIG-5159/replay-regenerated\" --profile fast-random --seed 7313380382653661636"
 }

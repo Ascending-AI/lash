@@ -394,16 +394,6 @@ where
             )
             .await
         }
-        command @ ProcessCommand::CompleteExternal { .. } => {
-            recorded_local_process_command(
-                context,
-                invocation,
-                local_executor.into_process()?,
-                "process-complete-external",
-                command,
-            )
-            .await
-        }
         command @ ProcessCommand::ValidateVisible { .. } => {
             recorded_local_process_command(
                 context,
@@ -748,21 +738,7 @@ where
             let outcome = Box::pin(execution.execute(receiver, command))
                 .await
                 .map_err(PluginError::from)?;
-            let realization = match &outcome {
-                ProcessEffectOutcome::CompleteExternal { completion } => {
-                    match completion.as_ref() {
-                        lash_core::ProcessCompletionOutcome::Committed(_) => {
-                            lash_core::StoreRealization::Realized
-                        }
-                        _ => lash_core::StoreRealization::Coalesced,
-                    }
-                }
-                _ => lash_core::StoreRealization::Realized,
-            };
-            Ok(JournaledProcessOutcome {
-                outcome,
-                realization,
-            })
+            Ok(JournaledProcessOutcome::realized(outcome))
         },
     )
     .await?;

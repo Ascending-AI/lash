@@ -146,10 +146,8 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                     .lock_recover()
                     .push(RecordedProcessCommand::Cancel);
                 let mut record = crate::ProcessRecord::from_registration(
-                    crate::ProcessRegistration::new(
-                        crate::ProcessInput::External {
-                            metadata: serde_json::Value::Null,
-                        },
+                    crate::testing::held_engine_registration(
+                        serde_json::Value::Null,
                         crate::ProcessProvenance::host(),
                         crate::Lifetime::Detached,
                     ),

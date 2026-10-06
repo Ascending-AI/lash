@@ -306,17 +306,24 @@ impl lash_core::facade_support::PluginFactory for ProcessEnginePlugin {
 
     fn process_engine_contributions(
         &self,
-        _context: &lash_core::ProcessEngineContributionContext<'_>,
+        context: &lash_core::ProcessEngineContributionContext<'_>,
     ) -> Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError> {
-        Ok(vec![
-            lash_lashlang_runtime::lashlang_process_engine_registration(
-                lash_lashlang_runtime::LashlangProcessEngine::new(
-                    self.0.clone(),
-                    lash_lashlang_runtime::LashlangSurface::default(),
-                    self.1.clone(),
-                ),
+        let mut engines = vec![lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                self.0.clone(),
+                lash_lashlang_runtime::LashlangSurface::default(),
+                self.1.clone(),
             ),
-        ])
+        )];
+        // The H2 mutation receiver: a host engine process the fleet's tools
+        // append their receipts to.
+        engines.extend(
+            lash_core::facade_support::PluginFactory::process_engine_contributions(
+                &crate::node::tools::ReceiverEnginePlugin,
+                context,
+            )?,
+        );
+        Ok(engines)
     }
 
     fn build(

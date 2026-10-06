@@ -382,6 +382,29 @@ use endpoint_protocol::{
     restate_output_failure_message, restate_output_json, restate_recorded_commands, with_admission,
 };
 
+/// [`RECOVERY_PROCESS_ENV_STORE`] holding the fixture execution environment
+/// that `lash_core::testing::held_engine_registration` captures, so a start of
+/// a held process stages its environment.
+fn fixture_env_store() -> Arc<dyn ProcessExecutionEnvStore> {
+    static PUBLISHED: std::sync::LazyLock<Arc<dyn ProcessExecutionEnvStore>> =
+        std::sync::LazyLock::new(|| {
+            let store = Arc::clone(&RECOVERY_PROCESS_ENV_STORE);
+            std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("build the fixture environment runtime")
+                    .block_on(lash_core::testing::process_execution_env_fixture(
+                        store.as_ref(),
+                    ));
+                store
+            })
+            .join()
+            .expect("publish the fixture execution environment on its own thread")
+        });
+    Arc::clone(&PUBLISHED)
+}
+
 fn registry_local_executor(
     registry: Arc<dyn ProcessRegistry>,
 ) -> RuntimeEffectLocalExecutor<'static> {
@@ -404,6 +427,7 @@ fn registry_local_executor(
             )),
         lash_core::runtime::HostStartAdmission::default(),
     )
+    .with_process_env_store(fixture_env_store())
 }
 
 #[tokio::test]

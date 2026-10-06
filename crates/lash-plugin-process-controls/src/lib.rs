@@ -178,8 +178,7 @@ impl StaticToolExecute for SessionProcessAdminTools {
 ///
 /// A handle is the shape every other process tool takes, so `cancel` accepts
 /// it too and reads it through the one handle parser. The bare `process_id`
-/// stays for a host that holds an id and never held a handle — an
-/// Externally-Owned run the host launched and reported by id, for instance.
+/// stays for a host that holds an id and never held a handle.
 ///
 /// A value that is present but names no process is refused with the reason,
 /// never passed over for the other spelling: a retired handle or an id no
@@ -221,7 +220,7 @@ fn process_list_tool_definition() -> ToolDefinition {
                 "status": {
                     "anyOf": [
                         { "const": "any" },
-                        { "type": "object", "properties": { "in": { "type": "array", "items": { "enum": ["running", "waiting", "completed", "failed", "cancelled", "abandoned", "caller_departed"] } } }, "required": ["in"], "additionalProperties": false }
+                        { "type": "object", "properties": { "in": { "type": "array", "items": { "enum": ["running", "waiting", "completed", "failed", "cancelled", "abandoned"] } } }, "required": ["in"], "additionalProperties": false }
                     ],
                     "description": "Any-of lifecycle status set. Absence selects running runs; `any` includes every status."
                 },
@@ -442,7 +441,7 @@ pub fn process_handle_view_schema() -> Value {
             "definition_id": declarations::definition_id_schema(),
             "status": {
                 "type": "string",
-                "enum": ["running", "waiting", "completed", "failed", "cancelled", "abandoned", "caller_departed"]
+                "enum": ["running", "waiting", "completed", "failed", "cancelled", "abandoned"]
             }
         },
         "required": ["__handle__", "id", "process_id", "kind", "status"],

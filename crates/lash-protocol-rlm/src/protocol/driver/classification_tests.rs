@@ -215,7 +215,7 @@ fn non_cell_reply_classification_table_is_byte_identical() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 
-    let native = driver.native_tool_call_prompt(&attempt, "bash");
+    let native = driver.native_tool_call_prompt(&attempt, "lookup");
     assert_eq!(native.decision, "retry_native_tool_call");
     assert_eq!(native.assistant_message, None);
     assert_eq!(

@@ -27,8 +27,7 @@ fn ledger_key(scope: &ScopeId) -> (&'static str, String) {
 /// settles it. Past the same cutoff the process rows themselves are pruned
 /// under, a settled scope with no live child can no longer parent anything
 /// lash will act on, and without this the table grows by one row per committed
-/// turn forever. A `caller_departed` child is not live by construction: lash
-/// may never act on such a row, so it can never need a parent-end cancel.
+/// turn forever.
 pub(crate) fn reclaim_settled_plans_conn(
     conn: &Connection,
     cutoff: i64,
@@ -304,9 +303,7 @@ pub(super) async fn list_unrecorded_opener_parents(
 /// Processes living `Until` one closed scope that still owe a cancel.
 ///
 /// The predicate is exactly the pending-cancel partial index: `Until` lifetime,
-/// no cancel request yet, and a live status. `caller_departed` is excluded for
-/// the reason it is excluded from every non-terminal registry scan — lash may never act on
-/// such a row nor assert an outcome for it, and a cancel request is both.
+/// no cancel request yet, and a live status.
 ///
 /// A session's plan also owes the children of every scope inside the
 /// session that has no row of its own (FIG-3948): a turn that never became

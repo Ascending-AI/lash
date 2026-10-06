@@ -506,10 +506,8 @@ mod tests {
         let registry = backend.process_registry();
         let process_id = registry
             .register_process(
-                lash_core::ProcessRegistration::new(
-                    lash_core::ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
+                lash_core::testing::held_engine_registration(
+                    serde_json::Value::Null,
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )
@@ -576,7 +574,7 @@ mod tests {
                 ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                     serde_json::json!({"done": true}),
                 )),
-                ProcessCompletionAuthority::external_owner(),
+                ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await
             .expect("complete transcript process");

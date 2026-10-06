@@ -242,37 +242,6 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         Ok((record, lash_core_execution::StoreRealization::Realized))
     }
 
-    async fn record_caller_departure(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<ProcessRecord, PluginError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        let append = match lash_core_execution::runtime::prepare_process_transition(
-            &record,
-            ProcessTransition::RecordCallerDeparture,
-        )? {
-            ProcessTransitionPlan::Unchanged => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(record);
-            }
-            ProcessTransitionPlan::Append(append) => *append,
-        };
-        append_process_event_tx(
-            &mut tx,
-            &mut record,
-            append,
-            self.clock.timestamp_ms(),
-            self.wake_delivery_config,
-            self.fence.fleet(),
-        )
-        .await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(record)
-    }
-
     async fn set_process_wait_with_authority(
         &self,
         process_id: &ProcessId,

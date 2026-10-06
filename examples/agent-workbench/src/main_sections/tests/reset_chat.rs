@@ -278,10 +278,8 @@ async fn register_terminal_processes(
     let registry = double.engine_stores().process_registry();
     for _ in 0..count {
         let process_id = registry
-            .register_process(lash::process::ProcessRegistration::new(
-                lash::process::ProcessInput::External {
-                    metadata: Value::Null,
-                },
+            .register_process(lash::testing::held_engine_registration(
+                Value::Null,
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                     session_id.clone(),
                 )),
@@ -296,7 +294,7 @@ async fn register_terminal_processes(
                 lash::process::ProcessAwaitOutput::from_tool_output(
                     lash::tools::ToolCallOutput::success(json!("done")),
                 ),
-                lash::process::ProcessCompletionAuthority::external_owner(),
+                lash::process::ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await
             .expect("complete process");

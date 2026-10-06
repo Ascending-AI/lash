@@ -730,10 +730,8 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
 
     let mut ids = std::collections::BTreeMap::new();
     for label in ["allowed-process", "filtered-process", "filtered-cancel"] {
-        let mut registration = lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        let mut registration = lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         );
@@ -1003,10 +1001,8 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     .expect("runtime with process registry");
     let pruned_previous_turn_process_record = registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -1026,7 +1022,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!("previous turn result"),
             )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("complete previous-turn process");
@@ -1120,14 +1116,20 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     let parent_session_id = "observer-parent";
     let registry = backend.process_registry();
     let factory = backend.session_store_factory();
-    let env =
-        lash_core::facade_support::RuntimeEnvironment::builder(test_host_config(&backend).core)
-            .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
-            .with_process_work(lash_core::testing::process_work_wiring_for_registry(
-                registry.clone(),
-            ))
-            .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
-            .build();
+    // The held registrations name the held test engine.
+    let mut core = test_host_config(&backend).core;
+    core.process_engines =
+        core.process_engines
+            .with_registration(lash_core::ProcessEngineRegistration::accepting(Arc::new(
+                lash_core::testing::HeldProcessEngine,
+            )));
+    let env = lash_core::facade_support::RuntimeEnvironment::builder(core)
+        .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
+        .with_process_work(lash_core::testing::process_work_wiring_for_registry(
+            registry.clone(),
+        ))
+        .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
+        .build();
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -1138,6 +1140,8 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     .await
     .expect("runtime with process registry");
 
+    // The environment the held registrations capture.
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let process_service = runtime.process_service().expect("process service");
     let mut started = std::collections::BTreeMap::new();
     for (process_id, options) in [
@@ -1157,10 +1161,8 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         let record = process_service
             .start(
                 &SessionId::from(parent_session_id),
-                lash_core::ProcessRegistration::new(
-                    lash_core::ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
+                lash_core::testing::held_engine_registration(
+                    serde_json::Value::Null,
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )
@@ -1198,10 +1200,8 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     let mut ids = std::collections::BTreeMap::new();
     for process_id in ["named-process", "unnamed-process", "pruned-process"] {
         let registered = registry
-            .register_process(lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            .register_process(lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             ))
@@ -1215,7 +1215,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core::ProcessCompletionAuthority::workflow_key(&ids["pruned-process"]),
         )
         .await
         .expect("complete process before pruning");

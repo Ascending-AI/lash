@@ -1936,9 +1936,11 @@ fn replay_conformance_tool_attempt_outcome(
             intents: crate::ToolIntents::v3(vec![crate::ToolIntent::StartProcess(Box::new(
                 crate::StartProcessIntent {
                     owner: crate::RuntimeOwner::Session(SessionId::from("replay-session")),
-                    declaration: crate::ProcessStartDeclaration::external(
+                    declaration: crate::ProcessStartDeclaration::new(
+                        lash_core::testing::held_engine_input(
+                            serde_json::json!({"tool": tool_name}),
+                        ),
                         crate::ProcessOriginator::host_scoped("effect-host-conformance"),
-                        serde_json::json!({"tool": tool_name}),
                         lash_core::Lifetime::Detached,
                     ),
                 },

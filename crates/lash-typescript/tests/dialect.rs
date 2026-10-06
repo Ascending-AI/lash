@@ -440,7 +440,7 @@ mod durability {
         for source in [
             "function isEven(n: number): boolean { if (n === 0) { return true; } return isOdd(n - 1); } function isOdd(n: number): boolean { if (n === 0) { return false; } return isEven(n - 1); } print('x'); finish(`${isEven(4)}`);",
             "function a(n: number): number { if (n === 0) { return 0; } return b(n - 1); } function b(n: number): number { return c(n); } function c(n: number): number { return 1 + a(n); } finish(`${a(3)}`);",
-            "function shell(n: number): number { function up(k: number): number { if (k === 0) { return 0; } return down(k - 1) + 1; } function down(k: number): number { return up(k); } return up(n); } finish(`${shell(5)}`);",
+            "function outer(n: number): number { function up(k: number): number { if (k === 0) { return 0; } return down(k - 1) + 1; } function down(k: number): number { return up(k); } return up(n); } finish(`${outer(5)}`);",
         ] {
             let error = lash_typescript::testing::compile(source)
                 .expect_err("mutually recursive declarations must reject statically");

@@ -1,13 +1,126 @@
-//! H2's external mutation receiver uses the real process registry and returns
-//! its original event records. The caller lends an admitted handler scope.
+//! H2's mutation receiver uses the real process registry and returns its
+//! original event records. The caller lends an admitted handler scope. The
+//! receiver is a host engine process: it holds the events tools append to it
+//! and runs until it is cancelled.
+use std::sync::Arc;
+
 use anyhow::{Result, ensure};
+use lash::plugins::{
+    PluginDeclaration, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
+    ProcessEngine, ProcessEngineContributionContext, ProcessEngineRegistration,
+    ProcessEngineRunContext, ProcessInfraError, ProcessRunOutcome, SessionPlugin,
+};
 use lash::process::{
-    ProcessEvent, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
-    ProcessEventReadOutcome, ProcessEventType, ProcessOriginator, ProcessStartReceipt,
-    ProcessStartRequest,
+    ProcessAwaitOutput, ProcessEvent, ProcessEventPageEvents, ProcessEventPageMore,
+    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventType, ProcessInput,
+    ProcessOriginator, ProcessStartReceipt, ProcessStartRequest,
 };
 use lash::runtime::ScopedEffectController;
 use serde::{Deserialize, Serialize};
+
+/// The kind of [`ReceiverEngine`].
+pub const RECEIVER_ENGINE_KIND: &str = "h2-receiver";
+
+/// The receiver's input for `session`: what its start declares and what a
+/// binding check compares a retained row against.
+pub fn receiver_input(session: &lash::SessionId) -> ProcessInput {
+    ProcessInput::Engine {
+        kind: RECEIVER_ENGINE_KIND.to_owned(),
+        payload: serde_json::json!({"fixture":"h2-receiver","session":session}),
+    }
+}
+
+/// The receiver's engine: its process runs until it is cancelled, holding
+/// the events tools append to it.
+pub struct ReceiverEngine;
+
+#[lash::async_trait]
+impl ProcessEngine for ReceiverEngine {
+    fn kind(&self) -> &'static str {
+        RECEIVER_ENGINE_KIND
+    }
+
+    async fn run(
+        &self,
+        context: ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> std::result::Result<ProcessRunOutcome, ProcessInfraError> {
+        context.cancellation_token().cancelled().await;
+        Ok(
+            ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::cancelled(
+                lash::tools::ToolCancellation::runtime("the receiver was cancelled"),
+            ))
+            .into(),
+        )
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<Vec<lash::persistence::ArtifactName>, PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &lash::persistence::ResolvedArtifactCleanup,
+    ) -> std::result::Result<(), lash::persistence::ArtifactStoreError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &lash::persistence::ReferrerClaim,
+        artifact_ref: &str,
+    ) -> std::result::Result<(), PluginError> {
+        Err(PluginError::Session(format!(
+            "the receiver engine stores no artifact `{artifact_ref}`"
+        )))
+    }
+}
+
+/// The plugin that contributes [`ReceiverEngine`] to a host's core.
+pub struct ReceiverEnginePlugin;
+
+const RECEIVER_PLUGIN: &str = "h2-receiver-engine";
+
+impl PluginFactory for ReceiverEnginePlugin {
+    fn id(&self) -> &'static str {
+        RECEIVER_PLUGIN
+    }
+
+    fn process_engine_contributions(
+        &self,
+        _context: &ProcessEngineContributionContext<'_>,
+    ) -> std::result::Result<Vec<ProcessEngineRegistration>, PluginError> {
+        Ok(vec![ProcessEngineRegistration::accepting(Arc::new(
+            ReceiverEngine,
+        ))])
+    }
+
+    fn build(
+        &self,
+        _context: &PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn SessionPlugin>, PluginError> {
+        Ok(Arc::new(ReceiverEnginePlugin))
+    }
+}
+
+impl lash::plugins::PluginDefinition for ReceiverEnginePlugin {
+    fn declaration() -> PluginDeclaration {
+        PluginDeclaration::initial(RECEIVER_PLUGIN)
+    }
+}
+
+impl SessionPlugin for ReceiverEnginePlugin {
+    fn id(&self) -> &'static str {
+        RECEIVER_PLUGIN
+    }
+
+    fn register(&self, _registrar: &mut PluginRegistrar) -> std::result::Result<(), PluginError> {
+        Ok(())
+    }
+}
 
 pub async fn register_receiver(
     core: &lash::LashCore,
@@ -15,11 +128,27 @@ pub async fn register_receiver(
     event_type: &str,
     scoped: ScopedEffectController<'_>,
 ) -> Result<ProcessStartReceipt> {
-    let start = ProcessStartRequest::external(
+    // The receiver runs under an execution environment the host publishes; a
+    // host pin keeps it alive for the process (ADR 0113).
+    let env_ref = core
+        .host_artifacts()
+        .publish_process_env(
+            &lash::process::HostArtifactPin::mint(),
+            &lash::process::ProcessExecutionEnvSpec::new(
+                lash::plugins::AdmittedPluginConfig::default(),
+                lash::runtime::SessionPolicy::new(
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(1024),
+                ),
+            ),
+        )
+        .await?;
+    let start = ProcessStartRequest::new(
+        receiver_input(session),
         ProcessOriginator::host_scoped(format!("h2:{session}")),
-        serde_json::json!({"fixture":"h2-receiver","session":session}),
         lash::process::Lifetime::Detached,
     )
+    .with_env_ref(env_ref)
     .with_host_start_key(format!("h2-receiver:{session}"))
     .with_observers([session.clone()])
     .with_extra_event_types([ProcessEventType {

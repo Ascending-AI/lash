@@ -18,8 +18,8 @@
 use std::sync::Arc;
 
 use lash_core_execution::{
-    ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventLog as _, ProcessInput,
-    ProcessLifecycle as _, ProcessProvenance, ProcessRegistrar as _, ProcessRegistration,
+    ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventLog as _,
+    ProcessLifecycle as _, ProcessProvenance, ProcessRegistrar as _,
 };
 use lash_sqlite_store::{SqliteProcessRegistry, SqliteTriggerStore};
 
@@ -56,10 +56,8 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
     let reader = stores.process_registry();
     let process_id = reader
         .register_process(
-            ProcessRegistration::new(
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 ProcessProvenance::host(),
                 lash_core_execution::Lifetime::Detached,
             )
@@ -90,7 +88,7 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
             lash_core_execution::ProcessAwaitOutput::from_tool_output(
                 lash_core_execution::ToolCallOutput::success(serde_json::Value::Null),
             ),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&process_id),
         )
         .await
         .expect("complete snapshot process");

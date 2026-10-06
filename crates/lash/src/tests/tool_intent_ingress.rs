@@ -34,10 +34,8 @@ async fn ingress_core_over(
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     let process = registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
+            lash_core::testing::held_engine_registration(
+                serde_json::Value::Null,
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -1096,14 +1094,16 @@ fn emit_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIn
     })
 }
 
+/// A held process start under the session's captured environment.
 fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
         owner: crate::RuntimeOwner::Session(session_id.clone()),
-        declaration: lash_core::ProcessStartDeclaration::external(
+        declaration: lash_core::ProcessStartDeclaration::new(
+            lash_core::testing::held_engine_input(serde_json::Value::Null),
             lash_core::ProcessOriginator::host(),
-            serde_json::Value::Null,
             lash_core::Lifetime::Detached,
-        ),
+        )
+        .with_env_ref(session_env_ref()),
     }))
 }
 
@@ -1118,21 +1118,24 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
         )
-        .with_env_ref(
-            (lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::AdmittedPluginConfig::default(),
-                lash_core::SessionPolicy {
-                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-                    ..lash_core::SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                        crate::MaxToolCalls::new(1024),
-                    )
-                },
-            ))
-            .stable_ref()
-            .expect("captured environment digest"),
-        ),
+        .with_env_ref(session_env_ref()),
     }))
+}
+
+/// The environment an ingress test session captures.
+fn session_env_ref() -> lash_core::ProcessExecutionEnvRef {
+    (lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::AdmittedPluginConfig::default(),
+        lash_core::SessionPolicy {
+            model: Some(recorded_llm_profile(mock_llm_profile_spec())),
+            ..lash_core::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+        },
+    ))
+    .stable_ref()
+    .expect("captured environment digest")
 }
 
 fn cancel_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {

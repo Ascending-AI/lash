@@ -49,11 +49,14 @@ async fn intent_for(core: &LashCore, intent: Intent, target: &ProcessId) -> lash
                 .expect("the law's session is live");
             lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
                 owner,
-                declaration: lash_core::ProcessStartDeclaration::external(
+                declaration: lash_core::ProcessStartDeclaration::new(
+                    lash_core::testing::held_engine_input(
+                        serde_json::json!({"law": "replay-after-advance"}),
+                    ),
                     lash_core::ProcessOriginator::host(),
-                    serde_json::json!({"law": "replay-after-advance"}),
                     lash_core::Lifetime::Until(scope),
-                ),
+                )
+                .with_env_ref(session_env_ref()),
             }))
         }
         Intent::Signal => lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
@@ -77,13 +80,8 @@ async fn end_prune_and_compact(registry: &Arc<dyn ProcessRegistry>, process_id: 
         .await
         .expect("read the target")
         .expect("the target is retained");
-    // An externally owned row is closed by its owner; a row lash runs is
-    // closed by its workflow key, the engine's single writer.
-    let authority = if record.input.is_externally_owned() {
-        lash_core::ProcessCompletionAuthority::external_owner()
-    } else {
-        lash_core::ProcessCompletionAuthority::workflow_key(process_id.to_string())
-    };
+    // The row is closed by its workflow key, the engine's single writer.
+    let authority = lash_core::ProcessCompletionAuthority::workflow_key(record.id.to_string());
     let ended = match registry
         .complete_process(
             process_id,

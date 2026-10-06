@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::events::{ProcessEventType, default_process_event_types};
 use super::{
-    LifetimeDecision, ProcessInput, ProcessProvenance, ProcessStartRegistration,
-    ProcessStartTarget, SessionId,
+    LifetimeDecision, ProcessProvenance, ProcessStartRegistration, ProcessStartTarget, SessionId,
 };
 
 /// A start request as a leaf tool attempt declares it: everything a process
@@ -54,16 +53,6 @@ impl ProcessStartDeclaration {
             observers: Vec::new(),
             event_types: default_process_event_types(),
         }
-    }
-
-    /// External placeholder declaration: lash never executes an
-    /// `ProcessInput::External` process.
-    pub fn external(
-        originator: super::ProcessOriginator,
-        metadata: serde_json::Value,
-        lifetime: impl Into<LifetimeDecision>,
-    ) -> Self {
-        Self::new(ProcessInput::External { metadata }, originator, lifetime)
     }
 
     pub fn with_env_ref(mut self, env_ref: super::ProcessExecutionEnvRef) -> Self {
@@ -199,16 +188,6 @@ impl ProcessStartRequest {
     pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
         self.trace_cause = trace_cause;
         self
-    }
-
-    /// External placeholder start: lash never executes an
-    /// `ProcessInput::External` process.
-    pub fn external(
-        originator: super::ProcessOriginator,
-        metadata: serde_json::Value,
-        lifetime: impl Into<LifetimeDecision>,
-    ) -> Self {
-        Self::new(ProcessInput::External { metadata }, originator, lifetime)
     }
 
     /// The start's idempotency key, if it has one.

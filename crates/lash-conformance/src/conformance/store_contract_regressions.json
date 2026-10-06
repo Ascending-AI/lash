@@ -18,7 +18,6 @@
       {
         "op": "register",
         "process": 0,
-        "external": true,
         "wake_target": null
       },
       { "op": "terminal", "process": 0, "disposition": 0 }
@@ -30,7 +29,6 @@
       {
         "op": "register",
         "process": 2,
-        "external": true,
         "wake_target": null
       },
       { "op": "terminal", "process": 2, "disposition": 0 },
@@ -38,7 +36,6 @@
       {
         "op": "register",
         "process": 2,
-        "external": false,
         "wake_target": null
       }
     ]
@@ -61,7 +58,6 @@
       {
         "op": "register",
         "process": 2,
-        "external": false,
         "wake_target": null
       },
       { "op": "cancel_request", "process": 2, "requester": 0 },

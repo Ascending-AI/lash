@@ -145,7 +145,7 @@ async fn acquire_runtime_connection(
 // are rejected and recreated.
 //
 // Bumped to 18 for the second completion-authority payload cutover (ADR 0027):
-// `ExternalOwner` no longer carries the unverified `granted_to` field, changing
+// the external-owner authority no longer carried the unverified `granted_to` field, changing
 // the terminal event's replay-key payload hash. Pre-18 databases are rejected
 // and recreated so retries cannot compare terminal events across payload formats.
 //

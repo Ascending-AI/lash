@@ -37,11 +37,15 @@ impl lash_core::ToolProvider for FirstTurnProcessTool {
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     owner: lash_core::RuntimeOwner::Session(session_id.clone()),
-                    declaration: lash_core::ProcessStartDeclaration::external(
+                    declaration: lash_core::ProcessStartDeclaration::new(
+                        lash_core::ProcessInput::Engine {
+                            kind: "testing-fixture".to_string(),
+                            payload: serde_json::json!({ "source": "first child turn" }),
+                        },
                         lash_core::ProcessOriginator::host(),
-                        serde_json::json!({ "source": "first child turn" }),
                         lash_core::Lifetime::Detached,
                     )
+                    .with_env_ref(lash_core::testing::process_execution_env_fixture_ref())
                     .with_observers([session_id]),
                 },
             ))]),
@@ -53,7 +57,7 @@ fn first_turn_process_tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:start_first_turn_process",
         "start_first_turn_process",
-        "register an externally owned process during the first child turn",
+        "register a process during the first child turn",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": false }),
     )
@@ -366,6 +370,19 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
     );
 }
 
+/// `config` with the fixture test engine registered beside its own engines.
+fn with_fixture_engine(
+    mut config: lash_core::facade_support::RuntimeHostConfig,
+) -> lash_core::facade_support::RuntimeHostConfig {
+    config.process_engines =
+        config
+            .process_engines
+            .with_registration(lash_core::ProcessEngineRegistration::accepting(Arc::new(
+                lash_core::testing::FixtureProcessEngine,
+            )));
+    config
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn process_registered_during_first_durable_child_turn_remains_listable_after_commit() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
@@ -402,6 +419,9 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     .await
     .expect("create the runtime fixture session");
     let registry = backend.process_registry();
+    // The child's start runs the fixture engine under the fixture environment
+    // it declares.
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let backend = LayeredBackend::over(backend)
         .map_session_store_factory(|_| Arc::new(child_factory.clone()))
         .into_backend();
@@ -415,11 +435,11 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         lash_core_worker::DurableProcessWorker::new(
             lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
                 worker_factories,
-                lash_core::facade_support::RuntimeHostConfig::new(
+                with_fixture_engine(lash_core::facade_support::RuntimeHostConfig::new(
                     backend.clone(),
                     lash_core::CommitBudget::bounded(1024 * 1024, 512),
                     lash_core::QueuedWorkBatchingConfig::new(1),
-                ),
+                )),
                 backend.process_work(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
@@ -427,13 +447,13 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         )
         .expect("valid child process fixture worker"),
     );
-    let embedded = lash_core::facade_support::EmbeddedRuntimeHost::new(
+    let embedded = lash_core::facade_support::EmbeddedRuntimeHost::new(with_fixture_engine(
         lash_core::facade_support::RuntimeHostConfig::new(
             backend.clone(),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         ),
-    );
+    ));
     let registry: Arc<dyn lash_core::ProcessRegistry> = registry;
     let host = lash_core::facade_support::ProcessRuntimeHost::with_ports(
         embedded,

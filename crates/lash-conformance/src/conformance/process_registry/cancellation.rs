@@ -133,7 +133,7 @@ pub(super) async fn contract(
         .complete_process(
             &base.id,
             proposed.clone(),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&base.id),
         )
         .await
         .expect("settle the standing cancellation");
@@ -155,7 +155,7 @@ pub(super) async fn contract(
         .complete_process(
             &base.id,
             proposed,
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&base.id),
         )
         .await
         .expect("completion retry without a caller-supplied origin");
@@ -175,7 +175,7 @@ pub(super) async fn contract(
         .complete_process(
             &terminal.id,
             settled_success(serde_json::Value::Null),
-            crate::ProcessCompletionAuthority::external_owner(),
+            crate::ProcessCompletionAuthority::workflow_key(&terminal.id),
         )
         .await
         .expect("complete before cancellation");

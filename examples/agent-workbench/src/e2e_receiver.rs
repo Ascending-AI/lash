@@ -1,4 +1,4 @@
-//! H2's external process receiver: realization appends an actual keyed event
+//! H2's process receiver: realization appends an actual keyed event
 //! to the persistent registry. The fixture routes expose those raw receipts.
 #![allow(
     deprecated,
@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 #[path = "../../shared/h2_receiver.rs"]
 mod receiver;
+pub(crate) use receiver::ReceiverEnginePlugin;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ReceiverRequest {

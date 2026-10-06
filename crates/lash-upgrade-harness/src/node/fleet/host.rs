@@ -362,10 +362,7 @@ async fn command_host(state: &State, command: HostCommand) -> Result<HostObserva
                     "receiver binding does not match its actual start receipt"
                 );
                 ensure!(
-                    record.input.as_ref()
-                        == &lash::process::ProcessInput::External {
-                            metadata: serde_json::json!({"fixture":"h2-receiver","session":&session_id}),
-                        },
+                    record.input.as_ref() == &crate::node::tools::receiver_input(&session_id),
                     "receiver binding names another fixture or session"
                 );
                 ensure!(

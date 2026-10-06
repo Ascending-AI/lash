@@ -6,13 +6,12 @@ Accepted.
 
 ## Decision
 
-`ProcessRegistry::complete_process` requires `ProcessCompletionAuthority`. The backend validates it against the process input class inside the terminal transaction and records the accepted authority in event evidence.
+`ProcessRegistry::complete_process` requires `ProcessCompletionAuthority`. The backend validates it inside the terminal transaction and records the accepted authority in event evidence. Lash executes every process it registers (ADR 0110), so every authority names the engine's workflow discipline.
 
-- `ExternalOwner` completes `ProcessInput::External`. Public session-scoped completion checks the caller's observer relationship before reaching the registry.
 - `WorkflowKey` completes engine-executed work and records its serialized workflow key.
 - `WorkflowKeyRecovery` ends engine work whose segment cannot resume. It includes a segment ordinal, checked transactionally against the retained carrier; a later handover returns `ProcessHandedOver`.
 
-External authority is refused for engine work and both workflow authorities are refused for external work. There is no default authority. Authority validation precedes terminal replay. Valid repetition returns the retained outcome and original authority without applying a prelude, adding events or rearming publication. An equal proposal is `AlreadyApplied`; a different proposal reports that the retained terminal already owns the result. A different valid workflow key does not replace terminal evidence.
+There is no default authority. Authority validation precedes terminal replay. Valid repetition returns the retained outcome and original authority without applying a prelude, adding events or rearming publication. An equal proposal is `AlreadyApplied`; a different proposal reports that the retained terminal already owns the result. A different valid workflow key does not replace terminal evidence.
 
 Process execution writes also carry `ProcessExecutionWriteAuthority`, bound to invocation identity and the admitted attempt. A stale invocation is refused with `ProcessExecutionSuperseded`. The engine journal owns replay under ADR 0110; the registry has no execution lease, renewal or takeover API.
 

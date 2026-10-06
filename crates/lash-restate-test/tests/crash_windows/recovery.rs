@@ -735,52 +735,6 @@ async fn terminal_case(engine: Engine, point: CrashPoint) {
     engine.finish().await;
 }
 
-async fn external_owner_case(engine: Engine) {
-    let registry = engine.lash_backend().process_registry();
-    let record = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: json!({"owner": "fixture"}),
-            },
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        ))
-        .await
-        .expect("register externally owned process");
-    let refusal = engine
-        .lash_backend()
-        .process_work()
-        .port()
-        .deliver_process_start(&record)
-        .await
-        .expect_err("Lash refuses to execute an external owner");
-    assert!(refusal.to_string().contains("externally owned"));
-    let unchanged = registry.get_process(&record.id).await.unwrap().unwrap();
-    assert!(unchanged.first_started.is_none());
-    assert!(!unchanged.is_terminal());
-    assert!(
-        engine
-            .invocations(&format!("{PROCESS_WORKFLOW}/{}", record.id))
-            .await
-            .is_empty()
-    );
-    let expected = lash_core::ProcessAwaitOutput::from_tool_output(
-        lash_core::ToolCallOutput::success(json!({"owner": "settled"})),
-    );
-    registry
-        .complete_process(
-            &record.id,
-            expected.clone(),
-            lash_core::ProcessCompletionAuthority::external_owner(),
-        )
-        .await
-        .expect("the owner publishes the terminal");
-    let settled = registry.get_process(&record.id).await.unwrap().unwrap();
-    assert!(settled.is_terminal());
-    assert!(settled.first_started.is_none());
-    engine.finish().await;
-}
-
 async fn retired_journal_case() {
     let engine = Engine::live("retired-journal", None).await;
     let executions = Arc::new(AtomicUsize::new(0));
@@ -901,8 +855,7 @@ async fn retired_journal_case() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs a live restate-server: the crash-windows Restate suite runs it"]
-async fn live_restate_process_recovery_external_generation_and_terminal_fault_matrix() {
-    external_owner_case(Engine::live("external-owner", None).await).await;
+async fn live_restate_process_recovery_generation_and_terminal_fault_matrix() {
     retired_journal_case().await;
     for point in [
         CrashPoint::BeforeRun {

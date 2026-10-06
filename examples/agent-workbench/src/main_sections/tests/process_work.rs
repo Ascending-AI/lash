@@ -78,10 +78,8 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
     // It is also the registry installed in the core.
     let await_route_proc_id = watched
         .register_process(
-            lash::process::ProcessRegistration::new(
-                lash::process::ProcessInput::External {
-                    metadata: Value::Null,
-                },
+            lash::testing::held_engine_registration(
+                Value::Null,
                 lash::process::ProcessProvenance::host(),
                 lash::process::Lifetime::Detached,
             )
@@ -107,7 +105,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
             lash::process::ProcessAwaitOutput::from_tool_output(
                 lash::tools::ToolCallOutput::success(json!("done")),
             ),
-            lash::process::ProcessCompletionAuthority::external_owner(),
+            lash::process::ProcessCompletionAuthority::workflow_key(&await_route_proc_id),
         )
         .await
         .expect("complete process");
@@ -155,10 +153,8 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
     );
 
     let failed_work_rail_proc_id = watched
-        .register_process(lash::process::ProcessRegistration::new(
-            lash::process::ProcessInput::External {
-                metadata: Value::Null,
-            },
+        .register_process(lash::testing::held_engine_registration(
+            Value::Null,
             lash::process::ProcessProvenance::host(),
             lash::process::Lifetime::Detached,
         ))
@@ -175,7 +171,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
                     "deterministic durable process failure",
                 )),
             ),
-            lash::process::ProcessCompletionAuthority::external_owner(),
+            lash::process::ProcessCompletionAuthority::workflow_key(&failed_work_rail_proc_id),
         )
         .await
         .expect("fail process");
@@ -263,10 +259,8 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
     };
     let session_id = state.current_session_id();
     let process_id = process_registry
-        .register_process(lash::process::ProcessRegistration::new(
-            lash::process::ProcessInput::External {
-                metadata: json!({ "test": true }),
-            },
+        .register_process(lash::testing::held_engine_registration(
+            json!({ "test": true }),
             lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                 &session_id,
             )),
@@ -442,7 +436,6 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     }])
     .with_wake_session_id(Some(SessionId::from("session-finance")));
     assert_eq!(registration.start_key.as_ref(), Some(&start_key));
-    assert!(!registration.input.is_externally_owned());
     assert_eq!(
         registration
             .env_ref
@@ -486,7 +479,6 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         record.identity.label.as_deref(),
         Some("Nightly invoice export")
     );
-    assert!(!record.input.is_externally_owned());
     assert_eq!(record.input.engine_specific_kind(), Some("report-export"));
     assert_eq!(
         record.provenance.originator,
@@ -830,15 +822,13 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     );
 
     let external_id = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: json!({ "backend": "batch-service" }),
-            },
+        .register_process(lash::testing::held_engine_registration(
+            json!({ "backend": "batch-service" }),
             ProcessProvenance::new(ProcessOriginator::host_scoped("batch-service")),
             lash::process::Lifetime::Detached,
         ))
         .await
-        .expect("register externally-owned work")
+        .expect("register held work")
         .id;
     let mut batch_failure = lash::tools::ToolFailure::tool(
         lash::tools::ToolFailureClass::External,
@@ -854,10 +844,10 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
             ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::failure(
                 batch_failure,
             )),
-            ProcessCompletionAuthority::external_owner(),
+            ProcessCompletionAuthority::workflow_key(&external_id),
         )
         .await
-        .expect("external owner closes its work");
+        .expect("the workflow key closes the work");
     assert_eq!(external_completion.status(), ProcessStatus::Failed);
     assert!(matches!(
         external_completion.outcome().as_ref(),
@@ -963,10 +953,7 @@ fn session_delete_reclaims_the_deleted_sessions_terminal_work() {
 /// the dead session's finished work — trigger deliveries above all — on the
 /// rail forever (FIG-989).
 async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
-    use lash::process::{
-        ProcessCompletionAuthority, ProcessInput, ProcessProvenance, ProcessRegistration,
-        SessionScope,
-    };
+    use lash::process::{ProcessCompletionAuthority, ProcessProvenance, SessionScope};
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-session-delete-retention-{}",
         uuid::Uuid::new_v4()
@@ -1046,10 +1033,8 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
     ] {
         let process_id = process_registry
             .register_process(
-                ProcessRegistration::new(
-                    ProcessInput::External {
-                        metadata: json!({ "trigger_delivery": originator.is_some() }),
-                    },
+                lash::testing::held_engine_registration(
+                    json!({ "trigger_delivery": originator.is_some() }),
                     match &originator {
                         Some(session_id) => {
                             ProcessProvenance::session(SessionScope::new(session_id))
@@ -1076,7 +1061,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
                 lash::process::ProcessAwaitOutput::from_tool_output(
                     lash::tools::ToolCallOutput::success(json!({ "delivered": true })),
                 ),
-                ProcessCompletionAuthority::external_owner(),
+                ProcessCompletionAuthority::workflow_key(&ids[label]),
             )
             .await
             .expect("complete work-rail process");
@@ -1099,6 +1084,28 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         "every registered row is on the runtime-wide rail before the delete"
     );
 
+    // The reclaimed row's events: its terminal, after its engine start when
+    // the start was delivered before the row ended.
+    let reclaimed_events = match process_registry
+        .event_page_after(
+            &ids[reclaimed.as_str()],
+            0,
+            std::num::NonZeroUsize::new(32).expect("nonzero page limit"),
+            lash::process::ProcessEventQueryMode::Full,
+        )
+        .await
+        .expect("read the reclaimed row's events")
+    {
+        lash::process::ProcessEventReadOutcome::Retained(page) => match page.events {
+            lash::process::ProcessEventPageEvents::Full(events) => events.len(),
+            events => panic!("a full projection returns full events: {events:?}"),
+        },
+        outcome => panic!("the reclaimed row is retained before the delete: {outcome:?}"),
+    };
+    assert!(
+        reclaimed_events >= 1,
+        "the reclaimed row holds its terminal event"
+    );
     let reported = Arc::new(Mutex::new(None));
     crate::tests::run_session_delete_in_handler(
         &double,
@@ -1129,8 +1136,8 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         .expect("the deletion reported its reclaimed work");
     assert_eq!(retention.pruned_processes, 1, "one finished row reclaimed");
     assert_eq!(
-        retention.pruned_events, 1,
-        "its terminal event went with it"
+        retention.pruned_events, reclaimed_events,
+        "its events went with it"
     );
     assert_eq!(
         retention.pruned_trigger_deliveries, 0,
@@ -1212,12 +1219,9 @@ fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window() {
     });
 }
 
-/// FIG-3155: the runtime-wide rail bounded retired rows by a recent-update
-/// window, and "retired" in the registry means "not live" — which includes the
-/// non-terminal `caller_departed` status a dropped foreground await leaves
-/// behind. Such a row aged off the rail while its outcome was still open and
-/// the operator lost the work item. A row now leaves the rail when its outcome
-/// is recorded, never because time passed.
+/// FIG-3155: the runtime-wide rail bounds retired rows by a recent-update
+/// window. A row leaves the rail when its outcome is recorded, never because
+/// time passed, so a running process older than the window stays on it.
 async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner() {
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-work-rail-window-{}",
@@ -1238,6 +1242,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         .build()
         .expect("model spec");
     let core = explicit_durable_test_facets_on(double.lash_backend())
+        .plugin(lash::testing::process_engine_plugin_fixture())
         .serve_workbench_llm_profile(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
@@ -1282,12 +1287,10 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         .with_runtime_clock(Arc::new(lash::testing::TestClock::new(stale_ms)))
         .expect("the sqlite registry rebinds its clock");
     let mut ids = BTreeMap::new();
-    for label in ["departed-process", "settled-process"] {
+    for label in ["running-process", "settled-process"] {
         let process_id = stale_registry
-            .register_process(lash::process::ProcessRegistration::new(
-                lash::process::ProcessInput::External {
-                    metadata: json!({ "test": true }),
-                },
+            .register_process(lash::testing::held_engine_registration(
+                json!({ "test": true }),
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                     &session_id,
                 )),
@@ -1298,21 +1301,13 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
             .id;
         ids.insert(label, process_id);
     }
-    let departed = stale_registry
-        .record_caller_departure(&ids["departed-process"])
-        .await
-        .expect("record the caller departure");
-    assert!(
-        !departed.status().is_terminal(),
-        "caller departure is not an outcome"
-    );
     stale_registry
         .complete_process(
             &ids["settled-process"],
             lash::process::ProcessAwaitOutput::from_tool_output(
                 lash::tools::ToolCallOutput::success(json!("done")),
             ),
-            lash::process::ProcessCompletionAuthority::ExternalOwner,
+            lash::process::ProcessCompletionAuthority::workflow_key(&ids["settled-process"]),
         )
         .await
         .expect("record the terminal outcome");
@@ -1325,7 +1320,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         .map(|item| item.process.process_id.clone())
         .collect::<Vec<_>>();
     assert!(
-        listed.contains(&ids["departed-process"]),
+        listed.contains(&ids["running-process"]),
         "a non-terminal process must stay on the rail until its terminal lands: {listed:?}"
     );
     assert!(

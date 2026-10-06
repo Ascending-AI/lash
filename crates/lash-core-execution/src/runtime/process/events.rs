@@ -95,10 +95,8 @@ pub struct ProcessSignalWaitBinding {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AbandonWriter {
-    /// The process's producer recorded that its work was lost: the external
-    /// owner of a process lash never executes (an operator closing one whose
-    /// owner is gone included), or a producer-declared `Abandoned` terminal
-    /// event.
+    /// The process's producer recorded that its work was lost: a
+    /// producer-declared `Abandoned` terminal event.
     Producer,
     /// The resume fence refused to run a started process, before any effect,
     /// because it cannot be resumed safely (FIG-3588). `reason` says why.
@@ -131,8 +129,8 @@ pub enum ProcessResumeRefusal {
 }
 
 /// Evidence attached to an [`ProcessStatus::Abandoned`] terminal: which
-/// path wrote it, the owner identity it was established against
-/// (absent for an externally-owned row lash never executed), and when.
+/// path wrote it, the owner identity it was established against (absent
+/// when no owner was established), and when.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbandonEvidence {
     pub writer: AbandonWriter,
@@ -145,8 +143,8 @@ pub struct AbandonEvidence {
 /// ([`ProcessRegistry::complete_process`](super::registry::ProcessRegistry::complete_process))
 /// is written.
 ///
-/// Each variant names the engine or external owner whose single-writer
-/// discipline authorizes the completion. In-process Rust cannot make such a
+/// Each variant names the engine whose single-writer discipline authorizes
+/// the completion. In-process Rust cannot make such a
 /// token unforgeable; the value of
 /// this type is instead **explicitness + a single validation choke point per
 /// backend + audit evidence** on the terminal write. Every backend calls
@@ -159,18 +157,11 @@ pub struct AbandonEvidence {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "authority", rename_all = "snake_case")]
 pub enum ProcessCompletionAuthority {
-    /// An external actor closes an externally-owned process
-    /// ([`ProcessInput::External`](super::ProcessInput::External)) it
-    /// observes: a host that launched work outside lash records that work's
-    /// outcome, `Abandoned` included when the work was lost (ADR 0110).
-    /// Rejected on a process lash executes: its engine is its single writer.
-    ExternalOwner,
     /// A workflow-key-coalesced substrate (e.g. Restate keyed by `process_id`)
     /// completes a row it ran itself. Its single-writer discipline is the
     /// engine's per-key coalescing; `workflow_key` records the
-    /// key that served as that discipline. Valid for every process lash
-    /// executes, and rejected on an externally-owned process: an engine never
-    /// runs one, so it may not close one.
+    /// key that served as that discipline. Valid for every process: lash
+    /// executes every process it registers.
     WorkflowKey { workflow_key: String },
     /// A workflow-key substrate ends a row that segment `segment_ordinal`
     /// could not resume (a recovery that found the segment's journal lost).
@@ -186,10 +177,6 @@ pub enum ProcessCompletionAuthority {
 }
 
 impl ProcessCompletionAuthority {
-    pub fn external_owner() -> Self {
-        Self::ExternalOwner
-    }
-
     pub fn workflow_key(workflow_key: impl Into<String>) -> Self {
         Self::WorkflowKey {
             workflow_key: workflow_key.into(),
@@ -199,57 +186,30 @@ impl ProcessCompletionAuthority {
     /// Short, stable label for diagnostics.
     pub fn label(&self) -> &'static str {
         match self {
-            Self::ExternalOwner => "external-owner",
             Self::WorkflowKey { .. } => "workflow-key",
             Self::WorkflowKeyRecovery { .. } => "workflow-key-recovery",
         }
     }
 
-    /// Validate this authority against the row's ownership. This is the single per-backend choke point that
-    /// keeps completion authority honest: each `complete_process`
-    /// implementation calls it before appending the terminal event, so the
-    /// ownership×authority contract is enforced uniformly across memory,
-    /// SQLite, and Postgres rather than at each scattered caller.
+    /// Validate this authority against the row. This is the single
+    /// per-backend choke point that keeps completion authority honest: each
+    /// `complete_process` implementation calls it before appending the
+    /// terminal event, so the contract is enforced uniformly across SQLite and
+    /// Postgres rather than at each scattered caller.
     pub fn validate(&self, record: &super::ProcessRecord) -> Result<(), crate::PluginError> {
-        let process_id = &record.id;
-        let externally_owned = record.input.is_externally_owned();
-        let reject = |reason: &str| {
-            Err(crate::PluginError::Session(format!(
-                "process `{process_id}` cannot be completed with {} authority: {reason}",
-                self.label()
-            )))
-        };
-        match self {
-            Self::ExternalOwner => {
-                if !externally_owned {
-                    return reject(
-                        "only externally-owned rows may be completed by an external owner; a \
-                         lash-executed row has its engine as its single writer",
-                    );
-                }
-            }
-            Self::WorkflowKey { .. } | Self::WorkflowKeyRecovery { .. } => {
-                if externally_owned {
-                    return reject(
-                        "externally-owned rows are never executed by a workflow substrate; they \
-                         close through their external owner",
-                    );
-                }
-                if let Self::WorkflowKeyRecovery {
-                    segment_ordinal, ..
-                } = self
-                    && let Some(carrier) = record
-                        .external_ref
-                        .as_ref()
-                        .map(super::ProcessExternalRef::segment_ordinal)
-                        .filter(|carrier| carrier > segment_ordinal)
-                {
-                    return Err(crate::PluginError::ProcessHandedOver {
-                        process_id: process_id.clone(),
-                        segment_ordinal: carrier,
-                    });
-                }
-            }
+        if let Self::WorkflowKeyRecovery {
+            segment_ordinal, ..
+        } = self
+            && let Some(carrier) = record
+                .external_ref
+                .as_ref()
+                .map(super::ProcessExternalRef::segment_ordinal)
+                .filter(|carrier| carrier > segment_ordinal)
+        {
+            return Err(crate::PluginError::ProcessHandedOver {
+                process_id: record.id.clone(),
+                segment_ordinal: carrier,
+            });
         }
         Ok(())
     }
@@ -446,11 +406,6 @@ impl ProcessAwaitOutput {
                     RetiredProcessStatus::Abandoned => failure(
                         crate::ToolFailureClass::External,
                         "process was abandoned, and its evidence is no longer retained",
-                    ),
-                    RetiredProcessStatus::CallerDeparted => failure(
-                        crate::ToolFailureClass::External,
-                        "process recorded a caller departure before any outcome, and is no \
-                         longer retained",
                     ),
                 }
             }
@@ -1195,20 +1150,6 @@ impl ProcessEventAppendRequest {
         })
     }
 
-    /// Builds the replay-stable caller-departure event for process-store
-    /// implementors; repeated reports for the process converge on the same
-    /// append identity.
-    ///
-    /// The event carries no payload on purpose. What it records is a lifecycle
-    /// transition of the row itself — its registering caller left before any
-    /// outcome could be written — and the transition's wall clock is the
-    /// event's own `occurred_at`, projected onto `updated_at_ms` like every
-    /// other lifecycle append.
-    pub fn caller_departed(process_id: &ProcessId) -> Self {
-        Self::new("process.caller_departed", serde_json::json!({}))
-            .with_replay_key(format!("process:{process_id}:caller-departed"))
-    }
-
     /// Builds an observer-add event for process-store implementors whose replay key includes
     /// process, session, and observer authority.
     pub fn observer_added(process_id: &ProcessId, session: &str, by: &ProcessObserverBy) -> Self {
@@ -1300,7 +1241,6 @@ pub(super) enum ProcessEventKind {
     Resumed,
     ExternalRefSet,
     CancelRequested,
-    CallerDeparted,
     Parked,
     ParkRerunBegan,
     ObserverAdded,
@@ -1320,7 +1260,6 @@ impl ProcessEventKind {
             "process.resumed" => Self::Resumed,
             "process.external_ref_set" => Self::ExternalRefSet,
             "process.cancel_requested" => Self::CancelRequested,
-            "process.caller_departed" => Self::CallerDeparted,
             "process.parked" => Self::Parked,
             "process.park_rerun_began" => Self::ParkRerunBegan,
             "process.observer_added" => Self::ObserverAdded,
@@ -1352,7 +1291,6 @@ pub fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
         | ProcessEventKind::Resumed
         | ProcessEventKind::ExternalRefSet
         | ProcessEventKind::CancelRequested
-        | ProcessEventKind::CallerDeparted
         | ProcessEventKind::Parked
         | ProcessEventKind::ParkRerunBegan
         | ProcessEventKind::ObserverAdded
@@ -1378,7 +1316,6 @@ pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
         "process.waiting",
         "process.resumed",
         "process.external_ref_set",
-        "process.caller_departed",
         "process.observer_added",
         "process.observer_removed",
         "process.subscription_retargeted",
@@ -1501,9 +1438,7 @@ mod cancellation_identity_tests {
             match (status, &output.outcome) {
                 (RetiredProcessStatus::Completed, crate::ToolCallOutcome::Success(_)) => {}
                 (
-                    RetiredProcessStatus::Failed
-                    | RetiredProcessStatus::Abandoned
-                    | RetiredProcessStatus::CallerDeparted,
+                    RetiredProcessStatus::Failed | RetiredProcessStatus::Abandoned,
                     crate::ToolCallOutcome::Failure(failure),
                 ) => {
                     assert_eq!(failure.code, "process_no_longer_retained");

@@ -97,7 +97,7 @@ pub(super) async fn a_parent_replay_after_its_child_was_pruned_returns_the_recor
     let registry = backend.lash_backend().process_registry();
     let started: StartedIds = Arc::default();
     let registration = || {
-        external_registration().with_start_key(Some(
+        held_registration().with_start_key(Some(
             lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(
                 &lash_core::derive_tool_intent_identity(
                     &lash_core::RuntimeOwner::Session(lash_core::SessionId::from("session")),
@@ -120,7 +120,7 @@ pub(super) async fn a_parent_replay_after_its_child_was_pruned_returns_the_recor
                     .complete_process(
                         &child,
                         process_success(serde_json::json!({ "child": "done" })),
-                        lash_core::ProcessCompletionAuthority::external_owner(),
+                        lash_core::ProcessCompletionAuthority::workflow_key(&child),
                     )
                     .await
                     .expect("the child finishes");
@@ -189,11 +189,12 @@ pub(super) async fn a_keyless_host_start_replays_to_the_process_it_started(seed:
     let registry = backend.lash_backend().process_registry();
     let started: StartedIds = Arc::default();
     let keyless = |scoped: &lash_core::ScopedEffectController<'_>| {
-        lash_core::ProcessStartRequest::external(
+        lash_core::ProcessStartRequest::new(
+            lash_core::testing::held_engine_input(serde_json::json!({ "work_item": "keyless" })),
             lash_core::ProcessOriginator::host(),
-            serde_json::json!({ "work_item": "keyless" }),
             lash_core::Lifetime::Detached,
         )
+        .with_env_ref(lash_core::testing::process_execution_env_fixture_ref())
         .keyed_in(scoped)
         .expect("a keyless host start is keyed in its scope")
         .into_registration()
@@ -258,7 +259,7 @@ pub(super) async fn a_replayed_host_start_binds_its_recorded_process(seed: u64) 
     let host_key = format!("replayed-host-start-{seed:x}");
     let under = |originator: &str| {
         let mut registration =
-            external_registration().with_start_key(Some(lash_core::StartKey::for_host(&host_key)));
+            held_registration().with_start_key(Some(lash_core::StartKey::for_host(&host_key)));
         registration.provenance = lash_core::ProcessProvenance::session(
             lash_core::SessionScope::new(lash_core::SessionId::fixture(originator.to_string())),
         );
@@ -281,7 +282,7 @@ pub(super) async fn a_replayed_host_start_binds_its_recorded_process(seed: u64) 
                     .complete_process(
                         &process,
                         process_success(serde_json::json!({ "a": "done" })),
-                        lash_core::ProcessCompletionAuthority::external_owner(),
+                        lash_core::ProcessCompletionAuthority::workflow_key(&process),
                     )
                     .await
                     .expect("A's process finishes");

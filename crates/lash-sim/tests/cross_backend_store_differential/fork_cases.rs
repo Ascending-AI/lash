@@ -393,10 +393,8 @@ pub(super) async fn selected_observer_intents(
     ];
     for (index, (factory, registry)) in backends.into_iter().enumerate() {
         let session_id = SessionId::fixture(format!("selected-observer-{nonce}-{index}"));
-        let registration = lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
+        let registration = lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         );
@@ -539,7 +537,7 @@ pub(super) async fn selected_observer_intents(
                 lash_core::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(serde_json::Value::Null),
                 ),
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core::ProcessCompletionAuthority::workflow_key(&first.id),
             )
             .await
             .expect("finish selected run");

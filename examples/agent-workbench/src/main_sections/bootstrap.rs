@@ -319,6 +319,8 @@ async fn workbench_core_builder(
             operation,
             operation_namespace,
         )));
+        #[cfg(feature = "e2e-tools")]
+        plugins.push(Arc::new(crate::e2e_receiver::ReceiverEnginePlugin));
         if let Some(marker) = shutdown_marker {
             plugins.push(marker);
         }

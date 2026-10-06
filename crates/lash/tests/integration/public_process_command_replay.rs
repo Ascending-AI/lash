@@ -294,7 +294,10 @@ async fn law(kind: StorageKind, method: Method, live: bool) {
         })
         .build()
         .into_handle();
+    // The environment the held target captures.
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
     let core = lash::LashCore::standard_builder(backend)
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .llm_profiles(std::sync::Arc::new(
@@ -325,10 +328,8 @@ async fn law(kind: StorageKind, method: Method, live: bool) {
     }
     let record = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: json!({"owner": "receipt-law"}),
-                },
+            lash_core::testing::held_engine_registration(
+                json!({"owner": "receipt-law"}),
                 lash_core::ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
@@ -382,18 +383,39 @@ async fn law(kind: StorageKind, method: Method, live: bool) {
         .unwrap();
     assert_eq!(first_phase, 0);
     let original = original.expect("the original public command is admitted");
+    // The held target runs until a cancel ends it: the cancel under test, or
+    // one the law sends after the signal.
+    if matches!(method, Method::Signal) {
+        let core = core.clone();
+        let id = record.id.clone();
+        let end: HandlerAttempt = Arc::new(move |scoped| {
+            let core = core.clone();
+            let id = id.clone();
+            Box::pin(async move {
+                core.processes()
+                    .cancel(&id, scoped)
+                    .await
+                    .expect("end the signalled process");
+            })
+        });
+        engine
+            .run(
+                lash_core::AdmittedScope::runtime_operation("public-command-receipt-end"),
+                end,
+            )
+            .await
+            .unwrap();
+    }
+    tokio::time::timeout(BOUND, core.processes().await_output(&record.id))
+        .await
+        .expect("the held target ends")
+        .expect("the held target's terminal");
     engine.deliveries().await;
     let ended = registry
-        .complete_process(
-            &record.id,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                json!({"done": true}),
-            )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
-        )
+        .get_process(&record.id)
         .await
-        .unwrap();
-    engine.deliveries().await;
+        .unwrap()
+        .expect("the ended target is retained");
     let pruned = registry
         .prune_terminal_processes(
             ended.updated_at_ms + 1,
