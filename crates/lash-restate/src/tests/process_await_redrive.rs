@@ -1181,11 +1181,11 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     let object_key = "fig1943-session";
     let key = restate_await_event_key(
         &durable_turn_scope(object_key, "fig1943-turn"), // gitleaks:allow -- synthetic workflow/turn identity fixture
-        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-            "fig1943-tool-wait",
-        )),
+        AwaitEventWaitIdentity::Custom {
+            key: "fig1943-event-wait".into(),
+        },
     )
-    .expect("derive FIG-1943 tool-wait key");
+    .expect("derive FIG-1943 event-wait key");
     let mut state = BTreeMap::new();
 
     let registered = invoke_endpoint_body(

@@ -1014,7 +1014,9 @@ async fn effect_host_await_event_accepts_early_resolution(host: Arc<dyn EffectHo
     let key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-early")),
+            AwaitEventWaitIdentity::Custom {
+                key: "call-early".into(),
+            },
         )
         .await
         .expect("await-event key");
@@ -1042,7 +1044,9 @@ async fn effect_host_await_event_duplicate_resolution_is_terminal(host: Arc<dyn 
     let key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-dupe")),
+            AwaitEventWaitIdentity::Custom {
+                key: "call-dupe".into(),
+            },
         )
         .await
         .expect("await-event key");
@@ -1075,7 +1079,9 @@ async fn effect_host_await_event_cancel_is_terminal(host: Arc<dyn EffectHost>) {
     let cancel_key = host
         .await_event_key(
             &cancel_scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-cancel")),
+            AwaitEventWaitIdentity::Custom {
+                key: "call-cancel".into(),
+            },
         )
         .await
         .expect("cancel await-event key");
@@ -1145,9 +1151,9 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
     let scope = ExecutionScope::process(process_id.clone());
     host.await_event_key(
         &scope,
-        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-            "call-before-prune",
-        )),
+        AwaitEventWaitIdentity::Custom {
+            key: "call-before-prune".into(),
+        },
     )
     .await
     .expect("the first incarnation mints");
@@ -1157,9 +1163,9 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
     let fenced = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                "call-while-fenced",
-            )),
+            AwaitEventWaitIdentity::Custom {
+                key: "call-while-fenced".into(),
+            },
         )
         .await
         .expect_err("a pruned process id mints nothing until it is registered again");
@@ -1171,9 +1177,9 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
     let key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                "call-after-reregistration",
-            )),
+            AwaitEventWaitIdentity::Custom {
+                key: "call-after-reregistration".into(),
+            },
         )
         .await
         .expect("the re-registered incarnation mints");
@@ -1417,16 +1423,18 @@ async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn Effect
     let retired_key = host
         .await_event_key(
             &retired_scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-retired")),
+            AwaitEventWaitIdentity::Custom {
+                key: "call-retired".into(),
+            },
         )
         .await
         .expect("runtime-operation key");
     let survivor_key = host
         .await_event_key(
             &survivor_scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                "call-survivor",
-            )),
+            AwaitEventWaitIdentity::Custom {
+                key: "call-survivor".into(),
+            },
         )
         .await
         .expect("process key");
@@ -1462,9 +1470,9 @@ async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn Effect
     let mint_err = host
         .await_event_key(
             &retired_scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                "call-after-retirement",
-            )),
+            AwaitEventWaitIdentity::Custom {
+                key: "call-after-retirement".into(),
+            },
         )
         .await
         .expect_err("a retired scope mints nothing");
@@ -1515,9 +1523,9 @@ async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
     let key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                "call-cancel-waits",
-            )),
+            AwaitEventWaitIdentity::Custom {
+                key: "call-cancel-waits".into(),
+            },
         )
         .await
         .expect("await-event key");
@@ -1567,9 +1575,9 @@ async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
     let later_key = host
         .await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                "call-after-cancel",
-            )),
+            AwaitEventWaitIdentity::Custom {
+                key: "call-after-cancel".into(),
+            },
         )
         .await
         .expect("post-cancel await-event key");
