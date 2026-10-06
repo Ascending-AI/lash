@@ -957,7 +957,10 @@ async fn a_redriven_turn_keeps_its_output_identity() {
     // first call's result comes back from the journal and the second runs
     // anew.
     double.crash_run_execution(lash_restate_test::CrashPoint::BeforeRunResult {
-        name: Some(format!("lash:{session_id}:turn-one:1:1:llm_call:6")),
+        name: Some(
+            lash_restate_test::JournalStepKind::RecordedEffect
+                .journal_name(&format!("lash:{session_id}:turn-one:1:1:llm_call:6")),
+        ),
     });
     let session = crate::created_session(&state.core, session_id.clone())
         .await
