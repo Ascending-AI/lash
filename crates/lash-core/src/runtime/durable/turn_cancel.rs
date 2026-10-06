@@ -91,6 +91,9 @@ pub(super) async fn finalize(
         cause_json: Some(cause),
         head_revision: None,
     }));
+    // The turn's scope ends with its cancel (L6b): its waits are revoked and
+    // its first batch of `Until` children marked; the next pass marks the rest.
+    super::turn_scope::end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
     cx.commit(tx, CommitLabel::TURN_CANCEL).await?;
     Ok(TurnTerminal::Cancelled)
 }

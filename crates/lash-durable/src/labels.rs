@@ -70,6 +70,8 @@ impl CommitLabel {
     pub const CELL_SNAPSHOT: Self = Self::new("cell.snapshot");
 
     // Session close (L6b).
+    /// `session.close.begin`: A close request drained: the closing state entered.
+    pub const SESSION_CLOSE_BEGIN: Self = Self::new("session.close.begin");
     /// `session.close.cancel`: Close step: the open turn cancelled.
     pub const SESSION_CLOSE_CANCEL: Self = Self::new("session.close.cancel");
     /// `session.close.revoke`: Close step: the session's waits revoked.
@@ -114,7 +116,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 41] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -146,6 +148,7 @@ impl CommitLabel {
         Self::CELL_SNAPSHOT_ADMIT,
         Self::CELL_INJECT,
         Self::CELL_SNAPSHOT,
+        Self::SESSION_CLOSE_BEGIN,
         Self::SESSION_CLOSE_CANCEL,
         Self::SESSION_CLOSE_REVOKE,
         Self::SESSION_CLOSE_END_SCOPE,

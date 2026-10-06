@@ -25,10 +25,9 @@ pub(crate) struct BoundSession {
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     process_engines: lash_core::ProcessEngineRegistry,
     catalog: Arc<dyn DeploymentStore>,
-    scope_close: Arc<dyn lash_core::engine::ScopeCloseSink>,
     /// The owner core's relay policy: every immediate delivery this binding
-    /// runs — an ingress ask, a close's engine half — honors the host's
-    /// configured attempt budget (FIG-4246).
+    /// runs (an ingress ask) honors the host's configured attempt budget
+    /// (FIG-4246).
     relay_policy: lash_core::shift::relay::RelayPolicy,
     clock: Arc<dyn lash_core::Clock>,
     models: Arc<dyn lash_core::LlmProfiles>,
@@ -59,7 +58,6 @@ impl BoundSession {
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
             process_engines: env.core.process_engines.clone(),
             catalog,
-            scope_close: Arc::clone(&env.core.control.scope_close),
             relay_policy: env.core.control.relay_policy(),
             clock: Arc::clone(&env.core.clock),
             models: Arc::clone(&env.core.providers.models),
@@ -140,26 +138,6 @@ impl BoundSession {
             Some(self.backend.trigger_store()),
             Arc::clone(&self.process_env_store),
             self.process_engines.clone(),
-            lash_core::session_close::SessionCloseServices {
-                work: self.queued(),
-                scopes: Arc::clone(&self.scope_close),
-                scope_close_obligations: Arc::new(
-                    lash_core::runtime::shift::ScopeCloseRelay::over_backend(
-                        &self.backend,
-                        self.catalog(),
-                        Arc::clone(&self.scope_close),
-                    )
-                    .with_policy(self.relay_policy)
-                    .with_metrics(self.tracing.metrics().clone()),
-                ),
-                intents: self
-                    .backend
-                    .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
-                clock: Arc::clone(&self.clock),
-                metrics: self.tracing.metrics().clone(),
-                deletes: lash_core::session_delete::SessionDeleteStores::of(&self.backend),
-                policy: self.relay_policy,
-            },
         )
     }
 

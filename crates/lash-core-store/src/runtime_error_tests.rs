@@ -425,7 +425,6 @@ fn assert_terminal_derivation(fault: &crate::runtime_error::RuntimeEffectControl
         Kind::ResolveTurnConfig,
         Kind::ResolveConfigTransaction,
         Kind::CloseRunScope,
-        Kind::BeginSessionClose,
         Kind::IngestTriggerOccurrence,
         Kind::AdmitTriggerDelivery,
         Kind::Process,

@@ -247,49 +247,6 @@ macro_rules! driver_turn_ownership_tests {
     };
 }
 
-/// Register the session-close laws L-D1..L-D6 (FIG-3600 S7, FIG-3607 item
-/// 7): a deletion's refusals come before its recorded `BeginSessionClose`
-/// step, the close ends every open run `SessionDeleted` and raises the shift
-/// epoch, its engine half is retained on failure, and its `CloseSession`
-/// intent outlives the session as the tombstone its runs are answered from,
-/// and is the one writer of the session scope's close row (D11); and the
-/// two-phase delete's laws L-D7..L-D12 (ADR 0109 §4): the close's
-/// acknowledgement arms the `SessionDelete` obligation, which waits on
-/// exactly the session's undelivered cleanup and then deletes it; a deletion
-/// retried after its close is not refused by a closure pin the close
-/// superseded, and the physical delete retires that pin; the frame cleanup
-/// the delete arms, whose claimant dies inside it, is retaken at its lapse
-/// and settled.
-/// The fixture is the admitted-head one; a tier with a
-/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) runs the close
-/// inside the engine's `SessionDelete` handler.
-#[macro_export]
-macro_rules! session_close_tests {
-    ($fixture:block) => {
-        $crate::session_close_tests!(@laws $fixture; [
-            (session_delete_closes_active_and_parked_runs_as_session_deleted, "session-close-runs"),
-            (the_close_intent_is_idempotent_retained_on_failure_and_survives_deletion, "session-close-retained"),
-            (a_run_commit_racing_a_close_is_refused_stale_fence, "session-close-fence"),
-            (session_delete_writes_exactly_one_close_row_via_its_intent, "session-close-one-row"),
-            (a_close_interrupted_before_its_acknowledgement_is_finished_and_its_tombstone_kept, "session-close-crash"),
-            (a_close_acknowledgement_arms_the_session_delete_obligation, "session-delete-arm"),
-            (session_delete_counts_only_the_sessions_undelivered_cleanup, "session-delete-cleanup"),
-            (the_physical_delete_waits_for_cleanup_then_deletes_the_session, "session-delete-finalizer"),
-            (a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_settled, "session-delete-frame-cleanup-lapse"),
-        ]);
-    };
-    (@laws $fixture:block; [$(($law:ident, $label:literal)),* $(,)?]) => {
-        $($crate::session_close_tests!(@one $fixture; ($law, $label));)*
-    };
-    (@one $fixture:block; ($law:ident, $label:literal)) => {
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_guard, prefix, host, stores, runner) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
-        }
-    };
-}
-
 /// Register the segment redrive law (FIG-3547): a redrive never
 /// re-executes a recorded effect, an unrecorded one runs once more under the
 /// same identity, and a segment whose engine lost its record ends

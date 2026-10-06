@@ -65,18 +65,6 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_begin_session_close(
-        self,
-    ) -> Result<Option<crate::store::ControlIntent>, RuntimeEffectControllerError> {
-        match self {
-            Self::BeginSessionClose { intent } => Ok(intent.map(|intent| *intent)),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::BeginSessionClose,
-                other.kind(),
-            )),
-        }
-    }
-
     pub fn into_resolve_turn_config(
         self,
     ) -> Result<crate::ResolvedRun, RuntimeEffectControllerError> {

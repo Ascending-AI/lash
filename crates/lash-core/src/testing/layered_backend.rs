@@ -155,6 +155,7 @@ impl LayeredBackend {
         let stores = Arc::new(LayeredStoreSet {
             binding: inner_stores.binding_identity().clone(),
             attachment_referrers: inner_stores.attachment_referrers(),
+            durable: None,
             inner: inner_stores,
             clock: self.clock,
             session_store_factory: self.session_store_factory,
@@ -194,8 +195,18 @@ impl LayeredStores {
             obligation_ledgers: None,
             artifact_cleanup: inner.artifact_cleanup(),
             worker_recovery: inner.worker_recovery(),
+            durable: None,
             inner,
         })
+    }
+
+    /// Replace the durable store with `layer` over the inner store set's.
+    pub fn map_durable_store(
+        mut self,
+        layer: impl FnOnce(Arc<dyn lash_durable::DurableStore>) -> Arc<dyn lash_durable::DurableStore>,
+    ) -> Self {
+        self.0.durable = Some(layer(self.0.inner.durable_store()));
+        self
     }
 
     /// Stamp and sleep on `clock` in place of the inner store set's clock.
@@ -293,6 +304,8 @@ impl LayeredStores {
 #[derive(Clone)]
 struct LayeredStoreSet {
     inner: Arc<dyn StoreSet>,
+    /// The durable store in place of the inner store set's, when layered.
+    durable: Option<Arc<dyn lash_durable::DurableStore>>,
     binding: StoreBindingId,
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<dyn DeploymentStore>,
@@ -309,7 +322,10 @@ struct LayeredStoreSet {
 
 impl StoreSet for LayeredStoreSet {
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
-        self.inner.durable_store()
+        match &self.durable {
+            Some(durable) => Arc::clone(durable),
+            None => self.inner.durable_store(),
+        }
     }
 
     fn durable_signals(&self) -> Option<Arc<dyn lash_durable::Signals>> {

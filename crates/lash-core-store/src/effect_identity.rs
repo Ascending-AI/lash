@@ -103,10 +103,6 @@ pub enum RuntimeEffectKind {
     /// evidence (FIG-3600 S7, FIG-3607 item 7): the one step a run's end
     /// runs, and what its lifetime-scope owner hooks.
     CloseRunScope,
-    /// The recorded start of a session's close (FIG-3600 S7, FIG-3607 item
-    /// 7): the store half of its `CloseSession` control intent, the point of
-    /// no return of its deletion.
-    BeginSessionClose,
     Checkpoint,
     SyncExecutionEnvironment,
     /// The recorded read of an execution environment (FIG-3683):
@@ -148,7 +144,6 @@ impl RuntimeEffectKind {
             Self::ResolveConfigTransaction => "resolve_config_transaction",
             Self::ReadSessionCommandRun => "read_session_command_run",
             Self::CloseRunScope => "close_run_scope",
-            Self::BeginSessionClose => "begin_session_close",
             Self::Checkpoint => "checkpoint",
             Self::SyncExecutionEnvironment => "sync_execution_environment",
             Self::LoadExecutionEnv => "load_execution_env",

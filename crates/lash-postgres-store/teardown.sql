@@ -142,6 +142,10 @@ DROP TABLE IF EXISTS lash_actor_mail CASCADE;
 
 DROP TABLE IF EXISTS lash_run_records CASCADE;
 
+DROP TABLE IF EXISTS lash_session_close CASCADE;
+
+DROP TABLE IF EXISTS lash_session_scope_ends CASCADE;
+
 DROP TABLE IF EXISTS lash_park_events CASCADE;
 
 DROP TABLE IF EXISTS lash_exec_snapshots CASCADE;

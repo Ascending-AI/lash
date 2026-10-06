@@ -163,7 +163,6 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::ResolveConfigTransaction
                 | RuntimeEffectKind::CloseRunScope
-                | RuntimeEffectKind::BeginSessionClose
                 | RuntimeEffectKind::IngestTriggerOccurrence
                 | RuntimeEffectKind::AdmitTriggerDelivery
                 | RuntimeEffectKind::Process

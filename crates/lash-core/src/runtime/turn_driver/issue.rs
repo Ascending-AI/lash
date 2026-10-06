@@ -29,10 +29,7 @@ pub(crate) async fn issue_effect(
         | RuntimeEffectCommand::TraceBoundary { .. } => cx.turn_effect(envelope, local).await,
         RuntimeEffectCommand::ResolveConfigTransaction { .. }
         | RuntimeEffectCommand::ReadSessionCommandRun { .. }
-        | RuntimeEffectCommand::CloseRunScope { .. }
-        | RuntimeEffectCommand::BeginSessionClose { .. } => {
-            cx.session_effect(envelope, local).await
-        }
+        | RuntimeEffectCommand::CloseRunScope { .. } => cx.session_effect(envelope, local).await,
         RuntimeEffectCommand::TransitionPlugins { .. }
         | RuntimeEffectCommand::AdmitShift { .. }
         | RuntimeEffectCommand::DrawRunStart { .. }

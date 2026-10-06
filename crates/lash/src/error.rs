@@ -85,6 +85,10 @@ pub enum EmbedError {
     MissingQueuedWorkBatching,
     #[error("session store operation failed: {0}")]
     Store(#[from] lash_core::StoreError),
+    /// The durable store refused (ADR 0132): a fence, a mailbox rule or a
+    /// store failure.
+    #[error("durable store: {0}")]
+    Durable(#[from] lash_core::durable_port::DurableError),
     #[error(
         "session `{session_id}` does not exist; only create() creates a session, so create it first with core.session(id).create(creation)"
     )]
@@ -327,6 +331,9 @@ impl EmbedError {
             // The runtime's `llm_profile_unavailable`, as a session error: a
             // deployment that serves the recorded key repairs it.
             Self::Session(SessionError::LlmProfileUnavailable { .. }) => true,
+            // A busy or unreachable store, or a lost acknowledgement: the
+            // same mailbox write is safe to repeat.
+            Self::Durable(error) => durable_error_is_retryable(error),
             Self::MissingProtocolPlugin
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
@@ -401,6 +408,7 @@ impl EmbedError {
             | Self::ConfigSubmit(_) => true,
             Self::Send(_) => false,
             Self::Store(err) => store_error_is_terminal(err),
+            Self::Durable(error) => durable_error_is_terminal(error),
             Self::Runtime(err) => err.is_terminal(),
             Self::Control(err) => err.is_terminal(),
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_terminal(),
@@ -426,6 +434,29 @@ impl EmbedError {
             | Self::Session(_) => false,
         }
     }
+}
+
+fn durable_error_is_retryable(error: &lash_core::durable_port::DurableError) -> bool {
+    use lash_core::durable_port::{DurableError, StoreFailureKind};
+    match error {
+        DurableError::AckLost { .. } => true,
+        DurableError::Store(failure) => matches!(
+            failure.kind,
+            StoreFailureKind::Contended | StoreFailureKind::Unavailable
+        ),
+        _ => false,
+    }
+}
+
+/// A durable store that a newer release finalized, or a stored row that does
+/// not decode, refuses every repeat.
+fn durable_error_is_terminal(error: &lash_core::durable_port::DurableError) -> bool {
+    use lash_core::durable_port::{DurableError, StoreFailureKind};
+    matches!(
+        error,
+        DurableError::Store(failure)
+            if matches!(failure.kind, StoreFailureKind::WriterRetired | StoreFailureKind::Corrupt)
+    )
 }
 
 /// A store error is terminal at the facade exactly when the engine ends a

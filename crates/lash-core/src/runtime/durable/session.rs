@@ -19,6 +19,18 @@
 //!   owner owns what it writes.
 //! - The checkpoint is L3a's bounded encoding, referenced from
 //!   [`TurnRow::checkpoint_ref`] by digest.
+//! - The ends of scopes (L6b): `turn.commit` and `turn.cancel` call
+//!   `turn_scope::end_turn_scope` on their own transaction. After either
+//!   commits, and on every claim right after the mail drain, the activation
+//!   runs `turn_scope::continue_scope_ends` before it releases; after
+//!   `turn.cancel` it then waits, bounded by `stop_grace`, for the turn's
+//!   children (`turn_scope::await_turn_children`, G1b). When the
+//!   drain returns a `close`, its transaction also calls
+//!   `session_close::begin_session_close`; while the session has a close
+//!   row that is not its tombstone, the activation admits no turn and runs
+//!   `session_close::run_session_close`, releasing as waiting on
+//!   `SessionCloseExit::Waiting` (the close's `tombstone` commit itself
+//!   releases the actor as terminal).
 
 use std::sync::Arc;
 
@@ -41,6 +53,11 @@ use crate::{
 pub use lash_durable::domain::{
     ModelPin, TurnCancelAnswer, TurnCancelRequest, TurnPhase, TurnRow, TurnTerminal,
 };
+
+use super::session_close::{
+    SESSION_CLOSE_MAIL, SessionCloseError, SessionCloseExit, begin_session_close, run_session_close,
+};
+use super::turn_scope::{TurnChildrenStopError, await_turn_children, continue_scope_ends};
 
 /// The mail kind a producer admits a turn with until L3s's (FIG-5196) mail
 /// drain owns the session's mailbox: its body is
@@ -267,7 +284,46 @@ impl SessionActivation {
         session: &SessionId,
         release: bool,
     ) -> Result<Pass, TurnError> {
+        // A turn's scope whose cascade a crash cut short is marked to its end
+        // before anything else (L6b).
+        continue_scope_ends(cx, session).await?;
         let mut tx = cx.begin().await?;
+        if let Some(seq) = tx
+            .mail()
+            .iter()
+            .filter(|mail| mail.kind.as_str() == SESSION_CLOSE_MAIL)
+            .map(|mail| mail.seq)
+            .max()
+        {
+            begin_session_close(&mut tx, session);
+            tx.ack_through(seq);
+            cx.commit(tx, CommitLabel::SESSION_CLOSE_BEGIN).await?;
+            return Ok(Pass::Again);
+        }
+        // A closing session admits nothing: it runs its close (L6b).
+        if cx
+            .durable_reads()?
+            .session_close(session)
+            .await?
+            .is_some_and(|close| !close.is_tombstone())
+        {
+            drop(tx);
+            return match run_session_close(cx, session)
+                .await
+                .map_err(|error| TurnError::Close(Box::new(error)))?
+            {
+                Some(SessionCloseExit::Closed) => Ok(Pass::Released),
+                Some(SessionCloseExit::Waiting) => {
+                    let mut tx = cx.begin().await?;
+                    tx.give_up(Release::Waiting {
+                        next_due: cx.next_due(),
+                    });
+                    cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
+                    Ok(Pass::Released)
+                }
+                None => Ok(Pass::Again),
+            };
+        }
         let open = cx.durable_reads()?.turn(session).await?;
         let Some(row) = open else {
             let admission = tx
@@ -298,6 +354,27 @@ impl SessionActivation {
         // runs: the live owner stopped its work for it, or a crash left it.
         if let Some(request) = row.cancel.clone() {
             turn_cancel::finalize(cx, &row, &request).await?;
+            // The stop then waits for the children its cancel marked (G1b,
+            // L6b): the rest of its cascade first, then their terminals,
+            // bounded by the stop's grace. A child still running at the
+            // grace keeps its cancel, and the stop completes anyway.
+            continue_scope_ends(cx, session).await?;
+            let stop = await_turn_children(
+                cx,
+                session,
+                &row.run,
+                self.services.execution_budgets(session).stop_grace(),
+                self.backend.config().settings().cascade_batch,
+            )
+            .await?;
+            if !stop.may_still_be_running.is_empty() {
+                tracing::warn!(
+                    %session,
+                    run = %row.run,
+                    children = ?stop.may_still_be_running,
+                    "the cancelled turn's children may still be running past its stop grace"
+                );
+            }
             return Ok(Pass::Again);
         }
         let turn = match row.checkpoint_ref {
@@ -517,9 +594,15 @@ pub enum TurnError {
     /// The turn could not be admitted.
     #[error(transparent)]
     Admit(#[from] TurnAdmitRefusal),
+    /// The session's close stopped at a step; the next claim resumes it.
+    #[error(transparent)]
+    Close(Box<SessionCloseError>),
     /// The turn could not be restored.
     #[error(transparent)]
     Restore(#[from] TurnRestoreError),
+    /// A cancelled turn's stop could not wait for its children.
+    #[error(transparent)]
+    Stop(#[from] TurnChildrenStopError),
     /// A pinned model call was re-delivered with another request: its
     /// checkpoint no longer re-yields the call it pinned.
     #[error("the pinned model request {pinned} was re-delivered as {redelivered}")]

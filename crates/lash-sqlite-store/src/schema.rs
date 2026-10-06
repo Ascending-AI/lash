@@ -903,7 +903,7 @@ pub(crate) fn expected_version() -> i64 {
 
 /// The shared table sets provisioning applies after the schema bodies, in
 /// order; see [`crate::schema_fragments`].
-pub(crate) const FRAGMENTS: [&str; 8] = [
+pub(crate) const FRAGMENTS: [&str; 9] = [
     crate::schema_fragments::SESSION_INGRESS_TABLE,
     crate::schema_fragments::SESSION_RUNS_TABLES,
     crate::durable::DURABLE_TABLES,
@@ -912,6 +912,7 @@ pub(crate) const FRAGMENTS: [&str; 8] = [
     crate::durable::TURN_PHASES_TABLES,
     crate::durable::WAITS_TABLES,
     crate::durable::PARK_EVENTS_TABLES,
+    crate::durable::SESSION_CLOSE_TABLES,
 ];
 
 /// Everything provisioning applies, in order: the durable core's, process

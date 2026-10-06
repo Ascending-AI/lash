@@ -7,11 +7,21 @@
 //! - [`node`]: the node runtime that serves a backend (L3).
 //! - [`session_mail`]: everything the session's mailbox carries, drained
 //!   and applied under the epoch on every claim (L3s).
+//! - [`session_close`]: the session's closing state, one fenced step at a
+//!   time (L6b).
+//! - [`turn_scope`]: a turn's scope ending with its commit or cancel, the
+//!   cascade's cursor work and the bounded wait for its children (L6b).
 
 pub mod head;
 mod model_call;
 pub mod node;
 pub mod phases;
 pub mod session;
+pub mod session_close;
 pub mod session_mail;
 mod turn_cancel;
+pub mod turn_scope;
+
+#[cfg(test)]
+#[path = "scope_end_tests.rs"]
+mod scope_end_tests;

@@ -429,6 +429,12 @@ table lash_schema_versions
   column min_reader integer not-null
   column version integer not-null
   primary-key (component)
+table lash_session_close
+  column begun_at_ms bigint not-null
+  column done_step text nullable
+  column session_id text not-null
+  column written_epoch bigint not-null
+  primary-key (session_id)
 table lash_session_head
   column head_revision bigint not-null
   column pending_follow_on_json text nullable
@@ -526,6 +532,12 @@ table lash_session_runs
   unique (obligation_id)
   unique (session_id) where (admission_json is not null) and (terminal_kind is null)
   primary-key (session_id, run)
+table lash_session_scope_ends
+  column begun_at_ms bigint not-null
+  column scope_key text not-null
+  column session_id text not-null
+  column written_epoch bigint not-null
+  primary-key (session_id, scope_key)
 table lash_session_shift_admissions
   column admission text not-null
   column receipt_json text not-null

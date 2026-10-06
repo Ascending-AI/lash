@@ -17,7 +17,6 @@ pub struct SessionAdministration {
     trigger_store: Option<Arc<dyn crate::TriggerStore>>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     process_engines: crate::ProcessEngineRegistry,
-    session_close: crate::session_close::SessionCloseServices,
 }
 
 impl SessionAdministration {
@@ -32,7 +31,6 @@ impl SessionAdministration {
         trigger_store: Option<Arc<dyn crate::TriggerStore>>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
         process_engines: crate::ProcessEngineRegistry,
-        session_close: crate::session_close::SessionCloseServices,
     ) -> Self {
         Self {
             store_factory,
@@ -41,7 +39,6 @@ impl SessionAdministration {
             trigger_store,
             process_env_store,
             process_engines,
-            session_close,
         }
     }
 
@@ -75,13 +72,6 @@ impl SessionAdministration {
 
     pub fn process_engines(&self) -> &crate::ProcessEngineRegistry {
         &self.process_engines
-    }
-
-    /// What a deletion's close runs against (FIG-3600 S7): the session work
-    /// engine whose executions it releases, and the scope owner it closes the
-    /// session's scopes with.
-    pub fn session_close(&self) -> &crate::session_close::SessionCloseServices {
-        &self.session_close
     }
 
     /// Mint a delete context through this administration's retained host.

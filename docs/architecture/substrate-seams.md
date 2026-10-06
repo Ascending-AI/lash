@@ -42,6 +42,7 @@ L13 = FIG-5193.
 - **S9, facade:** `DurableBackendBuilder::new` keeps the `Arc<dyn StoreSet>` that L10a's skeleton landed with, because every host already hands it one. `config` takes `DurableSettings` (the unvalidated parameters) rather than a `DurableConfig`, so `build` is where they are validated and `InvalidConfig` is reachable. `projection_provider` exists with the `rlm` feature, which brings `lashlang`; `build` registers the providers into a `lashlang::ProjectionCatalog` (whose `register` is L7p's) and maps a refused registration, or a host provider of the lash-provided `history` type, to `DuplicateProvider`. The facade re-exports the build vocabulary from `lash::durable` (`CompletionKeySecrets`, `DurableBuildError`, `DurableConfig`, `DurableSettings`, `DurableStore`, `KeyVersion`, `SecretBytes`, `SecretsRefusal`) and the engine state machine from `lash::plugins` (`EngineAction`, `EngineEvent`, `EngineState`, `EngineStateFormat`, `HostWaitKind`, `KeyName`, `StepName`, `StepRequest`), so an external engine and store set can be written against the facade alone.
 - **S9, signals (L8, FIG-5178):** `StoreSet` gained `durable_signals() -> Option<Arc<dyn lash_durable::Signals>>`, agreed with the orchestrator. PostgreSQL answers `PostgresSignals` (after-commit `pg_notify` wake hints, a listener per node that holds the boot's session advisory lock, liveness probes and the reap of a boot whose lock is released); SQLite and the test store sets answer `None`, because one node per database keeps its wakes in process. `serve` passes it to `Runner::with_signals` when `DurableConfig`'s notifier is `AfterCommit`, and every mailbox commit through `Backend::commit_mail` hands what it woke to the shared `Hints`, which hint in process or publish.
 - **S1, work ports:** `EffectEngine::{session_work, process_work}` became `DurableSessionWork` and `DurableProcessWork` (`runtime/work/durable.rs`), the facade core's session-work engine and process port over the backend. A shift ask is `Backend::wake_session` (L3s) and a process start needs no delivery: registration creates its actor ready, so the durable `deliver_process_start` is a no-op (L6); `schedule_shift` and `await_shift` are L3s stubs, the terminal wait and its publication are L5's, and cancel delivery is L6's mail. `install_session_shifts` is real (get-or-init).
+- **S0, L6b:** the session-close domain also records a session's turn scopes whose cascade is still marking (`SessionCloseWrite::ScopeEnding` and `ScopeEnded`), and `DurableReads` gained `session_close` and `ending_scopes`. A deletion is session mail (`session.close`, under `mail.session`); the close runs as the session actor's closing state in `lash-core/src/runtime/durable/session_close.rs`, and a turn's scope end, its cascade cursor work and the bounded wait for its children (G1b) are in `durable/turn_scope.rs`.
 - **S1, perf:** the runtime-perf scenario `ScopedEffectController` is `ScopedEffects`; its report name `scoped_effect_controller` and its budget are unchanged.
 
 ## `execute_effect` variant classification
@@ -59,7 +60,7 @@ L13 = FIG-5193.
 | | `TraceBoundary` | phase-transaction write (the trace receipt rides the commit) |
 | `session_effect` (L3) | `ResolveConfigTransaction`, `ReadSessionCommandRun` | phase-transaction write under the session epoch |
 | | `CloseRunScope` | phase-transaction write (`turn.commit` ends the run's scope through `process::end_scope`) |
-| | `BeginSessionClose` | phase-transaction write (L6b's close steps) |
+| | `BeginSessionClose` | deleted (L6b): a deletion is session mail, and the close is the session actor's closing state (`runtime/durable/session_close.rs`), one labelled transaction per step |
 | `shift_effect` (L3s) | `AdmitShift`, `DrawRunStart`, `AcceptTurnInput`, `TransitionPlugins`, `PluginCallbacks` | phase-transaction write in the session mail drain (`turn.accept`, `turn.admit`) |
 | | `ObserveDrainMark` | deleted: drain is a release at a committed phase (L11) |
 | `tool_effect` (L4) | `ToolAttempt` | admitted execution |
@@ -116,7 +117,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 | `lash_waits` (with `key_version`, `created_epoch`) | L5 | L5 |
 | process actor columns, engine-state pointer, `cancel_requested_at_ms`, cascade cursor | L6 | L6 |
 | `lash_park_events` | L6 | L6 |
-| session closing state | L6b | L6b |
+| `session_close` (a closing session's last step, then its tombstone), `session_scope_ends` (a session's turn scopes whose cascade is still marking) | L6b | L6b |
 | format columns, fleet format | L11 | L11 |
 | notifier, advisory lock (no tables; the liveness probe and the released-boot reap read and write `nodes` and `actors` through the PostgreSQL engine module) | none | L8 |
 | drops of replaced tables | the lane that replaces them | L10b squashes the 1.0 baseline last |
@@ -125,7 +126,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 
 Generated from the tree with `scripts/check-substrate-todos.py`'s scanner; each lane removes its rows as it fills them.
 
-Counts: L3 1, L3s 5, L4 14, L6 1, L6b 2 (23 in all).
+Counts: L3 1, L3s 5, L4 14, L6 1 (21 in all).
 
 ### V0 (FIG-5170)
 
@@ -178,10 +179,7 @@ L6 filled the rest. The one row left is reached only by the lashlang run path's 
 
 ### L6b (FIG-5176)
 
-| Where | Function | Stub |
-|---|---|---|
-| `crates/lash-postgres-store/src/postgres/durable/session_close.rs` | `apply` | record a session close step on PostgreSQL |
-| `crates/lash-sqlite-store/src/durable/session_close.rs` | `apply` | record a session close step on SQLite |
+None: L6b filled the session-close domain's `apply` on SQLite and PostgreSQL, and its laws run on L6's process API.
 
 ### L7 (FIG-5177)
 

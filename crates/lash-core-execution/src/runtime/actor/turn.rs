@@ -47,9 +47,8 @@ impl ActorContext {
     }
 
     /// The session's own effects: `ResolveConfigTransaction`,
-    /// `ReadSessionCommandRun`, `CloseRunScope` and `BeginSessionClose`, each
-    /// run in place: what it writes, its runner writes to the store as one
-    /// idempotent call. Any other command is refused.
+    /// `ReadSessionCommandRun` and `CloseRunScope`. Any other command is
+    /// refused.
     ///
     /// # Errors
     ///
@@ -62,8 +61,7 @@ impl ActorContext {
         match &envelope.command {
             crate::RuntimeEffectCommand::ResolveConfigTransaction { .. }
             | crate::RuntimeEffectCommand::ReadSessionCommandRun { .. }
-            | crate::RuntimeEffectCommand::CloseRunScope { .. }
-            | crate::RuntimeEffectCommand::BeginSessionClose { .. } => {
+            | crate::RuntimeEffectCommand::CloseRunScope { .. } => {
                 local.run_in_place(envelope).await
             }
             other => Err(not_in_group(other, "session")),

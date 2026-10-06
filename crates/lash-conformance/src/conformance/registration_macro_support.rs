@@ -45,8 +45,6 @@ pub use super::runtime_persistence::*;
 pub use super::runtime_persistence_state_machine::*;
 pub use super::segment_redrive::*;
 pub use super::served_process_start::*;
-pub use super::session_close::*;
-pub use super::session_delete::*;
 pub use super::session_delete_blob_reclaim::*;
 pub use super::session_graph_append::*;
 pub use super::session_graph_state_machine::*;

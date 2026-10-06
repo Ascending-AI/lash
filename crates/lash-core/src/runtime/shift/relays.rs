@@ -17,7 +17,6 @@ use crate::runtime::artifact_cleanup::{
 };
 use crate::runtime::process_start::ProcessStartRelay;
 use crate::runtime::process_terminal::ProcessTerminalRelay;
-use crate::runtime::session_delete::SessionDeleteRelay;
 use crate::runtime::trigger_delivery::TriggerDeliveryRelay;
 use crate::store::ObligationKind;
 use crate::{
@@ -32,9 +31,9 @@ pub enum RelayNeed {
     /// a parent-end plan cancels children through it, and a terminal is
     /// published through it.
     ProcessWork,
-    /// The session administration a physical delete runs through, and
-    /// whose engine registry an artifact cleanup applies to and a recovered
-    /// trigger delivery registers its process against.
+    /// The session administration whose engine registry an artifact
+    /// cleanup applies to and a recovered trigger delivery registers its
+    /// process against.
     SessionAdministration,
 }
 
@@ -45,13 +44,12 @@ impl RelayNeed {
         match kind {
             ObligationKind::Ingress
             | ObligationKind::ControlIntent
-            | ObligationKind::ScopeClose => &[],
+            | ObligationKind::ScopeClose
+            | ObligationKind::SessionDelete => &[],
             ObligationKind::ParentEnd
             | ObligationKind::ProcessStart
             | ObligationKind::ProcessTerminal => &[Self::ProcessWork],
-            ObligationKind::SessionDelete | ObligationKind::ArtifactCleanup => {
-                &[Self::SessionAdministration]
-            }
+            ObligationKind::ArtifactCleanup => &[Self::SessionAdministration],
             ObligationKind::TriggerDelivery => &[Self::ProcessWork, Self::SessionAdministration],
         }
     }
@@ -120,7 +118,8 @@ pub struct RelayParts {
     pub scopes: Arc<dyn ScopeCloseSink>,
     /// The process registry and the port its processes run on.
     pub processes: Option<ProcessWorkWiring>,
-    /// What a physical delete runs through.
+    /// What an artifact cleanup and a recovered trigger delivery run
+    /// through.
     pub administration: Option<SessionAdministration>,
     /// The same live route service the deployment uses for immediate emits.
     pub trigger_route_restorer: Option<Arc<dyn crate::TriggerRouteRestorer>>,
@@ -139,6 +138,36 @@ impl RelayParts {
             process_work: self.processes.is_some(),
             session_administration: self.administration.is_some(),
         }
+    }
+}
+
+/// The relay of a kind nothing arms any more: a row it finds is settled as
+/// delivered.
+struct SettledRelay {
+    ledger: Arc<dyn crate::store::ObligationLedger>,
+    policy: RelayPolicy,
+    metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+}
+
+#[async_trait::async_trait]
+impl ObligationRelay for SettledRelay {
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        self.metrics.clone()
+    }
+
+    fn ledger(&self) -> &dyn crate::store::ObligationLedger {
+        self.ledger.as_ref()
+    }
+
+    fn policy(&self) -> RelayPolicy {
+        self.policy
+    }
+
+    async fn deliver(
+        &self,
+        _delivery: super::relay::ObligationDelivery<'_>,
+    ) -> Result<(), super::relay::DeliveryFailure> {
+        Ok(())
     }
 }
 
@@ -209,15 +238,14 @@ pub fn obligation_relays(
                     .with_metrics(metrics.clone()),
                 )
             }
-            ObligationKind::SessionDelete => Arc::new(
-                SessionDeleteRelay::with_policy(
-                    administration
-                        .clone()
-                        .ok_or_else(|| unavailable(kind, RelayNeed::SessionAdministration))?,
-                    policy,
-                )
-                .with_metrics(metrics.clone()),
-            ),
+            // A session's delete is its own mail on the durable substrate
+            // (ADR 0132 §12): nothing arms this kind, and a row an earlier
+            // build armed settles as delivered.
+            ObligationKind::SessionDelete => Arc::new(SettledRelay {
+                ledger: backend.obligation_ledger(kind),
+                policy,
+                metrics: metrics.clone(),
+            }),
             ObligationKind::TriggerDelivery => {
                 let wiring = processes
                     .as_ref()
@@ -340,7 +368,7 @@ mod tests {
             }
             .check(),
             Err(ObligationRelayUnavailable {
-                kind: ObligationKind::SessionDelete,
+                kind: ObligationKind::ArtifactCleanup,
                 need: RelayNeed::SessionAdministration,
             })
         );

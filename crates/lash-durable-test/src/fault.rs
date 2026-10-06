@@ -13,7 +13,7 @@ use crate::life::NodeLife;
 use crate::script::{Entry, Fault, Shared, Stored, WriteKind};
 use lash_durable::domain::{
     ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
-    SnapshotRow, TurnRow, WaitId, WaitRow,
+    SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
@@ -414,6 +414,17 @@ impl DurableReads for FaultStore {
     ) -> Result<Vec<ProcessId>, DurableError> {
         self.read(self.inner.until_children(scope, after, limit))
             .await
+    }
+
+    async fn session_close(
+        &self,
+        session: &SessionId,
+    ) -> Result<Option<SessionCloseRow>, DurableError> {
+        self.read(self.inner.session_close(session)).await
+    }
+
+    async fn ending_scopes(&self, session: &SessionId) -> Result<Vec<ScopeKey>, DurableError> {
+        self.read(self.inner.ending_scopes(session)).await
     }
 
     async fn park_events(

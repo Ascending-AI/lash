@@ -34,6 +34,12 @@ pub type LawResult = Result<(), LawBroken>;
 /// Moves the store's clock forward.
 pub type Advance<'a> = &'a (dyn Fn(Duration) + Sync);
 
+mod session_close;
+
+pub use session_close::{
+    a_session_close_moves_one_step_at_a_time, an_ending_scope_stays_recorded_until_its_last_batch,
+};
+
 macro_rules! ensure {
     ($condition:expr, $($message:tt)+) => {
         if !$condition {
@@ -41,6 +47,7 @@ macro_rules! ensure {
         }
     };
 }
+use ensure;
 
 const TTL_MILLIS: i64 = 15_000;
 const TTL: Duration = Duration::from_millis(15_000);

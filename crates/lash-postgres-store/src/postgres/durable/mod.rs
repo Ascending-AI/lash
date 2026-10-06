@@ -32,7 +32,7 @@ use std::sync::{Arc, LazyLock, OnceLock};
 
 use lash_durable::domain::{
     ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
-    SnapshotRow, TurnRow, WaitId, WaitRow,
+    SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorKind, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause,
@@ -1111,6 +1111,20 @@ impl DurableReads for PostgresDurableStore {
         limit: usize,
     ) -> Result<Vec<lash_sansio::ProcessId>, DurableError> {
         processes::until_children(&mut *self.reader().await?, scope, after, limit).await
+    }
+
+    async fn session_close(
+        &self,
+        session: &lash_sansio::SessionId,
+    ) -> Result<Option<SessionCloseRow>, DurableError> {
+        session_close::read(&mut *self.reader().await?, session).await
+    }
+
+    async fn ending_scopes(
+        &self,
+        session: &lash_sansio::SessionId,
+    ) -> Result<Vec<ScopeKey>, DurableError> {
+        session_close::ending_scopes(&mut *self.reader().await?, session).await
     }
 
     async fn park_events(

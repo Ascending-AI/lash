@@ -80,7 +80,6 @@ mod run_start;
 pub mod scenario_contracts;
 mod session_administration;
 mod session_api;
-pub mod session_close;
 pub mod session_delete;
 use lash_core_store::session_catalog;
 pub use session_administration::{

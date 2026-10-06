@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1193 rows over 727 files, 3363 laws.
-# By class: mechanical 142, semantic 99, delete 637, replace 315.
-# By lane: L1b 11, L3 16, L4 7, L5 2, L7 25, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 475, ported 42, deleted 676.
+# 1202 rows over 727 files, 3372 laws.
+# By class: mechanical 142, semantic 99, delete 646, replace 315.
+# By lane: L1b 11, L3 16, L4 7, L5 2, L6b 9, L7 25, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
+# By status: todo 475, ported 42, deleted 685.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -585,7 +585,8 @@
 #   leg becomes a kill-and-resume leg), delete (the subject is removed
 #   machinery) or replace (a domain law whose only home is a deleted crate).
 # - lane: who ports or deletes it. L1b deleted the SQLite multi-file layout's
-#   own tests (FIG-5195). First matching rule: crates/lash-sim -> L9f;
+#   own tests (FIG-5195); L6b deleted the two-phase session delete's laws
+#   (FIG-5176). First matching rule: crates/lash-sim -> L9f;
 #   conformance instantiation sites -> L9g; examples, lash-perf and the E2E
 #   runner -> L9h; lash-upgrade-harness -> L11; the Restate runbook -> L8 for
 #   its live rows, L10a for the rest; rows that need cells -> L9e; processes
@@ -19276,7 +19277,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; L6b (FIG-5176) deleted the rest of the file, each with its own row"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/session_delete.rs"
@@ -19290,7 +19291,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; L6b (FIG-5176) deleted the rest of the file, each with its own row"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/shift_admission.rs"
@@ -19432,3 +19433,129 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row; only the laws listed were deleted, the file's other tests stay"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_close.rs"
+test = "a_run_commit_racing_a_close_is_refused_stale_fence"
+area = "session-close"
+needs = ["turn"]
+class = "delete"
+lane = "L6b"
+laws = [
+  "a_run_commit_racing_a_close_is_refused_stale_fence",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the intent-based close is gone: a deletion is session mail, the session actor owns its turn and its close, and turn-cancel closure pins no longer gate a deletion"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_delete.rs"
+test = "a_close_acknowledgement_arms_the_session_delete_obligation"
+area = "session-close"
+needs = ["turn"]
+class = "delete"
+lane = "L6b"
+laws = [
+  "a_close_acknowledgement_arms_the_session_delete_obligation",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "nothing arms SessionDelete (ADR 0132 §12): the close no longer waits on relayed obligations or closure pins, and arms the session's ArtifactCleanup in its storage delete, which the close law checks; the ArtifactCleanup relay's claim lapse is that relay's own behaviour"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_delete.rs"
+test = "session_delete_counts_only_the_sessions_undelivered_cleanup"
+area = "session-close"
+needs = ["turn"]
+class = "delete"
+lane = "L6b"
+laws = [
+  "session_delete_counts_only_the_sessions_undelivered_cleanup",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "nothing arms SessionDelete (ADR 0132 §12): the close no longer waits on relayed obligations or closure pins, and arms the session's ArtifactCleanup in its storage delete, which the close law checks; the ArtifactCleanup relay's claim lapse is that relay's own behaviour"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_delete.rs"
+test = "a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_settled"
+area = "session-close"
+needs = ["turn"]
+class = "delete"
+lane = "L6b"
+laws = [
+  "a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_settled",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "nothing arms SessionDelete (ADR 0132 §12): the close no longer waits on relayed obligations or closure pins, and arms the session's ArtifactCleanup in its storage delete, which the close law checks; the ArtifactCleanup relay's claim lapse is that relay's own behaviour"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_close.rs"
+test = "session_delete_closes_active_and_parked_runs_as_session_deleted"
+area = "session-close"
+needs = ["turn"]
+class = "delete"
+lane = "L6b"
+laws = [
+  "session_delete_closes_active_and_parked_runs_as_session_deleted",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while_a_process_lives"
+status = "deleted"
+note = "a close cancels the session's open turn in its first step (L6b)"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_close.rs"
+test = "the_close_intent_is_idempotent_retained_on_failure_and_survives_deletion"
+area = "session-close"
+needs = ["turn"]
+class = "delete"
+lane = "L6b"
+laws = [
+  "the_close_intent_is_idempotent_retained_on_failure_and_survives_deletion",
+]
+disposition = "covered-by:crates/lash-durable/src/laws/session_close.rs::a_session_close_moves_one_step_at_a_time"
+status = "deleted"
+note = "the CloseSession intent became the session_close row: a second begin keeps the close, and the row outlives the session as its tombstone"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_close.rs"
+test = "session_delete_writes_exactly_one_close_row_via_its_intent"
+area = "session-close"
+needs = ["turn"]
+class = "delete"
+lane = "L6b"
+laws = [
+  "session_delete_writes_exactly_one_close_row_via_its_intent",
+]
+disposition = "covered-by:crates/lash-durable/src/laws/session_close.rs::a_session_close_moves_one_step_at_a_time"
+status = "deleted"
+note = "one close row per session, written by Begin"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_close.rs"
+test = "a_close_interrupted_before_its_acknowledgement_is_finished_and_its_tombstone_kept"
+area = "session-close"
+needs = ["turn"]
+class = "delete"
+lane = "L6b"
+laws = [
+  "a_close_interrupted_before_its_acknowledgement_is_finished_and_its_tombstone_kept",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while_a_process_lives"
+status = "deleted"
+note = "a close cut at any step resumes there and ends at its tombstone"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/session_delete.rs"
+test = "the_physical_delete_waits_for_cleanup_then_deletes_the_session"
+area = "session-close"
+needs = ["turn", "process"]
+class = "delete"
+lane = "L6b"
+laws = [
+  "the_physical_delete_waits_for_cleanup_then_deletes_the_session",
+]
+disposition = "covered-by:crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while_a_process_lives"
+status = "deleted"
+note = "the close deletes nothing while a process of the session is non-terminal, then deletes the session"

@@ -54,7 +54,6 @@ pub use lash_core_store::surface_format;
 pub use lash_durable as durable_port;
 /// A session's durable close, the point of no return of its deletion
 /// (FIG-3600 S7).
-pub use runtime::session_close;
 pub use runtime::session_delete;
 /// The session shift (FIG-3600): admission as recorded steps, then the
 /// admitted run's turns.

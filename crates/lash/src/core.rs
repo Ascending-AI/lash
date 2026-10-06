@@ -66,9 +66,7 @@ pub struct LashCore {
     pub(crate) recovery: Arc<recovery::RecoverySlot>,
 }
 
-pub use lash_core::session_delete::{
-    SessionClosing, SessionDeleteFailure, SessionDeleteReport, SessionDeleteWait, SessionDeletion,
-};
+pub use lash_core::session_delete::SessionDeletion;
 
 /// What a core builds its [`SessionAdministration`](lash_core::SessionAdministration)
 /// from. Its `SessionShifts` holds one, weakly bound to the core's substrate,
@@ -103,29 +101,6 @@ impl AdministrationSource {
             Some(resolved_env.core.trigger_store()),
             Arc::clone(&resolved_env.core.durability.process_env_store),
             self.host_process_engines.clone(),
-            lash_core::session_close::SessionCloseServices {
-                work: queued,
-                scopes: Arc::clone(&resolved_env.core.control.scope_close),
-                scope_close_obligations: Arc::new(
-                    lash_core::runtime::shift::ScopeCloseRelay::over_backend(
-                        resolved_env.core.backend(),
-                        Arc::clone(&self.store_factory),
-                        Arc::clone(&resolved_env.core.control.scope_close),
-                    )
-                    .with_policy(resolved_env.core.control.relay_policy())
-                    .with_metrics(resolved_env.core.tracing.metrics().clone()),
-                ),
-                intents: resolved_env
-                    .core
-                    .backend()
-                    .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
-                clock: Arc::clone(&resolved_env.core.clock),
-                metrics: resolved_env.core.tracing.metrics().clone(),
-                deletes: lash_core::session_delete::SessionDeleteStores::of(
-                    resolved_env.core.backend(),
-                ),
-                policy: resolved_env.core.control.relay_policy(),
-            },
         )
     }
 }
@@ -658,43 +633,24 @@ impl LashCore {
         Ok(fork)
     }
 
-    /// Delete a session in two phases (ADR 0109 §4).
+    /// Delete a session (ADR 0132 §12): its close request as the session's
+    /// mail.
     ///
-    /// The close commits first, and every refusal of a deletion is asked
-    /// before it: the session's `CloseSession` intent is recorded, the
-    /// session is marked closing and refuses new sends with
-    /// [`StoreError::SessionClosing`](lash_core::StoreError::SessionClosing),
-    /// and the intent's engine half releases the session's runs and closes
-    /// its scopes. Its acknowledgement arms the session's physical delete as
-    /// an obligation, which this call attempts before it returns.
-    ///
-    /// The physical delete waits for the close's cleanup — each run's scope
-    /// close, each owned scope's parent-end plan, to be delivered. What this
-    /// call could not finish is [`SessionDeletion::Closing`]: the session
-    /// stays closed and the recovery relay retries the delete with backoff,
-    /// stalling it (surfaced in [`drain_status`](Self::drain_status) and
-    /// [`stalled_obligations`](Self::stalled_obligations)) at the attempt
-    /// ceiling. Await physical completion with [`await_session_deletion`](Self::await_session_deletion).
+    /// The session actor closes itself, one durable step at a time: it
+    /// cancels its open turn, revokes its waits, ends its `Until` processes
+    /// and waits for each to be terminal, deletes its triggers and storage
+    /// (arming the `ArtifactCleanup` of what it referred to), deletes its
+    /// process state and writes its tombstone. A crash resumes the close at
+    /// the step it interrupted; nothing is owed by the caller. Await the
+    /// tombstone with [`await_session_deletion`](Self::await_session_deletion).
     ///
     /// Deleting an id that never materialized a session is a no-op (ADR
-    /// 0049), answered [`SessionDeletion::Absent`]: nothing is closed or
-    /// cleaned up, and the id stays creatable.
+    /// 0049), answered [`SessionDeletion::Absent`]: nothing is requested, and
+    /// the id stays creatable.
     pub async fn delete_session(
         context: lash_core::SessionDeleteContext<'_>,
     ) -> Result<SessionDeletion> {
-        lash_core::session_delete::delete_session(&context)
-            .await
-            .map_err(|error| match error {
-                lash_core::session_delete::SessionDeleteError::Close(
-                    lash_core::session_close::SessionCloseError::Store(error),
-                )
-                | lash_core::session_delete::SessionDeleteError::Store(error) => {
-                    EmbedError::from(error)
-                }
-                lash_core::session_delete::SessionDeleteError::Close(
-                    lash_core::session_close::SessionCloseError::Runtime(error),
-                ) => EmbedError::from(error),
-            })
+        Ok(lash_core::session_delete::delete_session(&context).await?)
     }
 
     /// The process registry of this core's backend.

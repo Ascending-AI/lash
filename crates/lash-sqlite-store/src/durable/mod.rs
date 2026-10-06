@@ -17,7 +17,7 @@ use std::sync::{Arc, LazyLock};
 use lash_core_execution::Clock;
 use lash_durable::domain::{
     ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
-    SnapshotRow, TurnRow, WaitId, WaitRow,
+    SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorKind, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause,
@@ -45,6 +45,7 @@ mod waits;
 // each domain's own lane adds its tables beside them.
 pub(crate) use park_events::TABLES as PARK_EVENTS_TABLES;
 pub(crate) use run_records::TABLES as RUN_RECORDS_TABLES;
+pub(crate) use session_close::TABLES as SESSION_CLOSE_TABLES;
 pub(crate) use snapshots::TABLES as EXEC_SNAPSHOTS_TABLES;
 pub(crate) use turns::TABLES as TURN_PHASES_TABLES;
 pub(crate) use waits::TABLES as WAITS_TABLES;
@@ -988,6 +989,23 @@ impl DurableReads for SqliteDurableStore {
         let scope = scope.clone();
         let after = after.cloned();
         self.read(move |tx| processes::until_children(tx, &scope, after.as_ref(), limit))
+            .await
+    }
+
+    async fn session_close(
+        &self,
+        session: &lash_sansio::SessionId,
+    ) -> Result<Option<SessionCloseRow>, DurableError> {
+        let session = session.clone();
+        self.read(move |tx| session_close::read(tx, &session)).await
+    }
+
+    async fn ending_scopes(
+        &self,
+        session: &lash_sansio::SessionId,
+    ) -> Result<Vec<ScopeKey>, DurableError> {
+        let session = session.clone();
+        self.read(move |tx| session_close::ending_scopes(tx, &session))
             .await
     }
 

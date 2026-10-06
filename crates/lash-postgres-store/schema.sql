@@ -1199,6 +1199,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_run_records_outcome
     ON lash_run_records (owner_key, run_seq, call_id)
     WHERE kind = 'x_outcome' AND call_id IS NOT NULL;
 
+-- Session close (L6b, FIG-5176): a closing session's last step done, each
+-- step its own fenced transaction (ADR 0132 §12). After the 'tombstone'
+-- step the row is the session's tombstone.
+CREATE TABLE IF NOT EXISTS lash_session_close (
+    session_id TEXT COLLATE "C" PRIMARY KEY,
+    done_step TEXT CONSTRAINT ck_session_close_step
+        CHECK (done_step IN ('cancel', 'revoke', 'end_scope', 'triggers', 'artifacts', 'tombstone')),
+    begun_at_ms BIGINT NOT NULL,
+    written_epoch BIGINT NOT NULL
+);
+
+-- A session's scopes whose cascade still has Until children to mark (L6b,
+-- FIG-5176; ADR 0132 §11): written in the transaction that ended the turn,
+-- deleted in the one that marks its last batch.
+CREATE TABLE IF NOT EXISTS lash_session_scope_ends (
+    session_id TEXT COLLATE "C" NOT NULL,
+    scope_key TEXT COLLATE "C" NOT NULL,
+    begun_at_ms BIGINT NOT NULL,
+    written_epoch BIGINT NOT NULL,
+    PRIMARY KEY (session_id, scope_key)
+);
+
 -- VM snapshots (I0, FIG-5194; statements: V0, then L7): the latest snapshot
 -- of each code cell ('c/...') and lashlang process ('p/...'),
 -- compare-and-set on rev.

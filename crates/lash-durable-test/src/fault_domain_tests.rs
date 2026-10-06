@@ -75,6 +75,17 @@ impl DurableReads for DummyDomainApply {
         self.inner.until_children(scope, after, limit).await
     }
 
+    async fn session_close(
+        &self,
+        session: &SessionId,
+    ) -> Result<Option<SessionCloseRow>, DurableError> {
+        self.inner.session_close(session).await
+    }
+
+    async fn ending_scopes(&self, session: &SessionId) -> Result<Vec<ScopeKey>, DurableError> {
+        self.inner.ending_scopes(session).await
+    }
+
     async fn park_events(
         &self,
         after: Option<ParkEventSeq>,

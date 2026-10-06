@@ -1,43 +1,39 @@
 use super::LashCore;
+use crate::EmbedError;
 use crate::Result;
-use lash_core::store::{ObligationKey, ObligationKind, SessionLookup, StalledObligation};
-use lash_core::{EffectOpener, ScopeId, SessionId};
-use std::num::NonZeroUsize;
+use lash_core::SessionId;
+use lash_core::store::SessionLookup;
 use std::time::Duration;
 
-/// Where a state-based wait for an accepted session deletion ended.
+/// Where a state-based wait for a requested session deletion ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionDeleteCompletion {
-    /// Physical deletion committed. The session id cannot be reused.
+    /// The session's close wrote its tombstone. The session id cannot be
+    /// reused.
     Deleted,
     /// This id has never materialized a session.
     Absent,
-    /// The session has no accepted close. This wait starts no deletion.
+    /// The session has no close. This wait starts no deletion.
     NotClosing,
-    /// A close, cleanup or physical-delete obligation requires operator re-arm.
-    Stalled(Box<StalledObligation>),
 }
 
 const POLL: Duration = Duration::from_millis(25);
 const MAX_POLL: Duration = Duration::from_secs(1);
-const PAGE: NonZeroUsize = NonZeroUsize::MIN.saturating_add(63);
 
 impl LashCore {
-    /// Await the physical deletion owed by an accepted close (ADR 0109 §4).
+    /// Await the tombstone of a requested deletion (ADR 0132 §12).
     ///
-    /// The permanent tombstone proves completion. An absent obligation alone
-    /// does not: the close may still be unacknowledged. This reads the store
-    /// and its ledgers, makes no engine request, and never retries deletion.
-    /// Recovery owns delivery. A stalled dependency returns its typed record
-    /// for explicit re-arm instead of keeping the caller waiting.
+    /// The session actor closes itself one durable step at a time; its
+    /// tombstone proves completion. This reads the store, makes no request,
+    /// and never retries the deletion: the session's own close resumes after
+    /// any crash.
     ///
     /// There is no elapsed-time completion rule. Dropping the future stops
-    /// observation and leaves accepted deletion owed. A host using this inside
-    /// a Restate handler must journal the returned observation in its own step.
+    /// observation and leaves the requested close running.
     ///
     /// # Errors
     ///
-    /// A typed store error if the catalog or a dependency ledger cannot answer.
+    /// A typed store error if the catalog or the durable store cannot answer.
     pub async fn await_session_deletion(
         &self,
         session_id: &SessionId,
@@ -69,59 +65,26 @@ impl LashCore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionDeleteCompletion>> {
-        match self.store_factory.lookup_session(session_id).await? {
-            SessionLookup::Deleted => return Ok(Some(SessionDeleteCompletion::Deleted)),
-            SessionLookup::Absent => return Ok(Some(SessionDeleteCompletion::Absent)),
-            SessionLookup::Live(_) => {}
+        let lookup = self.store_factory.lookup_session(session_id).await?;
+        if matches!(lookup, SessionLookup::Deleted) {
+            return Ok(Some(SessionDeleteCompletion::Deleted));
         }
-        let Some(close_id) = self.store_factory.shift_epoch(session_id).await?.closing else {
-            return Ok(Some(SessionDeleteCompletion::NotClosing));
-        };
-        let own = ScopeId::session(session_id.clone()).storage_id();
-        let turns = EffectOpener::session_turn_encoding_range(session_id);
-        let drains = EffectOpener::session_operation_encoding_range(session_id);
-        for kind in [
-            ObligationKind::ControlIntent,
-            ObligationKind::ScopeClose,
-            ObligationKind::ParentEnd,
-            ObligationKind::SessionDelete,
-        ] {
-            let ledger = self.backend.obligation_ledger(kind);
-            let mut after = None;
-            loop {
-                let page = ledger.list_stalled(after.as_ref(), PAGE).await?;
-                let last = page.last().map(|row| row.id.clone());
-                let full = page.len() == PAGE.get();
-                for row in page {
-                    let owned = match &row.key {
-                        Ok(ObligationKey::ControlIntent { intent_id }) => *intent_id == close_id,
-                        Ok(
-                            ObligationKey::ScopeClose {
-                                session_id: owner, ..
-                            }
-                            | ObligationKey::SessionDelete { session_id: owner },
-                        ) => owner == session_id,
-                        Ok(ObligationKey::ParentEnd {
-                            parent_kind,
-                            parent_id,
-                        }) => match parent_kind.as_str() {
-                            "session" => *parent_id == own,
-                            "turn" => turns.0 <= *parent_id && *parent_id < turns.1,
-                            "session_operation" => drains.0 <= *parent_id && *parent_id < drains.1,
-                            _ => false,
-                        },
-                        _ => false,
-                    };
-                    if owned {
-                        return Ok(Some(SessionDeleteCompletion::Stalled(Box::new(row))));
-                    }
+        let close = lash_core::runtime::durable::session_close::session_close_state(
+            &self.backend,
+            session_id,
+        )
+        .await
+        .map_err(EmbedError::from)?;
+        Ok(match close {
+            Some(close) if close.is_tombstone() => Some(SessionDeleteCompletion::Deleted),
+            // The session actor is still closing itself.
+            Some(_) => None,
+            None => Some(match lookup {
+                SessionLookup::Absent => SessionDeleteCompletion::Absent,
+                SessionLookup::Live(_) | SessionLookup::Deleted => {
+                    SessionDeleteCompletion::NotClosing
                 }
-                if !full {
-                    break;
-                }
-                after = last;
-            }
-        }
-        Ok(None)
+            }),
+        })
     }
 }

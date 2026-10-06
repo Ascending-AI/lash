@@ -113,6 +113,8 @@ pub const TABLES: &[&str] = &[
     durable::park_events::TABLE,
     durable::run_records::TABLE,
     durable::turns::TABLE,
+    durable::session_close::ENDING_TABLE,
+    durable::session_close::TABLE,
     durable::snapshots::TABLE,
     durable::waits::TABLE,
     process::abandoned_consumer_holds::TABLE,
@@ -243,6 +245,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(durable::processes::ProcessActorStatements::NEUTRAL);
     statements.extend_from_slice(durable::processes::ActorParkStatements::NEUTRAL);
     statements.extend_from_slice(durable::park_events::ParkEventStatements::NEUTRAL);
+    statements.extend_from_slice(durable::session_close::SessionCloseStatements::NEUTRAL);
     statements.extend_from_slice(
         turn_ingress::pending_inputs::PendingTurnInputObligationStatements::NEUTRAL,
     );

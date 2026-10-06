@@ -1,23 +1,19 @@
-//! The PostgreSQL store half of a session's two-phase delete (ADR 0109 §4).
-//!
-//! The acknowledgement of a session's `CloseSession` intent arms its delete
-//! in the transaction that writes it ([`arm_on_close_acknowledged_conn`]).
+//! The PostgreSQL reads of the `SessionDelete` obligation kind (ADR 0109
+//! §4). Nothing arms the kind any more: a session's delete is its own mail
+//! on the durable substrate (ADR 0132 §12), and L10b deletes the kind.
 
 use std::sync::LazyLock;
 
 use lash_core_execution::store::session_delete::{
     SessionCleanup, SessionDeleteLedger, SessionDeleteObligation,
 };
-use lash_core_execution::store::{
-    ControlIntent, ControlIntentKind, ControlIntentState, ObligationId, ObligationKey,
-    ObligationState,
-};
+use lash_core_execution::store::{ObligationId, ObligationState};
 use lash_core_execution::{EffectOpener, ScopeId, SessionId};
 use lash_store_sql::Dialect;
 use lash_store_sql::process::parent_end_plans::ParentEndPlanCleanupStatements;
 use lash_store_sql::session::meta::SessionMetaDeleteStatements;
 use lash_store_sql::session_runs::runs::SessionRunCleanupStatements;
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 
 use crate::StoreError;
 use crate::support::store_sqlx_error;
@@ -28,35 +24,6 @@ static RUNS: LazyLock<SessionRunCleanupStatements> =
     LazyLock::new(|| SessionRunCleanupStatements::render(Dialect::postgres()));
 static PLANS: LazyLock<ParentEndPlanCleanupStatements> =
     LazyLock::new(|| ParentEndPlanCleanupStatements::render(Dialect::postgres()));
-
-/// Arm session `next`'s `SessionDelete` obligation when `next` is its
-/// `CloseSession` intent's acknowledgement over `prior`, in the transaction
-/// that writes it: the close's delivered settle owes the physical delete
-/// (ADR 0109 §3). A no-op for any other write, and once the row carries an
-/// obligation.
-pub(crate) async fn arm_on_close_acknowledged_conn(
-    conn: &mut PgConnection,
-    prior: &ControlIntent,
-    next: &ControlIntent,
-) -> Result<(), StoreError> {
-    let ControlIntentState::Acknowledged { at_ms } = next.state else {
-        return Ok(());
-    };
-    if !matches!(next.kind, ControlIntentKind::CloseSession { .. })
-        || matches!(prior.state, ControlIntentState::Acknowledged { .. })
-    {
-        return Ok(());
-    }
-    crate::obligation_ledger::arm_obligation_tx(
-        conn,
-        &ObligationKey::SessionDelete {
-            session_id: next.session_id.clone(),
-        },
-        at_ms,
-    )
-    .await?;
-    Ok(())
-}
 
 fn count(value: i64) -> Result<u64, StoreError> {
     u64::try_from(value).map_err(|_| StoreError::StoredDataCorrupt {

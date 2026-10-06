@@ -273,12 +273,10 @@ enum StoreOperation {
     /// instance, so its leg can only reopen the same object through the
     /// retained factory and does not prove cold-instance reconstruction.
     ColdReopenSession,
-    /// Enter deletion through `LashCore::delete_session` to exercise the store
-    /// tombstone and subsequent admission refusal. The lifecycle backend's
-    /// store set supplies its real process registry and trigger store, and the
-    /// recording effect host runs session-close and process-deletion effects
-    /// through their local executors, so this leg covers the full delete path
-    /// an embedder sees.
+    /// Delete the session's storage as its close's `artifacts` step does
+    /// (ADR 0132 §12), then build the lifecycle core a later admission
+    /// attempt goes through, so the leg covers the store tombstone and the
+    /// refusal an embedder sees after it.
     DeleteSession,
     AttemptAdmission,
     CreateHandle {
@@ -1691,21 +1689,11 @@ impl BackendRunner {
             }
             StoreOperation::ReclaimRetainedEvidence => self.reclaim_terminal_evidence().await,
             StoreOperation::DeleteSession => {
-                let core = self.build_lifecycle_core();
-                let administration = core.session_administration().await;
-                let context = administration
-                    .delete_context(&self.session_id)
-                    .expect("issue the differential delete context");
-                let deletion = lash::LashCore::delete_session(context)
+                self.factory()
+                    .delete_session(&self.session_id)
                     .await
-                    .expect("delete the materialized session through LashCore");
-                assert!(
-                    matches!(deletion, lash::SessionDeletion::Deleted(_)),
-                    "{}: nothing the close left is undelivered, so the delete runs in the call: \
-                     {deletion:?}",
-                    self.name
-                );
-                self.lifecycle_core = Some(core);
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                self.lifecycle_core = Some(self.build_lifecycle_core());
                 Ok(None)
             }
             StoreOperation::AttemptAdmission => {

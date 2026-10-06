@@ -96,8 +96,6 @@ pub use segment_budget::{
     segment_budget_and_continuation_preserve_results_across_waits,
 };
 mod served_process_start;
-mod session_close;
-mod session_delete;
 mod session_delete_blob_reclaim;
 mod session_graph_append;
 mod session_graph_state_machine;

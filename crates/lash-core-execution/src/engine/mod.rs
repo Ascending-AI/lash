@@ -26,7 +26,6 @@ pub use control::{
     EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, NoEngineControl,
     NoScopeClose, OpenRun, ParkReconcileReport, ParkRecoveryWriter, ParkTarget, RefusalClass,
     RunLoss, RunRef, ScopeCloseSink, SessionControlEngine, StalledExecution,
-    begin_session_close_replay_key,
 };
 pub use ingress::{FIRST_INGRESS_ATTEMPT, ingress_shift_request};
 pub use reconcile::{

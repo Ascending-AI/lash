@@ -42,7 +42,7 @@ pub use processes::{
     RedriveAnswer, RedriveRequest, SIGNAL_MAIL,
 };
 pub use run_records::{AdmittedId, RunRecordKind, RunRecordRow, RunRecordWrite};
-pub use session_close::{SessionCloseStep, SessionCloseWrite};
+pub use session_close::{SessionCloseRow, SessionCloseStep, SessionCloseWrite};
 pub use snapshots::{SnapshotRev, SnapshotRow, SnapshotWrite};
 pub use turns::{
     ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnPhase, TurnRow,
@@ -214,6 +214,22 @@ pub enum DomainRefusal {
         /// The store's refusal.
         reason: String,
     },
+    /// A session-close step is not the one after the stored step.
+    #[error("session {session} close step {step:?} does not follow {done:?}")]
+    SessionCloseOutOfOrder {
+        /// The session.
+        session: SessionId,
+        /// The step the commit recorded.
+        step: SessionCloseStep,
+        /// The last step stored.
+        done: Option<SessionCloseStep>,
+    },
+    /// A session-close step names a session whose close never began.
+    #[error("session {session} is not closing")]
+    SessionNotClosing {
+        /// The session.
+        session: SessionId,
+    },
 }
 
 /// The owner's and operators' reads of domain rows, unfenced.
@@ -266,6 +282,16 @@ pub trait DurableReads: Send + Sync {
         after: Option<&ProcessId>,
         limit: usize,
     ) -> Result<Vec<ProcessId>, DurableError>;
+
+    /// L6b: the session's closing state, or its tombstone once closed.
+    async fn session_close(
+        &self,
+        session: &SessionId,
+    ) -> Result<Option<SessionCloseRow>, DurableError>;
+
+    /// L6b: the session's scopes whose cascade still has children to mark,
+    /// in the order they began ending.
+    async fn ending_scopes(&self, session: &SessionId) -> Result<Vec<ScopeKey>, DurableError>;
 
     /// L6: up to `limit` park-feed entries after `after`, oldest first.
     async fn park_events(

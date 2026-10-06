@@ -198,8 +198,7 @@ pub use crate::admin::{
     SessionCommandWithdrawal, SessionTriggerAdmin, ToolAdmin,
 };
 pub use crate::core::{
-    DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionClosing, SessionDeleteCompletion,
-    SessionDeleteFailure, SessionDeleteReport, SessionDeleteWait, SessionDeletion,
+    DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionDeleteCompletion, SessionDeletion,
 };
 pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, SendError};
@@ -237,7 +236,7 @@ pub use lash_core::runtime::ExternalCompletionError;
 /// How a turn coalesces its stream deltas into frames for the live feed
 /// (`LashCoreBuilder::delta_coalescing`).
 pub use lash_core::runtime::{DeltaCoalescing, DeltaCoalescingError};
-/// The immediate delivery verdict carried by a session deletion's wait.
+/// The immediate delivery verdict of an obligation relay's attempt.
 pub use lash_core::shift::relay::RelayVerdict;
 pub use lash_core::store::{
     DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, SessionFault,
@@ -309,8 +308,6 @@ pub use tokio_util::sync::CancellationToken;
 pub use lash_core::ConfigTransactionRecord;
 pub use lash_core::SessionPluginInit;
 pub use lash_core::runtime::ConfigTransactionSubmitError;
-pub use lash_core::session_close::SessionCloseServices;
-pub use lash_core::session_delete::SessionDeleteStores;
 pub use lash_core::shift::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
 pub use lash_core::shift::{ObligationRelayUnavailable, RelayNeed};
 pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
@@ -336,8 +333,8 @@ pub mod prelude {
         NoProgressBudget, ObservableSession, ParkedSession, PendingTurnInputCancelOutcome,
         PluginOperations, PluginStack, RegisteredLlmProfile, Result, SendBuilder, SendHandle,
         SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin, SessionCommandReceipt,
-        SessionCreateRequest, SessionCreation, SessionDeleteReport, SessionDeletion, SessionEntry,
-        SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec, SessionStartPoint,
+        SessionCreateRequest, SessionCreation, SessionDeletion, SessionEntry, SessionListFilter,
+        SessionParkRefused, SessionRelationKind, SessionSpec, SessionStartPoint,
         SessionTriggerAdmin, SessionView, ToolAdmin, TurnActivity, TurnActivityFanout,
         TurnActivityId, TurnActivitySink, TurnBudget, TurnCause, TurnEvent, TurnExecutionMetrics,
         TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport,

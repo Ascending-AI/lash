@@ -16,6 +16,7 @@ use lash_durable::domain::{CellId, ExecKey, RunSeq, SessionCommitWrite, TurnWrit
 use super::session::{
     CodeCell, OpenTurn, PhaseExit, TurnDone, TurnDrive, TurnError, TurnPhase, TurnServices,
 };
+use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel};
 use crate::{ActorContext, Effect, SessionStreamEvent, TurnMachine};
 
@@ -164,6 +165,10 @@ pub async fn run_phases(
                     cause_json: commit.cause_json,
                     head_revision: Some(commit.expected_head.saturating_add(1)),
                 }));
+                // The turn's scope ends with its commit (L6b): its waits are
+                // revoked and its first batch of `Until` children marked; the
+                // next pass marks the rest.
+                end_turn_scope(cx, &mut tx, &session, &run).await?;
                 cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
                 return Ok(PhaseExit::Committed(terminal));
             }

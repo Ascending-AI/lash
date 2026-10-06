@@ -58,3 +58,11 @@ law!(
     a_turn_cancel_is_a_first_winner_row_with_a_wake,
     |store, _advance| { laws::a_turn_cancel_is_a_first_winner_row_with_a_wake(store) }
 );
+law!(
+    a_session_close_moves_one_step_at_a_time,
+    |store, _advance| { laws::a_session_close_moves_one_step_at_a_time(store) }
+);
+law!(
+    an_ending_scope_stays_recorded_until_its_last_batch,
+    |store, _advance| { laws::an_ending_scope_stays_recorded_until_its_last_batch(store) }
+);
