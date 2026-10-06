@@ -184,11 +184,11 @@ pub use tool_catalog::{
 #[cfg(feature = "schema-validation")]
 pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
-    CompactToolContract, ExtraKeys, ModelTool, ObjectShape, ProcessParamShape, ProcessShape,
-    SchemaShape, ShapeConstraints, ShapeField, ShapeKind, ShapeRow, TOOL_BINDING_KEY,
-    ToolArgumentProjectionPolicy, ToolBinding, ToolContract, ToolDefinition,
-    ToolDefinitionBindingExt, ToolDiscovery, ToolId, ToolManifest, ToolModule, ToolOutputContract,
-    ToolRetryPolicy, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
+    Backoff, BoundedRetry, CompactToolContract, ExecutionPolicy, ExtraKeys, LimitCause, ModelTool,
+    ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints, ShapeField,
+    ShapeKind, ShapeRow, TOOL_BINDING_KEY, ToolArgumentProjectionPolicy, ToolBinding, ToolContract,
+    ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery, ToolId, ToolManifest, ToolModule,
+    ToolOutputContract, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
     is_named_type_reference, schema_for,
 };
 pub use tool_declaration::{
@@ -199,8 +199,8 @@ pub use tool_output::{
     AttachmentMaterializationSource, CancelOrigin, CancelRequest, ModelToolReturn,
     ModelToolReturnPart, ObservedProcessFailure, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureCause, ToolFailureClass,
-    ToolFailureSource, ToolIntentIdentity, ToolIntentKind, ToolRetryStatus, ToolValue, ToolView,
-    ToolViewBlock, ToolViewMeta, format_tool_output_content, tool_result_text,
+    ToolFailureSource, ToolIntentIdentity, ToolIntentKind, ToolValue, ToolView, ToolViewBlock,
+    ToolViewMeta, format_tool_output_content, tool_result_text,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{

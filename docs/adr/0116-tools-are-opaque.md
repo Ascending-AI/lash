@@ -67,8 +67,8 @@ Every attempt is an admitted execution with a started row and an outcome
 started without an outcome records `Interrupted` and never runs again. A
 `Repeatable` attempt runs again at the same ordinal with the same
 `ToolCallId`. A reported failure advances the ordinal only if the recorded
-retry policy admits another attempt. External side effects deduplicate on
-`AttemptContext::call_id()`. `ToolRetryPolicy::Never` prevents a reported
+execution policy admits another attempt. External side effects deduplicate on
+`AttemptContext::call_id()`. `ExecutionPolicy::Once` prevents a reported
 retry. Lash-owned effects use declared intents and their exactly-once fences.
 
 #### 1.6 Duration and isolation

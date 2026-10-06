@@ -121,7 +121,10 @@ impl SingletonToolHandlers for Probe {
                 start: None,
             }
         } else {
-            SingletonBodyOutcome::Failed { output: text }
+            SingletonBodyOutcome::Failed {
+                output: text,
+                suggested_delay_ms: None,
+            }
         })
     }
 

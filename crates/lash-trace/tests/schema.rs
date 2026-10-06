@@ -54,7 +54,7 @@ fn node_kind_refuses_unrecognized_wire_value() {
 }
 
 #[test]
-fn node_failure_requires_typed_provenance_and_preserves_recorded_retry() {
+fn node_failure_requires_typed_provenance() {
     let legacy = json!({
         "kind": "node_failed",
         "node_id": "node-1",
@@ -79,7 +79,7 @@ fn node_failure_requires_typed_provenance_and_preserves_recorded_retry() {
             message: "permission denied".to_owned(),
             replay_key: "effect-1".to_owned(),
             source: lash_sansio::ToolFailureSource::Policy,
-            retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
+            suggested_delay_ms: None,
         },
     };
     let wire = serde_json::to_value(&payload).expect("encode typed failure");
@@ -92,7 +92,7 @@ fn node_failure_requires_typed_provenance_and_preserves_recorded_retry() {
             "message": "permission denied",
             "replay_key": "effect-1",
             "source": "policy",
-            "retry": { "type": "exhausted", "attempts": 3 }
+            "suggested_delay_ms": null
         })
     );
     assert!(wire.get("error").is_none());

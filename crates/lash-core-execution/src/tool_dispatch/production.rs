@@ -366,29 +366,49 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     fn restore_cancel(&self, call_id: &crate::ToolCallId) {
         self.cancel_inline_stop(call_id, true);
     }
-    fn retry_policy(
+    fn execution_policy(
         &self,
         call: &SingletonToolCall,
-        _default: RecordedRetryPolicy,
-    ) -> RecordedRetryPolicy {
-        match self
-            .calls
+        _default: ExecutionPolicy,
+    ) -> ExecutionPolicy {
+        self.calls
             .lock_recover()
             .get(&call.call_id)
-            .map(|input| input.definition.manifest.retry_policy)
+            .map_or(ExecutionPolicy::Once, |input| {
+                input.definition.manifest.execution_policy
+            })
+    }
+
+    fn current_execution_policy(
+        &self,
+        call: &SingletonToolCall,
+        admitted: ExecutionPolicy,
+    ) -> ExecutionPolicy {
+        let Some(input) = self.calls.lock_recover().get(&call.call_id).cloned() else {
+            return ExecutionPolicy::Once;
+        };
+        let dispatch = self.context.dispatch();
+        let id = &input.definition.manifest.id;
+        let catalog = dispatch.tools.resolve_manifest_by_id(id);
+        if catalog
+            .as_ref()
+            .is_some_and(|manifest| manifest.execution_policy == ExecutionPolicy::Once)
         {
-            Some(crate::ToolRetryPolicy::Safe {
-                max_attempts,
-                base_delay_ms,
-                max_delay_ms,
-            }) => RecordedRetryPolicy::Reported {
-                max_attempts: std::num::NonZeroU32::new(max_attempts)
-                    .unwrap_or(std::num::NonZeroU32::MIN),
-                base_delay_ms,
-                max_delay_ms,
-            },
-            _ => RecordedRetryPolicy::Never,
+            return ExecutionPolicy::Once;
         }
+        let Ok(mut providers) = dispatch
+            .plugins
+            .resolve_context_tool_bindings(std::slice::from_ref(&input.binding.executable))
+        else {
+            return ExecutionPolicy::Once;
+        };
+        // A grant may be absent from the catalog. Its bound provider still
+        // owns the declaration; querying it does not select a new implementation.
+        providers
+            .pop()
+            .and_then(|provider| provider.resolve_manifest_by_id(id))
+            .or(catalog)
+            .map_or(admitted, |manifest| manifest.execution_policy)
     }
     fn cached_capture(&self, output: String) -> Result<SingletonCapture, String> {
         let capture: Captured = decode(&output)?;
@@ -405,6 +425,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 SingletonCapture::Failed {
                     output,
                     stream: Default::default(),
+                    suggested_delay_ms: None,
                 }
             },
         )
@@ -615,7 +636,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             let dispatch = &dispatch;
             let authority = &authority;
             let call = &prepared.call;
-            let retry_policy = prepared.input.definition.manifest.retry_policy;
+            let execution_policy = prepared.input.definition.manifest.execution_policy;
             async move {
                 if let Some(stop) = &stop {
                     context = context.with_step_stop(stop.clone());
@@ -626,10 +647,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     call,
                     context,
                     attempt.attempt.get(),
-                    match retry_policy {
-                        crate::ToolRetryPolicy::Never => 1,
-                        crate::ToolRetryPolicy::Safe { max_attempts, .. } => max_attempts,
-                    },
+                    execution_policy.max_attempts(),
                 ));
                 let outcome = match &stop {
                     Some(stop) if stop.is_cancelled() => stopped_before_completion(),
@@ -700,8 +718,8 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 intents: ToolIntents::default(),
                 start_refusal: None,
             };
-            return Ok(SingletonBodyOutcome::Failed {
-                output: encode(&capture)?,
+            return Ok(SingletonBodyOutcome::Cancelled {
+                evidence: Some(encode(&capture)?),
             });
         }
 
@@ -753,6 +771,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         .await?;
                     Ok(SingletonBodyOutcome::Failed {
                         output: encode(&capture)?,
+                        suggested_delay_ms: None,
                     })
                 } else if let Some(crate::PendingResolver::DeclaredStart(start)) =
                     &pending.resolved_by
@@ -781,6 +800,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     capture.start_refusal = Some(outcome);
                     Ok(SingletonBodyOutcome::Failed {
                         output: encode(&capture)?,
+                        suggested_delay_ms: None,
                     })
                 } else if completion_context.take_completion_key().is_none() {
                     let capture = self
@@ -801,6 +821,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         .await?;
                     Ok(SingletonBodyOutcome::Failed {
                         output: encode(&capture)?,
+                        suggested_delay_ms: None,
                     })
                 } else {
                     Ok(SingletonBodyOutcome::Pending {
@@ -861,15 +882,24 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                             .collect(),
                         start: None,
                     }),
-                    crate::ToolCallOutcome::Failure(failure)
-                        if matches!(failure.retry, crate::ToolRetryStatus::Safe { .. }) =>
-                    {
-                        let crate::ToolRetryStatus::Safe { after_ms } = failure.retry else {
-                            unreachable!()
-                        };
-                        Ok(SingletonBodyOutcome::RetryableFailure { output, after_ms })
-                    }
-                    _ => Ok(SingletonBodyOutcome::Failed { output }),
+                    crate::ToolCallOutcome::Failure(failure) => match failure.cause.as_deref() {
+                        Some(crate::ToolFailureCause::Interrupted) => {
+                            Ok(SingletonBodyOutcome::Interrupted)
+                        }
+                        Some(crate::ToolFailureCause::ExecutionLimit { cause }) => {
+                            Ok(SingletonBodyOutcome::TimedOut {
+                                cause: *cause,
+                                evidence: Some(output),
+                            })
+                        }
+                        _ => Ok(SingletonBodyOutcome::Failed {
+                            output,
+                            suggested_delay_ms: failure.suggested_delay_ms,
+                        }),
+                    },
+                    crate::ToolCallOutcome::Cancelled(_) => Ok(SingletonBodyOutcome::Cancelled {
+                        evidence: Some(output),
+                    }),
                 }
             }
         }
@@ -916,7 +946,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             SingletonCapture::Done { .. } => crate::Resolution::Ok(
                 serde_json::from_str(output).map_err(|error| error.to_string())?,
             ),
-            SingletonCapture::Failed { .. } | SingletonCapture::RetryableFailure { .. } => {
+            SingletonCapture::Failed { .. } => {
                 serde_json::from_str(output).map_err(|error| error.to_string())?
             }
             _ => return Err("the source did not supply a completed result".to_owned()),
@@ -949,6 +979,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             SingletonCapture::Failed {
                 output,
                 stream: Default::default(),
+                suggested_delay_ms: None,
             }
         })
     }
@@ -1240,6 +1271,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         Ok(SingletonCapture::Failed {
             output: encode(&captured)?,
             stream: Default::default(),
+            suggested_delay_ms: None,
         })
     }
 

@@ -1,7 +1,7 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 584 rows over 403 files, 2072 laws.
+# 584 rows over 403 files, 2075 laws.
 # By class: mechanical 104, semantic 99, delete 348, replace 33.
 # By lane: L9b 61, L9c 90, L9d 53, L9e 72, L9f 22, L9g 64, L9h 30, L11 12, L8 1, L10a 179.
 # By status: todo 584, ported 0, deleted 0.
@@ -24,7 +24,7 @@
 # - L9c: crates/lash-restate/src/tests/run_control_witnesses.rs::a_handle_naming_another_sessions_run_is_refused_for_good_with_its_code
 #   a run handle naming another session's run is refused for good with its code
 # - L9c: crates/lash-restate/src/tests/run_coordinator_on_the_double.rs
-#   the RunCoordinator's round laws on phase rows: every admitted body enters before any completes, a committed final drains every lower rank first at every cut, a cancel during backoff starts no next body, the stream publishes only after presentation acceptance, and admission ignores live isolation drift
+#   the RunCoordinator's round laws on phase rows: every admitted body enters before any completes, a committed final drains every lower rank first at every cut, a cancel during backoff starts no next body, the stream publishes only after presentation acceptance, admission ignores live isolation drift, Once never repeats, Repeatable admits only bounded ordinals after a known failure or slice timeout, and a current Once vetoes without upgrading stored Once
 # - L9c: crates/lash-restate/src/tests/run_coordinator_on_the_double/aggregate.rs
 #   aggregate rounds (all, race, any, settled) keep operand order, aliases and distinct rejections; a race returns before its inline loser and keeps it unconsumed; only logical closing cancels losers
 # - L9c: crates/lash-restate/src/tests/run_coordinator_on_the_double/cold_selection.rs
@@ -5867,10 +5867,13 @@ laws = [
   "l03_deferred_replay_after_cancel_keeps_the_subscription_and_source_winner",
   "l02_a_schedule_suspends_until_its_owned_attempt_is_acknowledged",
   "l03_closing_records_backoff_cancellation_without_waiting_for_the_timer",
+  "lb1_once_never_repeats",
+  "lb2_repeatable_admits_bounded_ordinals_for_known_failures",
+  "lb3_current_policy_vetoes_and_never_upgrades_admission",
 ]
 disposition = "owed"
 status = "todo"
-owed = "the RunCoordinator's round laws on phase rows: every admitted body enters before any completes, a committed final drains every lower rank first at every cut, a cancel during backoff starts no next body, the stream publishes only after presentation acceptance, and admission ignores live isolation drift"
+owed = "the RunCoordinator's round laws on phase rows: every admitted body enters before any completes, a committed final drains every lower rank first at every cut, a cancel during backoff starts no next body, the stream publishes only after presentation acceptance, admission ignores live isolation drift, Once never repeats, Repeatable admits only bounded ordinals after a known failure or slice timeout, and a current Once vetoes without upgrading stored Once"
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_coordinator_on_the_double.rs"

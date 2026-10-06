@@ -66,7 +66,7 @@ derives and records that id for the admitted logical call; it is stable across
 correlation data. [ADR 0117](0117-lash-names-every-tool-call.md) owns the
 derivation and recording rules.
 
-`ToolRetryPolicy::Never` disables retry after a reported failure. A
+`ExecutionPolicy::Once` disables retry after a reported failure. A
 process-engine implementor performs effects only as admitted `Step` actions,
 each with its own execution policy, and its `advance` function performs none.
 

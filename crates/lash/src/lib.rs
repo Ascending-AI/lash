@@ -456,8 +456,6 @@ pub mod tools {
     /// Turn flow control constructed by tool implementors; attach it with
     /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
     pub use lash_core::ToolControl;
-    /// Per-tool retry policy carried by [`ToolDefinition::with_retry_policy`].
-    pub use lash_core::ToolRetryPolicy;
     /// Source and owning plugin identity of tools registered with
     /// [`crate::LashCoreBuilder::tools`]. Use it in deferred grants for those tools.
     pub use lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID;
@@ -479,12 +477,13 @@ pub mod tools {
         ToolIntent, ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentIdentity,
         ToolIntentKind, ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure,
         ToolIntents, ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
-        ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRegistry, ToolRetryStatus,
-        ToolSessionLlmProfile, ToolValue, ToolView, ToolViewBlock, ToolViewMeta,
-        derive_tool_intent_identity, facade_support::ReconfigureError,
-        facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
-        turn_outcome_from_tool_control,
+        ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRegistry, ToolSessionLlmProfile,
+        ToolValue, ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
+        facade_support::ReconfigureError, facade_support::ToolSourceHandle,
+        facade_support::ToolStateFacadeOps, turn_outcome_from_tool_control,
     };
+    /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
+    pub use lash_core::{Backoff, BoundedRetry, ExecutionPolicy, LimitCause};
     /// The three capabilities a tool declares with
     /// [`ToolDefinition::with_declaration`], what refuses a call at admission,
     /// and what refuses an outcome its declaration does not admit.
@@ -959,16 +958,16 @@ pub mod plugins {
     /// A source seal's typed refusal, distinct from engine admission refusal.
     pub use lash_core::tool_run::SealRefusal as SourceSealRefusal;
     pub use lash_core::tool_run::run_event::{
-        AttemptResult, CallDecision, PendingStart, RealizationKey, ResultSource, RunAttemptEntry,
-        RunEvent, RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger, RunRecord,
-        RunTraceFacts,
+        AttemptOutcome, AvailableEvidence, CallDecision, CompletionSource, KnownFailure,
+        KnownFailureReason, PendingStart, RealizationKey, ResultSource, RunAttemptEntry, RunEvent,
+        RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger, RunRecord, RunTraceFacts,
     };
     pub use lash_core::tool_run::{
         AdmissionRefusal as ToolRunAdmissionRefusal, AdmittedBinding, AdmittedCall, AdmittedRound,
         AdoptedRun, AfterCheckVerdict, AggregateConsumer, AggregateLeaf, AggregatePlan,
-        AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CapacityScope, Cut, CutPhase,
-        RecordedRetryPolicy, RoundAdmission, RunLifecycle, RunTransfer, RuntimeCallPolicy,
-        SegmentOrdinal, TransferBundle,
+        AttributedVerdict, Backoff, BeforeCheckVerdict, BeforeSelection, BoundedRetry,
+        CapacityScope, Cut, CutPhase, ExecutionPolicy, LimitCause, RoundAdmission, RunLifecycle,
+        RunTransfer, RuntimeCallPolicy, SegmentOrdinal, TransferBundle,
     };
     /// Recorded Run data needed by engine extensions and effect-host journals.
     pub use lash_core::tool_run::{

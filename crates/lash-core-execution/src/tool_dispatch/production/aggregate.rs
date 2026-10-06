@@ -452,7 +452,7 @@ impl<'run> ProductionToolHandlers<'run> {
             &calls,
             capacity,
             self.clone(),
-            RecordedRetryPolicy::Never,
+            ExecutionPolicy::Once,
             self.context.dispatch().clock.as_ref(),
         )
         .await?;

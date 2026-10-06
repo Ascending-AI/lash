@@ -1867,7 +1867,7 @@ fn remote_tool_grant(name: &str) -> lash_remote_protocol::RemoteToolGrant {
         output_contract: lash_remote_protocol::RemoteToolOutputContract::Static,
         examples: Vec::new(),
         argument_projection: None,
-        retry_policy: None,
+        execution_policy: None,
         bindings: Default::default(),
     }
 }

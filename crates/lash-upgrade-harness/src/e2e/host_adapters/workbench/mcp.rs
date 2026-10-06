@@ -163,10 +163,10 @@ impl WorkbenchHost {
                     }
                     if let Some(DecodedRecord::Attempt(entry)) = &fact.decoded {
                         let output = match &entry.result {
-                            lash_core_store::tool_run::AttemptResult::Done { output }
-                            | lash_core_store::tool_run::AttemptResult::Failed { output, .. } => {
-                                output
-                            }
+                            lash_core_store::tool_run::AttemptOutcome::Completed(output)
+                            | lash_core_store::tool_run::AttemptOutcome::Failed(
+                                lash_core_store::tool_run::KnownFailure { output, .. },
+                            ) => output,
                             _ => continue,
                         };
                         let material = entries

@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolFailureCause {
+    Interrupted,
+    ExecutionLimit {
+        cause: crate::LimitCause,
+    },
     /// A result check proposed state commands outside the recorded body
     /// that owns its decision. No command was reduced or published.
     PluginStateUnrecorded {

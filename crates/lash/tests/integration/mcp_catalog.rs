@@ -693,7 +693,7 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
             };
             assert_eq!(error.class, class);
             assert_eq!(error.code, code);
-            assert_eq!(error.retry, lash::tools::ToolRetryStatus::Never);
+            assert_eq!(error.suggested_delay_ms, None);
             let raw = error.raw.as_ref().expect("typed cause").to_json_value();
             assert_eq!(raw["kind"], kind);
             if kind == "json_rpc" {

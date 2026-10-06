@@ -1,7 +1,7 @@
 use crate::pool::McpServerHealth;
 use lash_core::{
     AttachmentRetentionFailure, ToolFailure, ToolFailureClass, ToolFailureSource, ToolOutcome,
-    ToolRetryStatus, ToolValue,
+    ToolValue,
 };
 use rmcp::{ServiceError, model::ErrorData};
 use serde::{Deserialize, Serialize};
@@ -227,69 +227,44 @@ impl From<McpCallFailure> for ToolFailure {
         use McpCallFailure as F;
         use ToolFailureClass as C;
         use ToolFailureSource as S;
-        let (class, code, source, retry) = match &cause {
-            F::UnknownTool { .. } => (
-                C::InvalidRequest,
-                "mcp_unknown_tool",
-                S::Plugin,
-                ToolRetryStatus::Never,
-            ),
-            F::UnknownToolId { .. } => (
-                C::InvalidRequest,
-                "mcp_unknown_tool_id",
-                S::Plugin,
-                ToolRetryStatus::Never,
-            ),
-            F::InvalidArguments { .. } => (
-                C::InvalidRequest,
-                "mcp_invalid_arguments",
-                S::Plugin,
-                ToolRetryStatus::Never,
-            ),
+        let (class, code, source, suggested_delay_ms) = match &cause {
+            F::UnknownTool { .. } => (C::InvalidRequest, "mcp_unknown_tool", S::Plugin, None),
+            F::UnknownToolId { .. } => (C::InvalidRequest, "mcp_unknown_tool_id", S::Plugin, None),
+            F::InvalidArguments { .. } => {
+                (C::InvalidRequest, "mcp_invalid_arguments", S::Plugin, None)
+            }
             F::InvalidExecutionBinding { .. } => (
                 C::InvalidRequest,
                 "mcp_invalid_execution_binding",
                 S::Plugin,
-                ToolRetryStatus::Never,
+                None,
             ),
             F::ExecutionBindingChanged { .. } => (
                 C::Unavailable,
                 "mcp_execution_binding_changed",
                 S::Plugin,
-                ToolRetryStatus::Never,
+                None,
             ),
             F::UnsupportedRemoteCompletion { .. } => (
                 C::Unavailable,
                 "mcp_unsupported_remote_completion",
                 S::Plugin,
-                ToolRetryStatus::Never,
+                None,
             ),
-            F::PoolShutDown => (
-                C::Unavailable,
-                "mcp_pool_shut_down",
-                S::Plugin,
-                ToolRetryStatus::Never,
-            ),
+            F::PoolShutDown => (C::Unavailable, "mcp_pool_shut_down", S::Plugin, None),
             F::ServerUnavailable {
                 health, after_ms, ..
             } => {
-                let (code, retry) = match health {
-                    McpServerHealth::Exhausted { .. } => {
-                        ("mcp_reconnect_exhausted", ToolRetryStatus::Never)
-                    }
-                    McpServerHealth::ShuttingDown { .. } => {
-                        ("mcp_server_unavailable", ToolRetryStatus::Never)
-                    }
+                let (code, suggested_delay_ms) = match health {
+                    McpServerHealth::Exhausted { .. } => ("mcp_reconnect_exhausted", None),
+                    McpServerHealth::ShuttingDown { .. } => ("mcp_server_unavailable", None),
                     McpServerHealth::Connecting
                     | McpServerHealth::Connected { .. }
-                    | McpServerHealth::Reconnecting { .. } => (
-                        "mcp_server_unavailable",
-                        ToolRetryStatus::Safe {
-                            after_ms: Some(*after_ms),
-                        },
-                    ),
+                    | McpServerHealth::Reconnecting { .. } => {
+                        ("mcp_server_unavailable", Some(*after_ms))
+                    }
                 };
-                (C::Unavailable, code, S::Plugin, retry)
+                (C::Unavailable, code, S::Plugin, suggested_delay_ms)
             }
             F::ConnectionLost {
                 after_ms,
@@ -304,11 +279,9 @@ impl From<McpCallFailure> for ToolFailure {
                 },
                 S::Plugin,
                 if *shutting_down {
-                    ToolRetryStatus::Never
+                    None
                 } else {
-                    ToolRetryStatus::Safe {
-                        after_ms: Some(*after_ms),
-                    }
+                    Some(*after_ms)
                 },
             ),
             F::CallTimeout { deadline, .. } => (
@@ -319,7 +292,7 @@ impl From<McpCallFailure> for ToolFailure {
                     "mcp_call_timeout"
                 },
                 S::Plugin,
-                ToolRetryStatus::Safe { after_ms: None },
+                None,
             ),
             F::JsonRpc { error } => (
                 if matches!(error.code.0, -32600 | -32601 | -32602 | -32700) {
@@ -329,46 +302,23 @@ impl From<McpCallFailure> for ToolFailure {
                 },
                 "mcp_json_rpc_error",
                 S::Tool,
-                ToolRetryStatus::Never,
+                None,
             ),
-            F::UnexpectedResponse => (
-                C::External,
-                "mcp_unexpected_response",
-                S::Plugin,
-                ToolRetryStatus::Never,
-            ),
-            F::UnsupportedSdkError { .. } => (
-                C::Internal,
-                "mcp_unsupported_sdk_error",
-                S::Plugin,
-                ToolRetryStatus::Never,
-            ),
-            F::AttachmentDecode { .. } => (
-                C::External,
-                "mcp_attachment_decode",
-                S::Plugin,
-                ToolRetryStatus::Never,
-            ),
-            F::AttachmentMime { .. } => (
-                C::External,
-                "mcp_attachment_mime",
-                S::Plugin,
-                ToolRetryStatus::Never,
-            ),
+            F::UnexpectedResponse => (C::External, "mcp_unexpected_response", S::Plugin, None),
+            F::UnsupportedSdkError { .. } => {
+                (C::Internal, "mcp_unsupported_sdk_error", S::Plugin, None)
+            }
+            F::AttachmentDecode { .. } => (C::External, "mcp_attachment_decode", S::Plugin, None),
+            F::AttachmentMime { .. } => (C::External, "mcp_attachment_mime", S::Plugin, None),
             // Retention happens after the external tool executed. Its transient
             // class never authorizes executing the tool a second time.
             F::AttachmentStore { cause, .. } => (
                 cause.tool_failure_class(),
                 "mcp_attachment_store",
                 S::Plugin,
-                ToolRetryStatus::Never,
+                None,
             ),
-            F::ToolError { .. } => (
-                C::Execution,
-                "mcp_tool_error",
-                S::Tool,
-                ToolRetryStatus::Never,
-            ),
+            F::ToolError { .. } => (C::Execution, "mcp_tool_error", S::Tool, None),
         };
         let schema_cause = if let F::ServerUnavailable { health, .. } = &cause {
             if let Some(super::pool::McpServerFault::UnusableSchema(source)) = health.fault() {
@@ -396,7 +346,7 @@ impl From<McpCallFailure> for ToolFailure {
             code: code.into(),
             message,
             source,
-            retry,
+            suggested_delay_ms,
             raw: Some(raw),
         }
     }

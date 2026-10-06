@@ -191,18 +191,18 @@ mod tests {
     use super::*;
     use lash_core::{
         AttachmentSource, MediaType, ToolCallOutput, ToolFailure, ToolFailureClass,
-        ToolFailureSource, ToolRetryStatus, ToolValue, facade_support::ToolInvocationReply,
+        ToolFailureSource, ToolValue, facade_support::ToolInvocationReply,
     };
     use std::collections::BTreeMap;
 
-    fn policy_failure(retry: ToolRetryStatus) -> ToolFailure {
+    fn policy_failure(suggested_delay_ms: Option<u64>) -> ToolFailure {
         ToolFailure {
             cause: None,
             class: ToolFailureClass::PermissionDenied,
             code: "approval_denied".to_string(),
             message: "approval was denied".to_string(),
             source: ToolFailureSource::Policy,
-            retry,
+            suggested_delay_ms,
             raw: None,
         }
     }
@@ -210,9 +210,7 @@ mod tests {
     #[test]
     fn both_tool_bridges_preserve_structured_failure_fields() {
         let cancellation = ExecutionCancellation::new();
-        let borrowed = ToolCallOutput::failure(policy_failure(ToolRetryStatus::Safe {
-            after_ms: Some(1_250),
-        }));
+        let borrowed = ToolCallOutput::failure(policy_failure(Some(1_250)));
         let borrowed_error =
             protocol_tool_output_to_lashlang_value(&borrowed, "borrowed-key", &cancellation)
                 .expect_err("a failed output must remain an execution-host error");
@@ -224,15 +222,13 @@ mod tests {
                     "class": "permission_denied",
                     "code": "approval_denied",
                     "source": "policy",
-                    "retry": { "type": "safe", "after_ms": 1_250 }
+                    "suggested_delay_ms": 1_250
                     ,"replay_key": "borrowed-key"
                 }
             })
         );
 
-        let reply = ToolInvocationReply::from_output(ToolCallOutput::failure(policy_failure(
-            ToolRetryStatus::Exhausted { attempts: 3 },
-        )));
+        let reply = ToolInvocationReply::from_output(ToolCallOutput::failure(policy_failure(None)));
         let owned_error = protocol_tool_reply_to_lashlang_value(reply, "owned-key", &cancellation)
             .expect_err("a failed reply must remain an execution-host error");
         assert_eq!(
@@ -243,7 +239,7 @@ mod tests {
                     "class": "permission_denied",
                     "code": "approval_denied",
                     "source": "policy",
-                    "retry": { "type": "exhausted", "attempts": 3 }
+                    "suggested_delay_ms": null
                     ,"replay_key": "owned-key"
                 }
             })

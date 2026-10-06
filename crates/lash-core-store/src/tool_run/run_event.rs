@@ -36,7 +36,7 @@ use std::num::NonZeroU32;
 use lash_sansio::ToolCallId;
 use serde::{Deserialize, Serialize};
 
-use super::admission::{RecordedRetryPolicy, RoundAdmission};
+use super::admission::{ExecutionPolicy, RoundAdmission};
 pub use super::aggregate::{AggregateConsumer, AggregateLeaf, AggregatePlan};
 use super::material::{MaterialEntry, MaterialRef};
 use super::tool_hooks::{AfterCheckVerdict, BeforeSelection, CheckRecord, HookCause};
@@ -134,32 +134,95 @@ pub struct RunEventOrdinal(pub u64);
 #[serde(transparent)]
 pub struct SegmentOrdinal(pub u32);
 
-/// What one attempt's body returned (X).
+/// What one admitted application attempt settled as (X).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
-pub enum AttemptResult {
-    /// A completed result.
-    Done { output: MaterialRef },
-    /// A production pending completion, including its recorded resolver and stream.
+#[serde(
+    tag = "result",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum AttemptOutcome {
+    Completed(MaterialRef),
+    Waiting(CompletionSource),
+    Failed(KnownFailure),
+    Interrupted,
+    TimedOut {
+        cause: LimitCause,
+        evidence: AvailableEvidence,
+    },
+    Cancelled {
+        evidence: AvailableEvidence,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CompletionSource {
     Pending {
         source: AwaitEventKey,
         metadata: MaterialRef,
         start: Option<Box<PendingStart>>,
     },
-    /// Parked on a Deferred source; the source's seal supplies the result.
-    Deferred { source: AwaitEventKey },
-    /// One start whose terminal supplies this call's result.
+    Deferred {
+        source: AwaitEventKey,
+    },
     DeferredStart {
         source: AwaitEventKey,
         start_key: StartKey,
         obligation: MaterialRef,
     },
-    /// A failure the body reported. Only a `retryable` one may be retried,
-    /// and only under the call's recorded retry policy.
-    Failed {
-        output: MaterialRef,
-        retryable: bool,
-    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KnownFailure {
+    pub output: MaterialRef,
+    pub reason: KnownFailureReason,
+    pub suggested_delay_ms: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnownFailureReason {
+    Reported,
+    DeclarationRefused,
+    StartRefused,
+}
+
+pub use lash_sansio::LimitCause;
+
+/// Only material actually retained before an attempt stopped.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AvailableEvidence {
+    pub retained: Option<MaterialRef>,
+}
+
+impl AttemptOutcome {
+    /// A known failure or slice expiry may use the pinned Repeatable contract.
+    /// Failure reasons describe facts; they never carry retry permission.
+    pub fn may_repeat(&self) -> bool {
+        matches!(
+            self,
+            Self::Failed(_)
+                | Self::TimedOut {
+                    cause: LimitCause::ExecutionSlice,
+                    ..
+                }
+        )
+    }
+
+    pub fn output(&self) -> Option<&MaterialRef> {
+        match self {
+            Self::Completed(output) => Some(output),
+            Self::Failed(failure) => Some(&failure.output),
+            Self::TimedOut { evidence, .. } | Self::Cancelled { evidence } => {
+                evidence.retained.as_ref()
+            }
+            Self::Waiting(_) | Self::Interrupted => None,
+        }
+    }
 }
 
 /// The obligation of a pending call that declared a process start.
@@ -272,7 +335,7 @@ pub enum RunEvent {
     AttemptRecorded {
         call_id: ToolCallId,
         attempt: AttemptOrdinal,
-        result: AttemptResult,
+        result: AttemptOutcome,
     },
     /// The Run's schedule selected an open source's seal; the call's
     /// decision follows from it.
@@ -292,7 +355,7 @@ pub enum RunEvent {
         next: AttemptOrdinal,
         backoff_ms: u64,
     },
-    /// K9: a reported retryable failure, its backoff and the registration
+    /// K9: a repeatable attempt failure, its backoff and the registration
     /// of the next attempt, as one schedule entry.
     RetryScheduled {
         call_id: ToolCallId,
@@ -443,7 +506,7 @@ pub struct RunJournalEntry {
 pub struct RunAttemptEntry {
     pub call_id: ToolCallId,
     pub attempt: AttemptOrdinal,
-    pub result: AttemptResult,
+    pub result: AttemptOutcome,
     pub materials: Vec<MaterialEntry>,
 }
 
@@ -542,10 +605,10 @@ struct CallState {
     cancel: super::ExternalCancelPolicy,
     cancel_discharged: bool,
     selection: BeforeSelection,
-    retry: RecordedRetryPolicy,
+    execution: ExecutionPolicy,
     /// The attempt issued and not yet recorded.
     outstanding: Option<AttemptOrdinal>,
-    attempts: BTreeMap<AttemptOrdinal, AttemptResult>,
+    attempts: BTreeMap<AttemptOrdinal, AttemptOutcome>,
     retry_timer: Option<(AttemptOrdinal, AttemptOrdinal, u64)>,
     /// The schedule selected the open source's seal.
     source_sealed: bool,
@@ -903,9 +966,9 @@ impl RunLedger {
                     || !call.attempts.values().any(|result| {
                         matches!(
                             result,
-                            AttemptResult::Deferred { .. }
-                                | AttemptResult::DeferredStart { .. }
-                                | AttemptResult::Pending { .. }
+                            AttemptOutcome::Waiting(CompletionSource::Deferred { .. })
+                                | AttemptOutcome::Waiting(CompletionSource::DeferredStart { .. })
+                                | AttemptOutcome::Waiting(CompletionSource::Pending { .. })
                         )
                     })
                 {
@@ -925,9 +988,9 @@ impl RunLedger {
                     || !call.attempts.values().any(|result| {
                         matches!(
                             result,
-                            AttemptResult::Deferred { .. }
-                                | AttemptResult::DeferredStart { .. }
-                                | AttemptResult::Pending { .. }
+                            AttemptOutcome::Waiting(CompletionSource::Deferred { .. })
+                                | AttemptOutcome::Waiting(CompletionSource::DeferredStart { .. })
+                                | AttemptOutcome::Waiting(CompletionSource::Pending { .. })
                         )
                     })
                 {
@@ -1133,7 +1196,7 @@ impl RunLedger {
                     cancel: member.policy.cancel,
                     cancel_discharged: false,
                     selection,
-                    retry: member.policy.retry.clone(),
+                    execution: member.policy.execution,
                     outstanding: (selection == BeforeSelection::Execute)
                         .then_some(AttemptOrdinal::FIRST),
                     attempts: BTreeMap::new(),
@@ -1169,23 +1232,17 @@ impl RunLedger {
     ) -> Result<(), RunEventRefusal> {
         let stopped = self.aborted || self.lifecycle != RunLifecycle::Live;
         let call = self.call(call_id)?;
-        let within_policy = match &call.retry {
-            RecordedRetryPolicy::Never => false,
-            RecordedRetryPolicy::Reported { max_attempts, .. } => next.get() <= max_attempts.get(),
-        };
+        let within_policy = call.execution.permits_repeat(call.execution, failed.get());
         let eligible = !stopped
             && within_policy
             && call.decision.is_none()
             && call.outstanding.is_none()
             && failed.next() == Some(next)
             && call.attempts.keys().next_back() == Some(&failed)
-            && matches!(
-                call.attempts.get(&failed),
-                Some(AttemptResult::Failed {
-                    retryable: true,
-                    ..
-                })
-            );
+            && call
+                .attempts
+                .get(&failed)
+                .is_some_and(AttemptOutcome::may_repeat);
         if !eligible {
             return Err(RunEventRefusal::RetryNotEligible {
                 call_id: call_id.clone(),
@@ -1273,13 +1330,14 @@ impl RunLedger {
         );
         let deferred = call.decision.is_none()
             && match call.attempts.values().next_back() {
-                Some(AttemptResult::DeferredStart {
+                Some(AttemptOutcome::Waiting(CompletionSource::DeferredStart {
                     start_key: recorded,
                     ..
-                }) => recorded == start_key,
-                Some(AttemptResult::Pending {
-                    start: Some(start), ..
-                }) => &start.start_key == start_key,
+                })) => recorded == start_key,
+                Some(AttemptOutcome::Waiting(CompletionSource::Pending {
+                    start: Some(start),
+                    ..
+                })) => &start.start_key == start_key,
                 _ => false,
             };
         if !(deferred || declaring && call.declarations_issued)
@@ -1414,15 +1472,21 @@ fn decision_follows(
                 ResultSource::Cached => call.selection == BeforeSelection::Cached,
                 ResultSource::Attempt { attempt } => matches!(
                     call.attempts.get(attempt),
-                    Some(AttemptResult::Done { .. } | AttemptResult::Failed { .. })
+                    Some(
+                        AttemptOutcome::Completed(..)
+                            | AttemptOutcome::Failed(_)
+                            | AttemptOutcome::Interrupted
+                            | AttemptOutcome::TimedOut { .. }
+                            | AttemptOutcome::Cancelled { .. }
+                    )
                 ),
                 ResultSource::DeferredCompletion { attempt, .. } => {
                     matches!(
                         call.attempts.get(attempt),
                         Some(
-                            AttemptResult::Deferred { .. }
-                                | AttemptResult::DeferredStart { .. }
-                                | AttemptResult::Pending { .. }
+                            AttemptOutcome::Waiting(CompletionSource::Deferred { .. })
+                                | AttemptOutcome::Waiting(CompletionSource::DeferredStart { .. })
+                                | AttemptOutcome::Waiting(CompletionSource::Pending { .. })
                         )
                     )
                 }

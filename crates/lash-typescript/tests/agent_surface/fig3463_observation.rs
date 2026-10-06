@@ -24,7 +24,6 @@ fn direct_process_handle_await_error_keeps_typed_provenance() {
             if effect.class == lash_sansio::ToolFailureClass::PermissionDenied
                 && effect.code == "approval_denied"
                 && effect.source == lash_sansio::ToolFailureSource::Policy
-                && effect.retry == lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 }
                 && effect.replay_key == "await-effect-key"
     ));
 }

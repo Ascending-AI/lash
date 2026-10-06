@@ -286,7 +286,11 @@ async fn l19_native_inline_cancel_retains_only_the_disjoint_key_durable_sibling(
 struct RetryingTools(Arc<Mutex<Vec<(String, u32)>>>);
 
 fn retry_definition() -> crate::ToolDefinition {
-    definition().with_retry_policy(crate::ToolRetryPolicy::safe(2, 30_000, 30_000))
+    definition().with_execution_policy(crate::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
+        30_000,
+        30_000,
+    ))
 }
 
 #[async_trait::async_trait]
@@ -305,7 +309,7 @@ impl crate::ToolProvider for RetryingTools {
             call.context.attempt_number(),
         ));
         if call.context.attempt_number() == 1 {
-            crate::ToolOutcome::retryable_failure(
+            crate::ToolOutcome::failure_with_delay(
                 crate::ToolFailureClass::External,
                 "retry-first",
                 "reported first-attempt failure",
@@ -916,7 +920,7 @@ impl crate::ToolProvider for BackoffTools {
             }
             return crate::ToolOutcome::ok(json!("B")).into();
         }
-        crate::ToolOutcome::retryable_failure(
+        crate::ToolOutcome::failure_with_delay(
             crate::ToolFailureClass::External,
             "retry-first",
             "reported first-attempt failure",

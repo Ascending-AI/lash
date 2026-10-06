@@ -40,9 +40,9 @@ pub mod state_command;
 pub mod tool_hooks;
 
 pub use admission::{
-    AdmissionRefusal, AdmittedBinding, AdmittedCall, AdmittedRound, CapacityScope,
-    DeclarationRefusal, ExternalCancelPolicy, OutcomeShape, PresentationBinding,
-    RecordedRetryPolicy, RoundAdmission, RuntimeCallPolicy, ToolDeclaration,
+    AdmissionRefusal, AdmittedBinding, AdmittedCall, AdmittedRound, Backoff, BoundedRetry,
+    CapacityScope, DeclarationRefusal, ExecutionPolicy, ExternalCancelPolicy, OutcomeShape,
+    PresentationBinding, RoundAdmission, RuntimeCallPolicy, ToolDeclaration,
 };
 pub use aggregate::{AggregateConsumer, AggregateLeaf, AggregatePlan};
 pub use continuation::{
@@ -59,7 +59,8 @@ pub use refusal::{
 };
 pub use retention::{MaterialBundle, MaterialHolder, MaterialRetentionError, RetainedBundle};
 pub use run_event::{
-    AttemptOrdinal, AttemptResult, CallDecision, PendingStart, RealizationKey, ResultSource,
+    AttemptOrdinal, AttemptOutcome, AvailableEvidence, CallDecision, CompletionSource,
+    KnownFailure, KnownFailureReason, LimitCause, PendingStart, RealizationKey, ResultSource,
     RunAttemptEntry, RunEvent, RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger,
     RunLifecycle, RunRecord, RunTraceFacts, SegmentOrdinal,
 };

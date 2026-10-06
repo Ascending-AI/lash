@@ -355,7 +355,6 @@ try {
             Some(&json!("agent_workbench:approval_denied"))
         );
         assert_eq!(typed_failure.get("source"), Some(&json!("tool")));
-        assert_eq!(typed_failure["retry"]["type"], "never");
     });
 }
 
@@ -599,7 +598,6 @@ try {
             assert_eq!(value["cause"]["class"], "execution");
             assert_eq!(value["cause"]["code"], error.code.namespaced());
             assert_eq!(value["cause"]["source"], "tool");
-            assert_eq!(value["cause"]["retry"]["type"], "never");
         }
         lash::Resolution::Cancelled => {
             // ADR 0096 + the FIG-3271 cancellation contract: a cancelled call

@@ -43,23 +43,6 @@ impl From<RemoteToolArgumentProjectionPolicy> for lash_core::ToolArgumentProject
     }
 }
 
-impl From<RemoteToolRetryPolicy> for lash_core::ToolRetryPolicy {
-    fn from(value: RemoteToolRetryPolicy) -> Self {
-        match value {
-            RemoteToolRetryPolicy::Never => Self::Never,
-            RemoteToolRetryPolicy::Safe {
-                max_attempts,
-                base_delay_ms,
-                max_delay_ms,
-            } => Self::Safe {
-                max_attempts,
-                base_delay_ms,
-                max_delay_ms,
-            },
-        }
-    }
-}
-
 impl TryFrom<&RemoteToolGrant> for ToolDefinition {
     type Error = RemoteProtocolError;
 
@@ -74,7 +57,7 @@ impl TryFrom<&RemoteToolGrant> for ToolDefinition {
             output_contract,
             examples,
             argument_projection,
-            retry_policy,
+            execution_policy,
             bindings,
         } = value;
         let mut definition = ToolDefinition::new(
@@ -92,8 +75,8 @@ impl TryFrom<&RemoteToolGrant> for ToolDefinition {
         if let Some(argument_projection) = argument_projection.clone() {
             definition = definition.with_argument_projection(argument_projection.into());
         }
-        if let Some(retry_policy) = *retry_policy {
-            definition = definition.with_retry_policy(retry_policy.into());
+        if let Some(execution_policy) = *execution_policy {
+            definition = definition.with_execution_policy(execution_policy);
         }
         Ok(definition)
     }

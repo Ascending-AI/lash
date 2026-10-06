@@ -220,7 +220,11 @@ fn probe_definition(name: &str) -> crate::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_tool_binding(crate::ToolBinding::new(["tools"], name))
-    .with_retry_policy(crate::ToolRetryPolicy::safe(3, 1, 1));
+    .with_execution_policy(crate::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+        1,
+        1,
+    ));
     if name == DEFERRED {
         definition.with_declaration(crate::ToolDeclaration::deferring())
     } else {
@@ -314,7 +318,7 @@ impl crate::ToolProvider for IdentityProbes {
             self.witness.gate.passed().await;
         }
         if args.fail_first && identity.attempt == 1 {
-            return crate::ToolOutcome::failure(crate::ToolFailure::safe_retry(
+            return crate::ToolOutcome::failure(crate::ToolFailure::with_suggested_delay(
                 crate::ToolFailureClass::External,
                 "identity_probe_timeout",
                 "the probe's effect happened and its first attempt reported a timeout",

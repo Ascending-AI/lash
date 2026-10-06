@@ -480,6 +480,14 @@
         }
       ]
     },
+    "LimitCause": {
+      "enum": [
+        "execution_slice",
+        "execution_total",
+        "wait_deadline"
+      ],
+      "type": "string"
+    },
     "ModuleArtifactAstRefusal": {
       "description": "Owned validation evidence suitable for a worker response or a durable journal.",
       "oneOf": [
@@ -2159,19 +2167,23 @@
           "type": "string"
         },
         "raw": true,
-        "retry": {
-          "$ref": "#/$defs/RemoteProcessToolRetryStatus"
-        },
         "source": {
           "$ref": "#/$defs/RemoteProcessToolFailureSource"
+        },
+        "suggested_delay_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
         "class",
         "code",
         "message",
-        "source",
-        "retry"
+        "source"
       ],
       "type": "object"
     },
@@ -2184,60 +2196,6 @@
         "cancellation"
       ],
       "type": "string"
-    },
-    "RemoteProcessToolRetryStatus": {
-      "oneOf": [
-        {
-          "properties": {
-            "type": {
-              "const": "never",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "after_ms": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "type": {
-              "const": "safe",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "attempts": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "exhausted",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "attempts"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "RemoteProcessValueSelector": {
       "oneOf": [
@@ -2785,6 +2743,34 @@
     },
     "ToolFailureCause": {
       "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "interrupted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/LimitCause"
+            },
+            "kind": {
+              "const": "execution_limit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "cause"
+          ],
+          "type": "object"
+        },
         {
           "description": "A result check proposed state commands outside the recorded body\nthat owns its decision. No command was reduced or published.",
           "properties": {

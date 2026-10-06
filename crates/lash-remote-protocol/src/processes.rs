@@ -24,8 +24,7 @@ mod outcomes;
 pub use outcomes::{
     RemoteObservedProcessFailure, RemoteProcessAwaitOutput, RemoteProcessTerminal,
     RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput, RemoteProcessToolCancellation,
-    RemoteProcessToolFailure, RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
-    RemoteToolFailureClass,
+    RemoteProcessToolFailure, RemoteProcessToolFailureSource, RemoteToolFailureClass,
 };
 
 mod operations;

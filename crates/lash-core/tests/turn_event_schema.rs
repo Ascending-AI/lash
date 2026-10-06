@@ -438,7 +438,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                             "code": "boom",
                             "message": "kaboom",
                             "source": "tool",
-                            "retry": { "type": "never" },
                         },
                     },
                 },

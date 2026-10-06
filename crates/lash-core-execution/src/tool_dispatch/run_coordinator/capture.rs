@@ -1,5 +1,6 @@
 //! Canonical X capture and declaration admission.
 use super::*;
+use crate::tool_run::{CompletionSource, KnownFailure, KnownFailureReason};
 
 pub(super) async fn capture_attempt(
     owner: MaterialOwner,
@@ -106,11 +107,11 @@ pub(super) async fn capture_attempt(
                             return Ok(crate::tool_run::RunAttemptEntry {
                                 call_id: call.call_id.clone(),
                                 attempt: ordinal,
-                                result: AttemptResult::Pending {
+                                result: AttemptOutcome::Waiting(CompletionSource::Pending {
                                     source,
                                     metadata,
                                     start,
-                                },
+                                }),
                                 materials,
                             });
                         }
@@ -137,11 +138,11 @@ pub(super) async fn capture_attempt(
                         return Ok(crate::tool_run::RunAttemptEntry {
                             call_id: call.call_id.clone(),
                             attempt: ordinal,
-                            result: AttemptResult::DeferredStart {
+                            result: AttemptOutcome::Waiting(CompletionSource::DeferredStart {
                                 source,
                                 start_key: obligation.start_key().clone(),
                                 obligation: reference,
-                            },
+                            }),
                             materials: vec![entry],
                         });
                     }
@@ -199,32 +200,81 @@ pub(super) async fn capture_attempt(
                 },
             }
         }
-        Some(SingletonBodyOutcome::RetryableFailure { output, after_ms }) => {
-            Ok(SingletonCapture::RetryableFailure {
-                output,
-                stream,
-                after_ms,
-            })
+        Some(SingletonBodyOutcome::Failed {
+            output,
+            suggested_delay_ms,
+        }) => Ok(SingletonCapture::Failed {
+            output,
+            stream,
+            suggested_delay_ms,
+        }),
+        Some(SingletonBodyOutcome::Interrupted) => Ok(SingletonCapture::Interrupted),
+        Some(SingletonBodyOutcome::TimedOut { cause, evidence }) => {
+            Ok(SingletonCapture::TimedOut { cause, evidence })
         }
-        Some(SingletonBodyOutcome::Failed { output }) => {
-            Ok(SingletonCapture::Failed { output, stream })
+        Some(SingletonBodyOutcome::Cancelled { evidence }) => {
+            Ok(SingletonCapture::Cancelled { evidence })
         }
     };
     let (result, materials) = match capture {
-        Err(source) => (AttemptResult::Deferred { source }, Vec::new()),
+        Err(source) => (
+            AttemptOutcome::Waiting(CompletionSource::Deferred { source }),
+            Vec::new(),
+        ),
         Ok(capture) => {
-            let done = matches!(
-                capture,
-                SingletonCapture::Done { .. } | SingletonCapture::Isolated { .. }
-            );
+            let empty = match &capture {
+                SingletonCapture::Interrupted => Some(AttemptOutcome::Interrupted),
+                SingletonCapture::TimedOut {
+                    cause,
+                    evidence: None,
+                } => Some(AttemptOutcome::TimedOut {
+                    cause: *cause,
+                    evidence: crate::tool_run::AvailableEvidence::default(),
+                }),
+                SingletonCapture::Cancelled { evidence: None } => Some(AttemptOutcome::Cancelled {
+                    evidence: crate::tool_run::AvailableEvidence::default(),
+                }),
+                _ => None,
+            };
+            if let Some(result) = empty {
+                return Ok(crate::tool_run::RunAttemptEntry {
+                    call_id: call.call_id.clone(),
+                    attempt: ordinal,
+                    result,
+                    materials: started,
+                });
+            }
             let (output, entry) = mint(&owner, MaterialRole::AttemptOutput, encode(&capture)?)?;
-            let result = if done {
-                AttemptResult::Done { output }
-            } else {
-                AttemptResult::Failed {
-                    output,
-                    retryable: matches!(capture, SingletonCapture::RetryableFailure { .. }),
+            let result = match &capture {
+                SingletonCapture::Done { .. } | SingletonCapture::Isolated { .. } => {
+                    AttemptOutcome::Completed(output)
                 }
+                SingletonCapture::Interrupted => AttemptOutcome::Interrupted,
+                SingletonCapture::TimedOut { cause, .. } => AttemptOutcome::TimedOut {
+                    cause: *cause,
+                    evidence: crate::tool_run::AvailableEvidence {
+                        retained: Some(output),
+                    },
+                },
+                SingletonCapture::Cancelled { .. } => AttemptOutcome::Cancelled {
+                    evidence: crate::tool_run::AvailableEvidence {
+                        retained: Some(output),
+                    },
+                },
+                _ => AttemptOutcome::Failed(KnownFailure {
+                    output,
+                    reason: match &capture {
+                        SingletonCapture::Refused { .. } => KnownFailureReason::DeclarationRefused,
+                        SingletonCapture::StartRefused { .. } => KnownFailureReason::StartRefused,
+                        _ => KnownFailureReason::Reported,
+                    },
+                    suggested_delay_ms: match &capture {
+                        SingletonCapture::Failed {
+                            suggested_delay_ms, ..
+                        } => *suggested_delay_ms,
+                        _ => None,
+                    },
+                }),
             };
             started.insert(0, entry);
             (result, started)

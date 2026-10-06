@@ -1,12 +1,11 @@
 use crate::{
-    PreparedToolCall, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeInvocation,
-    ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolOutcome, ToolRetryPolicy,
+    ExecutionPolicy, PreparedToolCall, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
+    RuntimeInvocation, ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass,
 };
-use lash_sansio::core_support::*;
 
 use super::{
     PendingToolDispatchOutcome, ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome,
-    ToolTriggerEffectOutcome, mark_retry_exhausted, retry_after_ms,
+    ToolTriggerEffectOutcome,
 };
 
 /// The invocation a tool call's attempts descend from: its lineage.
@@ -107,13 +106,13 @@ pub async fn coordinate_tool_invocation<'run>(
     context: &ToolDispatchContext<'run>,
     call: PreparedToolCall,
     execution_grant: Option<Box<crate::ToolExecutionGrant>>,
-    retry_policy: ToolRetryPolicy,
+    execution_policy: ExecutionPolicy,
     lineage: ToolAttemptLineage,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
     child_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     mut local_executor: impl FnMut(Option<crate::AwaitEventKey>) -> RuntimeEffectLocalExecutor<'run>,
 ) -> CoordinatedToolInvocation {
-    let max_attempts = retry_policy.max_attempts().max(1);
+    let max_attempts = execution_policy.max_attempts().max(1);
     let mut triggers = Vec::new();
     let mut captures = Vec::new();
     let mut attempts = Vec::new();
@@ -253,11 +252,34 @@ pub async fn coordinate_tool_invocation<'run>(
                 let recorded_call_id = record.call_id.clone();
                 record.call_id = call.call_id.clone();
                 record.provider_call_id = call.provider_call_id.clone();
-                let retry_after = retry_after_ms(
-                    &ToolOutcome::from_output(record.output.clone()),
-                    retry_policy,
-                    attempt - 1,
-                );
+                let current = context
+                    .tools
+                    .resolve_manifest_by_id(&call.tool_id)
+                    .map_or(execution_policy, |manifest| manifest.execution_policy);
+                let retry_after = if execution_policy.permits_repeat(current, attempt) {
+                    match &record.output.outcome {
+                        crate::ToolCallOutcome::Failure(failure)
+                            if !matches!(
+                                failure.cause.as_deref(),
+                                Some(
+                                    crate::ToolFailureCause::Interrupted
+                                        | crate::ToolFailureCause::ExecutionLimit {
+                                            cause: crate::LimitCause::ExecutionTotal
+                                                | crate::LimitCause::WaitDeadline,
+                                        }
+                                )
+                            ) =>
+                        {
+                            Some(
+                                execution_policy
+                                    .delay_ms_for_retry(attempt - 1, failure.suggested_delay_ms),
+                            )
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 attempts.push(crate::trace::trace_tool_attempt(
                     attempt,
                     record.as_ref(),
@@ -287,15 +309,6 @@ pub async fn coordinate_tool_invocation<'run>(
                     };
                 };
                 if attempt >= max_attempts {
-                    let exhausted =
-                        mark_retry_exhausted(ToolOutcome::from_output(record.output), attempt);
-                    record.output = exhausted.into_done_output().unwrap_or_else(|_| {
-                        ToolCallOutput::failure(ToolFailure::runtime(
-                            ToolFailureClass::Internal,
-                            "tool_retry_exhaustion_failed",
-                            "retry exhaustion produced a pending output",
-                        ))
-                    });
                     return CoordinatedToolInvocation {
                         launch: match settle_terminal_attempt(
                             context,

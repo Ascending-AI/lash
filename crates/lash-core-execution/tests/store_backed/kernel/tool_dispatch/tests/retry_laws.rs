@@ -12,7 +12,7 @@ async fn an_attempt_refuses_a_context_from_another_logical_call_before_the_body(
     let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
     let context = retry_dispatch_context(
         crate::support::double_dispatch_ports(&double, &handler),
-        ToolRetryPolicy::Never,
+        ExecutionPolicy::Once,
         Arc::clone(&attempts),
         1,
         false,
@@ -58,7 +58,11 @@ async fn direct_and_prepared_runners_keep_the_call_and_attempt_ordinal() {
     let context = Arc::new(
         retry_dispatch_context(
             crate::support::double_dispatch_ports(&double, &handler),
-            ToolRetryPolicy::safe(3, 0, 0),
+            ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+                0,
+                0,
+            ),
             Arc::clone(&attempts),
             1,
             false,
@@ -168,147 +172,6 @@ async fn direct_and_prepared_runners_keep_the_call_and_attempt_ordinal() {
 }
 
 #[tokio::test]
-async fn default_retry_policy_never_retries_safe_failures() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context(
-            crate::support::double_dispatch_ports(&double, &handler),
-            ToolRetryPolicy::Never,
-            Arc::clone(&attempts),
-            usize::MAX,
-            false,
-            Arc::clone(&observed),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    assert_eq!(observed.lock_recover()[0].0, 1);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context(
-            crate::support::double_dispatch_ports(&double, &handler),
-            ToolRetryPolicy::safe(3, 0, 0),
-            Arc::clone(&attempts),
-            2,
-            false,
-            Arc::clone(&observed),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(outcome.record.output.is_success());
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    assert_eq!(outcome.attempts.len(), 2);
-    assert_eq!(outcome.attempts[0].ordinal, 1);
-    assert!(matches!(
-        outcome.attempts[0].detail,
-        lash_trace::TraceRetryAttemptDetail::Tool {
-            outcome: lash_trace::TraceToolAttemptOutcome::Failed { .. }
-        }
-    ));
-    assert!(
-        matches!(&outcome.attempts[0].detail, lash_trace::TraceRetryAttemptDetail::Tool { outcome: lash_trace::TraceToolAttemptOutcome::Failed { message, .. } } if message.contains("transient"))
-    );
-    assert_eq!(outcome.attempts[0].delay_ms, Some(0));
-    assert_eq!(outcome.attempts[1].ordinal, 2);
-    assert!(matches!(
-        outcome.attempts[1].detail,
-        lash_trace::TraceRetryAttemptDetail::Tool {
-            outcome: lash_trace::TraceToolAttemptOutcome::Completed
-        }
-    ));
-    assert_eq!(outcome.attempts[1].delay_ms, None);
-    let directory = tempfile::tempdir().expect("trace tempdir");
-    let path = directory.path().join("tool-retry.trace.jsonl");
-    let runtime = crate::trace::TraceRuntime::default()
-        .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)));
-    let tracing = crate::RuntimeExecutionTracing::new(
-        runtime.clone(),
-        None,
-        lash_trace::TraceContext::default().for_session("tool-retry-session"),
-    );
-    crate::emit_tool_call_completed(
-        &tracing,
-        &runtime.unreplayed(None),
-        &outcome.record,
-        &outcome.attempts,
-        None,
-        7,
-    );
-    let emitted: lash_trace::TraceRecord =
-        lash_trace::parse_jsonl_records(&std::fs::read_to_string(path).expect("read tool trace"))
-            .expect("parse emitted tool trace")
-            .into_iter()
-            .next()
-            .expect("one emitted tool trace record");
-    let lash_trace::TraceEvent::ToolCallCompleted { attempts, .. } = emitted.event else {
-        panic!("expected emitted tool completion");
-    };
-    assert_eq!(attempts.expect("emitted attempt ladder").len(), 2);
-    assert_eq!(
-        observed
-            .lock_recover()
-            .iter()
-            .map(|(attempt, max, _)| (*attempt, *max))
-            .collect::<Vec<_>>(),
-        vec![(1, 3), (2, 3)]
-    );
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn scalar_after_tool_hook_runs_once_per_retry_attempt_before_exhaustion() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed_attempts = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let observed_retries = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context_with_after_observations(
-            crate::support::double_dispatch_ports(&double, &handler),
-            Arc::clone(&attempts),
-            observed_attempts,
-            Arc::clone(&observed_retries),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    assert_eq!(
-        *observed_retries.lock_recover(),
-        vec![
-            ToolRetryStatus::Safe { after_ms: Some(0) },
-            ToolRetryStatus::Safe { after_ms: Some(0) },
-        ],
-        "the after hook runs for each finalized attempt, before exhaustion is marked"
-    );
-    let ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
-        panic!("expected exhausted failure");
-    };
-    assert_eq!(failure.retry, ToolRetryStatus::Exhausted { attempts: 2 });
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
 async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
@@ -317,7 +180,14 @@ async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
     let mut context = exact_dispatch_context(
         crate::support::double_dispatch_ports(&double, &handler),
         Arc::new(RetryProbeTools {
-            definition: retry_tool("retry_probe", ToolRetryPolicy::safe(3, 25, 25)),
+            definition: retry_tool(
+                "retry_probe",
+                ExecutionPolicy::repeatable(
+                    std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+                    25,
+                    25,
+                ),
+            ),
             attempts: Arc::clone(&attempts),
             successes_after: 2,
             cancel_on_first: false,
@@ -365,7 +235,14 @@ async fn retry_sleep_controller_rejection_aborts_as_controller_error() {
     let mut context = exact_dispatch_context(
         crate::support::double_dispatch_ports(&double, &handler),
         Arc::new(RetryProbeTools {
-            definition: retry_tool("retry_probe", ToolRetryPolicy::safe(3, 25, 25)),
+            definition: retry_tool(
+                "retry_probe",
+                ExecutionPolicy::repeatable(
+                    std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+                    25,
+                    25,
+                ),
+            ),
             attempts: Arc::clone(&attempts),
             successes_after: 2,
             cancel_on_first: false,
@@ -410,7 +287,11 @@ async fn cancellation_stops_retry_immediately() {
     let outcome = dispatch_tool_call(
         &retry_dispatch_context(
             crate::support::double_dispatch_ports(&double, &handler),
-            ToolRetryPolicy::safe(3, 0, 0),
+            ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+                0,
+                0,
+            ),
             Arc::clone(&attempts),
             usize::MAX,
             true,
@@ -438,7 +319,11 @@ async fn retry_context_has_stable_replay_key_across_attempts() {
     let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
     let context = retry_dispatch_context(
         crate::support::double_dispatch_ports(&double, &handler),
-        ToolRetryPolicy::safe(3, 0, 0),
+        ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+            0,
+            0,
+        ),
         Arc::clone(&attempts),
         3,
         false,

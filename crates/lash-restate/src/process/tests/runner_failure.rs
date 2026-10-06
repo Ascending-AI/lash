@@ -69,7 +69,7 @@ fn session_turn_supersession_keeps_its_cause_across_process_plugin_and_host_boun
             RuntimeErrorCode::StoreCommitSuperseded.as_str()
         );
         assert_eq!(failure.message, "superseded child");
-        assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
+        assert_eq!(failure.suggested_delay_ms, None);
     }
     for plugin in [
         PluginError::Runtime(RuntimeError::new(

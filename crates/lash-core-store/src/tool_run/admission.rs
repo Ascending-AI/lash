@@ -5,7 +5,7 @@
 //! prepared request, the author's three-capability declaration, the
 //! executable/preparation/presentation callbacks bound automatically from the
 //! plugin composition (FIG-4854's [`PluginCallbackIdentity`]), the recorded
-//! runtime retry and cancel policy, the before-check record, and the
+//! execution and cancel policy, the before-check record, and the
 //! capacity the round holds. One invalid member admits none. Replay reads
 //! this record; it never consults a changed catalog or selects a new route.
 //!
@@ -16,7 +16,6 @@
 //! external idempotency key.
 
 use std::collections::BTreeSet;
-use std::num::NonZeroU32;
 
 use lash_sansio::ToolCallId;
 pub use lash_sansio::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
@@ -93,21 +92,7 @@ impl AdmittedBinding {
     }
 }
 
-/// The recorded runtime retry policy. A reported failure alone advances
-/// the attempt ordinal; a crash redelivers the same attempt.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "retry", rename_all = "snake_case", deny_unknown_fields)]
-pub enum RecordedRetryPolicy {
-    #[default]
-    Never,
-    /// Retry failures the body reports as retryable, up to `max_attempts`
-    /// attempts in all, with bounded exponential backoff.
-    Reported {
-        max_attempts: NonZeroU32,
-        base_delay_ms: u64,
-        max_delay_ms: u64,
-    },
-}
+pub use lash_sansio::{Backoff, BoundedRetry, ExecutionPolicy};
 
 /// What cancelling an issued call asks of the external work it started.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -124,7 +109,7 @@ pub enum ExternalCancelPolicy {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeCallPolicy {
-    pub retry: RecordedRetryPolicy,
+    pub execution: ExecutionPolicy,
     pub cancel: ExternalCancelPolicy,
 }
 

@@ -124,7 +124,13 @@ impl ProductionToolHandlers<'_> {
     ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
         // An isolated call has no result candidate at D: its process has not
         // launched yet, so no after-check sees it.
-        if matches!(capture, SingletonCapture::Isolated { .. }) {
+        if matches!(
+            capture,
+            SingletonCapture::Isolated { .. }
+                | SingletonCapture::Interrupted
+                | SingletonCapture::TimedOut { evidence: None, .. }
+                | SingletonCapture::Cancelled { evidence: None }
+        ) {
             return Ok(Vec::new());
         }
         let captured: Captured = decode(capture.output().ok_or("final has no output")?)?;
@@ -228,12 +234,30 @@ impl ProductionToolHandlers<'_> {
         capture: &SingletonCapture,
     ) -> Result<String, SingletonPresentationError> {
         let fault = |message| SingletonPresentationError::Fault { message };
-        let captured: Captured = decode(
-            capture
-                .output()
-                .ok_or_else(|| fault("final has no output".to_owned()))?,
-        )
-        .map_err(fault)?;
+        let captured: Captured = match capture.output() {
+            Some(output) => decode(output).map_err(fault)?,
+            None => Captured {
+                original: None,
+                output: observations::terminal_output(
+                    &CallDecision::Final {
+                        source: ResultSource::Attempt {
+                            attempt: AttemptOrdinal::FIRST,
+                        },
+                        declares: false,
+                    },
+                    None,
+                    Some(capture),
+                )
+                .map_err(fault)?,
+                messages: Vec::new(),
+                triggers: Vec::new(),
+                occurrence: crate::plugin::ToolHookOccurrence::Attempt {
+                    attempt: AttemptOrdinal::FIRST,
+                },
+                intents: ToolIntents::default(),
+                start_refusal: None,
+            },
+        };
         let prepared = self
             .prepared
             .lock_recover()

@@ -3116,6 +3116,14 @@
         }
       ]
     },
+    "LimitCause": {
+      "enum": [
+        "execution_slice",
+        "execution_total",
+        "wait_deadline"
+      ],
+      "type": "string"
+    },
     "LlmProfileEffortValidationCategory": {
       "description": "Deterministic taxonomy of effort-validation failures. The serde snake_case\ncodes are a stable contract: downstream consumers match on them.",
       "enum": [
@@ -7272,19 +7280,23 @@
           "type": "string"
         },
         "raw": true,
-        "retry": {
-          "$ref": "#/$defs/RemoteProcessToolRetryStatus"
-        },
         "source": {
           "$ref": "#/$defs/RemoteProcessToolFailureSource"
+        },
+        "suggested_delay_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
         "class",
         "code",
         "message",
-        "source",
-        "retry"
+        "source"
       ],
       "type": "object"
     },
@@ -7297,60 +7309,6 @@
         "cancellation"
       ],
       "type": "string"
-    },
-    "RemoteProcessToolRetryStatus": {
-      "oneOf": [
-        {
-          "properties": {
-            "type": {
-              "const": "never",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "after_ms": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "type": {
-              "const": "safe",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "attempts": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "exhausted",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "attempts"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "RemoteProcessValueSelector": {
       "oneOf": [
@@ -8576,19 +8534,23 @@
           "type": "string"
         },
         "raw": true,
-        "retry": {
-          "$ref": "#/$defs/ToolRetryStatus"
-        },
         "source": {
           "$ref": "#/$defs/ToolFailureSource"
+        },
+        "suggested_delay_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
         "class",
         "code",
         "message",
-        "source",
-        "retry"
+        "source"
       ],
       "type": "object"
     },
@@ -13190,6 +13152,34 @@
     "ToolFailureCause": {
       "oneOf": [
         {
+          "properties": {
+            "kind": {
+              "const": "interrupted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/LimitCause"
+            },
+            "kind": {
+              "const": "execution_limit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
           "description": "A result check proposed state commands outside the recorded body\nthat owns its decision. No command was reduced or published.",
           "properties": {
             "kind": {
@@ -15075,60 +15065,6 @@
         "generation"
       ],
       "type": "object"
-    },
-    "ToolRetryStatus": {
-      "oneOf": [
-        {
-          "properties": {
-            "type": {
-              "const": "never",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "after_ms": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "type": {
-              "const": "safe",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "attempts": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "exhausted",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "attempts"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "ToolView": {
       "additionalProperties": false,

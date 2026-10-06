@@ -5,7 +5,8 @@ use super::tools::{
 };
 use anyhow::{Context, Result, anyhow, ensure};
 use lash_core::ToolCallId;
-use lash_core::tool_run::{AttemptResult, CallDecision, LogicalTerminal, RunEvent, RunLifecycle};
+use lash_core::tool_run::CompletionSource;
+use lash_core::tool_run::{AttemptOutcome, CallDecision, LogicalTerminal, RunEvent, RunLifecycle};
 use lash_remote_protocol::RemoteTurnStatus;
 use lash_upgrade_harness::e2e::case::{
     ArtifactIdentity, CaseSpec, Channel, Leg, Permutation, StoreKind,
@@ -497,7 +498,8 @@ pub async fn live_loser(
             attempts(&parked).iter().any(|entry| &entry.call_id == loser
                 && matches!(
                     entry.result,
-                    AttemptResult::Pending { .. } | AttemptResult::Deferred { .. }
+                    AttemptOutcome::Waiting(CompletionSource::Pending { .. })
+                        | AttemptOutcome::Waiting(CompletionSource::Deferred { .. })
                 )),
             "Deferred loser has no acknowledged descriptor"
         );

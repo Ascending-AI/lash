@@ -21,8 +21,7 @@ use crate::{
     AttachmentId, AttachmentTypeMetadata, BaseRenderCache, ConversationRecord,
     LlmProfileEffortValidationCategory, MediaType, Message, MessageSequence, ModelToolReturn,
     ModelToolReturnPart, ProtocolEvent, SessionAppendNode, ToolCancellation, ToolCatalog,
-    ToolContract, ToolDefinition, ToolFailure, ToolFailureClass, ToolId, ToolManifest,
-    ToolRetryPolicy, ToolValue,
+    ToolContract, ToolDefinition, ToolFailure, ToolFailureClass, ToolId, ToolManifest, ToolValue,
 };
 
 /// BLAKE3 hasher initialized with Lash's mandatory length-prefixed domain tag.
@@ -230,22 +229,6 @@ impl ToolCatalogCoreSupport for ToolCatalog {
 
     fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>> {
         ToolCatalog::model_tool_specs(self)
-    }
-}
-
-pub trait ToolRetryPolicyCoreSupport {
-    fn max_attempts(self) -> u32;
-    fn delay_ms_for_retry(self, retry_index: u32, requested_after_ms: Option<u64>) -> u64;
-}
-
-#[doc(hidden)]
-impl ToolRetryPolicyCoreSupport for ToolRetryPolicy {
-    fn max_attempts(self) -> u32 {
-        ToolRetryPolicy::max_attempts(self)
-    }
-
-    fn delay_ms_for_retry(self, retry_index: u32, requested_after_ms: Option<u64>) -> u64 {
-        ToolRetryPolicy::delay_ms_for_retry(self, retry_index, requested_after_ms)
     }
 }
 

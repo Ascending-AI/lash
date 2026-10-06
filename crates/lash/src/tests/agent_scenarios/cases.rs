@@ -186,7 +186,7 @@ finish(result);"#,
         // runner carried it, every stopped child collapsed onto one sentence.
         assert_eq!(spawn_failure.message, "child boom");
         assert_eq!(spawn_failure.source, lash_core::ToolFailureSource::Tool);
-        assert_eq!(spawn_failure.retry, lash_core::ToolRetryStatus::Never);
+        assert_eq!(spawn_failure.suggested_delay_ms, None);
         assert!(
             !format!("{:#?}", ran_execution.streamed_events)
                 .contains("scripted agent scenario provider exhausted"),

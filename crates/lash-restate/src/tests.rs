@@ -219,7 +219,7 @@ pub(super) async fn decide_round<'a>(
     run: &mut lash_core::tool_dispatch::RunCoordinator<'a>,
     calls: &[lash_core::tool_dispatch::SingletonToolCall],
     handlers: Arc<dyn lash_core::tool_dispatch::SingletonToolHandlers + 'a>,
-    retry: lash_core::tool_run::RecordedRetryPolicy,
+    retry: lash_core::tool_run::ExecutionPolicy,
 ) -> Result<Vec<lash_core::tool_dispatch::DecidedCall>, lash_core::tool_dispatch::SingletonRunError>
 {
     let mut decisions: std::collections::BTreeMap<_, _> = run

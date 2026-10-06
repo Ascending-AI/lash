@@ -69,5 +69,5 @@ pub use preparation::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use retry::execute_once;
+pub(crate) use retry::normalized_outcome;
 pub(crate) use retry::settle_completed_pending_tool_call;
-pub(crate) use retry::{mark_retry_exhausted, normalized_outcome, retry_after_ms};

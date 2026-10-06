@@ -12,7 +12,7 @@ pub(super) struct ExecutionHostToolFailure {
     pub(super) class: lash_sansio::ToolFailureClass,
     pub(super) code: String,
     pub(super) source: lash_sansio::ToolFailureSource,
-    pub(super) retry: lash_sansio::ToolRetryStatus,
+    pub(super) suggested_delay_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) cause: Option<Box<lash_sansio::ToolFailureCause>>,
     pub(super) replay_key: String,

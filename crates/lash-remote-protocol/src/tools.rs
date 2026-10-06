@@ -1,4 +1,4 @@
-//! Tool grants: schemas, call-path bindings, and retry policies.
+//! Tool grants: schemas, call-path bindings, and execution policies.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -25,7 +25,7 @@ pub struct RemoteToolGrant {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub argument_projection: Option<RemoteToolArgumentProjectionPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub retry_policy: Option<RemoteToolRetryPolicy>,
+    pub execution_policy: Option<RemoteExecutionPolicy>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bindings: BTreeMap<String, serde_json::Value>,
 }
@@ -209,14 +209,4 @@ pub enum RemoteToolArgumentProjectionPolicy {
     },
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum RemoteToolRetryPolicy {
-    #[default]
-    Never,
-    Safe {
-        max_attempts: u32,
-        base_delay_ms: u64,
-        max_delay_ms: u64,
-    },
-}
+pub type RemoteExecutionPolicy = lash_sansio::ExecutionPolicy;

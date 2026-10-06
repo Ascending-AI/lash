@@ -176,7 +176,7 @@ fn settled_failed() -> RemoteProcessAwaitOutput {
                 code: "failed".to_string(),
                 message: "failed".to_string(),
                 source: RemoteProcessToolFailureSource::Tool,
-                retry: RemoteProcessToolRetryStatus::Never,
+                suggested_delay_ms: None,
                 raw: None,
             }),
             control: None,

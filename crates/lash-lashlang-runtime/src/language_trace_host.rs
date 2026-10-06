@@ -18,7 +18,7 @@ pub fn trace_failure(
                 message: effect.message,
                 replay_key: effect.replay_key,
                 source: effect.source,
-                retry: effect.retry,
+                suggested_delay_ms: effect.suggested_delay_ms,
             }
         }
         lashlang::LashlangExecutionFailure::Runtime { code, message } => {

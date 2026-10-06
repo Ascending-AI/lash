@@ -7,9 +7,7 @@ use super::{
     error::ExecutionHostToolFailure,
 };
 use crate::LashlangExecutionObservation;
-use lash_sansio::{
-    ToolFailure, ToolFailureClass, ToolFailureSource, ToolRetryStatus, sync::MutexExt,
-};
+use lash_sansio::{ToolFailure, ToolFailureClass, ToolFailureSource, sync::MutexExt};
 use std::future::Future;
 use std::sync::Mutex;
 use thiserror::Error;
@@ -784,7 +782,7 @@ impl ExecutionHostError {
                     class: failure.class.clone(),
                     code: failure.code.clone(),
                     source: failure.source.clone(),
-                    retry: failure.retry.clone(),
+                    suggested_delay_ms: failure.suggested_delay_ms,
                     cause: failure.cause.clone(),
                     replay_key: replay_key.into(),
                 },
@@ -801,7 +799,7 @@ impl ExecutionHostError {
             message: self.message.clone(),
             replay_key: failure.replay_key.clone(),
             source: failure.source.clone(),
-            retry: failure.retry.clone(),
+            suggested_delay_ms: failure.suggested_delay_ms,
             cause: failure.cause.clone(),
         })
     }
@@ -824,8 +822,9 @@ impl ExecutionHostError {
     }
 
     /// Returns the tool retry disposition when this error crossed a tool bridge.
-    pub fn tool_failure_retry(&self) -> Option<&ToolRetryStatus> {
-        self.tool_failure_details().map(|failure| &failure.retry)
+    pub fn tool_failure_suggested_delay_ms(&self) -> Option<&Option<u64>> {
+        self.tool_failure_details()
+            .map(|failure| &failure.suggested_delay_ms)
     }
 }
 

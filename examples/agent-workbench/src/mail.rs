@@ -27,9 +27,9 @@ use std::{
 use crate::MAIL_RECEIVED_SOURCE_TYPE;
 use async_trait::async_trait;
 use lash::tools::{
-    EmitTriggerIntent, ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDeclaration,
-    ToolDefinition, ToolDefinitionBindingExt, ToolIntent, ToolIntentKind, ToolIntents,
-    ToolManifest, ToolOutcome, ToolOutcomeDone, ToolProvider, ToolRetryPolicy,
+    EmitTriggerIntent, ExecutionPolicy, ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract,
+    ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt, ToolIntent, ToolIntentKind,
+    ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone, ToolProvider,
 };
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use serde::{Deserialize, Serialize};
@@ -384,9 +384,13 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
     let description = format!("{summary} Account `{display_name}` (inbox.{slug}).");
     // Deleting a message twice leaves the same mailbox, so a reported failure
     // may retry a delete as safely as a list.
-    let retry_policy = match operation {
-        "list" | "delete" => ToolRetryPolicy::safe(3, 25, 250),
-        _ => ToolRetryPolicy::Never,
+    let execution_policy = match operation {
+        "list" | "delete" => ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+            25,
+            250,
+        ),
+        _ => ExecutionPolicy::Once,
     };
     // A send declares its `mail.received` emission as a trigger intent.
     let declaration = match operation {
@@ -401,7 +405,7 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
         json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
-    .with_retry_policy(retry_policy)
+    .with_execution_policy(execution_policy)
     .with_declaration(declaration)
     .with_tool_binding(ToolBinding::new(["inbox", slug], operation).with_authority_type("Inbox"))
 }

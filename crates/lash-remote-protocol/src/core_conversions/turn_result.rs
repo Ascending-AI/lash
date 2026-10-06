@@ -398,7 +398,7 @@ impl From<lash_core::ToolFailure> for RemoteToolFailure {
             code,
             message,
             source,
-            retry,
+            suggested_delay_ms,
             cause,
             raw,
         } = value;
@@ -407,7 +407,7 @@ impl From<lash_core::ToolFailure> for RemoteToolFailure {
             code,
             message,
             source,
-            retry,
+            suggested_delay_ms,
             cause,
             raw: raw.map(|value| value.to_json_value()),
         }

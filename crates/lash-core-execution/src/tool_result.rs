@@ -370,7 +370,7 @@ impl ToolOutcome {
             code: "tool_error".to_string(),
             message,
             source: crate::ToolFailureSource::Tool,
-            retry: crate::ToolRetryStatus::Never,
+            suggested_delay_ms: None,
             raw: Some(crate::ToolValue::untrusted_json(result)),
         }))
     }
@@ -387,15 +387,15 @@ impl ToolOutcome {
         Self::from_output(crate::ToolCallOutput::failure(failure))
     }
 
-    /// Constructs a retryable structured failure, including an optional backoff hint, for protocol
-    /// and process-engine implementors returning from an authorized tool call.
-    pub fn retryable_failure(
+    /// Constructs a structured failure with an optional delay suggestion.
+    /// The call's admitted execution policy controls whether it repeats.
+    pub fn failure_with_delay(
         class: crate::ToolFailureClass,
         code: impl Into<String>,
         message: impl Into<String>,
         after_ms: Option<u64>,
     ) -> Self {
-        Self::failure(crate::ToolFailure::safe_retry(
+        Self::failure(crate::ToolFailure::with_suggested_delay(
             class, code, message, after_ms,
         ))
     }

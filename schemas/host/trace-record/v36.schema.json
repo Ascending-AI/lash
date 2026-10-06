@@ -801,60 +801,6 @@
       ],
       "type": "string"
     },
-    "ToolRetryStatus": {
-      "oneOf": [
-        {
-          "properties": {
-            "type": {
-              "const": "never",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "after_ms": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "type": {
-              "const": "safe",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "attempts": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "exhausted",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "attempts"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "TraceAgentFrameSwitch": {
       "properties": {
         "frame_key": {
@@ -1935,7 +1881,7 @@
       "description": "The observed cause of a failed language node.",
       "oneOf": [
         {
-          "description": "A dispatched tool effect failed with its recorded classification and\nrecorded source and retry status. `replay_key` is the causing effect's identity.",
+          "description": "A dispatched tool effect failed with its recorded classification and\nrecorded source and delay hint. `replay_key` is the causing effect's identity.",
           "properties": {
             "class": {
               "$ref": "#/$defs/ToolFailureClass"
@@ -1953,11 +1899,16 @@
             "replay_key": {
               "type": "string"
             },
-            "retry": {
-              "$ref": "#/$defs/ToolRetryStatus"
-            },
             "source": {
               "$ref": "#/$defs/ToolFailureSource"
+            },
+            "suggested_delay_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
@@ -1966,8 +1917,7 @@
             "code",
             "message",
             "replay_key",
-            "source",
-            "retry"
+            "source"
           ],
           "type": "object"
         },
@@ -3053,11 +3003,16 @@
               "const": "failed",
               "type": "string"
             },
-            "retry": {
-              "$ref": "#/$defs/ToolRetryStatus"
-            },
             "source": {
               "$ref": "#/$defs/ToolFailureSource"
+            },
+            "suggested_delay_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
@@ -3065,8 +3020,7 @@
             "class",
             "code",
             "message",
-            "source",
-            "retry"
+            "source"
           ],
           "type": "object"
         },

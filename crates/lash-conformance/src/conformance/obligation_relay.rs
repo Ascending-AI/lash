@@ -624,7 +624,7 @@ pub async fn a_stale_claimant_cannot_take_back_a_retaken_claim(fixture: Obligati
 /// A retryable failure hands the claim back due after the capped
 /// exponential backoff; the relay does not touch it before then.
 #[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
-pub async fn a_retryable_failure_backs_off(fixture: ObligationLawFixture) {
+pub async fn a_failure_with_delay_backs_off(fixture: ObligationLawFixture) {
     let ledger = ledger_of(&fixture);
     let clock = TestClock::new(T0);
     let (key, id) = armed_session(&fixture, ledger.as_ref(), "backoff", T0).await;

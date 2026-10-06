@@ -77,7 +77,7 @@ use crate::runtime::process::{
 };
 use crate::store::plugin_writers::PluginRevision;
 use crate::tool_run::{
-    AdmissionRefusal, AdmittedCall, AfterCheckVerdict, AttemptOrdinal, AttemptResult,
+    AdmissionRefusal, AdmittedCall, AfterCheckVerdict, AttemptOrdinal, AttemptOutcome,
     AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CallDecision, CheckRecord,
     DeclarationRefusal, ExternalCancelPolicy, MaterialEntry, MaterialLocation, MaterialOwner,
     MaterialPayload, MaterialRef, MaterialRefusal, MaterialRole, OutcomeShape, RealizationKey,
@@ -344,7 +344,7 @@ async fn prepare_admitted_call(
         MaterialRef,
         std::sync::Arc<crate::plugin::PluginNamespaceState>,
     )>,
-    retry: crate::tool_run::RecordedRetryPolicy,
+    retry: crate::tool_run::ExecutionPolicy,
 ) -> Result<(AdmittedCall, Vec<MaterialEntry>, Option<serde_json::Value>), String> {
     let mut minted = Vec::new();
     let isolation = match live_start {
@@ -409,7 +409,7 @@ async fn prepare_admitted_call(
             binding: call.binding.clone(),
             policy: RuntimeCallPolicy {
                 cancel: call.cancel,
-                retry: handlers.retry_policy(call, retry),
+                execution: handlers.execution_policy(call, retry),
             },
             checks: CheckRecord::reduce(checks),
         },
@@ -922,7 +922,7 @@ impl<'a> RunCoordinator<'a> {
         &mut self,
         calls: &[SingletonToolCall],
         handlers: &dyn SingletonToolHandlers,
-        retry: crate::tool_run::RecordedRetryPolicy,
+        retry: crate::tool_run::ExecutionPolicy,
         aggregate: Option<(&crate::tool_run::AggregatePlan, &dyn crate::Clock)>,
         capacity: crate::tool_run::CapacityScope,
     ) -> Result<Vec<(AdmittedCall, SingletonPreparedRequest)>, SingletonRunError> {
@@ -1049,8 +1049,7 @@ impl<'a> RunCoordinator<'a> {
                     None
                 };
                 let (member, minted, observation) =
-                    prepare_admitted_call(&owner, call, handlers, start, snapshot, retry.clone())
-                        .await?;
+                    prepare_admitted_call(&owner, call, handlers, start, snapshot, retry).await?;
                 if let Some(observation) = observation {
                     projections.insert(call.call_id.clone(), observation);
                 }

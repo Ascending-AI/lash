@@ -1494,7 +1494,6 @@ mod cancellation_identity_tests {
                             "code": "provider_failure",
                             "message": "provider failed",
                             "source": "plugin",
-                            "retry": {"type": "never"},
                             "raw": malformed.clone()
                         }
                     }

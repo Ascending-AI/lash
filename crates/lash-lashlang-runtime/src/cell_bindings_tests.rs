@@ -116,18 +116,18 @@ fn a_removed_or_changed_tool_is_drift_and_links_as_recorded() {
         .collect::<Vec<_>>();
     assert_eq!(linked_a.len(), 1, "the recorded tool replaces the live one");
     assert_eq!(
-        linked_a[0].manifest.retry_policy,
-        lash_core::ToolRetryPolicy::Never,
+        linked_a[0].manifest.execution_policy,
+        lash_core::ExecutionPolicy::Once,
         "the recorded definition is linked"
     );
 }
 
 fn retried(mut definition: lash_core::ToolDefinition) -> lash_core::ToolDefinition {
-    definition.manifest.retry_policy = lash_core::ToolRetryPolicy::Safe {
-        max_attempts: 3,
-        base_delay_ms: 10,
-        max_delay_ms: 100,
-    };
+    definition.manifest.execution_policy = lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+        10,
+        100,
+    );
     definition
 }
 

@@ -91,14 +91,13 @@ pub mod processes {
         RemoteProcessStarted, RemoteProcessStatus, RemoteProcessStatusFilter,
         RemoteProcessTerminal, RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
         RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput, RemoteProcessToolCancellation,
-        RemoteProcessToolFailure, RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
-        RemoteProcessValueSelector, RemoteProcessWaitKind, RemoteProcessWaitState,
-        RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem, RemoteProcessWorkSnapshot,
-        RemoteRecordedRender, RemoteRetiredProcessStatus, RemoteRuntimeAttribution,
-        RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeReplayAttribution,
-        RemoteRuntimeSubject, RemoteScopeGrant, RemoteScopeId, RemoteSessionScope,
-        RemoteSessionTurnOutcome, RemoteStartLifetime, RemoteTerminalProcessStatus,
-        RemoteToolFailureClass, RemoteTurnBudget,
+        RemoteProcessToolFailure, RemoteProcessToolFailureSource, RemoteProcessValueSelector,
+        RemoteProcessWaitKind, RemoteProcessWaitState, RemoteProcessWake, RemoteProcessWakeSpec,
+        RemoteProcessWorkItem, RemoteProcessWorkSnapshot, RemoteRecordedRender,
+        RemoteRetiredProcessStatus, RemoteRuntimeAttribution, RemoteRuntimeInvocation,
+        RemoteRuntimeReplay, RemoteRuntimeReplayAttribution, RemoteRuntimeSubject,
+        RemoteScopeGrant, RemoteScopeId, RemoteSessionScope, RemoteSessionTurnOutcome,
+        RemoteStartLifetime, RemoteTerminalProcessStatus, RemoteToolFailureClass, RemoteTurnBudget,
     };
 }
 
@@ -108,8 +107,8 @@ pub mod tools {
         RemoteToolRegistry, assert_remote_tool_registry_reopenable,
     };
     pub use lash_remote_protocol::tools::{
-        RemoteToolArgumentProjectionPolicy, RemoteToolGrant, RemoteToolOutputContract,
-        RemoteToolRetryPolicy,
+        RemoteExecutionPolicy, RemoteToolArgumentProjectionPolicy, RemoteToolGrant,
+        RemoteToolOutputContract,
     };
 }
 

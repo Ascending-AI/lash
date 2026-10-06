@@ -95,6 +95,17 @@ pub(super) fn terminal_output(
     capture: Option<&SingletonCapture>,
 ) -> Result<ToolCallOutput, String> {
     if matches!(decision, CallDecision::Final { .. }) {
+        match capture {
+            Some(SingletonCapture::Interrupted) => return Ok(ToolCallOutput::failure(crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Execution, "tool_interrupted",
+                "tool was interrupted by a runtime restart; it may or may not have taken effect, and may still be running.",
+            ).with_cause(crate::ToolFailureCause::Interrupted))),
+            Some(SingletonCapture::TimedOut { cause, evidence: None }) => return Ok(ToolCallOutput::failure(crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Timeout, "tool_timed_out", format!("tool exceeded its {cause:?} limit; it may have partly run, and may still be running."),
+            ).with_cause(crate::ToolFailureCause::ExecutionLimit { cause: *cause }))),
+            Some(SingletonCapture::Cancelled { evidence: None }) => return Ok(ToolCallOutput::cancelled(crate::ToolCancellation::runtime("tool cancelled"))),
+            _ => {}
+        }
         return capture
             .and_then(SingletonCapture::output)
             .ok_or_else(|| "the final has no canonical output".to_owned())

@@ -22,6 +22,7 @@ impl Probe {
             parallel_completed: Default::default(),
             parallel_wake: Default::default(),
             retry: Default::default(),
+            current_policy: None,
             gate: None,
             unavailable: None,
             gate_open: AtomicBool::new(false),
@@ -84,6 +85,14 @@ impl Probe {
 impl SingletonToolHandlers for Probe {
     fn tool_material_store(&self) -> Option<&dyn lash_core::store::ToolMaterialStore> {
         self.materials.as_deref()
+    }
+
+    fn current_execution_policy(
+        &self,
+        _call: &SingletonToolCall,
+        admitted: lash_core::ExecutionPolicy,
+    ) -> lash_core::ExecutionPolicy {
+        self.current_policy.unwrap_or(admitted)
     }
 
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
@@ -220,9 +229,9 @@ impl SingletonToolHandlers for Probe {
                 )),
             },
             Kind::Retry { after_ms } if attempt.attempt == AttemptOrdinal::FIRST => {
-                SingletonBodyOutcome::RetryableFailure {
+                SingletonBodyOutcome::Failed {
                     output: format!("failed {call_id}@1"),
-                    after_ms: Some(*after_ms),
+                    suggested_delay_ms: Some(*after_ms),
                 }
             }
             Kind::Stateful { key } => {
@@ -247,8 +256,15 @@ impl SingletonToolHandlers for Probe {
                     start: None,
                 }
             }
+            Kind::Interrupted => SingletonBodyOutcome::Interrupted,
+            Kind::TimedOut(cause) => SingletonBodyOutcome::TimedOut {
+                cause: *cause,
+                evidence: None,
+            },
+            Kind::Cancelled => SingletonBodyOutcome::Cancelled { evidence: None },
             Kind::Failed => SingletonBodyOutcome::Failed {
                 output: format!("rejected {call_id}"),
+                suggested_delay_ms: None,
             },
             Kind::Cached => panic!("a cached admission executes no body"),
             Kind::IntentFree | Kind::Retry { .. } => SingletonBodyOutcome::Done {

@@ -398,43 +398,6 @@ fn process_start_requests_round_trip_core_values() {
 }
 
 #[test]
-fn process_await_wire_round_trip_preserves_failure_source_and_retry() {
-    let failure = lash_core::ToolFailure {
-        cause: None,
-        class: lash_core::ToolFailureClass::External,
-        code: "plugin_busy".to_string(),
-        message: "plugin asked the host to retry".to_string(),
-        source: lash_core::ToolFailureSource::Plugin,
-        retry: lash_core::ToolRetryStatus::Safe { after_ms: Some(41) },
-        raw: Some(lash_core::ToolValue::untrusted_json(
-            serde_json::json!({ "status": 503 }),
-        )),
-    };
-    let core = lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(
-        failure,
-    ));
-
-    let remote = RemoteProcessAwaitOutput::try_from(core.clone()).expect("remote await output");
-    assert!(matches!(
-        &remote,
-        RemoteProcessAwaitOutput::Settled {
-            output: RemoteProcessToolCallOutput {
-                outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
-                    cause: None,
-                    source: RemoteProcessToolFailureSource::Plugin,
-                    retry: RemoteProcessToolRetryStatus::Safe { after_ms: Some(41) },
-                    ..
-                }),
-                ..
-            }
-        }
-    ));
-
-    let round_trip = lash_core::ProcessAwaitOutput::try_from(remote).expect("core await output");
-    assert_eq!(round_trip, core);
-}
-
-#[test]
 fn process_await_output_keeps_code_value_and_display_projection_distinct() {
     let structured = serde_json::json!({"channels":[{"name":"engineering"}]});
     let envelope = serde_json::json!({"structuredContent":structured,"content":[]});
@@ -1165,7 +1128,7 @@ fn demo_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant {
         output_contract: RemoteToolOutputContract::Static,
         examples: Vec::new(),
         argument_projection: None,
-        retry_policy: None,
+        execution_policy: None,
         bindings: BTreeMap::from([(
             EXAMPLE_BINDING_KEY.to_string(),
             serde_json::json!({

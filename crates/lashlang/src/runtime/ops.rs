@@ -1228,28 +1228,6 @@ pub(crate) fn tool_failure_fields(error: &ExecutionHostError) -> Option<Record> 
         lash_sansio::ToolFailureSource::Policy => "policy",
         lash_sansio::ToolFailureSource::Cancellation => "cancellation",
     };
-    let retry = match error.tool_failure_retry()? {
-        lash_sansio::ToolRetryStatus::Never => {
-            let mut retry = record_with_capacity(1);
-            retry.insert_constant("type", Value::String("never".into()));
-            retry
-        }
-        lash_sansio::ToolRetryStatus::Safe { after_ms } => {
-            let mut retry = record_with_capacity(2);
-            retry.insert_constant("type", Value::String("safe".into()));
-            if let Some(after_ms) = after_ms {
-                retry.insert_constant("after_ms", Value::Number(*after_ms as f64));
-            }
-            retry
-        }
-        lash_sansio::ToolRetryStatus::Exhausted { attempts } => {
-            let mut retry = record_with_capacity(2);
-            retry.insert_constant("type", Value::String("exhausted".into()));
-            retry.insert_constant("attempts", Value::Number((*attempts).into()));
-            retry
-        }
-    };
-
     let mut fields = record_with_capacity(4);
     fields.insert(
         "code".to_string(),
@@ -1257,7 +1235,9 @@ pub(crate) fn tool_failure_fields(error: &ExecutionHostError) -> Option<Record> 
     );
     fields.insert_constant("class", Value::String(class.into()));
     fields.insert_constant("source", Value::String(source.into()));
-    fields.insert_constant("retry", Value::Record(Arc::new(retry)));
+    if let Some(delay) = error.tool_failure_suggested_delay_ms()? {
+        fields.insert_constant("suggested_delay_ms", Value::Number(*delay as f64));
+    }
     Some(fields)
 }
 

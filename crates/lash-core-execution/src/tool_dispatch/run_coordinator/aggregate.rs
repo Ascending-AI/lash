@@ -1,5 +1,6 @@
 //! Aggregate selection and logical ownership over K3's recorded schedule.
 
+use crate::tool_run::KnownFailure;
 use std::collections::BTreeSet;
 
 use super::*;
@@ -125,7 +126,7 @@ impl<'a> RunCoordinator<'a> {
         calls: &[SingletonToolCall],
         capacity: crate::tool_run::CapacityScope,
         handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
-        retry: crate::tool_run::RecordedRetryPolicy,
+        retry: crate::tool_run::ExecutionPolicy,
         clock: &dyn crate::Clock,
     ) -> Result<(), SingletonRunError> {
         plan.validate()?;
@@ -567,11 +568,41 @@ impl<'a> RunCoordinator<'a> {
             })
     }
 
-    fn call_capture(
+    pub(super) fn call_capture(
         &self,
         call_id: &ToolCallId,
         source: &ResultSource,
     ) -> Result<SingletonCapture, SingletonRunError> {
+        if let ResultSource::Attempt { attempt } = source {
+            let outcome = self
+                .journal
+                .records
+                .iter()
+                .flat_map(|record| &record.events)
+                .find_map(|event| match event {
+                    RunEvent::AttemptRecorded {
+                        call_id: id,
+                        attempt: ordinal,
+                        result,
+                    } if id == call_id && ordinal == attempt => Some(result),
+                    _ => None,
+                });
+            match outcome {
+                Some(AttemptOutcome::Interrupted) => return Ok(SingletonCapture::Interrupted),
+                Some(AttemptOutcome::TimedOut { cause, evidence })
+                    if evidence.retained.is_none() =>
+                {
+                    return Ok(SingletonCapture::TimedOut {
+                        cause: *cause,
+                        evidence: None,
+                    });
+                }
+                Some(AttemptOutcome::Cancelled { evidence }) if evidence.retained.is_none() => {
+                    return Ok(SingletonCapture::Cancelled { evidence: None });
+                }
+                _ => {}
+            }
+        }
         let reference = self
             .journal
             .records
@@ -584,7 +615,21 @@ impl<'a> RunCoordinator<'a> {
                         call_id: id,
                         attempt: ordinal,
                         result:
-                            AttemptResult::Done { output } | AttemptResult::Failed { output, .. },
+                            AttemptOutcome::Completed(output)
+                            | AttemptOutcome::Failed(KnownFailure { output, .. })
+                            | AttemptOutcome::TimedOut {
+                                evidence:
+                                    crate::tool_run::AvailableEvidence {
+                                        retained: Some(output),
+                                    },
+                                ..
+                            }
+                            | AttemptOutcome::Cancelled {
+                                evidence:
+                                    crate::tool_run::AvailableEvidence {
+                                        retained: Some(output),
+                                    },
+                            },
                     },
                 ) if id == call_id && ordinal == attempt => Some(output),
                 (ResultSource::Cached, RunEvent::Admitted { round }) => round

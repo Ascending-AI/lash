@@ -614,7 +614,7 @@ pub(crate) fn trace_tool_attempt(
             code: failure.code.clone(),
             message: failure.message.clone(),
             source: failure.source.clone(),
-            retry: failure.retry.clone(),
+            suggested_delay_ms: failure.suggested_delay_ms,
         },
         crate::ToolCallOutcome::Cancelled(cancellation) => TraceToolAttemptOutcome::Cancelled {
             message: cancellation.message.clone(),

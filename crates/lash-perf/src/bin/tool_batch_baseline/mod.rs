@@ -131,7 +131,11 @@ impl Tool {
                 .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["tools"], "cost"));
         }
         if matches!(self.branch, Branch::Retry) {
-            definition.manifest.retry_policy = lash_core::ToolRetryPolicy::safe(2, 1, 1);
+            definition.manifest.execution_policy = lash_core::ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
+                1,
+                1,
+            );
         }
         if matches!(self.branch, Branch::Deferred | Branch::RaceLoser) {
             definition = definition.with_declaration(lash_core::ToolDeclaration::deferring());
@@ -167,7 +171,7 @@ impl lash_core::ToolProvider for Tool {
         self.reached.add_permits(1);
         match self.branch {
             Branch::Retry if call.context.attempt_number() == 1 => {
-                return lash_core::ToolOutcome::retryable_failure(
+                return lash_core::ToolOutcome::failure_with_delay(
                     lash_core::ToolFailureClass::External,
                     "controlled_retry",
                     "controlled reported retry",

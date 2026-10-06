@@ -375,15 +375,14 @@ async fn s34(leg: lash_upgrade_harness::e2e::case::Leg) -> Result<()> {
                 && actual.iter().any(|attempt| attempt.attempt.get() == 1
                     && matches!(
                         attempt.result,
-                        lash_core_store::tool_run::AttemptResult::Failed {
-                            retryable: true,
+                        lash_core_store::tool_run::AttemptOutcome::Failed(lash_core_store::tool_run::KnownFailure {
                             ..
-                        }
+                        })
                     ))
                 && actual.iter().any(|attempt| attempt.attempt.get() == 2
                     && matches!(
                         attempt.result,
-                        lash_core_store::tool_run::AttemptResult::Done { .. }
+                        lash_core_store::tool_run::AttemptOutcome::Completed(..)
                     )),
             "reported retry did not produce one failure and one successful body receipt"
         );

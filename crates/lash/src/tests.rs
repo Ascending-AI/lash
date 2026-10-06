@@ -410,7 +410,7 @@ impl ToolProvider for RetryingDirectTools {
             Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
         };
         if call.context.attempt_number() == 1 {
-            return lash_core::ToolOutcome::failure(lash_core::ToolFailure::safe_retry(
+            return lash_core::ToolOutcome::failure(lash_core::ToolFailure::with_suggested_delay(
                 lash_core::ToolFailureClass::Execution,
                 "retrying_direct_first_attempt",
                 "retry the complete atomic attempt",
@@ -437,7 +437,11 @@ fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
             serde_json::json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
-        .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 0, 0)),
+        .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
+            0,
+            0,
+        )),
         "retrying_direct",
     )
 }

@@ -64,7 +64,7 @@ use crate::naming;
 use crate::service_lifecycle::build_http_headers;
 use crate::service_lifecycle::equal_jitter;
 #[cfg(test)]
-use lash_core::{ToolFailureClass, ToolFailureSource, ToolRetryStatus};
+use lash_core::{ToolFailureClass, ToolFailureSource};
 use lifecycle_actor::{LifecycleActor, LifecycleCommand};
 
 /// Scheduling margin added to each entry's configured shutdown durations.

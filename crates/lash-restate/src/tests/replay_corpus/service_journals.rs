@@ -347,7 +347,11 @@ impl lash::plugins::SessionPlugin for CorpusToolsPlugin {
             }
             if name == "retry_once" {
                 definition =
-                    definition.with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 10, 10));
+                    definition.with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+                        std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
+                        10,
+                        10,
+                    ));
             }
             Ok(definition)
         };
@@ -382,7 +386,7 @@ impl lash::tools::StaticToolExecute for CorpusToolsPlugin {
                 }
                 lash_core::ToolOutcome::ok(json!({"result": "counted"})).into()
             }
-            "retry_once" if delivery.attempt == 1 => lash_core::ToolOutcome::retryable_failure(
+            "retry_once" if delivery.attempt == 1 => lash_core::ToolOutcome::failure_with_delay(
                 lash_core::ToolFailureClass::External,
                 "replay-corpus-retry",
                 "first attempt reports a retryable failure",

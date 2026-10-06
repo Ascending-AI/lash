@@ -10,7 +10,7 @@ use crate::runtime::ScopedEffectController;
 use crate::support::prelude::*;
 use crate::tool_dispatch::*;
 use crate::{
-    ToolCall, ToolCallOutcome, ToolOutcome, ToolProvider, ToolRetryPolicy, ToolRetryStatus,
+    ExecutionPolicy, ToolCall, ToolCallOutcome, ToolOutcome, ToolProvider,
     coordinate_prepared_tool_call_launch_with_execution_context,
     dispatch_tool_call_with_execution_context,
 };
@@ -382,7 +382,7 @@ impl ToolProvider for RetryingIntentTools {
         )]);
         if attempt == 1 {
             crate::ToolAttemptOutcome::done(
-                crate::ToolOutcomeDone::failure(crate::ToolFailure::safe_retry(
+                crate::ToolOutcomeDone::failure(crate::ToolFailure::with_suggested_delay(
                     crate::ToolFailureClass::External,
                     "retry_once",
                     "literal first attempt failure",
@@ -594,12 +594,14 @@ impl ToolProvider for PendingProbeTools {
                 call.context.completion_key().expect("completion key");
                 ToolOutcome::pending(crate::PendingCompletion::new())
             }
-            PendingProbeMode::FailureThenPending if attempt == 1 => ToolOutcome::retryable_failure(
-                crate::ToolFailureClass::External,
-                "transient",
-                "transient before pending",
-                Some(0),
-            ),
+            PendingProbeMode::FailureThenPending if attempt == 1 => {
+                ToolOutcome::failure_with_delay(
+                    crate::ToolFailureClass::External,
+                    "transient",
+                    "transient before pending",
+                    Some(0),
+                )
+            }
             PendingProbeMode::FailureThenPending => {
                 call.context.completion_key().expect("completion key");
                 ToolOutcome::pending(crate::PendingCompletion::new())
@@ -942,7 +944,7 @@ impl ToolProvider for RetryProbeTools {
         if attempt_index >= self.successes_after {
             return ToolOutcome::ok(json!({ "attempt": attempt_index })).into();
         }
-        ToolOutcome::retryable_failure(
+        ToolOutcome::failure_with_delay(
             crate::ToolFailureClass::External,
             "transient",
             "transient failure",
@@ -1074,13 +1076,13 @@ async fn exact_dispatch_context_with_plugins<'h>(
     }
 }
 
-fn retry_tool(name: &str, retry_policy: ToolRetryPolicy) -> crate::ToolDefinition {
-    named_beta_tool(name).with_retry_policy(retry_policy)
+fn retry_tool(name: &str, execution_policy: ExecutionPolicy) -> crate::ToolDefinition {
+    named_beta_tool(name).with_execution_policy(execution_policy)
 }
 
 async fn retry_dispatch_context<'h>(
     ports: crate::support::DispatchPorts<'h>,
-    retry_policy: ToolRetryPolicy,
+    execution_policy: ExecutionPolicy,
     attempts: Arc<AtomicUsize>,
     successes_after: usize,
     cancel_on_first: bool,
@@ -1089,7 +1091,7 @@ async fn retry_dispatch_context<'h>(
     exact_dispatch_context(
         ports,
         Arc::new(RetryProbeTools {
-            definition: retry_tool("retry_probe", retry_policy),
+            definition: retry_tool("retry_probe", execution_policy),
             attempts,
             successes_after,
             cancel_on_first,
@@ -1100,45 +1102,11 @@ async fn retry_dispatch_context<'h>(
     .await
 }
 
-async fn retry_dispatch_context_with_after_observations<'h>(
-    ports: crate::support::DispatchPorts<'h>,
-    attempts: Arc<AtomicUsize>,
-    observed_attempts: SharedAttemptObservations,
-    observed_retries: Arc<std::sync::Mutex<Vec<ToolRetryStatus>>>,
-) -> ToolDispatchContext<'h> {
-    let provider: Arc<dyn ToolProvider> = Arc::new(RetryProbeTools {
-        definition: retry_tool("retry_probe", ToolRetryPolicy::safe(2, 0, 0)),
-        attempts,
-        successes_after: usize::MAX,
-        cancel_on_first: false,
-        observed_attempts,
-        retry_after_ms: Some(0),
-    });
-    let hook: crate::plugin::ToolResultCheckHook = Arc::new(move |input| {
-        let observed_retries = Arc::clone(&observed_retries);
-        Box::pin(async move {
-            if let ToolCallOutcome::Failure(failure) = &input.final_result.outcome {
-                observed_retries.lock_recover().push(failure.retry.clone());
-            }
-            Ok(crate::plugin::AfterToolContributions::default())
-        })
-    });
-    let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        lash_core_execution::plugin::PluginDeclaration::initial("retry_probe_tools"),
-        crate::PluginSpec::new()
-            .with_tool_provider(provider)
-            .with_tool_result_check(lash_core_execution::hook_key!("observe-retry"), hook),
-    ))])
-    .build_session(PluginSessionRequest::creation("root", Default::default()))
-    .expect("plugin session");
-    exact_dispatch_context_with_plugins(ports, plugins).await
-}
-
 /// The probe declares it may defer: every mode but `MissingKey` parks under
 /// its declaration.
-fn pending_probe_tool(retry_policy: ToolRetryPolicy) -> crate::ToolDefinition {
+fn pending_probe_tool(execution_policy: ExecutionPolicy) -> crate::ToolDefinition {
     named_beta_tool("pending_probe")
-        .with_retry_policy(retry_policy)
+        .with_execution_policy(execution_policy)
         .with_declaration(crate::ToolDeclaration::deferring())
 }
 
@@ -1147,16 +1115,16 @@ async fn pending_dispatch_context<'h>(
     mode: PendingProbeMode,
     attempts: Arc<AtomicUsize>,
     after_calls: Option<Arc<AtomicUsize>>,
-    retry_policy: ToolRetryPolicy,
+    execution_policy: ExecutionPolicy,
 ) -> ToolDispatchContext<'h> {
     let definition = match mode {
         // This mode parks under no deferral declaration.
         PendingProbeMode::MissingKey => {
-            named_beta_tool("pending_probe").with_retry_policy(retry_policy)
+            named_beta_tool("pending_probe").with_execution_policy(execution_policy)
         }
         PendingProbeMode::PendingWithKey
         | PendingProbeMode::FailureThenPending
-        | PendingProbeMode::AnnouncingWithoutProcess => pending_probe_tool(retry_policy),
+        | PendingProbeMode::AnnouncingWithoutProcess => pending_probe_tool(execution_policy),
     };
     let provider: Arc<dyn ToolProvider> = Arc::new(PendingProbeTools {
         definition,
@@ -1244,7 +1212,7 @@ async fn an_undeclared_deferral_is_refused_typed_before_it_parks() {
         PendingProbeMode::MissingKey,
         Arc::clone(&attempts),
         None,
-        ToolRetryPolicy::Never,
+        ExecutionPolicy::Once,
     )
     .await;
     let prepared = pending_prepared_call();
@@ -1285,7 +1253,11 @@ async fn retry_ladder_survives_a_later_pending_completion() {
         PendingProbeMode::FailureThenPending,
         Arc::clone(&attempts),
         None,
-        ToolRetryPolicy::safe(3, 0, 0),
+        ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+            0,
+            0,
+        ),
     )
     .await;
     let prepared = pending_prepared_call();

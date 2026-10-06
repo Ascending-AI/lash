@@ -194,7 +194,7 @@ impl ToolProvider for LedgeredEffectTools {
         if self.transient_failures > 0
             && self.executions.load(Ordering::SeqCst) <= self.transient_failures
         {
-            return ToolOutcome::retryable_failure(
+            return ToolOutcome::failure_with_delay(
                 crate::ToolFailureClass::External,
                 "transient",
                 "the acknowledgement was lost after the write",
@@ -207,7 +207,7 @@ impl ToolProvider for LedgeredEffectTools {
     }
 }
 
-fn ledger_tool(name: &str, retry_policy: ToolRetryPolicy) -> crate::ToolDefinition {
+fn ledger_tool(name: &str, execution_policy: ExecutionPolicy) -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{name}"),
         name,
@@ -223,7 +223,7 @@ fn ledger_tool(name: &str, retry_policy: ToolRetryPolicy) -> crate::ToolDefiniti
         json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
-    .with_retry_policy(retry_policy)
+    .with_execution_policy(execution_policy)
 }
 
 /// The hook a ledger-owning host installs: records the observation — call id
@@ -289,7 +289,7 @@ async fn host_effect_ledger_hook_call_id_matches_the_executed_call_record() {
     let world = Arc::new(ExternalWorld::default());
     let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
     let provider: Arc<dyn ToolProvider> = Arc::new(LedgeredEffectTools {
-        definition: ledger_tool("effect", ToolRetryPolicy::Never),
+        definition: ledger_tool("effect", ExecutionPolicy::Once),
         ledger: Arc::clone(&ledger),
         world: Arc::clone(&world),
         executions: Arc::new(AtomicUsize::new(0)),
@@ -333,7 +333,7 @@ async fn host_effect_ledger_replay_reexecutes_neither_effect_nor_hook() {
     let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
     let executions = Arc::new(AtomicUsize::new(0));
     let provider: Arc<dyn ToolProvider> = Arc::new(LedgeredEffectTools {
-        definition: ledger_tool("effect", ToolRetryPolicy::Never),
+        definition: ledger_tool("effect", ExecutionPolicy::Once),
         ledger: Arc::clone(&ledger),
         world: Arc::clone(&world),
         executions: Arc::clone(&executions),
@@ -385,7 +385,7 @@ async fn host_effect_ledger_observes_a_settled_pending_call_under_its_call_id() 
     let ledger = Arc::new(HostEffectLedger::default());
     let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
     let provider: Arc<dyn ToolProvider> = Arc::new(PendingProbeTools {
-        definition: pending_probe_tool(ToolRetryPolicy::Never),
+        definition: pending_probe_tool(ExecutionPolicy::Once),
         attempts: Arc::new(AtomicUsize::new(0)),
         mode: PendingProbeMode::PendingWithKey,
     });

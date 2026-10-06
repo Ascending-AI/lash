@@ -296,7 +296,7 @@ impl lash_core::ToolProvider for RecoveryEchoTool {
                 code: "approval_denied".to_owned(),
                 message: "approval was denied".to_owned(),
                 source: lash_core::ToolFailureSource::Policy,
-                retry: lash_core::ToolRetryStatus::Exhausted { attempts: 3 },
+                suggested_delay_ms: None,
                 raw: None,
             })
             .into();
@@ -626,11 +626,11 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
                             class,
                             code,
                             source,
-                            retry,
+                            suggested_delay_ms,
                             ..
                         },
                     ..
-                } => Some((replay_key, class, code, source, retry)),
+                } => Some((replay_key, class, code, source, suggested_delay_ms)),
                 _ => None,
             })
             .unwrap_or_else(|| {
@@ -653,9 +653,6 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
         assert_eq!(*failure.1, lash_core::ToolFailureClass::PermissionDenied);
         assert_eq!(failure.2, "approval_denied");
         assert_eq!(*failure.3, lash_core::ToolFailureSource::Policy);
-        assert_eq!(
-            *failure.4,
-            lash_core::ToolRetryStatus::Exhausted { attempts: 3 }
-        );
+        assert_eq!(*failure.4, None);
     }
 }

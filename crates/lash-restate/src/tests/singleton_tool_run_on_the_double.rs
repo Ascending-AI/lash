@@ -9,6 +9,7 @@
 //! the same handler, which serves every durable record and runs only the step
 //! that never became durable.
 
+use lash_core::tool_run::{CompletionSource, KnownFailure, KnownFailureReason};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -81,7 +82,7 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
                 } else {
                     use lash_core::tool_dispatch::RunCoordinator;
                     use lash_core::tool_run::{
-                        RecordedRetryPolicy, SourceAuthority, SourceDescriptor, SourceSeal,
+                        ExecutionPolicy, SourceAuthority, SourceDescriptor, SourceSeal,
                     };
                     call.declaration = ToolDeclaration::deferring();
                     let mut run = RunCoordinator::open(
@@ -97,7 +98,7 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
                             &mut run,
                             &[call, sibling],
                             probe,
-                            RecordedRetryPolicy::Never,
+                            ExecutionPolicy::Once,
                         )
                         .await
                         .map_err(|error| error.to_string())?;
@@ -133,7 +134,7 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
                             &mut run,
                             std::slice::from_ref(&call),
                             deferred,
-                            RecordedRetryPolicy::Never,
+                            ExecutionPolicy::Once,
                         )
                         .await
                         .map_err(|error| error.to_string())?;
@@ -525,7 +526,7 @@ async fn logical_receipts_follow_recorded_admission_and_protected_presentation()
 async fn cancelled_spending_calls_and_unreturned_losers_keep_recorded_provider_results() {
     use lash_core::llm::types::{LlmRequest, LlmRequestScope, LlmResponse, LlmUsage};
     use lash_core::tool_run::{
-        AdmittedCall, AttemptResult, CheckRecord, MaterialEntry, MaterialLocation, MaterialOwner,
+        AdmittedCall, AttemptOutcome, CheckRecord, MaterialEntry, MaterialLocation, MaterialOwner,
         MaterialPayload, MaterialRole, RoundAdmission, RunJournalEntry, RunLedger,
         RuntimeCallPolicy,
     };
@@ -630,7 +631,7 @@ async fn cancelled_spending_calls_and_unreturned_losers_keep_recorded_provider_r
                         let output = payload.reference(MaterialLocation::JournalLocal).unwrap();
                         Ok(RunJournalEntry {
                             state: Vec::new(),
-                            record: RunRecord { segment: SegmentOrdinal(0), first, events: vec![RunEvent::AttemptRecorded { call_id, attempt: AttemptOrdinal::FIRST, result: AttemptResult::Done { output: output.clone() } }], trace: None },
+                            record: RunRecord { segment: SegmentOrdinal(0), first, events: vec![RunEvent::AttemptRecorded { call_id, attempt: AttemptOrdinal::FIRST, result: AttemptOutcome::Completed(output.clone()) }], trace: None },
                             materials: vec![MaterialEntry::Available { reference: output, payload: Box::new(payload) }],
                         })
                     })).await.unwrap();
@@ -754,8 +755,9 @@ async fn cancelled_spending_calls_and_unreturned_losers_keep_recorded_provider_r
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
     use lash_core::tool_run::{
-        AdmittedCall, AttemptResult, CheckRecord, MaterialLocation, MaterialOwner, MaterialPayload,
-        MaterialRole, RoundAdmission, RunJournalEntry, RunLedger, RuntimeCallPolicy,
+        AdmittedCall, AttemptOutcome, CheckRecord, MaterialLocation, MaterialOwner,
+        MaterialPayload, MaterialRole, RoundAdmission, RunJournalEntry, RunLedger,
+        RuntimeCallPolicy,
     };
     let backend = lash_restate_test::backend(0x4831, ServerConfig::default().always_replay(true))
         .await
@@ -794,12 +796,12 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                             declaration,
                             binding: binding(1),
                             policy: RuntimeCallPolicy {
-                                retry: if label == "grouped" {
-                                    lash_core::tool_run::RecordedRetryPolicy::Reported {
-                                        max_attempts: std::num::NonZeroU32::new(2).unwrap(),
-                                        base_delay_ms: 0,
-                                        max_delay_ms: 0,
-                                    }
+                                execution: if label == "grouped" {
+                                    lash_core::tool_run::ExecutionPolicy::repeatable(
+                                        std::num::NonZeroU32::new(2).unwrap(),
+                                        0,
+                                        0,
+                                    )
                                 } else {
                                     Default::default()
                                 },
@@ -855,24 +857,23 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                         RunEvent::AttemptRecorded {
                             call_id: a.clone(),
                             attempt: AttemptOrdinal::new(1).unwrap(),
-                            result: AttemptResult::Failed {
+                            result: AttemptOutcome::Failed(KnownFailure {
                                 output: isolated_output.clone(),
-                                retryable: true,
-                            },
+                                reason: KnownFailureReason::Reported,
+                                suggested_delay_ms: None,
+                            }),
                         },
                         RunEvent::AttemptRecorded {
                             call_id: b.clone(),
                             attempt: AttemptOrdinal::new(1).unwrap(),
-                            result: AttemptResult::Done {
-                                output: isolated_output,
-                            },
+                            result: AttemptOutcome::Completed(isolated_output),
                         },
                         RunEvent::AttemptRecorded {
                             call_id: c.clone(),
                             attempt: AttemptOrdinal::FIRST,
-                            result: AttemptResult::Deferred {
+                            result: AttemptOutcome::Waiting(CompletionSource::Deferred {
                                 source: source.clone(),
-                            },
+                            }),
                         },
                     ],
                     vec![
@@ -891,9 +892,9 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                         RunEvent::AttemptRecorded {
                             call_id: a.clone(),
                             attempt: AttemptOrdinal::new(2).unwrap(),
-                            result: AttemptResult::Deferred {
+                            result: AttemptOutcome::Waiting(CompletionSource::Deferred {
                                 source: source.clone(),
-                            },
+                            }),
                         },
                     ],
                     vec![
@@ -1216,9 +1217,11 @@ impl SingletonToolHandlers for Probe {
             }
             SingletonCapture::Done { intents, .. } => intents.len(),
             SingletonCapture::Failed { .. }
-            | SingletonCapture::RetryableFailure { .. }
             | SingletonCapture::Refused { .. }
-            | SingletonCapture::StartRefused { .. } => 0,
+            | SingletonCapture::StartRefused { .. }
+            | SingletonCapture::Interrupted
+            | SingletonCapture::TimedOut { .. }
+            | SingletonCapture::Cancelled { .. } => 0,
         };
         assert_eq!(
             self.realized.lock().unwrap().len(),

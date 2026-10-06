@@ -210,7 +210,7 @@ fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
             code: "approval_denied".to_string(),
             message: "approval was denied".to_string(),
             source: lash_sansio::ToolFailureSource::Policy,
-            retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
+            suggested_delay_ms: None,
             raw: None,
         },
         "test-effect-key",
@@ -245,7 +245,7 @@ fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
                         "class": "permission_denied",
                         "code": "approval_denied",
                         "source": "policy",
-                        "retry": { "type": "exhausted", "attempts": 3 },
+                        "suggested_delay_ms": null,
                         "replay_key": "test-effect-key"
                     }
                 }

@@ -9,7 +9,10 @@ use super::h2::{Segment, Shared, transferred};
 use super::tools::{Scenario, assert_body_identity, assert_call, attempts, calls, events};
 use anyhow::{Context, Result, anyhow, ensure};
 use lash_core::ToolCallId;
-use lash_core::tool_run::{AttemptResult, LogicalTerminal, RunEvent, RunJournalEntry, RunTransfer};
+use lash_core::tool_run::CompletionSource;
+use lash_core::tool_run::{
+    AttemptOutcome, LogicalTerminal, RunEvent, RunJournalEntry, RunTransfer,
+};
 use lash_remote_protocol::{RemoteSendOutcome, RemoteTurnStatus};
 use lash_upgrade_harness::e2e::case::{
     ArtifactIdentity, CaseSpec, Channel, Leg, Permutation, StoreKind,
@@ -286,7 +289,8 @@ async fn park_source(scenario: &mut Scenario<'_>, source: &ToolCallId) -> Result
             .any(|entry| &entry.call_id == source
                 && matches!(
                     entry.result,
-                    AttemptResult::Pending { .. } | AttemptResult::Deferred { .. }
+                    AttemptOutcome::Waiting(CompletionSource::Pending { .. })
+                        | AttemptOutcome::Waiting(CompletionSource::Deferred { .. })
                 )),
         "source has no acknowledged Deferred descriptor"
     );

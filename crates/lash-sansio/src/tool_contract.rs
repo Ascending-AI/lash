@@ -7,13 +7,7 @@ use crate::{
     ToolCatalogBuildError, ToolDeclaration,
 };
 
-/// Automatic retry policy for a tool's execution.
-///
-/// Only a failure the body reports with a safe retry disposition is retried,
-/// and every attempt runs under the call's one stable
-/// [`ToolCallId`](crate::ToolCallId). There is no idempotent variant: the
-/// runtime does not take an author's word that a body is idempotent; the body
-/// keys its external effects on the call id itself (binding Q3).
+/// The contract for executing one logical call, pinned before its first attempt.
 #[derive(
     Clone,
     Copy,
@@ -25,65 +19,92 @@ use crate::{
     serde::Deserialize,
     schemars::JsonSchema,
 )]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ToolRetryPolicy {
-    /// Never retry automatically.
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ExecutionPolicy {
+    /// One application attempt, even after a reported pre-effect failure.
     #[default]
-    Never,
-    /// Retry only failures that explicitly report a safe retry disposition.
-    Safe {
-        max_attempts: u32,
+    Once,
+    /// Repeated execution is part of the tool's declared contract.
+    Repeatable { retry: BoundedRetry },
+}
+
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct BoundedRetry {
+    /// Counts admitted application ordinals, including the first attempt.
+    pub max_attempts: std::num::NonZeroU32,
+    pub backoff: Backoff,
+}
+
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Backoff {
+    pub base_delay_ms: u64,
+    pub max_delay_ms: u64,
+}
+
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitCause {
+    ExecutionSlice,
+    ExecutionTotal,
+    WaitDeadline,
+}
+
+impl ExecutionPolicy {
+    pub fn repeatable(
+        max_attempts: std::num::NonZeroU32,
         base_delay_ms: u64,
         max_delay_ms: u64,
-    },
-}
-
-impl ToolRetryPolicy {
-    pub fn safe(max_attempts: u32, base_delay_ms: u64, max_delay_ms: u64) -> Self {
-        Self::Safe {
-            max_attempts,
-            base_delay_ms,
-            max_delay_ms,
+    ) -> Self {
+        Self::Repeatable {
+            retry: BoundedRetry {
+                max_attempts,
+                backoff: Backoff {
+                    base_delay_ms,
+                    max_delay_ms,
+                },
+            },
         }
     }
 
-    pub(crate) fn max_attempts(self) -> u32 {
+    pub fn max_attempts(self) -> u32 {
         match self {
-            Self::Never => 1,
-            Self::Safe { max_attempts, .. } => max_attempts.max(1),
+            Self::Once => 1,
+            Self::Repeatable { retry } => retry.max_attempts.get(),
         }
     }
 
-    pub(crate) fn delay_ms_for_retry(
-        self,
-        retry_index: u32,
-        requested_after_ms: Option<u64>,
-    ) -> u64 {
-        let (base_delay_ms, max_delay_ms) = match self {
-            Self::Never => return 0,
-            Self::Safe {
-                base_delay_ms,
-                max_delay_ms,
-                ..
-            } => (base_delay_ms, max_delay_ms),
-        };
-        let multiplier = 1_u64.checked_shl(retry_index).unwrap_or(u64::MAX);
-        let backoff = base_delay_ms.saturating_mul(multiplier);
-        let delay = requested_after_ms.unwrap_or(backoff);
-        if max_delay_ms == 0 {
-            delay
-        } else {
-            delay.min(max_delay_ms)
+    /// A current declaration may veto a repeat; it cannot upgrade admission.
+    pub fn permits_repeat(self, current: Self, failed_ordinal: u32) -> bool {
+        matches!((self, current), (Self::Repeatable { retry }, Self::Repeatable { .. }) if failed_ordinal < retry.max_attempts.get())
+    }
+
+    pub fn delay_ms_for_retry(self, retry_index: u32, suggested_delay_ms: Option<u64>) -> u64 {
+        match self {
+            Self::Once => 0,
+            Self::Repeatable { retry } => {
+                let multiplier = 1_u64.checked_shl(retry_index).unwrap_or(u64::MAX);
+                suggested_delay_ms
+                    .unwrap_or_else(|| retry.backoff.base_delay_ms.saturating_mul(multiplier))
+                    .min(retry.backoff.max_delay_ms)
+            }
         }
     }
 }
 
-fn default_tool_retry_policy() -> ToolRetryPolicy {
-    ToolRetryPolicy::default()
+fn default_tool_execution_policy() -> ExecutionPolicy {
+    ExecutionPolicy::default()
 }
 
-fn is_default_tool_retry_policy(policy: &ToolRetryPolicy) -> bool {
-    *policy == ToolRetryPolicy::default()
+fn is_default_tool_execution_policy(policy: &ExecutionPolicy) -> bool {
+    *policy == ExecutionPolicy::default()
 }
 
 #[derive(
@@ -325,10 +346,10 @@ pub struct ToolManifest {
     )]
     pub argument_projection: ToolArgumentProjectionPolicy,
     #[serde(
-        default = "default_tool_retry_policy",
-        skip_serializing_if = "is_default_tool_retry_policy"
+        default = "default_tool_execution_policy",
+        skip_serializing_if = "is_default_tool_execution_policy"
     )]
-    pub retry_policy: ToolRetryPolicy,
+    pub execution_policy: ExecutionPolicy,
     /// The author's three-capability declaration. Admission records it with
     /// this manifest; dispatch, recovery and replay read the recorded answer,
     /// never the live provider.
@@ -797,7 +818,7 @@ impl ToolDefinition {
                 compact_contract: None,
                 bindings: std::collections::BTreeMap::new(),
                 argument_projection: ToolArgumentProjectionPolicy::default(),
-                retry_policy: default_tool_retry_policy(),
+                execution_policy: default_tool_execution_policy(),
                 declaration: ToolDeclaration::default(),
             },
             contract: ToolContract {
@@ -840,8 +861,8 @@ impl ToolDefinition {
         self
     }
 
-    pub fn with_retry_policy(mut self, retry_policy: ToolRetryPolicy) -> Self {
-        self.manifest.retry_policy = retry_policy;
+    pub fn with_execution_policy(mut self, execution_policy: ExecutionPolicy) -> Self {
+        self.manifest.execution_policy = execution_policy;
         self
     }
 

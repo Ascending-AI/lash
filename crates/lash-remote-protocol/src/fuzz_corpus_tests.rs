@@ -282,7 +282,7 @@ fn seed_tool_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant
         output_contract: RemoteToolOutputContract::Static,
         examples: Vec::new(),
         argument_projection: None,
-        retry_policy: None,
+        execution_policy: None,
         bindings: BTreeMap::from([(
             "call".to_string(),
             serde_json::json!({
@@ -624,7 +624,7 @@ fn plugin_payload_seeds() -> Vec<(&'static str, String, Vec<u8>)> {
                 output_contract: RemoteToolOutputContract::Static,
                 examples: Vec::new(),
                 argument_projection: None,
-                retry_policy: None,
+                execution_policy: None,
                 bindings: BTreeMap::new(),
             }])
             .expect("encode tool grants"),
@@ -639,11 +639,11 @@ fn plugin_payload_seeds() -> Vec<(&'static str, String, Vec<u8>)> {
                             field: "args".to_string(),
                         },
                     ),
-                    retry_policy: Some(RemoteToolRetryPolicy::Safe {
-                        max_attempts: 3,
-                        base_delay_ms: 50,
-                        max_delay_ms: 1_000,
-                    }),
+                    execution_policy: Some(RemoteExecutionPolicy::repeatable(
+                        std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+                        50,
+                        1_000,
+                    )),
                     output_contract: RemoteToolOutputContract::FromInputSchema {
                         input_field: "schema".to_string(),
                         default_schema: None,

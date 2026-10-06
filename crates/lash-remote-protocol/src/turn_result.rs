@@ -822,7 +822,8 @@ pub struct RemoteToolFailure {
     pub code: String,
     pub message: String,
     pub source: lash_sansio::ToolFailureSource,
-    pub retry: lash_sansio::ToolRetryStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_delay_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<Box<lash_sansio::ToolFailureCause>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

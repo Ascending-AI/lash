@@ -224,7 +224,11 @@ fn approval_request_definition() -> lash_core::ToolDefinition {
         ["approval"],
         "request",
     ))
-    .with_retry_policy(lash_core::ToolRetryPolicy::safe(3, 10, 100))
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
+        10,
+        100,
+    ))
 }
 
 struct PolicyDeniedToolProvider;
@@ -253,7 +257,7 @@ impl lash_core::ToolProvider for PolicyDeniedToolProvider {
                 code: "approval_denied".to_string(),
                 message: "approval was denied".to_string(),
                 source: lash_core::ToolFailureSource::Policy,
-                retry: lash_core::ToolRetryStatus::Never,
+                suggested_delay_ms: None,
                 raw: None,
             })
         })
@@ -298,11 +302,9 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
                             message: error.message,
                             class: error.cause.class,
                             source: error.cause.source,
-                            retry: error.cause.retry.type,
                             settledCode: settledReason.cause.code,
                             settledMessage: settledReason.message,
-                            settledSource: settledReason.cause.source,
-                            settledRetry: settledReason.cause.retry.type
+                            settledSource: settledReason.cause.source
                         });
                     }
                 "#
@@ -329,11 +331,9 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
                 "message": "approval was denied",
                 "class": "permission_denied",
                 "source": "policy",
-                "retry": "never",
                 "settledCode": "approval_denied",
                 "settledMessage": "approval was denied",
-                "settledSource": "policy",
-                "settledRetry": "never"
+                "settledSource": "policy"
             }))
         );
     });
@@ -407,7 +407,7 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
                 message,
                 replay_key,
                 source,
-                retry,
+                suggested_delay_ms,
             } = failed.1
             else {
                 panic!("failed effect lost its typed provenance: {:?}", failed.1);
@@ -416,7 +416,7 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
             assert_eq!(failure_code, "approval_denied");
             assert_eq!(message, "approval was denied");
             assert_eq!(*source, lash_core::ToolFailureSource::Policy);
-            assert_eq!(*retry, lash_core::ToolRetryStatus::Never);
+            assert_eq!(*suggested_delay_ms, None);
             // The recorded effect's key names the issue ordinal under the
             // cell's `lk2` namespace (FIG-3586); the node names its call by
             // the `ToolCallId` derived from that ordinal (ADR 0117).

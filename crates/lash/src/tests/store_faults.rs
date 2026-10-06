@@ -721,7 +721,7 @@ mod sweep {
                     lash_core::ToolCallOutcome::Failure(failure) => Answer::Refused {
                         code: failure.code,
                         cause: None,
-                        terminal: failure.retry == lash_core::ToolRetryStatus::Never,
+                        terminal: true,
                     },
                     other => panic!("the child answers: {other:?}"),
                 });
@@ -1401,11 +1401,6 @@ mod sweep {
         assert_eq!(
             failure.code,
             lash_core::RuntimeErrorCode::SessionStateVersionNewerThanRuntime.as_str(),
-            "{failure:?}"
-        );
-        assert_eq!(
-            failure.retry,
-            lash_core::ToolRetryStatus::Never,
             "{failure:?}"
         );
         assert_nothing_paused(&double);

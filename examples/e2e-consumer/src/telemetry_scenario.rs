@@ -15,8 +15,8 @@ use lash::plugins::{
 use lash::provider::{LlmContentBlock, LlmRequest, LlmResponse, ProviderHandle};
 use lash::sync::MutexExt as _;
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition,
-    ToolFailure, ToolFailureClass, ToolOutcome, ToolRetryPolicy,
+    ExecutionPolicy, StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall,
+    ToolDefinition, ToolFailure, ToolFailureClass, ToolOutcome,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -277,7 +277,11 @@ impl SessionPlugin for TelemetryPlugin {
             json!({"type":"string"}),
         )
         .map_err(|error| PluginError::Session(error.to_string()))?
-        .with_retry_policy(ToolRetryPolicy::safe(2, 0, 0));
+        .with_execution_policy(ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::MIN.saturating_add(1),
+            0,
+            0,
+        ));
         registrar
             .tools()
             .provider(Arc::new(StaticToolProvider::new(
@@ -323,7 +327,7 @@ impl StaticToolExecute for TelemetryTool {
             Ok(completion) if ordinal == 1 => {
                 // The completed model result remains recorded usage data even
                 // when this spending tool reports a retryable failure.
-                let failure = ToolFailure::safe_retry(
+                let failure = ToolFailure::with_suggested_delay(
                     ToolFailureClass::Io,
                     "s34_retry",
                     format!("retry after {}", completion.text),

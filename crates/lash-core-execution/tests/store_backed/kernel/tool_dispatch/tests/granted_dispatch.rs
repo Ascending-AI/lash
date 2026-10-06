@@ -106,8 +106,8 @@ impl crate::AttachmentSourcePolicy for RecordingAttachmentSourcePolicy {
     }
 }
 
-fn grant_probe_tool(retry_policy: ToolRetryPolicy) -> crate::ToolDefinition {
-    named_beta_tool("grant_probe").with_retry_policy(retry_policy)
+fn grant_probe_tool(execution_policy: ExecutionPolicy) -> crate::ToolDefinition {
+    named_beta_tool("grant_probe").with_execution_policy(execution_policy)
 }
 
 /// Builds a dispatch context whose only provider is a granted probe, plus the
@@ -116,14 +116,14 @@ async fn grant_probe_dispatch<'h>(
     ports: crate::support::DispatchPorts<'h>,
     mode: GrantProbeMode,
     attempts: Arc<AtomicUsize>,
-    retry_policy: ToolRetryPolicy,
+    execution_policy: ExecutionPolicy,
     observed_execution_bindings: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
 ) -> (ToolDispatchContext<'h>, crate::ToolExecutionGrant) {
     let definition = match mode {
         GrantProbeMode::PendingWithKey => {
-            grant_probe_tool(retry_policy).with_declaration(crate::ToolDeclaration::deferring())
+            grant_probe_tool(execution_policy).with_declaration(crate::ToolDeclaration::deferring())
         }
-        GrantProbeMode::InlineAttachment => grant_probe_tool(retry_policy),
+        GrantProbeMode::InlineAttachment => grant_probe_tool(execution_policy),
     };
     let provider: Arc<dyn ToolProvider> = Arc::new(GrantProbeTools {
         definition: definition.clone(),
@@ -171,7 +171,11 @@ async fn granted_pending_park_returns_a_pending_launch_under_the_grant_binding()
         crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::PendingWithKey,
         Arc::clone(&attempts),
-        ToolRetryPolicy::safe(5, 0, 0),
+        ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(5).expect("nonzero attempt bound"),
+            0,
+            0,
+        ),
         Arc::clone(&observed_execution_bindings),
     )
     .await;
@@ -219,7 +223,7 @@ async fn a_grant_admits_its_own_declaration_never_a_same_id_catalog_tools() {
         crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::PendingWithKey,
         Arc::clone(&attempts),
-        ToolRetryPolicy::Never,
+        ExecutionPolicy::Once,
         observed_execution_bindings,
     )
     .await;
@@ -234,7 +238,7 @@ async fn a_grant_admits_its_own_declaration_never_a_same_id_catalog_tools() {
     );
     let grant = crate::ToolExecutionGrant::from_definition(
         crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
-        grant_probe_tool(ToolRetryPolicy::Never),
+        grant_probe_tool(ExecutionPolicy::Once),
     )
     .with_source_id("test_tools")
     .with_execution_binding(json!({ "kind": "grant-probe" }));
@@ -283,7 +287,7 @@ async fn granted_attachment_producer_is_the_grant_name_when_the_prepared_call_is
         crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::InlineAttachment,
         Arc::clone(&attempts),
-        ToolRetryPolicy::Never,
+        ExecutionPolicy::Once,
         Arc::clone(&observed_execution_bindings),
     )
     .await;
@@ -330,7 +334,7 @@ async fn catalog_attachment_producer_is_the_manifest_name_when_prepared_call_is_
         crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::InlineAttachment,
         Arc::clone(&attempts),
-        ToolRetryPolicy::Never,
+        ExecutionPolicy::Once,
         Arc::clone(&observed_execution_bindings),
     )
     .await;
@@ -417,7 +421,7 @@ async fn granted_identifier_mismatch_is_refused_before_the_tool_body_runs() {
         crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::InlineAttachment,
         Arc::clone(&attempts),
-        ToolRetryPolicy::Never,
+        ExecutionPolicy::Once,
         Arc::clone(&observed_execution_bindings),
     )
     .await;

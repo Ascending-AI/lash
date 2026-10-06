@@ -306,7 +306,7 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
                     code,
                     message,
                     source,
-                    retry,
+                    suggested_delay_ms,
                     cause,
                     raw,
                 } = failure;
@@ -315,7 +315,7 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
                     code,
                     message,
                     source: source.into(),
-                    retry: retry.into(),
+                    suggested_delay_ms,
                     cause,
                     raw: raw
                         .map(|raw| {
@@ -384,7 +384,7 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
                     code,
                     message,
                     source,
-                    retry,
+                    suggested_delay_ms,
                     cause,
                     raw,
                 } = failure;
@@ -393,7 +393,7 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
                     code,
                     message,
                     source: source.into(),
-                    retry: retry.into(),
+                    suggested_delay_ms,
                     cause,
                     raw: raw
                         .map(|raw| {
@@ -458,26 +458,6 @@ impl From<RemoteProcessToolFailureSource> for lash_core::ToolFailureSource {
             RemoteProcessToolFailureSource::Plugin => Self::Plugin,
             RemoteProcessToolFailureSource::Policy => Self::Policy,
             RemoteProcessToolFailureSource::Cancellation => Self::Cancellation,
-        }
-    }
-}
-
-impl From<lash_core::ToolRetryStatus> for RemoteProcessToolRetryStatus {
-    fn from(value: lash_core::ToolRetryStatus) -> Self {
-        match value {
-            lash_core::ToolRetryStatus::Never => Self::Never,
-            lash_core::ToolRetryStatus::Safe { after_ms } => Self::Safe { after_ms },
-            lash_core::ToolRetryStatus::Exhausted { attempts } => Self::Exhausted { attempts },
-        }
-    }
-}
-
-impl From<RemoteProcessToolRetryStatus> for lash_core::ToolRetryStatus {
-    fn from(value: RemoteProcessToolRetryStatus) -> Self {
-        match value {
-            RemoteProcessToolRetryStatus::Never => Self::Never,
-            RemoteProcessToolRetryStatus::Safe { after_ms } => Self::Safe { after_ms },
-            RemoteProcessToolRetryStatus::Exhausted { attempts } => Self::Exhausted { attempts },
         }
     }
 }

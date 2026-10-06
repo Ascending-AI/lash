@@ -27,8 +27,8 @@ use lash_core::{
     ProtocolBuildInput, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     ScopedEffectController, SessionPolicy, ToolAttemptOutcome, ToolCall, ToolCallOutcome,
-    ToolContract, ToolDefinition, ToolFailureClass, ToolManifest, ToolProvider, ToolRetryStatus,
-    TurnDriverConfig, TurnDriverPreamble, TurnInput,
+    ToolContract, ToolDefinition, ToolFailureClass, ToolManifest, ToolProvider, TurnDriverConfig,
+    TurnDriverPreamble, TurnInput,
 };
 
 fn test_runtime_owner() -> lash_core::LeaseOwnerIdentity {
@@ -753,7 +753,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
     assert_eq!(failure.class, ToolFailureClass::Internal);
     assert_eq!(failure.code, "tool_panicked");
     assert_eq!(failure.message, "tool payload only");
-    assert_eq!(failure.retry, ToolRetryStatus::Never);
+    assert_eq!(failure.suggested_delay_ms, None);
     assert_eq!(first.assistant_output.safe_text, "turn recovered");
 
     let next_handler = double

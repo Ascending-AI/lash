@@ -594,7 +594,8 @@ pub struct ToolFailure {
     pub code: String,
     pub message: String,
     pub source: ToolFailureSource,
-    pub retry: ToolRetryStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_delay_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<Box<ToolFailureCause>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -616,7 +617,7 @@ impl ToolFailure {
             code: code.into(),
             message: message.into(),
             source: ToolFailureSource::Runtime,
-            retry: ToolRetryStatus::Never,
+            suggested_delay_ms: None,
             cause: None,
             raw: None,
         }
@@ -649,14 +650,14 @@ impl ToolFailure {
         Self::tool(ToolFailureClass::Io, code, message)
     }
 
-    pub fn safe_retry(
+    pub fn with_suggested_delay(
         class: ToolFailureClass,
         code: impl Into<String>,
         message: impl Into<String>,
         after_ms: Option<u64>,
     ) -> Self {
         let mut failure = Self::tool(class, code, message);
-        failure.retry = ToolRetryStatus::Safe { after_ms };
+        failure.suggested_delay_ms = after_ms;
         failure
     }
 
@@ -716,19 +717,6 @@ pub enum ToolFailureSource {
     Plugin,
     Policy,
     Cancellation,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ToolRetryStatus {
-    Never,
-    Safe {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        after_ms: Option<u64>,
-    },
-    Exhausted {
-        attempts: u32,
-    },
 }
 
 /// The runtime or actor decision that requested cancellation of a process
@@ -1392,7 +1380,7 @@ mod tests {
             code: "boom".into(),
             message: "boom".into(),
             source: ToolFailureSource::Tool,
-            retry: ToolRetryStatus::Never,
+            suggested_delay_ms: None,
             raw: Some(ToolValue::Object(BTreeMap::from([(
                 "image".into(),
                 ToolValue::Attachment(attachment.clone()),

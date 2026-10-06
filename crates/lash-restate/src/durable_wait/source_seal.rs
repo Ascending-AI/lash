@@ -299,6 +299,7 @@ pub(super) async fn resolve_completion(
             _ => lash_core::tool_dispatch::SingletonCapture::Failed {
                 output: serde_json::to_string(&resolution).map_err(TerminalError::from_error)?,
                 stream: Default::default(),
+                suggested_delay_ms: None,
             },
         };
         let payload = MaterialPayload::new(

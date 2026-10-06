@@ -17,7 +17,7 @@ macro_rules! obligation_relay_tests {
                 a_stale_claimant_cannot_take_back_a_retaken_claim,
                 "obligation-stale-claimant"
             ),
-            (a_retryable_failure_backs_off, "obligation-backoff"),
+            (a_failure_with_delay_backs_off, "obligation-backoff"),
             (the_attempt_ceiling_stalls, "obligation-ceiling"),
             (
                 a_refused_or_undecodable_row_stalls_without_failing_the_page,

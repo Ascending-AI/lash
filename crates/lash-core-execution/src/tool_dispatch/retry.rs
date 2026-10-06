@@ -1,24 +1,21 @@
-use crate::{
-    PreparedToolCall, ToolCallOutcome, ToolContext, ToolOutcome, ToolRetryPolicy, ToolRetryStatus,
-};
+use crate::{ExecutionPolicy, PreparedToolCall, ToolContext, ToolOutcome};
 use futures_util::FutureExt as _;
-use lash_sansio::core_support::*;
 
 use super::atomic_attempt::AttemptAuthority;
 use super::context::{ToolDispatchContext, ToolDispatchOutcome};
 
-pub(crate) fn resolve_retry_policy(
+pub(crate) fn resolve_execution_policy(
     context: &ToolDispatchContext<'_>,
     tool_id: &crate::ToolId,
     execution_grant: Option<&crate::ToolExecutionGrant>,
-) -> ToolRetryPolicy {
+) -> ExecutionPolicy {
     execution_grant
-        .map(|grant| grant.manifest().retry_policy)
+        .map(|grant| grant.manifest().execution_policy)
         .or_else(|| {
             super::preparation::resolve_callable_manifest_by_id(context, tool_id)
-                .map(|manifest| manifest.retry_policy)
+                .map(|manifest| manifest.execution_policy)
         })
-        .unwrap_or(ToolRetryPolicy::Never)
+        .unwrap_or(ExecutionPolicy::Once)
 }
 
 /// Runs one attempt of `prepared` with its attempt number stamped on the
@@ -135,7 +132,7 @@ fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolOutcome {
         code: "tool_panicked".to_string(),
         message,
         source: crate::ToolFailureSource::Runtime,
-        retry: crate::ToolRetryStatus::Never,
+        suggested_delay_ms: None,
         raw: None,
     });
     crate::panic_containment::enforce_loudness(payload);
@@ -224,38 +221,9 @@ fn attachment_failure(code: &str, error: impl std::fmt::Display) -> crate::ToolC
         code: code.to_string(),
         message: error.to_string(),
         source: crate::ToolFailureSource::Runtime,
-        retry: crate::ToolRetryStatus::Never,
+        suggested_delay_ms: None,
         raw: None,
     })
-}
-
-pub(crate) fn retry_after_ms(
-    result: &ToolOutcome,
-    retry_policy: ToolRetryPolicy,
-    retry_index: u32,
-) -> Option<u64> {
-    if matches!(retry_policy, ToolRetryPolicy::Never) {
-        return None;
-    }
-    let output = result.as_done_output()?;
-    let ToolCallOutcome::Failure(failure) = &output.outcome else {
-        return None;
-    };
-    let ToolRetryStatus::Safe { after_ms } = &failure.retry else {
-        return None;
-    };
-    Some(retry_policy.delay_ms_for_retry(retry_index, *after_ms))
-}
-
-pub(crate) fn mark_retry_exhausted(result: ToolOutcome, attempts: u32) -> ToolOutcome {
-    let mut output = match result.into_done_output() {
-        Ok(output) => output,
-        Err(pending) => return ToolOutcome::pending(pending),
-    };
-    if let ToolCallOutcome::Failure(failure) = &mut output.outcome {
-        failure.retry = ToolRetryStatus::Exhausted { attempts };
-    }
-    ToolOutcome::from_output(output)
 }
 
 /// Settles a tool call that parked and has now been resolved.
@@ -314,50 +282,6 @@ mod panic_tests {
     use lash_sansio::sync::MutexExt as _;
 
     static PANIC_MODE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    #[test]
-    fn process_await_preserves_plugin_retry_evidence_for_retry_policy() {
-        let output = crate::ToolCallOutput::failure(crate::ToolFailure {
-            cause: None,
-            class: crate::ToolFailureClass::External,
-            code: "plugin_temporarily_unavailable".to_string(),
-            message: "plugin asks the caller to retry".to_string(),
-            source: crate::ToolFailureSource::Plugin,
-            retry: crate::ToolRetryStatus::Safe { after_ms: Some(37) },
-            raw: None,
-        });
-        let persisted = serde_json::to_value(crate::ProcessAwaitOutput::from_tool_output(output))
-            .expect("serialize process await payload");
-        let restored: crate::ProcessAwaitOutput =
-            serde_json::from_value(persisted).expect("deserialize process await payload");
-        let restored = crate::ToolOutcome::from_output(restored.into_tool_output());
-
-        let failure = restored
-            .as_done_output()
-            .and_then(|output| match &output.outcome {
-                crate::ToolCallOutcome::Failure(failure) => Some(failure),
-                crate::ToolCallOutcome::Success(_) | crate::ToolCallOutcome::Cancelled(_) => None,
-            })
-            .expect("process await returns the plugin failure");
-        assert_eq!(failure.source, crate::ToolFailureSource::Plugin);
-        assert_eq!(
-            failure.retry,
-            crate::ToolRetryStatus::Safe { after_ms: Some(37) }
-        );
-        assert_eq!(
-            super::retry_after_ms(
-                &restored,
-                crate::ToolRetryPolicy::Safe {
-                    max_attempts: 2,
-                    base_delay_ms: 1,
-                    max_delay_ms: 100,
-                },
-                0,
-            ),
-            Some(37),
-            "the retry layer must honor the plugin's preserved backoff hint"
-        );
-    }
 
     /// A `ToolProvider` whose `execute` is written the way `async_trait`
     /// desugars the trait: its body runs when dispatch invokes the method, so
@@ -511,7 +435,7 @@ mod panic_tests {
                 assert_eq!(failure.class, crate::ToolFailureClass::Internal);
                 assert_eq!(failure.code, "tool_panicked");
                 assert_eq!(failure.message, "tool construction payload");
-                assert_eq!(failure.retry, crate::ToolRetryStatus::Never);
+                assert_eq!(failure.suggested_delay_ms, None);
             }
             crate::panic_containment::set_loud(previous);
         }

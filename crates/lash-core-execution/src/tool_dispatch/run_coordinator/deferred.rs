@@ -1,5 +1,6 @@
 //! Root ownership and retained-result acceptance for Deferred calls.
 use super::*;
+use crate::tool_run::CompletionSource;
 
 impl<'a> RunCoordinator<'a> {
     pub(super) async fn accept_pending(
@@ -77,7 +78,9 @@ impl<'a> RunCoordinator<'a> {
             .iter()
             .rev()
             .find_map(|entry| match &entry.result {
-                AttemptResult::Pending { metadata, .. } if &entry.call_id == id => {
+                AttemptOutcome::Waiting(CompletionSource::Pending { metadata, .. })
+                    if &entry.call_id == id =>
+                {
                     Some(self.journal.materials.decode(metadata))
                 }
                 _ => None,
@@ -523,8 +526,7 @@ impl<'a> RunCoordinator<'a> {
                                 if let Some(pending) = pending {
                                     match &mut capture {
                                         SingletonCapture::Done { stream, .. }
-                                        | SingletonCapture::Failed { stream, .. }
-                                        | SingletonCapture::RetryableFailure { stream, .. } => {
+                                        | SingletonCapture::Failed { stream, .. } => {
                                             *stream = pending.stream
                                         }
                                         _ => {}

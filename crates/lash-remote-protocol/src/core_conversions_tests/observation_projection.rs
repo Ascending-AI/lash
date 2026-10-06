@@ -49,7 +49,7 @@ fn completed_tool(output: lash_core::ToolCallOutput) -> lash_core::TurnEvent {
 
 #[test]
 fn fig4659_law_tool_records_and_observations_share_the_typed_output() {
-    let mut failure = lash_core::ToolFailure::safe_retry(
+    let mut failure = lash_core::ToolFailure::with_suggested_delay(
         lash_core::ToolFailureClass::Unavailable,
         "catalog_offline",
         "try again",
@@ -86,8 +86,8 @@ fn fig4659_law_tool_records_and_observations_share_the_typed_output() {
     );
     assert_eq!(wire["output"]["outcome"]["payload"]["source"], "tool");
     assert_eq!(
-        wire["output"]["outcome"]["payload"]["retry"],
-        serde_json::json!({"type": "safe", "after_ms": 25})
+        wire["output"]["outcome"]["payload"]["suggested_delay_ms"],
+        serde_json::json!(25)
     );
     assert_eq!(
         wire["output"]["outcome"]["payload"]["raw"],
@@ -141,7 +141,7 @@ fn fig4659_law_tool_failure_shape_refuses_untyped_payloads() {
     assert!(validator.is_valid(&wire));
     let failure = &wire["output"]["outcome"]["payload"];
     let mut invalid_payloads = Vec::new();
-    for field in ["class", "code", "message", "source", "retry"] {
+    for field in ["class", "code", "message", "source"] {
         let mut incomplete = failure.clone();
         incomplete.as_object_mut().unwrap().remove(field);
         invalid_payloads.push(incomplete);
@@ -149,7 +149,7 @@ fn fig4659_law_tool_failure_shape_refuses_untyped_payloads() {
     for (field, unknown) in [
         ("class", serde_json::json!("unknown_class")),
         ("source", serde_json::json!("unknown_source")),
-        ("retry", serde_json::json!({"type": "unknown_retry"})),
+        ("suggested_delay_ms", serde_json::json!(-1)),
     ] {
         let mut unknown_variant = failure.clone();
         unknown_variant[field] = unknown;
@@ -163,7 +163,7 @@ fn fig4659_law_tool_failure_shape_refuses_untyped_payloads() {
         serde_json::json!({"message": "offline"}),
         serde_json::json!({
             "class": "unknown_class", "code": "offline", "message": "offline",
-            "source": "tool", "retry": {"type": "never"}
+            "source": "tool"
         }),
     ]);
     for payload in invalid_payloads {

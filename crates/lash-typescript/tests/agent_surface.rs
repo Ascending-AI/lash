@@ -235,7 +235,7 @@ impl ExecutionHost for ProcessAwaitFailureHost {
                         code: "approval_denied".to_string(),
                         message: "approval was denied".to_string(),
                         source: lash_sansio::ToolFailureSource::Policy,
-                        retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
+                        suggested_delay_ms: None,
                         raw: None,
                     },
                     "await-effect-key",
@@ -288,9 +288,7 @@ fn direct_process_handle_await_preserves_typed_tool_failure_fields() {
               code: error.cause.code,
               message: error.message,
               class: error.cause.class,
-              source: error.cause.source,
-              retry: error.cause.retry.type,
-              attempts: error.cause.retry.attempts
+              source: error.cause.source
             }"#,
         ),
         lashlang::from_json(serde_json::json!({
@@ -299,9 +297,7 @@ fn direct_process_handle_await_preserves_typed_tool_failure_fields() {
             "code": "approval_denied",
             "message": "approval was denied",
             "class": "permission_denied",
-            "source": "policy",
-            "retry": "exhausted",
-            "attempts": 3
+            "source": "policy"
         }))
     );
 }

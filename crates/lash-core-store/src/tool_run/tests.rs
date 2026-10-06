@@ -1,5 +1,6 @@
 //! Codec, refusal and transition witnesses of the tool-run contract.
 
+use super::{CompletionSource, KnownFailure, KnownFailureReason};
 use lash_core_ids::BehaviorRevision;
 use lash_sansio::{ToolCallId, ToolIntentKind};
 use serde_json::json;
@@ -152,20 +153,19 @@ fn done(call_id: &ToolCallId, n: u32) -> RunEvent {
     RunEvent::AttemptRecorded {
         call_id: call_id.clone(),
         attempt: attempt(n),
-        result: AttemptResult::Done {
-            output: run_material(MaterialRole::AttemptOutput),
-        },
+        result: AttemptOutcome::Completed(run_material(MaterialRole::AttemptOutput)),
     }
 }
 
-fn failed(call_id: &ToolCallId, n: u32, retryable: bool) -> RunEvent {
+fn failed(call_id: &ToolCallId, n: u32) -> RunEvent {
     RunEvent::AttemptRecorded {
         call_id: call_id.clone(),
         attempt: attempt(n),
-        result: AttemptResult::Failed {
+        result: AttemptOutcome::Failed(KnownFailure {
             output: run_material(MaterialRole::AttemptOutput),
-            retryable,
-        },
+            reason: KnownFailureReason::Reported,
+            suggested_delay_ms: None,
+        }),
     }
 }
 
@@ -233,7 +233,7 @@ fn the_singleton_route_is_four_records_and_its_codec_is_pinned() {
             "event": "attempt_recorded",
             "call_id": id.as_str(),
             "attempt": 1,
-            "result": {"result": "done", "output": material},
+            "result": {"result": "completed", "value": material},
         })
     );
     assert_eq!(
@@ -267,12 +267,6 @@ fn a_declaration_has_exactly_three_capabilities_and_no_duration() {
             "`{field}` must not decode"
         );
     }
-    assert!(
-        serde_json::from_value::<RecordedRetryPolicy>(
-            json!({"retry": "idempotent", "max_attempts": 2, "base_delay_ms": 1, "max_delay_ms": 2})
-        )
-        .is_err()
-    );
 }
 
 #[test]
@@ -840,95 +834,17 @@ fn k3_decision_ranks_are_dense_in_fold_order() {
 }
 
 #[test]
-fn reported_retries_follow_one_recorded_schedule() {
-    let retrying = |label: &str| {
-        let mut call = call(label);
-        call.policy.retry = RecordedRetryPolicy::Reported {
-            max_attempts: std::num::NonZeroU32::new(2).unwrap(),
-            base_delay_ms: 10,
-            max_delay_ms: 100,
-        };
-        call
-    };
-    let (a, b) = (ToolCallId::fixture("a"), ToolCallId::fixture("b"));
-    let retry = |call_id: &ToolCallId, failed: u32| RunEvent::RetryScheduled {
-        call_id: call_id.clone(),
-        failed: attempt(failed),
-        next: attempt(failed + 1),
-        backoff_ms: 10,
-    };
-    // Both wake orders are valid schedules; replay follows the recorded one.
-    for a_first in [true, false] {
-        let mut log = Log::new();
-        log.push(RunEvent::Admitted {
-            round: round(vec![retrying("a"), retrying("b")]),
-        })
-        .unwrap();
-        log.push(failed(&a, 1, true)).unwrap();
-        log.push(failed(&b, 1, true)).unwrap();
-        for id in [&a, &b] {
-            let registered = RunEvent::RetryTimerRegistered {
-                call_id: id.clone(),
-                failed: attempt(1),
-                next: attempt(2),
-                backoff_ms: 10,
-            };
-            log.push(registered.clone()).unwrap();
-            assert!(
-                log.push(registered).is_err(),
-                "a reported failure registers only one timer"
-            );
-        }
-        let (wake_first, wake_second) = if a_first { (&a, &b) } else { (&b, &a) };
-        log.push(retry(wake_first, 1)).unwrap();
-        log.push(retry(wake_second, 1)).unwrap();
-        let (first, second) = if a_first { (&a, &b) } else { (&b, &a) };
-        log.push(done(first, 2)).unwrap();
-        log.push(done(second, 2)).unwrap();
-        assert_eq!(
-            log.push(retry(first, 2)),
-            Err(RunEventRefusal::RetryNotEligible {
-                call_id: first.clone(),
-                failed: attempt(2),
-                next: attempt(3)
-            }),
-            "a done attempt and the attempt bound both refuse a retry"
-        );
-    }
-
-    let mut log = Log::new();
-    log.push(RunEvent::Admitted {
-        round: round(vec![retrying("a"), call("b")]),
-    })
-    .unwrap();
-    log.push(failed(&b, 1, true)).unwrap();
-    assert!(
-        log.push(retry(&b, 1)).is_err(),
-        "a call without a retry policy never retries"
-    );
-    log.push(failed(&a, 1, false)).unwrap();
-    assert!(
-        log.push(retry(&a, 1)).is_err(),
-        "a non-retryable failure is final"
-    );
-    log.push(decided(&a, final_of(1, false))).unwrap();
-}
-
-#[test]
 fn cancellation_during_backoff_starts_no_next_attempt() {
     let mut retrying = call("a");
-    retrying.policy.retry = RecordedRetryPolicy::Reported {
-        max_attempts: std::num::NonZeroU32::new(3).unwrap(),
-        base_delay_ms: 10,
-        max_delay_ms: 100,
-    };
+    retrying.policy.execution =
+        ExecutionPolicy::repeatable(std::num::NonZeroU32::new(3).unwrap(), 10, 100);
     let a = retrying.call_id.clone();
     let mut log = Log::new();
     log.push(RunEvent::Admitted {
         round: round(vec![retrying]),
     })
     .unwrap();
-    log.push(failed(&a, 1, true)).unwrap();
+    log.push(failed(&a, 1)).unwrap();
     log.push(RunEvent::RetryTimerRegistered {
         call_id: a.clone(),
         failed: attempt(1),
@@ -1143,14 +1059,14 @@ fn a_declared_start_drains_inside_its_declarations_under_one_key() {
     log.push(RunEvent::AttemptRecorded {
         call_id: id.clone(),
         attempt: attempt(1),
-        result: AttemptResult::Pending {
+        result: AttemptOutcome::Waiting(CompletionSource::Pending {
             source: source_key(&id),
             metadata: run_material(MaterialRole::AttemptOutput),
             start: Some(Box::new(PendingStart {
                 start_key: key.clone(),
                 obligation: run_material(MaterialRole::AttemptOutput),
             })),
-        },
+        }),
     })
     .unwrap();
     log.push(RunEvent::Decided {
@@ -1450,9 +1366,9 @@ fn transfer() -> RunTransfer {
         RunEvent::AttemptRecorded {
             call_id: call_id.clone(),
             attempt: AttemptOrdinal::FIRST,
-            result: AttemptResult::Deferred {
+            result: AttemptOutcome::Waiting(CompletionSource::Deferred {
                 source: source_key(&call_id),
-            },
+            }),
         },
     ];
     let entries = vec![RunJournalEntry {
@@ -1622,9 +1538,9 @@ fn receipts_name_the_logical_call_and_permits_come_from_records() {
     let deferred = RunEvent::AttemptRecorded {
         call_id: a.clone(),
         attempt: attempt(1),
-        result: AttemptResult::Deferred {
+        result: AttemptOutcome::Waiting(CompletionSource::Deferred {
             source: source_key(&a),
-        },
+        }),
     };
     assert!(
         BusinessReceipt::for_event(&deferred).is_empty(),

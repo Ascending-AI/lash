@@ -47,6 +47,7 @@ impl RestateProcessRunner for Runner {
             Arc::clone(&self.starter.registry),
             SingletonBodyOutcome::Failed {
                 output: "the child body failed".into(),
+                suggested_delay_ms: None,
             },
             CancelAt::Never,
         );
@@ -73,7 +74,7 @@ impl RestateProcessRunner for Runner {
             assert!(matches!(
                 terminal,
                 SingletonTerminal::Final {
-                    capture: SingletonCapture::Failed { ref output, .. }, ..
+                    capture: SingletonCapture::Failed { ref output, ..}, ..
                 } if output == "the child body failed"
             ));
             run.close().await.unwrap();

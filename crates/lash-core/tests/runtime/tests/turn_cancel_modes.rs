@@ -962,8 +962,8 @@ fn retry_once_tool_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
-    .with_retry_policy(lash_core::ToolRetryPolicy::safe(
-        2,
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
         RETRY_AFTER_MS,
         RETRY_AFTER_MS,
     ))
@@ -982,7 +982,7 @@ impl lash_core::ToolProvider for RetryOnceTool {
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         (async {
             if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-                return lash_core::ToolOutcome::retryable_failure(
+                return lash_core::ToolOutcome::failure_with_delay(
                     lash_core::ToolFailureClass::External,
                     "transient",
                     "transient failure",

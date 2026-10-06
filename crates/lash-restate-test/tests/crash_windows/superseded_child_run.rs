@@ -80,7 +80,7 @@ async fn superseded_child_run_law(storage: Storage) {
         lash_core::RuntimeErrorCode::StoreCommitSuperseded.as_str()
     );
     assert_eq!(failure.source, lash_core::ToolFailureSource::Runtime);
-    assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
+    assert_eq!(failure.suggested_delay_ms, None);
     assert!(
         failure.message.starts_with("shift fence epoch 1"),
         "{failure:?}"

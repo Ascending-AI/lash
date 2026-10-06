@@ -647,7 +647,11 @@ async fn ordinary_controller_wrapped_intent_refusal_preserves_its_typed_code() {
 async fn retry_drains_only_the_final_attempts_intents() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let definition = named_beta_tool("retry_intents")
-        .with_retry_policy(crate::ToolRetryPolicy::safe(2, 0, 0))
+        .with_execution_policy(crate::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
+            0,
+            0,
+        ))
         .with_declaration(
             crate::ToolDeclaration::default()
                 .with_intents([crate::ToolIntentKind::EmitProcessEvent]),

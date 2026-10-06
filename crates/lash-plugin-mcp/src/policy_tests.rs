@@ -477,7 +477,7 @@ async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() 
             .contains("reconnect attempts exhausted"),
         "terminal tool-call failure must not claim recovery is active: {terminal:?}"
     );
-    assert_eq!(failure(&terminal).retry, ToolRetryStatus::Never);
+    assert_eq!(failure(&terminal).suggested_delay_ms, None);
     assert_eq!(starts(root.path()), 2);
     drop(clock);
     pool.shutdown_all().await;

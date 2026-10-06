@@ -317,7 +317,7 @@ fn probe_tool() -> crate::ToolDefinition {
         object,
     )
     .expect("valid declared tool schemas")
-    .with_retry_policy(crate::ToolRetryPolicy::safe(2, 1, 1))
+    .with_execution_policy(crate::ExecutionPolicy::repeatable(std::num::NonZeroU32::new(2).expect("nonzero attempt bound"), 1, 1))
     // It parks on a declared start, and its failing first attempt declares
     // the start as an ordinary intent that the retry discards.
     .with_declaration(
@@ -441,7 +441,7 @@ impl crate::ToolProvider for DeclaringProbe {
         };
         if probe.fail_first && call.context.attempt_number() == 1 {
             return crate::ToolAttemptOutcome::done(
-                crate::ToolOutcomeDone::failure(crate::ToolFailure::safe_retry(
+                crate::ToolOutcomeDone::failure(crate::ToolFailure::with_suggested_delay(
                     crate::ToolFailureClass::External,
                     "transient",
                     "the probe's first attempt fails",

@@ -79,6 +79,9 @@ enum Kind {
     /// Done, declaring nothing.
     IntentFree,
     Failed,
+    Interrupted,
+    TimedOut(lash_core::LimitCause),
+    Cancelled,
     Cached,
     Retry {
         after_ms: u64,
@@ -96,6 +99,9 @@ fn call(label: &str, kind: &Kind) -> SingletonToolCall {
         Kind::Starts => ToolDeclaration::default().with_intents([ToolIntentKind::StartProcess]),
         Kind::IntentFree
         | Kind::Failed
+        | Kind::Interrupted
+        | Kind::TimedOut(_)
+        | Kind::Cancelled
         | Kind::Cached
         | Kind::Retry { .. }
         | Kind::Stateful { .. } => ToolDeclaration::default(),
@@ -195,7 +201,8 @@ struct Probe {
     parallel_order: Vec<ToolCallId>,
     parallel_completed: std::sync::atomic::AtomicUsize,
     parallel_wake: tokio::sync::Notify,
-    retry: lash_core::tool_run::RecordedRetryPolicy,
+    retry: lash_core::tool_run::ExecutionPolicy,
+    current_policy: Option<lash_core::ExecutionPolicy>,
     gate: Option<(ToolCallId, ToolCallId)>,
     unavailable: Option<(ToolCallId, Arc<AtomicBool>)>,
     gate_open: AtomicBool,
@@ -370,7 +377,7 @@ async fn decide_beside_unrelated(
     })
     .await;
     let handlers = Arc::clone(probe) as Arc<dyn SingletonToolHandlers>;
-    let decide = super::decide_round(run, round, handlers, probe.retry.clone());
+    let decide = super::decide_round(run, round, handlers, probe.retry);
     let (decided, unrelated) = match issued {
         Some(entry) => (decide.await, entry),
         None => tokio::join!(decide, unrelated),
@@ -652,7 +659,7 @@ async fn drive(
                             &mut run,
                             &round,
                             Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
-                            probe.retry.clone(),
+                            probe.retry,
                         )
                         .await
                         .map(|decisions| {
@@ -1254,12 +1261,8 @@ async fn l01_every_admitted_body_enters_before_any_completes() {
     }
 }
 
-fn retry_policy() -> lash_core::tool_run::RecordedRetryPolicy {
-    lash_core::tool_run::RecordedRetryPolicy::Reported {
-        max_attempts: std::num::NonZeroU32::new(2).unwrap(),
-        base_delay_ms: 1,
-        max_delay_ms: 100,
-    }
+fn execution_policy() -> lash_core::tool_run::ExecutionPolicy {
+    lash_core::tool_run::ExecutionPolicy::repeatable(std::num::NonZeroU32::new(2).unwrap(), 1, 100)
 }
 
 #[tokio::test]
@@ -1298,7 +1301,7 @@ async fn l02_l17_replay_registers_b2_before_waiting_for_unfinished_a1() {
     let mut reference = None;
     for (index, cut) in cuts.into_iter().enumerate() {
         let mut probe = Probe::new(&calls);
-        probe.retry = retry_policy();
+        probe.retry = execution_policy();
         probe.gate = Some((a.clone(), b.clone()));
         probe.gate_after_crash = index == 3;
         let probe = Arc::new(probe);
@@ -1394,7 +1397,7 @@ async fn l17_two_registered_timers_replay_the_recorded_wake_order() {
         ),
     ] {
         let mut probe = Probe::new(&calls);
-        probe.retry = retry_policy();
+        probe.retry = execution_policy();
         // Both old deadlines expire before a cold replay registers A's
         // timer first. The already recorded B wake must still issue B2 first.
         probe.replay_delay = Some(Duration::from_millis(150));
@@ -1443,7 +1446,7 @@ async fn l03_cancel_during_registered_backoff_starts_no_next_body() {
     let kind = Kind::Retry { after_ms: 50 };
     let calls = Arc::new(vec![(call("backoff-cancel", &kind), kind)]);
     let mut probe = Probe::new(&calls);
-    probe.retry = retry_policy();
+    probe.retry = execution_policy();
     probe.cancel_at_timer = true;
     let probe = Arc::new(probe);
     let driven = drive(
@@ -2104,11 +2107,11 @@ async fn l03_closing_records_backoff_cancellation_without_waiting_for_the_timer(
                     &[call],
                     lash_core::tool_run::CapacityScope::Held,
                     probe as Arc<dyn SingletonToolHandlers>,
-                    lash_core::tool_run::RecordedRetryPolicy::Reported {
-                        max_attempts: std::num::NonZeroU32::new(2).unwrap(),
-                        base_delay_ms: 60_000,
-                        max_delay_ms: 60_000,
-                    },
+                    lash_core::tool_run::ExecutionPolicy::repeatable(
+                        std::num::NonZeroU32::new(2).unwrap(),
+                        60_000,
+                        60_000,
+                    ),
                 )
                 .await
                 .unwrap();
@@ -2155,3 +2158,123 @@ async fn l03_closing_records_backoff_cancellation_without_waiting_for_the_timer(
     );
 }
 mod probe;
+
+/// L-B2: the pinned repeatable contract, not a body's permission, owns ordinals.
+#[tokio::test]
+async fn lb2_repeatable_admits_bounded_ordinals_for_known_failures() {
+    for (kind, expected) in [
+        (Kind::Failed, 2),
+        (Kind::TimedOut(lash_core::LimitCause::ExecutionSlice), 2),
+        (Kind::TimedOut(lash_core::LimitCause::ExecutionTotal), 1),
+        (Kind::TimedOut(lash_core::LimitCause::WaitDeadline), 1),
+        (Kind::Interrupted, 1),
+        (Kind::Cancelled, 1),
+    ] {
+        let calls = Arc::new(vec![(call("lb2", &kind), kind)]);
+        let mut probe = Probe::new(&calls);
+        probe.retry = execution_policy();
+        let probe = Arc::new(probe);
+        let driven = drive(
+            5165,
+            Vec::new(),
+            Arc::clone(&calls),
+            Arc::new(vec![Step::Concurrent, Step::Drain]),
+            Arc::clone(&probe),
+        )
+        .await;
+        assert_eq!(probe.executions_of(&calls[0].0.call_id), expected);
+        let records = driven.records();
+        let ordinals: Vec<_> = records
+            .iter()
+            .flat_map(|record| &record.events)
+            .filter_map(|event| match event {
+                RunEvent::AttemptRecorded {
+                    call_id, attempt, ..
+                } => {
+                    assert_eq!(call_id, &calls[0].0.call_id);
+                    Some(attempt.get())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ordinals, (1..=expected as u32).collect::<Vec<_>>());
+        assert_eq!(
+            records
+                .iter()
+                .flat_map(|record| &record.events)
+                .filter(|event| matches!(event, RunEvent::Admitted { .. }))
+                .count(),
+            1
+        );
+    }
+}
+
+/// L-B1: every non-successful end of Once is terminal.
+#[tokio::test]
+async fn lb1_once_never_repeats() {
+    for kind in [
+        Kind::Retry { after_ms: 0 },
+        Kind::Interrupted,
+        Kind::TimedOut(lash_core::LimitCause::ExecutionSlice),
+        Kind::TimedOut(lash_core::LimitCause::ExecutionTotal),
+        Kind::TimedOut(lash_core::LimitCause::WaitDeadline),
+        Kind::Cancelled,
+    ] {
+        let calls = Arc::new(vec![(call("lb1", &kind), kind)]);
+        let probe = Arc::new(Probe::new(&calls));
+        let driven = drive(
+            5165,
+            Vec::new(),
+            Arc::clone(&calls),
+            Arc::new(vec![Step::Concurrent, Step::Drain]),
+            Arc::clone(&probe),
+        )
+        .await;
+        assert_eq!(probe.executions_of(&calls[0].0.call_id), 1);
+        assert!(
+            driven
+                .records()
+                .iter()
+                .flat_map(|record| &record.events)
+                .all(|event| !matches!(
+                    event,
+                    RunEvent::RetryScheduled { .. } | RunEvent::RetryTimerRegistered { .. }
+                ))
+        );
+    }
+}
+
+/// L-B3: current declarations veto repeats and cannot upgrade admission.
+#[tokio::test]
+async fn lb3_current_policy_vetoes_and_never_upgrades_admission() {
+    for (stored, current) in [
+        (execution_policy(), lash_core::ExecutionPolicy::Once),
+        (lash_core::ExecutionPolicy::Once, execution_policy()),
+    ] {
+        let kind = Kind::Retry { after_ms: 0 };
+        let calls = Arc::new(vec![(call("lb3", &kind), kind)]);
+        let mut probe = Probe::new(&calls);
+        probe.retry = stored;
+        probe.current_policy = Some(current);
+        let probe = Arc::new(probe);
+        let driven = drive(
+            5165,
+            Vec::new(),
+            Arc::clone(&calls),
+            Arc::new(vec![Step::Concurrent, Step::Drain]),
+            Arc::clone(&probe),
+        )
+        .await;
+        assert_eq!(probe.executions_of(&calls[0].0.call_id), 1);
+        let records = driven.records();
+        let admitted = records
+            .iter()
+            .flat_map(|record| &record.events)
+            .find_map(|event| match event {
+                RunEvent::Admitted { round } => Some(round),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(admitted.members[0].policy.execution, stored);
+    }
+}

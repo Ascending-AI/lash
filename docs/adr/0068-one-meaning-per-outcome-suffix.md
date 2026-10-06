@@ -58,9 +58,9 @@ Private implementation names follow the same naming roles when changed.
 `ToolCallOutcome` answers the call's settlement, `Success`, `Failure` or
 `Cancelled`. Both are outcomes of their own operation.
 
-`ToolRetryPolicy` is the configured choice. `ToolRetryStatus` observes retry
-progress, including exhaustion. A policy is not a status merely because both
-refer to retries.
+`ExecutionPolicy` is the configured execution contract. `AttemptOutcome`
+records one application attempt; its failure may suggest a delay but cannot
+grant permission to execute again.
 
 Likewise, an addressed cancellation receipt binds a target to its closed cancel
 outcome. A batch report collects per-delivery receipts rather than calling one
@@ -106,7 +106,7 @@ These current types demonstrate the roles rather than recording a rename list.
 | `ProcessRegistrationOutcome` | Registration's answer, including an existing registration. |
 | `ToolOutcome` | The tool body's return. |
 | `ToolCallOutcome` | The call's settlement. |
-| `ToolRetryStatus` | Retry progress observation. |
+| `ExecutionPolicy` | Pinned execution contract: Once or bounded Repeatable. |
 | `AggregateConsumer` | Caller-chosen Run selection policy, not an answer. |
 | `ToolDeclaration` | Producer capabilities, not an answer. |
 | `ProcessHandleView` | Read projection of the process handle. |
@@ -121,10 +121,10 @@ These current types demonstrate the roles rather than recording a rename list.
   `MaintenanceResult`, `TriggerEffectResult` and
   `TriggerOccurrenceReclamationResult`.
 - [Role witnesses](../../scripts/test_identity_adr_claims.py#L23) pin delivery
-  receipt/report nesting, registration outcomes and retry status.
+  receipt/report nesting, registration outcomes and execution policy.
 - [Tool-body answer](../../crates/lash-core-execution/src/tool_result.rs#L382),
   [call outcome](../../crates/lash-sansio/src/tool_output.rs#L455) and
-  [retry status](../../crates/lash-sansio/src/tool_output.rs#L893) keep the
+  [execution policy](../../crates/lash-sansio/src/tool_contract.rs#L13) keep the
   neighbouring roles separate.
 - [Turn report](../../crates/lash/src/turn.rs#L158) and
   [remote status](../../crates/lash-remote-protocol/src/turn_result.rs#L217)

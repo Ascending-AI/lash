@@ -205,8 +205,7 @@ pub(super) async fn launch_start(
                         if let (
                             Some(recorded),
                             SingletonCapture::Done { stream, .. }
-                            | SingletonCapture::Failed { stream, .. }
-                            | SingletonCapture::RetryableFailure { stream, .. },
+                            | SingletonCapture::Failed { stream, .. },
                         ) = (stream, &mut capture)
                         {
                             *stream = recorded;

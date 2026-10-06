@@ -15,7 +15,7 @@ async fn failed_park_announcement_fails_the_call_instead_of_parking() {
         PendingProbeMode::AnnouncingWithoutProcess,
         Arc::clone(&attempts),
         None,
-        ToolRetryPolicy::Never,
+        ExecutionPolicy::Once,
     )
     .await;
     let prepared = pending_prepared_call();

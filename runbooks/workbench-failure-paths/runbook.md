@@ -45,7 +45,7 @@ internal assertions.
    product-event records by call id and attempt ordinal, and require the same order and facts
    after replay and reload.
 6. Paid partial output is preview evidence only. It must stop with a non-retryable
-   `unsafe_retry_after_output_started`, make exactly one provider attempt, and never purchase
+   `unwith_suggested_delay_after_output_started`, make exactly one provider attempt, and never purchase
    or render the fixture's second-generation sentinel.
 7. Process failure remains process failure. The work rail must show `failed` plus the
    durable error; a successful parent turn must not make the process look successful.
@@ -150,7 +150,7 @@ is hidden.
 
 Require the rendered turn to show the public event `turn could not be completed`, with no
 assistant success bubble. In the captured observations require the safe-regeneration error
-text, and in the trace require the typed issue `unsafe_retry_after_output_started`. Also
+text, and in the trace require the typed issue `unwith_suggested_delay_after_output_started`. Also
 require in captured observations
 `paid partial output marker` as preview activity, but require that marker to be absent from
 `/api/state.messages` and the settled transcript. Require `UNSAFE second generation was
@@ -165,7 +165,7 @@ the cheaper witness; they are not in the trace, whose `llm_call_failed` record
 carries the same facts as prose (`reason` ending `retry: output_started_without_retry_guarantee`),
 plus `charge_safety` (`outcome: denied`, `tokens_at_stake: 4`) and the attempt `usage`. Gate
 each field where it is actually emitted: output usage equal to 4 in either record, and
-terminal issue code `unsafe_retry_after_output_started` with `retryable: false` on the trace
+terminal issue code `unwith_suggested_delay_after_output_started` with `retryable: false` on the trace
 record's `error`. Require no attempt reset or
 retry-status event and no active route.
 

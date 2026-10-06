@@ -1,6 +1,7 @@
 //! Physical capture and adoption use the shared K6 codec.
 
 use super::*;
+use crate::tool_run::CompletionSource;
 
 impl RunCoordinator<'_> {
     pub(crate) fn with_generation_cuts(mut self, enabled: bool) -> Self {
@@ -424,48 +425,10 @@ impl<'a> RunCoordinator<'a> {
                         SingletonTerminal::Deferred { .. } => return Err(boundary(&id)),
                     }
                 } else {
-                    let reference = match decision {
-                        CallDecision::Final {
-                            source: ResultSource::Attempt { attempt },
-                            ..
-                        } => run
-                            .attempts
-                            .iter()
-                            .find(|entry| entry.call_id == id && entry.attempt == *attempt)
-                            .and_then(|entry| match &entry.result {
-                                AttemptResult::Done { output }
-                                | AttemptResult::Failed { output, .. } => Some(output.clone()),
-                                AttemptResult::Deferred { .. }
-                                | AttemptResult::DeferredStart { .. }
-                                | AttemptResult::Pending { .. } => None,
-                            })
-                            .or_else(|| {
-                                attempts.get(&id).and_then(|(_, result)| match result {
-                                    AttemptResult::Done { output }
-                                    | AttemptResult::Failed { output, .. } => Some(output.clone()),
-                                    _ => None,
-                                })
-                            }),
-                        CallDecision::Final {
-                            source: ResultSource::Cached,
-                            ..
-                        } => member
-                            .checks
-                            .winner()
-                            .and_then(|reply| match &reply.verdict {
-                                BeforeCheckVerdict::Cached { result } => Some(result.clone()),
-                                _ => None,
-                            }),
-                        CallDecision::Final {
-                            source: ResultSource::DeferredCompletion { resolved, .. },
-                            ..
-                        } => Some(*resolved.clone()),
+                    let capture = match decision {
+                        CallDecision::Final { source, .. } => Some(run.call_capture(&id, source)?),
                         _ => None,
                     };
-                    let capture = reference
-                        .as_ref()
-                        .map(|reference| run.journal.materials.decode(reference))
-                        .transpose()?;
                     run.owed.insert(
                         *rank,
                         Owed {
@@ -478,9 +441,9 @@ impl<'a> RunCoordinator<'a> {
                 }
             } else if let Some((
                 attempt,
-                result @ (AttemptResult::Deferred { .. }
-                | AttemptResult::DeferredStart { .. }
-                | AttemptResult::Pending { .. }),
+                result @ (AttemptOutcome::Waiting(CompletionSource::Deferred { .. })
+                | AttemptOutcome::Waiting(CompletionSource::DeferredStart { .. })
+                | AttemptOutcome::Waiting(CompletionSource::Pending { .. })),
             )) = attempts.get(&id)
             {
                 let request: RecordedPreparedRequest =
@@ -498,17 +461,18 @@ impl<'a> RunCoordinator<'a> {
                     environment: request.environment,
                 };
                 let start = match result {
-                    AttemptResult::Pending {
-                        start: Some(start), ..
-                    } => Some(SingletonStart {
+                    AttemptOutcome::Waiting(CompletionSource::Pending {
+                        start: Some(start),
+                        ..
+                    }) => Some(SingletonStart {
                         start_key: start.start_key.clone(),
                         obligation: start.obligation.clone(),
                     }),
-                    AttemptResult::DeferredStart {
+                    AttemptOutcome::Waiting(CompletionSource::DeferredStart {
                         start_key,
                         obligation,
                         ..
-                    } => Some(SingletonStart {
+                    }) => Some(SingletonStart {
                         start_key: start_key.clone(),
                         obligation: obligation.clone(),
                     }),
@@ -526,13 +490,19 @@ impl<'a> RunCoordinator<'a> {
                     run.refused_starts.insert(id, (waiting, output));
                 } else if pending_start {
                     let source = match result {
-                        AttemptResult::DeferredStart { source, .. }
-                        | AttemptResult::Pending { source, .. } => source,
+                        AttemptOutcome::Waiting(CompletionSource::DeferredStart {
+                            source, ..
+                        })
+                        | AttemptOutcome::Waiting(CompletionSource::Pending { source, .. }) => {
+                            source
+                        }
                         _ => return Err(crate::tool_run::ContinuationRefusal::ForeignSource.into()),
                     };
                     run.pending_starts.insert(id, (waiting, source.clone()));
                 } else {
-                    if let AttemptResult::Pending { metadata, .. } = result {
+                    if let AttemptOutcome::Waiting(CompletionSource::Pending { metadata, .. }) =
+                        result
+                    {
                         let pending: RecordedPending = run.journal.materials.decode(metadata)?;
                         waiting
                             .handlers

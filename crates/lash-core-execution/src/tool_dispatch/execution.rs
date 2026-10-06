@@ -32,8 +32,11 @@ pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
     execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     tool_context: ToolContext<'run>,
 ) -> ToolCallLaunch {
-    let retry_policy =
-        super::retry::resolve_retry_policy(context, &prepared.tool_id, execution_grant.as_deref());
+    let execution_policy = super::retry::resolve_execution_policy(
+        context,
+        &prepared.tool_id,
+        execution_grant.as_deref(),
+    );
     let turn_cancel_wait = Box::new(
         context.effect_controller.turn_cancel_wait(
             tool_context
@@ -47,7 +50,7 @@ pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
         context,
         prepared,
         execution_grant,
-        retry_policy,
+        execution_policy,
         super::ToolAttemptLineage::from_parent(context.parent_invocation.clone()),
         turn_cancel_wait.as_ref(),
         None,

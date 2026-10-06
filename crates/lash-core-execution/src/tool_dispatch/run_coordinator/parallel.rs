@@ -1,7 +1,8 @@
 //! Eager X handles and the recorded K9 selection/registration schedule.
 use super::*;
 use crate::tool_dispatch::SelectKey;
-use crate::tool_run::{RecordedRetryPolicy, RunAttemptEntry};
+use crate::tool_run::CompletionSource;
+use crate::tool_run::{ExecutionPolicy, RunAttemptEntry};
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 
 pub(super) type KeyHandle<'a> =
@@ -48,6 +49,7 @@ enum SelectedWork<'a> {
         ordinal: AttemptOrdinal,
         timer: bool,
         delay: u64,
+        capture: Option<SingletonCapture>,
     },
     AggregateTimer {
         key: String,
@@ -110,11 +112,7 @@ impl SelectedWork<'_> {
                 Self::Call {
                     work, timer: true, ..
                 },
-                RunEvent::Decided {
-                    call_id,
-                    decision: CallDecision::Cancelled,
-                    ..
-                },
+                RunEvent::Decided { call_id, .. },
             ) => work.call.call_id == *call_id,
             _ => false,
         }
@@ -142,11 +140,19 @@ fn captured(
     owner: &MaterialOwner,
     available: &[PluginRevision],
 ) -> Result<Option<SingletonCapture>, RuntimeEffectControllerError> {
-    let output = match &entry.result {
-        AttemptResult::Deferred { .. }
-        | AttemptResult::DeferredStart { .. }
-        | AttemptResult::Pending { .. } => return Ok(None),
-        AttemptResult::Done { output } | AttemptResult::Failed { output, .. } => output,
+    let Some(output) = entry.result.output() else {
+        return Ok(match &entry.result {
+            AttemptOutcome::Waiting(_) => None,
+            AttemptOutcome::Interrupted => Some(SingletonCapture::Interrupted),
+            AttemptOutcome::TimedOut { cause, .. } => Some(SingletonCapture::TimedOut {
+                cause: *cause,
+                evidence: None,
+            }),
+            AttemptOutcome::Cancelled { .. } => {
+                Some(SingletonCapture::Cancelled { evidence: None })
+            }
+            _ => None,
+        });
     };
     let mut materials = Materials {
         owner: owner.clone(),
@@ -173,7 +179,7 @@ impl<'a> RunCoordinator<'a> {
         calls: &[SingletonToolCall],
         capacity: crate::tool_run::CapacityScope,
         handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
-        retry: RecordedRetryPolicy,
+        retry: ExecutionPolicy,
     ) -> Result<Vec<(ToolCallId, DecidedCall)>, SingletonRunError> {
         self.begin_frame()?;
         let result = self
@@ -191,7 +197,7 @@ impl<'a> RunCoordinator<'a> {
         calls: &[SingletonToolCall],
         capacity: crate::tool_run::CapacityScope,
         handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
-        retry: RecordedRetryPolicy,
+        retry: ExecutionPolicy,
         aggregate: Option<(&crate::tool_run::AggregatePlan, &dyn crate::Clock)>,
     ) -> Result<Vec<(ToolCallId, DecidedCall)>, SingletonRunError> {
         let admitted = self
@@ -399,8 +405,9 @@ impl<'a> RunCoordinator<'a> {
                             work: std::sync::Arc::clone(&entry.work),
                             ordinal: entry.ordinal,
                             timer: entry.timer,
+                            capture: entry.capture.clone(),
                             delay: backoff(
-                                &entry.work.member.policy.retry,
+                                &entry.work.member.policy.execution,
                                 entry.ordinal,
                                 entry.capture.as_ref(),
                             ),
@@ -513,7 +520,7 @@ impl<'a> RunCoordinator<'a> {
                 }
             };
             let step = Box::pin(async move {
-                let (work, ordinal, timer, delay) = match selected_work {
+                let (work, ordinal, timer, delay, previous_capture) = match selected_work {
                     SelectedWork::Source { call_id } => {
                         let Ready::Sealed(seal) = ready else {
                             return Err(format!("a source returned {}", describe(&ready)));
@@ -586,7 +593,8 @@ impl<'a> RunCoordinator<'a> {
                         ordinal,
                         timer,
                         delay,
-                    } => (work, ordinal, timer, delay),
+                        capture,
+                    } => (work, ordinal, timer, delay, capture),
                 };
                 let call = &work.call;
                 let member = &work.member;
@@ -600,13 +608,6 @@ impl<'a> RunCoordinator<'a> {
                         }
                         let capture = captured(&entry, &owner, &available)
                             .map_err(|error| error.to_string())?;
-                        let retryable = matches!(
-                            &entry.result,
-                            AttemptResult::Failed {
-                                retryable: true,
-                                ..
-                            }
-                        );
                         record.events.push(RunEvent::AttemptRecorded {
                             call_id: call_id.clone(),
                             attempt: ordinal,
@@ -619,8 +620,11 @@ impl<'a> RunCoordinator<'a> {
                                 state: Vec::new(),
                             });
                         };
-                        if retryable
-                            && eligible(&member.policy.retry, ordinal)
+                        if entry.result.may_repeat()
+                            && member.policy.execution.permits_repeat(
+                                handlers.current_execution_policy(call, member.policy.execution),
+                                ordinal.get(),
+                            )
                             && !aborted
                             && !handlers.run_cancel_requested().await?
                         {
@@ -628,7 +632,11 @@ impl<'a> RunCoordinator<'a> {
                                 call_id,
                                 failed: ordinal,
                                 next: ordinal.next().ok_or("attempt ordinal exhausted")?,
-                                backoff_ms: backoff(&member.policy.retry, ordinal, Some(&capture)),
+                                backoff_ms: backoff(
+                                    &member.policy.execution,
+                                    ordinal,
+                                    Some(&capture),
+                                ),
                             });
                             Ok(RunJournalEntry {
                                 record,
@@ -656,6 +664,25 @@ impl<'a> RunCoordinator<'a> {
                     Ready::Timer => {
                         if !timer {
                             return Err("an X handle returned a timer wake".to_owned());
+                        }
+                        if !member.policy.execution.permits_repeat(
+                            handlers.current_execution_policy(call, member.policy.execution),
+                            ordinal.get(),
+                        ) {
+                            return decision_entry(
+                                call,
+                                handlers,
+                                member,
+                                previous_capture.map(|capture| {
+                                    (ResultSource::Attempt { attempt: ordinal }, capture)
+                                }),
+                                DecisionSlot {
+                                    record,
+                                    address,
+                                    aborted,
+                                },
+                            )
+                            .await;
                         }
                         // A cancellation is observed at the durable timer's
                         // wake; Closing records pending cancellations itself.
@@ -879,11 +906,11 @@ impl<'a> RunCoordinator<'a> {
                 [
                     RunEvent::AttemptRecorded {
                         result:
-                            AttemptResult::Pending {
+                            AttemptOutcome::Waiting(CompletionSource::Pending {
                                 source,
                                 metadata,
                                 start,
-                            },
+                            }),
                         ..
                     },
                 ] => {
@@ -905,11 +932,11 @@ impl<'a> RunCoordinator<'a> {
                 [
                     RunEvent::AttemptRecorded {
                         result:
-                            AttemptResult::DeferredStart {
+                            AttemptOutcome::Waiting(CompletionSource::DeferredStart {
                                 source,
                                 start_key,
                                 obligation,
-                            },
+                            }),
                         ..
                     },
                 ] => {
@@ -928,7 +955,7 @@ impl<'a> RunCoordinator<'a> {
                 }
                 [
                     RunEvent::AttemptRecorded {
-                        result: AttemptResult::Deferred { source },
+                        result: AttemptOutcome::Waiting(CompletionSource::Deferred { source }),
                         ..
                     },
                 ] => {
@@ -1124,35 +1151,18 @@ fn describe(ready: &Ready) -> &'static str {
     }
 }
 
-fn eligible(policy: &RecordedRetryPolicy, failed: AttemptOrdinal) -> bool {
-    matches!(policy, RecordedRetryPolicy::Reported { max_attempts, .. } if failed.get() < max_attempts.get())
-}
-
 fn backoff(
-    policy: &RecordedRetryPolicy,
+    policy: &ExecutionPolicy,
     failed: AttemptOrdinal,
     capture: Option<&SingletonCapture>,
 ) -> u64 {
-    let RecordedRetryPolicy::Reported {
-        base_delay_ms,
-        max_delay_ms,
-        ..
-    } = policy
-    else {
-        return 0;
-    };
     let hint = match capture {
-        Some(SingletonCapture::RetryableFailure { after_ms, .. }) => *after_ms,
+        Some(SingletonCapture::Failed {
+            suggested_delay_ms, ..
+        }) => *suggested_delay_ms,
         _ => None,
     };
-    hint.unwrap_or_else(|| {
-        base_delay_ms.saturating_mul(
-            1_u64
-                .checked_shl(failed.get().saturating_sub(1))
-                .unwrap_or(u64::MAX),
-        )
-    })
-    .min(*max_delay_ms)
+    policy.delay_ms_for_retry(failed.get().saturating_sub(1), hint)
 }
 
 fn selection_boundary(message: &str) -> SingletonRunError {

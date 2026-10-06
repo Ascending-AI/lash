@@ -11,9 +11,9 @@ use lash::plugins::{
     SessionPlugin, StateCommands,
 };
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
-    ToolDefinition, ToolDefinitionBindingExt, ToolFailureClass, ToolOutcome, ToolOutcomeDone,
-    ToolRetryPolicy,
+    ExecutionPolicy, StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding,
+    ToolCall, ToolDefinition, ToolDefinitionBindingExt, ToolFailureClass, ToolOutcome,
+    ToolOutcomeDone,
 };
 use serde::{Deserialize, Serialize};
 
@@ -81,7 +81,7 @@ impl SessionPlugin for ToolFixtureArgs {
             ).map_err(|error| PluginError::Session(error.to_string()))?
                 .with_tool_binding(ToolBinding::new(["h1"], "write"));
             Ok(if name == "h1_retry" {
-                definition.with_retry_policy(ToolRetryPolicy::safe(2, self.backoff_ms, self.backoff_ms))
+                definition.with_execution_policy(ExecutionPolicy::repeatable(std::num::NonZeroU32::MIN.saturating_add(1), self.backoff_ms, self.backoff_ms))
             } else { definition })
         }).collect::<Result<Vec<_>, PluginError>>()?;
         registrar
@@ -150,7 +150,7 @@ impl ToolFixtureArgs {
                 .error_for_status()?;
         }
         match call.name() {
-            "h1_retry" if delivery.attempt == 1 => Ok(ToolOutcome::retryable_failure(
+            "h1_retry" if delivery.attempt == 1 => Ok(ToolOutcome::failure_with_delay(
                 ToolFailureClass::External,
                 "h1-reported-retry",
                 "first attempt reports a retryable failure",

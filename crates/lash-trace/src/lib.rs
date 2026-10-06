@@ -537,7 +537,7 @@ pub enum TraceToolAttemptOutcome {
         code: String,
         message: String,
         source: lash_sansio::ToolFailureSource,
-        retry: lash_sansio::ToolRetryStatus,
+        suggested_delay_ms: Option<u64>,
     },
     Cancelled {
         message: String,

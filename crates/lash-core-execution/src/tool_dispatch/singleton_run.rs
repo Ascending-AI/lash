@@ -156,7 +156,9 @@ pub struct IsolatedProcessDescriptor {
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SingletonCapture {
     /// A process bound at admission. No ordinary body produced this capture.
-    Isolated { binding: Box<RecordedIsolatedStart> },
+    Isolated {
+        binding: Box<RecordedIsolatedStart>,
+    },
     Done {
         output: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -173,17 +175,23 @@ pub enum SingletonCapture {
     /// A failure the body reported.
     Failed {
         output: String,
+        suggested_delay_ms: Option<u64>,
         #[serde(default, skip_serializing_if = "AttemptStream::is_empty")]
         stream: AttemptStream,
     },
-    RetryableFailure {
-        output: String,
-        stream: AttemptStream,
-        after_ms: Option<u64>,
+    Interrupted,
+    TimedOut {
+        cause: crate::tool_run::LimitCause,
+        evidence: Option<String>,
+    },
+    Cancelled {
+        evidence: Option<String>,
     },
     /// An outcome the admitted declaration does not admit, refused before
     /// anything it declared was realized.
-    Refused { refusal: DeclarationRefusal },
+    Refused {
+        refusal: DeclarationRefusal,
+    },
     /// A declared start that cannot be an obligation — keyless, or a start
     /// lash executes in a Run that owns no environment — refused before it
     /// was admitted.
@@ -206,10 +214,20 @@ impl SingletonCapture {
     #[must_use]
     pub fn output(&self) -> Option<&str> {
         match self {
-            Self::Done { output, .. }
-            | Self::Failed { output, .. }
-            | Self::RetryableFailure { output, .. } => Some(output),
-            Self::Refused { .. } | Self::StartRefused { .. } | Self::Isolated { .. } => None,
+            Self::Done { output, .. } | Self::Failed { output, .. } => Some(output),
+            Self::TimedOut {
+                evidence: Some(output),
+                ..
+            }
+            | Self::Cancelled {
+                evidence: Some(output),
+            } => Some(output),
+            Self::Refused { .. }
+            | Self::StartRefused { .. }
+            | Self::Isolated { .. }
+            | Self::Interrupted
+            | Self::TimedOut { .. }
+            | Self::Cancelled { .. } => None,
         }
     }
 
@@ -217,10 +235,13 @@ impl SingletonCapture {
     #[must_use]
     pub fn stream(&self) -> Option<&AttemptStream> {
         match self {
-            Self::Done { stream, .. }
-            | Self::Failed { stream, .. }
-            | Self::RetryableFailure { stream, .. } => Some(stream),
-            Self::Refused { .. } | Self::StartRefused { .. } | Self::Isolated { .. } => None,
+            Self::Done { stream, .. } | Self::Failed { stream, .. } => Some(stream),
+            Self::Refused { .. }
+            | Self::StartRefused { .. }
+            | Self::Isolated { .. }
+            | Self::Interrupted
+            | Self::TimedOut { .. }
+            | Self::Cancelled { .. } => None,
         }
     }
 
@@ -228,10 +249,12 @@ impl SingletonCapture {
         match self {
             Self::Done { intents, .. } => intents,
             Self::Failed { .. }
-            | Self::RetryableFailure { .. }
             | Self::Refused { .. }
             | Self::StartRefused { .. }
-            | Self::Isolated { .. } => &[],
+            | Self::Isolated { .. }
+            | Self::Interrupted
+            | Self::TimedOut { .. }
+            | Self::Cancelled { .. } => &[],
         }
     }
 
@@ -242,9 +265,11 @@ impl SingletonCapture {
             Self::Done { start, .. } => start.as_deref(),
             Self::Isolated { binding } => Some(&binding.start),
             Self::Failed { .. }
-            | Self::RetryableFailure { .. }
             | Self::Refused { .. }
-            | Self::StartRefused { .. } => None,
+            | Self::StartRefused { .. }
+            | Self::Cancelled { .. }
+            | Self::Interrupted
+            | Self::TimedOut { .. } => None,
         }
     }
 
@@ -268,11 +293,15 @@ pub enum SingletonBodyOutcome {
     },
     Failed {
         output: String,
+        suggested_delay_ms: Option<u64>,
     },
-    /// A reported failure the admitted retry policy may retry.
-    RetryableFailure {
-        output: String,
-        after_ms: Option<u64>,
+    Interrupted,
+    TimedOut {
+        cause: crate::tool_run::LimitCause,
+        evidence: Option<String>,
+    },
+    Cancelled {
+        evidence: Option<String>,
     },
     /// Declare one K5 start; the Run launches it and waits on its K4 terminal.
     DeferredStart {
@@ -387,12 +416,21 @@ pub trait SingletonToolHandlers: Send + Sync {
     fn restore_cancel(&self, _call_id: &ToolCallId) {}
 
     /// Policy sealed by the same admission as the prepared request.
-    fn retry_policy(
+    fn execution_policy(
         &self,
         _call: &SingletonToolCall,
-        default: crate::tool_run::RecordedRetryPolicy,
-    ) -> crate::tool_run::RecordedRetryPolicy {
+        default: crate::tool_run::ExecutionPolicy,
+    ) -> crate::tool_run::ExecutionPolicy {
         default
+    }
+
+    /// Read the current declaration only to veto a repeat; admission owns its bound.
+    fn current_execution_policy(
+        &self,
+        _call: &SingletonToolCall,
+        admitted: crate::ExecutionPolicy,
+    ) -> crate::ExecutionPolicy {
+        admitted
     }
 
     fn cached_capture(&self, output: String) -> Result<SingletonCapture, String> {
