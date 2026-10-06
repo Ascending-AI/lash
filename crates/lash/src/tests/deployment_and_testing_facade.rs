@@ -417,7 +417,11 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
 /// hold until they are gone; the mark is what makes it drainable at all.
 #[tokio::test]
 async fn generation_drain_status_counts_the_generations_live_processes() {
-    let backend = sqlite_memory_store_backend().await;
+    // Marking a generation draining hands its live processes over (FIG-4976),
+    // which only an engine that routes work by build generation can do.
+    // Explicit reconcile keeps the relay from starting the process this law
+    // registers by hand.
+    let backend = double_backend_explicit_reconcile().await;
     let registry = backend.process_registry();
     let own = backend
         .build_generation()
