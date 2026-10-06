@@ -8,7 +8,10 @@ source "$repo/scripts/worktree-gate-env.sh"
 # shellcheck source=scripts/ci/pg-service.sh
 source "$repo/scripts/ci/pg-service.sh"
 
-export PATH="$HOME/.cargo/bin:$PATH"
+# A Kiln gate already sourced its pinned toolchain and managed Cargo wrapper.
+if [ -z "${KILN_GATE_ID:-}" ]; then
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
 
 dry_run=0
 requested_selector=""
@@ -414,7 +417,11 @@ finish_confidence_gate() {
   fi
   cleanup_mutation_postgres
   finish_current_step
-  lash_gate_cleanup
+  # A local stage inherits its driver's lock and network. Only the owner can
+  # remove that network: an idle moment may be another stage's service startup.
+  if [ "${LASH_GATE_ACQUIRED_HERE:-0}" = "1" ]; then
+    lash_gate_cleanup
+  fi
 }
 
 trap finish_confidence_gate EXIT

@@ -520,6 +520,10 @@ confidence-broad:
 confidence-full:
   bash "{{repo}}/scripts/confidence-gate.sh" full
 
+# CI's complete stage matrix, one shared build, and its strict conclusion.
+confidence-local *args:
+  bash "{{repo}}/scripts/confidence-local.sh" "$@"
+
 # Optional broader iteration run: the whole workspace suite except four tests
 # that between them account for most of its wall clock. It can supplement a
 # focused regression when wider feedback is useful, but it is not a routine

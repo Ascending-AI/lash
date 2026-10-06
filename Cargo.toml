@@ -1,5 +1,6 @@
 [workspace]
-exclude = ["fuzz"]
+# Local gate scratch packages (including Miri's sysroot) are standalone.
+exclude = ["fuzz", ".kiln"]
 members = [
     "crates/lash-render",
     "crates/lash-sansio",

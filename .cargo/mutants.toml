@@ -1,2 +1,6 @@
 # Removing this arm is equivalent: both Undefined and the wildcard return Any.
 exclude_re = ['^crates/lashlang/src/linker/type_helpers\.rs:[0-9]+:[0-9]+: delete match arm Expr::Undefined in literal_type$']
+
+# Local evidence, toolchains and private executor state are not source inputs.
+# In particular TMPDIR may live under .kiln; copying it recurses into itself.
+gitignore = true
