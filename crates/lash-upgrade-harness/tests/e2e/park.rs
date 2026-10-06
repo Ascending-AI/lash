@@ -224,13 +224,13 @@ pub fn s22(permutation: Permutation) -> anyhow::Result<()> {
                 .contains(&served_by(BuildLabel::N, &g_n)),
         "the redriven turn did not settle Answered once by N: {answer}"
     );
-    let resumed = turns()?;
-    ensure!(
-        resumed
-            .iter()
-            .any(|invocation| invocation.id == paused.id && invocation.status == "completed"),
-        "redrive did not finish the original journal: {resumed:?}"
-    );
+    // The store terminal commits inside the original journal; the journal
+    // completes only after the handler returns.
+    lash_upgrade_harness::harness::wait_for("the redrive to finish the original journal", || {
+        Ok(turns()?
+            .into_iter()
+            .find(|invocation| invocation.id == paused.id && invocation.status == "completed"))
+    })?;
     let cleared = live.h3(&n, &session, &H3Command::Parks)?;
     ensure!(
         cleared["park"].is_null(),
@@ -341,16 +341,16 @@ pub fn s22(permutation: Permutation) -> anyhow::Result<()> {
     let (redriven, cancelled) = (racing.0.wait()?, racing.1.wait()?);
     live.retain_control(&n, &session_op, &redrive, &redriven)?;
     live.retain_control(&n, &session_op, &cancel, &cancelled)?;
-    let applied = [&redriven, &cancelled]
-        .iter()
-        .filter(|answer| answer.get("refused").is_none())
-        .count();
+    // A verb wins when its intent applied. The loser is refused, or, for a
+    // redrive the cancel superseded before it applied, accepted unapplied.
+    let won = |answer: &serde_json::Value, verb: &str| answer[verb]["applied"] == json!(true);
+    let redrive_won = won(&redriven, "redrive");
     ensure!(
-        applied == 1,
+        redrive_won != won(&cancelled, "cancel"),
         "redrive and cancel did not have exactly one winner: {redriven} / {cancelled}"
     );
     let (settled, snapshot) = terminal(&mut live, &session_op, &run)?;
-    if redriven.get("refused").is_none() {
+    if redrive_won {
         ensure!(
             settled.kind() == lash_core::store::RunTerminalKind::Answered,
             "the winning redrive did not answer: {snapshot}"
