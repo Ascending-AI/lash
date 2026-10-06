@@ -45,8 +45,8 @@ async fn s19_isolated_start_cuts_recover_one_worker() -> Result<()> {
 
 /// L08: cancellation before admission forbids the start; cancellation after
 /// start terminates and reaps the worker, and a coordinator killed after the
-/// worker's death but before the discharge ACK recovers the recorded receipt
-/// and releases the hold only after termination.
+/// worker's death but before its launch and discharge are durable recovers the
+/// retained receipt and releases the hold only after termination.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs the upgrade node binary and a private Restate server supplied by the E2E gate"]
 async fn s20_isolated_cancel_terminates_and_reaps_worker() -> Result<()> {
@@ -199,16 +199,17 @@ async fn s20(host: &mut Host) -> Result<()> {
         held.len() == 1 && held[0].hold.is_some(),
         "hold was released before the discharge: {held:?}"
     );
+    // Launch and discharge are one durable preparation (FIG-5009): while
+    // discharge is held, only the admission is in the Run's journal.
     let proof = host
-        .await_start(key, &run, BarrierKind::StartRegistered)
+        .await_start(key, &run, BarrierKind::StartAdmitted)
         .await?;
     ensure!(
-        !host
-            .events(key, &run)
-            .await?
-            .iter()
-            .any(|event| matches!(event, RunEvent::StartDischarged { .. })),
-        "discharge was ACKed before the coordinator cut"
+        !host.events(key, &run).await?.iter().any(|event| matches!(
+            event,
+            RunEvent::StartLaunched { .. } | RunEvent::StartDischarged { .. }
+        )),
+        "launch or discharge was ACKed before the coordinator cut"
     );
     host.evidence
         .stores
@@ -529,7 +530,6 @@ impl Host {
                     .iter()
                     .find_map(|event| match (event, &kind) {
                         (RunEvent::StartAdmitted { call_id, .. }, BarrierKind::StartAdmitted)
-                        | (RunEvent::StartLaunched { call_id, .. }, BarrierKind::StartRegistered)
                         | (
                             RunEvent::StartDischarged { call_id, .. },
                             BarrierKind::ConsumerHoldDischarged,
