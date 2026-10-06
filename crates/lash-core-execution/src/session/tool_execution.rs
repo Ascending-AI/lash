@@ -577,7 +577,6 @@ impl RuntimeExecutionContext<'_> {
             let context = self.with_call_observation_key(self.call_observation_key(call_key));
             let this = &context;
             let call_id = &ids.call_id;
-            let tool_correlation_id = tool_activity_id(call_id);
             let attempts = outcome.attempts.clone();
             let output = outcome.record.output.clone();
             let facts = crate::plugin::ToolPresentationFacts {
@@ -652,27 +651,12 @@ impl RuntimeExecutionContext<'_> {
                 &messages,
                 &outcome.triggers,
             )?;
-            {
-                let mut cursor = this.observation_cursor(&format!("tool:{call_id}:intents"));
-                for intent_outcome in crate::tool_dispatch::model_visible_intent_outcomes(&outcome)
-                {
-                    model_return.parts.push(crate::ModelToolReturnPart::text(
-                        intent_outcome.model_addendum(),
-                    ));
-                }
-                for intent_outcome in &outcome.intent_outcomes {
-                    cursor.observe(
-                        this.dispatch.observer.as_ref(),
-                        crate::engine::ObservedEvent::Activity {
-                            correlation_id: Some(tool_correlation_id.clone()),
-                            event: TurnEvent::ToolIntentOutcome {
-                                call_id: call_id.clone(),
-                                outcome: intent_outcome.clone(),
-                            },
-                        },
-                    );
-                }
+            for intent_outcome in crate::tool_dispatch::model_visible_intent_outcomes(&outcome) {
+                model_return.parts.push(crate::ModelToolReturnPart::text(
+                    intent_outcome.model_addendum(),
+                ));
             }
+            self.emit_tool_intent_outcome_activities(call_key, call_id, &outcome.intent_outcomes);
 
             let record = ToolCallRecord {
                 call_id: ids.call_id.clone(),
@@ -726,6 +710,29 @@ impl RuntimeExecutionContext<'_> {
             self.record_nested_effect_error(error);
         }
         self.emit_tool_call_completed_activity(call_key, record, duration_ms);
+    }
+
+    /// Observes each of a call's intent outcomes, ahead of its completion.
+    pub(crate) fn emit_tool_intent_outcome_activities(
+        &self,
+        call_key: &str,
+        call_id: &crate::ToolCallId,
+        intent_outcomes: &[crate::ToolIntentExecutionOutcome],
+    ) {
+        let context = self.with_call_observation_key(self.call_observation_key(call_key));
+        let mut cursor = context.observation_cursor(&format!("tool:{call_id}:intents"));
+        for intent_outcome in intent_outcomes {
+            cursor.observe(
+                context.dispatch.observer.as_ref(),
+                crate::engine::ObservedEvent::Activity {
+                    correlation_id: Some(tool_activity_id(call_id)),
+                    event: TurnEvent::ToolIntentOutcome {
+                        call_id: call_id.clone(),
+                        outcome: intent_outcome.clone(),
+                    },
+                },
+            );
+        }
     }
 
     pub(crate) fn emit_tool_call_completed_activity(

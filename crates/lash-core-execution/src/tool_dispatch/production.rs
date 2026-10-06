@@ -957,22 +957,29 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     message,
                 )
             })?;
-        self.context
-            .with_tool_observation_attribution(
-                &self
-                    .prepared
-                    .lock_recover()
-                    .get(call_id)
-                    .ok_or_else(|| {
-                        crate::RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RecordEncodingFailed,
-                            "the observed call has no admitted preparation",
-                        )
-                    })?
-                    .input
-                    .attribution,
-            )
-            .emit_tool_call_completed_activity(call_id.as_str(), &record, 0);
+        let context = self.context.with_tool_observation_attribution(
+            &self
+                .prepared
+                .lock_recover()
+                .get(call_id)
+                .ok_or_else(|| {
+                    crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RecordEncodingFailed,
+                        "the observed call has no admitted preparation",
+                    )
+                })?
+                .input
+                .attribution,
+        );
+        // The presented record retains the call's realized intents.
+        if let Some(presented) = presentation.and_then(|text| decode::<Presented>(text).ok()) {
+            context.emit_tool_intent_outcome_activities(
+                call_id.as_str(),
+                call_id,
+                &presented.intent_outcomes,
+            );
+        }
+        context.emit_tool_call_completed_activity(call_id.as_str(), &record, 0);
         Ok(())
     }
 
