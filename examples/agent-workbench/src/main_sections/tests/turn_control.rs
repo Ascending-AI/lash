@@ -1552,6 +1552,41 @@ async fn spawn_restate_admin_recording_probes(
     (format!("http://{addr}"), seen)
 }
 
+async fn reconcile_turn_probe_fixture(double: &lash_restate_test::RestateTestBackend) {
+    use lash::runtime::SessionWorkEngine as _;
+
+    struct NoPausedTurns;
+
+    #[async_trait::async_trait]
+    impl lash::runtime::ParkRecoveryWriter for NoPausedTurns {
+        async fn record_engine_park(
+            &self,
+            target: &lash::runtime::ParkTarget,
+            _reason: lash::persistence::ParkReason,
+            _engine: lash::persistence::EnginePark,
+            _execution: &dyn lash::runtime::StalledExecution,
+        ) -> Result<lash::runtime::EngineParkRecorded, lash::persistence::StoreError> {
+            panic!("the probe fixture has no paused turns: {target:?}");
+        }
+    }
+
+    let report = double
+        .restate()
+        .session_work_engine()
+        .control()
+        .reconcile_parks(
+            &NoPausedTurns,
+            lash::runtime::EnginePage {
+                after: None,
+                limit: std::num::NonZeroUsize::MIN.saturating_add(63),
+                budget: Duration::from_secs(5),
+            },
+        )
+        .await
+        .expect("reconcile the probe fixture");
+    assert!(report.failed.is_empty(), "reconcile failed: {report:?}");
+}
+
 #[test]
 fn a_pending_cancel_probes_the_runs_lash_turn() {
     run_async_test_on_stack_budget("workbench-turn-probe-lash-turn", || {
@@ -1569,41 +1604,31 @@ async fn a_pending_cancel_probes_the_runs_lash_turn_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_id = SessionId::fixture(format!("probe-session-{}", uuid::Uuid::new_v4()));
+    let double = crate::tests::test_double_backend(0).await;
+    let mut state =
+        admitted_turn_cancel_test_state(&double, &data_dir, String::new(), "plainly-named-turn")
+            .await;
+    let session_id = state.current_session_id();
     let turn_id = TurnId::from("plainly-named-turn");
-    let admission = lash::persistence::AdmissionId::new("probe-intent#0");
-    let key = lash::restate::turn_invocation_key(
-        &lash::restate::ShiftRequest {
-            session: session_id.clone(),
-            request: lash::restate::ShiftRequestId::new("probe-intent"),
-            intended_lane: None,
-        },
-        0,
+    let store = state.core.backend().session_store_factory();
+    let Some(lash::persistence::RunExecutor::Run { admission }) = store
+        .run_executor(&session_id, &turn_id)
+        .await
+        .expect("read the real Run's executor")
+    else {
+        panic!("the fixture's Run executes in its own LashTurn invocation");
+    };
+    let key = format!(
+        "{}:{}{}",
+        session_id.as_str().len(),
+        session_id.as_str(),
+        admission.as_str(),
     );
     let (admin_url, probed) = spawn_restate_admin_recording_probes(key.clone()).await;
-    let double = crate::tests::test_double_backend(0).await;
-    let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
-    state.sessions.ensure(&session_id);
-    state.sessions.select(&session_id);
-    state
-        .ensure_current_session()
-        .await
-        .expect("create the selected session");
-    let store = state.core.backend().session_store_factory();
-    let epoch = store.shift_epoch(&session_id).await.expect("session epoch");
-    store
-        .seal_shift_epoch(
-            &session_id,
-            &admission,
-            epoch.epoch,
-            &lash::persistence::RunStartNonce::new("probe-start"),
-            Some(&lash::persistence::RunHold {
-                run: turn_id.clone(),
-                executor: lash::persistence::RunExecutor::run(&admission),
-            }),
-        )
-        .await
-        .expect("record probe invocation");
+    state.restate_admin_url = admin_url;
+    // Recovery may run before the pending cancel probes liveness. A seal
+    // without a real admission and invocation is released by that pass.
+    reconcile_turn_probe_fixture(&double).await;
     state.track_turn(&session_id, &turn_id);
 
     let (driver, acknowledge) = expiring_terminal_driver(&state);
@@ -1613,7 +1638,7 @@ async fn a_pending_cancel_probes_the_runs_lash_turn_inner() {
             state.cancel_turns_for_session_with_driver(
                 &cancel_session,
                 &driver,
-                WorkbenchTurnCancelMode::Abort,
+                WorkbenchTurnCancelMode::Stop,
                 EXPIRING_ATTACH_TIMEOUT,
             ),
             acknowledge
