@@ -681,7 +681,9 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) park_sleeps: AtomicBool,
     pub(super) sleep_started: tokio::sync::Notify,
     pub(super) sleep_release: tokio::sync::Notify,
-    pub(super) crash_after_run_commit: AtomicBool,
+    /// A fragment of the name of the run step the worker crashes right
+    /// after committing, once.
+    pub(super) crash_after_run_commit: Mutex<Option<String>>,
     pub(super) run_committed: ZeroPermitSemaphore,
     pub(super) runs: Mutex<Vec<String>>,
     pub(super) journal_commands: Mutex<Vec<String>>,
@@ -796,8 +798,8 @@ impl ReplayableRecordingContext {
         self.sleep_release.notify_one();
     }
 
-    pub(super) fn crash_after_next_run_commit(&self) {
-        self.crash_after_run_commit.store(true, Ordering::SeqCst);
+    pub(super) fn crash_after_next_run_commit_named(&self, fragment: &str) {
+        *self.crash_after_run_commit.lock_recover() = Some(fragment.to_owned());
     }
 
     pub(super) async fn await_run_committed(&self) {
@@ -1194,8 +1196,18 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         Box::pin(async move {
             let value = future.await;
             let bytes = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
+            let crash = {
+                let mut armed = context.crash_after_run_commit.lock_recover();
+                let hit = armed
+                    .as_deref()
+                    .is_some_and(|fragment| effect_name.contains(fragment));
+                if hit {
+                    *armed = None;
+                }
+                hit
+            };
             context.records.lock_recover().insert(effect_name, bytes);
-            if context.crash_after_run_commit.swap(false, Ordering::SeqCst) {
+            if crash {
                 context.run_committed.add_permits(1);
                 panic!("injected worker crash after the post-wake effect committed");
             }
