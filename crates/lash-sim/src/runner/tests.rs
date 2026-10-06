@@ -520,7 +520,8 @@ async fn rlm_final_value_provider_response_shape_mutation_guard() {
 
 #[tokio::test]
 async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
-    let mut provider = pending_tool_roundtrip_provider();
+    let final_answer = Arc::new(tokio::sync::Notify::new());
+    let mut provider = pending_tool_roundtrip_provider(Arc::clone(&final_answer));
     let tool_response = provider
         .complete(openai_compatible_request(false))
         .await
@@ -534,6 +535,7 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
         "pending tool provider must start with the concrete tool-call part"
     );
 
+    final_answer.notify_one();
     let final_response = provider
         .complete(openai_compatible_request(false))
         .await

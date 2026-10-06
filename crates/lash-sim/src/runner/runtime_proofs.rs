@@ -308,12 +308,13 @@ pub(crate) async fn prove_pending_tool_completion_on(
     recorder: &crate::invariants::HistoryRecorder,
 ) -> Result<PendingToolCompletionProof, FixedScriptRunnerError> {
     let (key_tx, key_rx) = tokio::sync::oneshot::channel();
+    let final_answer = Arc::new(tokio::sync::Notify::new());
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let core = lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .serve_test_llm_profile(
-            pending_tool_roundtrip_provider(),
+            pending_tool_roundtrip_provider(Arc::clone(&final_answer)),
             lash_core::LlmProfileMetadata::builder("mock-model")
                 .context_window_tokens(200_000)
                 .build()
@@ -409,6 +410,19 @@ pub(crate) async fn prove_pending_tool_completion_on(
         .resolve(key.clone(), lash_core::Resolution::Ok(resolution.clone()))
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    // The duplicate lands while the resumed turn still waits on its final
+    // answer: the run cannot end, and its scope close cannot retire the
+    // source the first resolution sealed, until that answer is released. A
+    // write after the retirement is refused typed instead (FIG-5128).
+    let duplicate = core
+        .completions()
+        .resolve(
+            key,
+            lash_core::Resolution::Ok(json!({"ok": false, "duplicate": true})),
+        )
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    final_answer.notify_one();
     delivered.observed = json!({
         "session": event.actor_alias,
         "tool": event.payload.get("tool").cloned().unwrap_or(Value::Null),
@@ -440,14 +454,6 @@ pub(crate) async fn prove_pending_tool_completion_on(
         final_ok,
         "pending tool completion did not resume the turn to the scripted final answer",
     )?;
-    let duplicate = core
-        .completions()
-        .resolve(
-            key,
-            lash_core::Resolution::Ok(json!({"ok": false, "duplicate": true})),
-        )
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session_id = result.state.session_id.clone();
     let turn_index = result.state.turn_index;
     engine.restate().server().settle().await;
@@ -786,7 +792,12 @@ fn pending_tool_definition() -> lash_core::ToolDefinition {
     .with_declaration(lash_core::ToolDeclaration::deferring())
 }
 
-pub(super) fn pending_tool_roundtrip_provider() -> ProviderHandle {
+/// The pending-tool turn's provider: a tool call, then the final answer once
+/// `final_answer` is notified, so the proof decides when the resumed turn can
+/// finish.
+pub(super) fn pending_tool_roundtrip_provider(
+    final_answer: Arc<tokio::sync::Notify>,
+) -> ProviderHandle {
     let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from([
         tool_call_llm_response("call-1", "app_lookup", "{}"),
         text_llm_response("done"),
@@ -795,8 +806,13 @@ pub(super) fn pending_tool_roundtrip_provider() -> ProviderHandle {
         .kind("lash-sim-pending-tool")
         .complete(move |_request| {
             let responses = Arc::clone(&responses);
+            let final_answer = Arc::clone(&final_answer);
             async move {
-                responses.lock().await.pop_front().ok_or_else(|| {
+                let mut responses = responses.lock().await;
+                if responses.len() == 1 {
+                    final_answer.notified().await;
+                }
+                responses.pop_front().ok_or_else(|| {
                     LlmTransportError::new("pending tool roundtrip provider exhausted")
                 })
             }
