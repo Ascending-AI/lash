@@ -47,8 +47,17 @@ impl LashRuntime {
             base: crate::plugin::PluginTransitionBase::Session { head: base.clone() },
             target: target.clone(),
         };
-        self.record_transition_request(controller, admitted, request, basis)
-            .await
+        // A turn run states the host's tool-source policy at its transition;
+        // a command run applies host commands, a tool restore among them, and
+        // tolerates (FIG-5134).
+        self.record_transition_request(
+            controller,
+            admitted,
+            request,
+            basis,
+            self.host.core.control.tool_source_policy,
+        )
+        .await
     }
 
     pub(super) async fn record_command_plugin_transition(
@@ -61,6 +70,7 @@ impl LashRuntime {
             admitted,
             command_transition_request(controller, admitted)?,
             TransitionBasis::Admitted,
+            crate::ToolSourcePolicy::Tolerate,
         )
         .await
     }
@@ -71,6 +81,7 @@ impl LashRuntime {
         admitted: &Admitted,
         request: crate::plugin::PluginTransitionRequest,
         basis: TransitionBasis<'_>,
+        tool_source_policy: crate::ToolSourcePolicy,
     ) -> Result<crate::plugin::PluginTransitionRecord, ShiftAbort> {
         let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
         let runner = PluginTransitionRunner {
@@ -88,6 +99,7 @@ impl LashRuntime {
                 TransitionBasis::FollowOn(owed) => Some(owed.clone()),
                 _ => None,
             },
+            tool_source_policy,
         };
         let outcome = controller
             .execute_effect(
@@ -228,6 +240,7 @@ struct PluginTransitionRunner {
     commit_budget: crate::CommitBudget,
     resume: Option<(crate::store::SessionHeadRef, crate::store::ShiftFence)>,
     follow_on: Option<crate::store::PendingFollowOn>,
+    tool_source_policy: crate::ToolSourcePolicy,
 }
 
 impl PluginTransitionRunner {
@@ -392,6 +405,15 @@ impl RuntimeEffectLocalRunner for PluginTransitionRunner {
         let mut record = self.host.transition_plugins(*request, &plugins, config);
         if let Ok((native_state, native_config)) = record.candidate() {
             let candidate = self.plugins.materialize_transition_candidate(&record)?;
+            // `Require` refuses the run here, before the transition publishes
+            // anything: the refusal is the step's recorded answer, and the
+            // run ends with it as its typed terminal (FIG-5134).
+            crate::runtime::tool_restore::require_tool_sources(
+                self.tool_source_policy,
+                candidate.tool_registry().as_ref(),
+                state.tool_state_snapshot(),
+                &state.session_id,
+            )?;
             record.generation = candidate
                 .code_executor()
                 .and_then(|executor| executor.executable_generation());

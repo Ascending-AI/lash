@@ -6,7 +6,7 @@ use lash_core::{SessionError, SessionHistoryRecord};
 use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
 use crate::dialect::{DialectSession, SessionDialect};
-use crate::projection::{RlmProjectedBindings, RlmProjectionExtension, decode_rlm_protocol_event};
+use crate::projection::{RlmProjectedBindings, decode_rlm_protocol_event};
 
 pub(crate) struct RlmRuntimeState {
     dialect: Arc<SessionDialect>,
@@ -117,28 +117,6 @@ impl RlmRuntimeState {
             .await
             .names()
             .collect()
-    }
-
-    pub(crate) async fn apply_session_extension(
-        &self,
-        extension: lash_core::ProtocolSessionExtensionHandle,
-    ) -> Result<(), SessionError> {
-        let extension = extension
-            .as_any()
-            .downcast_ref::<RlmProjectionExtension>()
-            .ok_or_else(|| {
-                SessionError::Protocol(
-                    "RLM protocol received an unsupported session extension".to_string(),
-                )
-            })?;
-        reject_reserved_projected_binding_names(&extension.bindings)?;
-        let mut guard = self.session_projected_bindings.lock().await;
-        let merged = guard
-            .clone()
-            .merge(extension.bindings.clone())
-            .map_err(|err| SessionError::Protocol(err.to_string()))?;
-        *guard = merged;
-        Ok(())
     }
 
     /// Rebuild execution state and projected bindings from the restore view.

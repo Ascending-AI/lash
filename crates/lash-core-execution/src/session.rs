@@ -298,28 +298,6 @@ pub enum SessionError {
     SessionCommandPending(crate::SessionCommandReceipt),
     #[error("session config command was cancelled before settlement: {0}")]
     SessionCommandCancelled(crate::SessionCommandReceipt),
-    /// The session opened under [`ToolSourcePolicy::Require`](crate::ToolSourcePolicy)
-    /// and a persisted Tool Catalog member had no registered source.
-    ///
-    /// The refusal guarantees no config or state commit, no protocol restore,
-    /// no `SessionRestored` event, and a released Session Execution Lease. It
-    /// does not claim zero side effects: observer-intent reconcile, the
-    /// admitted load, plugin materialisation and `initialize_session` have
-    /// already run by the time tool state is installed.
-    #[error(
-        "session `{session_id}` requires every persisted tool source: no registered source resolves {}",
-        report
-            .lost_members
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ")
-    )]
-    ToolSourcesUnavailable {
-        session_id: SessionId,
-        /// The full restore report, including the classes that did not refuse.
-        report: Box<crate::ToolRestoreReport>,
-    },
     /// Session config a creation stated that was refused, before anything
     /// was written (FIG-4099, FIG-4379): which owner, and why, typed
     /// ([`ConfigRefusal`](crate::ConfigRefusal)). Its
@@ -375,7 +353,6 @@ impl SessionError {
             | Self::Store { .. }
             | Self::SessionCommandPending(_)
             | Self::SessionCommandCancelled(_)
-            | Self::ToolSourcesUnavailable { .. }
             | Self::SessionConfigRefused(_)
             | Self::Plugin(_)
             | Self::Protocol(_) => crate::ExecCodeFailureReason::Session,
@@ -442,7 +419,6 @@ impl ExecutionEnvironmentSyncError {
             | SessionError::LlmProfileUnknown { .. }
             | SessionError::SessionCommandPending(_)
             | SessionError::SessionCommandCancelled(_)
-            | SessionError::ToolSourcesUnavailable { .. }
             | SessionError::SessionConfigRefused(_)
             | SessionError::Protocol(_)) => {
                 Self::Recorded(crate::sansio::ExecutionEnvironmentSyncFailure {

@@ -50,14 +50,13 @@ impl LashRuntime {
         Ok(generation)
     }
 
-    /// The report from the most recent persisted tool-state install on this
-    /// runtime.
+    /// The report of the latest persisted tool-state install on this runtime
+    /// that no turn has reported yet.
     ///
-    /// Present after any open that restored tool state, and replaced by every
-    /// later host restore, persisted-state install or resident re-sync. It is
-    /// how those internal reloads deliver their answer: the paths that have no
-    /// return value leave the typed report here (and on the trace) instead of
-    /// dropping it (FIG-3367).
+    /// A run's plugin transition, a host restore command, a persisted-state
+    /// install and a resident re-sync each leave their report here; the next
+    /// turn this runtime starts takes it and reports it as
+    /// `TurnEvent::ToolRestoreReported` when it is not clean (FIG-5134).
     pub fn tool_restore_report(&self) -> Option<&crate::ToolRestoreReport> {
         self.tool_restore_report.as_ref()
     }
@@ -76,10 +75,10 @@ impl LashRuntime {
     /// (kept as non-members, rebound when their source returns) and are listed
     /// in the returned [`crate::ToolRestoreReport`].
     ///
-    /// This is an install onto a *live* runtime, so it never refuses: the
-    /// host's [`ToolSourcePolicy`](crate::ToolSourcePolicy) applies to opening
-    /// a session, not to a restore the host asked for on one it already holds.
-    /// A lost member comes back in the report, which is also retained for
+    /// It never refuses: the host's
+    /// [`ToolSourcePolicy`](crate::ToolSourcePolicy) applies to a turn run's
+    /// transition, not to a restore the host asked for. A lost member comes
+    /// back in the report, which is also kept for
     /// [`tool_restore_report`](Self::tool_restore_report).
     pub async fn restore_tool_state(
         &mut self,
@@ -98,9 +97,7 @@ impl LashRuntime {
         let report = crate::runtime::tool_restore::install_persisted_tool_state(
             registry.as_ref(),
             snapshot,
-            // A live runtime: this returns the report to its caller and
-            // never refuses, whatever the host's open policy is (FIG-3367).
-            crate::runtime::tool_restore::ToolRestoreContext::for_live_install(
+            crate::runtime::tool_restore::ToolRestoreContext::new(
                 &session_id,
                 crate::runtime::ToolRestoreSite::HostRestore,
                 &tracing,

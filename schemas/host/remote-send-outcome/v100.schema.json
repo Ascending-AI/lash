@@ -10366,6 +10366,23 @@
           "type": "object"
         },
         {
+          "description": "A run's restore of the session's persisted tool state that some\npersisted id had no registered source for (FIG-5134).",
+          "properties": {
+            "report": {
+              "$ref": "#/$defs/ToolRestoreReport"
+            },
+            "type": {
+              "const": "tool_restore_reported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "report"
+          ],
+          "type": "object"
+        },
+        {
           "properties": {
             "event": true,
             "plugin_id": {
@@ -12858,6 +12875,23 @@
             "refusal"
           ],
           "type": "object"
+        },
+        {
+          "description": "The restore report of a turn run refused under\n`ToolSourcePolicy::Require` (FIG-5134): the typed half of\n[`RuntimeErrorCode::ToolSourcesUnavailable`]. Its lost members are\nwhat no registered source resolves.",
+          "properties": {
+            "kind": {
+              "const": "tool_sources_unavailable",
+              "type": "string"
+            },
+            "report": {
+              "$ref": "#/$defs/ToolRestoreReport"
+            }
+          },
+          "required": [
+            "kind",
+            "report"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -13522,6 +13556,29 @@
           "type": "string"
         }
       ]
+    },
+    "SupersededToolIdentity": {
+      "description": "A persisted tool identity that a live id has replaced by owning its\nmodel-facing name. The old grant is not transferred: the live id is a\ndefault member and the retired id is dropped from the surface.",
+      "properties": {
+        "live_id": {
+          "description": "The live tool id that now owns the model-facing name.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The model-facing name both identities carry.",
+          "type": "string"
+        },
+        "retired_id": {
+          "description": "The persisted tool id no source resolves any more.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "retired_id",
+        "live_id",
+        "name"
+      ],
+      "type": "object"
     },
     "SupervisorEvidence": {
       "description": "What the supervisor observed of a worker's end. Evidence, never testimony:\na worker cannot claim how it ended.",
@@ -15660,6 +15717,38 @@
       "required": [
         "code",
         "message"
+      ],
+      "type": "object"
+    },
+    "ToolRestoreReport": {
+      "description": "Outcome of restoring a persisted [`ToolState`] over live sources: the\nadopted generation plus what happened to each persisted tool id no\nregistered source resolved.\n\nThe three classes are different facts about the session, and only the first\nis capability loss:\n\n* [`lost_members`](Self::lost_members) \u2014 persisted `member: true`, nothing\n  resolves the id. The session runs without a tool the host had curated\n  in. This is what a host surfaces to its user and what\n  `ToolSourcePolicy::Require` refuses a run on.\n* [`parked_opt_outs`](Self::parked_opt_outs) \u2014 unresolved ids the host had\n  already opted out of (`member: false`). Nothing the session could use is\n  missing; the entry is kept so the opt-out survives the source's return.\n* [`superseded_identities`](Self::superseded_identities) \u2014 an old id dropped\n  because a live id owns its model-facing name. The capability is present\n  under a new identity, which is a default member.\n\nEntries in the first two classes remain in tool state as orphans and rebind\nautomatically when their source returns.",
+      "properties": {
+        "generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lost_members": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "parked_opt_outs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "superseded_identities": {
+          "items": {
+            "$ref": "#/$defs/SupersededToolIdentity"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "generation"
       ],
       "type": "object"
     },

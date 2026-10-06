@@ -661,12 +661,12 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::runtime::LlmRequestSpec| {
         let _ = &value.scope;
     });
-    // W0185: lash::runtime::ProtocolSessionExtensionHandle [struct]
-    type_witness::<lash::runtime::ProtocolSessionExtensionHandle>();
-    // W0186: lash::runtime::ProtocolSessionExtensionHandle::as_any [function]
-    let _ = lash::runtime::ProtocolSessionExtensionHandle::as_any;
-    // W0187: lash::runtime::ProtocolSessionExtensionHandle::new [function]
-    let _ = lash::runtime::ProtocolSessionExtensionHandle::new(NoopSessionExt);
+    // W0185: lash::runtime::ProtocolSessionExtension [struct]
+    type_witness::<lash::runtime::ProtocolSessionExtension>();
+    // W0186: lash::runtime::ProtocolSessionExtension::session_nodes [function]
+    let _ = lash::runtime::ProtocolSessionExtension::session_nodes;
+    // W0187: lash::runtime::ProtocolSessionExtension::new [function]
+    let _ = lash::runtime::ProtocolSessionExtension::new(|_| Vec::new());
     // W0188: lash::runtime::ProtocolTurnOptions [struct]
     type_witness::<lash::runtime::ProtocolTurnOptions>();
     // W0189: lash::runtime::ProtocolTurnOptions::decode [function]
@@ -977,12 +977,6 @@ fn drain_area_witnesses() {
     variant_witness(|value: &lash::provider::ProtocolPosition| {
         matches!(value, lash::provider::ProtocolPosition::OutputStarted)
     });
-    // W0269: lash_core::ProtocolSessionExtension [trait]
-    fn trait_witness_0269<T: lash_core::ProtocolSessionExtension>() {}
-    // W0270: lash_core::ProtocolSessionExtension::as_any [function]
-    fn meth_0270<T: lash_core::ProtocolSessionExtension>(_: &T) {
-        let _ = T::as_any;
-    }
     // W0276: lash::plugins::ProtocolTurnOptionsError [enum]
     type_witness::<lash::plugins::ProtocolTurnOptionsError>();
     // W0277: lash::plugins::ProtocolTurnOptionsError::Decode [variant]
@@ -1328,18 +1322,8 @@ fn drain_area_witnesses() {
     fn meth_0408<T: lash::plugins::ProtocolSessionPlugin>(_: &T) {
         let _ = T::append_session_nodes;
     }
-    // W0409: lash::plugins::ProtocolSessionPlugin::apply_session_extension [function]
-    fn meth_0409<T: lash::plugins::ProtocolSessionPlugin>(_: &T) {
-        let _ = T::apply_session_extension;
-    }
     // W0412: lash::plugins::ProtocolSessionPlugin::before_llm_call [function]
     fn meth_0412<T: lash::plugins::ProtocolSessionPlugin>(_: &T) {
         let _ = T::before_llm_call;
-    }
-}
-struct NoopSessionExt;
-impl lash_core::ProtocolSessionExtension for NoopSessionExt {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }

@@ -372,7 +372,12 @@ async fn follow_once(
     // the page shows. A refused run answers its typed refusal. A parked run,
     // or an input withdrawn before it ran, has none.
     let output = match outcome {
-        lash::SendOutcome::Settled { output, .. } => output.result,
+        lash::SendOutcome::Settled { output, .. } => {
+            if let Some(report) = output.tool_restore_report() {
+                state.render_tool_loss(&session.session_id(), report);
+            }
+            output.result
+        }
         lash::SendOutcome::Refused { refusal, .. } => {
             return Err(AppError::runtime(lash::EmbedError::Runtime(*refusal)));
         }

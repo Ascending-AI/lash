@@ -356,17 +356,38 @@ impl SessionAdmin {
         .await
     }
 
+    /// Record `extension` durably (FIG-5134): its session nodes are a host
+    /// append the command lane applies, so its protocol reads them when the
+    /// append lands and replays them on every rebuild of the session.
     async fn apply_protocol_session_extension(
         &self,
-        extension: lash_core::ProtocolSessionExtensionHandle,
+        extension: lash_core::ProtocolSessionExtension,
     ) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .apply_protocol_session_extension(extension)
-                .await
-                .map_err(Into::into)
-        })
-        .await
+        let fleet = self
+            .runtime
+            .observe()
+            .queue_store
+            .as_ref()
+            .map(lash_core::store::SessionStore::fleet_format)
+            .ok_or_else(|| {
+                EmbedError::Session(SessionError::Protocol(
+                    "a session extension is recorded on a store-backed session".to_string(),
+                ))
+            })?;
+        match Box::pin(
+            self.append_session_nodes(lash_core::AppendSessionNodesRequest {
+                operation_id: format!("session-extension:{}", uuid::Uuid::new_v4()),
+                nodes: extension.session_nodes(fleet),
+                requires_ancestor_node_id: None,
+            }),
+        )
+        .await?
+        {
+            lash_core::AppendSessionNodesOutcome::Appended { .. } => Ok(()),
+            outcome => Err(EmbedError::Session(SessionError::Protocol(format!(
+                "a session extension requires no ancestor, yet its append settled {outcome:?}"
+            )))),
+        }
     }
 
     /// Refresh the session graph from any background process that signalled it
@@ -741,50 +762,8 @@ impl SessionAdmin {
         .await
     }
 
-    async fn tool_state(&self) -> Result<ToolState> {
-        self.runtime.observe().tool_state.clone().ok_or_else(|| {
-            EmbedError::Session(SessionError::Protocol(
-                "runtime session not available".to_string(),
-            ))
-        })
-    }
-
-    async fn apply_tool_state(&self, state: ToolState) -> Result<u64> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .apply_tool_state(state)
-                .await
-                .map_err(EmbedError::from)
-        })
-        .await
-    }
-
-    async fn restore_tool_state(&self, state: ToolState) -> Result<ToolRestoreReport> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .restore_tool_state(state)
-                .await
-                .map_err(EmbedError::from)
-        })
-        .await
-    }
-
     async fn set_tool_membership(&self, tool_id: lash_core::ToolId, present: bool) -> Result<u64> {
         self.set_tool_membership_many(&[(tool_id, present)]).await
-    }
-
-    async fn set_tool_membership_many(&self, updates: &[(lash_core::ToolId, bool)]) -> Result<u64> {
-        let mut state = self.tool_state().await?;
-        for (tool_id, present) in updates {
-            state
-                .set_membership(tool_id, *present)
-                .map_err(EmbedError::from)?;
-        }
-        self.apply_tool_state(state).await
-    }
-
-    async fn active_tool_manifests(&self) -> Result<Vec<ToolManifest>> {
-        Ok(self.tool_state().await?.tool_manifests())
     }
 
     async fn remove_tool_source(&self, handle: &ToolSourceHandle) -> Result<u64> {
@@ -793,7 +772,7 @@ impl SessionAdmin {
             .remove_source(handle)
             .map_err(EmbedError::from)?;
         self.refresh_tool_catalog().await?;
-        Ok(self.tool_state().await?.generation())
+        Ok(tool_registry.generation())
     }
 
     async fn inject_turn_input(
@@ -878,7 +857,11 @@ pub struct ToolAdmin {
 }
 
 impl ToolAdmin {
-    pub async fn state(&self) -> Result<ToolState> {
+    /// The session's tool state as its durable records state it, read
+    /// without building the session's capabilities (FIG-5134): what the
+    /// durable head recorded, and the changes this admin's writers submitted
+    /// that no run has applied yet.
+    pub async fn state(&self) -> Result<SessionToolState> {
         self.control.tool_state().await
     }
 
@@ -890,6 +873,13 @@ impl ToolAdmin {
 
     /// Toggle Tool Catalog membership for a tool. `present` adds it as a
     /// member; `!present` removes it. Membership is the execution gate.
+    ///
+    /// The change is a durable session command the next command run applies
+    /// against the capabilities its transition builds (FIG-5134); this awaits
+    /// its settlement and answers the generation it landed at. A tool id the
+    /// head's recorded tool state does not name is refused at once, with a
+    /// typed [`ReconfigureError`](crate::tools::ReconfigureError), and nothing
+    /// is submitted.
     pub async fn set_membership(
         &self,
         tool_id: impl Into<lash_core::ToolId>,
@@ -900,11 +890,14 @@ impl ToolAdmin {
             .await
     }
 
-    /// Applies multiple tool-membership updates atomically.
+    /// Applies multiple tool-membership updates atomically, as one durable
+    /// command; see [`Self::set_membership`].
     pub async fn set_membership_many(&self, updates: &[(lash_core::ToolId, bool)]) -> Result<u64> {
         self.control.set_tool_membership_many(updates).await
     }
 
+    /// The manifests of the Tool Catalog members the session's durable head
+    /// recorded; empty before a run recorded any.
     pub async fn active_manifests(&self) -> Result<Vec<ToolManifest>> {
         self.control.active_tool_manifests().await
     }
@@ -965,7 +958,10 @@ impl AdvancedToolAdmin {
     ///
     /// This is a generation-checked escape hatch for hosts that intentionally
     /// edit the full snapshot. Prefer `ToolAdmin` membership methods for
-    /// ordinary tool policy changes.
+    /// ordinary tool policy changes. Like them it is a durable command,
+    /// awaited to its settlement; a snapshot whose generation is not the
+    /// head's recorded one is refused at once with
+    /// [`ReconfigureError::GenerationMismatch`](crate::tools::ReconfigureError::GenerationMismatch).
     pub async fn apply_state(&self, state: ToolState) -> Result<u64> {
         self.control.apply_tool_state(state).await
     }
@@ -981,7 +977,9 @@ impl AdvancedToolAdmin {
     /// Persisted tools whose source is not currently registered (e.g. a
     /// detached MCP server) do not fail the restore: they are kept as orphaned
     /// non-members, listed in the returned [`ToolRestoreReport`], and rebind
-    /// automatically when a source re-advertises the same tool.
+    /// automatically when a source re-advertises the same tool. The restore is
+    /// a durable command, awaited to its settlement, and never refuses under
+    /// [`ToolSourcePolicy::Require`](crate::tools::ToolSourcePolicy::Require).
     pub async fn restore_state(&self, state: ToolState) -> Result<ToolRestoreReport> {
         self.control.restore_tool_state(state).await
     }
@@ -1089,7 +1087,9 @@ mod process_admin;
 
 pub(crate) mod config_transactions;
 mod host_commands;
+mod tool_state;
 use host_commands::{HostPluginOperation, SubmittedCommand, unsettled_command_error};
+pub use tool_state::{PendingToolStateChange, SessionToolState};
 
 /// What withdrawing a submitted session command did (FIG-4202).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1451,9 +1451,14 @@ pub struct ProtocolAdmin {
 }
 
 impl ProtocolAdmin {
+    /// Record a protocol session extension durably (FIG-5134). It is a host
+    /// append of the extension's session nodes, applied by the session's
+    /// command lane and awaited to its settlement; the protocol reads the
+    /// nodes when they land and replays them whenever it rebuilds the
+    /// session, so the extension holds for every later run.
     pub async fn apply_session_extension(
         &self,
-        extension: lash_core::ProtocolSessionExtensionHandle,
+        extension: lash_core::ProtocolSessionExtension,
     ) -> Result<()> {
         self.control
             .apply_protocol_session_extension(extension)

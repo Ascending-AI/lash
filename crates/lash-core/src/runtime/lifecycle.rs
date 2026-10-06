@@ -346,17 +346,15 @@ impl LashRuntime {
             // persisted generation rebuilds. A changed live surface bumps once
             // to make the next commit capture it.
             //
-            // Refusing here is what the Require contract promises: the
-            // protocol restore, the `SessionRestored` event and every durable
-            // write below have not run, and the admitted load already released
-            // its Session Execution Lease.
+            // It never refuses: a turn run's transition step decided
+            // `ToolSourcePolicy::Require` before it published (FIG-5134).
             let registry = session.plugins().tool_registry();
             tool_restore_report = Some(crate::runtime::tool_restore::install_persisted_tool_state(
                 registry.as_ref(),
                 tool_state,
-                crate::runtime::tool_restore::ToolRestoreContext::for_open(
+                crate::runtime::tool_restore::ToolRestoreContext::new(
                     &state.session_id,
-                    host.core.control.tool_source_policy,
+                    crate::runtime::ToolRestoreSite::SessionConstruction,
                     &host.core.tracing,
                 ),
             )?);

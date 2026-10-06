@@ -52,7 +52,7 @@ impl ToolStateEntry {
         self.member && !self.orphaned
     }
 }
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToolState {
     pub generation: u64,
     pub(super) tools: Arc<BTreeMap<ToolId, ToolStateEntry>>,
@@ -147,6 +147,113 @@ impl<'de> Deserialize<'de> for ToolState {
     }
 }
 
+/// A persisted tool identity that a live id has replaced by owning its
+/// model-facing name. The old grant is not transferred: the live id is a
+/// default member and the retired id is dropped from the surface.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SupersededToolIdentity {
+    /// The persisted tool id no source resolves any more.
+    pub retired_id: ToolId,
+    /// The live tool id that now owns the model-facing name.
+    pub live_id: ToolId,
+    /// The model-facing name both identities carry.
+    pub name: String,
+}
+
+/// Outcome of restoring a persisted [`ToolState`] over live sources: the
+/// adopted generation plus what happened to each persisted tool id no
+/// registered source resolved.
+///
+/// The three classes are different facts about the session, and only the first
+/// is capability loss:
+///
+/// * [`lost_members`](Self::lost_members) — persisted `member: true`, nothing
+///   resolves the id. The session runs without a tool the host had curated
+///   in. This is what a host surfaces to its user and what
+///   `ToolSourcePolicy::Require` refuses a run on.
+/// * [`parked_opt_outs`](Self::parked_opt_outs) — unresolved ids the host had
+///   already opted out of (`member: false`). Nothing the session could use is
+///   missing; the entry is kept so the opt-out survives the source's return.
+/// * [`superseded_identities`](Self::superseded_identities) — an old id dropped
+///   because a live id owns its model-facing name. The capability is present
+///   under a new identity, which is a default member.
+///
+/// Entries in the first two classes remain in tool state as orphans and rebind
+/// automatically when their source returns.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ToolRestoreReport {
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lost_members: Vec<ToolId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parked_opt_outs: Vec<ToolId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub superseded_identities: Vec<SupersededToolIdentity>,
+}
+
+impl ToolRestoreReport {
+    pub fn has_lost_members(&self) -> bool {
+        !self.lost_members.is_empty()
+    }
+
+    pub fn is_clean(&self) -> bool {
+        self.lost_members.is_empty()
+            && self.parked_opt_outs.is_empty()
+            && self.superseded_identities.is_empty()
+    }
+
+    /// The ids retained as orphaned entries: lost members and parked opt-outs.
+    /// A superseded identity is not retained, so it is not listed here.
+    pub fn orphaned_ids(&self) -> impl Iterator<Item = &ToolId> {
+        self.lost_members.iter().chain(self.parked_opt_outs.iter())
+    }
+}
+
+/// A host's change to a session's tool state, carried by a
+/// [`SessionCommand::ChangeToolState`](crate::SessionCommand::ChangeToolState)
+/// (FIG-5134). A session holds no tool registry until a run publishes its
+/// plugin transition, so a change is a durable command the command run
+/// applies, in lane order, against the capabilities that run built.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "change", rename_all = "snake_case")]
+pub enum ToolStateChange {
+    /// Toggle Tool Catalog membership, all of `updates` or none.
+    SetMembership { updates: Vec<ToolMembershipUpdate> },
+    /// Replace the whole snapshot, guarded by its generation: the change
+    /// applies only while the session's tool state is at
+    /// `state.generation`.
+    Apply {
+        #[schemars(with = "serde_json::Value")]
+        state: ToolState,
+    },
+    /// Restore a persisted snapshot over the live sources, adopting its
+    /// generation. Unresolved ids are reported, never refused.
+    Restore {
+        #[schemars(with = "serde_json::Value")]
+        state: ToolState,
+    },
+}
+
+/// One membership toggle of a [`ToolStateChange::SetMembership`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ToolMembershipUpdate {
+    pub tool_id: ToolId,
+    pub member: bool,
+}
+
+/// How a [`ToolStateChange`] the command lane applied settled (FIG-5134).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolStateChangeOutcome {
+    /// A membership change or snapshot apply landed at `generation`.
+    Applied { generation: u64 },
+    /// A restore landed; `report` classifies what no source resolved.
+    Restored { report: ToolRestoreReport },
+    /// The change did not apply against the session's tool state, and
+    /// nothing of it committed.
+    Refused { error: ReconfigureError },
+}
+
 fn is_member_default() -> bool {
     true
 }
@@ -212,7 +319,8 @@ pub mod facade_ops {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ReconfigureError {
     #[error("validation error: {0}")]

@@ -423,6 +423,9 @@ pub mod facade_support {
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::session_state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use lash_core_store::tool_state::facade_ops::ToolStateFacadeOps;
+    pub use lash_core_store::tool_state::{
+        ToolMembershipUpdate, ToolStateChange, ToolStateChangeOutcome,
+    };
     pub use lash_sansio::AcceptedInjectedTurnInput;
     pub use lash_sansio::AttachmentMaterializationNotice;
     pub use lash_sansio::AttachmentMaterializationReason;
@@ -743,15 +746,14 @@ pub use runtime::{
     ProcessTerminalPublication, ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone,
     ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox,
     ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
-    ProtocolSessionExtension, ProtocolSessionExtensionHandle, QueuedDrainCandidate,
-    QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
-    QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkKind, RecordedJournal,
-    RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender, RefusedWriteRange,
-    RegistryScopeClose, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
-    ResolvedProcessDefinition, ResolvedRun, RetainedRevision, Retention, RunAggregateWakePolicy,
-    RunDefinition, RunDefinitionRefusal, RunDefinitions, RunOptionsOwner, RunOverrides,
-    RunRecordStep, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
-    RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
+    ProtocolSessionExtension, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy,
+    QueuedDrainRequest, QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig,
+    QueuedWorkKind, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
+    RecordedRender, RefusedWriteRange, RegistryScopeClose, RenderFault, RenderRefusal, Resolution,
+    ResolveOutcome, ResolvedProcessDefinition, ResolvedRun, RetainedRevision, Retention,
+    RunAggregateWakePolicy, RunDefinition, RunDefinitionRefusal, RunDefinitions, RunOptionsOwner,
+    RunOverrides, RunRecordStep, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash,
+    RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,

@@ -1,12 +1,13 @@
-//! Tool loss at open is a typed fact the host receives, and `Require` is an
-//! explicit refusal with a named contract (FIG-3367, ADR 0119).
+//! Tool loss is a typed fact the host receives from the run that restored the
+//! session's tool state, and `Require` is that run's explicit refusal with a
+//! named contract (FIG-3367, FIG-5134, ADR 0119).
 
 use super::*;
 use lash_sansio::SessionId;
 
 const SEED: u64 = 0x7001_3357;
 
-/// Counts the lifecycle facts a refused open must not produce.
+/// Counts the lifecycle facts a refused run must not produce.
 #[derive(Default)]
 struct OpenLifecycleCounters {
     session_restored_events: AtomicUsize,
@@ -113,10 +114,32 @@ async fn durable_head_revision(
     )
 }
 
-/// Tolerate is the default: the session opens and the host can read what it
-/// lost, by tool id and by class.
+/// The restore report of a run refused under `Require`: its sender reads
+/// `SendOutcome::Refused` carrying the typed `ToolSourcesUnavailable` cause.
+fn assert_tool_source_refusal(outcome: &crate::SendOutcome) {
+    let crate::SendOutcome::Refused { refusal, .. } = outcome else {
+        panic!("Require refuses the run as its terminal answer, got {outcome:?}");
+    };
+    assert_eq!(
+        refusal.code,
+        lash_core::RuntimeErrorCode::ToolSourcesUnavailable,
+        "the refusal is typed: {refusal:?}"
+    );
+    let report = refusal
+        .tool_sources_unavailable()
+        .expect("the refusal carries the restore report");
+    assert_eq!(
+        report.lost_members,
+        vec![lash_core::ToolId::from("tool:app_lookup")],
+        "the refusal carries the typed lost-member ids"
+    );
+}
+
+/// Tolerate is the default: the run that restores the session's tool state
+/// goes on, and the host reads what it lost, by tool id and by class, on the
+/// run's output and on the session's observation feed (FIG-5134).
 #[tokio::test]
-async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
+async fn the_restoring_run_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
     let session_id = SessionId::from("fig-3367-tolerate");
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
@@ -131,11 +154,20 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
         .await
         .open()
         .await?;
-
-    let report = opened
-        .tool_restore_report()
+    let cursor = opened
+        .observe()
+        .snapshot()
         .await
-        .expect("an open that installed persisted tool state reports what it found");
+        .expect("durable snapshot")
+        .cursor;
+
+    let output = opened
+        .send(TurnInput::text("run without the tool's source"))
+        .output()
+        .await?;
+    let report = output
+        .tool_restore_report()
+        .expect("the run that restored persisted tool state reports what it found");
     assert_eq!(
         report.lost_members,
         vec![lash_core::ToolId::from("tool:app_lookup")],
@@ -143,14 +175,35 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
     );
     assert!(report.parked_opt_outs.is_empty());
     assert!(report.superseded_identities.is_empty());
+
+    let lash_core::facade_support::SessionResume::Replayed { events } =
+        opened.observe().resume_from_cursor(&cursor).await?
+    else {
+        panic!("the run's observation cursor stays replayable");
+    };
+    let observed = events
+        .iter()
+        .find_map(|event| match &event.payload {
+            lash_core::SessionObservationEventPayload::TurnActivity(activity) => {
+                match &activity.event {
+                    TurnEvent::ToolRestoreReported { report } => Some(report),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .expect("the session feed carries the typed restore report");
+    assert_eq!(observed, report, "the feed and the output carry one report");
     Box::pin(opened.close()).await?;
     Ok(())
 }
 
-/// Require refuses, with the report on the typed error, and keeps its named
-/// promises: no `SessionRestored`, no durable write, lease released.
+/// Require refuses the run whose transition would lose a member, typed, and
+/// keeps its named promises: no `SessionRestored`, no durable write, and the
+/// next open still runs. The open itself builds no capabilities, so it never
+/// refuses (FIG-5134).
 #[tokio::test]
-async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
+async fn require_refuses_the_run_and_keeps_its_named_promises() -> Result<()> {
     let session_id = SessionId::from("fig-3367-require");
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
@@ -166,43 +219,35 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
         .tool_source_policy(lash_core::ToolSourcePolicy::Require)
         .build(crate::testing::runtime_lease_owner())?;
 
-    let refusal = match strict_core
+    let opened = strict_core
         .session(session_id.clone())
         .created()
         .await
         .open()
-        .await
-    {
-        Ok(_) => panic!("Require must refuse an open whose persisted member has no source"),
-        Err(error) => error,
-    };
-    match &refusal {
-        EmbedError::Session(lash_core::SessionError::ToolSourcesUnavailable {
-            session_id: refused,
-            report,
-        }) => {
-            assert_eq!(refused, &session_id);
-            assert_eq!(
-                report.lost_members,
-                vec![lash_core::ToolId::from("tool:app_lookup")],
-                "the refusal carries the typed lost-member ids"
-            );
-        }
-        other => panic!("expected a typed tool-source refusal, got {other:?}"),
-    }
+        .await?;
+    let outcome = opened
+        .send(TurnInput::text("run without the tool's source"))
+        .await?
+        .outcome()
+        .await?;
+    assert_tool_source_refusal(&outcome);
     assert_eq!(
         counters.session_restored_events.load(Ordering::SeqCst),
         0,
-        "a refused open emits no SessionRestored"
+        "a refused run emits no SessionRestored"
     );
     assert_eq!(
         durable_head_revision(factory.as_ref(), &session_id).await?,
         head_before,
-        "a refused open commits no config or state"
+        "a refused run commits no config or state"
     );
+    Box::pin(opened.close()).await?;
+    // The deployment drops the strict core: the engine runs the next run on
+    // the core that hosts it.
+    drop(strict_core);
 
-    // The lease the refused open claimed was released: a following open takes
-    // it. Tolerate here, because the point is the lease, not the policy.
+    // The refused run held nothing: a following open runs. Tolerate here,
+    // because the point is what the refusal left, not the policy.
     let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -212,12 +257,16 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
         .await
         .open()
         .await?;
+    reopened
+        .send(TurnInput::text("run after the refusal"))
+        .output()
+        .await?;
     Box::pin(reopened.close()).await?;
     Ok(())
 }
 
-/// The per-open override states the policy for one session on a core that
-/// tolerates loss everywhere else.
+/// The per-open override states the policy for the runs one open hosts, on a
+/// core that tolerates loss everywhere else.
 #[tokio::test]
 async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     let session_id = SessionId::from("fig-3367-per-open");
@@ -229,37 +278,36 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    let refusal = match tolerant_core
+    let strict = tolerant_core
         .session(session_id.clone())
         .tool_source_policy(lash_core::ToolSourcePolicy::Require)
         .created()
         .await
         .open()
-        .await
-    {
-        Ok(_) => panic!("the per-open override must refuse this open"),
-        Err(error) => error,
-    };
-    assert!(
-        matches!(
-            &refusal,
-            EmbedError::Session(lash_core::SessionError::ToolSourcesUnavailable { .. })
-        ),
-        "expected a typed tool-source refusal, got {refusal:?}"
-    );
+        .await?;
+    let outcome = strict
+        .send(TurnInput::text("run under the override"))
+        .await?
+        .outcome()
+        .await?;
+    assert_tool_source_refusal(&outcome);
+    Box::pin(strict.close()).await?;
 
-    // The same core, without the override, still opens.
+    // The same core, without the override, runs and reports the loss.
     let opened = tolerant_core
         .session(session_id.clone())
         .created()
         .await
         .open()
         .await?;
+    let output = opened
+        .send(TurnInput::text("run under the core's policy"))
+        .output()
+        .await?;
     assert!(
-        opened
+        output
             .tool_restore_report()
-            .await
-            .is_some_and(|report| report.has_lost_members()),
+            .is_some_and(lash_core::ToolRestoreReport::has_lost_members),
         "the core's own policy is unchanged by one session's override"
     );
     Box::pin(opened.close()).await?;
@@ -293,9 +341,14 @@ async fn require_refuses_a_shift_rebuild_that_lost_a_tool_source() -> Result<()>
         Err(error) => error,
     };
     // The shift's refusal reaches the sender typed and naming the lost
-    // tool. (The engine classifies it by its runtime code, which is
-    // `plugin_session_manager` today: making a lost source terminal on the
-    // engine's shift is FIG-3860's B6 follow-up.)
+    // tool (FIG-5134).
+    let EmbedError::Runtime(refusal) = &error else {
+        panic!("the refusal is the run's typed runtime error, got {error:?}");
+    };
+    assert_eq!(
+        refusal.code,
+        lash_core::RuntimeErrorCode::ToolSourcesUnavailable
+    );
     assert!(
         error
             .to_string()

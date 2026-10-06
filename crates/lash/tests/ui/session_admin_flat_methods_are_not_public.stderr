@@ -4,7 +4,7 @@ error[E0624]: method `tool_state` is private
 2 |     let _ = control.tool_state().await;
   |                     ^^^^^^^^^^ private method
   |
- ::: src/admin.rs
+ ::: src/admin/tool_state.rs
   |
-  |     async fn tool_state(&self) -> Result<ToolState> {
-  |     ----------------------------------------------- private method defined here
+  |     pub(super) async fn tool_state(&self) -> Result<SessionToolState> {
+  |     ----------------------------------------------------------------- private method defined here

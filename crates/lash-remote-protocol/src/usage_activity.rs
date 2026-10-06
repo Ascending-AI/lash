@@ -202,6 +202,11 @@ pub enum RemoteTurnEvent {
         messages: Vec<RemotePluginMessage>,
         checkpoint: RemoteTurnInputCheckpoint,
     },
+    /// A run's restore of the session's persisted tool state that some
+    /// persisted id had no registered source for (FIG-5134).
+    ToolRestoreReported {
+        report: lash_core::ToolRestoreReport,
+    },
     PluginRuntime {
         plugin_id: String,
         event: serde_json::Value,

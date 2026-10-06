@@ -1,6 +1,7 @@
-//! The workbench tells its user when an open lost a tool (FIG-3367).
+//! The workbench tells its user when a run lost a tool (FIG-3367, FIG-5134).
 
 use super::*;
+use lash::tools::ToolDefinitionBindingExt as _;
 
 fn lost_tool_definition() -> lash::tools::ToolDefinition {
     lash::tools::ToolDefinition::raw(
@@ -11,6 +12,7 @@ fn lost_tool_definition() -> lash::tools::ToolDefinition {
         json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
+    .with_tool_binding(lash::tools::ToolBinding::new(["workbench"], "seed_lookup"))
 }
 
 struct SeedTools;
@@ -43,20 +45,24 @@ impl lash::tools::ToolProvider for SeedTools {
     }
 }
 
-/// A session whose persisted tool has no source here is rendered to the user
-/// as a chat row naming the tool, not swallowed into the workbench log.
+fn answering_provider() -> lash::provider::ProviderHandle {
+    lash::testing::TestProvider::builder()
+        .kind("workbench-test")
+        .complete(|_| async { Ok(text_response("done")) })
+        .build()
+        .into_handle()
+}
+
+/// A run whose session's persisted tool has no source here is rendered to the
+/// user as a chat row naming the tool, not swallowed into the workbench log.
 ///
-/// The seeding core carries the tool source and commits a checkpoint with it;
-/// the workbench's own core does not. Dropping the restore report — or
-/// rendering only the policy value instead of the report — leaves
-/// `messages_snapshot()` without the row and fails here.
+/// The seeding core carries the tool source and its run records the tool; the
+/// workbench's own core does not, so its run reports the loss on its output.
+/// Dropping the run's restore report — or rendering only the policy value
+/// instead of the report — leaves `messages_snapshot()` without the row and
+/// fails here.
 #[tokio::test]
-async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
-    let data_dir = std::env::temp_dir().join(format!(
-        "agent-workbench-tool-loss-{}",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
+async fn a_run_that_lost_a_tool_renders_the_loss_to_the_user() {
     let double = crate::tests::test_double_backend(0).await;
     let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
@@ -64,14 +70,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
 
     // Seed a checkpoint that records the tool, on a core that has its source.
     let seeding_core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_llm_profile(
-            lash::testing::TestProvider::builder()
-                .kind("workbench-test")
-                .complete_error("the seed never calls the provider")
-                .build()
-                .into_handle(),
-            test_llm_profile(),
-        )
+        .serve_workbench_llm_profile(answering_provider(), test_llm_profile())
         .plugin(source_plugin(Some(Arc::new(SeedTools))))
         .build(crate::test_core_owner())
         .expect("build the seeding core");
@@ -81,26 +80,16 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
         .await
         .expect("seed open");
     seeded
-        .admin()
-        .state()
-        .append_messages(vec![lash::plugins::PluginMessage::text(
-            lash::messages::MessageRole::Assistant,
-            "seeded while the tool source was present",
-        )])
+        .send(lash::TurnInput::text("record the tool"))
+        .output()
         .await
-        .expect("commit a checkpoint carrying the tool");
+        .expect("a run records a checkpoint carrying the tool");
     seeded.close().await.expect("close the seeded session");
+    drop(seeding_core);
 
     // The workbench's own core has no such source.
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_llm_profile(
-            lash::testing::TestProvider::builder()
-                .kind("workbench-test")
-                .complete_error("this test never calls the provider")
-                .build()
-                .into_handle(),
-            test_llm_profile(),
-        )
+        .serve_workbench_llm_profile(answering_provider(), test_llm_profile())
         .plugin(source_plugin(None))
         .build(crate::test_core_owner())
         .expect("build core");
@@ -138,9 +127,16 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
     let opened = state
         .create_or_open_session(&session_id, "tool-loss-test")
         .await
-        .expect("the session still opens: the default policy tolerates loss");
-    opened.close().await.expect("close");
-
+        .expect("the session opens");
+    let output = opened
+        .send(lash::TurnInput::text("run without the tool"))
+        .output()
+        .await
+        .expect("the default policy tolerates loss, so the run goes on");
+    let report = output
+        .tool_restore_report()
+        .expect("the run reports the tool it could not restore");
+    state.render_tool_loss(&session_id, report);
     let rendered = state
         .messages_snapshot()
         .into_iter()
@@ -158,12 +154,9 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
         rendered[0]
     );
 
-    // Opening again does not repeat the row: the id is derived from the loss.
-    let again = state
-        .create_or_open_session(&session_id, "tool-loss-test")
-        .await
-        .expect("second open");
-    again.close().await.expect("close");
+    // Another run reporting the same loss does not repeat the row: the id is
+    // derived from the loss.
+    state.render_tool_loss(&session_id, report);
     assert_eq!(
         state
             .messages_snapshot()
@@ -171,8 +164,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
             .filter(|message| message.role == "system")
             .count(),
         1,
-        "one row per distinct loss, not one per open"
+        "one row per distinct loss, not one per run"
     );
-
-    let _ = std::fs::remove_dir_all(data_dir);
+    opened.close().await.expect("close");
 }

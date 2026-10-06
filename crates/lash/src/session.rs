@@ -102,14 +102,17 @@ struct ResolvedSessionStore {
 }
 
 impl SessionBuilder {
-    /// Override the core's tool-source policy for this open.
+    /// Override the core's tool-source policy for the runs this open hosts.
     ///
     /// The core's choice is the deployment default; this states it for one
     /// session — an unattended reopen that must not run without its tools sets
     /// [`Require`](lash_core::ToolSourcePolicy::Require) even on a core that
-    /// tolerates loss elsewhere. The refusal is
-    /// [`SessionError::ToolSourcesUnavailable`](lash_core::SessionError::ToolSourcesUnavailable),
-    /// which carries the report.
+    /// tolerates loss elsewhere. The open itself builds no capabilities and
+    /// never refuses: a run this open hosts that would lose a persisted
+    /// member is refused at its plugin transition, and its sender reads
+    /// [`SendOutcome::Refused`](crate::SendOutcome::Refused) with a
+    /// [`RuntimeErrorCode::ToolSourcesUnavailable`](lash_core::RuntimeErrorCode::ToolSourcesUnavailable)
+    /// refusal that carries the restore report (FIG-5134).
     pub fn tool_source_policy(mut self, policy: lash_core::ToolSourcePolicy) -> Self {
         self.tool_source_policy = Some(policy);
         self
@@ -700,32 +703,6 @@ impl LashSession {
     /// process services and trigger store its open was bound to.
     pub fn session_administration(&self) -> lash_core::SessionAdministration {
         self.binding.administration()
-    }
-
-    /// What this session's open (or its latest internal reload) found when it
-    /// installed the persisted Tool Catalog.
-    ///
-    /// `None` means no persisted tool state was installed — a first open of a
-    /// fresh session. A present report says which persisted tools no registered
-    /// source resolves, in three classes:
-    ///
-    /// * `lost_members` — capability loss. Surface these to your user: the
-    ///   session opened, but a tool the host had curated in is not callable
-    ///   until its source returns. Under
-    ///   [`ToolSourcePolicy::Require`](lash_core::ToolSourcePolicy::Require)
-    ///   this list is what refuses the open instead.
-    /// * `parked_opt_outs` — unresolved tools the host had already opted out
-    ///   of. Nothing usable is missing.
-    /// * `superseded_identities` — a live tool now owns the old tool's
-    ///   model-facing name. The capability is present under a new id.
-    ///
-    /// The report is replaced by every later host restore, persisted-state
-    /// install and resident re-sync on this session, so a host that renders it
-    /// after a long-lived session's re-sync sees the current answer.
-    pub async fn tool_restore_report(&self) -> Option<crate::tools::ToolRestoreReport> {
-        let writer = self.runtime.writer();
-        let runtime = writer.lock().await;
-        runtime.tool_restore_report().cloned()
     }
 
     /// Durably close this session, then release its in-memory runtime.

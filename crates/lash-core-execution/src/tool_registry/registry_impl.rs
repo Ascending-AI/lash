@@ -205,6 +205,29 @@ impl ToolRegistry {
         }
     }
 
+    /// What [`restore_state`](Self::restore_state) would report for
+    /// `snapshot` over the sources registered now, without changing the
+    /// registry. A run's plugin transition reads it to decide
+    /// `ToolSourcePolicy::Require` before it publishes anything (FIG-5134).
+    pub fn preview_restore(
+        &self,
+        snapshot: &ToolState,
+    ) -> Result<ToolRestoreReport, ReconfigureError> {
+        let sources = self.inner.read_recover().sources.clone();
+        let rebound = reconcile_tool_state_entries(
+            snapshot.entries(),
+            &sources,
+            ReconcileMode::LiveSurface,
+            None,
+        )?;
+        Ok(ToolRestoreReport {
+            generation: reconciled_generation(snapshot.generation(), rebound.changed)?,
+            lost_members: rebound.unresolved.lost_members,
+            parked_opt_outs: rebound.unresolved.parked_opt_outs,
+            superseded_identities: rebound.unresolved.superseded_identities,
+        })
+    }
+
     pub(crate) fn compose_session_catalog(
         &self,
         context_providers: Vec<Arc<dyn ToolProvider>>,

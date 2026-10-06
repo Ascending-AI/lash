@@ -1078,21 +1078,19 @@ async fn persisted_tool_state_bytes(
 /// FIG-3353: a grantless core polls and edits a session's queue without
 /// building a runtime, so nothing is orphaned and nothing is restored.
 ///
-/// The test asserts its own precondition — `open()` on this core *does* orphan
-/// the persisted tool — and then counts, on the `durable()` path, every step of
-/// the runtime build. Swapping `durable()` for `open()` here fails: the
+/// The test asserts its own precondition — a run on this core *does* orphan
+/// the persisted tool — and then counts, on the `durable()` path, every step
+/// of the runtime build. Swapping the durable ops for a run here fails: the
 /// counters below all move, and the byte-identity assertion fails with them.
 #[tokio::test]
 async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<()> {
     let session_id = SessionId::from("fig-3353-durable-poll");
+    let app_lookup = lash_core::ToolId::from("tool:app_lookup");
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
     let factory: Arc<dyn DeploymentStore> = backend.session_store_factory();
 
     // A core that carries the session's tool source, to persist tool state.
-    // Its send needs the engine's queued-work port; the pending enqueue that
-    // follows must stay pending, so it goes through the grantless core — the
-    // only core left without a `SessionShifts` once this one is dropped.
     let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
@@ -1103,31 +1101,23 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
         .await
         .open()
         .await?;
+    granted
+        .send(TurnInput::text("persist a checkpoint with tool state"))
+        .output()
+        .await?;
     assert!(
         granted
             .admin()
             .tools()
             .state()
             .await?
-            .contains(&lash_core::ToolId::from("tool:app_lookup")),
-        "the granting core registers the tool this session will persist"
+            .recorded()
+            .is_some_and(|state| state.contains(&app_lookup)),
+        "the granting core's run records the tool this session persists"
     );
-    granted
-        .send(TurnInput::text("persist a checkpoint with tool state"))
-        .output()
-        .await?;
 
     Box::pin(granted.close()).await?;
     drop(granting_core);
-
-    // The engine may still run a session shift the send or close scheduled —
-    // a reconcile, say — and under the double that shift's admit materialises
-    // a runtime on the grantless core's session-work handle, landing after
-    // the counter baseline below. Gate the shift for the measurement window;
-    // the durable ops under test are store reads and never need it.
-    let _hold = double.hold_session_shift(&session_id).await;
-
-    let tool_state_before = persisted_tool_state_bytes(factory.as_ref(), &session_id).await?;
 
     // The grantless core: same store, no tool source, fully instrumented.
     let counters = Arc::new(RuntimeBuildCounters::default());
@@ -1150,32 +1140,38 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     }))
     .build(crate::testing::runtime_lease_owner())?;
 
-    // Precondition: on this core, `open()` really does orphan the tool. A
+    // Precondition: on this core, a run really does orphan the tool. A
     // negative test whose premise does not hold proves nothing.
     {
         let opened =
             retry_when_claim_frees(|| grantless_core.session(session_id.clone()).open()).await?;
-        let state = opened.admin().tools().state().await?;
-        let entry = state
-            .get(&lash_core::ToolId::from("tool:app_lookup"))
-            .expect("the persisted tool survives as a state entry");
-        assert!(
-            entry.is_orphaned(),
-            "precondition: opening on a core without the tool's source orphans it"
+        let output = opened
+            .send(TurnInput::text("run without the tool's source"))
+            .output()
+            .await?;
+        assert_eq!(
+            output
+                .tool_restore_report()
+                .map(|report| report.lost_members.clone()),
+            Some(vec![app_lookup.clone()]),
+            "precondition: a run on a core without the tool's source orphans it"
         );
         let (plugins, restored, admissions) = counters.snapshot();
         assert!(
             plugins > 0 && restored > 0,
-            "precondition: open() materialises plugins ({plugins}) and restores the session ({restored})"
+            "precondition: a run materialises plugins ({plugins}) and restores the session ({restored})"
         );
         let _ = admissions;
         Box::pin(opened.close()).await?;
     }
-    // Restore the durable tool state the orphaning open may have rewritten,
-    // then measure the durable path from a clean baseline.
-    let tool_state_before = persisted_tool_state_bytes(factory.as_ref(), &session_id)
-        .await
-        .unwrap_or(tool_state_before);
+
+    // The engine may still run a session shift the run or close scheduled —
+    // a reconcile, say — and under the double that shift's admit materialises
+    // a runtime on the grantless core's session-work handle, landing after
+    // the counter baseline below. Gate the shift for the measurement window;
+    // the durable ops under test are store reads and never need it.
+    let _hold = double.hold_session_shift(&session_id).await;
+    let tool_state_before = persisted_tool_state_bytes(factory.as_ref(), &session_id).await?;
     counters.plugin_materializations.store(0, Ordering::SeqCst);
     counters.session_restored_events.store(0, Ordering::SeqCst);
     counters.process_admissions.store(0, Ordering::SeqCst);

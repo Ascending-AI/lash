@@ -2,7 +2,6 @@ use super::*;
 use crate::session_model::SessionStreamEvent;
 use crate::{SessionSnapshot, TokenUsage, ToolCallRecord};
 use lash_sansio::sync::MutexExt;
-use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -46,31 +45,34 @@ impl RuntimeTurnPhaseProbeSlot {
     }
 }
 
+/// A protocol's session-scoped extension, recorded durably (FIG-5134): the
+/// session nodes it appends, which its protocol applies when the append lands
+/// and replays on every restore. A host applies it through the session's
+/// command lane, so it survives every rebuild of the session's capabilities.
 #[derive(Clone)]
-pub struct ProtocolSessionExtensionHandle(Arc<dyn ProtocolSessionExtension>);
+pub struct ProtocolSessionExtension(
+    Arc<dyn Fn(crate::FleetFormat) -> Vec<crate::SessionAppendNode> + Send + Sync>,
+);
 
-impl ProtocolSessionExtensionHandle {
-    /// Type-erases and shares a session extension for protocol implementors restoring plugin-owned
-    /// session state.
-    pub fn new(extension: impl ProtocolSessionExtension + 'static) -> Self {
-        Self(Arc::new(extension))
+impl ProtocolSessionExtension {
+    /// An extension whose durable form is the nodes `nodes` writes for the
+    /// session's fleet format.
+    pub fn new(
+        nodes: impl Fn(crate::FleetFormat) -> Vec<crate::SessionAppendNode> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Arc::new(nodes))
     }
 
-    /// Exposes the erased extension for protocol implementors that must downcast back to their
-    /// concrete session-extension type.
-    pub fn as_any(&self) -> &dyn Any {
-        self.0.as_any()
+    /// The nodes that record this extension in a session of `fleet`.
+    pub fn session_nodes(&self, fleet: crate::FleetFormat) -> Vec<crate::SessionAppendNode> {
+        (self.0)(fleet)
     }
 }
 
-impl fmt::Debug for ProtocolSessionExtensionHandle {
+impl fmt::Debug for ProtocolSessionExtension {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("ProtocolSessionExtensionHandle(..)")
+        f.write_str("ProtocolSessionExtension(..)")
     }
-}
-
-pub trait ProtocolSessionExtension: Send + Sync {
-    fn as_any(&self) -> &dyn Any;
 }
 
 /// Code execution output observed during a turn.
@@ -231,6 +233,15 @@ pub enum TurnEvent {
         boundary: crate::AdmissionBoundary,
         batch_ids: Vec<String>,
         causes: Vec<crate::TurnCause>,
+    },
+    /// The run's plugin transition restored the session's persisted tool
+    /// state and some persisted id had no registered source (FIG-5134). It
+    /// follows the run's first `TurnStarted`; a clean restore emits nothing.
+    /// Under `ToolSourcePolicy::Tolerate` the run goes on without the lost
+    /// members; under `Require` a run that would lose one is refused with
+    /// `RuntimeErrorCode::ToolSourcesUnavailable` instead and never starts.
+    ToolRestoreReported {
+        report: crate::ToolRestoreReport,
     },
     ModelRequestStarted {
         protocol_iteration: usize,

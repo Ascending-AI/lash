@@ -412,6 +412,25 @@ impl TurnOutput {
     pub fn is_context_overflow(&self) -> bool {
         self.result.is_context_overflow()
     }
+
+    /// What this run's restore of the session's persisted tool state found
+    /// no registered source for, when it found anything (FIG-5134): the
+    /// run's [`TurnEvent::ToolRestoreReported`](crate::TurnEvent::ToolRestoreReported).
+    ///
+    /// A run reports a restore once, on the turn after the transition that
+    /// built the session's capabilities, or after a re-sync that reinstalled
+    /// them. `lost_members` is capability loss to surface to your user: the
+    /// run went on without those tools until their source returns.
+    /// `parked_opt_outs` lost nothing usable, and `superseded_identities`
+    /// names tools present under a new id.
+    pub fn tool_restore_report(&self) -> Option<&crate::tools::ToolRestoreReport> {
+        self.activities
+            .iter()
+            .find_map(|activity| match &activity.event {
+                crate::TurnEvent::ToolRestoreReported { report } => Some(report),
+                _ => None,
+            })
+    }
 }
 
 /// Fans a turn's activity stream out to multiple consumers.

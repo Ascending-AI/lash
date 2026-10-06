@@ -234,7 +234,8 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
             .tools()
             .state()
             .await?
-            .contains(&lash_core::ToolId::from("tool:before_refresh"))
+            .recorded()
+            .is_some_and(|state| state.contains(&lash_core::ToolId::from("tool:before_refresh")))
     );
     tools.replace("after_refresh");
 
@@ -308,7 +309,8 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
             .tools()
             .state()
             .await?
-            .contains(&lash_core::ToolId::from("tool:after_refresh")),
+            .recorded()
+            .is_some_and(|state| state.contains(&lash_core::ToolId::from("tool:after_refresh"))),
         "queued catalog refresh must apply the source's replacement manifest"
     );
     assert!(reopened.durable().queued_work().await?.is_empty());

@@ -1,5 +1,7 @@
-//! What a session open learns when its persisted tools have no live source
-//! (FIG-3367), and what the FIG-3353 sequence actually leaves durable.
+//! What a session's construction learns when its persisted tools have no live
+//! source (FIG-3367), and what the FIG-3353 sequence actually leaves durable.
+//! Every install tolerates and reports; `Require` refuses a turn run at its
+//! plugin transition instead, whose laws are the facade's (FIG-5134).
 
 use super::child_sessions::session_capabilities;
 use super::*;
@@ -397,109 +399,6 @@ async fn alias_replacement_is_reported_as_superseded_and_never_refuses() {
     );
 }
 
-/// Direct construction under Require refuses with the typed error, and the
-/// refusal carries the report.
-#[tokio::test(flavor = "multi_thread")]
-async fn require_refuses_a_direct_construction_that_lost_a_member() {
-    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let session_id = SessionId::from("fig3367-require-direct");
-    let store = double_unbound_store(&double).await;
-
-    let granted = create_or_open_fixture_runtime(
-        &backend,
-        &double,
-        &session_id,
-        &store,
-        Some(FixedTools::new(vec![(ALPHA_ID, ALPHA_NAME)])),
-        lash_core::ToolSourcePolicy::Tolerate,
-    )
-    .await
-    .expect("granted open");
-    drop(granted);
-    let head_before = durable_state(store.clone(), session_id.clone())
-        .await
-        .head_revision;
-
-    let refusal = match create_or_open_fixture_runtime(
-        &backend,
-        &double,
-        &session_id,
-        &store,
-        None,
-        lash_core::ToolSourcePolicy::Require,
-    )
-    .await
-    {
-        Ok(_) => panic!("Require must refuse an open that lost a catalog member"),
-        Err(refusal) => refusal,
-    };
-    match &refusal {
-        lash_core::SessionError::ToolSourcesUnavailable { report, .. } => {
-            assert_eq!(report.lost_members, vec![lash_core::ToolId::from(ALPHA_ID)]);
-        }
-        other => panic!("expected a typed tool-source refusal, got {other:?}"),
-    }
-
-    // The refusal's promises: nothing was committed, and the next open can
-    // still take the Session Execution Lease.
-    let head_after = durable_state(store.clone(), session_id.clone())
-        .await
-        .head_revision;
-    assert_eq!(
-        head_after, head_before,
-        "a refused open commits no config or state"
-    );
-    let reopened = create_or_open_fixture_runtime(
-        &backend,
-        &double,
-        &session_id,
-        &store,
-        Some(FixedTools::new(vec![(ALPHA_ID, ALPHA_NAME)])),
-        lash_core::ToolSourcePolicy::Require,
-    )
-    .await
-    .expect("a following open acquires the lease the refusal released");
-    drop(reopened);
-}
-
-/// Resume rebuilds a runtime through the same install owner, so it honours the
-/// policy the environment carries.
-#[tokio::test(flavor = "multi_thread")]
-async fn require_refuses_a_resume_that_lost_a_member() {
-    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let session_id = SessionId::from("fig3367-require-resume");
-    let store = double_unbound_store(&double).await;
-
-    let granted = create_or_open_fixture_runtime(
-        &backend,
-        &double,
-        &session_id,
-        &store,
-        Some(FixedTools::new(vec![(ALPHA_ID, ALPHA_NAME)])),
-        lash_core::ToolSourcePolicy::Tolerate,
-    )
-    .await
-    .expect("granted open");
-    let parked = Box::pin(granted.park()).await.expect("park");
-
-    let grantless_env = environment(&backend, None, lash_core::ToolSourcePolicy::Require);
-
-    let refusal =
-        match LashRuntime::resume(parked, &grantless_env, owner(session_id.as_str())).await {
-            Ok(_) => panic!("Require must refuse a resume that lost a catalog member"),
-            Err(refusal) => refusal,
-        };
-    assert!(
-        matches!(
-            refusal,
-            lash_core::SessionError::ToolSourcesUnavailable { .. }
-        ),
-        "expected a typed tool-source refusal, got {refusal:?}"
-    );
-}
-
 /// A source whose advertised set can be emptied while the runtime lives.
 struct MutableTools {
     tools: Mutex<Vec<(&'static str, &'static str)>>,
@@ -571,7 +470,7 @@ async fn live_require_runtime(
 }
 
 /// `restore_tool_state` is a host asking a session it already holds to install
-/// a snapshot. Under Require it still succeeds: the policy governs opening a
+/// a snapshot. Under Require it still succeeds: the policy governs a turn run's
 /// session, not a restore onto a live one. Refusing here would leave the
 /// registry reconciled, the catalog stale and the report unretained.
 #[tokio::test(flavor = "multi_thread")]
@@ -585,7 +484,7 @@ async fn a_host_restore_on_a_require_core_reports_instead_of_refusing() {
 
     let report = Box::pin(runtime.restore_tool_state(snapshot))
         .await
-        .expect("a live host restore never refuses, whatever the open policy is");
+        .expect("a live host restore never refuses, whatever the run policy is");
     assert_eq!(
         report.lost_members,
         vec![lash_core::ToolId::from(ALPHA_ID)],

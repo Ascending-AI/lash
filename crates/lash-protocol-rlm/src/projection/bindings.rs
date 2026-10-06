@@ -1,13 +1,13 @@
-use std::any::Any;
 use std::collections::BTreeMap;
-
-use lash_core::ProtocolSessionExtension;
 
 use lashlang::{ProjectedBindingError, ProjectedBindings, ProjectedValue, Value as FlowValue};
 
 #[derive(Clone, Default)]
 pub struct RlmProjectedBindings {
     bindings: BTreeMap<String, FlowValue>,
+    /// The JSON each host binding was bound from: its durable seed form
+    /// (FIG-5134). A cell's recorded bindings carry none.
+    sources: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -50,6 +50,7 @@ impl RlmProjectedBindings {
                 .into_iter()
                 .map(|(name, RecordedProjection(value))| (name, value))
                 .collect(),
+            sources: BTreeMap::new(),
         })
     }
 
@@ -69,6 +70,7 @@ impl RlmProjectedBindings {
                 .into_iter()
                 .map(|(name, RecordedProjection(value))| (name, value))
                 .collect(),
+            sources: BTreeMap::new(),
         }
     }
 
@@ -76,25 +78,34 @@ impl RlmProjectedBindings {
         Self::default()
     }
 
-    pub fn bind_value(
+    /// Bind `name` to `value`. A session extension records the JSON as its
+    /// durable seed, so a binding is JSON (FIG-5134).
+    pub fn bind_json(
         mut self,
         name: impl Into<String>,
-        value: impl Into<FlowValue>,
+        value: serde_json::Value,
     ) -> Result<Self, ProjectedBindingError> {
         let name = name.into();
         if self.bindings.contains_key(&name) {
             return Err(ProjectedBindingError::duplicate(name));
         }
-        self.bindings.insert(name, value.into());
+        self.bindings
+            .insert(name.clone(), lashlang::from_json(value.clone()));
+        self.sources.insert(name, value);
         Ok(self)
     }
 
-    pub fn bind_json(
-        self,
-        name: impl Into<String>,
-        value: serde_json::Value,
-    ) -> Result<Self, ProjectedBindingError> {
-        self.bind_value(name, lashlang::from_json(value))
+    /// The durable seed form of the host bindings: what
+    /// [`Self::from_snapshot`] binds again.
+    pub(crate) fn to_snapshot(&self) -> lash_rlm_types::RlmProjectedSeedSnapshot {
+        let mut snapshot = lash_rlm_types::RlmProjectedSeedSnapshot::new();
+        for (name, value) in &self.sources {
+            snapshot.push(
+                name.clone(),
+                lash_rlm_types::RlmProjectedSeedEntry::Materialized(value.clone()),
+            );
+        }
+        snapshot
     }
 
     pub fn names(&self) -> impl Iterator<Item = String> + '_ {
@@ -130,6 +141,7 @@ impl RlmProjectedBindings {
             }
             self.bindings.insert(name, value);
         }
+        self.sources.extend(other.sources);
         Ok(self)
     }
 
@@ -147,17 +159,6 @@ impl RlmProjectedBindings {
     }
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct RlmProjectionExtension {
-    pub(crate) bindings: RlmProjectedBindings,
-}
-
-impl RlmProjectionExtension {
-    pub(crate) fn new(bindings: RlmProjectedBindings) -> Self {
-        Self { bindings }
-    }
-}
-
 /// The heading the read-only variables render under.
 pub(crate) const READ_ONLY_VARIABLES_TITLE: &str = "Read-Only Variables";
 
@@ -171,16 +172,23 @@ pub(crate) fn read_only_variables_prompt(
     (!docs.is_empty()).then(|| crate::rlm_support::render_read_only_variables(docs, dialect))
 }
 
-impl ProtocolSessionExtension for RlmProjectionExtension {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
+/// A session extension binding `bindings` as the session's read-only
+/// variables (FIG-5134). Its durable form is an RLM seed event carrying the
+/// bindings: the protocol binds them when the host's append lands and again
+/// on every restore of the frame, so they hold for every later run.
 pub fn rlm_session_projection_extension(
     bindings: RlmProjectedBindings,
-) -> lash_core::ProtocolSessionExtensionHandle {
-    lash_core::ProtocolSessionExtensionHandle::new(RlmProjectionExtension::new(bindings))
+) -> lash_core::ProtocolSessionExtension {
+    let projected = bindings.to_snapshot();
+    lash_core::ProtocolSessionExtension::new(move |fleet| {
+        crate::rlm_seed_initial_nodes(
+            crate::RlmSeed {
+                projected: projected.clone(),
+                globals: serde_json::Map::new(),
+            },
+            fleet,
+        )
+    })
 }
 
 #[cfg(test)]

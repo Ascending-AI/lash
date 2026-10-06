@@ -72,6 +72,14 @@ pub enum SessionCommand {
         #[schemars(with = "serde_json::Value")]
         request: Box<crate::OpenAgentFrameRequest>,
     },
+    /// A host's tool-state change (FIG-5134). A session builds its tool
+    /// registry only when a run publishes its plugin transition, so the
+    /// change is durable first and the command run applies it, in lane
+    /// order, against the capabilities that run built. It settles as a
+    /// [`SessionCommandOutcome::ToolState`].
+    ChangeToolState {
+        change: Box<crate::tool_state::ToolStateChange>,
+    },
 }
 impl SessionCommand {
     pub fn kind(&self) -> &'static str {
@@ -83,6 +91,7 @@ impl SessionCommand {
             Self::RunPluginTask { .. } => "run_plugin_task",
             Self::OpenAgentFrame { .. } => "open_agent_frame",
             Self::ApplyConfigTransaction { .. } => "apply_config_transaction",
+            Self::ChangeToolState { .. } => "change_tool_state",
         }
     }
 
@@ -98,7 +107,8 @@ impl SessionCommand {
             | Self::RunPluginCommand { .. }
             | Self::RunPluginTask { .. }
             | Self::OpenAgentFrame { .. }
-            | Self::ApplyConfigTransaction { .. } => true,
+            | Self::ApplyConfigTransaction { .. }
+            | Self::ChangeToolState { .. } => true,
         }
     }
 
@@ -169,6 +179,11 @@ pub enum SessionCommandOutcome {
     /// stale, or refused by an owner (FIG-4379).
     ConfigTransaction {
         outcome: crate::ConfigTransactionOutcome,
+    },
+    /// A host tool-state change's outcome: applied, restored with its
+    /// report, or refused against the session's tool state (FIG-5134).
+    ToolState {
+        outcome: crate::tool_state::ToolStateChangeOutcome,
     },
     /// The command could not apply, for a reason its own outcome does not
     /// name: nothing of it committed, and the command is settled, so it is

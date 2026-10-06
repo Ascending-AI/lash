@@ -318,10 +318,23 @@ impl LashRuntime {
         turn_id: &TurnId,
         admissions: &LogicalTurnAdmissions,
         announce_queued_work: bool,
+        tool_restore: Option<crate::ToolRestoreReport>,
     ) {
         let mut cursor =
             super::turn_loop::turn_observation_cursor(scoped_effect_controller, turn_id, "start");
         super::turn_loop::emit_turn_started(observer, &mut cursor, turn_id);
+        // The restore this run's transition (or a later re-sync) made, when
+        // something persisted had no source: the sender reads it on the run's
+        // output and observers on the session's feed (FIG-5134).
+        if let Some(report) = tool_restore.filter(|report| !report.is_clean()) {
+            cursor.observe(
+                &observer.for_turn(turn_id),
+                crate::engine::ObservedEvent::Activity {
+                    correlation_id: None,
+                    event: crate::TurnEvent::ToolRestoreReported { report },
+                },
+            );
+        }
         if !announce_queued_work {
             // Work withheld from a terminal checkpoint already announced its
             // start at the boundary that admitted it (FIG-3157).
@@ -628,6 +641,7 @@ impl LashRuntime {
                 &turn_trace_turn_id,
                 &admissions,
                 announce_queued_work,
+                self.tool_restore_report.take(),
             );
             announce_queued_work = true;
             // A follow-on that must not run commits its failure as its

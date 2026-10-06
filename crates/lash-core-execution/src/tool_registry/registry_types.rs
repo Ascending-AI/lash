@@ -1,5 +1,7 @@
 use super::*;
-pub use lash_core_store::tool_state::ReconfigureError;
+pub use lash_core_store::tool_state::{
+    ReconfigureError, SupersededToolIdentity, ToolRestoreReport,
+};
 
 #[derive(Clone, PartialEq)]
 pub(super) struct ToolRegistryEntry {
@@ -174,87 +176,30 @@ impl ToolRegistryInner {
     }
 }
 
-/// A persisted tool identity that a live id has replaced by owning its
-/// model-facing name. The old grant is not transferred: the live id is a
-/// default member and the retired id is dropped from the surface.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SupersededToolIdentity {
-    /// The persisted tool id no source resolves any more.
-    pub retired_id: ToolId,
-    /// The live tool id that now owns the model-facing name.
-    pub live_id: ToolId,
-    /// The model-facing name both identities carry.
-    pub name: String,
-}
-
-/// Outcome of `ToolRegistry::restore_state`: the adopted generation plus what
-/// happened to each persisted tool id no registered source resolved.
-///
-/// The three classes are different facts about the session, and only the first
-/// is capability loss:
-///
-/// * [`lost_members`](Self::lost_members) — persisted `member: true`, nothing
-///   resolves the id. The session opened without a tool the host had curated
-///   in. This is what a host surfaces to its user and what
-///   [`ToolSourcePolicy::Require`] refuses on.
-/// * [`parked_opt_outs`](Self::parked_opt_outs) — unresolved ids the host had
-///   already opted out of (`member: false`). Nothing the session could use is
-///   missing; the entry is kept so the opt-out survives the source's return.
-/// * [`superseded_identities`](Self::superseded_identities) — an old id dropped
-///   because a live id owns its model-facing name. The capability is present
-///   under a new identity, which is a default member.
-///
-/// Entries in the first two classes remain in tool state as orphans and rebind
-/// automatically when their source returns.
-#[derive(Clone, Debug, Default)]
-pub struct ToolRestoreReport {
-    pub generation: u64,
-    pub lost_members: Vec<ToolId>,
-    pub parked_opt_outs: Vec<ToolId>,
-    pub superseded_identities: Vec<SupersededToolIdentity>,
-}
-
-impl ToolRestoreReport {
-    pub fn has_lost_members(&self) -> bool {
-        !self.lost_members.is_empty()
-    }
-
-    pub fn is_clean(&self) -> bool {
-        self.lost_members.is_empty()
-            && self.parked_opt_outs.is_empty()
-            && self.superseded_identities.is_empty()
-    }
-
-    /// The ids retained as orphaned entries: lost members and parked opt-outs.
-    /// A superseded identity is not retained, so it is not listed here.
-    pub fn orphaned_ids(&self) -> impl Iterator<Item = &ToolId> {
-        self.lost_members.iter().chain(self.parked_opt_outs.iter())
-    }
-}
-
-/// Host policy for **opening** a session whose persisted tools no live source
+/// Host policy for **running** a session whose persisted tools no live source
 /// resolves.
 ///
 /// The default is [`Tolerate`](Self::Tolerate): locking a user out of a
 /// conversation is worse than degrading it, so a lost tool is a typed fact the
-/// host receives rather than a refusal. Unattended and fixed-tool deployments
-/// opt into [`Require`](Self::Require).
+/// host receives on the run that restored it rather than a refusal.
+/// Unattended and fixed-tool deployments opt into [`Require`](Self::Require).
 ///
-/// It governs opening only. Opening a session is the host's claim that it can
-/// run that session, so a refusal there costs nothing: the half-built runtime
-/// is discarded whole. Installing persisted tool state onto a runtime the host
-/// already holds — an explicit `restore_tool_state`, a persisted-state install,
-/// the resident re-sync after an invalidation — always tolerates and reports,
-/// whatever this policy says. Those installs reconcile the live registry before
-/// anything could refuse, so a refusal would leave the session with a changed
-/// registry, a stale tool catalog and no report, which is worse than the
-/// degraded session `Require` exists to prevent.
+/// Opening a session builds no capabilities (FIG-4857), so an open never
+/// consults this policy. A turn run's recorded plugin transition does: under
+/// `Require` it refuses the run before the transition publishes anything, and
+/// the sender reads the refusal as the run's terminal answer (FIG-5134).
+/// Installing persisted tool state onto a session that already holds
+/// capabilities — a host restore command, a persisted-state install, the
+/// resident re-sync after an invalidation — always tolerates and reports,
+/// whatever this policy says.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ToolSourcePolicy {
     #[default]
     Tolerate,
-    /// Open refuses when the report has lost members. Parked opt-outs and
-    /// superseded identities never refuse: neither is a missing capability.
+    /// A turn run refuses at its plugin transition when restoring the
+    /// session's persisted tool state would lose a member. Parked opt-outs
+    /// and superseded identities never refuse: neither is a missing
+    /// capability.
     Require,
 }
 

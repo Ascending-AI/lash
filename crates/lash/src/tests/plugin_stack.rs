@@ -51,8 +51,12 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
     Ok(())
 }
 
+/// Host tool curation is durable session state: it needs no built session,
+/// it applies in a run, and a session reopened over persisted tool state
+/// restores it, the host's removal included (FIG-5134).
 #[tokio::test]
 async fn persisted_session_restores_tool_state() -> Result<()> {
+    let app_lookup = lash_core::ToolId::from("tool:app_lookup");
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
@@ -64,13 +68,29 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         .await
         .open()
         .await?;
+    assert!(
+        session.admin().tools().state().await?.recorded().is_none(),
+        "an open builds no capabilities, so nothing has recorded tool state yet"
+    );
     session
         .admin()
         .tools()
-        .set_membership("tool:app_lookup", false)
+        .set_membership(app_lookup.clone(), false)
         .await?;
-    let persisted_tool_state =
-        persisted_tool_state_at_generation(session.admin().tools().state().await?, 9);
+    let curated = session.admin().tools().state().await?;
+    assert!(
+        curated.pending().is_empty(),
+        "the settled change is applied, not pending"
+    );
+    let curated = curated
+        .recorded()
+        .expect("the command run recorded the session's tool state")
+        .clone();
+    assert!(
+        !curated.get(&app_lookup).expect("app tool").is_member(),
+        "the command run applied the host's removal"
+    );
+    let persisted_tool_state = persisted_tool_state_at_generation(curated, 9);
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("persisted-tools"),
         policy: lash_core::SessionPolicy {
@@ -98,14 +118,17 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         .await
         .open()
         .await?;
+    reopened
+        .send(TurnInput::text("restore the persisted tool state"))
+        .output()
+        .await?;
     let state = reopened.admin().tools().state().await?;
-    assert_eq!(state.generation(), 9);
-
+    let restored = state
+        .recorded()
+        .expect("the run recorded the restored tool state");
+    assert_eq!(restored.generation(), 9);
     assert!(
-        !state
-            .get(&lash_core::ToolId::from("tool:app_lookup"))
-            .expect("app tool")
-            .is_member(),
+        !restored.get(&app_lookup).expect("app tool").is_member(),
         "the host-removed tool is restored as a non-member"
     );
     Ok(())

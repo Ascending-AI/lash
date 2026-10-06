@@ -1031,7 +1031,8 @@ impl LashRuntime {
                 crate::SessionCommand::AppendSessionNodes { .. }
                 | crate::SessionCommand::RunPluginCommand { .. }
                 | crate::SessionCommand::RunPluginTask { .. }
-                | crate::SessionCommand::OpenAgentFrame { .. },
+                | crate::SessionCommand::OpenAgentFrame { .. }
+                | crate::SessionCommand::ChangeToolState { .. },
             ] => {
                 drop(RuntimeNamedPhase::begin(
                     self.turn_phase_probe.clone(),
@@ -1071,6 +1072,14 @@ impl LashRuntime {
                     completion,
                     shift_fence,
                     effect_controller,
+                ))
+                .await;
+            }
+            [crate::SessionCommand::ChangeToolState { change }] => {
+                return Box::pin(self.apply_tool_state_command(
+                    change.as_ref().clone(),
+                    completion,
+                    shift_fence,
                 ))
                 .await;
             }
@@ -1160,7 +1169,8 @@ impl LashRuntime {
                 | crate::SessionCommand::RunPluginCommand { .. }
                 | crate::SessionCommand::RunPluginTask { .. }
                 | crate::SessionCommand::OpenAgentFrame { .. }
-                | crate::SessionCommand::ApplyConfigTransaction { .. }) => {
+                | crate::SessionCommand::ApplyConfigTransaction { .. }
+                | crate::SessionCommand::ChangeToolState { .. }) => {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::SessionCommandRequired,
                         format!(

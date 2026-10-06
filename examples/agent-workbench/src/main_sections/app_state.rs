@@ -67,9 +67,7 @@ impl AppState {
         session_id: &SessionId,
         surface: &str,
     ) -> Result<lash::LashSession, lash::EmbedError> {
-        let session = open_session_with_bounded_retry(self, session_id, surface).await?;
-        self.render_tool_loss(session_id, &session).await;
-        Ok(session)
+        open_session_with_bounded_retry(self, session_id, surface).await
     }
 
     pub(crate) fn current_session_id(&self) -> SessionId {

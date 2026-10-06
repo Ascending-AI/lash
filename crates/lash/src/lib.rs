@@ -200,8 +200,9 @@ pub mod turn;
 pub mod usage;
 
 pub use crate::admin::{
-    AdvancedToolAdmin, Completions, CoreTriggerAdmin, PluginOperations, SessionCommandAdmin,
-    SessionCommandWithdrawal, SessionTriggerAdmin, ToolAdmin,
+    AdvancedToolAdmin, Completions, CoreTriggerAdmin, PendingToolStateChange, PluginOperations,
+    SessionCommandAdmin, SessionCommandWithdrawal, SessionToolState, SessionTriggerAdmin,
+    ToolAdmin,
 };
 pub use crate::core::{
     DeploymentDrainStatus, GenerationDrainStatus, LashCore, LashCoreBuilder, SessionClosing,
@@ -501,8 +502,10 @@ pub mod tools {
     pub use lash_core::{TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
     pub use lash_core::{
         ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,
-        facade_support::SupersededToolIdentity, facade_support::ToolRestoreReport,
-        facade_support::ToolSourcePolicy, facade_support::ToolStateEntry,
+        facade_support::SupersededToolIdentity, facade_support::ToolMembershipUpdate,
+        facade_support::ToolRestoreReport, facade_support::ToolSourcePolicy,
+        facade_support::ToolStateChange, facade_support::ToolStateChangeOutcome,
+        facade_support::ToolStateEntry,
     };
     /// Engine-owned tool-intent admission records used by process-registry integrators.
     pub use lash_core::{
@@ -1279,9 +1282,7 @@ pub mod runtime {
     pub use lash_core::triggers::TriggerDeliveryAdmission;
 
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
-    pub use lash_core::{
-        ProtocolSessionExtension, ScopeBoundController, ServedOnly, TurnControlAttachment,
-    };
+    pub use lash_core::{ScopeBoundController, ServedOnly, TurnControlAttachment};
     pub use lash_core_store::runtime_error::EffectErrorJournalPolicy;
     pub use lash_core_store::store::FollowOnRecoveryAnswer;
     pub use lash_core_store::turn_control_binding::{
@@ -1335,9 +1336,9 @@ pub mod runtime {
     /// wall-clock default; tests open a backend on their own to make expiry
     /// deterministic.
     pub use lash_core::{Clock, ClockWallTime, facade_support::SystemClock};
-    /// The session extension handle and turn options exposed to runtime integrators.
+    /// The durable session extension and turn options exposed to runtime integrators.
     pub use lash_core::{
-        ProtocolSessionExtensionHandle, ProtocolTurnOptions, SessionPolicy, SessionSnapshot,
+        ProtocolSessionExtension, ProtocolTurnOptions, SessionPolicy, SessionSnapshot,
         facade_support::SessionHandle, facade_support::render_turn_causes_prompt,
     };
 }

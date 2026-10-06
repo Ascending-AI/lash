@@ -1,28 +1,27 @@
-//! Rendering tool loss to the workbench's user (FIG-3367).
+//! Rendering tool loss to the workbench's user (FIG-3367, FIG-5134).
 //!
-//! An open reports which persisted tools no live source resolves. This is the
-//! workbench's answer to that report: the one class that means a capability is
-//! gone becomes a chat row the user reads.
+//! A run reports which persisted tools no live source resolves when its
+//! transition restored the session's tool state. This is the workbench's
+//! answer to that report: the one class that means a capability is gone
+//! becomes a chat row the user reads.
 
 use super::*;
 use lash::SessionId;
 
 impl AppState {
-    /// Show the user which of this session's tools the open could not find.
+    /// Show the user which of this session's tools a run could not find.
     ///
-    /// The open reports tool loss as a typed value (FIG-3367); the workbench
-    /// renders the one class that means a capability is gone. The row carries a
-    /// deterministic id derived from the lost ids, so the identified product
-    /// event dedupes it: every route opens the session, and a chat that
-    /// repeated the warning per request would be unreadable.
-    pub(crate) async fn render_tool_loss(
+    /// The run reports tool loss as a typed value on its output (FIG-5134);
+    /// the workbench renders the one class that means a capability is gone.
+    /// The row carries a deterministic id derived from the lost ids, so the
+    /// identified product event dedupes it: every run built on the same
+    /// sources reports the same loss, and a chat that repeated the warning
+    /// per run would be unreadable.
+    pub(crate) fn render_tool_loss(
         &self,
         session_id: &SessionId,
-        session: &lash::LashSession,
+        report: &lash::tools::ToolRestoreReport,
     ) {
-        let Some(report) = session.tool_restore_report().await else {
-            return;
-        };
         if !report.has_lost_members() {
             return;
         }

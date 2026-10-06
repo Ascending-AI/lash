@@ -151,13 +151,6 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
         self.runtime_state.append_session_nodes(nodes).await
     }
 
-    async fn apply_session_extension(
-        &self,
-        extension: lash_core::ProtocolSessionExtensionHandle,
-    ) -> Result<(), SessionError> {
-        self.runtime_state.apply_session_extension(extension).await
-    }
-
     async fn bound_variables_prompt(
         &self,
         ctx: ProtocolSessionContext<'_>,
@@ -265,6 +258,22 @@ mod tests {
         RlmProtocolSession::new(config, runtime_state)
     }
 
+    /// Land `bindings`' session extension on `session` the way the host's
+    /// append does: its durable nodes, through `append_session_nodes`.
+    async fn extend(
+        session: &RlmProtocolSession,
+        bindings: RlmProjectedBindings,
+    ) -> Result<(), SessionError> {
+        let fleet = lash_core::FleetFormat::current();
+        let session_id = SessionId::from("rlm-session-extension");
+        session
+            .append_session_nodes(
+                ProtocolSessionContext::new(&session_id, fleet),
+                &crate::rlm_session_projection_extension(bindings).session_nodes(fleet),
+            )
+            .await
+    }
+
     #[tokio::test]
     async fn session_projection_extension_rejects_duplicate_names() {
         let session = test_session(
@@ -274,22 +283,22 @@ mod tests {
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
                 .build(),
         );
-        session
-            .apply_session_extension(crate::rlm_session_projection_extension(
-                RlmProjectedBindings::new()
-                    .bind_json("current_query", serde_json::json!("first"))
-                    .expect("first bind"),
-            ))
-            .await
-            .expect("first projection");
+        extend(
+            &session,
+            RlmProjectedBindings::new()
+                .bind_json("current_query", serde_json::json!("first"))
+                .expect("first bind"),
+        )
+        .await
+        .expect("first projection");
 
-        let duplicate = session
-            .apply_session_extension(crate::rlm_session_projection_extension(
-                RlmProjectedBindings::new()
-                    .bind_json("current_query", serde_json::json!("second"))
-                    .expect("second bind"),
-            ))
-            .await;
+        let duplicate = extend(
+            &session,
+            RlmProjectedBindings::new()
+                .bind_json("current_query", serde_json::json!("second"))
+                .expect("second bind"),
+        )
+        .await;
         let Err(err) = duplicate else {
             panic!("duplicate session projection should fail");
         };
@@ -328,14 +337,14 @@ mod tests {
             lash_core::AdmittedPluginConfig::new(config, revision)
         };
         let session = test_session(deployment.clone());
-        session
-            .apply_session_extension(crate::rlm_session_projection_extension(
-                RlmProjectedBindings::new()
-                    .bind_json("current_query", serde_json::json!("open issues"))
-                    .expect("bind"),
-            ))
-            .await
-            .expect("bind the session's read-only variable");
+        extend(
+            &session,
+            RlmProjectedBindings::new()
+                .bind_json("current_query", serde_json::json!("open issues"))
+                .expect("bind"),
+        )
+        .await
+        .expect("bind the session's read-only variable");
         let catalog = lash_core::ToolCatalog::from_tool_definitions(Vec::new());
         let subagent = lash_core::SubagentSessionContext {
             capability: "research".to_string(),

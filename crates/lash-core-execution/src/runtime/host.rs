@@ -267,15 +267,17 @@ pub struct RuntimeControlConfig {
     /// holds them until its own commit settles them (FIG-3927). Defaults to
     /// [`crate::LeaseTimings::default`] (30s TTL / 10s renew).
     pub lease_timings: crate::LeaseTimings,
-    /// What an open does when a persisted tool id no registered source
+    /// What a turn run does when a persisted tool id no registered source
     /// resolves. Defaults to
-    /// [`ToolSourcePolicy::Tolerate`](crate::ToolSourcePolicy): the session
-    /// opens and the host receives the typed
-    /// [`ToolRestoreReport`](crate::ToolRestoreReport). Set
+    /// [`ToolSourcePolicy::Tolerate`](crate::ToolSourcePolicy): the run goes
+    /// on and reports the typed
+    /// [`ToolRestoreReport`](crate::ToolRestoreReport) as its
+    /// `TurnEvent::ToolRestoreReported`. Set
     /// [`Require`](crate::ToolSourcePolicy::Require) in unattended or
-    /// fixed-tool deployments to refuse an open that lost a catalog member.
-    /// It is carried on the host config, not on the session, so every
-    /// runtime-initiated construction honours the host's choice.
+    /// fixed-tool deployments to refuse, at its plugin transition, a run that
+    /// would lose a catalog member (FIG-5134). It is carried on the host
+    /// config of the runtime that executes the run, so a session's resident
+    /// open applies the policy its open stated.
     pub tool_source_policy: crate::ToolSourcePolicy,
     /// Where the shift reports a logical run's closed scope, after the
     /// run's terminal evidence is durable (FIG-3607 item 7). Defaults to

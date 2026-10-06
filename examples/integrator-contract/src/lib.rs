@@ -79,12 +79,6 @@ impl ProtocolSessionPlugin for Integrator {
     ) -> Result<(), SessionError> {
         unreachable!("external signature witness")
     }
-    async fn apply_session_extension(
-        &self,
-        _extension: ProtocolSessionExtensionHandle,
-    ) -> Result<(), SessionError> {
-        unreachable!("external signature witness")
-    }
     async fn before_llm_call(
         &self,
         _ctx: ProtocolBeforeLlmCallContext,

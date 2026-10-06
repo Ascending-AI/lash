@@ -218,6 +218,14 @@ runtime_error_codes! {
         /// The deployment's plugin set and the recorded request decide it, so
         /// retrying the identical creation cannot change the answer (FIG-4396).
         SessionConfigRefused = "session_config_refused" => Terminal,
+        // the deployment's sources decide it; a run admitted on them is refused again.
+        /// A turn run under `ToolSourcePolicy::Require` found a persisted Tool
+        /// Catalog member no registered source resolves, and was refused at its
+        /// plugin transition before the transition published anything
+        /// (FIG-5134). Its typed half is
+        /// [`RuntimeErrorCause::ToolSourcesUnavailable`], which carries the
+        /// restore report.
+        ToolSourcesUnavailable = "tool_sources_unavailable" => Terminal,
         // the row has no head; a redrive reads the same row.
         /// A session's catalog row has no head, so its creation recorded no
         /// config (FIG-4553). A session opens with the config its creation
@@ -1135,6 +1143,7 @@ impl RuntimeError {
             | RuntimeErrorCause::ModuleArtifactRefused { .. }
             | RuntimeErrorCause::RunShapeRefused { .. }
             | RuntimeErrorCause::ConfigRefused { .. }
+            | RuntimeErrorCause::ToolSourcesUnavailable { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
             | RuntimeErrorCause::StoreRefusal { .. }
             | RuntimeErrorCause::PluginStateUnrecorded { .. }

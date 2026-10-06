@@ -118,14 +118,23 @@ events reach a feed.
 
 Source: `crates/lash-core/src/runtime/durable_queue.rs:104`.
 
-## Tool loss at open is a typed fact
+## Tool loss is a typed fact of the run that restores tool state
+
+An open builds no capabilities (FIG-4857): a session's tool registry and
+plugins exist only once a run publishes its plugin transition. Tool loss,
+`ToolSourcePolicy` and host tool administration therefore belong to runs and
+to durable state, never to the open (FIG-5134).
 
 ### One owner for installing persisted tool state
 
-`install_persisted_tool_state` owns tool-state reconciliation for open, explicit
-host restore, persisted-state install and resident re-sync. It returns a
-`ToolRestoreReport`; the live runtime retains the report for
-`LashSession::tool_restore_report()`. A refused open carries it on the error.
+`install_persisted_tool_state` owns tool-state reconciliation for a run's
+construction of the session's capabilities, a host restore command, a
+persisted-state install and a resident re-sync. It returns a
+`ToolRestoreReport` and never refuses. The runtime keeps the report until its
+next turn starts, which reports a non-clean one as
+`TurnEvent::ToolRestoreReported` right after `TurnStarted`. The sender reads
+it on the run's output (`TurnOutput::tool_restore_report`), and observers read
+the same typed event on the session's observation feed.
 
 ### The report separates three facts
 
@@ -145,38 +154,49 @@ Source: `crates/lash-core-execution/src/tool_registry/rebind.rs:128`.
 
 ### Delivery
 
-Open and internal installs retain the report. A non-clean report emits a
-`tool_restore.report` trace event with site, authority, policy and the three
-classes. A clean report emits no such event. The report is a local runtime
-fact, rather than a Session Observation Event or persisted wire shape.
+A non-clean report also emits a `tool_restore.report` trace event with its
+site and the three classes. A clean report emits neither the trace event nor
+the turn event.
 
-Source: `crates/lash-core/src/runtime/tool_restore.rs:172`.
+Source: `crates/lash-core/src/runtime/tool_restore.rs`.
 
 ### Tool-source policy
 
-`ToolSourcePolicy::Tolerate` is the default. `Require` refuses an open with
-`SessionError::ToolSourcesUnavailable` when the report has lost members.
-Parked opt-outs and replaced identities do not refuse. The core sets the
-policy, and the session builder can override it for an open.
+`ToolSourcePolicy::Tolerate` is the default. Under `Require`, a turn run's
+recorded plugin transition previews the restore over the capabilities it
+built and refuses when it would lose a member, before the transition
+publishes anything. The refusal is the run's typed terminal,
+`RuntimeErrorCode::ToolSourcesUnavailable` with the report as its
+`RuntimeErrorCause`, which the sender reads as `SendOutcome::Refused`.
+Parked opt-outs and replaced identities do not refuse. The refused run makes
+no config or state commit, restores no protocol session and emits no
+`SessionRestored`. Command runs tolerate, so a host's tool restore still
+applies on a `Require` core. The core sets the policy, and the session
+builder can override it for the runs an open hosts.
 
 Tolerate permits reading and continuing a conversation during tool-source
 outages. A deployment whose tool set is part of its execution contract can
 choose Require. This policy checks tool restoration, not every condition
 needed to run a turn.
 
-#### Only an open may refuse
+Sources: `crates/lash-core/src/runtime/tool_restore.rs` and
+`crates/lash-core/src/runtime/shift/plugin_transition.rs`.
 
-The installer receives `Open(policy)` or `LiveInstall`. Only the former can
-refuse for missing sources. Reconciliation mutates the registry before policy
-consultation: a refused open drops the runtime under construction, while a
-live install must complete the catalog refresh and retain its report.
+### Host tool administration is durable
 
-A policy refusal makes no config or state commit, restores no protocol, and
-emits no `SessionRestored`. It does not promise zero side effects: admitted
-load, observer reconciliation and plugin initialization can precede it.
+`ToolAdmin::state` reads the tool state the session's durable head recorded,
+beside the `ChangeToolState` commands a host submitted that no run applied
+yet, typed as pending; it builds nothing. A membership change, snapshot apply
+or restore is a `SessionCommand::ChangeToolState`: refused at once with a
+typed `ReconfigureError` when it is invalid against the recorded snapshot,
+otherwise applied in lane order by the command run against the capabilities
+its transition built, and settled as a typed `ToolStateChangeOutcome`. A
+protocol session extension is durable the same way: its session nodes are a
+host append the command lane applies, which the protocol replays on every
+restore.
 
-Sources: `crates/lash-core/src/runtime/tool_restore.rs:124` and
-`crates/lash-core/src/runtime/lifecycle.rs:239`.
+Sources: `crates/lash/src/admin/tool_state.rs` and
+`crates/lash-core/src/runtime/tool_state_commands.rs`.
 
 ### Only an open that executes hosts a run
 

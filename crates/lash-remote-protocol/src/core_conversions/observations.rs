@@ -369,6 +369,9 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 messages: messages.into_iter().map(Into::into).collect(),
                 checkpoint: checkpoint.into(),
             }),
+            lash_core::TurnEvent::ToolRestoreReported { report } => {
+                Ok(Self::ToolRestoreReported { report })
+            }
             lash_core::TurnEvent::Error { message } => Ok(Self::Error { message }),
         }
     }

@@ -53,8 +53,18 @@ async fn a_native_tool_membership_refusal_preserves_its_cause() -> Result<()> {
         "validation is typed: {error:?}"
     );
     let after = tools.state().await?;
-    assert_eq!(before.generation(), after.generation());
-    assert_eq!(before.tool_manifests(), after.tool_manifests());
+    assert_eq!(
+        before.recorded().map(ToolStateFacadeOps::generation),
+        after.recorded().map(ToolStateFacadeOps::generation)
+    );
+    assert_eq!(
+        before.recorded().map(ToolStateFacadeOps::tool_manifests),
+        after.recorded().map(ToolStateFacadeOps::tool_manifests)
+    );
+    assert!(
+        after.pending().is_empty(),
+        "a refused change is never submitted"
+    );
     assert!(error.is_terminal());
     assert!(!error.is_retryable());
     Ok(())

@@ -33,8 +33,8 @@
 //! generation outside the worker's window ends the process with the typed
 //! refusal's code, on its first attempt.
 //!
-//! A tool source lost under `ToolSourcePolicy::Require` is the runtime
-//! build's own refusal; `tool_restore_report.rs` holds its law. A deployment
+//! A tool source lost under `ToolSourcePolicy::Require` is the run
+//! transition's own refusal; `tool_restore_report.rs` holds its law. A deployment
 //! under another Restate authority opens and is refused at its run's
 //! admission; `wrong_authority_redeploy.rs` holds that law.
 

@@ -61,9 +61,7 @@ impl LashRuntime {
                 let report = crate::runtime::tool_restore::install_persisted_tool_state(
                     registry.as_ref(),
                     tool_state,
-                    // A live runtime: the install tolerates and reports,
-                    // never refuses (FIG-3367).
-                    crate::runtime::tool_restore::ToolRestoreContext::for_live_install(
+                    crate::runtime::tool_restore::ToolRestoreContext::new(
                         &state.session_id,
                         crate::runtime::ToolRestoreSite::PersistedStateInstall,
                         &self.host.core.tracing,
@@ -158,21 +156,6 @@ impl LashRuntime {
             ));
         }
         Ok(())
-    }
-
-    pub async fn apply_protocol_session_extension(
-        &mut self,
-        extension: crate::ProtocolSessionExtensionHandle,
-    ) -> Result<(), SessionError> {
-        self.reload_invalidated_resident_session_state_for_session()
-            .await?;
-        let Some(session) = self.session.as_ref() else {
-            return Err(SessionError::Protocol(
-                "runtime session is not available".to_string(),
-            ));
-        };
-        let protocol_session = Arc::clone(session.plugins().protocol_session());
-        protocol_session.apply_session_extension(extension).await
     }
 
     /// Explicitly snapshot protocol-local execution state, including leaf bodies, if any.

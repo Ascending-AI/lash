@@ -109,6 +109,7 @@ pub(crate) mod state;
 #[cfg(test)]
 pub(crate) mod tests;
 mod tool_restore;
+mod tool_state_commands;
 pub use tool_restore::ToolRestoreSite;
 mod turn_boundary;
 mod turn_commit_draft;
@@ -402,9 +403,9 @@ pub use lash_core_llm::turn_vocabulary::{
 pub use lash_core_execution::runtime::{
     AgentFrameRun, AssembledTurn, CodeOutputRecord, DeploymentStore, DeploymentStoreDecorator,
     EventSink, NOOP_EVENT_SINK, NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink,
-    ProtocolSessionExtension, ProtocolSessionExtensionHandle, TerminationPolicy, TurnActivity,
-    TurnActivitySink, TurnEvent, admit_session_state_generation, admit_session_view,
-    live_session_view, park_turn_refused_by_generation, session_is_live,
+    ProtocolSessionExtension, TerminationPolicy, TurnActivity, TurnActivitySink, TurnEvent,
+    admit_session_state_generation, admit_session_view, live_session_view,
+    park_turn_refused_by_generation, session_is_live,
 };
 
 mod normalized_item {
@@ -521,11 +522,11 @@ pub struct LashRuntime {
     /// last commit ran under. Its reload and invalidation rules are methods on
     /// [`ResidentSessionContinuity`].
     pub resident_session: ResidentSessionContinuity,
-    /// The report from the most recent persisted-tool-state install on this
-    /// runtime — the open that built it, or the latest host restore, persisted
-    /// state install or resident re-sync. This is how the report reaches a
-    /// host on the paths that have no return value to give it (FIG-3367); the
-    /// facade reads it as `LashSession::tool_restore_report()`.
+    /// The report of the latest persisted-tool-state install on this runtime
+    /// that no turn has reported yet: the run transition that built its
+    /// capabilities, or a later host restore, persisted-state install or
+    /// resident re-sync. The next turn takes it and reports it as
+    /// `TurnEvent::ToolRestoreReported` (FIG-3367, FIG-5134).
     pub tool_restore_report: Option<crate::ToolRestoreReport>,
     /// Whether the running direct turn replays the journaled initial shift
     /// set (ADR 0069 §6). A superseded one cedes the turn at commit under

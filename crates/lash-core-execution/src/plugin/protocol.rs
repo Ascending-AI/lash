@@ -49,15 +49,6 @@ pub trait ProtocolSessionPlugin: Send + Sync {
         Ok(())
     }
 
-    async fn apply_session_extension(
-        &self,
-        _extension: crate::ProtocolSessionExtensionHandle,
-    ) -> Result<(), crate::SessionError> {
-        Err(crate::SessionError::Protocol(
-            "protocol does not accept session extensions".to_string(),
-        ))
-    }
-
     /// Runs inside a recorded turn effect. Replay serves its recorded decision
     /// without invoking the hook again. A crash before the effect commits may
     /// invoke it again, so writes made through the context must be idempotent.
