@@ -75,7 +75,7 @@ impl RestateView {
         self.admin
             .query_json(sql)
             .await
-            .map_err(|error| anyhow!("Restate SQL `{sql}`: {error}"))
+            .with_context(|| format!("Restate SQL `{sql}`"))
     }
 
     /// Retrieve the real V2 journal and correlate completions with their Run slots.

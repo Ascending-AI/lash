@@ -132,12 +132,8 @@ impl V7Proxy {
                     accepted = listener.accept() => {
                         let (client, _) = accepted?;
                         let address=*target.lock().map_err(|_|anyhow::anyhow!("upstream registry poisoned"))?;
-                        let server = match TcpStream::connect(address).await {
-                            Ok(server) => server,
-                            // A host is intentionally unavailable between incarnations.
-                            // Close this accepted connection, retain the reconnect listener.
-                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => continue,
-                            Err(error) => return Err(error.into()),
+                        let Some(server) = upstream_connection(TcpStream::connect(address).await)? else {
+                            continue;
                         };
                         let connection = CONNECTIONS.fetch_add(1, Ordering::Relaxed) + 1;
                         let directory = directory.clone();
@@ -816,4 +812,36 @@ fn retry_matches(value: &serde_json::Value, barrier: &Barrier) -> bool {
                             == barrier.work.ordinal.map(u64::from)
                 })
             })
+}
+
+// A host can disappear during the TCP handshake as well as after it.
+fn upstream_connection(result: std::io::Result<TcpStream>) -> Result<Option<TcpStream>> {
+    match result {
+        Ok(server) => Ok(Some(server)),
+        // Both refused and reset handshakes are ordinary host downtime.
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    /// FIG-5125: a reset racing workbench teardown closes that handshake,
+    /// leaving the reconnect listener and its cleanup authority alive.
+    #[test]
+    fn upstream_teardown_reset_does_not_fail_the_proxy() -> Result<()> {
+        ensure!(upstream_connection(Err(Error::from(ErrorKind::ConnectionReset)))?.is_none());
+        ensure!(upstream_connection(Err(Error::from(ErrorKind::PermissionDenied))).is_err());
+        Ok(())
+    }
 }

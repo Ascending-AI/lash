@@ -201,6 +201,11 @@ impl WorkbenchHost {
                     "journals":journals,"materials":materials,"outcomes":outcomes}),
                 )
             }
+            "mcp-quiescence" => {
+                let view = crate::restate_view::RestateView::new(&self.admin, &lease.namespace)?;
+                let open = view.open_invocations().await?;
+                Ok(json!({"open": open}))
+            }
             "store-rows" => self.store_rows(&request).await,
             action => bail!("unknown MCP action {action}"),
         }

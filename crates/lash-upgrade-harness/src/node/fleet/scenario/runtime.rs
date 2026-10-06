@@ -870,7 +870,15 @@ impl FleetFixture for RuntimeFixture {
                 .map_err(|_| anyhow::anyhow!("fault receipts poisoned"))?
                 .clone();
             let after_fault = !evidence.faults.is_empty();
-            capture_journals(&mut evidence, &nodes, &self.namespace, work, excluded_node).await?;
+            capture_journals(
+                &mut evidence,
+                &nodes,
+                &self.namespace,
+                work,
+                excluded_node,
+                self.deadline,
+            )
+            .await?;
             evidence.outputs.extend(self.primary.transcript()?);
             evidence.outputs.extend(self.follower.transcript()?);
             evidence.effects = self
@@ -1278,6 +1286,7 @@ async fn capture_journals(
     namespace: &str,
     work: &WorkIdentity,
     excluded_node: Option<u32>,
+    deadline: Instant,
 ) -> Result<()> {
     for node in nodes.iter().filter(|node| Some(node.node) != excluded_node) {
         let mut reader = RestateEvidenceReader::new(
@@ -1286,9 +1295,35 @@ async fn capture_journals(
             7,
         );
         reader.bind(work, work.segment.clone())?;
-        evidence
-            .journals
-            .extend(reader.collect(work).await?.journals);
+        loop {
+            match reader.collect(work).await {
+                Ok(collected) => {
+                    evidence.journals.extend(collected.journals);
+                    break;
+                }
+                Err(error) => {
+                    // A healed member can still be moving its partition store.
+                    // Retry that member, preserving its independent provenance;
+                    // other failures never count as an absent or drained journal.
+                    let moving = matches!(
+                        error.downcast_ref::<lash_restate::RestateHttpError>(),
+                        Some(lash_restate::RestateHttpError::Status { status: 500, body, .. })
+                            if serde_json::from_str::<serde_json::Value>(body).is_ok_and(|body|
+                                body["message"].as_str().is_some_and(|message|
+                                    message.contains("expecting a partition store")))
+                    );
+                    if !moving || Instant::now() >= deadline {
+                        return Err(error);
+                    }
+                    tokio::time::sleep_until(
+                        (Instant::now() + Duration::from_millis(100))
+                            .min(deadline)
+                            .into(),
+                    )
+                    .await;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1326,6 +1361,7 @@ mod tests {
     }
 
     async fn admin_queries(listener: tokio::net::TcpListener) -> Result<()> {
+        let mut moving_partition = true;
         loop {
             let (mut stream, _) = listener.accept().await?;
             let mut request = Vec::new();
@@ -1357,6 +1393,15 @@ mod tests {
                 query.contains("'inv-fleet-law'"),
                 "query changed invocation: {query}"
             );
+            // FIG-5125: after a heal each member can temporarily lose the
+            // partition store while its query routing catches up.
+            if moving_partition {
+                moving_partition = false;
+                let response = br#"{"message":"Datafusion error: External error: expecting a partition store"}"#;
+                stream.write_all(format!("HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", response.len()).as_bytes()).await?;
+                stream.write_all(response).await?;
+                continue;
+            }
             let rows = if query.contains("FROM sys_invocation") {
                 json!([{"target_service_name":"e2e-fleet-law.LashTurn_g1",
                     "pinned_service_protocol_version":7}])
@@ -1411,7 +1456,16 @@ mod tests {
             },
             target_incarnation: 1,
         });
-        capture_journals(&mut evidence, &nodes, "e2e-fleet-law", &work, Some(1)).await?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        capture_journals(
+            &mut evidence,
+            &nodes,
+            "e2e-fleet-law",
+            &work,
+            Some(1),
+            deadline,
+        )
+        .await?;
         ensure!(
             evidence.journals.len() == 2,
             "post-fault receipt lacks majority journal evidence"
@@ -1426,7 +1480,15 @@ mod tests {
             ensure!(fact.index == 0 && fact.value == json!({"Command":{"Input":{}}}));
         }
         evidence.journals.clear();
-        capture_journals(&mut evidence, &nodes, "e2e-fleet-law", &work, None).await?;
+        capture_journals(
+            &mut evidence,
+            &nodes,
+            "e2e-fleet-law",
+            &work,
+            None,
+            deadline,
+        )
+        .await?;
         ensure!(
             evidence.journals.len() == 3,
             "healed receipt lacks a member's journal evidence"

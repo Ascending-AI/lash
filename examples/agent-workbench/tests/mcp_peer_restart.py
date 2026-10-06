@@ -13,7 +13,6 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
-from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 from workbench_store_rows import StoreRows  # noqa: E402
@@ -93,6 +92,8 @@ class Journey:
             "els => els.map(e => ({role: e.classList.contains('assistant') ? 'assistant' : 'user', text: e.querySelector('.msg-body').innerText}))")
 
     def send(self, marker, wait=True):
+        from playwright.sync_api import expect
+
         before = len(self.turns())
         receipt = self.api("/api/turn?" + urllib.parse.urlencode({"session_id": self.session}), "POST", {"text": marker})
         assert receipt["accepted"] is True and receipt.get("turn_id"), receipt
@@ -131,11 +132,21 @@ class Journey:
         for index, page in enumerate(self.pages):
             page.screenshot(path=str(self.root / f"{checkpoint}-{index}.png"), full_page=True)
 
+    def await_mcp_quiescence(self):
+        # A visible answer can precede the native Run's final replay and scope
+        # close. Changing the catalog then changes that replay's tool binding.
+        def settled():
+            receipt = self.controller({"action": "mcp-quiescence"})
+            return receipt if not receipt["open"] else None
+        self.save("mcp-quiescence.json", self.poll(settled))
+
     def attach(self):
+        self.await_mcp_quiescence()
         return self.api("/api/mcp/servers", "POST", {"name": "workspace_http", "url": self.args.mcp_url,
                         "token": "workbench-mcp-fixture-token"})
 
     def detach(self):
+        self.await_mcp_quiescence()
         return self.api("/api/mcp/servers/workspace_http", "DELETE")
 
     def tool_receipts_for_turn(self, source: str, *, terminal: bool) -> list[dict[str, Any]]:
@@ -220,6 +231,8 @@ class Journey:
         return value["value"]
 
     def run(self):
+        from playwright.sync_api import expect, sync_playwright
+
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             try:
