@@ -328,6 +328,7 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
         .await?;
     let input = "x".repeat(8_000);
     let mut turn_bytes = Vec::new();
+    let mut step_bytes = Vec::new();
     for turn in 0..4 {
         session
             .send(TurnInput::text(format!("{turn} {input}")))
@@ -350,23 +351,43 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
                 .map(|entry| entry.payload.len())
                 .sum::<usize>(),
         );
+        let mut named = None;
+        let mut largest = journal
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                if entry.name.is_some() {
+                    named.clone_from(&entry.name);
+                }
+                (entry.payload.len(), index, entry.ty, named.clone())
+            })
+            .collect::<Vec<_>>();
+        largest.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+        largest.truncate(3);
+        step_bytes.push(largest);
         let commands = journal
             .iter()
             .filter(|entry| entry.ty.is_command() && entry.ty != MessageType::InputCommand)
             .collect::<Vec<_>>();
-        assert!(
-            commands.first().is_some_and(|first| {
-                first.ty == MessageType::RunCommand
-                    && first
+        let recorded_effect = |index: usize, prefix: &str| {
+            commands.get(index).is_some_and(|entry| {
+                entry.ty == MessageType::RunCommand
+                    && entry
                         .name
                         .as_deref()
                         .and_then(|name| {
                             lash_restate::JournalStepKind::RecordedEffect.instance_of(name)
                         })
-                        .is_some_and(|effect| effect.starts_with("lash:shift-admission:"))
-            }),
-            "the immutable intent admission is its first command: {:?}",
-            commands.first()
+                        .is_some_and(|effect| effect.starts_with(prefix))
+            })
+        };
+        // The root records its start nonce, then the atomic admission
+        // (FIG-4848); nothing else runs ahead of them.
+        assert!(
+            recorded_effect(0, "lash:shift-run-start:")
+                && recorded_effect(1, "lash:shift-admission:"),
+            "the start nonce and the immutable intent admission are its first commands: {:?}",
+            commands.iter().take(2).collect::<Vec<_>>()
         );
     }
     let server = double.server();
@@ -384,7 +405,7 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
     // Each turn carries 16 KB more transcript than the one before it.
     assert!(
         turn_bytes[3].abs_diff(turn_bytes[1]) < 1_024,
-        "a LashTurn journal does not grow with the transcript: {turn_bytes:?}"
+        "a LashTurn journal does not grow with the transcript: {turn_bytes:?}, largest steps {step_bytes:?}"
     );
     Ok(())
 }
