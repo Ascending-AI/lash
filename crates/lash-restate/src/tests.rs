@@ -369,12 +369,12 @@ mod turn_crash_on_the_double;
 mod turn_laws_on_the_double;
 mod wait_handoff_generations;
 use endpoint_protocol::{
-    admission_journal, admitted_invocation_body, durable_wait_index_call_response,
-    encode_call_replay, encode_completed_gate_sleep_replay, encode_journal_retry,
-    encode_process_segment_send_replay, encode_process_terminal_delivery_replay,
-    encode_recorded_commands_replay, encode_recorded_commands_with_invocations_replay,
-    encode_run_replay, invoke_endpoint, invoke_endpoint_body, invoke_endpoint_body_open,
-    invoke_endpoint_body_with_json_call_responses,
+    accepted_resolution, admission_journal, admitted_invocation_body,
+    durable_wait_index_call_response, encode_call_replay, encode_completed_gate_sleep_replay,
+    encode_journal_retry, encode_process_segment_send_replay,
+    encode_process_terminal_delivery_replay, encode_recorded_commands_replay,
+    encode_recorded_commands_with_invocations_replay, encode_run_replay, invoke_endpoint,
+    invoke_endpoint_body, invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses,
     invoke_endpoint_body_with_json_call_responses_then_suspend,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
     invoke_process_workflow_body, invoke_process_workflow_endpoint, restate_call_frames,

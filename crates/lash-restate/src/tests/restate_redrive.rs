@@ -534,13 +534,24 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
     )
     .await
     .expect("redrive should replay the timer race before settling cancelled");
+    // Effects record no per-effect index calls since FIG-4849, so the first
+    // command after the replayed race is the body's own outcome.
+    let first = restate_recorded_commands(&cancelled)
+        .expect("decode cancelled redrive frames")
+        .into_iter()
+        .next()
+        .expect("the redrive appends commands");
     assert_eq!(
-        restate_message_types(&cancelled)
-            .expect("decode cancelled redrive frames")
-            .first(),
-        Some(&RESTATE_CALL_COMMAND_MESSAGE_TYPE),
+        (
+            first.message_type,
+            super::endpoint_protocol::protobuf_len_field(&first.frame[8..], 12),
+        ),
+        (
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            Some(&b"lash.process.complete"[..])
+        ),
         "the race's recorded promise completion ends the sleep, and the body \
-         goes on to its effect's end record"
+         goes on to record its outcome"
     );
     assert!(matches!(
         registry
@@ -599,7 +610,9 @@ pub(super) async fn fig788_terminal_outcome_landing_preserves_the_suspended_comm
         "LashProcessWorkflow",
         "run",
         replay,
-        vec![serde_json::Value::Null],
+        // The segment releases its journal pin, then resolves the terminal
+        // at its scope's index (FIG-4887).
+        vec![serde_json::Value::Null, accepted_resolution()],
     )
     .await
     .expect("terminal redrive must preserve the deployed command prefix");
@@ -1126,13 +1139,15 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
     let admission = admission_journal(&endpoint, process_id.as_str(), &input)
         .await
         .expect("the first attempt admits its segment");
-    let segment_finish_suspension = invoke_endpoint_body_with_json_call_responses_then_suspend(
+    // The segment pins its scope's index before its runner (FIG-4849); the
+    // attempt then suspends on its successor's unanswered send.
+    let segment_finish_suspension = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
         "LashProcessWorkflow",
         "run",
         admitted_invocation_body(process_id.as_str(), &input, &admission)
             .expect("splice the admission"),
-        Vec::new(),
+        vec![serde_json::json!(true)],
     )
     .await
     .expect("first segment attempt should suspend after scheduling its successor");
@@ -1140,6 +1155,7 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
         restate_message_types(&segment_finish_suspension)
             .expect("decode segment-finish suspension frames"),
         vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
@@ -1169,7 +1185,13 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
         "LashProcessWorkflow",
         "run",
         replay,
-        vec![serde_json::Value::Null],
+        // The scope's journal pin moves to the successor and this segment's
+        // is released (FIG-4849) before the cancel is forwarded.
+        vec![
+            serde_json::json!(true),
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ],
     )
     .await
     .expect("cancelled segment redrive must preserve the deployed send prefix");
@@ -1180,7 +1202,21 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
             .iter()
             .map(|call| (call.key.clone(), call.handler.clone()))
             .collect::<Vec<_>>(),
-        vec![(format!("{process_id}#1"), "deliver_cancel".to_string())]
+        vec![
+            (
+                crate::durable_wait::durable_wait_index_key_for_scope(&ExecutionScope::process(
+                    &process_id
+                )),
+                "register_process_journal".to_string()
+            ),
+            (
+                crate::durable_wait::durable_wait_index_key_for_scope(&ExecutionScope::process(
+                    &process_id
+                )),
+                "release_process_journal".to_string()
+            ),
+            (format!("{process_id}#1"), "deliver_cancel".to_string())
+        ]
     );
     assert_eq!(
         restate_output_json::<RestateProcessWorkflowOutput>(&output),

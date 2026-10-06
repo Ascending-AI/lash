@@ -584,6 +584,22 @@ pub(super) fn durable_wait_index_call_response(
     }
 }
 
+/// The process scope's index accepting the terminal a finished segment
+/// resolves there (FIG-4887), as the live driver answers it.
+fn terminal_resolution_call_response(service: &str, handler: &str) -> Option<serde_json::Value> {
+    (service == "LashDurableWaitIndex" && handler == "resolve").then(accepted_resolution)
+}
+
+/// The index's first-writer answer to a resolution it accepted.
+pub(super) fn accepted_resolution() -> serde_json::Value {
+    serde_json::to_value(
+        crate::durable_wait::RestateDurableWaitResolveResponse::Outcome(
+            lash_core::ResolveOutcome::Accepted,
+        ),
+    )
+    .expect("encode the accepted resolution")
+}
+
 pub(super) fn restate_call_frames(input: &[u8]) -> Option<Vec<RestateCallFrame>> {
     let mut cursor = 0;
     let mut calls = Vec::new();
@@ -788,7 +804,12 @@ pub(super) fn encode_process_segment_send_replay<T: serde::Serialize>(
         input,
         &[suspended_output],
         &["inv_fig788_successor"],
-        |command| (command.message_type == 0x040D).then_some(serde_json::Value::Null),
+        |command| {
+            command.call.as_ref().map(|(service, handler)| {
+                durable_wait_index_call_response(service, handler)
+                    .unwrap_or(serde_json::Value::Null)
+            })
+        },
     )
 }
 
@@ -1306,12 +1327,14 @@ async fn invoke_process_workflow_body_unbounded(
                     })?;
             }
             if message_type == 0x040D {
-                // The process scope's index answers the handler's effect
-                // recording (FIG-2499); every other call stays pending.
+                // The process scope's index answers the handler's journal pin
+                // (FIG-4849) and the terminal it resolves (FIG-4887); every
+                // other call stays pending.
                 let call = decode_call_frame(&output[decoded..frame_end])
                     .ok_or_else(|| TerminalError::new("invalid call command frame"))?;
                 if let Some(response) =
                     durable_wait_index_call_response(&call.service, &call.handler)
+                        .or_else(|| terminal_resolution_call_response(&call.service, &call.handler))
                 {
                     let response =
                         serde_json::to_vec(&response).map_err(TerminalError::from_error)?;
