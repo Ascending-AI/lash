@@ -23,7 +23,7 @@
 //! | Session retention | `session_revisions`, `pins`, `deleted_sessions` | `revisions`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
 //! | Attachments | `attachment_referrer_edges`, `attachment_pending_writes`, `attachment_uploads`, SQLite `artifact_refs`, PostgreSQL's artifact table | The committed session's referrer edge plus process-execution-environment reference recovery |
 //! | Receiver queue | `queued_work_batches`, `pending_turn_inputs` | Queue/input payloads, deterministic ids, and a settled wake's tombstone answering its redelivery |
-//! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_segment_handovers`, `process_tombstones` | Process state; every event payload; observers; continuation; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
+//! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_tombstones` | Process state; every event payload; observers; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
 //! | Triggers | `trigger_subscriptions`, `trigger_occurrences`, `trigger_deliveries`, `trigger_mutation_receipts` | List/filter, delivery reservation, deterministic receipt replay, and `Unchanged` re-registration |
 //!
 //! The table names above omit PostgreSQL's `lash_` prefix where the logical name is
@@ -75,22 +75,21 @@ use lash_core::runtime::{
     publish_process_execution_env,
 };
 use lash_core::{
-    ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, BoundaryReason, Clock,
-    DeploymentStore, ExecutionScope, JsonSchema, MessageOrigin, MessageRole, OperationId, PartKind,
-    PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState, PluginState,
-    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
-    ProcessContinuationStore, ProcessEventAppendRequest, ProcessEventLogTestSupport as _,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
-    ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
-    ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
-    ReferrerClaim, RuntimeCommit, RuntimeSessionState, SegmentHandover, SessionAppendNode,
-    SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
-    SessionStoreCreateRequest, StoreError, TokenUsage, TriggerCommand, TriggerCommandOutcome,
-    TriggerDeliveryReservation, TriggerInputBinding, TriggerMutationOutcome,
-    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
-    WaitState,
+    ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, Clock, DeploymentStore,
+    ExecutionScope, JsonSchema, MessageOrigin, MessageRole, OperationId, PartKind,
+    PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessAwaitOutput, ProcessChange,
+    ProcessChangeCursor, ProcessCompletionAuthority, ProcessEventAppendRequest,
+    ProcessEventLogTestSupport as _, ProcessEventSemanticsSpec, ProcessEventType,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessOriginator,
+    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
+    ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark, ReferrerClaim,
+    RuntimeCommit, RuntimeSessionState, SessionAppendNode, SessionCreationHead, SessionNodePayload,
+    SessionPolicy, SessionRelation, SessionScope, SessionStoreCreateRequest, StoreError,
+    TokenUsage, TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
+    TriggerInputBinding, TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest,
+    TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
+    TurnInput, TurnInputIngress, WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -217,7 +216,6 @@ pub struct FixtureHandles {
     /// The deployment's catalog store; the fixture session is a view of it.
     pub store: Arc<dyn DeploymentStore>,
     pub processes: Arc<dyn lash_core::ConformanceProcessRegistry>,
-    pub continuations: Arc<dyn ProcessContinuationStore>,
     pub process_envs: Arc<dyn ProcessExecutionEnvStore>,
     pub triggers: Arc<dyn TriggerStore>,
 }
@@ -477,11 +475,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         )
         .await
         .expect("persist fixture effect omissions");
-    handles
-        .continuations
-        .put_segment_handover(&waiting_process_id(), fixture_handover())
-        .await
-        .expect("persist fixture continuation");
 
     let wake_process_id = handles
         .processes
@@ -1005,14 +998,6 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         vec![SESSION_ID.to_string()],
         "durable fixture semantic drift: process-observer edge changed"
     );
-    assert_eq!(
-        handles
-            .continuations
-            .latest_segment_handover(&waiting_process_id())
-            .await
-            .expect("durable fixture drift: continuation read failed"),
-        Some(fixture_handover())
-    );
     let loaded_env =
         load_process_execution_env(handles.process_envs.as_ref(), &expected.process_env_ref)
             .await
@@ -1386,18 +1371,6 @@ fn fixture_wait_state() -> WaitState {
             ordinal: 1,
         },
         since_ms: 123,
-    }
-}
-
-fn fixture_handover() -> PersistedSegmentHandover {
-    PersistedSegmentHandover {
-        writer: String::new(),
-        segment_ordinal: 1,
-        handover: SegmentHandover {
-            reason: BoundaryReason::JournalBudget,
-            program_hash: "durable-read-program-v1".to_string(),
-            engine_state: vec![8, 8, 7],
-        },
     }
 }
 

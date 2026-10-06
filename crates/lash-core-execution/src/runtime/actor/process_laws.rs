@@ -243,7 +243,7 @@ impl ProcessEngine for LawEngine {
         let act = script["act"].as_str().unwrap_or("hold").to_owned();
         let action = match event {
             EngineEvent::Started { .. } => match act.as_str() {
-                "stuck" => EngineAction::Steps(vec![StepRequest {
+                "stuck" => EngineAction::Steps(vec![StepRequest::Tool {
                     step: StepName("stuck".to_owned()),
                     tool: lash_sansio::ToolId::new("law_stuck"),
                     input: json!({}),

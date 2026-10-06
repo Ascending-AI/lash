@@ -50,7 +50,7 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 }
 
 fn step(name: &str) -> StepRequest {
-    StepRequest {
+    StepRequest::Tool {
         step: StepName(name.to_owned()),
         tool: ToolId::new(name),
         input: json!({ "step": name }),
@@ -254,7 +254,7 @@ impl ProcessSteps for WorkerSteps {
     fn body(&self, process: &ProcessRecord, step: &StepRequest, call: &ToolCallId) -> ToolBody {
         let witness = self.witness.clone();
         let process = process.id.clone();
-        let tool = step.tool.as_str().to_owned();
+        let tool = step.admitted_tool(KIND).as_str().to_owned();
         let call = call.to_string();
         Box::new(move |_token| {
             Box::pin(async move {

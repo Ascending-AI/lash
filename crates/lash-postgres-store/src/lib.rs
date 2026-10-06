@@ -49,12 +49,12 @@ use lash_core_execution::store::{
     SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core_execution::{
-    AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, GcReport, PersistedSegmentHandover,
-    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessContinuationStore, ProcessEvent,
-    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted,
-    SessionCommitStore, SessionListFilter, SessionMeta, SessionNodeRecord, SessionRelationKind,
+    AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, GcReport, ProcessAwaitOutput,
+    ProcessChange, ProcessChangeCursor, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
+    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, SessionCommitStore,
+    SessionListFilter, SessionMeta, SessionNodeRecord, SessionRelationKind,
     SessionStoreCreateRequest, SessionView, StoreError, StoreMaintenance, VacuumReport,
     facade_support::ProcessStartPlan, facade_support::ProcessTransition,
     facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
@@ -917,8 +917,6 @@ mod trigger_listing_plan_tests;
 mod trigger_store;
 #[path = "postgres/turn_ingress.rs"]
 mod turn_ingress;
-#[path = "postgres/worker_recovery.rs"]
-mod worker_recovery;
 
 pub use backend::PostgresStoreSet;
 pub use durable::{PostgresDurableStore, PostgresSignals};

@@ -262,9 +262,8 @@ mod walk {
     use super::super::SqliteStorePreflight;
     use crate::{SqliteProcessRegistry, SqliteStore};
 
-    const EVERY_SURFACE: [DurableSurface; 5] = [
+    const EVERY_SURFACE: [DurableSurface; 4] = [
         DurableSurface::ModuleArtifact,
-        DurableSurface::ParkedSegment,
         DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,
@@ -281,34 +280,13 @@ mod walk {
         .with_wake_session_id(Some(SessionId::from("wake-session")))
     }
 
-    fn handover(segment_ordinal: u64) -> lash_core_execution::PersistedSegmentHandover {
-        lash_core_execution::PersistedSegmentHandover {
-            writer: String::new(),
-            segment_ordinal,
-            handover: lash_core_execution::SegmentHandover {
-                reason: lash_core_execution::BoundaryReason::JournalBudget,
-                program_hash: "program-v1".to_string(),
-                engine_state: vec![segment_ordinal as u8],
-            },
-        }
-    }
-
-    /// Park one handover under a live process and, when asked, a second under a
-    /// process that has already reached a terminal outcome.
-    /// Register a process, park one segment handover under it, and answer
-    /// the id the registrar minted.
-    async fn park_segment(registry: &SqliteProcessRegistry) -> ProcessId {
-        use lash_core_execution::ProcessContinuationStore;
-        let process_id = registry
+    /// Register a live process and answer the id the registrar minted.
+    async fn live_process(registry: &SqliteProcessRegistry) -> ProcessId {
+        registry
             .register_process(registration())
             .await
             .expect("register process")
-            .id;
-        registry
-            .put_segment_handover(&process_id, handover(1))
-            .await
-            .expect("park a segment handover");
-        process_id
+            .id
     }
 
     async fn complete(registry: &SqliteProcessRegistry, process_id: &ProcessId) {
@@ -389,65 +367,6 @@ mod walk {
         }
     }
 
-    #[tokio::test]
-    async fn a_parked_segment_is_listed_with_its_owner_and_a_terminal_one_is_not() {
-        let root = super::temp_root();
-        let path = root.path().join("lash.db");
-        let registry = SqliteProcessRegistry::open_standalone_for_testing(&path)
-            .await
-            .expect("open registry");
-        let live = park_segment(&registry).await;
-        let done = park_segment(&registry).await;
-        complete(&registry, &done).await;
-        drop(registry);
-
-        // The terminal process's handover row is still on disk — the exclusion
-        // has to come from the status predicate, not from the row having been
-        // cleaned up, or this test would pass without testing anything.
-        let raw = rusqlite::Connection::open(&path).expect("open raw registry");
-        let parked: i64 = raw
-            .query_row(
-                "SELECT COUNT(*) FROM process_segment_handovers WHERE process_id = ?1",
-                [done.as_str()],
-                |row| row.get(0),
-            )
-            .expect("count terminal handovers");
-        assert_eq!(parked, 1, "the terminal process must still hold its row");
-        drop(raw);
-
-        let page = SqliteStorePreflight::for_database_file(root.path().join("lash.db"))
-            .scan_durable(&DurableScan::first(DurableSurface::ParkedSegment, 10))
-            .await
-            .expect("walk parked segments");
-
-        assert_eq!(page.coverage, ScanCoverage::Scanned);
-        assert_eq!(page.next, None, "a short page ends the surface");
-        assert_eq!(page.items.len(), 1, "{:?}", page.items);
-        let item = &page.items[0];
-        assert_eq!(item.surface, DurableSurface::ParkedSegment);
-        assert_eq!(item.process_id.as_deref(), Some(live.as_str()));
-        assert_eq!(item.session_id.as_deref(), Some("wake-session"));
-        assert_eq!(item.status.as_deref(), Some("running"));
-        assert!(
-            item.owner_record
-                .as_deref()
-                .is_some_and(|record| record.contains(live.as_str())),
-            "the owner record travels with the item: {:?}",
-            item.owner_record
-        );
-        match &item.payload {
-            // Handed over as stored text: the walk reports the payload, it does
-            // not parse it.
-            DurablePayload::Json(json) => assert!(json.contains("program-v1"), "{json}"),
-            other => panic!("expected the stored handover JSON, got {other:?}"),
-        }
-        assert!(
-            item.cursor.starts_with(&format!("{live}:")),
-            "the cursor names its row: {}",
-            item.cursor
-        );
-    }
-
     /// C8 (FIG-3571): every live process is walked with its record, which
     /// carries the start stamp the probe judges; a terminal one is not.
     #[tokio::test]
@@ -495,14 +414,14 @@ mod walk {
         let registry = SqliteProcessRegistry::open_standalone_for_testing(&path)
             .await
             .expect("open registry");
-        let first_process = park_segment(&registry).await;
-        let second_process = park_segment(&registry).await;
+        let first_process = live_process(&registry).await;
+        let second_process = live_process(&registry).await;
         drop(registry);
 
         let preflight = SqliteStorePreflight::for_database_file(root.path().join("lash.db"));
 
         let first = preflight
-            .scan_durable(&DurableScan::first(DurableSurface::ParkedSegment, 1))
+            .scan_durable(&DurableScan::first(DurableSurface::StartedProcess, 1))
             .await
             .expect("first page");
         assert_eq!(first.items.len(), 1);
@@ -518,7 +437,7 @@ mod walk {
 
         let second = preflight
             .scan_durable(&DurableScan::after(
-                DurableSurface::ParkedSegment,
+                DurableSurface::StartedProcess,
                 cursor,
                 1,
             ))
@@ -533,7 +452,7 @@ mod walk {
 
         let third = preflight
             .scan_durable(&DurableScan::after(
-                DurableSurface::ParkedSegment,
+                DurableSurface::StartedProcess,
                 second.items[0].cursor.clone(),
                 1,
             ))

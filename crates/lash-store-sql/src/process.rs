@@ -21,7 +21,6 @@ pub mod events;
 pub mod observers;
 pub mod parent_end_plans;
 pub mod processes;
-pub mod segment_handovers;
 pub mod tombstones;
 
 // No family-wide shared statement: every read that spans two of these tables —

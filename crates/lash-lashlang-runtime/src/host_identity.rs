@@ -2,17 +2,18 @@
 //! start: a call's id, the id of one leaf of an aggregate, and the key
 //! namespace every journal row of the run lives under.
 //!
-//! There are two Lashlang hosts, the RLM cell bridge and the process body
-//! bridge, and both mint from here, so the opener is an argument instead of
-//! a property of whichever host happened to build the string. The call ids
-//! themselves come from [`CodeCallIdentities`], the one derivation the worker
-//! broker mints from too (ADR 0117 §2, ADR 0123).
+//! The RLM cell bridge mints from here, with the opener as an argument
+//! instead of a property of whichever host happened to build the string. The
+//! call ids themselves come from [`CodeCallIdentities`], the one derivation
+//! the worker broker mints from too (ADR 0117 §2, ADR 0123). A process body
+//! mints its call ids from [`CodeCallIdentities::process_body`] and journals
+//! nothing: its operations are admitted by operation id (ADR 0132 §8).
 //!
 //! Every identity is positional (FIG-3586): a command is named by the issue
 //! ordinal it took when it left the VM, never by the call site that issued
 //! it. The call site's node id and occurrence are trace metadata only.
 
-use lash_core::{EffectOpener, ProcessId};
+use lash_core::EffectOpener;
 use lash_vm_broker::CodeCallIdentities;
 
 use crate::replay_run::LashlangReplayNamespace;
@@ -22,6 +23,7 @@ use crate::replay_run::LashlangReplayNamespace;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LashlangHostIdentities {
     code: CodeCallIdentities,
+    execution: String,
 }
 
 impl LashlangHostIdentities {
@@ -29,16 +31,10 @@ impl LashlangHostIdentities {
     ///
     /// `execution_key` is the cell's own replay key inside the turn.
     pub fn cell(opener: EffectOpener, execution_key: impl Into<String>) -> Self {
+        let execution = execution_key.into();
         Self {
-            code: CodeCallIdentities::cell(opener, execution_key),
-        }
-    }
-
-    /// The identities one process body mints, for the whole life of the
-    /// process.
-    pub fn process_body(process_id: ProcessId) -> Self {
-        Self {
-            code: CodeCallIdentities::process_body(process_id),
+            code: CodeCallIdentities::cell(opener, execution.clone()),
+            execution,
         }
     }
 
@@ -52,15 +48,10 @@ impl LashlangHostIdentities {
         &self.code
     }
 
-    /// The key namespace every journal row of this run lives under.
-    ///
-    /// A cell's rows sit under its own replay key, beside the rest of its
-    /// turn's journal; a process body's under its opener scope.
+    /// The key namespace every journal row of this run lives under: the
+    /// cell's own replay key, beside the rest of its turn's journal.
     pub fn namespace(&self) -> LashlangReplayNamespace {
-        match self.code.execution() {
-            Some(execution) => LashlangReplayNamespace::cell(execution),
-            None => LashlangReplayNamespace::process(&self.code.scope()),
-        }
+        LashlangReplayNamespace::cell(&self.execution)
     }
 
     /// The id of the call the program issued at `ordinal`: the tool call's
@@ -101,8 +92,8 @@ mod tests {
         lash_core::process_id_for_test(label)
     }
 
-    fn process_opener(label: &str) -> LashlangHostIdentities {
-        LashlangHostIdentities::process_body(process_id(label))
+    fn process_opener(label: &str) -> CodeCallIdentities {
+        CodeCallIdentities::process_body(process_id(label))
     }
 
     /// The minted id is what keeps two processes apart, so two processes
@@ -347,7 +338,7 @@ mod tests {
             .into_iter()
             .flat_map(|ordinal| {
                 let identities = &identities;
-                [0usize, 1]
+                [0u64, 1]
                     .into_iter()
                     .map(move |leaf_index| identities.child_call_id(ordinal, leaf_index))
             })

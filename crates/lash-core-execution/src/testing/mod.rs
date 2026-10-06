@@ -19,7 +19,6 @@ mod session_services;
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
-use crate::plugin::PluginSessionRequest;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use lash_sansio::sync::MutexExt;
 // Each submodule documents itself in its own file. Adding an outer doc comment
@@ -1446,54 +1445,6 @@ async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
         child_trace_hook,
     )
     .await
-}
-
-/// Build the real engine run context used by validation-path tests that are
-/// expected to settle before constructing a nested runtime context.
-pub fn process_engine_run_context_for_validation(
-    backend: &crate::Backend,
-    registration: crate::ProcessRegistration,
-    tool_catalog: Arc<crate::ToolCatalog>,
-    process_registry_available: bool,
-) -> crate::ProcessEngineRunContext<'static> {
-    let process_id = crate::mint_process_id();
-    let process_work = process_work_wiring_for_registry(backend.process_registry());
-    let plugins = crate::PluginHost::new(test_standard_protocol_factories())
-        .build_session(PluginSessionRequest::creation(
-            "engine-validation-test",
-            Default::default(),
-        ))
-        .expect("test protocol session builds");
-    let scoped_effect_controller = crate::ActorContext::detached(backend.clone())
-        .scoped(crate::AdmittedScope::process(process_id.clone()))
-        .expect("valid process scope");
-    let execution_context = crate::ProcessExecutionContext::default()
-        .with_execution_write_authority(crate::ProcessExecutionWriteAuthority::invocation(
-            process_id.clone(),
-            "engine-validation-test-execution",
-        ));
-    crate::ProcessEngineRunContext::new(
-        registration,
-        process_id,
-        execution_context,
-        process_work,
-        plugins,
-        tool_catalog,
-        None,
-        None,
-        Arc::new(crate::NoSessionWork::new()),
-        backend.clock(),
-        process_registry_available,
-        tokio_util::sync::CancellationToken::new(),
-        None,
-        scoped_effect_controller,
-        None,
-        Box::new(|_| {
-            Err(crate::PluginError::Session(
-                "validation test unexpectedly entered the nested runtime".to_string(),
-            ))
-        }),
-    )
 }
 
 /// A `ProcessService` that applies the production command-runner guard, then

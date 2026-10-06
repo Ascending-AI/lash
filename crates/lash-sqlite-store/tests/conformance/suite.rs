@@ -660,14 +660,6 @@ lash_conformance::session_graph_state_machine_tests!({
     })
 });
 
-lash_conformance::process_continuation_store_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let storage = backend.process_registry();
-    let registry = Arc::clone(&storage) as Arc<dyn lash_core_execution::ProcessRegistry>;
-    let store = storage as Arc<dyn lash_core_execution::ProcessContinuationStore>;
-    (backend, registry, store)
-});
-
 // The settlement laws run a facade runtime over a fresh backend per law: an
 // engine backend keeps its substrate alive and supplies the durable ports the
 // runtime takes from it.
@@ -1060,15 +1052,6 @@ lash_conformance::checkpoint_profile_tests!({
 async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms() {
     let backend = TestBackend::open(SUBSTRATE).await;
     lash_lashlang_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(artifact_store_handles(&backend).artifacts).await;
-}
-
-mod worker_recovery {
-    use super::*;
-    lash_conformance::worker_recovery_tests!({
-        let backend = TestBackend::open(SUBSTRATE).await;
-        let recovery = backend.as_stores().worker_recovery();
-        (backend, recovery)
-    });
 }
 
 mod session_commands {}

@@ -52,27 +52,6 @@ use sqlx::{Postgres, Transaction};
 /// no report at all for exactly the deployments a preflight is most useful on.
 const UNDEFINED_TABLE: &str = "42P01";
 
-// Two of this walk's four page statements belong to the process family and are
-// named in its PostgreSQL owner module (FIG-3384):
-//
-// * `process_segment_handover.list_parked_segments` orders parked segments by
-//   `(process_id, segment_ordinal)` — the table's primary key, and therefore a
-//   total order with no ties to break — and joins in only `running` and
-//   `waiting` processes. Terminal processes are excluded at the source rather
-//   than filtered afterwards: their handover rows are historical residue, and
-//   listing them on a drain list would send an operator after continuations
-//   that nothing will ever resume. Its `after` filter is a row-value
-//   comparison against the same two columns the `ORDER BY` uses, not a
-//   comparison of a minted cursor string: string comparison of a joined cursor
-//   does not always agree with tuple comparison of its parts, and comparing
-//   the columns themselves cannot disagree with the ordering of the same
-//   columns under any collation.
-// * `process_wake_delivery.list_undelivered_for_walk` reports only `pending`
-//   and `enqueuing` deliveries — the two states the delivery loop treats as
-//   still owed, since `wake_delivery.rs` reclaims `enqueuing` back to
-//   `pending` when a claim lapses. Anything else has already left the queue,
-//   and putting it on a drain list would be reporting work that is done.
-
 /// The entry point [`crate::PostgresStorePreflight`] delegates to; every branch
 /// returns a page, and `Err` is reserved for a server that could not answer at
 /// all.
@@ -82,7 +61,6 @@ pub(crate) async fn scan_durable(
 ) -> Result<DurableScanPage, StoreError> {
     match scan.surface {
         DurableSurface::ModuleArtifact => scan_module_artifacts(pool, scan).await,
-        DurableSurface::ParkedSegment => scan_parked_segments(pool, scan).await,
         DurableSurface::StartedProcess => scan_started_processes(pool, scan).await,
         DurableSurface::SessionCheckpoint => scan_session_checkpoints(pool, scan).await,
         DurableSurface::SessionExecutionState => scan_session_execution_state(pool, scan).await,
@@ -178,62 +156,6 @@ async fn scan_module_artifacts(
                 },
             },
         })
-        .collect();
-    let next = page_cursor(scan, items.last().map(|item| item.cursor.clone()), returned);
-    Ok(scanned(items, next))
-}
-
-/// One parked segment-handover envelope per live process that has one.
-async fn scan_parked_segments(
-    pool: &PgPool,
-    scan: &DurableScan,
-) -> Result<DurableScanPage, StoreError> {
-    let (after_process, after_ordinal) = match scan.after.as_deref() {
-        Some(cursor) => {
-            let (process_id, ordinal) = split_segment_cursor(cursor)?;
-            (Some(process_id), Some(ordinal))
-        }
-        None => (None, None),
-    };
-    let rows = sqlx::query_as::<_, ParkedSegmentRow>(
-        crate::process_sql::process_sql()
-            .handover_postgres
-            .list_parked_segments
-            .sql(),
-    )
-    .bind(after_process)
-    .bind(after_ordinal)
-    .bind(row_limit(scan))
-    .fetch_all(pool)
-    .await;
-    let rows = match rows {
-        Ok(rows) => rows,
-        Err(error) => return read_failure(scan.surface, error),
-    };
-
-    let returned = rows.len();
-    let items: Vec<DurableItem> = rows
-        .into_iter()
-        .map(
-            |(process_id, segment_ordinal, handover_json, status, wake_session_id, record_json)| {
-                let process_id = ProcessId::parse(&process_id).ok();
-                DurableItem {
-                    surface: DurableSurface::ParkedSegment,
-                    cursor: segment_cursor(process_id.as_ref(), segment_ordinal),
-                    process_id,
-                    // The session the process wakes into, which is the identity
-                    // an operator draining a stuck continuation looks for.
-                    session_id: wake_session_id.and_then(|id| SessionId::parse(id).ok()),
-                    status: Some(status),
-                    // The registry record travels with the item because an
-                    // identity-only durable format cannot be checked from the
-                    // payload alone: recomputing a stored program identity
-                    // needs the inputs only the owner's record holds.
-                    owner_record: Some(record_json),
-                    payload: DurablePayload::Json(handover_json),
-                }
-            },
-        )
         .collect();
     let next = page_cursor(scan, items.last().map(|item| item.cursor.clone()), returned);
     Ok(scanned(items, next))
@@ -590,48 +512,6 @@ fn page_cursor(scan: &DurableScan, last: Option<String>, returned: usize) -> Opt
     if returned == scan.limit { last } else { None }
 }
 
-/// Mint a parked-segment cursor.
-///
-/// The ordinal is zero-padded so the cursor reads in the same order the rows
-/// do, which keeps a cursor an operator sees in a report meaningful rather than
-/// arbitrary. Paging itself never relies on that: see the family's
-/// `process_segment_handover.list_parked_segments`.
-fn segment_cursor(process_id: Option<&ProcessId>, segment_ordinal: i64) -> String {
-    let process_id = process_id.map_or("", ProcessId::as_str);
-    format!("{process_id}:{segment_ordinal:020}")
-}
-
-/// Split at the **last** separator: a process id may itself contain one, while
-/// the fixed-width decimal ordinal never can, so the last separator is always
-/// the one this function put there.
-///
-/// A cursor that does not parse is an error rather than a silently-ignored
-/// filter. Ignoring it would restart the walk at the beginning while reporting
-/// the page as a continuation, which duplicates every earlier item — the exact
-/// failure the caller was paging to avoid.
-fn split_segment_cursor(cursor: &str) -> Result<(String, i64), StoreError> {
-    let Some((process_id, ordinal)) = cursor.rsplit_once(':') else {
-        return Err(invalid_cursor(cursor));
-    };
-    let ordinal: i64 = ordinal.parse().map_err(|_| invalid_cursor(cursor))?;
-    Ok((process_id.to_string(), ordinal))
-}
-
-fn invalid_cursor(cursor: &str) -> StoreError {
-    StoreError::Backend(format!(
-        "`{cursor}` is not a parked-segment cursor minted by this backend"
-    ))
-}
-
-/// `(process_id, segment_ordinal, handover_json, status, wake_session_id,
-/// record_json)`, in the order `process_segment_handover.list_parked_segments`
-/// selects them.
-///
-/// Rows are decoded positionally rather than through a derived `FromRow`: this
-/// crate does not enable sqlx's `derive` feature, and the alias keeps the column
-/// order the query fixes visible next to the query itself.
-type ParkedSegmentRow = (String, i64, String, String, Option<String>, String);
-
 /// A session that has published a checkpoint root, named rather than positional
 /// because both deep surfaces pass it around well away from its query.
 struct SessionCheckpointRow {
@@ -642,62 +522,6 @@ struct SessionCheckpointRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn parked_segment_join_uses_index_order_without_sort() {
-        let Some(url) = crate::postgres_test_support::database_url() else {
-            return;
-        };
-        let _lock = crate::postgres_test_support::SharedDatabaseLock::acquire(&url).await;
-        let storage = crate::PostgresStorage::connect(&url)
-            .await
-            .expect("connect planner witness");
-        let mut tx = storage.pool().begin().await.expect("begin planner witness");
-        // As in the worklist planner witness, remove small-table cost preference.
-        // Disable alternative joins to prove the existing btrees can supply merge
-        // order directly; a collation mismatch still requires an explicit sort.
-        for setting in [
-            "SET LOCAL enable_seqscan = off",
-            "SET LOCAL enable_bitmapscan = off",
-            "SET LOCAL enable_hashjoin = off",
-            "SET LOCAL enable_nestloop = off",
-        ] {
-            sqlx::query(setting)
-                .execute(&mut *tx)
-                .await
-                .expect("set planner witness preference");
-        }
-        let plan = sqlx::query_scalar::<_, String>(&format!(
-            "EXPLAIN (COSTS OFF) {}",
-            crate::process_sql::process_sql()
-                .handover_postgres
-                .list_parked_segments
-                .sql()
-        ))
-        .bind(None::<String>)
-        .bind(0_i64)
-        .bind(65_i64)
-        .fetch_all(&mut *tx)
-        .await
-        .expect("explain parked segment walk")
-        .join(" | ");
-        eprintln!("parked segment plan: {plan}");
-        assert!(
-            plan.contains("Merge Join")
-                && plan.contains("lash_process_segment_handovers_pkey")
-                && !plan.contains("Sort"),
-            "parked segment merge join must inherit btree order without sorting: {plan}"
-        );
-        tx.rollback().await.expect("rollback planner witness");
-    }
-
-    #[test]
-    fn a_cursor_this_backend_did_not_mint_is_refused_rather_than_ignored() {
-        // Ignoring it would silently restart the walk and re-emit every item
-        // the caller already has.
-        assert!(split_segment_cursor("proc-7").is_err());
-        assert!(split_segment_cursor("proc-7:not-a-number").is_err());
-    }
 
     #[test]
     fn a_manifest_without_execution_state_names_nothing() {

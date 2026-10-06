@@ -1,9 +1,11 @@
 //! How a host process engine's steps run (ADR 0132 §10; L6, FIG-5175).
 //!
-//! A [`StepRequest`] names a catalog tool. The process actor admits it as an
-//! admitted execution (S4) under the tool's declared [`ExecutionPolicy`] and
-//! an [`ExecutionLimit`] within the tool ceiling, commits that admission with
-//! the state that asked for it, and only then runs the tool's body. The host
+//! A [`StepRequest`] names a catalog tool, or one of the engine's own bodies
+//! that its registration declares ([`EngineSteps`](super::EngineSteps)). The
+//! process actor admits it as an admitted execution (S4) under the tool's
+//! declared [`ExecutionPolicy`] (an engine body's is a pinned `Repeatable`)
+//! and an [`ExecutionLimit`] within the tool ceiling, commits that admission
+//! with the state that asked for it, and only then runs the body. The host
 //! supplies both halves through [`ProcessSteps`]; there is no default.
 
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
@@ -42,10 +44,15 @@ pub enum StepRefusal {
         /// Why.
         reason: String,
     },
+    /// The step names an engine body the process's engine does not declare.
+    #[error(transparent)]
+    Engine(#[from] super::engine_state::EngineStepRefusal),
 }
 
 /// The host's half of a process step: the catalog tool's declaration and
-/// body. A durable backend serving processes is given exactly one.
+/// body, or the engine body its registration declares
+/// ([`ProcessEngineRegistry::engine_steps`](super::ProcessEngineRegistry::engine_steps)).
+/// A durable backend serving processes is given exactly one.
 pub trait ProcessSteps: Send + Sync {
     /// Admit `step` of `process` at `now_ms`: the policy its tool declares
     /// and the limit it runs under.

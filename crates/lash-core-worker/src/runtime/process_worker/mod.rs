@@ -195,7 +195,6 @@ impl DurableProcessWorker {
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
         scoped_effect_controller: crate::ActorContext,
         cancellation: CancellationToken,
-        handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
         let current = self
             .config
@@ -211,7 +210,6 @@ impl DurableProcessWorker {
             execution_write_authority,
             scoped_effect_controller,
             cancellation,
-            handover,
         )
         .await
     }
@@ -226,7 +224,6 @@ impl DurableProcessWorker {
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
         scoped_effect_controller: crate::ActorContext,
         cancellation: CancellationToken,
-        handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
         let owner = execution_write_authority.owner_identity();
         let attempt = current.first_started.as_deref().map_or(1, |started| {
@@ -372,7 +369,6 @@ impl DurableProcessWorker {
                 Arc::clone(self.config.process_registry()),
                 scoped_effect_controller,
                 cancellation,
-                handover,
             )
             .await
             .map_err(crate::ProcessInfraError::into_plugin_error)

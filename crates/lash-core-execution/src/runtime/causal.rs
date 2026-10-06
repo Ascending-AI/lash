@@ -206,8 +206,8 @@ pub fn child_effect_invocation_from_effect(
 /// The replay address of one command a replayed language program issued
 /// (FIG-3586).
 ///
-/// A language runtime that re-executes its program on replay (a lashlang cell,
-/// a lashlang process body) mints one of these per command, from the dense
+/// A language runtime that re-executes its program on replay (a lashlang
+/// cell) mints one of these per command, from the dense
 /// issue ordinal of that command within the run, and every journal row the
 /// command writes lives under it. Core derives the command's sub-keys from it
 /// — tool attempts, retry sleeps, a deferred completion's await, an
@@ -228,7 +228,6 @@ pub struct CommandReplayKey(String);
 pub enum CommandSubKey<'a> {
     Value,
     Sleep,
-    SignalWait,
     TimersAdmitted,
     AggregateRequests,
     ToolAttempt {
@@ -253,7 +252,6 @@ pub enum CommandSubKey<'a> {
 
 impl<'a> CommandSubKey<'a> {
     const SLEEP: &'static str = "sleep";
-    const SIGNAL: &'static str = "signal";
     const TIMERS_ADMITTED: &'static str = "timers-admitted";
     const REQUESTS: &'static str = "requests";
     const ATTEMPT: &'static str = "attempt:";
@@ -268,7 +266,6 @@ impl<'a> CommandSubKey<'a> {
         match sub {
             "" => return Some(Self::Value),
             Self::SLEEP => return Some(Self::Sleep),
-            Self::SIGNAL => return Some(Self::SignalWait),
             Self::TIMERS_ADMITTED => return Some(Self::TimersAdmitted),
             Self::REQUESTS => return Some(Self::AggregateRequests),
             _ => {}
@@ -320,7 +317,6 @@ impl std::fmt::Display for CommandSubKey<'_> {
         match self {
             Self::Value => Ok(()),
             Self::Sleep => f.write_str(Self::SLEEP),
-            Self::SignalWait => f.write_str(Self::SIGNAL),
             Self::TimersAdmitted => f.write_str(Self::TIMERS_ADMITTED),
             Self::AggregateRequests => f.write_str(Self::REQUESTS),
             Self::ToolAttempt { call_id, attempt } => {
@@ -368,11 +364,6 @@ impl CommandReplayKey {
     /// first-appearance order — under the group's invocation.
     pub fn child_suffix(leaf: usize) -> String {
         CommandSubKey::AggregateChild(&leaf.to_string()).to_string()
-    }
-
-    /// The row a process-signal wait journals its await under.
-    pub fn signal(&self) -> String {
-        format!("{}:{}", self.0, CommandSubKey::SignalWait)
     }
 
     /// Unwraps the key.
@@ -791,7 +782,6 @@ mod tests {
         let keys = [
             CommandSubKey::Value,
             CommandSubKey::Sleep,
-            CommandSubKey::SignalWait,
             CommandSubKey::TimersAdmitted,
             CommandSubKey::AggregateRequests,
             CommandSubKey::ToolAttempt {

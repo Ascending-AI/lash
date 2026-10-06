@@ -140,7 +140,6 @@ impl crate::runtime::effect::ProcessRunner for ProcessRuntimeContext {
         registry: Arc<dyn crate::ProcessRegistry>,
         scoped_effect_controller: crate::ActorContext,
         cancellation: tokio_util::sync::CancellationToken,
-        handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         if admitted.process_id != self.process_id {
             return Err(crate::ProcessInfraError::new(
@@ -198,7 +197,6 @@ impl crate::runtime::effect::ProcessRunner for ProcessRuntimeContext {
                 registry,
                 scoped_effect_controller,
                 cancellation,
-                handover,
             )
             .await
     }

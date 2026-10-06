@@ -287,14 +287,6 @@ table lash_process_observers
   column session_id text not-null
   primary-key (session_id, process_id)
   foreign-key (process_id) references lash_processes (process_id) on delete cascade
-table lash_process_segment_handovers
-  column committed_at_ms bigint not-null
-  column handover_json text not-null
-  column process_id text not-null
-  column segment_ordinal bigint not-null
-  column started_json text nullable
-  primary-key (process_id, segment_ordinal)
-  foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_tombstones
   column process_id text not-null
   column pruned_at_ms bigint not-null
@@ -707,12 +699,3 @@ table lash_waits
   column target_process text nullable
   column wait_id text not-null
   primary-key (wait_id)
-table lash_worker_recovery
-  column attempts integer not-null
-  column cpu_nanos bigint not-null
-  column in_flight integer not-null
-  column replacement integer not-null
-  column revision bigint not-null
-  column scope_id text not-null
-  column unknown_cpu_attempts integer not-null
-  primary-key (scope_id)

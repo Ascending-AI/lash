@@ -21,7 +21,6 @@ pub use super::migrated_tools_redrive::*;
 pub use super::observer_intent::*;
 pub use super::process_change_feed::*;
 pub use super::process_change_horizon::*;
-pub use super::process_continuation_store::*;
 pub use super::process_event_append_arms::*;
 pub use super::process_event_batch::*;
 pub use super::process_filters::*;

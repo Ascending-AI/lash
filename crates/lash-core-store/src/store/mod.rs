@@ -82,7 +82,6 @@ mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
 mod window_load;
-pub mod worker_recovery;
 
 use record_schema_version::record_schema_version;
 pub use record_schema_version::{

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 use lash::plugins::{
     PluginDeclaration, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
-    ProcessEngine, ProcessEngineContributionContext, ProcessEngineRegistration,
-    ProcessEngineRunContext, ProcessInfraError, ProcessRunOutcome, SessionPlugin,
+    ProcessEngine, ProcessEngineContributionContext, ProcessEngineRegistration, ProcessInfraError,
+    ProcessRunOutcome, SessionPlugin,
 };
 use lash::process::{
     ProcessAwaitOutput, ProcessEvent, ProcessEventPageEvents, ProcessEventPageMore,

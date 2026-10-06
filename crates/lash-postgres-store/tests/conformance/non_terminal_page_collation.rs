@@ -70,7 +70,6 @@ async fn process_family_columns_and_registry_scan_index_pin_c_collation() {
         "lash_process_events",
         "lash_process_observers",
         "lash_process_tombstones",
-        "lash_process_segment_handovers",
     ] {
         let collation: String = sqlx::query_scalar(
             "SELECT c.collname FROM pg_attribute a JOIN pg_collation c ON c.oid = a.attcollation

@@ -334,10 +334,6 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         SqliteStoreSet::process_registry(self)
     }
 
-    fn process_continuations(&self) -> Arc<dyn lash_core_execution::ProcessContinuationStore> {
-        SqliteStoreSet::process_registry(self)
-    }
-
     fn trigger_store(&self) -> Arc<dyn lash_core_execution::TriggerStore> {
         SqliteStoreSet::trigger_store(self)
     }
@@ -351,12 +347,6 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
     }
 
     fn turn_prelude_store(&self) -> Arc<dyn lash_core_execution::TurnPreludeStore> {
-        SqliteStoreSet::process_env_store(self)
-    }
-
-    fn worker_recovery(
-        &self,
-    ) -> Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore> {
         SqliteStoreSet::process_env_store(self)
     }
 

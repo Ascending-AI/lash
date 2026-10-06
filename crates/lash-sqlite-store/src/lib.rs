@@ -71,13 +71,13 @@ use lash_core_execution::store::{
     SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core_execution::{
-    AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, GcReport, PersistedSegmentHandover,
-    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessContinuationStore, ProcessEvent,
-    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy,
-    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
-    ProcessStarted, SessionCommitStore, SessionListFilter, SessionMeta, SessionStoreCreateRequest,
-    SessionView, StoreError, StoreMaintenance, VacuumReport, facade_support::ProcessStartPlan,
+    AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, GcReport, ProcessAwaitOutput,
+    ProcessChange, ProcessChangeCursor, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted,
+    SessionCommitStore, SessionListFilter, SessionMeta, SessionStoreCreateRequest, SessionView,
+    StoreError, StoreMaintenance, VacuumReport, facade_support::ProcessStartPlan,
     facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
     facade_support::registry_transitions,
 };
@@ -142,7 +142,6 @@ pub mod testing;
 mod trigger_schema;
 mod triggers;
 mod turn_ingress;
-mod worker_recovery;
 
 pub use attachment_store::SqliteAttachmentStore;
 pub use backend::{SqliteStoreSet, SqliteStoreSetOptions};

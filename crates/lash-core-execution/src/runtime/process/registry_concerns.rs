@@ -356,8 +356,8 @@ pub trait ProcessObserverRegistry: ProcessQuery {
 #[async_trait::async_trait]
 pub trait ProcessEventLog: ProcessQuery {
     /// This unfenced path is reserved for host signal/cancel coordination.
-    /// Process engines receive only [`ProcessEngineProcessContext`](super::engine::ProcessEngineProcessContext);
-    /// execution-owned events must use its authority-bound emitter.
+    /// Process engines append no event themselves: an engine's events are
+    /// its `Emit` actions, appended by the process activation.
     /// Signal events must be constructed by [`super::events::ProcessSignal::append_request`].
     /// Raw `signal.*` requests return [`PluginError::ReservedProcessEvent`],
     /// even if they carry a replay key. This rule also applies to batches

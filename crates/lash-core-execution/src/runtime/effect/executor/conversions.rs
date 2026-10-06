@@ -19,7 +19,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 {
                     execution.host_start.tracing = Some(runtime);
                 }
-                Ok(execution)
+                Ok(*execution)
             }
             _ => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,

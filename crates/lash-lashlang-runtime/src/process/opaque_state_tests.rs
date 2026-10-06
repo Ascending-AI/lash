@@ -1,14 +1,25 @@
-//! The parent holds a segment's VM state as opaque bytes (ADR 0123): its
-//! decode of the envelope never reaches the VM's semantic decoder, which
+//! The parent holds a process's VM state as opaque bytes (ADR 0123): its
+//! decode of the engine state never reaches the VM's semantic decoder, which
 //! validates and compiles regular expressions from guest-controlled bytes.
 
-use super::segment_state::ReplayOrdinalsState;
-use super::segment_trace_tests::worker_parked_continuation;
-use super::{
-    LASHLANG_SEGMENT_STATE_VERSION, LashlangSegmentState, decode_lashlang_segment_state,
-    segment_continuation_expectation, segment_continuation_owner,
-};
+use super::{segment_continuation_expectation, segment_continuation_owner};
+use crate::engine::state::{LashlangEngineState, Phase};
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+
+/// The worker's parked-continuation wire around raw VM bytes.
+fn worker_parked_continuation(vm: Vec<u8>) -> Vec<u8> {
+    #[derive(serde::Serialize)]
+    struct ParkedRun {
+        vm: lash_vm_protocol::EncodedPayload,
+        request: Option<()>,
+    }
+
+    rmp_serde::to_vec_named(&ParkedRun {
+        vm: lash_vm_protocol::EncodedPayload(vm),
+        request: None,
+    })
+    .expect("encode the worker's parked continuation")
+}
 
 /// Answers whether `T` implements `DeserializeOwned`, at compile time: the
 /// inherent constant exists only where the bound holds, and the trait
@@ -30,8 +41,9 @@ impl<T: serde::de::DeserializeOwned> DeserializeProbe<T> {
 // bytes, from a crate with no path to the VM.
 const _: () = assert!(!DeserializeProbe::<lashlang::VmContinuation>::DESERIALIZES);
 const _: () = assert!(DeserializeProbe::<lash_vm_protocol::OpaqueVmState>::DESERIALIZES);
-const _: () = assert!(DeserializeProbe::<LashlangSegmentState>::DESERIALIZES);
-const _: fn(&LashlangSegmentState) -> &lash_vm_protocol::OpaqueVmState = |state| &state.vm;
+const _: () = assert!(DeserializeProbe::<LashlangEngineState>::DESERIALIZES);
+const _: fn(&LashlangEngineState) -> Option<&lash_vm_protocol::OpaqueVmState> =
+    |state| state.vm.as_ref();
 
 struct SleepHost;
 
@@ -82,7 +94,7 @@ async fn parked_regexp_continuation() -> Vec<u8> {
         .expect("encode the witness")
 }
 
-/// The behavioural half: a segment whose continuation holds a RegExp the VM's
+/// The behavioural half: an engine state whose continuation holds a RegExp the VM's
 /// validator refuses decodes and passes every parent-side check — the parent
 /// never ran the validator — and only the worker's semantic decode refuses it.
 #[tokio::test(flavor = "current_thread")]
@@ -108,31 +120,28 @@ async fn parent_state_decode_never_compiles_regexp() {
             .expect("the worker accepts the unpoisoned RegExp"),
         0
     );
-    let envelope = serde_json::to_vec(&LashlangSegmentState {
-        version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: lash_vm_protocol::OpaqueVmState::seal(
+    let envelope = serde_json::to_vec(&LashlangEngineState {
+        payload: serde_json::Value::Null,
+        program_hash: Some("program".to_string()),
+        vm: Some(lash_vm_protocol::OpaqueVmState::seal(
             lash_vm_protocol::VmStateKind::Continuation,
             owner.clone(),
             vm_contract,
             worker_parked_continuation(poisoned),
-        ),
-        ordinals: ReplayOrdinalsState {
-            commands: crate::LashlangRunOrdinals::start(),
-            event_sequence: 0,
-            signal_wait_ordinals: Default::default(),
-        },
-        started_process_ids: Vec::new(),
-        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
-        pending_summary: Vec::new(),
-        effect_omissions: std::collections::BTreeMap::new(),
-        worker_recovery: Default::default(),
+        )),
+        runs: 1,
+        operations: 1,
+        faults: 0,
+        signals: Default::default(),
+        phase: Phase::Ended,
     })
-    .expect("encode the envelope");
+    .expect("encode the engine state");
 
-    let decoded = decode_lashlang_segment_state(&envelope)
-        .expect("the parent decodes the envelope without touching the VM bytes");
+    let decoded: LashlangEngineState = serde_json::from_slice(&envelope)
+        .expect("the parent decodes the engine state without touching the VM bytes");
+    let decoded = decoded.vm.expect("the state holds its snapshot");
     assert_eq!(
-        decoded.vm.check(&segment_continuation_expectation(
+        decoded.check(&segment_continuation_expectation(
             &owner,
             &lashlang::vm_contract_reads()
         )),
@@ -140,7 +149,7 @@ async fn parent_state_decode_never_compiles_regexp() {
         "the parent's structural check passes bytes the VM would refuse"
     );
 
-    let refusal = worker_continuation_info(&decoded.vm)
+    let refusal = worker_continuation_info(&decoded)
         .await
         .expect_err("the worker's semantic decode validates the RegExp");
     assert!(

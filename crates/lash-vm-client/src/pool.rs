@@ -23,40 +23,17 @@ struct BudgetTotals {
     attempts: u32,
     cpu_nanos: u64,
     replacement: bool,
-    unknown_cpu_attempts: u32,
 }
 impl ExecutionBudget {
     pub fn totals(&self) -> (u32, Duration) {
         let totals = lock(&self.0);
         (totals.attempts, Duration::from_nanos(totals.cpu_nanos))
     }
-    pub fn recovery_totals(
-        &self,
-    ) -> lash_core_execution::store::worker_recovery::WorkerRecoveryTotals {
-        let totals = lock(&self.0);
-        lash_core_execution::store::worker_recovery::WorkerRecoveryTotals {
-            attempts: totals.attempts,
-            cpu_nanos: totals.cpu_nanos,
-            replacement: totals.replacement,
-            unknown_cpu_attempts: totals.unknown_cpu_attempts,
-        }
-    }
-    pub fn from_recovery(
-        totals: lash_core_execution::store::worker_recovery::WorkerRecoveryTotals,
-    ) -> Self {
-        Self(Arc::new(Mutex::new(BudgetTotals {
-            attempts: totals.attempts,
-            cpu_nanos: totals.cpu_nanos,
-            replacement: totals.replacement,
-            unknown_cpu_attempts: totals.unknown_cpu_attempts,
-        })))
-    }
     pub fn restored(attempts: u32, cpu: Duration) -> Self {
         Self(Arc::new(Mutex::new(BudgetTotals {
             attempts,
             cpu_nanos: nanos(cpu),
             replacement: attempts > 0,
-            unknown_cpu_attempts: 0,
         })))
     }
     fn admit(&self, config: &PoolConfig) -> Result<(), PoolError> {

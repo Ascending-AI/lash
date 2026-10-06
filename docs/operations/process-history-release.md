@@ -33,7 +33,7 @@ does not make process-owned rows prune-eligible.
 Evidence: [event SQL](../../crates/lash-store-sql/src/process/events.rs),
 [append and replay matching](../../crates/lash-core-execution/src/runtime/process/validation.rs),
 [effect accounting](../../crates/lash-core-execution/src/runtime/process/effect_summary.rs),
-[handover SQL](../../crates/lash-store-sql/src/process/segment_handovers.rs),
+[snapshot SQL](../../crates/lash-store-sql/src/durable/snapshots.rs),
 [wake SQL](../../crates/lash-store-sql/src/process/wake_deliveries.rs),
 [outbox and retention contracts](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs),
 [SQLite pruning](../../crates/lash-sqlite-store/src/process_registry_change.rs),

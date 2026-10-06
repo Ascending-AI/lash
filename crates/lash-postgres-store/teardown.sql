@@ -96,8 +96,6 @@ DROP TABLE IF EXISTS lash_process_observers CASCADE;
 
 DROP TABLE IF EXISTS lash_process_tombstones CASCADE;
 
-DROP TABLE IF EXISTS lash_process_segment_handovers CASCADE;
-
 DROP TABLE IF EXISTS lash_parent_end_plans CASCADE;
 
 DROP TABLE IF EXISTS lash_tool_intent_submissions CASCADE;
@@ -129,8 +127,6 @@ DROP TABLE IF EXISTS lash_artifact_cleanup_obligations CASCADE;
 DROP TABLE IF EXISTS lash_release_stamp CASCADE;
 
 DROP TABLE IF EXISTS lash_catalog_identity CASCADE;
-
-DROP TABLE IF EXISTS lash_worker_recovery CASCADE;
 
 DROP TABLE IF EXISTS lash_nodes CASCADE;
 

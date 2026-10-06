@@ -17,10 +17,6 @@ pub fn is_language_runtime_receiver(receiver: &lashlang::Value) -> bool {
     )
 }
 
-/// The host operation a language runtime call's replay key names, and the
-/// one its durable effect-summary record carries.
-pub(crate) const LANGUAGE_RUNTIME_HOST_OPERATION: &str = "lashlang.runtime";
-
 /// The language runtime operation a call names, checked before anything
 /// reaches the journal: `None` when `receiver` is not the runtime, a refusal
 /// for arguments or an operation the runtime does not have.

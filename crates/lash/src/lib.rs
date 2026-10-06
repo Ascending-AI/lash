@@ -623,10 +623,6 @@ pub mod persistence {
     pub use lash_core::store::ObligationStanding;
     /// Head and usage values returned by custom session stores.
     pub use lash_core::store::SessionHeadRef;
-    pub use lash_core::store::worker_recovery::{
-        WorkerRecoveryClaim, WorkerRecoveryError, WorkerRecoveryLimits, WorkerRecoveryStore,
-        WorkerRecoveryTotals,
-    };
     /// The store halves a storage integrator's [`StoreSet`](crate::StoreSet)
     /// supplies: the obligation ledgers and the recovery leader lease
     /// (ADR 0109 §1.3, §1.6).
@@ -916,10 +912,7 @@ pub mod plugins {
     /// wrapped factory's process engines are still contributed (FIG-4373).
     pub use lash_core::plugin::{PluginExecutionTrace, ProcessEngineContributionContext};
     /// Engine registry and narrowed execution contexts used to host custom process engines.
-    pub use lash_core::runtime::{
-        ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunGuard,
-        ProcessEngineRuntimeContext,
-    };
+    pub use lash_core::runtime::ProcessEngineRegistry;
     /// Engine-extension contracts for a tool call's admission, attempts,
     /// decision and presentation, and for a Run's aggregates. A call runs in
     /// memory inside the admitted execution that makes it durable; hosts
@@ -967,10 +960,9 @@ pub mod plugins {
     /// Protocol-driver and process-engine inputs that core owns independently of plugin storage.
     pub use lash_core::{
         AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, HostTurnProtocol,
-        PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
-        ProcessEngineRunContext, ProcessInfraError, ProcessRunOutcome, ProcessSegmentKey,
-        ProtocolBuildInput, ProtocolDriverState, ProtocolTurnOptionsError, SegmentHandover,
-        SegmentStartMarker, SessionPluginSource, TurnDriverPreamble,
+        ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration, ProcessInfraError,
+        ProcessRunOutcome, ProtocolBuildInput, ProtocolDriverState, ProtocolTurnOptionsError,
+        SessionPluginSource, TurnDriverPreamble,
     };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends
@@ -990,8 +982,9 @@ pub mod plugins {
     /// keeps, the events lash delivers to `advance`, and the action it
     /// answers with.
     pub use lash_core::{
-        EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
-        PinnedKey, SettledOutcome, SettledOutcomeRefusal, StepName, StepRequest,
+        EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind,
+        EngineStepRefusal, EngineStepRun, EngineSteps, HostWaitKind, KeyName, PinnedKey,
+        SettledOutcome, SettledOutcomeRefusal, StepName, StepRequest,
     };
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};
@@ -1136,30 +1129,29 @@ pub mod process {
         NonTerminalProcessPage, PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
         PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PinnedTriggerDelivery, ProcessAwaitOutput,
         ProcessCancelReceipt, ProcessChangeCursor, ProcessClockRebind, ProcessCompletionAuthority,
-        ProcessContinuationStore, ProcessDefinition, ProcessDefinitionDraft,
-        ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionRef,
-        ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionTarget,
-        ProcessDefinitionValue, ProcessEffectNodeReport, ProcessEffectOccurrence,
-        ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
-        ProcessEffectReport, ProcessEffectReportError, ProcessEngineKind, ProcessEvent,
-        ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventHistoryRetention,
-        ProcessEventLite, ProcessEventLog, ProcessEventPage, ProcessEventPageEvents,
-        ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
-        ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-        ProcessExternalRef, ProcessHandleView, ProcessIdentity, ProcessInput, ProcessLifecycle,
-        ProcessLineage, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
-        ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
-        ProcessOriginatorFilter, ProcessProvenance, ProcessPruneReport, ProcessQuery,
-        ProcessRecord, ProcessRegistrar, ProcessRegistration, ProcessRegistrationOutcome,
-        ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention,
-        ProcessService, ProcessSessionDeleteReport, ProcessSignal, ProcessSignalIdentity,
-        ProcessSignalWaitBinding, ProcessSignature, ProcessStartOptions, ProcessStartReceipt,
-        ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget, ProcessStarted,
-        ProcessStatus, ProcessStatusFilter, ProcessTerminalPublication, ProcessTerminalWait,
-        ProcessToolIntents, ProcessWakeDelivery, ProcessWakeSpec, ProcessWorkSubstrate,
-        ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus, ScopeGrant, ScopeId,
-        ScopeRef, ScopeStorageError, SessionScope, StartCx, StartCxError, StartKey,
-        TerminalProcessStatus, TriggerDeliveryPin, WakeId, WatchedRegistry,
+        ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError,
+        ProcessDefinitionId, ProcessDefinitionRef, ProcessDefinitionRefusal,
+        ProcessDefinitionResolution, ProcessDefinitionTarget, ProcessDefinitionValue,
+        ProcessEffectNodeReport, ProcessEffectOccurrence, ProcessEffectOmissions,
+        ProcessEffectOmittedCounts, ProcessEffectOutcomeClass, ProcessEffectReport,
+        ProcessEffectReportError, ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt,
+        ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog,
+        ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
+        ProcessEventReadOutcome, ProcessEventRelease, ProcessEventType, ProcessExecutionContext,
+        ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView,
+        ProcessIdentity, ProcessInput, ProcessLifecycle, ProcessLineage, ProcessListFilter,
+        ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry,
+        ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter, ProcessProvenance,
+        ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
+        ProcessRegistrationOutcome, ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal,
+        ProcessRetention, ProcessService, ProcessSessionDeleteReport, ProcessSignal,
+        ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessSignature, ProcessStartOptions,
+        ProcessStartReceipt, ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget,
+        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalPublication,
+        ProcessTerminalWait, ProcessToolIntents, ProcessWakeDelivery, ProcessWakeSpec,
+        ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus,
+        ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionScope, StartCx, StartCxError,
+        StartKey, TerminalProcessStatus, TriggerDeliveryPin, WakeId, WatchedRegistry,
         facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
         facade_support::ObservedProcessEventLite, facade_support::ObservedProcessEventPage,
         facade_support::ObservedProcessEventReadOutcome, facade_support::ObservedWorkItem,
@@ -1193,9 +1185,9 @@ pub mod process {
 pub mod durability {
     pub use lash_core::{EffectAttempt, RecordedEffectExecution};
     // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::PreparedProcessRegistration;
     pub use lash_core::RecordedKeys;
     pub use lash_core::runtime::process_start::ProcessStartRelay;
-    pub use lash_core::{PreparedProcessRegistration, SegmentHandoverCommit};
     pub use lash_core_store::attachments::{
         AttachmentProducer, AttachmentSourcePolicy, AttachmentSourcePolicyError,
     };

@@ -1214,7 +1214,6 @@ pub trait LashlangRunSettingsRecorder: Send + Sync {
 #[derive(Clone)]
 pub struct LashlangProcessEngine {
     artifact_store: LashlangArtifacts,
-    worker_recovery: Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore>,
     workers: lash_vm_client::service::Service,
     surface: LashlangSurface,
     execution_bounds: lashlang::ExecutionBounds,
@@ -1222,16 +1221,10 @@ pub struct LashlangProcessEngine {
 }
 
 impl LashlangProcessEngine {
-    pub fn new(
-        artifact_store: LashlangArtifacts,
-        surface: LashlangSurface,
-        worker_recovery: Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore>,
-    ) -> Self {
+    pub fn new(artifact_store: LashlangArtifacts, surface: LashlangSurface) -> Self {
         Self {
             artifact_store,
-            workers: lash_vm_client::service::Service::default()
-                .with_recovery_store(worker_recovery.clone()),
-            worker_recovery,
+            workers: lash_vm_client::service::Service::default(),
             surface,
             execution_bounds: lashlang::ExecutionBounds::unbounded(),
             run_settings_recorder: None,
@@ -1239,7 +1232,7 @@ impl LashlangProcessEngine {
     }
 
     pub fn with_worker_service(mut self, workers: lash_vm_client::service::Service) -> Self {
-        self.workers = workers.with_recovery_store(self.worker_recovery.clone());
+        self.workers = workers;
         self
     }
 
@@ -1261,26 +1254,6 @@ impl LashlangProcessEngine {
     ) -> Self {
         self.run_settings_recorder = Some(recorder);
         self
-    }
-
-    fn run_settings(
-        &self,
-        context: &lash_core::ProcessEngineRunContext<'_>,
-    ) -> Result<LashlangRecordedSettings, lash_core::ProcessInfraError> {
-        let created = context
-            .registration()
-            .engine_config
-            .as_ref()
-            .ok_or_else(|| lash_core::PluginError::MissingRecordedProcessConfig {
-                engine_kind: LASHLANG_ENGINE_KIND.to_owned(),
-            })?;
-        serde_json::from_value(created.clone()).map_err(|error| {
-            lash_core::PluginError::StoredDataCorrupt {
-                record_kind: "lashlang process engine_config".to_owned(),
-                message: error.to_string(),
-            }
-            .into()
-        })
     }
 
     pub fn artifact_store(&self) -> LashlangArtifacts {
@@ -1431,30 +1404,21 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
     }
 
     fn state_format(&self) -> lash_core::EngineStateFormat {
-        lash_core::EngineStateFormat {
-            kind: self.kind().to_owned(),
-            version: 0,
-        }
+        engine::advance::state_format()
     }
 
     fn cancel_grace(&self) -> std::time::Duration {
         std::time::Duration::ZERO
     }
 
+    /// See [`engine`]: the VM runs only in the `vm_run` step, never here.
     fn advance(
         &self,
-        _state: lash_core::EngineState,
-        _event: lash_core::EngineEvent,
+        state: lash_core::EngineState,
+        event: lash_core::EngineEvent,
     ) -> Result<(lash_core::EngineState, lash_core::EngineAction), lash_core::ProcessInfraError>
     {
-        // A lashlang process is refused typed until its VM runs as a
-        // `Repeatable` step (L7b, FIG-5198); the activation parks it with
-        // this refusal, and a cancel ends it engine-free.
-        Err(lash_core::ProcessInfraError::new(
-            lash_core::PluginError::Invoke(
-                "a lashlang process cannot advance yet: its VM step is L7b's (FIG-5198)".to_owned(),
-            ),
-        ))
+        engine::advance::advance(state, event)
     }
 }
 
@@ -1476,16 +1440,20 @@ pub fn admit_lashlang_process(
 pub fn lashlang_process_engine_registration(
     engine: LashlangProcessEngine,
 ) -> lash_core::ProcessEngineRegistration {
+    let engine = Arc::new(engine);
     lash_core::ProcessEngineRegistration::new(
-        Arc::new(engine),
+        engine.clone(),
         lash_core::ProcessEngineAdmission::new(LASHLANG_ENGINE_KIND, admit_lashlang_process),
     )
     .expect("lashlang engine and admission share a fixed kind")
+    .with_engine_steps(Arc::new(LashlangEngineSteps::new(engine)))
 }
 
 mod bridge;
 #[cfg(test)]
 mod catalog_tests;
+pub mod engine;
+pub use engine::LashlangEngineSteps;
 mod catalogue_preview;
 mod deferred;
 mod deferred_triggers;
@@ -1513,8 +1481,9 @@ pub use deferred_triggers::{
     DeferredTriggerResolutionRecord, DeferredTriggerResolver, SharedDeferredTriggerResolver,
     TriggerGrant, TriggerResolution, resolve_and_fold_deferred_triggers,
 };
+pub use engine::LASHLANG_SEGMENT_STATE_VERSION;
 pub use process::{
-    LASHLANG_SEGMENT_STATE_VERSION, TraceLanguageExecutionMapError, lashlang_process_event_types,
+    TraceLanguageExecutionMapError, lashlang_process_event_types,
     lashlang_process_signal_event_types, lashlang_program_hash, lashlang_type_expr_schema,
     trace_lashlang_main_map, trace_lashlang_process_map, trace_lashlang_process_map_snapshot,
 };

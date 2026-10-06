@@ -12,8 +12,7 @@ use std::sync::Arc;
 
 use crate::{
     AttachmentStore, Backend, Clock, DeploymentStore, ModuleArtifactStore,
-    ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry, StoreBindingId, StoreSet,
-    TriggerStore,
+    ProcessExecutionEnvStore, ProcessRegistry, StoreBindingId, StoreSet, TriggerStore,
 };
 
 /// A decorator of one obligation kind's ledger.
@@ -40,7 +39,6 @@ pub struct LayeredBackend {
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
     artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
-    worker_recovery: Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>,
 }
 
 impl LayeredBackend {
@@ -56,7 +54,6 @@ impl LayeredBackend {
             module_artifacts: inner.module_artifacts(),
             obligation_ledgers: None,
             artifact_cleanup: inner.artifact_cleanup(),
-            worker_recovery: inner.worker_recovery(),
             inner,
         }
     }
@@ -73,17 +70,6 @@ impl LayeredBackend {
         layer: impl FnOnce(Arc<dyn DeploymentStore>) -> Arc<dyn DeploymentStore>,
     ) -> Self {
         self.session_store_factory = layer(self.session_store_factory);
-        self
-    }
-
-    /// Replace the worker recovery store with a fixture's independent counters.
-    pub fn map_worker_recovery(
-        mut self,
-        layer: impl FnOnce(
-            Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>,
-        ) -> Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>,
-    ) -> Self {
-        self.worker_recovery = layer(self.worker_recovery);
         self
     }
 
@@ -166,7 +152,6 @@ impl LayeredBackend {
             module_artifacts: self.module_artifacts,
             obligation_ledgers: self.obligation_ledgers,
             artifact_cleanup: self.artifact_cleanup,
-            worker_recovery: self.worker_recovery,
         });
         self.inner.over_stores(stores)
     }
@@ -194,7 +179,6 @@ impl LayeredStores {
             module_artifacts: inner.module_artifacts(),
             obligation_ledgers: None,
             artifact_cleanup: inner.artifact_cleanup(),
-            worker_recovery: inner.worker_recovery(),
             durable: None,
             inner,
         })
@@ -317,7 +301,6 @@ struct LayeredStoreSet {
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
     artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
-    worker_recovery: Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>,
 }
 
 impl StoreSet for LayeredStoreSet {
@@ -351,10 +334,6 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.process_registry)
     }
 
-    fn process_continuations(&self) -> Arc<dyn ProcessContinuationStore> {
-        self.inner.process_continuations()
-    }
-
     fn trigger_store(&self) -> Arc<dyn TriggerStore> {
         Arc::clone(&self.trigger_store)
     }
@@ -369,12 +348,6 @@ impl StoreSet for LayeredStoreSet {
 
     fn turn_prelude_store(&self) -> Arc<dyn crate::TurnPreludeStore> {
         self.inner.turn_prelude_store()
-    }
-
-    fn worker_recovery(
-        &self,
-    ) -> Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore> {
-        Arc::clone(&self.worker_recovery)
     }
 
     fn attachment_store(&self) -> Arc<dyn AttachmentStore> {

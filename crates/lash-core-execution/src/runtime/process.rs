@@ -61,14 +61,13 @@ pub use effect_summary::{
     ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, tool_failure_code,
 };
 pub use engine::{
-    AdmittedProcessIdentity, PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission,
-    ProcessEngineProcessContext, ProcessEngineRegistration, ProcessEngineRegistry,
-    ProcessEngineRunContext, ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessInfraError,
-    ProcessRunOutcome, SegmentHandover, WeakProcessEngineRegistry,
+    AdmittedProcessIdentity, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
+    ProcessEngineRegistry, ProcessInfraError, ProcessRunOutcome, WeakProcessEngineRegistry,
 };
 pub use engine_state::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
-    SettledOutcome, SettledOutcomeRefusal, StepName, StepRequest,
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal,
+    EngineStepRun, EngineSteps, HostWaitKind, KeyName, SettledOutcome, SettledOutcomeRefusal,
+    StepName, StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
@@ -129,10 +128,9 @@ pub use registry::{
 };
 pub use registry::{
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ParentEndPlan, ProcessClockRebind,
-    ProcessContinuationStore, ProcessEventLog, ProcessLifecycle, ProcessObserverRegistry,
-    ProcessPruneReport, ProcessQuery, ProcessRegistrar, ProcessRegistry, ProcessRegistryCursor,
-    ProcessRetention, ProcessSegmentKey, ProcessTerminalPublication, ProcessToolIntents,
-    ProjectionWatermark, SegmentHandoverCommit, SegmentStartMarker,
+    ProcessEventLog, ProcessLifecycle, ProcessObserverRegistry, ProcessPruneReport, ProcessQuery,
+    ProcessRegistrar, ProcessRegistry, ProcessRegistryCursor, ProcessRetention,
+    ProcessTerminalPublication, ProcessToolIntents, ProjectionWatermark,
     reconcile_pruned_trigger_deliveries, release_bound_trigger_delivery_pins,
 };
 pub use scope_close::RegistryScopeClose;

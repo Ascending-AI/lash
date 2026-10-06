@@ -4,7 +4,7 @@ use super::*;
 
 /// `tool_call_limit` is the typed `max_tool_calls` refusal the process's
 /// context met, read when the run failed on it.
-pub(super) fn process_lashlang_execution_result(
+pub(crate) fn process_lashlang_execution_result(
     result: Result<lashlang::ExecutionOutcome, lashlang::RuntimeError>,
     tool_call_limit: Option<lash_core::ToolCallLimitExceeded>,
 ) -> lash_core::ProcessAwaitOutput {
@@ -75,7 +75,7 @@ pub(super) fn process_lashlang_execution_result(
 /// meet every attempt the same way, so they end the process. A host verdict
 /// (its deadline, CPU or attempt accounting, FIG-4451), a lost worker and a
 /// broken exchange are this attempt's.
-pub(super) fn process_worker_failure(
+pub(crate) fn process_worker_failure(
     failure: &lash_vm_broker::BrokerFailure,
 ) -> Option<lash_core::ProcessAwaitOutput> {
     use lash_vm_broker::{BrokerFailure, CheckoutRefusal};
@@ -140,7 +140,7 @@ pub(super) fn process_worker_failure(
     }
 }
 
-pub(super) fn process_lashlang_failure(
+pub(crate) fn process_lashlang_failure(
     code: LashlangProcessFailureCode,
     message: impl Into<String>,
     raw: Option<serde_json::Value>,

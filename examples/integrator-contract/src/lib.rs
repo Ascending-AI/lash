@@ -311,53 +311,6 @@ impl ProcessExecutionEnvStore for Integrator {
 }
 
 #[lash::async_trait]
-impl ProcessContinuationStore for Integrator {
-    async fn put_segment_handover(
-        &self,
-        process_id: &ProcessId,
-        handover: PersistedSegmentHandover,
-    ) -> Result<StoreTransition<SegmentHandoverCommit>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn get_segment_handover(
-        &self,
-        process_id: &ProcessId,
-        segment_ordinal: u64,
-    ) -> Result<Option<PersistedSegmentHandover>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn latest_segment_handover(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<PersistedSegmentHandover>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn retire_segment_handovers_through(
-        &self,
-        process_id: &ProcessId,
-        segment_ordinal: u64,
-    ) -> Result<(), PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn segment_start(
-        &self,
-        segment: &ProcessSegmentKey,
-    ) -> Result<Option<SegmentStartMarker>, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn mark_segment_started(
-        &self,
-        segment: &ProcessSegmentKey,
-        marker: SegmentStartMarker,
-    ) -> Result<SegmentStartMarker, PluginError> {
-        unreachable!("external signature witness")
-    }
-}
-
-#[lash::async_trait]
 impl AttachmentStore for Integrator {
     fn persistence(&self) -> AttachmentStorePersistence {
         unreachable!("external signature witness")

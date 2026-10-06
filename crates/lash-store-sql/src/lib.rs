@@ -83,7 +83,6 @@ pub mod session_ingress;
 pub mod session_runs;
 pub mod trigger;
 pub mod turn_ingress;
-pub mod worker_recovery;
 
 pub use render::{
     Dialect, Placeholder, RenderError, SchemaTables, TableLayout, Vocabulary, VocabularyTerm,
@@ -124,10 +123,8 @@ pub const TABLES: &[&str] = &[
     process::observers::TABLE,
     process::parent_end_plans::TABLE,
     process::processes::TABLE,
-    process::segment_handovers::TABLE,
     process::tombstones::TABLE,
     recovery_leader::TABLE,
-    worker_recovery::TABLE,
     trigger::deliveries::TABLE,
     trigger::mutation_receipts::TABLE,
     trigger::occurrence_tombstones::TABLE,
@@ -204,7 +201,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(process::observers::ObserverStatements::NEUTRAL);
     statements.extend_from_slice(process::parent_end_plans::ParentEndPlanStatements::NEUTRAL);
     statements.extend_from_slice(process::processes::ProcessStatements::NEUTRAL);
-    statements.extend_from_slice(process::segment_handovers::SegmentHandoverStatements::NEUTRAL);
     statements.extend_from_slice(process::tombstones::TombstoneStatements::NEUTRAL);
     statements.extend_from_slice(session::fork_lineage::ForkLineageStatements::NEUTRAL);
     statements.extend_from_slice(session::graph_nodes::GraphNodeStatements::NEUTRAL);

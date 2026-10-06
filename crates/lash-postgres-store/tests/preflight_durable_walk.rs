@@ -60,7 +60,6 @@ async fn an_unprovisioned_database_reports_not_scanned_rather_than_erroring() {
     let preflight = PostgresStorePreflight::from_pool(empty_pool.clone());
 
     for surface in [
-        DurableSurface::ParkedSegment,
         DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,
@@ -139,83 +138,6 @@ async fn module_artifact_surface_reads_the_persisted_json() {
     scratch.cleanup().await;
 }
 
-/// A parked segment has to arrive carrying the identity an operator acts on —
-/// the process, the session it wakes into, the store's own status word, and the
-/// registry record a stored program identity can be recomputed from. It also has
-/// to arrive *only* for a live process: a terminal process's handover row is
-/// residue, and putting it on a drain list sends an operator after a
-/// continuation nothing will resume.
-#[tokio::test]
-async fn a_parked_segment_is_enumerated_with_its_identity_and_terminal_ones_are_not() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping preflight durable walk: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    seed_process(
-        &scratch,
-        &ProcessId::fixture("proc-live"),
-        "waiting",
-        Some("session-1"),
-    )
-    .await;
-    seed_process(
-        &scratch,
-        &ProcessId::fixture("proc-done"),
-        "completed",
-        Some("session-2"),
-    )
-    .await;
-    seed_segment(
-        &scratch,
-        &ProcessId::fixture("proc-live"),
-        0,
-        r#"{"segment":"live"}"#,
-    )
-    .await;
-    seed_segment(
-        &scratch,
-        &ProcessId::fixture("proc-done"),
-        0,
-        r#"{"segment":"residue"}"#,
-    )
-    .await;
-
-    let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
-    let page = preflight
-        .scan_durable(&DurableScan::first(DurableSurface::ParkedSegment, 10))
-        .await
-        .expect("a provisioned deployment walks");
-
-    assert_eq!(page.coverage, ScanCoverage::Scanned);
-    assert_eq!(
-        page.items.len(),
-        1,
-        "only the live process contributes a parked segment: {:?}",
-        page.items
-    );
-    let item = &page.items[0];
-    let live = ProcessId::fixture("proc-live");
-    assert_eq!(item.process_id.as_deref(), Some(live.as_str()));
-    assert_eq!(item.session_id.as_deref(), Some("session-1"));
-    assert_eq!(item.status.as_deref(), Some("waiting"));
-    assert_eq!(
-        item.owner_record.as_deref(),
-        Some(format!(r#"{{"process":"{live}"}}"#).as_str()),
-        "the registry record travels with the item"
-    );
-    assert_eq!(
-        item.payload,
-        DurablePayload::Json(r#"{"segment":"live"}"#.to_string())
-    );
-    assert!(
-        page.next.is_none(),
-        "a page shorter than its limit is the end of the surface"
-    );
-
-    scratch.cleanup().await;
-}
-
 /// C8 (FIG-3571): every live process is walked with its record, which carries
 /// the start stamp the probe judges; a terminal one is not.
 #[tokio::test]
@@ -265,59 +187,25 @@ async fn paging_a_surface_one_item_at_a_time_is_exact() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    seed_process(
-        &scratch,
-        &ProcessIdMint::sequential_id_for_testing(1),
-        "waiting",
-        Some("session-a"),
-    )
-    .await;
-    seed_process(
-        &scratch,
-        &ProcessIdMint::sequential_id_for_testing(2),
-        "running",
-        None,
-    )
-    .await;
-    seed_segment(
-        &scratch,
-        &ProcessIdMint::sequential_id_for_testing(1),
-        0,
-        r#"{"n":0}"#,
-    )
-    .await;
-    seed_segment(
-        &scratch,
-        &ProcessIdMint::sequential_id_for_testing(1),
-        1,
-        r#"{"n":1}"#,
-    )
-    .await;
-    seed_segment(
-        &scratch,
-        &ProcessIdMint::sequential_id_for_testing(2),
-        0,
-        r#"{"n":2}"#,
-    )
-    .await;
+    let ids: Vec<ProcessId> = (1..=3)
+        .map(ProcessIdMint::sequential_id_for_testing)
+        .collect();
+    for (id, status) in ids.iter().zip(["waiting", "running", "waiting"]) {
+        seed_process(&scratch, id, status, None).await;
+    }
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
-    let mut walked: Vec<String> = Vec::new();
+    let mut walked: Vec<ProcessId> = Vec::new();
     let mut after: Option<String> = None;
     for _ in 0..8 {
         let scan = DurableScan {
-            surface: DurableSurface::ParkedSegment,
+            surface: DurableSurface::StartedProcess,
             after: after.clone(),
             limit: 1,
         };
         let page = preflight.scan_durable(&scan).await.expect("walk one item");
         assert!(page.items.len() <= 1, "a page never exceeds its limit");
-        for item in &page.items {
-            walked.push(match &item.payload {
-                DurablePayload::Json(json) => json.clone(),
-                other => panic!("a parked segment is JSON, got {other:?}"),
-            });
-        }
+        walked.extend(page.items.iter().filter_map(|item| item.process_id.clone()));
         match page.next {
             Some(cursor) => after = Some(cursor),
             None => break,
@@ -325,13 +213,8 @@ async fn paging_a_surface_one_item_at_a_time_is_exact() {
     }
 
     assert_eq!(
-        walked,
-        vec![
-            r#"{"n":0}"#.to_string(),
-            r#"{"n":1}"#.to_string(),
-            r#"{"n":2}"#.to_string(),
-        ],
-        "every segment appears exactly once, in key order"
+        walked, ids,
+        "every process appears exactly once, in key order"
     );
 
     scratch.cleanup().await;
@@ -508,21 +391,6 @@ async fn seed_process(
                  'program', NULL, 0, 0, 0, 1, '{status}', NULL, NULL, 'detached',
                  '{{\"process\":\"{process_id}\"}}'
              )",
-        ))
-        .await;
-}
-
-async fn seed_segment(
-    scratch: &ScratchSchema,
-    process_id: &ProcessId,
-    ordinal: i64,
-    handover: &str,
-) {
-    scratch
-        .apply(&format!(
-            "INSERT INTO lash_process_segment_handovers
-                 (process_id, segment_ordinal, committed_at_ms, handover_json)
-             VALUES ('{process_id}', {ordinal}, 0, '{handover}')"
         ))
         .await;
 }

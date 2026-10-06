@@ -8,8 +8,6 @@ use lash_core_execution::ProcessQuery as _;
 use lash_core_execution::facade_support;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
-#[path = "process_registry/continuation_store.rs"]
-mod continuation_store;
 #[path = "process_registry/event_release.rs"]
 mod event_release;
 #[path = "process_registry/lifecycle.rs"]

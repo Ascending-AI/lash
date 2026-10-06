@@ -87,7 +87,7 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 }
 
 fn step(name: &str, tool: &str) -> StepRequest {
-    StepRequest {
+    StepRequest::Tool {
         step: StepName(name.to_owned()),
         tool: ToolId::new(tool),
         input: json!({ "step": name }),
@@ -255,7 +255,7 @@ impl ProcessSteps for ProofSteps {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Ok(StepAdmission {
-            policy: policy(&step.tool),
+            policy: policy(&step.admitted_tool(KIND)),
             limit: ExecutionLimit::starting_at(
                 now_ms,
                 Duration::from_secs(60),
@@ -268,7 +268,7 @@ impl ProcessSteps for ProofSteps {
         let world = Arc::clone(&self.world);
         let database = Arc::clone(&self.database);
         let process = process.id.clone();
-        let tool = step.tool.as_str().to_owned();
+        let tool = step.admitted_tool(KIND).as_str().to_owned();
         let call = call.clone();
         Box::new(move |_token| {
             // Entered: noted before anything can stop the body.

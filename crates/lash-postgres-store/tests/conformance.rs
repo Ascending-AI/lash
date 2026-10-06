@@ -863,20 +863,6 @@ lash_conformance::session_graph_state_machine_tests!({
     })
 });
 
-lash_conformance::process_continuation_store_tests!({
-    let Some((database_fixture, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres continuation conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    let process_storage = Arc::new(storage.process_registry());
-    let registry = Arc::clone(&process_storage) as Arc<dyn lash_core_execution::ProcessRegistry>;
-    let store = process_storage as Arc<dyn lash_core_execution::ProcessContinuationStore>;
-    (database_fixture, registry, store)
-});
-
 #[test]
 fn trigger_subscription_owner_filter_is_pushed_down() {
     lash_conformance::trigger_subscription_owner_filter_is_pushed_down(
@@ -1167,7 +1153,5 @@ lash_conformance::process_prune_start_staging_tests!({
     let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessExecutionEnvStore>;
     (database_fixture, registry, env_store)
 });
-
-mod worker_recovery {}
 
 mod session_commands {}

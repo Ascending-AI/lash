@@ -24,9 +24,7 @@ fn one_process_module(process_name: &str, param: &str) -> lashlang::Program {
     )
 }
 
-use lash_core_execution::{
-    ProcessRegistrar as _, SessionCatalogStore as _, SessionHistoryStore as _,
-};
+use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
 
@@ -552,16 +550,6 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
     );
 }
 
-fn registration() -> ProcessRegistration {
-    lash_core::testing::held_engine_registration(
-        serde_json::Value::Null,
-        lash_core_execution::ProcessProvenance::session(lash_core_execution::SessionScope::new(
-            "session",
-        )),
-        lash_core_execution::Lifetime::Detached,
-    )
-}
-
 #[tokio::test]
 async fn real_locked_catalog_surfaces_typed_contention() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -685,91 +673,6 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
     assert!(
         result.is_err(),
         "unreadable requested session metadata must not look absent"
-    );
-}
-
-#[tokio::test]
-async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
-    let registry = crate::SqliteStoreSet::memory()
-        .await
-        .expect("memory registry")
-        .process_registry();
-    let segment_crash_id = registry
-        .register_process(registration())
-        .await
-        .expect("register")
-        .id;
-    let handover = |segment_ordinal| PersistedSegmentHandover {
-        writer: String::new(),
-        segment_ordinal,
-        handover: lash_core_execution::SegmentHandover {
-            reason: lash_core_execution::BoundaryReason::JournalBudget,
-            program_hash: "program-v1".to_string(),
-            engine_state: vec![segment_ordinal as u8],
-        },
-    };
-    registry
-        .put_segment_handover(&segment_crash_id, handover(1))
-        .await
-        .expect("persist current segment input");
-    registry
-        .put_segment_handover(&segment_crash_id, handover(2))
-        .await
-        .expect("persist successor before send");
-
-    assert_eq!(
-        registry
-            .get_segment_handover(&segment_crash_id, 1)
-            .await
-            .expect("replay read"),
-        Some(handover(1)),
-        "a crash before successor send must leave segment 1 replayable"
-    );
-    assert_eq!(
-        registry
-            .latest_segment_handover(&segment_crash_id)
-            .await
-            .expect("latest handover"),
-        Some(handover(2))
-    );
-}
-
-#[tokio::test]
-async fn terminal_segment_handover_cleanup_removes_continuation_state() {
-    let registry = crate::SqliteStoreSet::memory()
-        .await
-        .expect("memory registry")
-        .process_registry();
-    let segment_terminal_id = registry
-        .register_process(registration())
-        .await
-        .expect("register")
-        .id;
-    registry
-        .put_segment_handover(
-            &segment_terminal_id,
-            PersistedSegmentHandover {
-                writer: String::new(),
-                segment_ordinal: 1,
-                handover: lash_core_execution::SegmentHandover {
-                    reason: lash_core_execution::BoundaryReason::JournalBudget,
-                    program_hash: "program-v1".to_string(),
-                    engine_state: vec![7],
-                },
-            },
-        )
-        .await
-        .expect("persist handover");
-    registry
-        .delete_segment_handovers(&segment_terminal_id)
-        .await
-        .expect("terminal cleanup");
-    assert!(
-        registry
-            .latest_segment_handover(&segment_terminal_id)
-            .await
-            .expect("latest handover")
-            .is_none()
     );
 }
 

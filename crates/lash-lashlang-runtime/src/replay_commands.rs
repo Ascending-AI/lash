@@ -1,12 +1,11 @@
-//! The command protocol both lashlang bridges follow for every command that
+//! The command protocol the cell bridge follows for every command that
 //! leaves the VM toward the effect host (FIG-3586): mint the ordinal, issue
 //! its effects through a context whose journal writes ask the command's
 //! guard, and close it.
 //!
-//! A refusal at any step stops the run the same way on both bridges: the
-//! refusal becomes the execution's nested error — so a cell's turn parks and
-//! a process segment fails its run instead of committing — and the run's own
-//! cancellation scope is cancelled, so no further command leaves the run
+//! A refusal at any step stops the run: the refusal becomes the execution's
+//! nested error — so the cell's turn parks instead of committing — and the
+//! run's own cancellation scope is cancelled, so no further command leaves the run
 //! whatever a guest handler does with the error it is handed. That is what
 //! makes the refusal uncatchable: `try { await a() } catch {}; await b()`
 //! never dispatches `b` after `a` diverged.
@@ -154,10 +153,6 @@ impl<'run> ReplayCommands<'_, 'run> {
         self.cancellation.cancel();
         ExecutionHostError::new(message)
     }
-
-    /// Closes a run that journals no seal (a process body, whose terminal the
-    /// registry records). Writes nothing.
-    pub async fn close_unsealed(&self) {}
 
     /// Journals the run's seal as its last nested effect: the count of
     /// commands it issued and the digest of those it wrote, with `producer`

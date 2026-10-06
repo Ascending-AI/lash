@@ -2,7 +2,6 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::plugin::PluginError;
 
-use super::engine::PersistedSegmentHandover;
 use super::model::{ProcessChangeCursor, ProcessRecord};
 pub use super::registry_concerns::{
     ProcessClockRebind, ProcessEventLog, ProcessLifecycle, ProcessObserverRegistry, ProcessQuery,
@@ -97,116 +96,6 @@ pub struct ParentEndPlan {
     pub obligation_id: crate::store::ObligationId,
     /// Where that obligation stands.
     pub obligation_state: crate::store::ObligationState,
-}
-
-/// One segment of one process: the key every segment-scoped durable fact is
-/// stored under. It is the single place a process-identity change (for
-/// example keying by incarnation) has to touch.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ProcessSegmentKey {
-    pub process_id: crate::ProcessId,
-    pub segment_ordinal: u64,
-}
-
-impl ProcessSegmentKey {
-    pub fn new(process_id: impl Into<crate::ProcessId>, segment_ordinal: u64) -> Self {
-        Self {
-            process_id: process_id.into(),
-            segment_ordinal,
-        }
-    }
-}
-
-/// The durable fact that a handed-over segment's execution started (FIG-3588).
-///
-/// Written once, by the substrate that runs the segment, before the segment
-/// issues any effect, and never cleared while the segment's handover is
-/// retained. `nonce` is drawn from OS randomness by the execution that
-/// admitted the segment and journaled with that admission, so the execution's
-/// own retry recognises the marker as its own, while any other execution of
-/// the segment — one whose journal is gone — finds a nonce it did not draw and
-/// refuses to run the segment again. Segment 0 has no marker of its own: its
-/// start is the process's `first_started`.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SegmentStartMarker {
-    pub nonce: String,
-    pub started_at_ms: u64,
-    /// The plugin composition the segment was admitted under and the writer
-    /// format chosen for each plugin (FIG-4747): a successor adopts the
-    /// admitting build's plugins and the fleet record's ranges as they stood
-    /// at its admission, and every retry of it reads this record back.
-    /// `None` for a substrate whose segments carry no plugins.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugins: Option<crate::store::plugin_writers::PluginAdmission>,
-}
-
-/// The immutable handover committed by a segment's first writer.
-#[derive(Clone, Debug)]
-pub struct SegmentHandoverCommit {
-    pub scope: Option<lash_trace::DurableTraceScope>,
-    pub handover: PersistedSegmentHandover,
-    pub committed_at_ms: u64,
-}
-
-/// Substrate-scoped durable continuation storage. This is not part of the
-/// uniform process registry because only segmented execution substrates need
-/// it.
-#[async_trait::async_trait]
-pub trait ProcessContinuationStore: Send + Sync {
-    /// Park `handover` at its ordinal. The same bytes again, or any handover
-    /// from the writer whose handover is already parked there (its own retried
-    /// write), succeed and keep the parked bytes; a different writer's
-    /// handover is a conflict.
-    async fn put_segment_handover(
-        &self,
-        process_id: &ProcessId,
-        handover: PersistedSegmentHandover,
-    ) -> Result<crate::store::StoreTransition<SegmentHandoverCommit>, PluginError>;
-
-    async fn get_segment_handover(
-        &self,
-        process_id: &ProcessId,
-        segment_ordinal: u64,
-    ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
-
-    async fn latest_segment_handover(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
-
-    /// Retire every handover of `process_id` up to and including
-    /// `segment_ordinal`: the segment that resumed from it has handed the
-    /// process on and recorded the cancel it forwards (FIG-3673). A put never
-    /// retires an older handover, so a segment's handover outlives its
-    /// successor's start until the segment itself retires it.
-    async fn retire_segment_handovers_through(
-        &self,
-        process_id: &ProcessId,
-        segment_ordinal: u64,
-    ) -> Result<(), PluginError>;
-
-    async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError>;
-
-    /// The start marker of the handover retained for `segment`, or `None`
-    /// while no execution has started that segment (or no handover is
-    /// retained for it).
-    async fn segment_start(
-        &self,
-        segment: &ProcessSegmentKey,
-    ) -> Result<Option<SegmentStartMarker>, PluginError>;
-
-    /// Record that `segment` started, set-if-absent, and return the marker the
-    /// store now holds: `marker` when this call wrote it, or the one an
-    /// earlier call recorded, which is left unchanged. The caller compares the
-    /// returned nonce with its own. The segment's handover must be retained;
-    /// marking a segment with none is an error. An ended process starts no
-    /// segment: the call is refused [`PluginError::ProcessAlreadyTerminal`],
-    /// checked in the transaction that writes the marker (FIG-3819).
-    async fn mark_segment_started(
-        &self,
-        segment: &ProcessSegmentKey,
-        marker: SegmentStartMarker,
-    ) -> Result<SegmentStartMarker, PluginError>;
 }
 
 /// Compiled only under `cfg(any(test, feature = "testing"))` and never a

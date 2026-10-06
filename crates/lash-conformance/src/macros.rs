@@ -718,25 +718,6 @@ macro_rules! observer_intent_tests {
 }
 
 #[macro_export]
-macro_rules! process_continuation_store_tests {
-    ($fixture:block) => {
-        $crate::process_continuation_store_tests!(@catalogue $fixture; [
-            (process_continuation_store, "process-continuation-store"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, registry, store) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(registry, store).await;
-            }
-        )*
-    };
-}
-
-#[macro_export]
 macro_rules! process_trigger_retention_tests {
     ($fixture:block) => {
         $crate::process_trigger_retention_tests!(@catalogue $fixture; [

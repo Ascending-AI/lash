@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 
 use lash_trace::{
     TraceBranchMembership, TraceBranchSelection, TraceLabelMetadata, TraceLanguageExecutionMap,
-    TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
+    TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -143,21 +143,6 @@ fn append_trace_workflow_subgraph(
             to: edge.to.to_string(),
             label,
         });
-    }
-}
-
-pub(super) fn language_event_node_id(payload: &TraceLanguageExecutionPayload) -> Option<&str> {
-    match payload {
-        TraceLanguageExecutionPayload::NodeStarted { node_id, .. }
-        | TraceLanguageExecutionPayload::NodeWaiting { node_id, .. }
-        | TraceLanguageExecutionPayload::NodeResumed { node_id, .. }
-        | TraceLanguageExecutionPayload::NodeCancelled { node_id, .. }
-        | TraceLanguageExecutionPayload::NodeCompleted { node_id, .. }
-        | TraceLanguageExecutionPayload::NodeFailed { node_id, .. }
-        | TraceLanguageExecutionPayload::BranchSelected { node_id, .. } => Some(node_id),
-        TraceLanguageExecutionPayload::ChildStarted { parent_node_id, .. } => Some(parent_node_id),
-        TraceLanguageExecutionPayload::ExecutionStarted { .. }
-        | TraceLanguageExecutionPayload::ExecutionFinished { .. } => None,
     }
 }
 

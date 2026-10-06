@@ -11,8 +11,8 @@ use lash_durable::{
 
 use crate::runtime::actor::projection::ProjectionProviders;
 use crate::{
-    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessContinuationStore,
-    ProcessExecutionEnvStore, ProcessRegistry, TriggerStore,
+    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessExecutionEnvStore,
+    ProcessRegistry, TriggerStore,
 };
 
 /// The identity of one store set: the storage it names, such as a SQLite
@@ -359,11 +359,6 @@ impl Backend {
         self.inner.stores.definition_store()
     }
 
-    /// Parent-owned worker accounting on this backend.
-    pub fn worker_recovery(&self) -> Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore> {
-        self.inner.stores.worker_recovery()
-    }
-
     /// The attachment byte store sessions write through.
     pub fn attachment_store(&self) -> Arc<dyn AttachmentStore> {
         self.inner.stores.attachment_store()
@@ -441,10 +436,6 @@ pub trait StoreSet: Send + Sync {
     /// The durable registry of background processes.
     fn process_registry(&self) -> Arc<dyn ProcessRegistry>;
 
-    /// The continuation records of [`Self::process_registry`]'s processes,
-    /// which an engine that runs them resumes from.
-    fn process_continuations(&self) -> Arc<dyn ProcessContinuationStore>;
-
     /// The durable trigger subscriptions and occurrences.
     fn trigger_store(&self) -> Arc<dyn TriggerStore>;
 
@@ -462,9 +453,6 @@ pub trait StoreSet: Send + Sync {
     /// §3.6), in the same database as the modules and environments their
     /// manifests name.
     fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore>;
-
-    /// Parent-owned recovery counters for model-code executions.
-    fn worker_recovery(&self) -> Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>;
 
     /// The attachment byte store sessions write through.
     fn attachment_store(&self) -> Arc<dyn AttachmentStore>;

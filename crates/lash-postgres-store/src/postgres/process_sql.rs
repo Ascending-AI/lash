@@ -15,7 +15,7 @@ use lash_store_sql::process::{
     abandoned_consumer_holds::AbandonedConsumerHoldStatements,
     event_horizons::EventHorizonStatements, events::EventStatements, observers::ObserverStatements,
     parent_end_plans::ParentEndPlanStatements, processes::ProcessStatements,
-    segment_handovers::SegmentHandoverStatements, tombstones::TombstoneStatements,
+    tombstones::TombstoneStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -489,42 +489,6 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `process_segment_handovers` statements only PostgreSQL issues.
-    pub(crate) struct SegmentHandoverPostgresStatements @ "process_segment_handover" {
-        /// Insert after the ordinal was read as absent under the owning
-        /// process row lock, which also fences terminal completion.
-        insert = "INSERT INTO process_segment_handovers
-             (process_id, segment_ordinal, handover_json, committed_at_ms)
-             VALUES (?1, ?2, ?3, ?4)";
-
-        /// The parked-continuation page of the preflight walk: after `?1` /
-        /// `?2`, at most `?3`.
-        ///
-        /// The resume filter is a row-value comparison against the same two
-        /// columns the `ORDER BY` uses, which cannot disagree with that
-        /// ordering under any collation. SQLite mints a text cursor in the
-        /// projection instead, which is the fork.
-        list_parked_segments = "SELECT
-         handovers.process_id,
-         handovers.segment_ordinal,
-         handovers.handover_json,
-         process.status,
-         process.wake_session_id,
-         process.record_json
-     FROM process_segment_handovers AS handovers
-     JOIN processes AS process
-         ON process.process_id = handovers.process_id
-     WHERE {{live_process_status(process.status)}}
-       AND (
-           ?1::text IS NULL
-           OR (handovers.process_id, handovers.segment_ordinal) > (?1::text, ?2::bigint)
-       )
-     ORDER BY handovers.process_id, handovers.segment_ordinal
-     LIMIT ?3";
-    }
-}
-
-lash_store_sql::statements! {
     /// `parent_end_plans` statements only PostgreSQL issues.
     pub(crate) struct ParentEndPlanPostgresStatements @ "parent_end_plan" {
         /// Reclaim settled plans older than `?1` that no live child still
@@ -561,10 +525,6 @@ pub(crate) struct ProcessSql {
     pub(crate) observer: ObserverStatements,
     /// `process_observers` statements only PostgreSQL issues.
     pub(crate) observer_postgres: ObserverPostgresStatements,
-    /// `process_segment_handovers` statements both backends issue verbatim.
-    pub(crate) handover: SegmentHandoverStatements,
-    /// `process_segment_handovers` statements only PostgreSQL issues.
-    pub(crate) handover_postgres: SegmentHandoverPostgresStatements,
     /// `process_tombstones` statements both backends issue verbatim.
     pub(crate) tombstone: TombstoneStatements,
     /// `process_tombstones` statements only PostgreSQL issues.
@@ -589,8 +549,6 @@ static PROCESS_SQL: LazyLock<ProcessSql> = LazyLock::new(|| {
         event_horizon: EventHorizonStatements::render(dialect),
         observer: ObserverStatements::render(dialect),
         observer_postgres: ObserverPostgresStatements::render(dialect),
-        handover: SegmentHandoverStatements::render(dialect),
-        handover_postgres: SegmentHandoverPostgresStatements::render(dialect),
         tombstone: TombstoneStatements::render(dialect),
         tombstone_postgres: TombstonePostgresStatements::render(dialect),
         clock_postgres: ChangeClockPostgresStatements::render(dialect),

@@ -332,7 +332,7 @@ impl ProcessActivation {
             self.steps
                 .admit(&record, &step.request, millis(now))
                 .ok()
-                .map(|admission| (step.request.tool.clone(), admission.policy))
+                .map(|admission| (step.request.admitted_tool(kind), admission.policy))
         }));
         let fold = round::fold(&rows, &policies)
             .map_err(|error| corrupt("a process's run records", error))?;
@@ -620,7 +620,7 @@ fn step_request_material(
         },
         MaterialRole::PreparedRequest,
         None,
-        step.request.input.to_string(),
+        step.request.input().to_string(),
     )
     .reference(MaterialLocation::JournalLocal)
     .expect("a step request's material encodes")
@@ -808,6 +808,9 @@ impl ProcessActivation {
         now: DurableInstant,
         fresh: &mut std::collections::BTreeMap<StepName, AdmittedExecution>,
     ) -> Result<Option<crate::ProcessOutcome>, DurableError> {
+        let ProcessInput::Engine { kind: engine, .. } = record.input.as_ref() else {
+            return Err(corrupt("an advanced process", "it runs no engine"));
+        };
         let budgets = lash_sansio::ExecutionBudgets::default();
         let deadline = |requested: Option<std::time::Duration>| {
             WaitDeadline::resolve(
@@ -826,10 +829,10 @@ impl ProcessActivation {
                 let mut drafts = Vec::with_capacity(requests.len());
                 let mut names = Vec::with_capacity(requests.len());
                 for (member, request) in (0_u64..).zip(requests) {
-                    if driver.steps.contains_key(&request.step) {
+                    if driver.steps.contains_key(request.step()) {
                         return Ok(Some(refused(format!(
                             "step `{}` is already in flight",
-                            request.step.0
+                            request.step().0
                         ))));
                     }
                     let admitted = match self.steps.admit(record, &request, millis(now)) {
@@ -837,7 +840,7 @@ impl ProcessActivation {
                         Err(refusal) => return Ok(Some(refused(refusal.to_string()))),
                     };
                     let call = admission.call_id(&[ToolCallPosition::ProcessStep {
-                        step: &request.step.0,
+                        step: &request.step().0,
                         run,
                     }]);
                     let step = InFlight {
@@ -852,14 +855,14 @@ impl ProcessActivation {
                     };
                     drafts.push(ExecutionDraft::new(
                         step.call.clone(),
-                        step.request.tool.clone(),
+                        step.request.admitted_tool(engine),
                         step_request_material(process, &step),
                         step.policy,
                         step.limit(),
                         None,
                     ));
-                    names.push(step.request.step.clone());
-                    driver.steps.insert(step.request.step.clone(), step);
+                    names.push(step.request.step().clone());
+                    driver.steps.insert(step.request.step().clone(), step);
                 }
                 if drafts.is_empty() {
                     return Ok(Some(refused("a Steps action names no step".to_owned())));

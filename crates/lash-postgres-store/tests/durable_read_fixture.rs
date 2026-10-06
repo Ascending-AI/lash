@@ -11,9 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use lash_core_execution::{
-    DeploymentStore, ProcessContinuationStore, ProcessExecutionEnvStore, TriggerStore,
-};
+use lash_core_execution::{DeploymentStore, ProcessExecutionEnvStore, TriggerStore};
 use lash_postgres_store::PostgresStorage;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
@@ -180,7 +178,6 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
         store: store as Arc<dyn DeploymentStore>,
         processes: Arc::clone(&processes)
             as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
-        continuations: processes as Arc<dyn ProcessContinuationStore>,
         process_envs: process_envs as Arc<dyn ProcessExecutionEnvStore>,
         triggers: triggers as Arc<dyn TriggerStore>,
         // PostgreSQL is storage only: its effects journal on Restate (ADR 0104).

@@ -887,20 +887,6 @@ fn drain_area_witnesses() {
     let _ = lash::plugins::RuntimeExecutionContext::turn_context;
     // W0280: lash_core::SansIoTurnInput [type_alias]
     type_witness::<lash_core::SansIoTurnInput>();
-    // W0281: lash::plugins::SegmentHandover [struct]
-    type_witness::<lash::plugins::SegmentHandover>();
-    // W0282: lash::plugins::SegmentHandover::engine_state [field]
-    field_witness(|value: &lash::plugins::SegmentHandover| {
-        let _ = &value.engine_state;
-    });
-    // W0283: lash::plugins::SegmentHandover::program_hash [field]
-    field_witness(|value: &lash::plugins::SegmentHandover| {
-        let _ = &value.program_hash;
-    });
-    // W0284: lash::plugins::SegmentHandover::reason [field]
-    field_witness(|value: &lash::plugins::SegmentHandover| {
-        let _ = &value.reason;
-    });
     // W0285: lash::durability::SegmentProgress [struct]
     type_witness::<lash::durability::SegmentProgress>();
     // W0286: lash::durability::SegmentProgress::effects_executed [field]

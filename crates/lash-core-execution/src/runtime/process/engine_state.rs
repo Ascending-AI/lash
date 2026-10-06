@@ -81,17 +81,145 @@ pub enum HostWaitKind {
     Custom,
 }
 
-/// One step an engine asks lash to run: a catalog tool, under its
-/// declaration, `ExecutionPolicy` and ceiling. Its identity is
+/// One step an engine asks lash to run. Its identity is
 /// `(process, step, ordinal)`, and its `ToolCallId` derives from it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct StepRequest {
+pub enum StepRequest {
+    /// A catalog tool, under its declaration, `ExecutionPolicy` and ceiling.
+    Tool {
+        /// The step's name.
+        step: StepName,
+        /// The catalog tool it runs.
+        tool: lash_sansio::ToolId,
+        /// The tool's input.
+        input: serde_json::Value,
+    },
+    /// A body of the process's own engine, run through the [`EngineSteps`]
+    /// its registration declares, under a pinned `Repeatable` policy. It is
+    /// neither model-visible nor host-invocable. A registration that
+    /// declares no engine steps, or not this kind, is refused before
+    /// admission ([`EngineStepRefusal`]).
+    Engine {
+        /// The step's name.
+        step: StepName,
+        /// Which of the engine's bodies runs.
+        kind: EngineStepKind,
+        /// The body's input.
+        input: serde_json::Value,
+    },
+}
+
+impl StepRequest {
     /// The step's name.
-    pub step: StepName,
-    /// The catalog tool it runs.
-    pub tool: lash_sansio::ToolId,
-    /// The tool's input.
+    #[must_use]
+    pub fn step(&self) -> &StepName {
+        match self {
+            Self::Tool { step, .. } | Self::Engine { step, .. } => step,
+        }
+    }
+
+    /// The step's input: the tool's, or the engine body's.
+    #[must_use]
+    pub fn input(&self) -> &serde_json::Value {
+        match self {
+            Self::Tool { input, .. } | Self::Engine { input, .. } => input,
+        }
+    }
+
+    /// The tool its admission records for a process of engine `engine`:
+    /// the catalog tool, or for an engine step `<engine>/<kind>`, which
+    /// only identifies the record. An engine step is dispatched by its
+    /// variant, never by this name.
+    #[must_use]
+    pub fn admitted_tool(&self, engine: &str) -> lash_sansio::ToolId {
+        match self {
+            Self::Tool { tool, .. } => tool.clone(),
+            Self::Engine { kind, .. } => lash_sansio::ToolId::new(format!("{engine}/{}", kind.0)),
+        }
+    }
+}
+
+/// The name an engine gives one of its own step bodies; meaningful only to
+/// that engine's [`EngineSteps`].
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub struct EngineStepKind(pub String);
+
+impl EngineStepKind {
+    /// The kind named `name`.
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+}
+
+/// What an engine step's body is handed: the process, what its row
+/// recorded, the catalog its steps resolve against, the activation's clock
+/// reading and the step's own kind and input.
+#[derive(Clone)]
+pub struct EngineStepRun {
+    /// The process the step belongs to.
+    pub process: ProcessId,
+    /// What the engine's `creation_config` recorded on the process's row.
+    pub engine_config: Option<serde_json::Value>,
+    /// The catalog the process's steps resolve against.
+    pub tool_catalog: std::sync::Arc<crate::ToolCatalog>,
+    /// The activation's clock reading when the body started.
+    pub now: DurableInstant,
+    /// The activation's clock, for a body that waits.
+    pub clock: std::sync::Arc<dyn crate::Clock>,
+    /// The backend's projection providers, which a body that runs a VM reads
+    /// projections through (ADR 0132 §9).
+    pub projection_providers:
+        Option<std::sync::Arc<dyn crate::runtime::actor::projection::ProjectionProviders>>,
+    /// Which body runs.
+    pub kind: EngineStepKind,
+    /// The body's input.
     pub input: serde_json::Value,
+}
+
+/// An engine's own step bodies, declared at registration
+/// ([`ProcessEngineRegistration::with_engine_steps`](super::ProcessEngineRegistration::with_engine_steps)).
+/// Each runs under a pinned `Repeatable` policy: a crash before its outcome
+/// commits runs it again from the same input, so a body must be a
+/// recomputation from that input, with no effect of its own.
+#[async_trait::async_trait]
+pub trait EngineSteps: Send + Sync {
+    /// The kinds of body this engine runs.
+    fn kinds(&self) -> Vec<EngineStepKind>;
+
+    /// Run one body to its outcome, observing `cancel`.
+    async fn run(
+        &self,
+        run: EngineStepRun,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> SettledOutcome;
+}
+
+/// Why an engine step was refused before admission.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum EngineStepRefusal {
+    /// No engine of this kind is registered.
+    #[error("no process engine `{engine}` is registered")]
+    UnknownEngine {
+        /// The engine kind.
+        engine: String,
+    },
+    /// The engine's registration declares no engine steps.
+    #[error("process engine `{engine}` declares no engine steps")]
+    NoEngineSteps {
+        /// The engine kind.
+        engine: String,
+    },
+    /// The engine's steps do not include this kind.
+    #[error("process engine `{engine}` declares no engine step `{kind:?}`")]
+    UndeclaredStep {
+        /// The engine kind.
+        engine: String,
+        /// The step kind asked for.
+        kind: EngineStepKind,
+    },
 }
 
 /// What an engine asks lash to do next.

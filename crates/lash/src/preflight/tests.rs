@@ -15,7 +15,6 @@
               in-test exemption does not recognize"
 )]
 
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 
@@ -27,10 +26,7 @@ use lash_core::{
 };
 
 use super::*;
-use crate::formats::{
-    LASHLANG_SEGMENT_STATE_VERSION, RLM_SNAPSHOT_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION,
-    VM_CONTINUATION_FORMAT_VERSION,
-};
+use crate::formats::{RLM_SNAPSHOT_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION};
 
 /// A handle whose surfaces are exactly what a test declares.
 #[derive(Default)]
@@ -185,31 +181,6 @@ impl StorePreflight for FakeStore {
     }
 }
 
-fn segment_item(process: &str, session: &str, segment: u32, continuation: u32) -> DurableItem {
-    let engine_state = serde_json::to_vec(&serde_json::json!({
-        "version": segment,
-        "vm": {"vm_contract": {
-            "continuation": continuation,
-        }},
-    }))
-    .expect("the fixture encodes");
-    DurableItem {
-        surface: DurableSurface::ParkedSegment,
-        cursor: format!("{process}:0"),
-        process_id: Some(ProcessId::fixture(process)),
-        session_id: Some(SessionId::fixture(session.to_string())),
-        status: Some("waiting".to_string()),
-        owner_record: None,
-        payload: DurablePayload::Json(
-            serde_json::json!({
-                "segment_ordinal": 0,
-                "handover": {"engine_state": engine_state},
-            })
-            .to_string(),
-        ),
-    }
-}
-
 fn checkpoint_item(session: &str, schema_version: u32, encoding: u32) -> DurableItem {
     let bytes = rmp_serde::to_vec_named(&serde_json::json!({
         "schema_version": schema_version,
@@ -279,15 +250,6 @@ fn healthy_store() -> FakeStore {
     FakeStore::default()
         .with_database("durable core", 37, StoreSchemaVerdict::Matches)
         .with_items(
-            DurableSurface::ParkedSegment,
-            vec![segment_item(
-                "p-1",
-                "s-1",
-                LASHLANG_SEGMENT_STATE_VERSION,
-                VM_CONTINUATION_FORMAT_VERSION,
-            )],
-        )
-        .with_items(
             DurableSurface::SessionCheckpoint,
             vec![checkpoint_item("s-1", SESSION_CHECKPOINT_SCHEMA_VERSION, 2)],
         )
@@ -306,7 +268,7 @@ async fn a_store_this_build_wrote_is_ready_with_an_empty_drain_list() {
     assert!(report.drain.is_empty(), "{:?}", report.drain);
     assert_eq!(report.refusal_message(), None);
     assert_eq!(
-        component(&report, DurableFormat::LashlangSegmentHandover).verdict,
+        component(&report, DurableFormat::RlmSnapshotEnvelope).verdict,
         ComponentVerdict::AllReadable
     );
     assert_eq!(
@@ -358,45 +320,35 @@ async fn a_future_module_artifact_refusal_names_recompile_and_republish() {
 }
 
 #[tokio::test]
-async fn a_segment_from_another_build_refuses_and_lands_on_the_drain_list() {
-    // The whole point of the surface: the refusal is named, counted and
-    // attributed to a process an operator can drain, before anything is wired.
+async fn a_state_from_another_build_refuses_and_lands_on_the_drain_list() {
+    // The whole point of the walk: the refusal is named, counted and
+    // attributed to what an operator can drain, before anything is wired.
     let store = FakeStore::default()
         .with_database("durable core", 37, StoreSchemaVerdict::Matches)
         .with_items(
-            DurableSurface::ParkedSegment,
+            DurableSurface::SessionExecutionState,
             vec![
-                segment_item(
-                    "p-1",
-                    "s-1",
-                    LASHLANG_SEGMENT_STATE_VERSION - 1,
-                    VM_CONTINUATION_FORMAT_VERSION,
-                ),
-                segment_item(
-                    "p-2",
-                    "s-2",
-                    LASHLANG_SEGMENT_STATE_VERSION,
-                    VM_CONTINUATION_FORMAT_VERSION,
-                ),
+                execution_state_item("s-1", RLM_SNAPSHOT_VERSION - 1),
+                execution_state_item("s-2", RLM_SNAPSHOT_VERSION),
             ],
         );
-    let report = probe_store(&store, PreflightOptions::summary())
+    let report = probe_store(&store, PreflightOptions::deep())
         .await
         .expect("the probe reads the store");
 
     assert_eq!(report.outcome, PreflightOutcome::Refused);
-    let handover = component(&report, DurableFormat::LashlangSegmentHandover);
-    assert_eq!(handover.verdict, ComponentVerdict::Refused);
-    assert_eq!(handover.scanned, 2);
+    let envelope = component(&report, DurableFormat::RlmSnapshotEnvelope);
+    assert_eq!(envelope.verdict, ComponentVerdict::Refused);
+    assert_eq!(envelope.scanned, 2);
     assert_eq!(
-        handover.found,
+        envelope.found,
         vec![
             FoundVersion {
-                version: LASHLANG_SEGMENT_STATE_VERSION - 1,
+                version: RLM_SNAPSHOT_VERSION - 1,
                 count: 1
             },
             FoundVersion {
-                version: LASHLANG_SEGMENT_STATE_VERSION,
+                version: RLM_SNAPSHOT_VERSION,
                 count: 1
             },
         ],
@@ -405,13 +357,8 @@ async fn a_segment_from_another_build_refuses_and_lands_on_the_drain_list() {
 
     assert_eq!(report.drain.len(), 1, "{:?}", report.drain);
     let blocker = &report.drain[0];
-    assert_eq!(
-        blocker.process_id.as_deref(),
-        Some(ProcessId::fixture("p-1").as_str())
-    );
     assert_eq!(blocker.session_id.as_deref(), Some("s-1"));
-    assert_eq!(blocker.status.as_deref(), Some("waiting"));
-    assert_eq!(blocker.found, Some(LASHLANG_SEGMENT_STATE_VERSION - 1));
+    assert_eq!(blocker.found, Some(RLM_SNAPSHOT_VERSION - 1));
 
     let message = report.refusal_message().expect("a refusal has a message");
     assert!(message.contains("Drain 1 affected item(s)"), "{message}");
@@ -486,21 +433,16 @@ async fn an_unreadable_database_is_undecided_rather_than_ready() {
 
 #[tokio::test]
 async fn a_payload_nobody_can_decode_is_undecided_and_never_panics() {
-    let mut item = segment_item(
-        "p-1",
-        "s-1",
-        LASHLANG_SEGMENT_STATE_VERSION,
-        VM_CONTINUATION_FORMAT_VERSION,
-    );
-    item.payload = DurablePayload::Json("not json at all".to_string());
-    let store = FakeStore::default().with_items(DurableSurface::ParkedSegment, vec![item]);
-    let report = probe_store(&store, PreflightOptions::summary())
+    let mut item = execution_state_item("s-1", RLM_SNAPSHOT_VERSION);
+    item.payload = DurablePayload::MessagePack(vec![0xc1, 0xc1]);
+    let store = FakeStore::default().with_items(DurableSurface::SessionExecutionState, vec![item]);
+    let report = probe_store(&store, PreflightOptions::deep())
         .await
         .expect("the probe reads the store");
-    let segment = component(&report, DurableFormat::LashlangSegmentHandover);
-    assert_eq!(segment.verdict, ComponentVerdict::Undecodable);
-    assert_eq!(segment.undecodable, 1);
-    assert_eq!(segment.undecodable_reasons.len(), 1);
+    let envelope = component(&report, DurableFormat::RlmSnapshotEnvelope);
+    assert_eq!(envelope.verdict, ComponentVerdict::Undecodable);
+    assert_eq!(envelope.undecodable, 1);
+    assert_eq!(envelope.undecodable_reasons.len(), 1);
     assert_eq!(report.outcome, PreflightOutcome::Undecided);
     assert!(report.drain.is_empty(), "nobody read a version to refuse");
 }
@@ -526,8 +468,8 @@ async fn summary_mode_names_the_per_session_walk_it_skipped() {
         "a format whose surface was skipped must not read as empty"
     );
     assert_eq!(
-        component(&report, DurableFormat::LashlangSegmentHandover).verdict,
-        ComponentVerdict::AllReadable,
+        component(&report, DurableFormat::ModuleArtifact).verdict,
+        ComponentVerdict::Empty,
         "the cheap surfaces are still walked"
     );
 }
@@ -578,7 +520,7 @@ async fn a_report_always_names_the_formats_no_walk_enumerates() {
 #[tokio::test]
 async fn a_backend_that_cannot_walk_a_surface_says_so_verbatim() {
     let store = healthy_store().unscannable(
-        DurableSurface::ParkedSegment,
+        DurableSurface::StartedProcess,
         "the deployment declared no process registry",
     );
     let report = probe_store(&store, PreflightOptions::summary())
@@ -586,14 +528,14 @@ async fn a_backend_that_cannot_walk_a_surface_says_so_verbatim() {
         .expect("the probe reads the store");
     assert!(
         report.not_scanned.iter().any(|entry| {
-            entry.what() == DurableSurface::ParkedSegment.name()
+            entry.what() == DurableSurface::StartedProcess.name()
                 && entry.reason() == "the deployment declared no process registry"
         }),
         "{:?}",
         report.not_scanned
     );
     assert_eq!(
-        component(&report, DurableFormat::LashlangSegmentHandover).verdict,
+        component(&report, DurableFormat::Bytecode).verdict,
         ComponentVerdict::NotScanned,
         "an unwalked surface must never read as an empty one"
     );
@@ -604,32 +546,25 @@ async fn paging_reads_every_item_exactly_once() {
     // A walk that dropped or double-counted items would report drain lists an
     // operator cannot reconcile with the store.
     let items: Vec<DurableItem> = (0..7)
-        .map(|index| {
-            segment_item(
-                &format!("p-{index}"),
-                "s-1",
-                LASHLANG_SEGMENT_STATE_VERSION - 1,
-                VM_CONTINUATION_FORMAT_VERSION,
-            )
-        })
+        .map(|index| execution_state_item(&format!("s-{index}"), RLM_SNAPSHOT_VERSION - 1))
         .collect();
-    let store = FakeStore::default().with_items(DurableSurface::ParkedSegment, items);
-    let report = probe_store(&store, PreflightOptions::summary().with_page_size(2))
+    let store = FakeStore::default().with_items(DurableSurface::SessionExecutionState, items);
+    let report = probe_store(&store, PreflightOptions::deep().with_page_size(2))
         .await
         .expect("the probe reads the store");
     assert_eq!(
-        component(&report, DurableFormat::LashlangSegmentHandover).scanned,
+        component(&report, DurableFormat::RlmSnapshotEnvelope).scanned,
         7
     );
     assert_eq!(report.drain.len(), 7);
     let mut named: Vec<&str> = report
         .drain
         .iter()
-        .filter_map(|blocker| blocker.process_id.as_deref())
+        .filter_map(|blocker| blocker.session_id.as_deref())
         .collect();
     named.sort();
     named.dedup();
-    assert_eq!(named.len(), 7, "no process appears twice");
+    assert_eq!(named.len(), 7, "no session appears twice");
 }
 
 #[tokio::test]
@@ -754,44 +689,33 @@ async fn the_serialized_report_carries_every_field_a_gate_asserts_on() {
     let store = FakeStore::default()
         .with_database("durable core", 37, StoreSchemaVerdict::Matches)
         .with_items(
-            DurableSurface::ParkedSegment,
-            vec![segment_item(
-                "p-1",
-                "s-1",
-                LASHLANG_SEGMENT_STATE_VERSION - 1,
-                VM_CONTINUATION_FORMAT_VERSION,
-            )],
+            DurableSurface::SessionExecutionState,
+            vec![execution_state_item("s-1", RLM_SNAPSHOT_VERSION - 1)],
         );
-    let report = probe_store(&store, PreflightOptions::summary())
+    let report = probe_store(&store, PreflightOptions::deep())
         .await
         .expect("the probe reads the store");
     let json = serde_json::to_value(&report).expect("the report serializes");
 
     assert_eq!(json["outcome"], "refused");
-    assert_eq!(json["mode"], "summary");
+    assert_eq!(json["mode"], "deep");
     assert_eq!(json["backend"], "sqlite (/srv/lash/durable-core.db)");
     assert_eq!(json["schema"]["outcome"], "ready");
-    assert_eq!(
-        json["drain"][0]["process_id"],
-        ProcessId::fixture("p-1").as_str()
-    );
-    assert_eq!(
-        json["drain"][0]["found"],
-        LASHLANG_SEGMENT_STATE_VERSION - 1
-    );
+    assert_eq!(json["drain"][0]["session_id"], "s-1");
+    assert_eq!(json["drain"][0]["found"], RLM_SNAPSHOT_VERSION - 1);
     assert!(
         json["not_scanned"]
             .as_array()
             .is_some_and(|list| !list.is_empty())
     );
-    let handover = json["components"]
+    let envelope = json["components"]
         .as_array()
         .expect("components is a list")
         .iter()
-        .find(|row| row["format"] == DurableFormat::LashlangSegmentHandover.name())
-        .expect("the handover row is present");
-    assert_eq!(handover["verdict"], "refused");
-    assert_eq!(handover["probe"], "comparable");
-    assert_eq!(handover["evidence"]["kind"], "direct");
-    assert_eq!(handover["scanned"], 1);
+        .find(|row| row["format"] == DurableFormat::RlmSnapshotEnvelope.name())
+        .expect("the envelope row is present");
+    assert_eq!(envelope["verdict"], "refused");
+    assert_eq!(envelope["probe"], "comparable");
+    assert_eq!(envelope["evidence"]["kind"], "direct");
+    assert_eq!(envelope["scanned"], 1);
 }

@@ -139,7 +139,6 @@ pub async fn probe_store(
     let mut walk = Walk::default();
     for surface in [
         DurableSurface::ModuleArtifact,
-        DurableSurface::ParkedSegment,
         DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,
@@ -190,12 +189,10 @@ enum SurfaceRelation {
     NotPersisted,
 }
 
-const PRIMARY_FORMATS: [DurableFormat; 6] = [
+const PRIMARY_FORMATS: [DurableFormat; 4] = [
     DurableFormat::ModuleArtifact,
     DurableFormat::Bytecode,
     DurableFormat::SessionCheckpointManifest,
-    DurableFormat::ProcessWakeDelivery,
-    DurableFormat::LashlangSegmentHandover,
     DurableFormat::RlmSnapshotEnvelope,
 ];
 
@@ -265,22 +262,21 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
              rather than at rest",
         ),
         // Every started process's start stamp is the program identity it runs
-        // under (FIG-3571); a parked handover restates it.
+        // under (FIG-3571).
         DurableFormat::Bytecode => SurfaceRelation::Walk {
             surface: DurableSurface::StartedProcess,
             primary: true,
         },
-        DurableFormat::VmContinuation => SurfaceRelation::Walk {
-            surface: DurableSurface::ParkedSegment,
-            primary: false,
-        },
+        DurableFormat::VmContinuation => {
+            SurfaceRelation::CarriedBy(DurableFormat::LashlangSegmentHandover)
+        }
         DurableFormat::LashlangSnapshot => {
             SurfaceRelation::CarriedBy(DurableFormat::RlmSnapshotEnvelope)
         }
-        DurableFormat::LashlangSegmentHandover => SurfaceRelation::Walk {
-            surface: DurableSurface::ParkedSegment,
-            primary: true,
-        },
+        DurableFormat::LashlangSegmentHandover => SurfaceRelation::Unwalkable(
+            "no bounded surface: a lashlang process's engine state is its snapshot row, refused \
+             when the process activation restores it rather than at rest",
+        ),
         DurableFormat::RlmSnapshotEnvelope => SurfaceRelation::Walk {
             surface: DurableSurface::SessionExecutionState,
             primary: true,

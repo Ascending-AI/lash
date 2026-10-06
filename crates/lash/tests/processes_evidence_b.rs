@@ -374,36 +374,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessEngineContributionContext::process_lifecycle_available;
     // W0459: lash::plugins::ProcessEngineContributionContext::trace_runtime [function]
     let _ = lash::plugins::ProcessEngineContributionContext::trace_runtime;
-    // W0460: lash::plugins::ProcessEngineRunContext [struct]
-    type_witness::<lash::plugins::ProcessEngineRunContext>();
-    // W0461: lash::plugins::ProcessEngineRunContext::cancellation_token [function]
-    let _ = lash::plugins::ProcessEngineRunContext::cancellation_token;
-    // W0463: lash::plugins::ProcessEngineRunContext::execution_context [function]
-    let _ = lash::plugins::ProcessEngineRunContext::execution_context;
-    // W0464: lash::plugins::ProcessEngineRunContext::into_runtime_context [function]
-    let _ = lash::plugins::ProcessEngineRunContext::into_runtime_context;
-    // W0465: lash::plugins::ProcessEngineRunContext::named_phase [function]
-    let _ = lash::plugins::ProcessEngineRunContext::named_phase;
-    // W0466: lash::plugins::ProcessEngineRunContext::plugins [function]
-    let _ = lash::plugins::ProcessEngineRunContext::plugins;
-    // W0467: lash::plugins::ProcessEngineRunContext::process_registry_available [function]
-    let _ = lash::plugins::ProcessEngineRunContext::process_registry_available;
-    // W0468: lash::plugins::ProcessEngineRunContext::processes [function]
-    let _ = lash::plugins::ProcessEngineRunContext::processes;
-    // W0470: lash::plugins::ProcessEngineRunContext::registration [function]
-    let _ = lash::plugins::ProcessEngineRunContext::registration;
-    // W0471: lash::plugins::ProcessEngineRunContext::resolved_tool_catalog [function]
-    let _ = lash::plugins::ProcessEngineRunContext::resolved_tool_catalog;
-    // W0473: lash::plugins::ProcessEngineRunContext::process_id [function]
-    let _ = lash::plugins::ProcessEngineRunContext::process_id;
-    // W0474: lash::plugins::ProcessEngineRunContext::session_store_factory [function]
-    let _ = lash::plugins::ProcessEngineRunContext::session_store_factory;
-    // W0475: lash::plugins::ProcessEngineRunContext::store [function]
-    let _ = lash::plugins::ProcessEngineRunContext::store;
-    // W0476: lash::plugins::ProcessEngineRunContext::take_handover [function]
-    let _ = lash::plugins::ProcessEngineRunContext::take_handover;
-    // W0477: lash::plugins::ProcessEngineRunContext::turn_phase_probe [function]
-    let _ = lash::plugins::ProcessEngineRunContext::turn_phase_probe;
     // W0482: lash::process::ProcessExecutionWriteAuthority [struct]
     type_witness::<lash::process::ProcessExecutionWriteAuthority>();
     // W0483: lash::process::ProcessExecutionWriteAuthority::attempt [function]
@@ -443,25 +413,14 @@ fn processes_area_witnesses_b() {
     type_witness::<lash::durability::ProcessOutcomeObserver>();
     // W0503: lash::plugins::ProcessRunOutcome [enum]
     type_witness::<lash::plugins::ProcessRunOutcome>();
-    // W0504: lash::plugins::ProcessRunOutcome::SegmentBoundary [variant]
-    variant_witness(|value: &lash::plugins::ProcessRunOutcome| {
-        matches!(value, lash::plugins::ProcessRunOutcome::SegmentBoundary(..))
-    });
-    // W0505: lash::plugins::ProcessRunOutcome::SegmentBoundary::0 [field]
-    field_witness(|value: &lash::plugins::ProcessRunOutcome| {
-        if let lash::plugins::ProcessRunOutcome::SegmentBoundary(f0) = value {
-            let _ = f0;
-        }
-    });
     // W0506: lash::plugins::ProcessRunOutcome::Terminal [variant]
     variant_witness(|value: &lash::plugins::ProcessRunOutcome| {
         matches!(value, lash::plugins::ProcessRunOutcome::Terminal { .. })
     });
     // W0508: lash::plugins::ProcessRunOutcome::Terminal::output [field]
     field_witness(|value: &lash::plugins::ProcessRunOutcome| {
-        if let lash::plugins::ProcessRunOutcome::Terminal { output, .. } = value {
-            let _ = output;
-        }
+        let lash::plugins::ProcessRunOutcome::Terminal { output, .. } = value;
+        let _ = output;
     });
     // W0509: lash_core::ProcessSpawnProvenance [struct]
     type_witness::<lash_core::ProcessSpawnProvenance>();
@@ -532,8 +491,6 @@ fn processes_area_witnesses_b() {
     });
     // W0533: lash::plugins::RuntimeExecutionContext::append_process_events [function]
     let _ = lash::plugins::RuntimeExecutionContext::append_process_events;
-    // W0534: lash::plugins::RuntimeExecutionContext::await_process_signal_event [function]
-    let _ = lash::plugins::RuntimeExecutionContext::await_process_signal_event;
     // W0535: lash::plugins::RuntimeExecutionContext::captured_process_execution_env_ref [function]
     let _ = lash::plugins::RuntimeExecutionContext::captured_process_execution_env_ref;
     // W0536: lash::plugins::RuntimeExecutionContext::process_handle_json [function]
@@ -585,34 +542,12 @@ fn processes_area_witnesses_b() {
         lash::SessionId::from("x"),
         todo!(),
     );
-    // W0616: lash::plugins::ProcessEngineProcessContext [struct]
-    type_witness::<lash::plugins::ProcessEngineProcessContext>();
-    // W0618: lash::plugins::ProcessEngineProcessContext::clear_wait [function]
-    let _ = lash::plugins::ProcessEngineProcessContext::clear_wait;
-    // W0619: lash::plugins::ProcessEngineProcessContext::emit [function]
-    let _ = lash::plugins::ProcessEngineProcessContext::emit;
-    // W0621: lash::plugins::ProcessEngineProcessContext::record [function]
-    let _ = lash::plugins::ProcessEngineProcessContext::record;
-    // W0622: lash::plugins::ProcessEngineProcessContext::set_wait [function]
-    let _ = lash::plugins::ProcessEngineProcessContext::set_wait;
     // W0623: lash::plugins::ProcessEngineRegistry [struct]
     type_witness::<lash::plugins::ProcessEngineRegistry>();
     // W0624: lash::plugins::ProcessEngineRegistry::new [function]
     let _ = lash::plugins::ProcessEngineRegistry::new;
     // W0625: lash::plugins::ProcessEngineRegistry::require [function]
     let _ = lash::plugins::ProcessEngineRegistry::require;
-    // W0627: lash::plugins::ProcessEngineRunGuard [struct]
-    type_witness::<lash::plugins::ProcessEngineRunGuard>();
-    // W0628: lash::plugins::ProcessEngineRunGuard::shutdown [function]
-    let _ = lash::plugins::ProcessEngineRunGuard::shutdown;
-    // W0629: lash::plugins::ProcessEngineRuntimeContext [struct]
-    type_witness::<lash::plugins::ProcessEngineRuntimeContext>();
-    // W0630: lash::plugins::ProcessEngineRuntimeContext::context [function]
-    let _ = lash::plugins::ProcessEngineRuntimeContext::context;
-    // W0631: lash::plugins::ProcessEngineRuntimeContext::into_parts [function]
-    let _ = lash::plugins::ProcessEngineRuntimeContext::into_parts;
-    // W0632: lash::plugins::ProcessEngineRuntimeContext::shutdown [function]
-    let _ = lash::plugins::ProcessEngineRuntimeContext::shutdown;
     // W0633: lash::process::ProcessEventSemantics [struct]
     type_witness::<lash::process::ProcessEventSemantics>();
     // W0634: lash::process::ProcessEventSemantics::terminal [field]

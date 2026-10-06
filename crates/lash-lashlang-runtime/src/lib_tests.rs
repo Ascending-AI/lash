@@ -2,11 +2,6 @@ use super::*;
 
 use lashlang::testing::ast_builders as b;
 
-/// A storage-backed test backend for paths that do not execute engine effects.
-pub(crate) async fn sqlite_recording_backend() -> lash_core::Backend {
-    lash_conformance::backend_over(sqlite_memory_store_set().await)
-}
-
 /// A fresh memory store set's Lashlang artifact store: a storage port a test
 /// reaches without an engine.
 pub(crate) async fn memory_artifact_store() -> LashlangArtifacts {
@@ -46,7 +41,6 @@ pub(crate) fn host_claim() -> lash_core::ReferrerClaim {
 
 #[path = "lib_tests/aggregate_child.rs"]
 mod aggregate_child;
-mod pre_cutover_refusal;
 mod second_front_end;
 
 /// `process <name>(<params>) -> <return_ty> { finish <body> }` as a one-process

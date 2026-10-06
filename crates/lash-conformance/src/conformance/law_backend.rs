@@ -146,10 +146,6 @@ impl crate::StoreSet for StoreLawStores {
         None
     }
 
-    fn worker_recovery(&self) -> Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore> {
-        Self::no_second_substrate("worker recovery accounting")
-    }
-
     fn binding_identity(&self) -> &crate::StoreBindingId {
         &self.binding
     }
@@ -171,10 +167,6 @@ impl crate::StoreSet for StoreLawStores {
 
     fn process_registry(&self) -> Arc<dyn crate::ProcessRegistry> {
         Self::no_second_substrate("process registry")
-    }
-
-    fn process_continuations(&self) -> Arc<dyn crate::ProcessContinuationStore> {
-        Self::no_second_substrate("process continuation store")
     }
 
     fn trigger_store(&self) -> Arc<dyn crate::TriggerStore> {

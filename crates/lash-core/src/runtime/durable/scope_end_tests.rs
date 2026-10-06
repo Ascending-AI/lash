@@ -880,7 +880,7 @@ impl crate::ProcessEngine for LawEngine {
             )),
             (LawEngineMode::RunForever, crate::EngineEvent::Started { .. }) => Ok((
                 state,
-                crate::EngineAction::Steps(vec![crate::StepRequest {
+                crate::EngineAction::Steps(vec![crate::StepRequest::Tool {
                     step: crate::StepName("forever".into()),
                     tool: lash_sansio::ToolId::new(HANGING_TOOL),
                     input: serde_json::Value::Null,

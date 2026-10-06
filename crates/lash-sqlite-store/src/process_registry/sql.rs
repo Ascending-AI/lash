@@ -14,7 +14,7 @@ use lash_store_sql::process::{
     abandoned_consumer_holds::AbandonedConsumerHoldStatements,
     event_horizons::EventHorizonStatements, events::EventStatements, observers::ObserverStatements,
     parent_end_plans::ParentEndPlanStatements, processes::ProcessStatements,
-    segment_handovers::SegmentHandoverStatements, tombstones::TombstoneStatements,
+    tombstones::TombstoneStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -591,48 +591,6 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `process_segment_handovers` statements only SQLite issues.
-    pub(crate) struct SegmentHandoverSqliteStatements @ "process_segment_handover" {
-        /// Park the handover of `?1` at segment `?2`.
-        ///
-        /// A plain insert: the caller read the ordinal's absence under the
-        /// same write lock and refuses a conflicting handover itself, where
-        /// PostgreSQL has to express that refusal as a conflict clause.
-        insert = "INSERT INTO process_segment_handovers
-                         (process_id, segment_ordinal, handover_json, committed_at_ms)
-                         VALUES (?1, ?2, ?3, ?4)";
-
-        delete_by_process_ids = "DELETE FROM process_segment_handovers
-                 WHERE process_id IN (SELECT value FROM json_each(?1))";
-
-        /// The parked-continuation page of the preflight walk: after cursor
-        /// `?1`, at most `?2`.
-        ///
-        /// The keyset expression is computed once in the projection and used
-        /// for both the resume filter and the ordering, so the two cannot
-        /// disagree. PostgreSQL compares the two ordered columns as a row
-        /// value instead, which is the fork.
-        list_parked_segments = "WITH parked AS (
-    SELECT
-        handovers.process_id || ':' || printf('%020d', handovers.segment_ordinal) AS walk_cursor,
-        handovers.process_id    AS process_id,
-        handovers.handover_json AS handover_json,
-        processes.status          AS status,
-        processes.wake_session_id AS wake_session_id,
-        processes.record_json     AS record_json
-    FROM process_segment_handovers AS handovers
-    JOIN processes ON processes.process_id = handovers.process_id
-    WHERE {{live_process_status(processes.status)}}
-)
-SELECT walk_cursor, process_id, handover_json, status, wake_session_id, record_json
-FROM parked
-WHERE ?1 IS NULL OR walk_cursor > ?1
-ORDER BY walk_cursor
-LIMIT ?2";
-    }
-}
-
-lash_store_sql::statements! {
     /// `parent_end_plans` statements only SQLite issues.
     pub(crate) struct ParentEndPlanSqliteStatements @ "parent_end_plan" {
         /// Reclaim settled plans older than `?1` that no live child still
@@ -668,10 +626,6 @@ pub(crate) struct ProcessSql {
     pub(crate) observer: ObserverStatements,
     /// `process_observers` statements only SQLite issues.
     pub(crate) observer_sqlite: ObserverSqliteStatements,
-    /// `process_segment_handovers` statements both backends issue verbatim.
-    pub(crate) handover: SegmentHandoverStatements,
-    /// `process_segment_handovers` statements only SQLite issues.
-    pub(crate) handover_sqlite: SegmentHandoverSqliteStatements,
     /// `process_tombstones` statements both backends issue verbatim.
     pub(crate) tombstone: TombstoneStatements,
     /// `process_tombstones` statements only SQLite issues.
@@ -698,8 +652,6 @@ impl ProcessSql {
             event_sqlite: EventSqliteStatements::render(dialect),
             observer: ObserverStatements::render(dialect),
             observer_sqlite: ObserverSqliteStatements::render(dialect),
-            handover: SegmentHandoverStatements::render(dialect),
-            handover_sqlite: SegmentHandoverSqliteStatements::render(dialect),
             tombstone: TombstoneStatements::render(dialect),
             tombstone_sqlite: TombstoneSqliteStatements::render(dialect),
             clock_sqlite: ChangeClockSqliteStatements::render(dialect),

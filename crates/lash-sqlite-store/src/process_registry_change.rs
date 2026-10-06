@@ -214,13 +214,12 @@ fn prune_process_rows_conn(
             params![process_ids_json],
         )
         .map_err(process_sqlite_error)?;
-    for dependent in [
+    crate::conn::cached_execute(
+        conn,
         sql.observer_sqlite.delete_by_process_ids.sql(),
-        sql.handover_sqlite.delete_by_process_ids.sql(),
-    ] {
-        crate::conn::cached_execute(conn, dependent, params![process_ids_json])
-            .map_err(process_sqlite_error)?;
-    }
+        params![process_ids_json],
+    )
+    .map_err(process_sqlite_error)?;
     let pruned_processes = conn
         .execute(
             sql.process_sqlite.delete_by_ids.sql(),

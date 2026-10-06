@@ -18,7 +18,6 @@ impl RuntimeSessionServices {
         _registry: Arc<dyn crate::ProcessRegistry>,
         scoped_effect_controller: crate::ActorContext,
         cancellation: tokio_util::sync::CancellationToken,
-        _handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         let crate::runtime::effect::AdmittedProcess {
             registration,

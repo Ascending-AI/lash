@@ -58,10 +58,6 @@ impl lash::StoreSet for ReceiverHoldStores {
         Arc::clone(&self.registry)
     }
 
-    fn process_continuations(&self) -> Arc<dyn ProcessContinuationStore> {
-        self.inner.process_continuations()
-    }
-
     fn trigger_store(&self) -> Arc<dyn TriggerStore> {
         self.inner.trigger_store()
     }
@@ -80,10 +76,6 @@ impl lash::StoreSet for ReceiverHoldStores {
 
     fn definition_store(&self) -> Arc<dyn ProcessDefinitionStore> {
         self.inner.definition_store()
-    }
-
-    fn worker_recovery(&self) -> Arc<dyn WorkerRecoveryStore> {
-        self.inner.worker_recovery()
     }
 
     fn attachment_store(&self) -> Arc<dyn AttachmentStore> {

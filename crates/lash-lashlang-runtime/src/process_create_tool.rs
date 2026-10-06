@@ -121,24 +121,12 @@ pub struct ProcessCreateTools {
 #[async_trait::async_trait]
 impl StaticToolExecute for ProcessCreateTools {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
-        let recovery = match self
-            .workers
-            .begin_execution(call.context.execution_scope_id())
-            .await
-        {
-            Ok(recovery) => recovery,
-            Err(error) => return worker_failure(error),
-        };
         let scoped = ProcessCreateTools {
-            workers: recovery.service().clone(),
+            workers: self.workers.begin_execution(),
             surface: self.surface.clone(),
             dialect: self.dialect,
         };
-        let outcome = execute_process_create_tool_call(call.context, call.args, &scoped).await;
-        match recovery.settle().await {
-            Ok(()) => outcome,
-            Err(error) => worker_failure(error),
-        }
+        execute_process_create_tool_call(call.context, call.args, &scoped).await
     }
 }
 

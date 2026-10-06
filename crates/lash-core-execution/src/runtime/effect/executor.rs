@@ -109,7 +109,6 @@ pub trait ProcessRunner: Send + Sync {
         registry: Arc<dyn ProcessRegistry>,
         scoped_effect_controller: crate::ActorContext,
         cancellation: CancellationToken,
-        handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError>;
 }
 
@@ -244,7 +243,7 @@ enum LocalTarget {
 
         clock: Arc<dyn crate::Clock>,
     },
-    Process(ProcessLocalExecution),
+    Process(Box<ProcessLocalExecution>),
     Definition(ProcessDefinitionLocalExecution),
     Trigger(TriggerLocalExecution),
     TurnAcceptance(Arc<dyn crate::TurnInputStore>, u64),
@@ -564,27 +563,19 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         mut self,
         turn_cancellation: ProcessTurnCancellation,
     ) -> Self {
-        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(
-            ProcessLocalExecution {
-                turn_cancellation: current,
-                ..
-            },
-        )) = &mut self.state
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
         {
-            *current = Some(turn_cancellation);
+            execution.turn_cancellation = Some(turn_cancellation);
         }
         self
     }
 
     pub fn with_process_effect_controller(mut self, controller: ActorContext) -> Self {
-        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(
-            ProcessLocalExecution {
-                effect_controller: current,
-                ..
-            },
-        )) = &mut self.state
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
         {
-            *current = Some(controller);
+            execution.effect_controller = Some(controller);
         }
         self
     }
@@ -646,7 +637,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         host_start: crate::runtime::HostStartAdmission,
     ) -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(Box::new(
                 ProcessLocalExecution {
                     registry,
                     process_work,
@@ -660,7 +651,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     trigger_route: None,
                     outcome_observer: None,
                 },
-            )),
+            ))),
             replay_trace: None,
             served_only: None,
             issued: crate::trace::StepIssue::default(),

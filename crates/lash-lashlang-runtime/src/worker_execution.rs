@@ -222,20 +222,13 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
         if self.service.execution_budget().is_some() {
             return self.run_scoped().await;
         }
-        let recovery = self
-            .service
-            .begin_execution(&self.identities.scope())
-            .await
-            .map_err(pool_failure)?;
-        let service = recovery.service().clone();
-        let result = WorkerRun {
+        let service = self.service.begin_execution();
+        WorkerRun {
             service: &service,
             ..self
         }
         .run_scoped()
-        .await;
-        recovery.settle().await.map_err(pool_failure)?;
-        result
+        .await
     }
     async fn run_scoped(mut self) -> Result<BrokeredEnd, BrokerFailure> {
         let context = AdmittedContext {
@@ -269,7 +262,7 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
             pool,
             owner_epoch: context.owner_epoch,
             frame_epoch: self.frame_epoch,
-            recovery: Some(self.service.clone()),
+            service: Some(self.service.clone()),
             budget: self.service.execution_budget().cloned().ok_or_else(|| {
                 BrokerFailure::Parent {
                     fault: ParentFault("worker execution has no reserved budget".into()),

@@ -413,24 +413,6 @@ fn processes_area_witnesses() {
     });
     // W0161: lash::process::ProcessCompletionAuthority::validate [function]
     let _ = lash::process::ProcessCompletionAuthority::validate;
-    // W0162: lash::process::ProcessContinuationStore [trait]
-    fn trait_witness_0162<T: lash::process::ProcessContinuationStore>() {}
-    // W0163: lash::process::ProcessContinuationStore::delete_segment_handovers [function]
-    fn meth_0163<T: lash::process::ProcessContinuationStore>(_: &T) {
-        let _ = T::delete_segment_handovers;
-    }
-    // W0164: lash::process::ProcessContinuationStore::get_segment_handover [function]
-    fn meth_0164<T: lash::process::ProcessContinuationStore>(_: &T) {
-        let _ = T::get_segment_handover;
-    }
-    // W0165: lash::process::ProcessContinuationStore::latest_segment_handover [function]
-    fn meth_0165<T: lash::process::ProcessContinuationStore>(_: &T) {
-        let _ = T::latest_segment_handover;
-    }
-    // W0166: lash::process::ProcessContinuationStore::put_segment_handover [function]
-    fn meth_0166<T: lash::process::ProcessContinuationStore>(_: &T) {
-        let _ = T::put_segment_handover;
-    }
     // W0167: lash::process::ProcessEvent [struct]
     type_witness::<lash::process::ProcessEvent>();
     // W0168: lash::process::ProcessEvent::event_type [field]

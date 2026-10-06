@@ -216,9 +216,7 @@ impl RlmCheckpointPerfFixture {
     ) -> Result<Self, SessionError> {
         let mut state = RlmExecutionState::for_engine_with_workers(
             dialect.language_id(),
-            dialect
-                .worker_service()
-                .with_recovery_store(backend.worker_recovery()),
+            dialect.worker_service(),
         );
         // The snapshot's globals became a read-only projection when the heap
         // took ownership of them, so seed through the state's own insert.
@@ -350,37 +348,11 @@ async fn execute_code_inner(
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     resumed: Option<Box<cell_segment::ResumedCell>>,
 ) -> ExecResponse {
-    let identities = match cell.as_ref() {
-        Ok(cell) => cell.identities().code().clone(),
-        Err(_) => match lash_core::EffectOpener::for_scope(&ctx.admitted_scope()) {
-            Ok(opener) => lash_vm_broker::CodeCallIdentities::cell(opener, "pure-cell"),
-            Err(error) => {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error.to_string(),
-                );
-            }
-        },
-    };
     if let Err(error) = hold_global_definitions(state, &ctx).await {
         return exec_setup_failure_or_stop(state, &ctx, lash_core::CellFailureKind::Host, error);
     }
-    let recovery = match state
-        .vm
-        .state()
-        .service()
-        .begin_execution(&identities.scope())
-        .await
-    {
-        Ok(recovery) => recovery,
-        Err(error) => return worker_setup_failure(state, &ctx, error),
-    };
-    let previous_service = state
-        .vm
-        .state_mut()
-        .replace_service(recovery.service().clone());
+    let workers = state.vm.state().service().begin_execution();
+    let previous_service = state.vm.state_mut().replace_service(workers.clone());
     let response = Box::pin(execute_code_in_worker_scope(
         dialect,
         state,
@@ -395,16 +367,13 @@ async fn execute_code_inner(
         execution_bounds,
         channel,
         prints,
-        recovery.service().clone(),
+        workers,
         snapshots,
         resumed,
     ))
     .await;
     state.vm.state_mut().replace_service(previous_service);
-    match recovery.settle().await {
-        Ok(()) => response,
-        Err(error) => worker_setup_failure(state, &ctx, error),
-    }
+    response
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -499,10 +468,6 @@ async fn execute_code_in_worker_scope(
             }
             Err(error) => return worker_setup_failure(state, &ctx, error),
         };
-
-        if let Err(error) = workers.checkpoint().await {
-            return worker_setup_failure(state, &ctx, error);
-        }
 
         // gather → journal → mask → fold: every parsed resource-bearing cell first
         // consults the deferred journal, even if no live resolver and no checkpoint
@@ -648,11 +613,6 @@ async fn execute_code_in_worker_scope(
             .with_expired_functions(state.vm.state().expired_functions().iter().cloned());
         (session_projected_bindings, cell_bindings, host_environment)
     };
-    if resumed.is_some()
-        && let Err(error) = workers.checkpoint().await
-    {
-        return worker_setup_failure(state, &ctx, error);
-    }
     // What the cell linked against, as a segment boundary inside it hands it
     // over.
     let linked = (
@@ -952,11 +912,6 @@ async fn execute_code_in_worker_scope(
             (Ok(outcome), None)
         }
         Ok(lash_vm_broker::BrokeredEnd::GuestError { error, checkpoint }) => {
-            if checkpoint.is_some()
-                && let Err(error) = workers.mark_running().await
-            {
-                return worker_setup_failure(state, &ctx, error);
-            }
             if let Some(checkpoint) = checkpoint
                 && let Err(error) = state
                     .vm
@@ -1254,7 +1209,7 @@ fn exec_setup_failure_or_stop(
 }
 
 /// A worker service fault in a cell. A host verdict — its retryable worker
-/// failure, worker budget, pool capacity or recovery store
+/// failure, worker budget or pool capacity
 /// ([`lash_vm_client::PoolError::is_host_verdict`]) — is read live, outside
 /// any recorded step, and a replay or another host with capacity answers it
 /// differently: it fails the attempt retryably, so the cell seals nothing

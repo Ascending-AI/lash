@@ -1,4 +1,5 @@
 use super::*;
+use crate::ProcessRegistration;
 use crate::ProcessSignature;
 
 const SIGNED_ENGINE_KIND: &str = "signed-engine";

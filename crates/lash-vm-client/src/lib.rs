@@ -32,8 +32,5 @@ pub use remote_state::{RemoteRestoreError, RemoteState, RemoteVm};
 mod projections;
 pub use projections::Projections;
 
-mod recovery;
-pub use recovery::RecoveryExecution;
-
 mod artifact;
 pub use artifact::{InspectedArtifact, ProcessMetadata};

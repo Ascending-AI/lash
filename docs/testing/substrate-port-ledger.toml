@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1214 rows over 728 files, 3384 laws.
-# By class: mechanical 143, semantic 99, delete 657, replace 315.
-# By lane: L1b 11, L3 16, L4 19, L5 2, L6b 9, L7 25, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 473, ported 43, deleted 698.
+# 1235 rows over 739 files, 3426 laws.
+# By class: mechanical 143, semantic 99, delete 678, replace 315.
+# By lane: L1b 11, L3 16, L4 19, L5 2, L6b 9, L7 25, L7b 22, L7p 8, L9b 66, L9c 241, L9d 70, L9e 90, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
+# By status: todo 472, ported 43, deleted 720.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -2308,12 +2308,13 @@ test = "foreground_trace_carries_the_enclosing_restate_process_invocation"
 area = "code-cells"
 needs = ["cell"]
 class = "delete"
-lane = "L9e"
+lane = "L7b"
 laws = [
   "foreground_trace_carries_the_enclosing_restate_process_invocation",
 ]
 disposition = "subject-deleted"
-status = "todo"
+status = "deleted"
+note = "L7b (FIG-5198) deleted it on the orchestrator's direction (was L9e): it pinned the attempt of an enclosing Restate process invocation, which the durable substrate does not have; a process's executions are admitted with their own identities"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/one_slot_process_await.rs"
@@ -19724,3 +19725,319 @@ laws = [
 disposition = "port"
 status = "ported"
 note = "L4 (FIG-5174) deleted the tool-receipt step and its sweep (their own row); the rest runs on the stores alone, with no host"
+# FIG-5198 (L7b): segment handover, the process side of replay and worker-recovery accounting deleted.
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/worker_recovery.rs"
+test = "*"
+area = "worker-recovery"
+needs = ["process", "cell"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "parent_loss_consumes_unknown_cpu_and_redrive_resumes",
+  "repeated_parent_loss_exhausts_worker_attempts",
+  "recovery_totals_are_monotone_and_stale_parents_are_fenced",
+  "parked_worker_handover_preserves_attempt",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) deleted durable worker-recovery accounting (lash_worker_recovery): an execution budget counts from zero per run"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/process_continuation_store.rs"
+test = "*"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "process_continuation_store",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the continuation store is gone"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/lib_tests/pre_cutover_refusal.rs"
+test = "*"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "another_artifact_family_is_a_typed_terminal_before_any_effect",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; vm_run keeps the RetiredGeneration refusal"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/lib_tests/pre_cutover_refusal.rs"
+test = "another_builds_parked_segment_is_refused_at_the_identity_fence_before_any_effect"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "another_builds_parked_segment_is_refused_at_the_identity_fence_before_any_effect",
+]
+disposition = "covered-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_snapshot_of_another_program_identity_is_refused_before_it_resumes"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/lib_tests/pre_cutover_refusal.rs"
+test = "another_generations_parked_segment_is_refused_at_the_version_fence_before_any_effect"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "another_generations_parked_segment_is_refused_at_the_version_fence_before_any_effect",
+]
+disposition = "covered-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_state_of_another_format_is_refused"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/process/segment_trace_tests.rs"
+test = "*"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "an_unversioned_segment_is_a_typed_rejection_with_the_drain_remedy",
+  "a_segment_state_without_its_worker_recovery_ledger_is_a_typed_format_rejection",
+  "a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary",
+  "the_parked_loop_golden_is_this_builds_segment",
+  "capture_parked_loop_segment",
+  "interrupted_resource_node_and_retried_occurrence_keep_distinct_trace_generations",
+  "process_branch_selection_derives_the_untaken_arm_in_each_iteration",
+  "process_graph_replay_uses_the_shared_runtime_without_exporting_again",
+  "process_trace_session_attribution_comes_only_from_a_session_originator",
+  "process_wait_resolution_and_cancellation_follow_only_the_active_occurrence",
+  "untraced_completed_resource_calls_retain_no_correlation_state",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; segment state, its goldens and process execution traces are gone"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/process/segment_trace_tests.rs"
+test = "resume_rejects_changed_bytecode_program_hash_with_typed_failure"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "resume_rejects_changed_bytecode_program_hash_with_typed_failure",
+]
+disposition = "covered-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_snapshot_of_another_program_identity_is_refused_before_it_resumes"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/process/segment_trace_tests.rs"
+test = "another_generations_segment_is_refused_at_both_fences"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "another_generations_segment_is_refused_at_both_fences",
+]
+disposition = "covered-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_state_of_another_format_is_refused"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/process/segment_trace_tests.rs"
+test = "durable_exhaustion_has_a_typed_process_failure_surface"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "durable_exhaustion_has_a_typed_process_failure_surface",
+]
+disposition = "covered-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_vm_run_past_its_limit_ends_the_process"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/process/signal_wait_tests.rs"
+test = "*"
+area = "processes"
+needs = ["process", "wait"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "a_wait_write_refused_on_a_terminal_process_is_settled",
+  "retention_after_an_earlier_wait_match_discards_the_timestamp_and_writes_no_wait",
+  "retention_before_a_wait_match_returns_the_typed_error_without_writing_a_wait",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the journaled signal wait is gone; signal order is crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order"
+
+[[row]]
+path = "crates/lash-lashlang-runtime/src/argument_admission_testing.rs"
+test = "*"
+area = "processes"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "process_event_host_failure_stops_execution",
+  "process_shutdown_preserves_typed_failures",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the segment run path these drove is gone; only these laws of the file are listed"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/tests.rs"
+test = "segment_handover_persist_keeps_current_input_for_crash_replay"
+area = "stores"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "segment_handover_persist_keeps_current_input_for_crash_replay",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/tests.rs"
+test = "terminal_segment_handover_cleanup_removes_continuation_state"
+area = "stores"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "terminal_segment_handover_cleanup_removes_continuation_state",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
+
+[[row]]
+path = "crates/lash-sim/tests/cross_backend_store_differential/process_event_pages.rs"
+test = "*"
+area = "stores"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "segment_handover_commit_keeps_the_first_time_and_permission",
+  "segment_handover_commit_matches_across_backends",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; only these laws of the file are listed, the rest stay"
+
+[[row]]
+path = "crates/lash-postgres-store/src/preflight/walk.rs"
+test = "*"
+area = "preflight"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "parked_segment_join_uses_index_order_without_sort",
+  "a_cursor_this_backend_did_not_mint_is_refused_rather_than_ignored",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the parked-segment surface and its cursor are gone; only these laws of the file are listed"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/preflight_durable_walk.rs"
+test = "*"
+area = "preflight"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "a_parked_segment_is_enumerated_with_its_identity_and_terminal_ones_are_not",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; only this law of the file is listed"
+
+[[row]]
+path = "crates/lash/src/preflight/extract.rs"
+test = "*"
+area = "preflight"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "a_parked_segment_yields_both_of_its_nested_format_versions",
+  "a_parked_segment_is_read_from_its_contract_and_never_from_a_duplicate",
+  "an_unstamped_segment_reads_as_generation_zero_not_as_readable",
+  "a_segment_whose_engine_state_is_junk_is_undecodable_rather_than_fatal",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the parked-segment extraction is gone; only these laws of the file are listed"
+
+[[row]]
+path = "crates/lash/src/preflight/extract.rs"
+test = "a_payload_that_is_not_json_at_all_is_undecodable_rather_than_fatal"
+area = "preflight"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "a_payload_that_is_not_json_at_all_is_undecodable_rather_than_fatal",
+]
+disposition = "covered-by:crates/lash/src/preflight/tests.rs::a_payload_nobody_can_decode_is_undecided_and_never_panics"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
+
+[[row]]
+path = "crates/lash/src/preflight/extract.rs"
+test = "a_program_identity_from_another_build_is_a_refusal_with_no_version_to_name"
+area = "preflight"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "a_program_identity_from_another_build_is_a_refusal_with_no_version_to_name",
+]
+disposition = "covered-by:crates/lash/src/preflight/extract.rs::a_started_process_is_judged_by_its_start_stamp"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
+
+[[row]]
+path = "crates/lash/src/preflight/tests.rs"
+test = "*"
+area = "preflight"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "a_segment_from_another_build_refuses_and_lands_on_the_drain_list",
+]
+disposition = "covered-by:crates/lash/src/preflight/tests.rs::a_wake_from_another_build_refuses_and_lands_on_the_drain_list"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the drain law runs over the pending-wake surface"
+
+[[row]]
+path = "crates/lash-sqlite-store/src/preflight/tests.rs"
+test = "a_parked_segment_is_listed_with_its_owner_and_a_terminal_one_is_not"
+area = "preflight"
+needs = ["process"]
+class = "delete"
+lane = "L7b"
+laws = [
+  "a_parked_segment_is_listed_with_its_owner_and_a_terminal_one_is_not",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the parked-segment surface is gone"

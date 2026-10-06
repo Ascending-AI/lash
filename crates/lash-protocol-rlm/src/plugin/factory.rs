@@ -65,7 +65,6 @@ pub struct RlmProtocolPluginFactory {
     /// parses, spells tools and prompts in it, and records its language id.
     dialect: Arc<dyn Dialect>,
     workers: lash_vm_client::service::Service,
-    worker_recovery: Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore>,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
     artifact_store: LashlangArtifacts,
@@ -104,14 +103,11 @@ impl RlmProtocolPluginFactory {
         dialect: Arc<dyn Dialect>,
         backend: &lash_core::Backend,
     ) -> Self {
-        let workers = dialect
-            .worker_service()
-            .with_recovery_store(backend.worker_recovery());
+        let workers = dialect.worker_service();
         Self {
             config,
             dialect,
             workers,
-            worker_recovery: backend.worker_recovery(),
             deferred_tool_resolver: None,
             deferred_trigger_resolver: None,
             artifact_store: LashlangArtifacts::of_backend(backend),
@@ -123,7 +119,7 @@ impl RlmProtocolPluginFactory {
     /// Select the host's worker entry, pool bounds and deadlines. This service
     /// is shared by compilation, cells, process creation and durable bodies.
     pub fn with_worker_service(mut self, workers: lash_vm_client::service::Service) -> Self {
-        self.workers = workers.with_recovery_store(self.worker_recovery.clone());
+        self.workers = workers;
         self
     }
     pub fn worker_service(&self) -> &lash_vm_client::service::Service {
@@ -368,14 +364,10 @@ impl PluginFactory for RlmProtocolPluginFactory {
             plugin_host: ctx.plugin_host().clone(),
             process_lifecycle,
         });
-        let engine = LashlangProcessEngine::new(
-            self.artifact_store.clone(),
-            surface,
-            self.worker_recovery.clone(),
-        )
-        .with_worker_service(self.workers.clone())
-        .with_execution_bounds(config.execution_bounds().into_engine())
-        .with_run_settings_recorder(recorder);
+        let engine = LashlangProcessEngine::new(self.artifact_store.clone(), surface)
+            .with_worker_service(self.workers.clone())
+            .with_execution_bounds(config.execution_bounds().into_engine())
+            .with_run_settings_recorder(recorder);
         Ok(vec![
             lash_lashlang_runtime::lashlang_process_engine_registration(engine),
         ])

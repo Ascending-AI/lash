@@ -216,9 +216,7 @@ pub struct Service {
     receipts: Option<Arc<Mutex<Vec<WorkerReceipt>>>>,
     config: Arc<PoolConfig>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
-    recovery: Option<Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore>>,
     budget: Option<ExecutionBudget>,
-    claim: Option<Arc<lash_core_execution::store::worker_recovery::WorkerRecoveryClaim>>,
 }
 impl Service {
     /// Select the helper executable explicitly, using the RLM/process bounds.
@@ -237,9 +235,7 @@ impl Service {
             receipts: None,
             config: Arc::new(config),
             pool: Arc::new(Mutex::new(None)),
-            recovery: None,
             budget: None,
-            claim: None,
         }
     }
     #[cfg(feature = "testing")]
@@ -299,18 +295,6 @@ impl Service {
         }
         Ok(())
     }
-    pub fn with_recovery_store(
-        mut self,
-        store: Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore>,
-    ) -> Self {
-        self.recovery = Some(store);
-        self
-    }
-    pub fn recovery_store(
-        &self,
-    ) -> Option<&Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore>> {
-        self.recovery.as_ref()
-    }
     pub fn config(&self) -> &PoolConfig {
         &self.config
     }
@@ -329,11 +313,7 @@ impl Default for Service {
             .unwrap_or_default();
         #[cfg(any(test, feature = "testing"))]
         let executable = crate::testing::worker_executable(executable);
-        let service = Self::subprocess(executable);
-        #[cfg(any(test, feature = "testing"))]
-        let service =
-            service.with_recovery_store(Arc::new(crate::recovery::RecoveryDouble::default()));
-        service
+        Self::subprocess(executable)
     }
 }
 
@@ -356,7 +336,7 @@ pub struct WorkerReceipt {
 }
 
 /// Runtime-only operations on a [`Service`]: the pool, requests, and the
-/// recovery accounting the Lashlang runtime and the RLM protocol drive a
+/// per-execution budget the Lashlang runtime and the RLM protocol drive a
 /// worker through. A dialect only constructs a service; these members are
 /// the cross-crate runtime seam, which the `lash` facade does not re-export,
 /// and the impl is hidden from docs because it is support plumbing rather
@@ -370,26 +350,9 @@ pub mod runtime_ops {
     pub trait ServiceRuntimeOps {
         fn execution_budget(&self) -> Option<&ExecutionBudget>;
 
-        fn begin_execution(
-            &self,
-            scope: &str,
-        ) -> impl Future<Output = Result<crate::RecoveryExecution, PoolError>> + Send;
-
-        /// Reserve `scope` for an execution that continues work earlier scopes
-        /// already consumed `carried` of (ADR 0123): a process body reserves a
-        /// scope per segment boundary and carries the totals its boundary
-        /// recorded. The reservation starts from no less than `carried`, and the
-        /// row is seeded with it before any worker launches, so a redrive of
-        /// this scope counts on from the carried totals too.
-        fn begin_execution_from(
-            &self,
-            scope: &str,
-            carried: lash_core_execution::store::worker_recovery::WorkerRecoveryTotals,
-        ) -> impl Future<Output = Result<crate::RecoveryExecution, PoolError>> + Send;
-
-        fn mark_running(&self) -> impl Future<Output = Result<(), PoolError>> + Send;
-
-        fn checkpoint(&self) -> impl Future<Output = Result<(), PoolError>> + Send;
+        /// This service with a fresh budget, shared by every checkout of one
+        /// execution: its attempts and CPU count from zero.
+        fn begin_execution(&self) -> Service;
 
         fn request_accounted(
             &self,
@@ -416,87 +379,10 @@ pub mod runtime_ops {
             self.budget.as_ref()
         }
 
-        async fn begin_execution(
-            &self,
-            scope: &str,
-        ) -> Result<crate::RecoveryExecution, PoolError> {
-            self.begin_execution_from(scope, Default::default()).await
-        }
-
-        async fn begin_execution_from(
-            &self,
-            scope: &str,
-            carried: lash_core_execution::store::worker_recovery::WorkerRecoveryTotals,
-        ) -> Result<crate::RecoveryExecution, PoolError> {
-            use lash_core_execution::store::worker_recovery::{
-                WorkerRecoveryError, WorkerRecoveryLimits,
-            };
-            let store = self
-                .recovery
-                .as_ref()
-                .ok_or_else(|| PoolError::Recovery {
-                    message: "worker execution requires its backend recovery store".into(),
-                })?
-                .clone();
-            let limits = WorkerRecoveryLimits {
-                max_attempts: self.config.deadlines.max_attempts,
-                max_cpu_nanos: self
-                    .config
-                    .deadlines
-                    .cumulative_cpu
-                    .as_nanos()
-                    .try_into()
-                    .map_err(|_| PoolError::InvalidConfiguration)?,
-            };
-            let mut claim = store
-                .reserve(scope, limits)
-                .await
-                .map_err(crate::recovery::recovery_error)?;
-            let seeded = crate::recovery::at_least(claim.baseline, carried);
-            if seeded != claim.baseline {
-                if seeded.cpu_nanos >= limits.max_cpu_nanos {
-                    return Err(crate::recovery::recovery_error(
-                        WorkerRecoveryError::CpuExhausted,
-                    ));
-                }
-                store
-                    .settle(&claim, seeded)
-                    .await
-                    .map_err(crate::recovery::recovery_error)?;
-                claim.baseline = seeded;
-            }
-            let budget = ExecutionBudget::from_recovery(claim.baseline);
+        fn begin_execution(&self) -> Service {
             let mut service = self.clone();
-            service.budget = Some(budget.clone());
-            service.claim = Some(Arc::new(claim.clone()));
-            Ok(crate::RecoveryExecution {
-                service,
-                store,
-                claim,
-                budget,
-            })
-        }
-
-        async fn mark_running(&self) -> Result<(), PoolError> {
-            if let (Some(store), Some(claim)) = (&self.recovery, &self.claim) {
-                store
-                    .mark_running(claim)
-                    .await
-                    .map_err(crate::recovery::recovery_error)?;
-            }
-            Ok(())
-        }
-
-        async fn checkpoint(&self) -> Result<(), PoolError> {
-            if let (Some(store), Some(claim), Some(budget)) =
-                (&self.recovery, &self.claim, &self.budget)
-            {
-                store
-                    .settle(claim, budget.recovery_totals())
-                    .await
-                    .map_err(crate::recovery::recovery_error)?;
-            }
-            Ok(())
+            service.budget = Some(ExecutionBudget::default());
+            service
         }
 
         #[expect(
@@ -504,17 +390,14 @@ pub mod runtime_ops {
             reason = "the accounted async seam isolates blocking checkout and IPC on Tokio's blocking pool"
         )]
         async fn request_accounted(&self, request: Request) -> Result<Response, PoolError> {
-            self.mark_running().await?;
             let service = self.clone();
-            let response = tokio::task::spawn_blocking(move || service.request_blocking(request))
+            tokio::task::spawn_blocking(move || service.request_blocking(request))
                 .await
                 .map_err(|error| {
                     PoolError::breach(lash_vm_protocol::ProtocolBreach::Panicked {
                         detail: lash_vm_protocol::Detail::new(error),
                     })
-                })?;
-            self.checkpoint().await?;
-            response
+                })?
         }
 
         async fn inspect_artifact(

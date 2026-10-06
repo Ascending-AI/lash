@@ -3,8 +3,6 @@ use lash_core_execution::ProcessQuery as _;
 use lash_core_execution::facade_support;
 use lash_sansio::ProcessId;
 pub(crate) mod actor;
-#[path = "process_registry/continuation_store.rs"]
-mod continuation_store;
 #[path = "process_registry/delivery_binding.rs"]
 mod delivery_binding;
 mod event_release;
@@ -18,7 +16,6 @@ mod prune_api;
 mod registration;
 #[path = "process_registry/retention.rs"]
 mod retention;
-mod segment_handover;
 #[path = "process_registry/sql.rs"]
 pub(crate) mod sql;
 mod support;

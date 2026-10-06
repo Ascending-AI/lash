@@ -1,7 +1,6 @@
 //! The asynchronous broker's slots over the synchronous, owned process pool.
 
 use crate::WorkerPoolRuntimeOps as _;
-use crate::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_vm_broker::{CheckoutRefusal, WorkerCheckout, WorkerRead, WorkerSlots, WorkerTransport};
 use lash_vm_protocol::*;
 use tokio::sync::mpsc;
@@ -15,7 +14,9 @@ pub struct PoolSlots {
     pub owner_epoch: OwnerEpoch,
     pub frame_epoch: FrameEpoch,
     pub budget: ExecutionBudget,
-    pub recovery: Option<crate::service::Service>,
+    /// The service the run checks workers out through, which records each
+    /// checkout when receipts are on.
+    pub service: Option<crate::service::Service>,
 }
 
 #[async_trait::async_trait]
@@ -25,9 +26,6 @@ impl WorkerSlots for PoolSlots {
         _owner: &VmOwner,
         start: &Start,
     ) -> Result<WorkerCheckout, CheckoutRefusal> {
-        if let Some(service) = &self.recovery {
-            service.mark_running().await.map_err(recovery_refusal)?;
-        }
         let pool = self.pool.clone();
         let epoch = self.owner_epoch;
         let frame = self.frame_epoch;
@@ -57,7 +55,6 @@ impl WorkerSlots for PoolSlots {
                     error @ (crate::PoolError::Infrastructure(_)
                     | crate::PoolError::RetryLimitExceeded
                     | crate::PoolError::ProtocolVersion(_)
-                    | crate::PoolError::Recovery { .. }
                     | crate::PoolError::InvalidConfiguration
                     | crate::PoolError::UnsupportedPlatform
                     | crate::PoolError::Io { .. }) => {
@@ -65,7 +62,7 @@ impl WorkerSlots for PoolSlots {
                     }
                 })?;
         #[cfg(feature = "testing")]
-        if let Some(service) = &self.recovery {
+        if let Some(service) = &self.service {
             service
                 .record_worker(
                     match &start.program {
@@ -77,15 +74,13 @@ impl WorkerSlots for PoolSlots {
                     },
                     &worker,
                 )
-                .map_err(recovery_refusal)?;
+                .map_err(|error| CheckoutRefusal::Infrastructure(error.into_outcome()))?;
         }
         let lease = worker.lease();
         let interruptor = worker.interruptor().map_err(|_| CheckoutRefusal::Closed)?;
         let codec = FrameCodec::new(self.pool.config().protocol.decode);
         let (commands, mut inputs) = mpsc::channel::<Option<Vec<u8>>>(1);
         let (outputs, messages) = mpsc::channel(2);
-        let recovery = self.recovery.clone();
-        let runtime = tokio::runtime::Handle::current();
         let released = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let actor_released = released.clone();
         let actor = tokio::task::spawn_blocking(move || {
@@ -131,12 +126,6 @@ impl WorkerSlots for PoolSlots {
                         return;
                     }
                 };
-                if let Some(service) = &recovery
-                    && let Err(error) = runtime.block_on(service.mark_running())
-                {
-                    let _ = outputs.blocking_send(WorkerRead::Failed(error.into_outcome()));
-                    return;
-                }
                 let response = match parent {
                     ParentMessage::Start(start) => worker.start(*start),
                     ParentMessage::EffectResponse(result) => worker.effect_result(result),
@@ -147,13 +136,6 @@ impl WorkerSlots for PoolSlots {
                     ParentMessage::Cancel => worker.cancel(),
                     _ => break,
                 };
-                if matches!(&response, Ok(WorkerMessage::EffectRequest(_)))
-                    && let Some(service) = &recovery
-                    && let Err(error) = runtime.block_on(service.checkpoint())
-                {
-                    let _ = outputs.blocking_send(WorkerRead::Failed(error.into_outcome()));
-                    return;
-                }
                 let observations = worker.take_observations();
                 if matches!(
                     &response,
@@ -171,10 +153,7 @@ impl WorkerSlots for PoolSlots {
                     } else {
                         worker.release()
                     };
-                    let result = released_worker.and_then(|()| match &recovery {
-                        Some(service) => runtime.block_on(service.checkpoint()),
-                        None => Ok(()),
-                    });
+                    let result = released_worker;
                     actor_released.store(true, std::sync::atomic::Ordering::Release);
                     if let Err(error) = result {
                         let _ = outputs.blocking_send(WorkerRead::Failed(error.into_outcome()));
@@ -235,16 +214,10 @@ impl WorkerSlots for PoolSlots {
             .send(Vec::new())
             .await
             .map_err(|_| CheckoutRefusal::Closed)?;
-        if let Some(service) = &self.recovery {
-            service.checkpoint().await.map_err(recovery_refusal)?;
-        }
         Ok(())
     }
     async fn discard(&self, mut checkout: WorkerCheckout) -> Result<(), CheckoutRefusal> {
         checkout.transport.kill().await;
-        if let Some(service) = &self.recovery {
-            service.checkpoint().await.map_err(recovery_refusal)?;
-        }
         Ok(())
     }
 }
@@ -297,8 +270,4 @@ impl Drop for Transport {
             let _ = self.interruptor.shutdown(std::net::Shutdown::Both);
         }
     }
-}
-
-fn recovery_refusal(error: crate::PoolError) -> CheckoutRefusal {
-    CheckoutRefusal::Infrastructure(error.into_outcome())
 }

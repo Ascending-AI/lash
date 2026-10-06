@@ -1,23 +1,20 @@
 //! One lashlang run's command ordinals (FIG-3586).
 //!
-//! A lashlang run — a code cell, or a process body — runs its program. Every
-//! command that leaves the VM through `ExecutionHost::perform` and reaches
-//! the effect host — a resource operation, a whole aggregate, a sleep, an
-//! await of a handle, a signal wait — takes the next **issue ordinal** of the
-//! run, and every journal row the command writes lives under that ordinal's
-//! key. Nothing a compiler produces reaches a key.
+//! A code cell runs its program. Every command that leaves the VM through
+//! `ExecutionHost::perform` and reaches the effect host — a resource
+//! operation, a whole aggregate, a sleep, an await of a handle — takes the
+//! next **issue ordinal** of the run, and every journal row the command
+//! writes lives under that ordinal's key. Nothing a compiler produces
+//! reaches a key.
 //!
 //! A run starts fresh: the recorded-frontier read a replayed run made went
-//! with Restate's journal (FIG-5190); L6 and L7b rebuild resume on
-//! snapshots.
+//! with Restate's journal (FIG-5190). A process body has no journal here: it
+//! resumes from its snapshot, fed its operations' outcomes by operation id
+//! (ADR 0132 §8; FIG-5198).
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_LASHLANG_CELL_GENERATION_DOMAIN_VERSION, lashlang_cell_generation))
 const LASH_LASHLANG_CELL_GENERATION_DOMAIN_VERSION: &str = "lash-lashlang-cell-generation/v1";
-
-/// version_surface = "coexist"
-/// version_guard(items(LASHLANG_PREFIX_VERSION, process))
-const LASHLANG_PREFIX_VERSION: &str = "lashlang:v2:";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASHLANG_DISPATCHED_ORDINALS_DOMAIN_VERSION, hash))
@@ -36,15 +33,14 @@ use lash_sansio::sync::MutexExt;
 /// (`{namespace}:lk2:{ordinal:010}`); v1 keyed it by the AST node id and
 /// occurrence of its call site. A journal written under v1 cannot be read by
 /// a v2 run: a cell refuses it through the missing grammar stamp on its
-/// iteration's execution-environment sync, a process body through its start
-/// record's stamp. Changing any spelling in this module — the namespace
+/// iteration's execution-environment sync. Changing any spelling in this module — the namespace
 /// marker, the ordinal width, a sub-key, the seal — is a grammar change.
 ///
 /// version_guard(
 ///     roots(path = "crates/lash-core-execution/src/runtime/causal.rs", CommandReplayKey),
 /// )
 /// version_surface = "drain"
-/// format_outside_manifest = "a key grammar, not a payload: the grammar a journal was written under rides the execution-environment sync outcome and the ProcessStarted record, and a run under any other grammar is refused before it issues a command"
+/// format_outside_manifest = "a key grammar, not a payload: the grammar a journal was written under rides the execution-environment sync outcome, and a run under any other grammar is refused before it issues a command"
 pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 
 /// The journal grammar a code cell writes (FIG-3587): the replay-key grammar
@@ -64,7 +60,7 @@ pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 /// input or output (FIG-3672 P2b): a v5 journal replayed under it would meet
 /// its peeks at other positions. A cell's iteration sync
 /// stamps this version, and a cell whose sync names another is refused before
-/// it runs. Process bodies journal no binding set and stay on the key grammar.
+/// it runs.
 ///
 /// version_guard(
 ///     roots(path = "crates/lash-core-execution/src/session.rs", ToolDispatchSurface),
@@ -153,14 +149,6 @@ impl LashlangReplayNamespace {
         }
     }
 
-    /// The namespace of one process body: under the incarnation's canonical
-    /// opener encoding, for the whole life of the incarnation.
-    pub fn process(opener_scope: &str) -> Self {
-        Self {
-            prefix: format!("{LASHLANG_PREFIX_VERSION}{opener_scope}:{NAMESPACE_MARKER}"),
-        }
-    }
-
     /// The command key of `ordinal`.
     pub fn command(&self, ordinal: u64) -> CommandReplayKey {
         CommandReplayKey::new(format!(
@@ -209,12 +197,6 @@ pub enum CommandShape {
     Aggregate,
     /// An await of a process handle: `{command}:process:await:{id}`.
     AwaitHandle,
-    /// A process signal wait: `{command}:signal`.
-    SignalWait,
-    /// A command that journals nothing in the effect journal: a process event
-    /// append, or an ability this host refuses before dispatch. It holds its
-    /// ordinal so every later command keeps its key.
-    Silent,
 }
 
 /// A running hash of the ordinals a run dispatched, in dispatch order.
@@ -247,8 +229,8 @@ impl DispatchedOrdinalsDigest {
     }
 }
 
-/// The part of a run's ordinal state that survives a process segment
-/// handover. A cell starts every run from [`Self::start`].
+/// The part of a run's ordinal state a cell segment carries to its next
+/// run. A fresh cell starts from [`Self::start`].
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LashlangRunOrdinals {
     /// The ordinal the next command takes.

@@ -812,15 +812,6 @@ CREATE TABLE IF NOT EXISTS lash_process_tombstones (
 CREATE INDEX IF NOT EXISTS idx_lash_process_tombstones_change
     ON lash_process_tombstones(pruned_change_seq);
 
-CREATE TABLE IF NOT EXISTS lash_process_segment_handovers (
-    process_id TEXT COLLATE "C" NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-    segment_ordinal BIGINT NOT NULL,
-    committed_at_ms BIGINT NOT NULL,
-    handover_json TEXT NOT NULL,
-    started_json TEXT,
-    PRIMARY KEY (process_id, segment_ordinal)
-);
-
 -- One row per ended parent scope, keyed by the scope itself rather than by a
 -- process row: a turn-scoped parent has no process row at all, and a
 -- process-scoped parent's row may be pruned before its children settle.
@@ -1101,15 +1092,6 @@ INSERT INTO lash_catalog_identity (singleton, catalog_id)
 VALUES (TRUE, gen_random_uuid()::text)
 ON CONFLICT (singleton) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS lash_worker_recovery (
-    scope_id TEXT PRIMARY KEY,
-    revision BIGINT NOT NULL,
-    attempts INTEGER NOT NULL,
-    cpu_nanos BIGINT NOT NULL,
-    replacement INTEGER NOT NULL,
-    unknown_cpu_attempts INTEGER NOT NULL,
-    in_flight INTEGER NOT NULL
-);
 
 -- The durability engine (ruling #74; crates/lash-durable). A serving node's
 -- lease: one row per node, renewed by its heartbeat, deleted by a reap.

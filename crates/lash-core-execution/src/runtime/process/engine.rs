@@ -1,10 +1,5 @@
-use crate::ProcessId;
 use std::collections::BTreeMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-
-use tokio_util::sync::CancellationToken;
 
 use super::definition_ref::{
     ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
@@ -12,43 +7,9 @@ use super::definition_ref::{
 use super::engine_state::{EngineAction, EngineEvent, EngineState, EngineStateFormat};
 use super::events::ProcessAwaitOutput;
 use super::events::ProcessEventType;
-use super::model::{
-    ProcessExecutionContext, ProcessExecutionEnvSpec, ProcessIdentity, ProcessRegistration,
-};
+use super::model::{ProcessExecutionEnvSpec, ProcessIdentity};
 
-/// Opaque engine-owned state carried between in-process execution segments.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SegmentHandover {
-    pub reason: crate::BoundaryReason,
-    pub program_hash: String,
-    pub engine_state: Vec<u8>,
-}
-
-/// The single bounded continuation durably retained for a process incarnation.
-///
-/// This is registry-internal execution state: it is deliberately not a process
-/// event and therefore never appears in change feeds or provenance.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PersistedSegmentHandover {
-    pub segment_ordinal: u64,
-    /// The segment execution that wrote this handover: the nonce its
-    /// admission recorded. A second put by the same writer is that
-    /// execution's own retried write, and the store keeps the bytes it holds:
-    /// the engine state carries measured wall-clock time, so a redriven
-    /// segment re-derives the same handover with different bytes. Empty names
-    /// no writer and matches none.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub writer: String,
-    pub handover: SegmentHandover,
-}
-
-impl PersistedSegmentHandover {
-    pub fn program_hash(&self) -> &str {
-        &self.handover.program_hash
-    }
-}
-
-/// Result of one process invocation. A segment boundary is never terminal.
+/// Result of one process invocation.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProcessRunOutcome {
     /// The run ended. `prelude` is its terminal batch (FIG-3571): the
@@ -61,7 +22,6 @@ pub enum ProcessRunOutcome {
         output: Box<ProcessAwaitOutput>,
         prelude: Vec<super::events::ProcessEventAppendRequest>,
     },
-    SegmentBoundary(SegmentHandover),
 }
 
 impl ProcessRunOutcome {
@@ -76,7 +36,6 @@ impl ProcessRunOutcome {
     pub fn terminal_output(&self) -> Option<&ProcessAwaitOutput> {
         match self {
             Self::Terminal { output, .. } => Some(output),
-            Self::SegmentBoundary(_) => None,
         }
     }
 }
@@ -132,362 +91,6 @@ impl From<ProcessAwaitOutput> for ProcessRunOutcome {
             output: Box::new(output),
             prelude: Vec::new(),
         }
-    }
-}
-
-pub type ProcessEngineShutdownFuture<'run> =
-    Pin<Box<dyn Future<Output = Result<(), crate::PluginError>> + Send + 'run>>;
-
-pub struct ProcessEngineRunGuard<'run> {
-    shutdown: Option<Box<dyn FnOnce(bool) -> ProcessEngineShutdownFuture<'run> + Send + 'run>>,
-}
-
-impl<'run> ProcessEngineRunGuard<'run> {
-    pub fn new(
-        shutdown: impl FnOnce(bool) -> ProcessEngineShutdownFuture<'run> + Send + 'run,
-    ) -> Self {
-        Self {
-            shutdown: Some(Box::new(shutdown)),
-        }
-    }
-
-    pub async fn shutdown(mut self, parent_ended: bool) -> Result<(), crate::PluginError> {
-        if let Some(shutdown) = self.shutdown.take() {
-            shutdown(parent_ended).await?;
-        }
-        Ok(())
-    }
-}
-
-pub struct ProcessEngineRuntimeContext<'run> {
-    context: crate::RuntimeExecutionContext<'run>,
-    guard: ProcessEngineRunGuard<'run>,
-}
-
-impl<'run> ProcessEngineRuntimeContext<'run> {
-    pub fn new(
-        context: crate::RuntimeExecutionContext<'run>,
-        guard: ProcessEngineRunGuard<'run>,
-    ) -> Self {
-        Self { context, guard }
-    }
-
-    pub fn context(&self) -> &crate::RuntimeExecutionContext<'run> {
-        &self.context
-    }
-
-    pub fn into_parts(
-        self,
-    ) -> (
-        crate::RuntimeExecutionContext<'run>,
-        ProcessEngineRunGuard<'run>,
-    ) {
-        (self.context, self.guard)
-    }
-
-    pub async fn shutdown(self, parent_ended: bool) -> Result<(), crate::PluginError> {
-        self.guard.shutdown(parent_ended).await
-    }
-}
-
-type RuntimeContextBuilder<'run> = Box<
-    dyn FnOnce(
-            Arc<crate::ToolCatalog>,
-        ) -> Result<ProcessEngineRuntimeContext<'run>, crate::PluginError>
-        + Send
-        + 'run,
->;
-
-/// Process-registry capabilities scoped to one engine execution.
-///
-/// Engines can inspect their own record and event history, maintain their
-/// durable wait, emit execution-owned events through the installed authority,
-/// and await other process handles. The underlying registry is deliberately
-/// not exposed: host-owned signal/cancel appends and lifecycle writes remain
-/// outside the engine extension boundary.
-#[derive(Clone)]
-pub struct ProcessEngineProcessContext {
-    process_id: ProcessId,
-    process_work: crate::ProcessWorkWiring,
-    execution_write_authority: super::model::ProcessExecutionWriteAuthority,
-}
-
-impl ProcessEngineProcessContext {
-    fn new(
-        process_id: ProcessId,
-        process_work: crate::ProcessWorkWiring,
-        execution_write_authority: super::model::ProcessExecutionWriteAuthority,
-    ) -> Self {
-        Self {
-            process_id,
-            process_work,
-            execution_write_authority,
-        }
-    }
-
-    pub async fn record(&self) -> Result<Option<super::model::ProcessRecord>, crate::PluginError> {
-        self.process_work
-            .registry()
-            .get_process(&self.process_id)
-            .await
-    }
-
-    /// Read a page of this run's own process events strictly after
-    /// `after_sequence`.
-    pub async fn event_page(
-        &self,
-        after_sequence: u64,
-        limit: std::num::NonZeroUsize,
-        mode: super::events::ProcessEventQueryMode,
-    ) -> Result<
-        super::events::ProcessEventReadOutcome<super::events::ProcessEventPage>,
-        crate::PluginError,
-    > {
-        self.process_work
-            .registry()
-            .event_page_after(&self.process_id, after_sequence, limit, mode)
-            .await
-    }
-
-    pub async fn emit(
-        &self,
-        request: super::events::ProcessEventAppendRequest,
-    ) -> Result<super::events::ProcessEvent, crate::PluginError> {
-        let result = self
-            .process_work
-            .registry()
-            .append_event_with_authority(&self.process_id, request, &self.execution_write_authority)
-            .await?;
-        Ok(result.event)
-    }
-
-    /// Enter `wait` as a run boundary, committing the run's pending
-    /// `prelude` in the same transaction (FIG-3571).
-    pub async fn set_wait(
-        &self,
-        wait: super::model::WaitState,
-        prelude: Vec<super::events::ProcessEventAppendRequest>,
-    ) -> Result<super::model::ProcessRecord, crate::PluginError> {
-        self.process_work
-            .registry()
-            .set_process_wait_with_authority(
-                &self.process_id,
-                wait,
-                prelude,
-                &self.execution_write_authority,
-            )
-            .await
-    }
-
-    /// Leave the current wait as a run boundary, committing the run's
-    /// pending `prelude` in the same transaction (FIG-3571).
-    pub async fn clear_wait(
-        &self,
-        prelude: Vec<super::events::ProcessEventAppendRequest>,
-    ) -> Result<super::model::ProcessRecord, crate::PluginError> {
-        self.process_work
-            .registry()
-            .clear_process_wait_with_authority(
-                &self.process_id,
-                prelude,
-                &self.execution_write_authority,
-            )
-            .await
-    }
-}
-
-pub struct ProcessEngineRunContext<'run> {
-    registration: ProcessRegistration,
-    /// The minted id of the process this run executes: the opener an engine
-    /// mints identities against (ADR 0099 §1, ADR 0107).
-    process_id: ProcessId,
-    execution_context: ProcessExecutionContext,
-    processes: ProcessEngineProcessContext,
-    plugins: Arc<crate::PluginSession>,
-    tool_catalog: Arc<crate::ToolCatalog>,
-    store: Option<Arc<dyn crate::RuntimeStore>>,
-    session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
-    queued_work: Arc<dyn crate::SessionWorkEngine>,
-    process_registry_available: bool,
-    cancellation: CancellationToken,
-    turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    scoped_effect_controller: crate::ActorContext,
-    handover: Option<SegmentHandover>,
-    runtime_context_builder: Option<RuntimeContextBuilder<'run>>,
-    /// The runtime's shared trace handle ([`Self::with_trace_runtime`]).
-    tracing: crate::trace::TraceRuntime,
-}
-
-impl<'run> ProcessEngineRunContext<'run> {
-    #[allow(clippy::too_many_arguments)]
-    #[expect(
-        clippy::expect_used,
-        reason = "the process worker installs the write authority"
-    )]
-    pub fn new(
-        registration: ProcessRegistration,
-        process_id: ProcessId,
-        execution_context: ProcessExecutionContext,
-        process_work: crate::ProcessWorkWiring,
-        plugins: Arc<crate::PluginSession>,
-        tool_catalog: Arc<crate::ToolCatalog>,
-        store: Option<Arc<dyn crate::RuntimeStore>>,
-        session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
-        queued_work: Arc<dyn crate::SessionWorkEngine>,
-        clock: Arc<dyn crate::Clock>,
-        process_registry_available: bool,
-        cancellation: CancellationToken,
-        turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-        scoped_effect_controller: crate::ActorContext,
-        handover: Option<SegmentHandover>,
-        runtime_context_builder: RuntimeContextBuilder<'run>,
-    ) -> Self {
-        let execution_write_authority = execution_context
-            .execution_write_authority
-            .clone()
-            .expect("process worker installs execution write authority");
-        let processes = ProcessEngineProcessContext::new(
-            process_id.clone(),
-            process_work,
-            execution_write_authority,
-        );
-        Self {
-            tracing: crate::trace::TraceRuntime::new(clock),
-            registration,
-            process_id,
-            execution_context,
-            processes,
-            plugins,
-            tool_catalog,
-            store,
-            session_store_factory,
-            queued_work,
-            process_registry_available,
-            cancellation,
-            turn_phase_probe,
-            scoped_effect_controller,
-            handover,
-            runtime_context_builder: Some(runtime_context_builder),
-        }
-    }
-
-    /// Installs the runtime's shared trace handle. A context built without
-    /// one observes nothing.
-    #[must_use]
-    pub fn with_trace_runtime(mut self, tracing: crate::trace::TraceRuntime) -> Self {
-        self.tracing = tracing;
-        self
-    }
-
-    /// The runtime's shared trace handle: the same one every engine path and
-    /// every plugin emits through.
-    pub fn trace_runtime(&self) -> &crate::trace::TraceRuntime {
-        &self.tracing
-    }
-
-    /// The scope this run executes under: its process's.
-    pub fn trace_scope(&self) -> Option<&lash_trace::DurableTraceScope> {
-        self.scoped_effect_controller.trace_scope()
-    }
-
-    /// Where this run's shift code stands when it observes: it may emit once
-    /// a step body of this attempt has really run. The handle is cloneable
-    /// and carries the scope, the substrate attempt and the right to emit.
-    pub fn trace_standing(&self) -> crate::trace::TraceStanding {
-        self.tracing
-            .shift(self.trace_scope().cloned(), &self.scoped_effect_controller)
-    }
-
-    /// Exposes registration to protocol and process-engine implementors while running a durable
-    /// process.
-    pub fn registration(&self) -> &ProcessRegistration {
-        &self.registration
-    }
-
-    /// The minted id of the process this run executes: the logical opener
-    /// (ADR 0099 §1).
-    pub fn process_id(&self) -> &ProcessId {
-        &self.process_id
-    }
-
-    /// Exposes execution context to protocol and process-engine implementors while running a
-    /// durable process.
-    pub fn execution_context(&self) -> &ProcessExecutionContext {
-        &self.execution_context
-    }
-
-    /// Exposes processes to protocol and process-engine implementors while running a durable
-    /// process.
-    pub fn processes(&self) -> ProcessEngineProcessContext {
-        self.processes.clone()
-    }
-
-    /// Exposes plugins to protocol and process-engine implementors while running a durable process.
-    pub fn plugins(&self) -> Arc<crate::PluginSession> {
-        Arc::clone(&self.plugins)
-    }
-
-    /// Exposes store to protocol and process-engine implementors while running a durable
-    /// process.
-    pub fn store(&self) -> Option<Arc<dyn crate::RuntimeStore>> {
-        self.store.clone()
-    }
-
-    /// Exposes session store factory to protocol and process-engine implementors while running
-    /// a durable process.
-    pub fn session_store_factory(&self) -> Option<Arc<dyn crate::DeploymentStore>> {
-        self.session_store_factory.clone()
-    }
-
-    /// Exposes the required queued-work port to process-engine implementors.
-    pub fn queued_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
-        Arc::clone(&self.queued_work)
-    }
-
-    /// Exposes process registry available to protocol and process-engine implementors while running
-    /// a durable process.
-    pub fn process_registry_available(&self) -> bool {
-        self.process_registry_available
-    }
-
-    /// Exposes cancellation token to protocol and process-engine implementors while running a
-    /// durable process.
-    pub fn cancellation_token(&self) -> CancellationToken {
-        self.cancellation.clone()
-    }
-
-    /// Transfers the persisted segment handover to a process-engine implementor exactly once,
-    /// returning `None` after it has been taken or when no predecessor exists.
-    pub fn take_handover(&mut self) -> Option<SegmentHandover> {
-        self.handover.take()
-    }
-
-    pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
-        crate::runtime::RuntimeNamedPhase::begin(self.turn_phase_probe.clone(), phase)
-    }
-
-    pub fn turn_phase_probe(&self) -> Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>> {
-        self.turn_phase_probe.clone()
-    }
-
-    /// Process-engine implementors must pass this `Arc` (or an `Arc::clone` of it) to
-    /// [`Self::into_runtime_context`].
-    pub fn resolved_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
-        Ok(Arc::clone(&self.tool_catalog))
-    }
-
-    /// Extracts the runtime context using the catalog captured for this process execution.
-    ///
-    /// `tool_catalog` must be the `Arc` returned by [`Self::resolved_tool_catalog`]; this keeps
-    /// definitions and execution routes on the same immutable resident snapshot.
-    pub fn into_runtime_context(
-        mut self,
-        tool_catalog: Arc<crate::ToolCatalog>,
-    ) -> Result<ProcessEngineRuntimeContext<'run>, crate::PluginError> {
-        let builder = self.runtime_context_builder.take().ok_or_else(|| {
-            crate::PluginError::Session("process engine runtime context was already built".into())
-        })?;
-        builder(tool_catalog)
     }
 }
 
@@ -573,7 +176,8 @@ pub trait ProcessEngine: Send + Sync {
 /// A process identity the engine registry produced, and the signal event types
 /// that came with it.
 ///
-/// This is the only way an identity reaches a [`ProcessRegistration`]. A
+/// This is the only way an identity reaches a
+/// [`ProcessRegistration`](super::model::ProcessRegistration). A
 /// definition reference can therefore only appear on a durable row if the
 /// engine that owns the definition resolved it and agreed with the signature
 /// the reference claimed: a fabricated claim is refused before the row exists,
@@ -674,6 +278,7 @@ impl ProcessEngineAdmission {
 pub struct ProcessEngineRegistration {
     engine: Arc<dyn ProcessEngine>,
     admission: ProcessEngineAdmission,
+    engine_steps: Option<Arc<dyn super::engine_state::EngineSteps>>,
 }
 
 impl ProcessEngineRegistration {
@@ -688,13 +293,30 @@ impl ProcessEngineRegistration {
                 admission.kind()
             )));
         }
-        Ok(Self { engine, admission })
+        Ok(Self {
+            engine,
+            admission,
+            engine_steps: None,
+        })
     }
 
     /// Pair an engine with the default recorded-input admission policy.
     pub fn accepting(engine: Arc<dyn ProcessEngine>) -> Self {
         let admission = ProcessEngineAdmission::accepting(engine.kind());
-        Self { engine, admission }
+        Self {
+            engine,
+            admission,
+            engine_steps: None,
+        }
+    }
+
+    /// Declare the engine's own step bodies: what runs a
+    /// [`StepRequest::Engine`](super::StepRequest::Engine) its `advance`
+    /// asks for.
+    #[must_use]
+    pub fn with_engine_steps(mut self, steps: Arc<dyn super::engine_state::EngineSteps>) -> Self {
+        self.engine_steps = Some(steps);
+        self
     }
 }
 
@@ -702,6 +324,7 @@ impl ProcessEngineRegistration {
 pub struct ProcessEngineRegistry {
     engines: Arc<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
+    engine_steps: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
@@ -710,6 +333,7 @@ pub struct ProcessEngineRegistry {
 pub struct WeakProcessEngineRegistry {
     engines: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: std::sync::Weak<BTreeMap<String, ProcessEngineAdmission>>,
+    engine_steps: std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
@@ -720,6 +344,7 @@ impl WeakProcessEngineRegistry {
         Some(ProcessEngineRegistry {
             engines: self.engines.upgrade()?,
             admissions: self.admissions.upgrade()?,
+            engine_steps: self.engine_steps.upgrade()?,
             artifact_ports: self.artifact_ports.clone(),
         })
     }
@@ -736,6 +361,7 @@ impl ProcessEngineRegistry {
         WeakProcessEngineRegistry {
             engines: Arc::downgrade(&self.engines),
             admissions: Arc::downgrade(&self.admissions),
+            engine_steps: Arc::downgrade(&self.engine_steps),
             artifact_ports: self.artifact_ports.clone(),
         }
     }
@@ -753,14 +379,60 @@ impl ProcessEngineRegistry {
     pub fn with_registration(self, registration: ProcessEngineRegistration) -> Self {
         let mut engines = (*self.engines).clone();
         let mut admissions = (*self.admissions).clone();
-        let ProcessEngineRegistration { engine, admission } = registration;
+        let mut engine_steps = (*self.engine_steps).clone();
+        let ProcessEngineRegistration {
+            engine,
+            admission,
+            engine_steps: steps,
+        } = registration;
+        match steps {
+            Some(steps) => engine_steps.insert(engine.kind().to_string(), steps),
+            None => engine_steps.remove(engine.kind()),
+        };
         engines.insert(engine.kind().to_string(), engine);
         admissions.insert(admission.kind().to_string(), admission);
         Self {
             engines: Arc::new(engines),
             admissions: Arc::new(admissions),
+            engine_steps: Arc::new(engine_steps),
             artifact_ports: self.artifact_ports,
         }
+    }
+
+    /// The body that runs `kind` for processes of engine `engine`: the
+    /// typed refusal, before admission, of a
+    /// [`StepRequest::Engine`](super::StepRequest::Engine) no registration
+    /// declares.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineStepRefusal`](super::engine_state::EngineStepRefusal) when
+    /// the engine is unknown, declares no engine steps, or not `kind`.
+    pub fn engine_steps(
+        &self,
+        engine: &str,
+        kind: &super::engine_state::EngineStepKind,
+    ) -> Result<Arc<dyn super::engine_state::EngineSteps>, super::engine_state::EngineStepRefusal>
+    {
+        use super::engine_state::EngineStepRefusal;
+        if !self.engines.contains_key(engine) {
+            return Err(EngineStepRefusal::UnknownEngine {
+                engine: engine.to_owned(),
+            });
+        }
+        let steps =
+            self.engine_steps
+                .get(engine)
+                .ok_or_else(|| EngineStepRefusal::NoEngineSteps {
+                    engine: engine.to_owned(),
+                })?;
+        if !steps.kinds().contains(kind) {
+            return Err(EngineStepRefusal::UndeclaredStep {
+                engine: engine.to_owned(),
+                kind: kind.clone(),
+            });
+        }
+        Ok(Arc::clone(steps))
     }
 
     /// Apply one resolved cleanup to every installed engine's own store

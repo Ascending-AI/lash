@@ -137,10 +137,11 @@ impl super::RuntimeEffectLocalExecutor<'_> {
         }
         matches!(
             &self.state,
-            super::RuntimeEffectLocalExecutorState::Target(super::LocalTarget::Process(super::ProcessLocalExecution {
-                turn_cancellation: Some(turn_cancellation),
-                ..
-            })) if turn_cancellation.transferable
+            super::RuntimeEffectLocalExecutorState::Target(super::LocalTarget::Process(execution))
+                if execution
+                    .turn_cancellation
+                    .as_ref()
+                    .is_some_and(|turn_cancellation| turn_cancellation.transferable)
         )
     }
 }

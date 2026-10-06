@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core_execution::{
-    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessContinuationStore,
-    ProcessExecutionEnvStore, ProcessRegistry, StoreBindingId, StoreSet, TriggerStore,
+    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessExecutionEnvStore,
+    ProcessRegistry, StoreBindingId, StoreSet, TriggerStore,
 };
 use lash_durable::domain::{
     ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
@@ -429,10 +429,6 @@ impl StoreSet for RecordedStores {
         self.inner.process_registry()
     }
 
-    fn process_continuations(&self) -> Arc<dyn ProcessContinuationStore> {
-        self.inner.process_continuations()
-    }
-
     fn trigger_store(&self) -> Arc<dyn TriggerStore> {
         self.inner.trigger_store()
     }
@@ -451,12 +447,6 @@ impl StoreSet for RecordedStores {
 
     fn definition_store(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
         self.inner.definition_store()
-    }
-
-    fn worker_recovery(
-        &self,
-    ) -> Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore> {
-        self.inner.worker_recovery()
     }
 
     fn attachment_store(&self) -> Arc<dyn AttachmentStore> {

@@ -23,16 +23,6 @@ pub(crate) use crate::trigger_schema::TRIGGER_SCHEMA;
 /// in the same transaction. Component blobs are shared and have no
 /// component-side cascade.
 pub(crate) const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS worker_recovery (
-    scope_id TEXT PRIMARY KEY,
-    revision INTEGER NOT NULL,
-    attempts INTEGER NOT NULL,
-    cpu_nanos INTEGER NOT NULL,
-    replacement INTEGER NOT NULL,
-    unknown_cpu_attempts INTEGER NOT NULL,
-    in_flight INTEGER NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS blobs (
     hash    TEXT PRIMARY KEY,
     content BLOB NOT NULL
@@ -793,16 +783,6 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
 );
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
-
-CREATE TABLE IF NOT EXISTS process_segment_handovers (
-    process_id       TEXT NOT NULL,
-    segment_ordinal  INTEGER NOT NULL,
-    committed_at_ms INTEGER NOT NULL,
-    handover_json    TEXT NOT NULL,
-    started_json     TEXT,
-    PRIMARY KEY (process_id, segment_ordinal),
-    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
-);
 
 -- One row per ended parent scope, keyed by the scope itself rather than by a
 -- process row: a turn-scoped parent has no process row at all, and a

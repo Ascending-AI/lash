@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use lash_core_execution::compat::VersionRange;
 use lash_core_execution::{
-    FleetFormat, ProcessContinuationStore as _, ProcessLifecycle as _, SessionCatalogStore as _,
+    FleetFormat, ProcessLifecycle as _, ProcessRetention as _, SessionCatalogStore as _,
     SessionCommitStore as _, SessionId, SessionMeta, SessionRelation, StoreError, WriterPin,
 };
 
@@ -299,9 +299,9 @@ async fn pg_fence_retries_contended_with_a_fresh_read() {
         let registry = storage.process_registry();
         async move {
             registry
-                .retire_segment_handovers_through(
+                .release_consumer_hold(
                     &lash_core_execution::ProcessId::fixture("fence-retry"),
-                    1,
+                    "fence-retry",
                 )
                 .await
         }

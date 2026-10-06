@@ -64,8 +64,7 @@ pub(super) async fn scan_durable(
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
     let target: DatabaseTarget = match scan.surface {
-        DurableSurface::ParkedSegment
-        | DurableSurface::StartedProcess
+        DurableSurface::StartedProcess
         | DurableSurface::ModuleArtifact
         | DurableSurface::SessionCheckpoint
         | DurableSurface::SessionExecutionState => preflight.location.target(),
@@ -142,7 +141,6 @@ fn read_page(
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
     match surface {
         DurableSurface::ModuleArtifact => read_module_artifacts(conn, after, limit),
-        DurableSurface::ParkedSegment => read_parked_segments(conn, after, limit),
         DurableSurface::StartedProcess => read_started_processes(conn, after, limit),
         DurableSurface::SessionCheckpoint => read_session_checkpoints(conn, after, limit),
         DurableSurface::SessionExecutionState => read_session_execution_state(conn, after, limit),
@@ -221,58 +219,6 @@ fn limit_binding(limit: usize) -> i64 {
 /// by the emptiness check rather than by arithmetic.
 fn next_cursor(last: Option<String>, scanned_rows: usize, limit: usize) -> Option<String> {
     if scanned_rows == limit { last } else { None }
-}
-
-/// One parked handover per non-terminal process, newest ordinal included.
-///
-/// `status IN ('running', 'waiting')` is the registry's own live-worklist
-/// predicate, copied rather than reinvented: a terminal process's leftover
-/// handover rows are not a continuation anyone will resume, and listing them on
-/// a drain list would send an operator after work that has already finished.
-///
-/// The keyset expression is computed once in the projection and then used for
-/// *both* the resume filter and the ordering, so the two cannot disagree.
-/// Ordering by `(process_id, segment_ordinal)` while comparing cursors as text
-/// would have been the subtle version of this bug: an integer ordinal orders
-/// numerically, its cursor orders lexicographically, and the first process whose
-/// ordinals crossed a digit boundary would silently skip or repeat rows across a
-/// page boundary. Zero-padding to twenty digits makes the text form order the
-/// same way the integer does, and executing the `ORDER BY` off the same expression
-/// makes that agreement structural instead of a property two clauses happen to
-/// share.
-fn read_parked_segments(
-    conn: &Connection,
-    after: Option<&str>,
-    limit: usize,
-) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare_cached(
-        crate::process_registry::sql::process_sql()
-            .handover_sqlite
-            .list_parked_segments
-            .sql(),
-    )?;
-    let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
-        Ok(DurableItem {
-            surface: DurableSurface::ParkedSegment,
-            cursor: row.get(0)?,
-            process_id: Some(crate::row_process_id(row, 1)?),
-            // The handover text is handed over as-is. Its shape is a durable
-            // format the manifest describes, not something this walk parses.
-            payload: DurablePayload::Json(row.get(2)?),
-            status: Some(row.get(3)?),
-            // Nullable in the schema: a process that has not been bound to a
-            // wake session yet still has a parked continuation worth listing.
-            session_id: row
-                .get::<_, Option<String>>(4)?
-                .map(crate::codec::sql_identity)
-                .transpose()?,
-            // Carried because a segment handover's stored program identity can
-            // only be judged by recomputing it from the inputs the process
-            // record holds, and only the registry holds those.
-            owner_record: Some(row.get(5)?),
-        })
-    })?;
-    collect_page(rows, limit)
 }
 
 /// One start record per live process (FIG-3571), in key order.

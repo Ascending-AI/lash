@@ -8,8 +8,6 @@ use thiserror::Error;
 pub enum PoolError {
     #[error(transparent)]
     ProtocolVersion(#[from] lash_vm_protocol::ProtocolVersionRefusal),
-    #[error("worker recovery store failed: {message}")]
-    Recovery { message: String },
     #[error(transparent)]
     Infrastructure(#[from] InfrastructureOutcome),
     #[error("the worker queue refuses {bytes} bytes at its item or byte bound")]
@@ -61,8 +59,7 @@ impl PoolError {
             Self::Infrastructure(outcome) => {
                 outcome.is_retryable() || outcome.deployment_fault().is_some()
             }
-            Self::Recovery { .. }
-            | Self::QueueFull { .. }
+            Self::QueueFull { .. }
             | Self::CheckoutTimedOut
             | Self::RestartStorm
             | Self::RetryLimitExceeded => true,
@@ -99,7 +96,6 @@ impl PoolError {
                     limit: WorkerLimit::Deadline,
                 };
             }
-            Self::Recovery { .. } => PoolFault::Recovery,
             Self::QueueFull { bytes } => PoolFault::QueueFull {
                 bytes: bytes as u64,
             },

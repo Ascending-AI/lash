@@ -140,7 +140,8 @@ pub enum DurableFormat {
     VmContinuation,
     /// The canonical Lashlang execution snapshot.
     LashlangSnapshot,
-    /// The Restate Lashlang segment-handover envelope.
+    /// A lashlang process's engine state: its VM snapshot and the operation
+    /// it parked on.
     LashlangSegmentHandover,
     /// The RLM snapshot envelope stored behind a checkpoint component.
     RlmSnapshotEnvelope,

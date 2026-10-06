@@ -104,7 +104,6 @@ pub(super) async fn extract(
         }
     };
     match item.surface {
-        DurableSurface::ParkedSegment => parked_segment(payload, item.owner_record.as_deref()),
         DurableSurface::StartedProcess => started_process(payload),
         DurableSurface::SessionCheckpoint => session_checkpoint(payload),
         DurableSurface::SessionExecutionState => session_execution_state(payload),
@@ -223,141 +222,12 @@ impl<'a> Payload<'a> {
     }
 }
 
-fn as_u32(value: Option<&serde_json::Value>) -> Option<u32> {
-    value
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|version| u32::try_from(version).ok())
-}
-
-/// A parked segment carries its envelope version, the nested VM continuation
-/// contract, and the program identity it resumes against.
-fn parked_segment(payload: Payload<'_>, owner_record: Option<&str>) -> Vec<Extraction> {
-    let handover = DurableFormat::LashlangSegmentHandover;
-    let root = match payload.json(handover) {
-        Ok(root) => root,
-        Err(extraction) => return vec![extraction],
-    };
-    let mut found = Vec::new();
-
-    // `engine_state` is the engine-private continuation, stored as a byte
-    // sequence rather than as nested JSON, so the outer envelope stays engine
-    // agnostic. Reading it is one un-nesting, not a decode: the bytes are UTF-8
-    // JSON whose first field is the version this build compares.
-    let engine_state = root
-        .get("handover")
-        .and_then(|handover| handover.get("engine_state"))
-        .and_then(serde_json::Value::as_array)
-        .map(|bytes| {
-            bytes
-                .iter()
-                .filter_map(serde_json::Value::as_u64)
-                .filter_map(|byte| u8::try_from(byte).ok())
-                .collect::<Vec<u8>>()
-        });
-    match engine_state {
-        None => found.push(Extraction::Undecodable {
-            format: handover,
-            reason: "segment handover carries no `handover.engine_state` byte sequence".to_string(),
-        }),
-        Some(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
-            Err(error) => found.push(Extraction::Undecodable {
-                format: handover,
-                reason: format!("segment engine state is not JSON: {error}"),
-            }),
-            Ok(state) => {
-                match as_u32(state.get("version")) {
-                    Some(version) => found.push(Extraction::Found {
-                        format: handover,
-                        version,
-                    }),
-                    // The engine's own decoder reads an absent version as
-                    // generation zero and refuses it; reporting it as
-                    // undecodable would be gentler than the boundary is.
-                    None => found.push(Extraction::Found {
-                        format: handover,
-                        version: 0,
-                    }),
-                }
-                // The sealed VM state stores each version once, in the contract
-                // it was written under; the worker admits every component of it.
-                let contract = state.get("vm").and_then(|vm| vm.get("vm_contract"));
-                match as_u32(contract.and_then(|contract| contract.get("continuation"))) {
-                    Some(version) => found.push(Extraction::Found {
-                        format: DurableFormat::VmContinuation,
-                        version,
-                    }),
-                    None => found.push(Extraction::Undecodable {
-                        format: DurableFormat::VmContinuation,
-                        reason: "segment engine state carries no `vm.vm_contract.continuation`"
-                            .into(),
-                    }),
-                }
-            }
-        },
-    }
-
-    if let Some(extraction) = program_identity(&root, owner_record) {
-        found.push(extraction);
-    }
-    found
-}
-
-/// The bytecode identity check, which is a recompute rather than a comparison.
-///
-/// No stored bytes say "this was compiled by bytecode version N": the process
-/// records a hash whose preimage includes the bytecode format version and the
-/// module, process and host-requirement references it was built from. The only
-/// honest check is to recompute the identity this build would mint for the same
-/// inputs and compare — which is why the walk carries the owner's record at all.
-#[cfg(feature = "rlm")]
-fn program_identity(root: &serde_json::Value, owner_record: Option<&str>) -> Option<Extraction> {
-    let format = DurableFormat::Bytecode;
-    let persisted = root.get("handover")?.get("program_hash")?.as_str()?;
-    let record: serde_json::Value = serde_json::from_str(owner_record?).ok()?;
-    let input = record.get("input")?;
-    // Only Lashlang engine processes carry a bytecode identity; a tool-call or
-    // session-turn process has nothing to recompute and is not a gap.
-    if input.get("type").and_then(serde_json::Value::as_str) != Some("engine")
-        || input.get("kind").and_then(serde_json::Value::as_str)
-            != Some(lash_lashlang_runtime::LASHLANG_ENGINE_KIND)
-    {
-        return None;
-    }
-    let payload = input.get("payload")?;
-    let parsed: lash_lashlang_runtime::LashlangProcessInput =
-        serde_json::from_value(payload.clone()).ok()?;
-    let current = lash_lashlang_runtime::lashlang_program_hash(&parsed);
-    if current == persisted {
-        Some(Extraction::Found {
-            format,
-            version: crate::formats::BYTECODE_FORMAT_VERSION,
-        })
-    } else {
-        Some(Extraction::IdentityMismatch {
-            format,
-            detail: format!(
-                "program identity {persisted} was minted by another build; \
-                 bytecode v{} mints {current}",
-                crate::formats::BYTECODE_FORMAT_VERSION
-            ),
-        })
-    }
-}
-
-/// A build without the language has no bytecode identity to recompute, and
-/// claiming one would be reporting a comparison this build cannot make.
-#[cfg(not(feature = "rlm"))]
-fn program_identity(_root: &serde_json::Value, _owner_record: Option<&str>) -> Option<Extraction> {
-    None
-}
-
-/// The start stamp of a started process (FIG-3571), a recompute like the
-/// handover's program identity: the stamp names the executable generation the
-/// incarnation runs under, and the only honest check is to recompute the
-/// generation this build would run its input as. A process that has not
-/// started carries no stamp and yields nothing; a started one whose stamp is
-/// missing or another build's parks at its next claim, so it is a refusal
-/// before any handover exists to report it.
+/// The start stamp of a started process (FIG-3571), a recompute: the stamp
+/// names the executable generation the incarnation runs under, and the only
+/// honest check is to recompute the generation this build would run its input
+/// as. A process that has not started carries no stamp and yields nothing; a
+/// started one whose stamp is missing or another build's parks at its next
+/// claim, so it is a refusal.
 fn started_process(payload: Payload<'_>) -> Vec<Extraction> {
     let format = DurableFormat::Bytecode;
     let record = match payload.json(format) {
@@ -532,125 +402,6 @@ mod tests {
                 _ => None,
             })
             .collect()
-    }
-
-    fn segment_handover(segment_version: u32, continuation_version: u32) -> String {
-        let engine_state = serde_json::json!({
-            "version": segment_version,
-            "vm": {"vm_contract": {"continuation": continuation_version}},
-        });
-        let bytes = serde_json::to_vec(&engine_state).expect("the fixture encodes");
-        serde_json::json!({
-            "segment_ordinal": 3,
-            "handover": {
-                "reason": "await",
-                "program_hash": "sha256:abc",
-                "engine_state": bytes,
-            },
-        })
-        .to_string()
-    }
-
-    #[tokio::test]
-    async fn a_parked_segment_yields_both_of_its_nested_format_versions() {
-        // One payload, two boundaries: the envelope this build wrote and the VM
-        // continuation nested a level inside it.
-        let extractions = extract(&item(
-            DurableSurface::ParkedSegment,
-            DurablePayload::Json(segment_handover(3, 8)),
-        ))
-        .await;
-        assert_eq!(
-            versions(&extractions, DurableFormat::LashlangSegmentHandover),
-            vec![3]
-        );
-        assert_eq!(
-            versions(&extractions, DurableFormat::VmContinuation),
-            vec![8]
-        );
-    }
-
-    /// FIG-4645: the sealed state stores each version once, in its contract.
-    /// A `format_version` beside it is no writer's shape and answers nothing.
-    #[tokio::test]
-    async fn a_parked_segment_is_read_from_its_contract_and_never_from_a_duplicate() {
-        let engine_state = serde_json::to_vec(&serde_json::json!({
-            "version": 3,
-            "vm": {"format_version": 8},
-        }))
-        .expect("the fixture encodes");
-        let payload = serde_json::json!({
-            "handover": {"program_hash": "sha256:abc", "engine_state": engine_state},
-        })
-        .to_string();
-        let extractions = extract(&item(
-            DurableSurface::ParkedSegment,
-            DurablePayload::Json(payload),
-        ))
-        .await;
-        assert!(versions(&extractions, DurableFormat::VmContinuation).is_empty());
-        assert_eq!(
-            undecodable(&extractions, DurableFormat::VmContinuation),
-            vec!["segment engine state carries no `vm.vm_contract.continuation`"]
-        );
-    }
-
-    #[tokio::test]
-    async fn an_unstamped_segment_reads_as_generation_zero_not_as_readable() {
-        // The engine's decoder reads an absent version as zero and refuses it;
-        // a probe that reported "no version, cannot say" would be gentler than
-        // the boundary the host will actually hit.
-        let engine_state =
-            serde_json::to_vec(&serde_json::json!({"vm": {"vm_contract": {"continuation": 8}}}))
-                .expect("the fixture encodes");
-        let payload = serde_json::json!({
-            "handover": {
-                "program_hash": "sha256:abc",
-                "engine_state": engine_state,
-            },
-        })
-        .to_string();
-        let extractions = extract(&item(
-            DurableSurface::ParkedSegment,
-            DurablePayload::Json(payload),
-        ))
-        .await;
-        assert_eq!(
-            versions(&extractions, DurableFormat::LashlangSegmentHandover),
-            vec![0]
-        );
-    }
-
-    #[tokio::test]
-    async fn a_segment_whose_engine_state_is_junk_is_undecodable_rather_than_fatal() {
-        let payload = serde_json::json!({
-            "handover": {"engine_state": vec![0xffu8, 0xfe, 0xfd]},
-        })
-        .to_string();
-        let extractions = extract(&item(
-            DurableSurface::ParkedSegment,
-            DurablePayload::Json(payload),
-        ))
-        .await;
-        assert_eq!(
-            undecodable(&extractions, DurableFormat::LashlangSegmentHandover).len(),
-            1
-        );
-        assert!(versions(&extractions, DurableFormat::VmContinuation).is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_payload_that_is_not_json_at_all_is_undecodable_rather_than_fatal() {
-        for payload in [
-            DurablePayload::Json("}{ not json".to_string()),
-            DurablePayload::MessagePack(vec![0xc1, 0xc1]),
-        ] {
-            let extractions = extract(&item(DurableSurface::ParkedSegment, payload)).await;
-            assert_eq!(
-                undecodable(&extractions, DurableFormat::LashlangSegmentHandover).len(),
-                1
-            );
-        }
     }
 
     #[tokio::test]
@@ -845,71 +596,8 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "rlm")]
-    #[tokio::test]
-    async fn a_program_identity_from_another_build_is_a_refusal_with_no_version_to_name() {
-        let hash = lashlang::ContentHash::new("00ff");
-        let input = lash_lashlang_runtime::LashlangProcessInput {
-            module_ref: lashlang::ModuleRef::new(&hash),
-            process_ref: lashlang::ProcessRef::new(hash.clone(), 0),
-            host_requirements_ref: lashlang::HostRequirementsRef::new(&hash),
-            process_name: "worker".to_string(),
-            args: serde_json::Map::new(),
-        };
-        let current = lash_lashlang_runtime::lashlang_program_hash(&input);
-        let record = serde_json::json!({
-            "input": {
-                "type": "engine",
-                "kind": lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
-                "payload": serde_json::to_value(&input).expect("the input serializes"),
-            }
-        })
-        .to_string();
-
-        let mut matching = item(
-            DurableSurface::ParkedSegment,
-            DurablePayload::Json(
-                serde_json::json!({
-                    "handover": {
-                        "program_hash": current,
-                        "engine_state": Vec::<u8>::new(),
-                    },
-                })
-                .to_string(),
-            ),
-        );
-        matching.owner_record = Some(record.clone());
-        assert_eq!(
-            versions(&extract(&matching).await, DurableFormat::Bytecode),
-            vec![crate::formats::BYTECODE_FORMAT_VERSION],
-            "an identity this build mints is the only evidence of readability there is"
-        );
-
-        let mut stale = matching.clone();
-        stale.payload = DurablePayload::Json(
-            serde_json::json!({
-                "handover": {
-                    "program_hash": "sha256:from-another-build",
-                    "engine_state": Vec::<u8>::new(),
-                },
-            })
-            .to_string(),
-        );
-        let extractions = extract(&stale).await;
-        assert!(
-            extractions.iter().any(|extraction| matches!(
-                extraction,
-                Extraction::IdentityMismatch {
-                    format: DurableFormat::Bytecode,
-                    ..
-                }
-            )),
-            "a stale identity is a decided refusal, not an undecodable item"
-        );
-    }
-
     /// C8 (FIG-3571): a started process carries its executable generation on
-    /// its start record, with no handover to restate it. The probe recomputes
+    /// its start record. The probe recomputes
     /// the generation this build runs its input as: a matching stamp is
     /// readable, a foreign or missing stamp is a decided refusal, and a
     /// process that has not started yields nothing.

@@ -134,10 +134,6 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         PostgresStoreSet::process_registry(self)
     }
 
-    fn process_continuations(&self) -> Arc<dyn lash_core_execution::ProcessContinuationStore> {
-        PostgresStoreSet::process_registry(self)
-    }
-
     fn trigger_store(&self) -> Arc<dyn lash_core_execution::TriggerStore> {
         PostgresStoreSet::trigger_store(self)
     }
@@ -151,12 +147,6 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
     }
 
     fn turn_prelude_store(&self) -> Arc<dyn lash_core_execution::TurnPreludeStore> {
-        PostgresStoreSet::process_env_store(self)
-    }
-
-    fn worker_recovery(
-        &self,
-    ) -> Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore> {
         PostgresStoreSet::process_env_store(self)
     }
 
