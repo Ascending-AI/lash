@@ -10,7 +10,7 @@ use super::tools::{Scenario, assert_body_identity, assert_call, attempts, calls,
 use anyhow::{Context, Result, anyhow, ensure};
 use lash_core::ToolCallId;
 use lash_core::tool_run::{AttemptResult, LogicalTerminal, RunEvent, RunJournalEntry, RunTransfer};
-use lash_remote_protocol::RemoteTurnStatus;
+use lash_remote_protocol::{RemoteSendOutcome, RemoteTurnStatus};
 use lash_upgrade_harness::e2e::case::{
     ArtifactIdentity, CaseSpec, Channel, Leg, Permutation, StoreKind,
 };
@@ -898,12 +898,27 @@ pub async fn remove_retained(
     super::write(&scenario.lease.directory.join("cold-follow.json"), &outcome)?;
     let mut evidence = scenario.read().await?;
     // The follow answers with the engine's typed refusal, never a body rerun.
-    let refusal = &outcome.output["outcome"];
+    let follow: RemoteSendOutcome = serde_json::from_value(outcome.output["outcome"].clone())?;
+    let RemoteSendOutcome::Refused {
+        input_id,
+        run,
+        refusal,
+        ..
+    } = follow
+    else {
+        return Err(anyhow!(
+            "missing retained material did not refuse the follow: {follow:?}"
+        ));
+    };
     ensure!(
-        refusal["type"] == "refused" && refusal["input_id"] == json!(work.ingress),
-        "missing retained material did not refuse the follow: {refusal}"
+        input_id == work.ingress && run.as_ref().map(|run| run.as_str()) == Some(&work.run),
+        "the refused follow changed input or run identity: {input_id}, {run:?}"
     );
-    let error: lash_core::RuntimeError = serde_json::from_value(refusal["error"].clone())?;
+    ensure!(
+        refusal.error_type == "lash.runtime",
+        "the refusal is not a typed runtime refusal: {refusal:?}"
+    );
+    let error: lash_core::RuntimeError = serde_json::from_value(refusal.payload)?;
     ensure!(
         error.code == lash_core::RuntimeErrorCode::RetainedResultRefused,
         "the refusal is not a typed retained-result refusal: {error:?}"
