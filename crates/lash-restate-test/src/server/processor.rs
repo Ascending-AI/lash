@@ -480,9 +480,9 @@ impl State {
         let invocation = &mut self.invocations[key.0];
         let partial_state = !invocation.spec.kind.is_keyed() || lazy;
         invocation.attempts += 1;
-        // Only this attempt's own runs count as in flight: a replay need not
-        // reach a run an earlier attempt left open.
-        invocation.pending_runs.clear();
+        // A run an earlier attempt left without a stored result stays in
+        // flight: the replay reaches its journaled command and runs its
+        // closure again, sending no command the server could count it by.
         let number = invocation.attempts;
         let journal_len = invocation.journal.len();
         let start = StartMessage {

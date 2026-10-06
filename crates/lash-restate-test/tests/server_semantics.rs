@@ -186,6 +186,30 @@ impl Flaky {
     }
 }
 
+/// Released by [`a_replayed_run_left_without_its_result_is_work_in_flight`]
+/// once it has seen the re-run closure counted as work.
+static RERUN_RELEASE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+struct Rerun;
+
+#[restate_sdk::service]
+impl Rerun {
+    /// Runs one side effect whose second execution, the replay's re-run,
+    /// waits for [`RERUN_RELEASE`].
+    #[handler]
+    async fn effect(&self, ctx: Context<'_>, Json(tag): Json<String>) -> HandlerResult<()> {
+        ctx.run(|| async move {
+            if counter(&tag).fetch_add(1, Ordering::SeqCst) == 1 {
+                RERUN_RELEASE.notified().await;
+            }
+            Ok(())
+        })
+        .name("rerun")
+        .await?;
+        Ok(())
+    }
+}
+
 /// The server's ingress transport, for a handler that calls the ingress
 /// itself — as lash's handlers do when they resolve a durable wait.
 static INGRESS: Mutex<Option<RestateTestServer>> = Mutex::new(None);
@@ -266,6 +290,7 @@ fn endpoint() -> Endpoint {
         .bind(Flaky)
         .bind(Relay)
         .bind(Beside)
+        .bind(Rerun)
         .build()
 }
 
@@ -494,6 +519,47 @@ async fn a_crash_before_a_run_result_is_stored_replays_and_reruns_the_effect() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(body, "\"2:ok\"", "the effect re-ran once after the crash");
     assert_eq!(server.stats().crashes, 1);
+}
+
+/// FIG-5128: a crash before a run's result is stored leaves the run in the
+/// journal without a result, and the replaying attempt runs its closure
+/// again. That closure is work in flight: the server is not quiescent while
+/// it executes, however idle the attempt's input reads, so a settle waits
+/// for the re-run instead of returning in the middle of it.
+#[tokio::test]
+async fn a_replayed_run_left_without_its_result_is_work_in_flight() {
+    for (mode, config) in streaming_modes().into_iter().enumerate() {
+        let tag = format!("rerun-in-flight-{mode}");
+        let server = server(config).await;
+        server.crash_on(
+            CrashRule::new(CrashPoint::BeforeRunResult {
+                name: Some("rerun".into()),
+            })
+            .service("Rerun"),
+        );
+        let id = send_invocation(&server, "Rerun/effect", &format!("\"{tag}\"")).await;
+        until("the replay re-runs the closure", || {
+            counter(&tag).load(Ordering::SeqCst) == 2
+        })
+        .await;
+        until("the replaying attempt has read all its input", || {
+            server
+                .invocations()
+                .iter()
+                .any(|view| view.id == id && view.blocked_on_server == Some(true))
+        })
+        .await;
+        assert!(
+            server.working().iter().any(|view| view.id == id),
+            "the re-run closure is work in flight: {:?}",
+            server.invocations()
+        );
+        RERUN_RELEASE.notify_one();
+        server.settle().await;
+        assert_eq!(finished(&server, &id).await, Ok(bytes::Bytes::new()));
+        assert_eq!(counter(&tag).load(Ordering::SeqCst), 2);
+        assert_eq!(server.stats().crashes, 1);
+    }
 }
 
 #[tokio::test]
