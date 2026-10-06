@@ -4,7 +4,6 @@ pub mod backend_fault;
 mod cache_regression;
 mod canonical_scripts;
 pub mod chaos_soak;
-mod clock;
 pub mod content_oracle;
 pub mod crash_matrix;
 #[cfg(test)]

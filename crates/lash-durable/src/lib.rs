@@ -31,6 +31,7 @@ mod ids;
 #[cfg(feature = "testing")]
 pub mod laws;
 mod port;
+pub mod runner;
 mod tx;
 
 pub use config::{LeaseConfig, LeaseConfigError, LeaseSettings};

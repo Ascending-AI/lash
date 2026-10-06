@@ -21,7 +21,7 @@ use lash_core::{
     SessionWorkEngine, StoreSet as _,
 };
 
-use crate::clock::SimClock;
+use lash_durable_test::SimClock;
 
 /// The virtual clock's wall reading, as the stores and the relay stamp it.
 fn now_ms(clock: &SimClock) -> u64 {

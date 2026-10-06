@@ -30,7 +30,7 @@ use lash_core::{
     Clock, ClockWallTime as _, SessionCatalogStore as _, SessionId, StoreError, StoreSet, TurnId,
 };
 
-use crate::clock::SimClock;
+use lash_durable_test::SimClock;
 
 mod settlements;
 

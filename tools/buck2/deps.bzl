@@ -269,6 +269,21 @@ PACKAGE_DEPS = {
             "tokio": "//third-party/rust:p0399"
         }
     },
+    "lash-internal-durable-test": {
+        "build": {},
+        "dev": {
+            "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "tempfile": "//third-party/rust:p0390"
+        },
+        "normal": {
+            "async_trait": "//third-party/rust:p0015",
+            "chrono": "//third-party/rust:p0047",
+            "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
+            "lash_durable": "//crates/lash-durable:lash-durable",
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "tokio": "//third-party/rust:p0399"
+        }
+    },
     "lash-internal-http-transport": {
         "build": {},
         "dev": {
@@ -1176,6 +1191,7 @@ PACKAGE_DEPS = {
             "fastrand": "//third-party/rust:p0114",
             "lash": "//crates/lash:lash",
             "lash_core": "//crates/lash-core:lash-core",
+            "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
             "lash_lashlang_runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_plugin_process_controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls",

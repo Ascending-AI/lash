@@ -9,7 +9,7 @@ use lash_core::store::{
 };
 use tokio::sync::mpsc;
 
-use crate::clock::SimClock;
+use lash_durable_test::SimClock;
 
 pub(super) enum Progress {
     EmptyPass,

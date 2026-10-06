@@ -37,7 +37,6 @@ use crate::canonical_scripts::{
     OPENAI_COMPAT_STREAM_CHUNK_TIMEOUT, OPENAI_COMPAT_TOOL_CALL, OPENAI_COMPAT_VALIDATION,
     OPENAI_RESPONSES_TEXT,
 };
-use crate::clock::SimClock;
 use crate::generator::{
     GENERATOR_VERSION, GeneratedWorkload, SimShard, WorkloadProfileError, generate_workload,
     validate_workload_profile,
@@ -80,6 +79,7 @@ use crate::trace::{
     AbstractWorldView, OracleCensus, OracleStatus, OracleVerdict, SimulationTrace, TraceEventLine,
     TraceIoError, write_event_lines, write_replay_report, write_trace,
 };
+use lash_durable_test::SimClock;
 
 pub const FIXED_SCRIPT_PROFILE: &str = "tiny-fixed-provider-scripts";
 pub const FIXED_SCRIPT_EVENTS: &str = "events.jsonl";
