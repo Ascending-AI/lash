@@ -1289,11 +1289,11 @@ async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_adver
         before == after,
     );
     assert_eq!(
-        error.as_deref(),
-        Some(
-            "validation error: source `plugins` resolved tool id `tool:known` with mismatched \
-             manifest id `tool:advertised`"
-        )
+        error,
+        Some(format!(
+            "validation error: source `{PLUGIN_TOOL_SOURCE_ID}` resolved tool id `tool:known` \
+             with mismatched manifest id `tool:advertised`"
+        ))
     );
 }
 
