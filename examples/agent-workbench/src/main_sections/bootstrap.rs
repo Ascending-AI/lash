@@ -243,9 +243,6 @@ struct WorkbenchCorePlugins {
     live_replay: Arc<dyn lash::observe::LiveReplayStore>,
     #[cfg(feature = "e2e-tools")]
     operation: Arc<crate::e2e_operation::Controls>,
-    /// The tool fixture's isolated worker engine, when its scenario binds one.
-    #[cfg(feature = "e2e-tools")]
-    worker_engine: Option<Arc<dyn PluginFactory>>,
 }
 
 /// The builder behind every workbench Restate core: the selected protocol factory
@@ -270,8 +267,6 @@ async fn workbench_core_builder(
         live_replay,
         #[cfg(feature = "e2e-tools")]
         operation,
-        #[cfg(feature = "e2e-tools")]
-        worker_engine,
     } = plugins;
     let mut builder = match crate::session_protocol::selected()? {
         crate::session_protocol::SessionProtocol::Standard => {
@@ -324,10 +319,6 @@ async fn workbench_core_builder(
             operation,
             operation_namespace,
         )));
-        #[cfg(feature = "e2e-tools")]
-        if let Some(engine) = worker_engine {
-            plugins.push(engine);
-        }
         if let Some(marker) = shutdown_marker {
             plugins.push(marker);
         }
@@ -373,10 +364,6 @@ pub(crate) async fn bound_workbench_engine(
         live_replay: Arc::new(lash::observe::InMemoryLiveReplayStore::default()),
         #[cfg(feature = "e2e-tools")]
         operation: Arc::new(crate::e2e_operation::Controls::default()),
-        #[cfg(feature = "e2e-tools")]
-        worker_engine: tool_fixture
-            .as_ref()
-            .and_then(crate::e2e_tools::Fixture::worker_engine),
     };
     let _core = workbench_core_builder(
         host_backend,
@@ -696,10 +683,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         live_replay: WorkbenchLiveReplay::from_environment()?.store().await?,
         #[cfg(feature = "e2e-tools")]
         operation: operation_controls.clone(),
-        #[cfg(feature = "e2e-tools")]
-        worker_engine: tool_fixture
-            .as_ref()
-            .and_then(crate::e2e_tools::Fixture::worker_engine),
     };
     // Deployment policy example. Choose these limits for the host's workload
     // before build(); session settings instead use recorded config commands.

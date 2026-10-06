@@ -17,34 +17,9 @@ use serde::{Deserialize, Serialize};
 
 use super::model::{ConsumerHold, ProcessStartRegistration, StartKey};
 
-pub use crate::tool_run::ProcessExecutionBoundary;
-
-/// A registered implementation's observation that its physical worker ended.
-/// The implementation retains this receipt so a repeated cancellation can
-/// recover it without terminating a different worker.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkerTerminationReceipt {
-    pub process_id: crate::ProcessId,
-    pub worker_pid: std::num::NonZeroU32,
-}
-
-/// The physical worker owned by a registered process implementation.
-#[async_trait::async_trait]
-pub trait PhysicalProcessWorker: Send + Sync {
-    /// Terminate and reap the worker, or recover its retained receipt.
-    /// Returning a cancellation request without observing termination does
-    /// not satisfy this contract. Repeated calls must name the same worker.
-    async fn terminate_worker(
-        &self,
-        process_id: &crate::ProcessId,
-    ) -> Result<WorkerTerminationReceipt, crate::PluginError>;
-}
-
 /// The implementation and start an isolated call binds before execution.
 #[derive(Clone, Debug)]
 pub struct IsolatedToolStart {
-    pub boundary: ProcessExecutionBoundary,
     pub registration: ProcessStartRegistration,
 }
 

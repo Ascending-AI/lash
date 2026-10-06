@@ -1,8 +1,6 @@
 //! Binding, launch recovery and discharge of admitted process starts.
 use super::*;
-use crate::runtime::process::{
-    DeclaredStartPhase, StartCancelDecision, StartKey, WorkerTerminationReceipt,
-};
+use crate::runtime::process::{DeclaredStartPhase, StartCancelDecision, StartKey};
 use crate::tool_dispatch::{RunStartPrepared, RunStepHandle, StartLaunch};
 
 /// The hold key of a call's declared start: the call's own id, so a call
@@ -248,7 +246,6 @@ pub(super) fn issue_prepare<'a>(
     scoped: &'a ScopedEffectController<'a>,
     call_id: ToolCallId,
     obligation: DeclaredStartObligation,
-    isolated: Option<RecordedIsolatedStart>,
     handlers: Handlers<'a>,
     closing: bool,
 ) -> Result<RunStepHandle<'a, RunStartPrepared>, SingletonRunError> {
@@ -265,16 +262,9 @@ pub(super) fn issue_prepare<'a>(
                 StartLaunch::Refused(refusal) => return Err(refusal.describe()),
             };
             let cancelled = decide_discharge(&obligation, handlers, closing).await?;
-            let termination = discharge_effects(
-                &call_id,
-                &obligation,
-                isolated.as_ref(),
-                handlers,
-                &process_id,
-                cancelled,
-            )
-            .await
-            .map_err(|error| error.to_string())?;
+            discharge_effects(&obligation, handlers, &process_id, cancelled)
+                .await
+                .map_err(|error| error.to_string())?;
             Ok(RunStartPrepared {
                 events: vec![
                     RunEvent::StartLaunched {
@@ -289,7 +279,6 @@ pub(super) fn issue_prepare<'a>(
                         cancelled,
                     },
                 ],
-                termination,
             })
         }),
     ))
@@ -357,41 +346,15 @@ pub(super) fn discharged(
     Ok(*cancelled)
 }
 
-/// Follow the journaled discharge decision — terminate a hard-isolated
-/// worker, release the hold — outside the carrier, on every replay.
+/// Follow the journaled discharge decision — release the hold, and on a
+/// cancel ask the process to stop cooperatively — outside the carrier, on
+/// every replay.
 pub(super) async fn discharge_effects(
-    call_id: &ToolCallId,
     obligation: &DeclaredStartObligation,
-    isolated: Option<&RecordedIsolatedStart>,
     handlers: &dyn SingletonToolHandlers,
     process_id: &ProcessId,
     cancelled: bool,
-) -> Result<Option<WorkerTerminationReceipt>, SingletonRunError> {
-    let engine = isolated
-        .map(|binding| require_isolated_engine(handlers, &binding.engine_kind, binding.boundary))
-        .transpose()?;
-    let hard =
-        isolated.is_some_and(|binding| binding.boundary == ProcessExecutionBoundary::WorkerProcess);
-    let mut receipt = None;
-    if cancelled && hard {
-        let binding = isolated.ok_or_else(|| boundary(call_id))?;
-        let worker = engine
-            .as_ref()
-            .and_then(|engine| engine.physical_worker())
-            .ok_or_else(|| IsolatedStartRefusal::Unavailable {
-                kind: binding.engine_kind.clone(),
-            })?;
-        let terminated = worker.terminate_worker(process_id).await.map_err(|error| {
-            RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::EngineEffectController,
-                error.to_string(),
-            )
-        })?;
-        if terminated.process_id != *process_id {
-            return Err(IsolatedStartRefusal::TerminationOwner.into());
-        }
-        receipt = Some(terminated);
-    }
+) -> Result<(), SingletonRunError> {
     handlers
         .discharge_start(obligation, process_id, cancelled)
         .await
@@ -401,15 +364,14 @@ pub(super) async fn discharge_effects(
                 message,
             )
         })?;
-    Ok(receipt)
+    Ok(())
 }
 
 /// Journal a deferred start's cancel decision as its `start:discharge`
 /// carrier, then follow the recorded decision — release the hold —
 /// outside the carrier, on every replay. The carrier's step asks the gate;
 /// a replay serves the decision. Only the deferred path owns one; a declared
-/// start records its decision together with launch in start:prepare. A
-/// deferred start is never isolated, so no worker is terminated here.
+/// start records its decision together with launch in start:prepare.
 pub(super) async fn discharge_start<'a>(
     journal: &mut RunJournal<'a>,
     call_id: &ToolCallId,
@@ -445,14 +407,6 @@ pub(super) async fn discharge_start<'a>(
         )
         .await?;
     let cancelled = discharged(&entry, call_id, &start_key)?;
-    discharge_effects(
-        call_id,
-        obligation,
-        None,
-        handlers.get(),
-        &process_id,
-        cancelled,
-    )
-    .await?;
+    discharge_effects(obligation, handlers.get(), &process_id, cancelled).await?;
     Ok(entry)
 }

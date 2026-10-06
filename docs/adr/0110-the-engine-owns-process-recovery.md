@@ -125,54 +125,22 @@ A SQL store is not a second execution engine. Tests exercise the contract
 through the in-process Restate server double and live Restate; simulation
 uses Lash-sim's in-process effect host.
 
-### 8. A physical worker retains one ownership record
+### 8. Cancellation is cooperative; hard isolation is the host engine's
 
-`WorkerProcessEngine` receives a durable ownership directory from its host.
-Replacement deployments retain that directory on the same Linux kernel and
-PID namespace. The StartKey recovers one minted ProcessId (ADR 0107); the
-engine's record binds that id, key and payload to one worker PID, kernel boot
-id, PID namespace and kernel start time. An OS file lock serializes launch
-and terminal writes across engine instances. Data replacement and the owning
-directory are synced before the new state is acknowledged.
+Lash provides the `ProcessEngine` seam. A host registers its own engines in
+its own deployment, and Restate runs each process's invocation on the host's
+nodes, the same way turns run there. An isolated tool binds a host-registered
+engine through `IsolatedProcessBinding` and runs as one process of it.
 
-A prelaunch shell waits for an authorization line on stdin and then execs
-in place. The parent records the PID durably before sending that line and
-the JSON payload. If the host dies before the write, EOF closes the gate:
-none of the configured work ran. If it dies after the write, redelivery
-reads that launch, never starts a replacement, and adopts its live worker.
-A pidfd is opened before checking boot, namespace and start time, so a
-reused numeric PID cannot receive a signal intended for the recorded worker.
+Lash's cancellation of a process is cooperative: it records the request,
+the process workflow delivers it to the running engine, and the engine ends
+its run. Lash ships
+no engine that executes OS programs or keeps ownership state on local disk. A
+host that needs hard isolation (an OS kill and reap, adoption of a live
+worker across host loss) builds it into its own `ProcessEngine`, together
+with whatever durable ownership that requires.
 
-The process invocation never waits on the worker itself (FIG-5152). It
-journals whether the worker has ended and, while it has not, sleeps on a
-durable timer raced against the process's cancel promise, doubling from one
-second to a minute. The invocation therefore suspends while the worker runs,
-and Restate's inactivity and abort timeouts never abort or replay it however
-long the worker lives. Every wake launches or adopts the worker through its
-ownership record before it observes, so a host lost while the invocation
-slept is replaced at the next wake. The first journaled observation that saw
-the worker ended reads the terminal the record retains, so the result
-reaches the invocation exactly once.
-
-Adoption retains the live worker instead of setting a parent-death signal.
-Cancellation signals that pidfd, observes death and waits for the original
-parent or kernel init to reap it. Termination and natural-exit output are
-written durably before the supervisor publishes them, and a retained terminal
-is immutable. Cold cancellation reads that record even when the process
-workflow already finished. When a host lost the worker's output before
-recording it, recovery refuses resume with typed `SubstrateLost`; it does
-not execute the program again to reconstruct that result. The directory
-must survive host replacement and remain retained alongside its process
-identities. A live worker record from another kernel or PID namespace refuses ownership
-observation: that worker is inaccessible, not proven dead. No fresh termination
-receipt or replacement launch is allowed there. Retained terminals remain
-readable without another physical observation.
-
-Evidence: `crates/lash-core-execution/src/runtime/process/worker_engine.rs`,
-`crates/lash-core-execution/src/runtime/process/worker_ownership.rs`, the
-L08 cold-process-redelivery laws in
-`crates/lash/src/tests/isolated_tool_route.rs` (FIG-5011), and its long-worker
-laws on the double and on live Restate (FIG-5152).
+Evidence: `crates/lash/src/tests/isolated_tool_route.rs`.
 
 ## Consequences
 

@@ -3015,13 +3015,11 @@
       "type": "string"
     },
     "IsolatedStartRefusal": {
-      "description": "A process binding or physical termination that cannot honor admission.",
+      "description": "A process binding that cannot honor admission.",
       "oneOf": [
         {
           "enum": [
-            "NotEngine",
-            "TerminationOwner",
-            "TerminationMissing"
+            "NotEngine"
           ],
           "type": "string"
         },
@@ -3042,34 +3040,6 @@
           },
           "required": [
             "Unavailable"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "Boundary": {
-              "properties": {
-                "available": {
-                  "$ref": "#/$defs/ProcessExecutionBoundary"
-                },
-                "kind": {
-                  "type": "string"
-                },
-                "recorded": {
-                  "$ref": "#/$defs/ProcessExecutionBoundary"
-                }
-              },
-              "required": [
-                "kind",
-                "recorded",
-                "available"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "Boundary"
           ],
           "type": "object"
         },
@@ -4558,22 +4528,6 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
-    },
-    "ProcessExecutionBoundary": {
-      "description": "The execution boundary a registered process implementation supplies.\nAn invocation has independent lifetime, but no OS isolation guarantee.",
-      "oneOf": [
-        {
-          "enum": [
-            "invocation"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "worker_process",
-          "description": "The implementation runs the work in a separate worker process and\ncan terminate and reap it before acknowledging cancellation.",
-          "type": "string"
-        }
-      ]
     },
     "ProcessStatus": {
       "description": "Durable lifecycle status of a process row.\n\n# Rollout: adding a variant is a one-way door for readers\n\nThis enum has no `#[serde(other)]` fallback arm, by design \u2014 a store that\nsilently folded an unknown status into a known one would corrupt the very\nfold the registry exists to keep honest. The consequence is that a variant\nis only readable by binaries that know it: an older binary sharing a\nregistry with a newer one hard-errors with `unknown variant\ncaller_departed` on any read that touches such a row. That includes\n[`ProcessRegistry::processes_changed_since`](crate::ProcessRegistry::processes_changed_since),\nwhere the failure is not \"skip one row\" but a stalled feed \u2014 the projector\nstops advancing its cursor at all.\n\n[`ProcessStatus::CallerDeparted`] therefore ships without a store schema\nbump, deliberately: no column shape changed, and every backend already\nfilters the `status` column it is written to. For SQLite that is also the\nonly tenable choice \u2014 its stores have no migration chain and refuse any\ndatabase whose `user_version` does not match exactly, so a bump would make\nevery existing process database unopenable to buy nothing. Postgres *does*\nhave a migration ladder, so a bump was possible there; it was skipped for\nrollout simplicity and vocabulary parity across backends, not because it\ncould not be done.\n\nOperationally: upgrade readers before any writer can emit a new status.\nA mixed-version fleet sharing one registry must roll all binaries forward\nfirst; rolling a writer out ahead of its readers stalls their feeds.",

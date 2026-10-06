@@ -102,9 +102,6 @@ pub enum Command {
     H3(h3::H3Args),
     /// Live H5 plugin publication and cold-reopen fixture.
     PluginUpgrade(plugin_upgrade::PluginUpgradeArgs),
-    /// S19/S20's physical worker: write its PID marker, then wait to be killed.
-    #[command(hide = true)]
-    IsolatedWorker(h3::IsolatedWorkerArgs),
 }
 
 /// Which store a command opens.
@@ -333,7 +330,6 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::PluginState(args) => print(&plugin_state::run(args).await?),
         Command::H3(args) => print(&h3::run(args).await?),
         Command::PluginUpgrade(args) => plugin_upgrade::run(args).await,
-        Command::IsolatedWorker(args) => h3::isolated_worker(args).await,
     }
 }
 
@@ -572,16 +568,7 @@ fn recovery_lease() -> lash::RecoveryLeaseConfig {
 /// calls the provider; the node that executes a turn does, and records and
 /// holds each call as `observed` asks.
 fn core_builder(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCoreBuilder> {
-    let h3 = h3::plugin(
-        "",
-        h3::IsolatedHost::new(
-            backend.stores().process_registry(),
-            backend.effect_host(),
-            observed.gate_dir.clone(),
-            backend.stores().process_env_store(),
-        ),
-        backend.tool_material_store(),
-    );
+    let h3 = h3::plugin("", backend.tool_material_store());
     let build = BuildLabel::current();
     // The generation exists once this core is built: it folds in the core's
     // plugins. The provider reads it when a turn calls it.

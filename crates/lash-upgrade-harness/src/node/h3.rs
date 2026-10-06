@@ -28,12 +28,6 @@ pub mod retirement;
 pub mod rlm;
 mod tasks;
 
-pub use tasks::isolated::{
-    IsolatedArgs, IsolatedClaim, IsolatedHost, IsolatedWorkerArgs, WORKER_KIND, WorkerMarker,
-    WorkerSpawn, body_marker, isolated_worker, observer_file, receipt_file, spawns,
-    start_key as isolated_start_key, terminal_file, worker_file,
-};
-
 /// Node controls deliberately preserve the public Run vocabulary.
 #[derive(Debug, Args)]
 pub struct H3Args {
@@ -57,11 +51,6 @@ pub enum H3Command {
     },
     Deferred {
         key: String,
-    },
-    /// S19/S20: one isolated call bound to the physical worker engine.
-    Isolated {
-        key: String,
-        args: IsolatedArgs,
     },
     Resolve {
         source: lash_core::AwaitEventKey,
@@ -105,7 +94,6 @@ pub enum H3Command {
 /// revision is identical across the candidate/synthetic successor pair.
 pub(super) fn plugin(
     namespace: &str,
-    isolated: IsolatedHost,
     materials: Arc<dyn lash_core::store::ToolMaterialStore>,
 ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     let namespace = namespace.to_owned();
@@ -184,10 +172,9 @@ pub(super) fn plugin(
                 Ok(lash_core::plugin::PluginOperationOutcome::new(output))
             }
         });
-    let spec = tasks::isolated::register(tasks::register(spec, materials), isolated.clone());
-    isolated.factory(StaticPluginFactory::new(
+    Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial(PLUGIN),
-        spec,
+        tasks::register(spec, materials),
     ))
 }
 
@@ -312,15 +299,6 @@ pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
             let handle = session
                 .plugin_operations()
                 .start_task_raw(tasks::DEFERRED, serde_json::json!(key), key)
-                .await?;
-            let run = handle.run().clone();
-            drop(handle);
-            Ok(serde_json::json!({"run": run, "admitted": true}))
-        }
-        H3Command::Isolated { key, args } => {
-            let handle = session
-                .plugin_operations()
-                .start_task_raw(tasks::isolated::ISOLATED, serde_json::to_value(args)?, key)
                 .await?;
             let run = handle.run().clone();
             drop(handle);

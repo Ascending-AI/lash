@@ -231,16 +231,11 @@ impl<'a> RunCoordinator<'a> {
         };
         let journal = &mut self.journal;
 
-        let isolated = match &capture {
-            SingletonCapture::Isolated { binding } => Some(binding.as_ref().clone()),
-            _ => None,
-        };
         let (select_key, handle) = if let Some(obligation) = obligation {
             let crate::tool_dispatch::RunStepHandle { body, result } = start::issue_prepare(
                 journal.scoped,
                 call_id.clone(),
                 obligation,
-                isolated,
                 callback,
                 journal.ledger.lifecycle() == crate::tool_run::RunLifecycle::Closing,
             )?;
@@ -314,8 +309,6 @@ impl<'a> RunCoordinator<'a> {
                                     Some(IsolatedProcessDescriptor {
                                         process_id: process_id.clone(),
                                         start_key: binding.start.start_key.clone(),
-                                        boundary: binding.boundary,
-                                        termination: prepared.termination.clone(),
                                     })
                                 }
                                 _ => None,

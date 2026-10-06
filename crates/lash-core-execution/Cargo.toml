@@ -48,7 +48,6 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 sha2 = { workspace = true }
-rustix = { version = "1.1.4", features = ["event", "process"] }
 chrono = { workspace = true }
 futures-util = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }

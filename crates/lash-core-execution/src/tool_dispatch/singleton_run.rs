@@ -48,12 +48,11 @@
 //!
 //! [`RuntimeEffectController::record_run_record`]: crate::RuntimeEffectController::record_run_record
 //!
-//! An isolated declaration binds its registered implementation, boundary and
-//! canonical start in admission. Its attempt records that binding without
-//! calling `execute`. The protected start drain returns a process descriptor.
-//! A hard-isolation cancel records the physical worker's termination receipt
-//! before releasing the consumer hold. Ordinary bodies retain their own
-//! timeout behavior and are never rerouted into this start path.
+//! An isolated declaration binds its registered implementation and canonical
+//! start in admission. Its attempt records that binding without calling
+//! `execute`. The protected start drain returns a process descriptor; its
+//! cancel is cooperative. Ordinary bodies retain their own timeout behavior
+//! and are never rerouted into this start path.
 
 use std::sync::Arc;
 
@@ -135,19 +134,15 @@ pub(super) struct RecordedPreparedRequest {
 pub struct RecordedIsolatedStart {
     pub implementation: crate::store::plugin_writers::PluginCallbackIdentity,
     pub engine_kind: String,
-    pub boundary: super::ProcessExecutionBoundary,
     pub start: SingletonStart,
 }
 
 /// An isolated call's result names the independently executing process.
-/// Physical cancellation carries the implementation's retained reap receipt.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IsolatedProcessDescriptor {
     pub process_id: ProcessId,
     pub start_key: StartKey,
-    pub boundary: super::ProcessExecutionBoundary,
-    pub termination: Option<super::WorkerTerminationReceipt>,
 }
 
 /// What an attempt captured (X), or the cached success a before-check
@@ -753,7 +748,6 @@ pub struct RunAttemptHandle<'run> {
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RunStartPrepared {
     pub events: Vec<crate::tool_run::RunEvent>,
-    pub termination: Option<crate::runtime::process::WorkerTerminationReceipt>,
 }
 
 pub type RunStartPrepareStep<'run> = std::pin::Pin<

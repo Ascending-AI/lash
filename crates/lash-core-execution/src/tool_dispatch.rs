@@ -17,7 +17,7 @@ mod singleton_run;
 
 pub use crate::runtime::process::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, IsolatedStartRefusal,
-    IsolatedToolStart, PhysicalProcessWorker, ProcessExecutionBoundary, WorkerTerminationReceipt,
+    IsolatedToolStart,
 };
 pub use admission::{ToolRoundRefusal, admission_failure, admit_tool_round};
 pub use context::{ToolDispatchContext, ToolTriggerEffectOutcome};

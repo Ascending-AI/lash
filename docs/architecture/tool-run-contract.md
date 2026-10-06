@@ -412,7 +412,7 @@ drains inside the final's declarations: `declare` admits it with them
 Inside that run, launch registers under the stable key (`StartLaunched`),
 the authoritative gate is read once, the recorded policy decides cancellation,
 and discharge releases the hold (`StartDischarged`). Its durable result owns
-both events and any physical termination receipt. D folds them at its current
+both events. D folds them at its current
 ordinal before `present` settles the declarations. Serving that result never
 launches, discharges or reads the live gate again. A
 cancellation before the decision is durable withholds the final, so its
@@ -560,19 +560,18 @@ format tables, guards, codecs, tests, corpus loaders, generated schemas and
 target membership in one compiling landing.
 
 An isolated call binds `IsolatedToolStart` at admission, including the registered
-process implementation's callback revision, execution boundary and stable start.
+process implementation's callback revision and stable start.
 Admission owns its canonical obligation material. The attempt references it and
 runs no ordinary body. The existing protected start drain recovers one process
-under that key and returns `IsolatedProcessDescriptor`. A missing implementation,
-an unavailable revision or an unsupported physical boundary refuses before a
-body or new process identity.
+under that key and returns `IsolatedProcessDescriptor`. A missing implementation
+or an unavailable revision refuses before a body or new process identity.
 
-`ProcessInput::Engine` alone promises independent invocation lifetime. A hard
-isolation claim requires the registered engine's `PhysicalProcessWorker` contract.
-On cancellation that implementation terminates and reaps its worker, or recovers
-its retained `WorkerTerminationReceipt`. The discharge journals that receipt
-before the descriptor is presented, and releases the consumer hold only after
-termination. Replay cannot replace the recorded implementation with a newly bound
-engine. Ordinary tool bodies keep cooperative duration semantics and their own
-transport timeouts; neither slow execution nor a reported timeout reroutes one
-as a process.
+`ProcessInput::Engine` promises independent invocation lifetime, run by the
+host's registered engine on the host's nodes. Lash's cancellation of that
+process is cooperative: the discharge requests the cancel and releases the
+consumer hold, and the engine ends its run. Lash ships no engine that executes
+OS programs; a host that needs hard isolation (an OS kill and reap) builds it
+into its own `ProcessEngine`. Replay cannot replace the recorded implementation
+with a newly bound engine. Ordinary tool bodies keep cooperative duration
+semantics and their own transport timeouts; neither slow execution nor a
+reported timeout reroutes one as a process.

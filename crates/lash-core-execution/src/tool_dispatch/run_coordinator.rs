@@ -73,7 +73,7 @@ use super::{RealizationReceipt, RealizationRequest};
 use crate::runtime::effect::{AttemptStreamRecorder, ScopedEffectController};
 use crate::runtime::process::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, IsolatedStartRefusal,
-    IsolatedToolStart, ProcessExecutionBoundary,
+    IsolatedToolStart,
 };
 use crate::store::plugin_writers::PluginRevision;
 use crate::tool_run::{
@@ -288,7 +288,7 @@ fn admit_live(
     let Some(crate::ProcessInput::Engine { kind, .. }) = start.registration.input.input() else {
         return Err(IsolatedStartRefusal::NotEngine.into());
     };
-    require_isolated_engine(handlers, kind, start.boundary)?;
+    require_isolated_engine(handlers, kind)?;
     bind_start(
         call,
         call.cancel == ExternalCancelPolicy::CancelExternalWork,
@@ -301,22 +301,14 @@ fn admit_live(
 fn require_isolated_engine(
     handlers: &dyn SingletonToolHandlers,
     kind: &str,
-    boundary: ProcessExecutionBoundary,
-) -> Result<std::sync::Arc<dyn crate::ProcessEngine>, IsolatedStartRefusal> {
-    let engine = handlers
+) -> Result<(), IsolatedStartRefusal> {
+    handlers
         .process_engines()
         .and_then(|engines| engines.require(kind).ok())
+        .map(|_| ())
         .ok_or_else(|| IsolatedStartRefusal::Unavailable {
             kind: kind.to_owned(),
-        })?;
-    if boundary == ProcessExecutionBoundary::WorkerProcess && engine.physical_worker().is_none() {
-        return Err(IsolatedStartRefusal::Boundary {
-            kind: kind.to_owned(),
-            recorded: boundary,
-            available: ProcessExecutionBoundary::Invocation,
-        });
-    }
-    Ok(engine)
+        })
 }
 
 fn before_verdict(
@@ -375,7 +367,6 @@ async fn prepare_admitted_call(
             Some(RecordedIsolatedStart {
                 implementation: call.binding.executable.clone(),
                 engine_kind,
-                boundary: start.boundary,
                 start: SingletonStart {
                     start_key: obligation.start_key().clone(),
                     obligation: reference,
@@ -478,7 +469,7 @@ fn validate_admitted_call(
                 drift: SingletonDrift::IsolationBinding,
             });
         }
-        require_isolated_engine(handlers, &binding.engine_kind, binding.boundary)?;
+        require_isolated_engine(handlers, &binding.engine_kind)?;
         let obligation = recorded_obligation(journal, &call.call_id, &binding.start)?;
         if !matches!(obligation.registration.input.input(), Some(crate::ProcessInput::Engine { kind, .. }) if kind == &binding.engine_kind)
         {

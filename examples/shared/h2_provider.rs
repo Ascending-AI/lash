@@ -30,19 +30,7 @@ pub fn scripted_provider(
     ensure!(
         matches!(
             scenario,
-            "S01"
-                | "S02"
-                | "S05"
-                | "S08"
-                | "S09"
-                | "S10"
-                | "S11"
-                | "S12"
-                | "S19"
-                | "S20"
-                | "S23"
-                | "S31"
-                | "S32"
+            "S01" | "S02" | "S05" | "S08" | "S09" | "S10" | "S11" | "S12" | "S23" | "S31" | "S32"
         ),
         "unknown H2 scenario"
     );
@@ -50,7 +38,6 @@ pub fn scripted_provider(
         scenario: scenario.to_owned(),
     };
     let labels: Vec<_> = labels.iter().map(|label| (*label).to_owned()).collect();
-    let gates = ledger_path.to_owned();
     let ledger = Arc::new(Mutex::new(
         std::fs::OpenOptions::new()
             .create(true)
@@ -69,50 +56,27 @@ pub fn scripted_provider(
             let config = config.clone();
             let labels = labels.clone();
             let ledger = ledger.clone();
-            let gates = gates.clone();
             async move {
                 let fail = |error: anyhow::Error| {
                     lash::provider::LlmTransportError::new(format!(
                         "H2 provider fixture: {error:#}"
                     ))
                 };
-                let (response, gate) =
-                    response(&config, &labels, protocol, &request, &ledger).map_err(fail)?;
-                if let Some(input) = gate {
-                    await_release(&gates, &input).await.map_err(fail)?;
-                }
-                Ok(response)
+                response(&config, &labels, protocol, &request, &ledger).map_err(fail)
             }
         })
         .build()
         .into_handle())
 }
 
-/// The release file a case writes to let an isolated leg's first answer
-/// return: the leg's input text, beside the provider ledger.
-pub fn release_path(ledger: &Path, input: &str) -> std::path::PathBuf {
-    ledger.with_file_name(format!("provider-release-{}", input.replace(' ', "-")))
-}
-
-/// Hold an isolated leg's first answer until its case released it: the
-/// ledger record is the reached proof, so the case binds the Run's invocation
-/// and arms its transport cuts before the cell calls the tool.
-async fn await_release(ledger: &Path, input: &str) -> Result<()> {
-    let release = release_path(ledger, input);
-    while !release.exists() {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    Ok(())
-}
-
-/// The answer, and the input whose release it waits for, if any.
+/// The answer to one request.
 fn response(
     config: &ProviderConfig,
     labels: &[String],
     protocol: FixtureProtocol,
     request: &LlmRequest,
     ledger: &Mutex<std::fs::File>,
-) -> Result<(LlmResponse, Option<String>)> {
+) -> Result<LlmResponse> {
     use std::io::{Read, Seek};
     let start = request
         .messages
@@ -150,9 +114,6 @@ fn response(
     file.rewind()?;
     let mut previous = String::new();
     file.read_to_string(&mut previous)?;
-    if matches!(config.scenario.as_str(), "S19" | "S20") {
-        return isolated_response(&text, &previous, request, &mut file);
-    }
     // S23 submits identical input again after cancelling the first Run; each
     // Run makes exactly one request of its own.
     let runs = if config.scenario == "S23" { 2 } else { 1 };
@@ -302,59 +263,8 @@ fn response(
     record.push(b'\n');
     file.write_all(&record)?;
     file.sync_all()?;
-    Ok((
-        LlmResponse {
-            parts,
-            ..Default::default()
-        },
-        None,
-    ))
-}
-
-/// S19/S20: each leg is its own session and input, and its first request
-/// calls the leg's one isolated tool. A later request of the same input (the
-/// model asked again after a refused call) finishes without a tool.
-fn isolated_response(
-    text: &str,
-    previous: &str,
-    request: &LlmRequest,
-    file: &mut std::fs::File,
-) -> Result<(LlmResponse, Option<String>)> {
-    // A retried model call must return the same script. Only a new logical
-    // request advances the leg, even if transport delivered this one twice.
-    let scope = serde_json::to_value(&request.scope)?;
-    let mut previous_requests = BTreeSet::new();
-    for line in previous.lines() {
-        let value: serde_json::Value = serde_json::from_str(line)?;
-        if value["input"] == text && value["scope"] != scope {
-            previous_requests.insert(value["scope"].to_string());
-        }
-    }
-    let asked = previous_requests.len();
-    let tool = if text.contains("unbound") {
-        "unbound"
-    } else {
-        "isolated"
-    };
-    let code = if asked == 0 {
-        format!("const started = await tools.{tool}({{}});\nfinish(started);")
-    } else {
-        "finish('asked again');".to_owned()
-    };
-    let mut record = serde_json::to_vec(
-        &serde_json::json!({"stage":asked,"input":text,"scope":request.scope,"request":request}),
-    )?;
-    record.push(b'\n');
-    file.write_all(&record)?;
-    file.sync_all()?;
-    Ok((
-        LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: format!("<typescript>\n{code}\n</typescript>"),
-                response_meta: None,
-            }],
-            ..Default::default()
-        },
-        (asked == 0).then(|| text.to_owned()),
-    ))
+    Ok(LlmResponse {
+        parts,
+        ..Default::default()
+    })
 }

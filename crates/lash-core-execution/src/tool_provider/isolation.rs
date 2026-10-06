@@ -1,12 +1,14 @@
-//! How a provider binds an isolated tool to the process that runs it (D04).
+//! How a provider binds an isolated tool to the process that runs it.
 //!
 //! An isolated call has no inline body: admission asks the call's provider
 //! which registered [`ProcessEngine`](crate::ProcessEngine) runs it, records
 //! that answer with the call's admission, and starts that one process under a
 //! lash-derived start key before any ordinary body could run. Replay and
 //! recovery read the recorded binding and never ask the provider again.
+//! Cancellation of that process is cooperative: a host needing hard isolation
+//! builds it into its own engine.
 
-use crate::{ProcessExecutionBoundary, ToolId};
+use crate::ToolId;
 use lash_sansio::ToolCallId;
 
 /// An isolated call, as admission asks its provider to bind it.
@@ -27,9 +29,4 @@ pub struct IsolatedProcessBinding {
     pub engine: String,
     /// The engine's start payload.
     pub payload: serde_json::Value,
-    /// The boundary the call promises.
-    /// [`ProcessExecutionBoundary::WorkerProcess`] requires the engine's
-    /// [`PhysicalProcessWorker`](crate::PhysicalProcessWorker); admission
-    /// refuses the call otherwise.
-    pub boundary: ProcessExecutionBoundary,
 }

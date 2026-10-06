@@ -259,41 +259,6 @@ timeout_seconds = 180
 # The laws prune after the await and resume a suspended handler's journal.
 RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT = "100ms"
 
-# FIG-5152: a process whose OS worker outlives the invoker's silence timers
-# suspends its invocation between durable observations of the worker, so the
-# server never aborts, replays or pauses it. Both legs shorten the abort
-# timeout to two seconds and the live leg the inactivity timeout to one, so
-# the six-second worker outlives both.
-[suites.long-process]
-label = "//crates/lash:lash__unit_test"
-cwd = "crates/lash"
-filters = ["tests::isolated_tool_route::live_restate_"]
-endpoints = ["LP"]
-shards = 1
-timeout_seconds = 180
-
-[suites.long-process.live.server_env]
-RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT = "1s"
-RESTATE_WORKER__INVOKER__ABORT_TIMEOUT = "2s"
-
-[suites.long-process.replay.server_env]
-RESTATE_WORKER__INVOKER__ABORT_TIMEOUT = "2s"
-
-[suites.long-process-postgres]
-label = "//crates/lash:lash__unit_test"
-cwd = "crates/lash"
-filters = ["tests::isolated_tool_route::postgres_live_restate_"]
-endpoints = ["LP"]
-shards = 1
-timeout_seconds = 180
-
-[suites.long-process-postgres.live.server_env]
-RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT = "1s"
-RESTATE_WORKER__INVOKER__ABORT_TIMEOUT = "2s"
-
-[suites.long-process-postgres.replay.server_env]
-RESTATE_WORKER__INVOKER__ABORT_TIMEOUT = "2s"
-
 [suites.attachment-attach]
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"

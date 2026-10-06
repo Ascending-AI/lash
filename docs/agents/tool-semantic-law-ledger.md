@@ -34,7 +34,7 @@ The F04 baseline is F01 `736db467f449e41f58f1f715838548b90341d7c1`. Sam’s dele
 | <a id="r26"></a>R26 | L08,L12 | `tests::declared_start_run_drain_on_the_double::l08_invalid_start_obligations_never_issue_preparation` | `//crates/lash-restate:lash-restate__unit_test` |
 | <a id="r27"></a>R27 | L08,L04 | `tests::declared_start_run_drain_on_the_double::l08_acknowledged_prepare_keeps_its_discharge_when_presentation_redelivers` | `//crates/lash-restate:lash-restate__unit_test` |
 | <a id="r28"></a>R28 | L03,L08 | `tests::declared_start_run_drain_on_the_double::l08_prepare_applies_cancel_policy_only_to_an_admitted_start` | `//crates/lash-restate:lash-restate__unit_test` |
-| <a id="r29"></a>R29 | L08 | `tests::declared_start_run_drain_on_the_double::l08_isolated_prepare_retains_the_terminated_worker_receipt` | `//crates/lash-restate:lash-restate__unit_test` |
+| <a id="r29"></a>R29 | L08 | Retired by FIG-5158: lash ships no OS-worker engine, so no physical termination receipt exists; isolated cancellation is cooperative (`tests::isolated_tool_route::l08_isolated_cancellation_forbids_launch_before_admission_or_cancels_the_same_process_after`, `//crates/lash:lash__unit_test`). | — |
 | <a id="r30"></a>R30 | L22 | `tests::declared_start_run_drain_on_the_double::slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process` | `//crates/lash-restate:lash-restate__unit_test` |
 | <a id="r31"></a>R31 | L07 | `tests::durable_wait_source_seal::an_early_resolution_answers_the_later_subscription_and_duplicates_read_it` | `//crates/lash-restate:lash-restate__unit_test` |
 | <a id="r32"></a>R32 | L03,L07 | `tests::durable_wait_source_seal::resolve_and_cancel_race_to_one_seal_and_wake_each_subscriber_once` | `//crates/lash-restate:lash-restate__unit_test` |

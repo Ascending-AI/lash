@@ -5,7 +5,7 @@ mod bodies;
 pub use bodies::*;
 #[path = "../../../../examples/shared/h2_provider.rs"]
 mod provider;
-pub use provider::{FixtureProtocol, release_path, scripted_provider};
+pub use provider::{FixtureProtocol, scripted_provider};
 #[path = "../../../../examples/shared/h2_receiver.rs"]
 mod receiver;
 pub use receiver::{ReceiverEvents, receiver_events, register_receiver};

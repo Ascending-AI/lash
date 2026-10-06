@@ -21631,46 +21631,6 @@ lash_restate_suite(
 )
 
 lash_restate_suite(
-    name = "restate_long_process_live",
-    test = ":lash__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "long-process",
-    leg = "live",
-    shard_count = 1,
-)
-
-lash_restate_suite(
-    name = "restate_long_process_replay",
-    test = ":lash__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "long-process",
-    leg = "replay",
-    shard_count = 1,
-)
-
-lash_restate_suite(
-    name = "restate_long_process_postgres_live",
-    test = ":lash__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "long-process-postgres",
-    leg = "live",
-    shard_count = 1,
-)
-
-lash_restate_suite(
-    name = "restate_long_process_postgres_replay",
-    test = ":lash__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "long-process-postgres",
-    leg = "replay",
-    shard_count = 1,
-)
-
-lash_restate_suite(
     name = "restate_long_tool_body_live",
     test = ":lash__unit_test__rust_test",
     env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},

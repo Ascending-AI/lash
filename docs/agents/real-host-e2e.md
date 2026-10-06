@@ -1,7 +1,10 @@
 # Real-host E2E selection and receipts
 
-`scripts/lash-e2e-manifest.json` owns scenario selection. It lists S01–S37,
-their named laws/risks, owner lanes, store/leg/channel/variant permutations,
+`scripts/lash-e2e-manifest.json` owns scenario selection. It lists S01–S37
+except S19 and S20, which exercised the OS-worker process engine lash no
+longer ships (FIG-5158): lash's cancellation is cooperative, and hard
+isolation is the host engine's own. For each scenario it lists the named
+laws/risks, owner lanes, store/leg/channel/variant permutations,
 required artifacts and landing dependencies. Every implemented case is
 registered and runs through `scripts/e2e-gate.py`; held rows keep a named
 reason and refuse execution and certification. Plans are inventory, never

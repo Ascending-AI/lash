@@ -20,10 +20,9 @@ use lash_core::runtime::AttemptStream;
 use lash_core::store::plugin_writers::PluginCallbackIdentity;
 use lash_core::tool_dispatch::{
     BeforeCheckReply, DeclaredStartObligation, DeclaredStartObligationRefusal,
-    IsolatedProcessDescriptor, IsolatedStartRefusal, IsolatedToolStart, PhysicalProcessWorker,
-    ProcessExecutionBoundary, SingletonAttempt, SingletonBodyOutcome, SingletonCapture,
-    SingletonPreparedRequest, SingletonRunError, SingletonTerminal, SingletonToolCall,
-    SingletonToolHandlers, WorkerTerminationReceipt,
+    IsolatedStartRefusal, IsolatedToolStart, SingletonAttempt, SingletonBodyOutcome,
+    SingletonCapture, SingletonPreparedRequest, SingletonRunError, SingletonTerminal,
+    SingletonToolCall, SingletonToolHandlers,
 };
 use lash_core::tool_run::{
     AdmittedBinding, AfterCheckVerdict, AttributedVerdict, CallDecision, DeclarationRefusal,
@@ -125,8 +124,8 @@ struct Starter {
     launches: Mutex<Vec<ProcessId>>,
     discharges: Mutex<Vec<(ProcessId, bool)>>,
     engines: Option<lash_core::ProcessEngineRegistry>,
-    isolation: Option<ProcessExecutionBoundary>,
-    worker: Option<Arc<IsolatedEngine>>,
+    isolated: bool,
+    engine: Option<Arc<IsolatedEngine>>,
     slow: bool,
     materials: std::sync::OnceLock<Arc<dyn lash_core::store::ToolMaterialStore>>,
     ingress: std::sync::OnceLock<crate::RestateIngressClient>,
@@ -148,8 +147,8 @@ impl Starter {
             launches: Mutex::new(Vec::new()),
             discharges: Mutex::new(Vec::new()),
             engines: None,
-            isolation: None,
-            worker: None,
+            isolated: false,
+            engine: None,
             slow: false,
             materials: Default::default(),
             ingress: Default::default(),
@@ -271,12 +270,14 @@ impl SingletonToolHandlers for Starter {
     }
 
     fn isolated_start(&self, call: &SingletonToolCall) -> Option<IsolatedToolStart> {
-        let boundary = self.isolation?;
+        if !self.isolated {
+            return None;
+        }
         let label = call.arguments["label"].as_str().unwrap();
         let registration = ProcessStartRegistration::of_target(
             ProcessInput::Engine {
                 kind: self
-                    .worker
+                    .engine
                     .as_ref()
                     .map_or("fig4884-index", |engine| engine.kind)
                     .to_owned(),
@@ -286,10 +287,7 @@ impl SingletonToolHandlers for Starter {
             Lifetime::Detached,
         )
         .with_start_key(Some(start_key(label)));
-        Some(IsolatedToolStart {
-            boundary,
-            registration,
-        })
+        Some(IsolatedToolStart { registration })
     }
 
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
@@ -378,9 +376,6 @@ impl SingletonToolHandlers for Starter {
             .register_process(registration.clone())
             .await
             .map_err(|error| error.to_string())?;
-        if let Some(engine) = &self.worker {
-            engine.launch(&record.id);
-        }
         if self.launch_workflow {
             let _: crate::RestateProcessWorkflowOutput = self
                 .ingress
@@ -425,12 +420,6 @@ impl SingletonToolHandlers for Starter {
                 )
                 .await
                 .map_err(|error| error.to_string())?;
-        }
-        if cancel && self.isolation == Some(ProcessExecutionBoundary::WorkerProcess) {
-            assert!(
-                self.worker.as_ref().unwrap().receipt(process_id).is_some(),
-                "termination precedes hold release"
-            );
         }
         let hold = obligation
             .registration
@@ -711,102 +700,12 @@ fn drained(
 
 struct IsolatedEngine {
     kind: &'static str,
-    physical: bool,
-    workers: Mutex<std::collections::BTreeMap<ProcessId, Worker>>,
-    spawned: AtomicUsize,
-}
-
-enum Worker {
-    Running(std::process::Child),
-    Reaped(WorkerTerminationReceipt),
-}
-
-impl IsolatedEngine {
-    fn new(kind: &'static str, physical: bool) -> Arc<Self> {
-        Arc::new(Self {
-            kind,
-            physical,
-            workers: Mutex::new(Default::default()),
-            spawned: AtomicUsize::new(0),
-        })
-    }
-
-    fn launch(&self, process: &ProcessId) {
-        if !self.physical {
-            return;
-        }
-        let mut workers = self.workers.lock().unwrap();
-        if workers.contains_key(process) {
-            return;
-        }
-        let child = lash_conformance::spawn_isolation_law_worker().unwrap();
-        assert_ne!(
-            child.id(),
-            std::process::id(),
-            "the body has a physical boundary"
-        );
-        workers.insert(process.clone(), Worker::Running(child));
-        self.spawned.fetch_add(1, Ordering::SeqCst);
-    }
-
-    fn receipt(&self, process: &ProcessId) -> Option<WorkerTerminationReceipt> {
-        match self.workers.lock().unwrap().get(process) {
-            Some(Worker::Reaped(receipt)) => Some(receipt.clone()),
-            _ => None,
-        }
-    }
-}
-
-impl Drop for IsolatedEngine {
-    fn drop(&mut self) {
-        for worker in self.workers.get_mut().unwrap().values_mut() {
-            if let Worker::Running(child) = worker {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl PhysicalProcessWorker for IsolatedEngine {
-    async fn terminate_worker(
-        &self,
-        process: &ProcessId,
-    ) -> Result<WorkerTerminationReceipt, lash_core::PluginError> {
-        let mut workers = self.workers.lock().unwrap();
-        let worker = workers.get_mut(process).unwrap();
-        match worker {
-            Worker::Reaped(receipt) => Ok(receipt.clone()),
-            Worker::Running(child) => {
-                let pid = std::num::NonZeroU32::new(child.id()).unwrap();
-                child.kill().unwrap();
-                let status = child.wait().unwrap();
-                assert!(!status.success(), "cancellation terminated the worker");
-                assert_eq!(
-                    child.try_wait().unwrap(),
-                    Some(status),
-                    "the worker was reaped"
-                );
-                let receipt = WorkerTerminationReceipt {
-                    process_id: process.clone(),
-                    worker_pid: pid,
-                };
-                *worker = Worker::Reaped(receipt.clone());
-                Ok(receipt)
-            }
-        }
-    }
 }
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for IsolatedEngine {
     fn kind(&self) -> &'static str {
         self.kind
-    }
-
-    fn physical_worker(&self) -> Option<&dyn PhysicalProcessWorker> {
-        self.physical.then_some(self)
     }
 
     async fn run(
@@ -849,43 +748,37 @@ fn isolated_call(label: &str, policy: ExternalCancelPolicy) -> SingletonToolCall
     call
 }
 
-fn isolated_starter(
-    stores: &Stores,
-    physical: bool,
-    cancel: CancelAt,
-    kind: &'static str,
-) -> Arc<Starter> {
-    let mut starter = Starter::new(stores.set.process_registry(), declaring(None), cancel);
-    let engine = IsolatedEngine::new(kind, physical);
+fn isolated_starter(stores: &Stores, kind: &'static str) -> Arc<Starter> {
+    let mut starter = Starter::new(
+        stores.set.process_registry(),
+        declaring(None),
+        CancelAt::Never,
+    );
+    let engine = Arc::new(IsolatedEngine { kind });
     let owned = Arc::get_mut(&mut starter).unwrap();
     owned.engines = Some(lash_core::ProcessEngineRegistry::new().with_registration(
         lash_core::ProcessEngineRegistration::accepting(engine.clone()),
     ));
-    owned.worker = Some(engine);
-    owned.isolation = Some(if physical {
-        ProcessExecutionBoundary::WorkerProcess
-    } else {
-        ProcessExecutionBoundary::Invocation
-    });
+    owned.engine = Some(engine);
+    owned.isolated = true;
     starter
 }
 
 /// L08 and L12: unsupported isolation and unavailable recorded implementations
-/// refuse before a body or new route. A cooperative engine cannot claim a
-/// physical worker. A replacement live binding cannot replace a recorded one.
+/// refuse before a body or new route. A replacement live binding cannot
+/// replace a recorded one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unsupported_or_changed_isolation_refuses_before_a_body_or_new_identity() {
     let stores = Stores::open().await;
-    for kind in ["missing", "physical-claim", "unavailable", "revision"] {
+    for kind in ["missing", "unavailable", "revision"] {
         let mut call = isolated_call(kind, ExternalCancelPolicy::Ignore);
         if kind == "revision" {
             call.available.clear();
         }
-        let mut starter = isolated_starter(&stores, false, CancelAt::Never, "fig4884-index");
+        let mut starter = isolated_starter(&stores, "fig4884-index");
         let owned = Arc::get_mut(&mut starter).unwrap();
         match kind {
-            "missing" => owned.isolation = None,
-            "physical-claim" => owned.isolation = Some(ProcessExecutionBoundary::WorkerProcess),
+            "missing" => owned.isolated = false,
             "unavailable" => owned.engines = None,
             _ => {}
         }
@@ -910,10 +803,6 @@ async fn unsupported_or_changed_isolation_refuses_before_a_body_or_new_identity(
                 ),
             )
             | (
-                "physical-claim",
-                SingletonRunError::Isolation(IsolatedStartRefusal::Boundary { .. }),
-            )
-            | (
                 "unavailable",
                 SingletonRunError::Isolation(IsolatedStartRefusal::Unavailable { .. }),
             ) => {}
@@ -922,8 +811,8 @@ async fn unsupported_or_changed_isolation_refuses_before_a_body_or_new_identity(
         assert_eq!(starter.executions.load(Ordering::SeqCst), 0);
         assert!(starter.launches().is_empty());
     }
-    let original = isolated_starter(&stores, false, CancelAt::Never, "fig4884-index");
-    let replacement = isolated_starter(&stores, false, CancelAt::Never, "replacement-engine");
+    let original = isolated_starter(&stores, "fig4884-index");
+    let replacement = isolated_starter(&stores, "replacement-engine");
     let driven = drive_with_replay(
         Some("attempt:1"),
         isolated_call("drift", ExternalCancelPolicy::Ignore),
@@ -959,7 +848,7 @@ async fn slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process() {
         },
     ] {
         let stores = Stores::open().await;
-        let mut starter = isolated_starter(&stores, false, CancelAt::Never, "fig4884-index");
+        let mut starter = isolated_starter(&stores, "fig4884-index");
         let owned = Arc::get_mut(&mut starter).unwrap();
         owned.body = body;
         owned.slow = true;
@@ -1250,48 +1139,6 @@ async fn l08_prepare_applies_cancel_policy_only_to_an_admitted_start() {
             );
         }
     }
-}
-
-/// L08: an isolated prepare owns the physical receipt and never enters the
-/// ordinary body, including an acknowledged result replay.
-#[tokio::test]
-async fn l08_isolated_prepare_retains_the_terminated_worker_receipt() {
-    let stores = Stores::open().await;
-    let call = isolated_call("physical-prepare", ExternalCancelPolicy::CancelExternalWork);
-    let starter = isolated_starter(&stores, true, CancelAt::Launch, "fig4884-index");
-    let driven = drive_with_config(
-        Some("present"),
-        call.clone(),
-        Arc::clone(&starter),
-        None,
-        ServerConfig::default().always_replay(true),
-    )
-    .await;
-    let (terminal, records) = driven.finished();
-    let SingletonTerminal::Final {
-        launched: Some(process),
-        presentation,
-        ..
-    } = terminal
-    else {
-        panic!("physical start drains");
-    };
-    let descriptor: IsolatedProcessDescriptor = serde_json::from_str(&presentation).unwrap();
-    let engine = starter.worker.as_ref().unwrap();
-    assert_eq!(starter.executions.load(Ordering::SeqCst), 0);
-    assert_eq!(engine.spawned.load(Ordering::SeqCst), 1);
-    assert_eq!(descriptor.process_id, process);
-    assert_eq!(descriptor.termination, engine.receipt(&process));
-    assert!(descriptor.termination.is_some());
-    assert_eq!(
-        start_events(&records),
-        drained(
-            &call.call_id,
-            &start_key("physical-prepare"),
-            &process,
-            true
-        )
-    );
 }
 
 /// R3/V1: a recorded body watches the deployment gate through ingress. It

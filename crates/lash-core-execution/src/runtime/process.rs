@@ -31,8 +31,6 @@ mod testing;
 mod tests;
 mod validation;
 mod wake;
-mod worker_engine;
-mod worker_ownership;
 
 pub use awaiter::{
     ProcessChangeHub, ProcessChangeSubscription, ProcessEventSink, ProcessEventSinkRegistration,
@@ -40,8 +38,7 @@ pub use awaiter::{
 };
 pub use declared_start::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, DeclaredStartPhase,
-    IsolatedStartRefusal, IsolatedToolStart, PhysicalProcessWorker, ProcessExecutionBoundary,
-    StartCancelDecision, WorkerTerminationReceipt,
+    IsolatedStartRefusal, IsolatedToolStart, StartCancelDecision,
 };
 pub use definition::{
     InvalidProcessDefinitionId, ProcessDefinition, ProcessDefinitionDraft,
@@ -160,4 +157,3 @@ pub use wake::{
     ProcessWakeDeliveryRequest, process_wake_delivery, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text,
 };
-pub use worker_engine::{WorkerCommand, WorkerProcessEngine};

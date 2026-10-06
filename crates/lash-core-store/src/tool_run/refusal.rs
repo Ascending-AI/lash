@@ -2,18 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The execution boundary a registered process implementation supplies.
-/// An invocation has independent lifetime, but no OS isolation guarantee.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessExecutionBoundary {
-    Invocation,
-    /// The implementation runs the work in a separate worker process and
-    /// can terminate and reap it before acknowledging cancellation.
-    WorkerProcess,
-}
-
-/// A process binding or physical termination that cannot honor admission.
+/// A process binding that cannot honor admission.
 #[derive(
     Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, thiserror::Error,
 )]
@@ -22,20 +11,10 @@ pub enum IsolatedStartRefusal {
     NotEngine,
     #[error("process implementation `{kind}` is unavailable")]
     Unavailable { kind: String },
-    #[error("process implementation `{kind}` supplies {available:?}, not {recorded:?}")]
-    Boundary {
-        kind: String,
-        recorded: ProcessExecutionBoundary,
-        available: ProcessExecutionBoundary,
-    },
     #[error("the isolated start is refused: {cause}")]
     Start {
         cause: DeclaredStartObligationRefusal,
     },
-    #[error("the termination receipt names another process")]
-    TerminationOwner,
-    #[error("a physical worker's cancellation has no termination receipt")]
-    TerminationMissing,
 }
 
 /// Why a registration cannot be a declared start.

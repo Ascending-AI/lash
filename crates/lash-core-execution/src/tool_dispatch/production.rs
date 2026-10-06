@@ -194,10 +194,7 @@ impl<'run> ProductionToolHandlers<'run> {
         .with_start_key(Some(
             crate::StartKeyDerivation::LASH_START_PATHS.for_isolated_call(owner, call_id),
         ));
-        Some(IsolatedToolStart {
-            boundary: binding.boundary,
-            registration,
-        })
+        Some(IsolatedToolStart { registration })
     }
     fn cancel_inline_stop(&self, call_id: &crate::ToolCallId, accepted: bool) {
         let mut stops = self.inline_stops.lock_recover();

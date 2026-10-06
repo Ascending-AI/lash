@@ -55,8 +55,7 @@ pub use material::{
 pub use operation::{OperationRun, RunInputKind};
 pub use receipt::{BusinessReceipt, LogicalTerminal, ObservationPermit, ObservedFact};
 pub use refusal::{
-    DeclaredStartObligationRefusal, IsolatedStartRefusal, ProcessExecutionBoundary, RunCutRefusal,
-    SingletonDrift,
+    DeclaredStartObligationRefusal, IsolatedStartRefusal, RunCutRefusal, SingletonDrift,
 };
 pub use retention::{MaterialBundle, MaterialHolder, MaterialRetentionError, RetainedBundle};
 pub use run_event::{

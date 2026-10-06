@@ -167,7 +167,6 @@ PACKAGE_DEPS = {
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "rmp_serde": "//third-party/rust:p0304",
-            "rustix": "//third-party/rust:p0308",
             "schemars": "//third-party/rust:p0322",
             "serde": "//third-party/rust:p0331",
             "serde_json": "//third-party/rust:p0338",

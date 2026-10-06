@@ -22,6 +22,8 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "scripts/lash-e2e-manifest.json"
 SMOKE = {"S01", "S02", "S17", "S18", "S26", "S30"}
+# S19/S20 exercised the OS-worker engine lash no longer ships (FIG-5158).
+CATALOGUE = {f"S{i:02}" for i in range(1, 38)} - {"S19", "S20"}
 AUDITS = {"F04", "Z0A", "Z0P", "Z01", "Z02", "Z03", "Z04", "Z05"}
 GATES = {"phase_a", "facade", "schema"}
 COUNTS = ("selected", "executed", "passed", "failed", "not_run")
@@ -56,7 +58,7 @@ def load_manifest(path: Path = MANIFEST) -> dict:
     scenarios = manifest["scenarios"]
     require(isinstance(scenarios, list), "scenarios must be a list")
     ids = [row["id"] for row in scenarios]
-    require(len(ids) == len(set(ids)) and set(ids) == {f"S{i:02}" for i in range(1, 38)}, "manifest must name S01–S37 exactly once")
+    require(len(ids) == len(set(ids)) and set(ids) == CATALOGUE, "manifest must name S01–S37, less the retired S19/S20, exactly once")
     require(set(manifest["release_audits"]) == AUDITS, "release audits are incomplete")
     require(set(manifest["release_gates"]) == GATES, "release gates are incomplete")
     for scenario in scenarios:
@@ -90,7 +92,7 @@ def load_manifest(path: Path = MANIFEST) -> dict:
     smoke = select(manifest, "smoke", [])
     require(len(smoke) == 6 and {r['scenario'] for r in smoke} == SMOKE, "smoke must select exactly its six scenarios")
     require(all(r["leg"] == "live" and r["store"] == ("sqlite_file" if r["scenario"] in {"S01", "S02", "S17", "S18", "S26"} else "sqlite_memory") for r in smoke), "smoke needs live SQLite rows; S01/S02/S17/S18/S26 persisted")
-    deterministic = {f"S{i:02}" for i in range(1, 35)} | {"S37"}
+    deterministic = (CATALOGUE - {"S35", "S36"})
     for tier in ("full", "release"):
         require({r["scenario"] for r in select(manifest, tier, [])} == deterministic, f"{tier}: deterministic catalogue incomplete")
     require({r["scenario"] for r in select(manifest, "live", [])} == {"S35", "S36"}, "live catalogue incomplete")

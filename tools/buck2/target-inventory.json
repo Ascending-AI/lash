@@ -50674,7 +50674,6 @@
         "lash-internal-trace",
         "proptest",
         "rmp-serde",
-        "rustix",
         "schemars",
         "serde",
         "serde_json",
@@ -55242,14 +55241,6 @@
       "live": "//runbooks/restate-postgres-workers:restate_load_behavior_replay_live",
       "replay": "//runbooks/restate-postgres-workers:restate_load_behavior_replay_replay"
     },
-    "long-process": {
-      "live": "//crates/lash:restate_long_process_live",
-      "replay": "//crates/lash:restate_long_process_replay"
-    },
-    "long-process-postgres": {
-      "live": "//crates/lash:restate_long_process_postgres_live",
-      "replay": "//crates/lash:restate_long_process_postgres_replay"
-    },
     "long-tool-body": {
       "live": "//crates/lash:restate_long_tool_body_live",
       "replay": "//crates/lash:restate_long_tool_body_replay"
@@ -55377,10 +55368,6 @@
       "//crates/lash:restate_drain_hand_over_replay",
       "//crates/lash:restate_live_replay_bounds_live",
       "//crates/lash:restate_live_replay_bounds_replay",
-      "//crates/lash:restate_long_process_live",
-      "//crates/lash:restate_long_process_postgres_live",
-      "//crates/lash:restate_long_process_postgres_replay",
-      "//crates/lash:restate_long_process_replay",
       "//crates/lash:restate_long_tool_body_live",
       "//crates/lash:restate_long_tool_body_replay",
       "//crates/lash:restate_mcp_catalog_live",

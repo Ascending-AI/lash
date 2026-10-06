@@ -80,19 +80,18 @@ pauses with its journal kept, and `send` answers the turn as parked with
 `EngineRetryExhausted`. So such a body runs up to 8 times, and the turn never
 finishes on its own.
 
-Declare long work `isolated` instead: the call starts a lash process whose
-OS worker runs outside every invocation. The process invocation never waits
-on the worker itself. It records whether the worker has ended and otherwise
-sleeps on a durable timer, from one second doubling to a minute, so it
-suspends while the worker runs and the invoker's timeouts never abort it,
-however long the worker lives. Each wake adopts the live worker and never
-launches another, and the worker's result is recorded once, at most a minute
-after it ends.
+Declare long work `isolated` instead: the call starts a lash process that
+the host's registered `ProcessEngine` runs in its own invocation, on the
+host's nodes. How that engine waits on long work is the engine's business;
+an engine that suspends its invocation on durable timers while the work runs
+is never aborted by the invoker's timeouts. Lash ships no engine that runs
+OS programs. Its cancellation of a process is cooperative, and a host that
+needs hard isolation (an OS kill and reap) builds it into its own engine.
 
 Size the server's two timeouts above the longest inline tool body you admit.
 The `long-tool-body` suite of `scripts/restate-suites.toml` holds the tool
-body rule, and the `long-process` suites the isolated one, on a live server
-with a 1 second inactivity and 2 second abort timeout.
+body rule on a live server with a 1 second inactivity and 2 second abort
+timeout.
 
 ## Read the compatibility report
 

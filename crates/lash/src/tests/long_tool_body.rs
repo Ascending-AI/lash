@@ -10,9 +10,8 @@
 //! the body again. Lash's handler attempt bound
 //! ([`TURN_HANDLER_MAX_ATTEMPTS`](lash_restate::TURN_HANDLER_MAX_ATTEMPTS))
 //! is what ends the loop: the invocation pauses and the host sees the turn
-//! parked. The same work declared isolated is a lash process whose
-//! invocation suspends while its OS worker runs and is never aborted
-//! (FIG-5152, the long-process laws of `isolated_tool_route`).
+//! parked. The same work declared isolated is a lash process that the host's
+//! registered engine runs in its own invocation.
 
 use super::*;
 
