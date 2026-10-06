@@ -181,7 +181,9 @@ fn registered_scenario_names() -> Vec<String> {
 
 /// The registered name of every Restate service, object and workflow
 /// the crate declares outside its tests: the
-/// trait's `#[name]`, or the trait's own name.
+/// trait's `#[name]`, or the trait's own name. Test files are skipped, and a
+/// file's inline `#[cfg(test)] mod … {` ends its production source (clippy's
+/// `items_after_test_module` keeps that module last).
 fn restate_services_declared_in_the_source() -> BTreeSet<String> {
     fn visit(directory: &Path, services: &mut BTreeSet<String>) {
         let mut entries = std::fs::read_dir(directory)
@@ -205,8 +207,15 @@ fn restate_services_declared_in_the_source() -> BTreeSet<String> {
                 continue;
             }
             let source = std::fs::read_to_string(&path).expect("read a source file");
-            let mut lines = source.lines().map(str::trim);
+            let mut lines = source.lines().map(str::trim).peekable();
             while let Some(line) = lines.next() {
+                if line == "#[cfg(test)]"
+                    && lines
+                        .peek()
+                        .is_some_and(|next| next.starts_with("mod ") && next.ends_with('{'))
+                {
+                    break;
+                }
                 if !line.starts_with("#[restate_sdk::object")
                     && !line.starts_with("#[restate_sdk::workflow")
                     && !line.starts_with("#[restate_sdk::service")
