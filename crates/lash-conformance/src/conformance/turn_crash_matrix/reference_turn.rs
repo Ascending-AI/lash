@@ -57,6 +57,7 @@ impl ReferenceTurn {
             identity: identity.clone(),
             seam: SeamLayer {
                 control,
+                session_id: identity.session_id.clone(),
                 executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             },
             trace_tool: TraceTool {

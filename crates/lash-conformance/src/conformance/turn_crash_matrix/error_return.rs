@@ -14,16 +14,15 @@ use pretty_assertions::assert_eq;
 /// These are error *returns*, not crashes: the seam answers the backend's
 /// typed store error and the turn must stop — no durable commit, no tool
 /// dispatch and no provider request may follow an unretried one. Both
-/// placements arm at the controller seam itself, the only error-return
-/// coverage a non-journaled controller can offer: `ToolAttempt` returns the
-/// typed store error and `ToolAttemptSessionRetirement` returns the
-/// session-retirement refusal.
+/// placements refuse native-attempt registration at the controller seam:
+/// `ToolAttempt` answers the typed store error and
+/// `ToolAttemptSessionRetirement` answers the session-retirement refusal.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(super) enum ErrorReturnPlacement {
-    /// `execute_effect(ToolAttempt)` returns the store-typed controller error.
+    /// `start_run_attempt` returns the store-typed controller error.
     ToolAttempt,
-    /// `execute_effect(ToolAttempt)` returns the session-retirement refusal a
+    /// `start_run_attempt` returns the session-retirement refusal a
     /// controller answers once the session is deleted under the turn
     /// (FIG-3630): `SessionDeleted`, carrying its cause.
     ToolAttemptSessionRetirement,
@@ -146,7 +145,6 @@ fn is_commit_seam(operation: &TurnSeamOperation) -> bool {
         TurnSeamOperation::Store(
             StoreOperation::CommitFinalHead { .. }
                 | StoreOperation::ApplyTurnCancelEffectsAndConsume
-                | StoreOperation::AuthorizeTurnCancelClosure
         ) | TurnSeamOperation::TurnControl(_)
     )
 }
@@ -255,9 +253,7 @@ async fn run_error_return_case(
             Err(error) => Some(error.code.clone()),
             Ok(_) => None,
         },
-        // Retried: the faulted seam was entered again — an engine that
-        // retries a failed group child itself (Restate) runs the child's
-        // tool attempt anew.
+        // Retried: the faulted native-attempt registration was entered again.
         retried: continued.iter().any(faulted_seam),
     };
     let violations = fail_stop_violations(&observation, expected_code);

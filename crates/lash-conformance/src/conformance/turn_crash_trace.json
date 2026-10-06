@@ -2,25 +2,33 @@
   {
     "seam": "store",
     "operation": {
-      "kind": "load_session_head_meta"
-    }
-  },
-  {
-    "seam": "store",
-    "operation": {
-      "kind": "unfinished_run"
-    }
-  },
-  {
-    "seam": "store",
-    "operation": {
-      "kind": "load_session_head_meta"
+      "kind": "load_session_window"
     }
   },
   {
     "seam": "store",
     "operation": {
       "kind": "admit_run"
+    }
+  },
+  {
+    "seam": "store",
+    "operation": {
+      "kind": "load_session_head_meta"
+    }
+  },
+  {
+    "seam": "store",
+    "operation": {
+      "kind": "commit_final_head",
+      "settles_queue": false,
+      "settles_turn_input": false
+    }
+  },
+  {
+    "seam": "store",
+    "operation": {
+      "kind": "load_session_window"
     }
   },
   {
@@ -38,27 +46,8 @@
   {
     "seam": "effect",
     "operation": {
-      "kind": "group_open",
-      "children": 1
-    }
-  },
-  {
-    "seam": "effect",
-    "operation": {
       "kind": "tool_attempt",
       "name": "trace_effect"
-    }
-  },
-  {
-    "seam": "effect",
-    "operation": {
-      "kind": "group_settle"
-    }
-  },
-  {
-    "seam": "effect",
-    "operation": {
-      "kind": "group_close"
     }
   },
   {
@@ -90,7 +79,7 @@
   {
     "seam": "store",
     "operation": {
-      "kind": "authorize_turn_cancel_closure"
+      "kind": "apply_turn_cancel_effects_and_consume"
     }
   },
   {
@@ -100,9 +89,9 @@
     }
   },
   {
-    "seam": "store",
+    "seam": "turn_control",
     "operation": {
-      "kind": "apply_turn_cancel_effects_and_consume"
+      "kind": "resolve_escalation"
     }
   }
 ]

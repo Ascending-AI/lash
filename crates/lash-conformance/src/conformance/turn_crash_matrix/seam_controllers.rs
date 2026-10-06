@@ -17,8 +17,8 @@ use crate::{
 };
 
 /// The crash matrix's effect seam: an [`EffectLayer`](crate::testing::EffectLayer)
-/// that records the turn's effect, group and turn-control operations on its
-/// [`SeamControl`], counts external executions, and crashes or fails them where
+/// that records native attempts, input acceptance and turn-control operations
+/// on its [`SeamControl`], counts external executions, and crashes or fails them where
 /// the control is armed. Every operation lands on the controller it
 /// layers, so durable Run state stays in the substrate under test.
 ///
@@ -27,6 +27,7 @@ use crate::{
 #[derive(Clone)]
 pub(crate) struct SeamLayer {
     pub(super) control: SeamControl,
+    pub(super) session_id: crate::SessionId,
     pub(super) executions: Arc<std::sync::atomic::AtomicUsize>,
 }
 
@@ -53,67 +54,80 @@ impl SeamLayer {
     }
 }
 
-/// The refusal a controller answers once the turn's session is deleted under
-/// it (FIG-3630): the store's `SessionDeleted`, carrying its cause.
-fn session_retirement_refusal(envelope: &RuntimeEffectEnvelope) -> RuntimeEffectControllerError {
-    let session_id = envelope
-        .invocation
-        .execution_scope()
-        .session_id()
-        .cloned()
-        .unwrap_or_else(|| panic!("the scripted tool attempt runs under a session scope"));
-    crate::StoreError::SessionDeleted { session_id }.into()
-}
-
 #[async_trait::async_trait]
 impl crate::testing::EffectLayer for SeamLayer {
+    fn start_run_attempt<'run>(
+        &'run self,
+        inner: &'run dyn RuntimeEffectController,
+        name: String,
+        step: crate::tool_dispatch::RunAttemptStep<'run>,
+    ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
+        // This fixture declares one tool. Native attempts cross the Run's
+        // independent X registration.
+        let operation = TurnSeamOperation::Effect(EffectOperation::ToolAttempt {
+            name: "trace_effect".to_string(),
+        });
+        self.control.record(operation.clone());
+        if let Some(placement) = self.control.take_tool_attempt_error_return() {
+            let error = match placement {
+                ErrorReturnPlacement::ToolAttempt => self.injected_store_error(),
+                ErrorReturnPlacement::ToolAttemptSessionRetirement => {
+                    crate::StoreError::SessionDeleted {
+                        session_id: self.session_id.clone(),
+                    }
+                    .into()
+                }
+            };
+            let key_error = error.clone();
+            return crate::tool_dispatch::RunAttemptHandle {
+                body: Box::pin(std::future::ready(())),
+                result: crate::tool_dispatch::RunSelectable {
+                    key: Box::pin(async move { Err(key_error) }),
+                    value: Box::pin(async move { Err(error) }),
+                },
+            };
+        }
+        let control = self.control.clone();
+        let boundary = operation.clone();
+        let wrapped = Box::pin(async move {
+            if control.matches(&boundary, CrashPlacement::Boundary) {
+                control.stop_here().await;
+            }
+            step.await
+        });
+        let crate::tool_dispatch::RunAttemptHandle { body, result } =
+            inner.start_run_attempt(name, wrapped);
+        let control = self.control.clone();
+        crate::tool_dispatch::RunAttemptHandle {
+            body,
+            result: crate::tool_dispatch::RunSelectable {
+                key: result.key,
+                value: Box::pin(async move {
+                    let outcome = result.value.await;
+                    // The result is durable here. A cut inside the opaque
+                    // body would instead be the unrecorded external window.
+                    if control.matches(&operation, CrashPlacement::InsideCall) {
+                        control.stop_here().await;
+                    }
+                    outcome
+                }),
+            },
+        }
+    }
+
     async fn execute_effect(
         &self,
         inner: &dyn RuntimeEffectController,
         envelope: RuntimeEffectEnvelope,
         executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let operation = match &envelope.command {
-            crate::RuntimeEffectCommand::ToolAttempt { call, .. } => Some((
-                EffectOperation::ToolAttempt {
-                    name: call.tool_name.clone(),
-                },
-                true,
-            )),
-            crate::RuntimeEffectCommand::AcceptTurnInput { .. } => {
-                Some((EffectOperation::AcceptTurnInput, true))
-            }
-            _ => None,
-        };
-        let Some((operation, counts_external_execution)) = operation else {
+        if !matches!(
+            envelope.command,
+            crate::RuntimeEffectCommand::AcceptTurnInput { .. }
+        ) {
             return inner.execute_effect(envelope, executor).await;
-        };
-        let operation = TurnSeamOperation::Effect(operation);
-        // FIG-3524: an armed error-return makes the first tool attempt that
-        // reaches the seam fail once, at the seam itself, instead of
-        // crashing the task.
-        if matches!(
-            operation,
-            TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
-        ) && let Some(placement) = self.control.take_tool_attempt_error_return()
-        {
-            let error = match placement {
-                ErrorReturnPlacement::ToolAttemptSessionRetirement => {
-                    session_retirement_refusal(&envelope)
-                }
-                ErrorReturnPlacement::ToolAttempt => self.injected_store_error(),
-            };
-            return self
-                .control
-                .around(operation, async move { Err(error) })
-                .await;
         }
-        if !counts_external_execution {
-            return self
-                .control
-                .around(operation, inner.execute_effect(envelope, executor))
-                .await;
-        }
+        let operation = TurnSeamOperation::Effect(EffectOperation::AcceptTurnInput);
         let executions = Arc::clone(&self.executions);
         let control = self.control.clone();
         let wrapped_operation = operation.clone();
@@ -122,14 +136,10 @@ impl crate::testing::EffectLayer for SeamLayer {
             async move {
                 executions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let outcome = executor.execute(envelope).await;
-                // A tool marks its own external effect; an acceptance's
-                // external effect is the store write its executor just made.
-                if wrapped_operation == TurnSeamOperation::Effect(EffectOperation::AcceptTurnInput)
-                    && control.matches(
-                        &wrapped_operation,
-                        CrashPlacement::AfterExternalEffectBeforeOutcome,
-                    )
-                {
+                if control.matches(
+                    &wrapped_operation,
+                    CrashPlacement::AfterExternalEffectBeforeOutcome,
+                ) {
                     control.stop_here().await;
                 }
                 outcome
@@ -214,21 +224,7 @@ impl crate::testing::EffectLayer for RoutedSeamLayer {
         let Some(seam) = self.seam() else {
             return inner.execute_effect(envelope, executor).await;
         };
-        // The host's layer carries a group child's effects, which the engine
-        // runs apart from the turn's own execution. When the law's crash
-        // kills the process running the turn, the child's execution dies with
-        // it: the call is dropped where it stands and the execution ends in a
-        // live fault, which the engine retries as it recovers any execution
-        // its process lost.
-        let control = seam.control.clone();
-        tokio::select! {
-            biased;
-            () = control.process_crash() => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeStore,
-                "the group child's execution died with the crashed process",
-            )),
-            outcome = seam.execute_effect(inner, envelope, executor) => outcome,
-        }
+        seam.execute_effect(inner, envelope, executor).await
     }
 
     async fn resolve_await_event(

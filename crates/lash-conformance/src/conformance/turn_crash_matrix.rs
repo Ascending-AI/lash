@@ -133,7 +133,6 @@ impl TurnSeamOperation {
                     | StoreOperation::AdmitAtCheckpoint { .. }
                     | StoreOperation::CommitFinalHead { .. }
                     | StoreOperation::CommitRunEnd
-                    | StoreOperation::AuthorizeTurnCancelClosure
                     | StoreOperation::ApplyTurnCancelEffectsAndConsume
             ) | Self::TurnControl(_)
         )
@@ -147,7 +146,6 @@ enum StoreOperation {
     LoadSessionWindow,
     LoadSessionHeadMeta,
     OpenSessionCommandRun,
-    UnfinishedRun,
     AdmitRun,
     AdmitAtCheckpoint {
         checkpoint: String,
@@ -157,7 +155,6 @@ enum StoreOperation {
         settles_turn_input: bool,
     },
     CommitRunEnd,
-    AuthorizeTurnCancelClosure,
     ApplyTurnCancelEffectsAndConsume,
 }
 
@@ -250,7 +247,6 @@ struct SeamState {
     /// Whether a tool attempt already consumed the armed error return.
     error_return_taken: bool,
     hit: bool,
-    process_crashed: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -260,10 +256,6 @@ struct SeamControl {
     /// Notified on every [`SeamControl::record`], so a seam can wait for another
     /// seam to appear in the trace rather than poll for it.
     recorded: Arc<tokio::sync::Notify>,
-    /// Cancelled when the law's crash kills the process running the turn: an
-    /// execution the engine runs apart from the turn's own (a group child's)
-    /// dies with it ([`SeamControl::process_crash`]).
-    process_crash: tokio_util::sync::CancellationToken,
 }
 
 impl SeamControl {
@@ -279,7 +271,6 @@ impl SeamControl {
         state.error_return = None;
         state.error_return_taken = false;
         state.hit = false;
-        state.process_crashed = false;
     }
 
     fn clear(&self) {
@@ -289,7 +280,6 @@ impl SeamControl {
         state.error_return = None;
         state.error_return_taken = false;
         state.hit = false;
-        state.process_crashed = false;
     }
 
     /// Arm an error-return placement for the fail-stop sweep (FIG-3524).
@@ -300,14 +290,12 @@ impl SeamControl {
         state.error_return = Some(placement);
         state.error_return_taken = false;
         state.hit = false;
-        state.process_crashed = false;
     }
 
     /// The armed error-return placement, consumed by the first tool attempt
     /// that reaches it: a retry of the faulted attempt runs clean, as a retry
-    /// after a real store blip does. An engine that retries a failed group
-    /// child itself (Restate) re-enters the seam; the law reads that
-    /// re-entry as the retry.
+    /// after a real store blip does. The law reads a second native attempt
+    /// registration as a retry.
     fn take_tool_attempt_error_return(&self) -> Option<ErrorReturnPlacement> {
         let mut state = self.state.lock_recover();
         if state.error_return_taken {
@@ -316,17 +304,6 @@ impl SeamControl {
         let placement = state.error_return?;
         state.error_return_taken = true;
         Some(placement)
-    }
-
-    fn simulate_process_crash(&self) {
-        self.state.lock_recover().process_crashed = true;
-        self.process_crash.cancel();
-    }
-
-    /// Resolves once the law's crash killed the process running this seam's
-    /// turn.
-    async fn process_crash(&self) {
-        self.process_crash.cancelled().await;
     }
 
     fn trace(&self) -> Vec<TurnSeamOperation> {
@@ -429,24 +406,17 @@ impl SeamStore {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for SeamStore {
-    async fn unfinished_run(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<crate::store::UnfinishedRun>, StoreError> {
-        self.control
-            .around(
-                TurnSeamOperation::Store(StoreOperation::UnfinishedRun),
-                self.inner.unfinished_run(session_id),
-            )
-            .await
-    }
-
     async fn commit_shift_admission(
         &self,
         write: &crate::store::ShiftAdmissionWrite,
         trace: &crate::TraceAnchor,
     ) -> Result<crate::store::ShiftAdmissionReceipt, StoreError> {
-        self.commit_shift_admission_and_steer(write, trace).await
+        self.control
+            .around(
+                TurnSeamOperation::Store(StoreOperation::AdmitRun),
+                self.commit_shift_admission_and_steer(write, trace),
+            )
+            .await
     }
     type Inner = dyn RuntimeStore;
 
@@ -501,20 +471,6 @@ impl crate::store::RuntimeStoreDecorator for SeamStore {
         };
         self.control
             .around(operation, self.inner.commit_runtime_state(commit))
-            .await
-    }
-
-    async fn authorize_turn_cancel_closure(
-        &self,
-        session_execution_lease: &ShiftFence,
-        authorization: &crate::TurnCancelClosureAuthorization,
-    ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError> {
-        self.control
-            .around(
-                TurnSeamOperation::Store(StoreOperation::AuthorizeTurnCancelClosure),
-                self.inner
-                    .authorize_turn_cancel_closure(session_execution_lease, authorization),
-            )
             .await
     }
 
@@ -978,14 +934,13 @@ async fn seed_reference_ingress_as(
 
 /// Park the turn at `control`'s armed point and fire `crash` there: the crash
 /// trigger a runner-driven law hands [`ConformanceTurnRunner::run_turn_until_crash`](crate::ConformanceTurnRunner::run_turn_until_crash).
-/// The seam marks the process crashed before firing the runner's crash point.
+/// The runner kills the owning handler, including its borrowed native bodies.
 fn crash_at_armed_point(control: &SeamControl) -> crate::ConformanceCrash {
     let crash = crate::ConformanceCrash::new();
     let trigger = crash.clone();
     let control = control.clone();
     crate::task::spawn(async move {
         control.wait_for_hit().await;
-        control.simulate_process_crash();
         trigger.fire();
     });
     crash
@@ -1095,6 +1050,11 @@ pub async fn turn_crash_trace_drift_check<F, S>(
         .expect("reference turn succeeds")
         .expect("reference ingress produces a turn");
     assert_eq!(turn.assistant_output.safe_text, "trace turn complete");
+    assert_eq!(
+        executions.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the reference trace must include one real external tool effect"
+    );
     assert_eq!(
         control.trace(),
         golden_trace(),

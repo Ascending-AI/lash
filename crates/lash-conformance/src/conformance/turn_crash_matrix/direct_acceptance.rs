@@ -103,6 +103,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
             reference_admitted_scope(&identity),
             attempt(
                 SeamLayer {
+                    session_id: identity.session_id.clone(),
                     control: control.clone(),
                     executions: Arc::clone(&executions),
                 },
@@ -132,6 +133,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
             reference_admitted_scope(&identity),
             attempt(
                 SeamLayer {
+                    session_id: identity.session_id.clone(),
                     control: SeamControl::default(),
                     executions: Arc::clone(&executions),
                 },
