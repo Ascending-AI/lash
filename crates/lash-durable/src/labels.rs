@@ -23,6 +23,9 @@ impl CommitLabel {
     pub const TURN_COMMIT: Self = Self::new("turn.commit");
     /// `turn.cancel`: A turn's cancel terminal.
     pub const TURN_CANCEL: Self = Self::new("turn.cancel");
+    /// `session.release`: The session activation gives its actor up with
+    /// nothing left to run.
+    pub const SESSION_RELEASE: Self = Self::new("session.release");
 
     // Tool rounds (V0, then L4).
     /// `round.outcome`: A batch of finished members' outcomes and their store-local effects (C5).
@@ -89,7 +92,7 @@ impl CommitLabel {
     pub const DRAIN_RELEASE: Self = Self::new("drain.release");
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 39] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -103,6 +106,7 @@ impl CommitLabel {
         Self::ROUND_PRESENT_MODEL_START,
         Self::TURN_COMMIT,
         Self::TURN_CANCEL,
+        Self::SESSION_RELEASE,
         Self::ROUND_OUTCOME,
         Self::ROUND_RETRY,
         Self::WAIT_MINT,

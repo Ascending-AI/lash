@@ -123,42 +123,11 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 
 Generated from the tree with `scripts/check-substrate-todos.py`'s scanner; each lane removes its rows as it fills them.
 
-Counts: V0 30, L3 8, L3s 5, L4 11, L5 35, L6 33, L6b 2, L7 2, L7p 2 (128 in all).
+Counts: L3 9, L3s 5, L4 15, L5 35, L6 32, L6b 2, L7 2, L7p 2 (102 in all).
 
 ### V0 (FIG-5170)
 
-| Where | Function | Stub |
-|---|---|---|
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `admit` | record admit and x_start for every draft in one transaction |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `fold` | fold run records to recoveries without calling a producer |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `record_run_record` | record a Run record as a run_records row |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `run_body` | run a catalog body under its limit, cancel and stop grace |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `settle` | record the outcome and its store-local effect; L4 (FIG-5174) group-commits |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_attempt` | start a Run attempt through admit, run_body and settle |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_prepare` | start a declared-start preparation as an admitted execution |
-| `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_record` | start a Run record as an admitted execution |
-| `crates/lash-core-execution/src/runtime/actor/turn.rs` | `turn_effect` | run a turn effect inside its phase transaction; L3 (FIG-5172) extends |
-| `crates/lash-core/src/runtime/durable/session.rs` | `activate` | drain session mail, admit, restore and run the turn's phases |
-| `crates/lash-core/src/runtime/durable/session.rs` | `admit_turn` | admit a turn: its row, bound inputs and deadline |
-| `crates/lash-core/src/runtime/durable/session.rs` | `restore_turn` | restore a turn from its checkpoint and name its pending effect |
-| `crates/lash-core/src/runtime/durable/session.rs` | `run_phases` | run a turn's phases with explicit commits |
-| `crates/lash-postgres-store/src/postgres/durable/run_records.rs` | `apply` | append or prune run records on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/run_records.rs` | `read` | read an owner's run records on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/snapshots.rs` | `apply` | compare-and-set an execution's snapshot on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/snapshots.rs` | `read` | read an execution's latest snapshot on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/turns.rs` | `apply` | write the turn phase row on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/turns.rs` | `apply_session_commit` | commit the turn to its session head on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/turns.rs` | `turn` | read the session's unfinished turn on PostgreSQL |
-| `crates/lash-sqlite-store/src/durable/run_records.rs` | `apply` | append or prune run records on SQLite |
-| `crates/lash-sqlite-store/src/durable/run_records.rs` | `read` | read an owner's run records on SQLite |
-| `crates/lash-sqlite-store/src/durable/snapshots.rs` | `apply` | compare-and-set an execution's snapshot on SQLite |
-| `crates/lash-sqlite-store/src/durable/snapshots.rs` | `read` | read an execution's latest snapshot on SQLite |
-| `crates/lash-sqlite-store/src/durable/turns.rs` | `apply` | write the turn phase row on SQLite |
-| `crates/lash-sqlite-store/src/durable/turns.rs` | `apply_session_commit` | commit the turn to its session head on SQLite |
-| `crates/lash-sqlite-store/src/durable/turns.rs` | `turn` | read the session's unfinished turn on SQLite |
-| `crates/lash-vm-broker/src/snapshot.rs` | `commit_quiet_point` | commit a snapshot with its ledger, admissions and waits in one transaction |
-| `crates/lash-vm-broker/src/snapshot.rs` | `latest` | read an execution's latest snapshot |
-| `crates/lash-vm-broker/src/snapshot.rs` | `outcomes_to_inject` | match a restored ledger's operations to their folded outcomes |
+None: V0 filled its stubs. It re-tagged the journal-era ones its path never reaches: `turn_effect` to L3, and `record_run_record`, `start_run_record`, `start_run_attempt` and `start_run_prepare` to L4.
 
 ### L3 (FIG-5172)
 
@@ -169,6 +138,7 @@ Counts: V0 30, L3 8, L3s 5, L4 11, L5 35, L6 33, L6b 2, L7 2, L7p 2 (128 in all)
 | `crates/lash-core-execution/src/runtime/actor/turn.rs` | `session_effect` | run a session effect as a write under the session's epoch |
 | `crates/lash-core-execution/src/runtime/actor/turn.rs` | `turn_control_binding` | replace the turn-control binding by turn cancel mail |
 | `crates/lash-core-execution/src/runtime/actor/turn.rs` | `turn_control_binding_id` | replace the turn-control binding by turn cancel mail |
+| `crates/lash-core-execution/src/runtime/actor/turn.rs` | `turn_effect` | run a turn effect inside its phase transaction |
 | `crates/lash-core/src/runtime/durable/session.rs` | `request_turn_cancel` | request a turn cancel as session mail |
 | `crates/lash-postgres-store/src/postgres/durable/turns.rs` | `request_cancel` | record a turn cancel request and wake the session on PostgreSQL |
 | `crates/lash-sqlite-store/src/durable/turns.rs` | `request_cancel` | record a turn cancel request and wake the session on SQLite |
@@ -195,7 +165,11 @@ Counts: V0 30, L3 8, L3s 5, L4 11, L5 35, L6 33, L6b 2, L7 2, L7p 2 (128 in all)
 | `crates/lash-core-execution/src/runtime/actor/round.rs` | `cancel_run_source` | cancel a Run source, first resolution wins |
 | `crates/lash-core-execution/src/runtime/actor/round.rs` | `issue_run_realization` | realize an intent as a store-local effect of its call's outcome |
 | `crates/lash-core-execution/src/runtime/actor/round.rs` | `present` | present a round in declared order from its committed records |
+| `crates/lash-core-execution/src/runtime/actor/round.rs` | `record_run_record` | record a Run record as a run_records row |
 | `crates/lash-core-execution/src/runtime/actor/round.rs` | `select_run_sources` | select the first completed Run source |
+| `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_attempt` | start a Run attempt through admit, run_body and settle |
+| `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_prepare` | start a declared-start preparation as an admitted execution |
+| `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_record` | start a Run record as an admitted execution |
 | `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_retry` | record a retry with its due time and register the due source |
 | `crates/lash-core-execution/src/runtime/actor/round.rs` | `tool_effect` | run a tool-round effect as an admitted execution or a round write |
 

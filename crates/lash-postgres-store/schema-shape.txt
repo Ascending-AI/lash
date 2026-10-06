@@ -736,6 +736,19 @@ table lash_turn_parks
   column since_ms bigint not-null
   column turn_id text not-null
   primary-key (session_id)
+table lash_turn_phases
+  column checkpoint_ref text nullable
+  column iteration bigint not-null
+  column model_attempt bigint nullable
+  column model_deadline_ms bigint nullable
+  column model_request_ref text nullable
+  column phase text not-null
+  column phase_arg bigint nullable
+  column run text not-null
+  column session_id text not-null
+  column turn_deadline_ms bigint nullable
+  column written_epoch bigint not-null
+  primary-key (session_id, run)
 table lash_wait_receipts
   column owner_key text not-null
   column request_json text not-null

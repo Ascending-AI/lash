@@ -26,5 +26,14 @@ lash-sansio = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 
 [dev-dependencies]
+lash-core = { workspace = true }
+lash-core-execution = { workspace = true, features = ["testing"] }
+lash-core-store = { workspace = true, features = ["testing"] }
+lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true }
+lash-typescript = { workspace = true }
+lash-vm-broker = { workspace = true }
+lashlang = { workspace = true }
+serde_json = { workspace = true }
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }

@@ -12,7 +12,7 @@
 //! | File | Owner |
 //! |---|---|
 //! | `core.rs` | I0 (real) |
-//! | [`turn`] | V0, then L3 |
+//! | [`turn`] | L3 |
 //! | [`round`] | V0, then L4 |
 //! | [`shift`] | L3s |
 //! | [`waits`] | L5 |

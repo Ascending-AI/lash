@@ -165,3 +165,5 @@ DROP TABLE IF EXISTS lash_actor_mail CASCADE;
 DROP TABLE IF EXISTS lash_run_records CASCADE;
 
 DROP TABLE IF EXISTS lash_exec_snapshots CASCADE;
+
+DROP TABLE IF EXISTS lash_turn_phases CASCADE;

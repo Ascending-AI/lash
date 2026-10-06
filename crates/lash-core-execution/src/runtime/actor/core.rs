@@ -74,6 +74,9 @@ impl Scope {
 
 pub(super) struct Inner {
     backend: Option<Backend>,
+    /// The node's store a claimed context commits through; the backend's
+    /// own otherwise.
+    durable: Option<Arc<dyn DurableStore>>,
     actor: ActorKey,
     epoch: Epoch,
     clock: Arc<dyn Clock>,
@@ -113,9 +116,37 @@ impl ActorContext {
         Self {
             inner: Arc::new(Inner {
                 backend: Some(backend),
+                durable: None,
                 actor,
                 epoch,
                 clock,
+                cancel,
+                probe,
+                dues: Dues::new(),
+                run_records: crate::trace::RunRecordObserver::default(),
+            }),
+            scope: Scope::new(admitted),
+        }
+    }
+
+    /// The context of the actor `owned` holds: its epoch, its node's store
+    /// and its node's clock, over `backend`'s services. Every activation runs
+    /// under the context of its claim.
+    #[must_use]
+    pub fn claimed(
+        backend: Backend,
+        owned: &lash_durable::runner::Owned,
+        admitted: AdmittedScope,
+        cancel: CancellationToken,
+        probe: Arc<dyn DurableProbe>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                backend: Some(backend),
+                durable: Some(Arc::clone(owned.store())),
+                actor: owned.actor().clone(),
+                epoch: owned.epoch(),
+                clock: Arc::clone(owned.clock()),
                 cancel,
                 probe,
                 dues: Dues::new(),
@@ -137,6 +168,7 @@ impl ActorContext {
         Self {
             inner: Arc::new(Inner {
                 backend: None,
+                durable: None,
                 actor: ActorKey::session("unavailable").expect("a constant actor id"),
                 epoch: Epoch(0),
                 clock: Arc::new(crate::SystemClock),
@@ -149,9 +181,9 @@ impl ActorContext {
         }
     }
 
-    /// A context over `backend` that owns no actor: the root a runtime host
-    /// scopes its work from until V0 (FIG-5170) hands every activation its
-    /// claimed context. Its reads and `backend()` work; the store's fence
+    /// A context over `backend` that owns no actor: the root the journal-era
+    /// runtime host scopes its work from; an activation runs under
+    /// [`Self::claimed`]. Its reads and `backend()` work; the store's fence
     /// refuses any commit through it, because epoch 0 is never claimed.
     #[expect(
         clippy::expect_used,
@@ -187,6 +219,34 @@ impl ActorContext {
     #[must_use]
     pub fn now(&self) -> DurableInstant {
         DurableInstant(i64::try_from(self.inner.clock.timestamp_ms()).unwrap_or(i64::MAX))
+    }
+
+    /// The node's clock, for live enforcement: a local timer for
+    /// `expires_at - now`.
+    #[must_use]
+    pub fn clock(&self) -> &Arc<dyn Clock> {
+        &self.inner.clock
+    }
+
+    /// The owner's unfenced reads of its domain rows (S0): current unless
+    /// ownership was lost, which the next commit's fence reports.
+    ///
+    /// # Errors
+    ///
+    /// Unavailable for [`Self::unavailable`].
+    pub fn durable_reads(&self) -> Result<&dyn lash_durable::DurableReads, DurableError> {
+        self.durable()
+            .map(|store| &**store as &dyn lash_durable::DurableReads)
+    }
+
+    /// The store's clock now: the instant a row stores, such as a deadline
+    /// recorded before its work starts.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal.
+    pub async fn durable_now(&self) -> Result<DurableInstant, DurableError> {
+        self.durable()?.now().await
     }
 
     /// Cancelled when the activation must stop.
@@ -431,6 +491,9 @@ impl ActorContext {
     }
 
     fn durable(&self) -> Result<&Arc<dyn DurableStore>, DurableError> {
+        if let Some(store) = &self.inner.durable {
+            return Ok(store);
+        }
         self.inner
             .backend
             .as_ref()

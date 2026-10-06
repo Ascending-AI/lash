@@ -51,7 +51,7 @@ pub use waits::{
 
 use crate::error::DurableError;
 use crate::ids::ActorKey;
-use lash_sansio::{ProcessId, SessionId, ToolCallId};
+use lash_sansio::{ProcessId, SessionId, ToolCallId, TurnId};
 
 /// One owner-state write inside a fenced [`ActorTx`](crate::ActorTx) commit.
 ///
@@ -146,6 +146,14 @@ pub enum DomainRefusal {
         run: RunSeq,
         /// The call.
         call: ToolCallId,
+    },
+    /// A turn write named a turn that is not the session's unfinished one.
+    #[error("turn {run} of session {session} is not unfinished")]
+    TurnNotOpen {
+        /// The session.
+        session: SessionId,
+        /// The turn.
+        run: TurnId,
     },
     /// The session already has an unfinished turn.
     #[error("session {session} already has an unfinished turn")]

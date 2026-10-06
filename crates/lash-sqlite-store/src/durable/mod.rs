@@ -43,6 +43,7 @@ mod waits;
 // each domain's own lane adds its tables beside them.
 pub(crate) use run_records::TABLES as RUN_RECORDS_TABLES;
 pub(crate) use snapshots::TABLES as EXEC_SNAPSHOTS_TABLES;
+pub(crate) use turns::TABLES as TURN_PHASES_TABLES;
 
 /// The engine's tables, carried by the durable core.
 pub(crate) const DURABLE_TABLES: &str = "

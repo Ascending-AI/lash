@@ -1,7 +1,7 @@
 //! Turn rows (V0, then L3) and the turn-cancel mail (L3).
 //!
 //! A turn is a sequence of committed phases of the sans-io `TurnMachine`
-//! (ADR 0132 §4). Its row names the phase, the checkpoint by digest, the
+//! (ADR 0132 §4). Its row names the phase, the encoded checkpoint, the
 //! pinned model request and the terminal. At most one turn per session is
 //! unfinished.
 
@@ -35,6 +35,53 @@ pub enum TurnPhase {
     Terminal(TurnTerminal),
 }
 
+impl TurnPhase {
+    /// The stored spelling and its argument: a tool round's run or a model
+    /// call's attempt. A terminal phase is stored on the turn's run row,
+    /// never as a phase.
+    #[must_use]
+    pub fn stored(&self) -> (&'static str, Option<u64>) {
+        match self {
+            Self::Admitted => ("admitted", None),
+            Self::Prepared => ("prepared", None),
+            Self::Model { attempt } => ("model", Some(u64::from(*attempt))),
+            Self::Tools { run } => ("tools", Some(run.0)),
+            Self::Waiting => ("waiting", None),
+            Self::Committing => ("committing", None),
+            Self::Terminal(_) => ("terminal", None),
+        }
+    }
+
+    /// A stored phase read back; `None` for anything [`Self::stored`] does
+    /// not write.
+    #[must_use]
+    pub fn parse(stored: &str, argument: Option<u64>) -> Option<Self> {
+        Some(match (stored, argument) {
+            ("admitted", None) => Self::Admitted,
+            ("prepared", None) => Self::Prepared,
+            ("model", Some(attempt)) => Self::Model {
+                attempt: u32::try_from(attempt).ok()?,
+            },
+            ("tools", Some(run)) => Self::Tools { run: RunSeq(run) },
+            ("waiting", None) => Self::Waiting,
+            ("committing", None) => Self::Committing,
+            _ => return None,
+        })
+    }
+}
+
+impl TurnTerminal {
+    /// The stored spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Answered => "answered",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
 /// How a turn ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TurnTerminal {
@@ -53,7 +100,7 @@ pub enum TurnTerminal {
 pub struct ModelPin {
     /// The attempt, from 1.
     pub attempt: u32,
-    /// The pinned request, by digest.
+    /// The pinned request, encoded by its owner.
     pub request_ref: String,
     /// The `model_total` deadline.
     pub deadline: DurableInstant,
@@ -73,7 +120,8 @@ pub struct TurnRow {
     pub phase: TurnPhase,
     /// The protocol iteration: the model-call ordinal.
     pub iteration: u32,
-    /// The bounded `TurnCheckpoint`, by digest.
+    /// The bounded `TurnCheckpoint` (L3a's `SavedTurn`), encoded inline by
+    /// its owner.
     pub checkpoint_ref: Option<String>,
     /// The in-flight model call.
     pub model: Option<ModelPin>,
@@ -100,6 +148,9 @@ pub enum TurnWrite {
         turn_deadline: Option<DurableInstant>,
     },
     /// Move an unfinished turn to `phase` with its checkpoint and model pin.
+    /// Refused with
+    /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
+    /// it is not the session's unfinished turn.
     Advance {
         /// The session.
         session: SessionId,
@@ -109,12 +160,14 @@ pub enum TurnWrite {
         phase: TurnPhase,
         /// The protocol iteration.
         iteration: u32,
-        /// The checkpoint, by digest.
+        /// The checkpoint, encoded inline by its owner.
         checkpoint_ref: Option<String>,
         /// The in-flight model call, or `None` once it is done.
         model: Option<ModelPin>,
     },
-    /// End the turn.
+    /// End the turn and drop its phase row. Refused with
+    /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
+    /// it is not the session's unfinished turn.
     Terminal {
         /// The session.
         session: SessionId,
@@ -130,9 +183,13 @@ pub enum TurnWrite {
 }
 
 /// The turn's commit to its session (V0, then L3): the head
-/// compare-and-set, `lash_runtime_turn_commits`, and pruning of the turn's
-/// phase rows, in the `turn.commit` transaction. The head compare-and-set
-/// makes a repeated commit idempotent.
+/// compare-and-set in the `turn.commit` transaction. It publishes revision
+/// `expected_head + 1` with `commit_json` as its head document and moves the
+/// session head to it; a session with no head is at revision 0. The head
+/// compare-and-set makes a repeated commit refuse rather than publish twice.
+/// The turn's phase row is dropped by its [`TurnWrite::Terminal`] in the same
+/// transaction; `lash_runtime_turn_commits` and run-record retention are
+/// L3's.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionCommitWrite {
     /// The session.

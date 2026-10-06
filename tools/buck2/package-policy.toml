@@ -49,6 +49,14 @@ packages = ["lash-internal-postgres-store"]
 kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["hermetic-postgres"]
 
+# V0's vertical crash proof (FIG-5170) runs its matrix on SQLite memory,
+# SQLite file and PostgreSQL; its PostgreSQL leg gets a server of its own.
+[[rule]]
+packages = ["lash-internal-durable-test"]
+kinds = ["test"]
+targets = ["vertical_crash_proof"]
+tags = ["hermetic-postgres"]
+
 # The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
 # ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
 # Each shard's action has a server of its own, so shards run in parallel

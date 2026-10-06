@@ -113,6 +113,7 @@ pub const TABLES: &[&str] = &[
     durable::MAIL_TABLE,
     durable::NODES_TABLE,
     durable::run_records::TABLE,
+    durable::turns::TABLE,
     durable::snapshots::TABLE,
     process::abandoned_consumer_holds::TABLE,
     process::change_clock::TABLE,
@@ -254,6 +255,9 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(durable::NodeStatements::NEUTRAL);
     statements.extend_from_slice(durable::ActorStatements::NEUTRAL);
     statements.extend_from_slice(durable::MailStatements::NEUTRAL);
+    statements.extend_from_slice(durable::turns::TurnStatements::NEUTRAL);
+    statements.extend_from_slice(durable::run_records::RunRecordStatements::NEUTRAL);
+    statements.extend_from_slice(durable::snapshots::SnapshotStatements::NEUTRAL);
     statements.extend_from_slice(
         turn_ingress::pending_inputs::PendingTurnInputObligationStatements::NEUTRAL,
     );

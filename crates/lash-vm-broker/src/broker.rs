@@ -439,11 +439,9 @@ impl Broker<'_> {
                                 frame_epoch,
                             };
                             self.checkpoints
-                                .commit_quiet_point(crate::snapshot::QuietPoint {
-                                    checkpoint: checkpoint.clone(),
-                                    issued: Vec::new(),
-                                    waits: Vec::new(),
-                                })
+                                .commit_quiet_point(crate::snapshot::QuietPoint::bare(
+                                    checkpoint.clone(),
+                                ))
                                 .await
                                 .map_err(|refusal| BrokerFailure::Checkpoint { refusal })?;
                             return Ok(BrokeredEnd::Suspended { checkpoint });
@@ -1070,11 +1068,7 @@ impl Session<'_, '_> {
         };
         self.broker
             .checkpoints
-            .commit_quiet_point(crate::snapshot::QuietPoint {
-                checkpoint: checkpoint.clone(),
-                issued: Vec::new(),
-                waits: Vec::new(),
-            })
+            .commit_quiet_point(crate::snapshot::QuietPoint::bare(checkpoint.clone()))
             .await
             .map_err(|refusal| BrokerFailure::Checkpoint { refusal })?;
         Ok(checkpoint)

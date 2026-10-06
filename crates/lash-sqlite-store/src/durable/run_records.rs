@@ -5,10 +5,25 @@
 //! fenced owner commit (or the mailbox commit), after the fence; a refusal
 //! rolls the whole commit back.
 
-use lash_durable::domain::{OwnerKey, RunRecordRow, RunRecordWrite};
-use rusqlite::Connection;
+use std::sync::LazyLock;
 
-use super::{Answer, Committing};
+use lash_durable::domain::{
+    DomainRefusal, Ordinal, OwnerKey, RunRecordKind, RunRecordRow, RunRecordWrite, RunSeq,
+};
+use lash_durable::{DurableError, Epoch};
+use lash_sansio::ToolCallId;
+use lash_store_sql::durable::run_records::RunRecordStatements;
+use rusqlite::{Connection, OptionalExtension};
+
+use super::{Answer, Committing, corrupt};
+use crate::conn::cached_execute;
+
+static SQL: LazyLock<RunRecordStatements> =
+    LazyLock::new(|| RunRecordStatements::render(crate::schema_layout::MAIN));
+
+fn signed(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
 
 /// `run_records`, created by I0 (FIG-5194); its statements are V0's.
 pub(crate) const TABLES: &str = "
@@ -29,13 +44,113 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_run_records_outcome
 ";
 
 pub(super) fn apply(
-    _tx: &Connection,
-    _commit: &Committing<'_>,
-    _write: &RunRecordWrite,
+    tx: &Connection,
+    commit: &Committing<'_>,
+    write: &RunRecordWrite,
 ) -> Answer<()> {
-    todo!("V0 (FIG-5170): append or prune run records on SQLite")
+    match write {
+        RunRecordWrite::Append {
+            owner,
+            run,
+            ordinal,
+            kind,
+            call,
+            record_json,
+        } => {
+            let owner_key = owner.stored();
+            let taken = tx
+                .prepare_cached(SQL.ordinal_taken.sql())?
+                .query_row(
+                    rusqlite::params![owner_key, signed(run.0), signed(ordinal.0)],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if taken.is_some() {
+                return Ok(Err(DurableError::Domain(DomainRefusal::RunOrdinalTaken {
+                    owner: owner.clone(),
+                    run: *run,
+                    ordinal: *ordinal,
+                })));
+            }
+            if *kind == RunRecordKind::XOutcome
+                && let Some(call) = call
+            {
+                let exists = tx
+                    .prepare_cached(SQL.outcome_exists.sql())?
+                    .query_row(
+                        rusqlite::params![owner_key, signed(run.0), call.as_str()],
+                        |_| Ok(()),
+                    )
+                    .optional()?;
+                if exists.is_some() {
+                    return Ok(Err(DurableError::Domain(DomainRefusal::OutcomeExists {
+                        owner: owner.clone(),
+                        run: *run,
+                        call: call.clone(),
+                    })));
+                }
+            }
+            cached_execute(
+                tx,
+                SQL.append.sql(),
+                rusqlite::params![
+                    owner_key,
+                    signed(run.0),
+                    signed(ordinal.0),
+                    kind.as_str(),
+                    call.as_ref().map(ToolCallId::as_str),
+                    record_json,
+                    commit.epoch.0,
+                ],
+            )?;
+            Ok(Ok(()))
+        }
+        RunRecordWrite::Prune { owner, before } => {
+            cached_execute(
+                tx,
+                SQL.prune.sql(),
+                rusqlite::params![owner.stored(), signed(before.0)],
+            )?;
+            Ok(Ok(()))
+        }
+    }
 }
 
-pub(super) fn read(_tx: &Connection, _owner: &OwnerKey) -> Answer<Vec<RunRecordRow>> {
-    todo!("V0 (FIG-5170): read an owner's run records on SQLite")
+pub(super) fn read(tx: &Connection, owner: &OwnerKey) -> Answer<Vec<RunRecordRow>> {
+    let rows = tx
+        .prepare_cached(SQL.read.sql())?
+        .query_map([owner.stored()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut records = Vec::with_capacity(rows.len());
+    for (run, ordinal, kind, call, record_json, epoch) in rows {
+        let Some(kind) = RunRecordKind::parse(&kind) else {
+            return Ok(Err(corrupt("run record kind", &kind)));
+        };
+        let call = match call {
+            None => None,
+            Some(call) => match ToolCallId::parse(&call) {
+                Ok(call) => Some(call),
+                Err(_) => return Ok(Err(corrupt("tool call id", &call))),
+            },
+        };
+        records.push(RunRecordRow {
+            owner: owner.clone(),
+            run: RunSeq(u64::try_from(run).unwrap_or(0)),
+            ordinal: Ordinal(u64::try_from(ordinal).unwrap_or(0)),
+            kind,
+            call,
+            record_json,
+            written_epoch: Epoch(epoch),
+        });
+    }
+    Ok(Ok(records))
 }

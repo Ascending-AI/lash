@@ -1372,3 +1372,27 @@ CREATE TABLE IF NOT EXISTS lash_exec_snapshots (
     format_version INTEGER NOT NULL,
     written_epoch BIGINT NOT NULL
 );
+
+-- Turn phase state (V0, FIG-5170; then L3): a 1:1 side table of
+-- lash_session_runs while the turn is unfinished. The run row stays the one
+-- admission authority (ux_lash_session_runs_unfinished); this row carries the
+-- phase, the encoded TurnCheckpoint and the pinned model call.
+CREATE TABLE IF NOT EXISTS lash_turn_phases (
+    session_id TEXT NOT NULL,
+    run TEXT NOT NULL,
+    phase TEXT NOT NULL CONSTRAINT ck_turn_phases_phase
+        CHECK (phase IN ('admitted', 'prepared', 'model', 'tools', 'waiting', 'committing')),
+    phase_arg BIGINT,
+    iteration BIGINT NOT NULL,
+    checkpoint_ref TEXT,
+    model_attempt BIGINT,
+    model_request_ref TEXT,
+    model_deadline_ms BIGINT,
+    turn_deadline_ms BIGINT,
+    written_epoch BIGINT NOT NULL,
+    PRIMARY KEY (session_id, run),
+    CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
+    CONSTRAINT ck_turn_phases_model CHECK (
+        (model_attempt IS NULL) = (model_request_ref IS NULL)
+        AND (model_attempt IS NULL) = (model_deadline_ms IS NULL))
+);

@@ -37,7 +37,7 @@ type AcceptedRequests = Arc<Mutex<BTreeMap<String, ToolRequestReceipt>>>;
 impl RunRecordObserver {
     #[expect(
         dead_code,
-        reason = "V0 (FIG-5170) binds the observer when ActorContext::record_run_record lands; the effect wrapper that bound it is deleted (I0)"
+        reason = "L4 (FIG-5174) binds the observer when ActorContext::record_run_record lands; the effect wrapper that bound it is deleted (I0)"
     )]
     pub(crate) fn bind(&self, controller: &ActorContext) {
         *self

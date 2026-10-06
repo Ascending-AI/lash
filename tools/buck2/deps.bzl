@@ -270,8 +270,17 @@ PACKAGE_DEPS = {
     "lash-internal-durable-test": {
         "build": {},
         "dev": {
+            "lash_core": "//crates/lash-core:lash-core",
+            "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
+            "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
-            "tempfile": "//third-party/rust:p0362"
+            "lash_typescript": "//crates/lash-typescript:lash-typescript",
+            "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
+            "lashlang": "//crates/lashlang:lashlang",
+            "serde_json": "//third-party/rust:p0313",
+            "tempfile": "//third-party/rust:p0362",
+            "tokio": "//third-party/rust:p0371"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0015",

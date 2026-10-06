@@ -1,8 +1,8 @@
-//! The turn's half of the context (ADR 0132 §4). Owned by V0 (FIG-5170),
-//! then L3 (FIG-5172).
+//! The turn's half of the context (ADR 0132 §4). Owned by L3 (FIG-5172).
 //!
-//! The turn's phase runner lives in `lash-core`'s `runtime::durable::session`;
-//! the context methods it and the turn driver call live here.
+//! The turn's phase runner lives in `lash-core`'s `runtime::durable::session`
+//! (V0, FIG-5170); the context methods the journal-era turn driver still
+//! calls live here until L3 folds that driver into the phase runner.
 
 pub use lash_durable::domain::{ModelPin, TurnPhase, TurnRow, TurnTerminal};
 
@@ -26,9 +26,7 @@ impl ActorContext {
         _envelope: crate::RuntimeEffectEnvelope,
         _local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        todo!(
-            "V0 (FIG-5170): run a turn effect inside its phase transaction; L3 (FIG-5172) extends"
-        )
+        todo!("L3 (FIG-5172): run a turn effect inside its phase transaction")
     }
 
     /// The session's own effects: `ResolveConfigTransaction`,

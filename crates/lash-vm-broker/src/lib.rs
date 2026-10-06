@@ -11,6 +11,8 @@
 //!   VM state they match.
 //! - [`snapshot`]: quiet points, admitted operation identities and the
 //!   [`SnapshotStore`] a VM's snapshots commit to.
+//! - [`cell`]: a code cell run from its snapshot, its operations admitted
+//!   at quiet points.
 //! - [`identity`]: the one derivation of a code command's `ToolCallId`.
 //! - [`effects`]: the journaled parent work behind every admitted operation.
 //! - [`broker`]: the run loop, worker-loss recovery through the substrate,
@@ -24,6 +26,7 @@
 
 pub mod authority;
 pub mod broker;
+pub mod cell;
 pub mod effects;
 pub mod identity;
 pub mod ledger;
@@ -53,6 +56,6 @@ pub use ledger::{
 pub use session::VmSession;
 pub use snapshot::{
     BrokerLedger, DurableSnapshotStore, InjectedOutcome, IssuedOperation, OperationId, QuietPoint,
-    SnapshotStore, outcomes_to_inject,
+    SnapshotStore, StoredSnapshot, outcomes_to_inject,
 };
 pub use transport::{CheckoutRefusal, WorkerCheckout, WorkerRead, WorkerSlots, WorkerTransport};

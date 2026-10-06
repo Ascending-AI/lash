@@ -17,8 +17,8 @@ pub struct SnapshotRow {
     pub exec: ExecKey,
     /// Its revision.
     pub rev: SnapshotRev,
-    /// The snapshot blob (VM continuation, broker ledger, incorporation
-    /// ledger, and a cell's envelope fields), by digest.
+    /// The encoded snapshot, inline: a cell's VM continuation and broker
+    /// ledger, or a process engine's state, as its writer encoded it.
     pub snapshot_ref: String,
     /// The executable identity the continuation was captured on.
     pub executable_identity: String,
@@ -40,7 +40,7 @@ pub enum SnapshotWrite {
         exec: ExecKey,
         /// The revision replaced.
         expected: Option<SnapshotRev>,
-        /// The blob, by digest.
+        /// The encoded snapshot, inline.
         snapshot_ref: String,
         /// The executable identity.
         executable_identity: String,

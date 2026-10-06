@@ -128,6 +128,13 @@ impl Owned {
     pub fn clock(&self) -> &Arc<dyn Clock> {
         &self.clock
     }
+
+    /// The node's store: every owner write and read the activation makes
+    /// goes through it.
+    #[must_use]
+    pub fn store(&self) -> &Arc<dyn DurableStore> {
+        &self.store
+    }
 }
 
 #[derive(Default)]
