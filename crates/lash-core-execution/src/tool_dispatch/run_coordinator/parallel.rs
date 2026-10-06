@@ -373,11 +373,13 @@ impl<'a> RunCoordinator<'a> {
             self.present_pending(pending).await?;
             return Ok(None);
         }
+        // With nothing else to select, only a caller waiting for its sources
+        // (`await_deferred`) races them; progress is otherwise quiescent.
         if self.pending.is_empty()
             && self.timers.is_empty()
             && self.realizing.is_empty()
             && presentation.is_none()
-            && !sources
+            && !(sources_alone && sources)
         {
             return Ok(None);
         }
