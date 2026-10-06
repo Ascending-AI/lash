@@ -11,6 +11,7 @@ use lash::ProcessId;
 use lash::durability::DurableProcessWorker;
 use lash::postgres::PostgresStorage;
 use lash::restate::RestateWait;
+use lash::restate::restate_sdk::context::{ContextSideEffects as _, RunFuture as _};
 use lash::runtime::AwaitEventResolver as _;
 use lash::{TurnActivity, TurnActivitySink, TurnEvent, TurnInput};
 use lash::{TurnOutcome, TurnStop};
@@ -276,8 +277,9 @@ impl AppState {
         }
         self.record(&request.workflow_id, "wake_run", json!({ "run": run }))
             .await?;
+        let process_ids = self.load_session_process_ids(ctx, core).await?;
         self.finish_response(
-            core,
+            process_ids,
             &request,
             final_value,
             turn.activities.len(),
@@ -384,8 +386,9 @@ impl AppState {
         )
         .await?;
 
+        let process_ids = self.load_session_process_ids(ctx, core).await?;
         self.finish_response(
-            core,
+            process_ids,
             &request,
             final_value,
             sink.count().await,
@@ -474,8 +477,9 @@ impl AppState {
             .await
             .map_err(turn_handler_error)?
             .is_empty();
+        let process_ids = self.load_session_process_ids(ctx, core).await?;
         self.finish_response(
-            core,
+            process_ids,
             &request,
             json!({
                 "final": EXPECTED_FRAME_SWITCH_TEXT,
@@ -545,8 +549,9 @@ impl AppState {
             crash_exit_taken(self.storage.pool(), &request.workflow_id)
                 .await
                 .map_err(terminal_error)?;
+        let process_ids = self.load_session_process_ids(ctx, core).await?;
         self.finish_response(
-            core,
+            process_ids,
             &request,
             json!({
                 "final": EXPECTED_FRAME_SWITCH_TEXT,
@@ -602,8 +607,11 @@ impl AppState {
             .first()
             .cloned()
             .ok_or_else(|| terminal_error("trigger occurrence did not start a process"))?;
+        let process_ids = self
+            .load_session_process_ids(controller.context(), core)
+            .await?;
         self.finish_response(
-            core,
+            process_ids,
             &request,
             json!({
                 "final": "trigger-emitted",
@@ -683,8 +691,9 @@ impl AppState {
             .final_value()
             .cloned()
             .ok_or_else(|| terminal_error("post-cancel turn produced no final value"))?;
+        let process_ids = self.load_session_process_ids(ctx, core).await?;
         self.finish_response(
-            core,
+            process_ids,
             &request,
             json!({
                 "final": EXPECTED_FRAME_SWITCH_CANCEL_TEXT,
@@ -702,14 +711,13 @@ impl AppState {
 
     async fn finish_response(
         &self,
-        core: &lash::LashCore,
+        process_ids: Vec<ProcessId>,
         request: &TurnRequest,
         final_value: serde_json::Value,
         streamed_event_count: usize,
         replay_cursor: Option<String>,
         queued_turn_ran: bool,
     ) -> HandlerResult<TurnResponse> {
-        let process_ids = self.load_session_process_ids(core).await?;
         let attachment_id = final_value
             .get("attachment_id")
             .and_then(serde_json::Value::as_str)
@@ -803,8 +811,11 @@ impl AppState {
             .signal(delivered, scoped)
             .await
             .map_err(terminal_error)?;
+        let process_ids = self
+            .load_session_process_ids(controller.context(), core)
+            .await?;
         self.finish_response(
-            core,
+            process_ids,
             request,
             json!({
                 "signalled": true,
@@ -821,28 +832,41 @@ impl AppState {
     }
 
     /// The processes the default session originated, oldest first: the
-    /// provenance lens the response's `process_ids` evidence reports.
+    /// provenance lens the response's `process_ids` evidence reports. The
+    /// listing is journaled, so a replay answers what the first execution
+    /// listed, never a fresh registry read (ADR 0105 §1).
     async fn load_session_process_ids(
         &self,
+        ctx: &WorkflowContext<'_>,
         core: &lash::LashCore,
     ) -> HandlerResult<Vec<ProcessId>> {
-        let mut processes = core
-            .processes()
-            .list_originated_by(
-                &lash::process::SessionScope {
-                    session_id: lash::SessionId::parse(default_session_originator_id())
-                        .map_err(terminal_error)?,
-                    agent_frame_id: None,
-                },
-                &lash::process::ProcessListFilter::default(),
-            )
-            .await
-            .map_err(terminal_error)?;
-        processes.sort_by_key(|process| (process.created_at_ms, process.process_id.clone()));
-        Ok(processes
-            .into_iter()
-            .map(|process| process.process_id)
-            .collect())
+        let session_id =
+            lash::SessionId::parse(default_session_originator_id()).map_err(terminal_error)?;
+        Ok(ctx
+            .run(|| async {
+                let mut processes = core
+                    .processes()
+                    .list_originated_by(
+                        &lash::process::SessionScope {
+                            session_id: session_id.clone(),
+                            agent_frame_id: None,
+                        },
+                        &lash::process::ProcessListFilter::default(),
+                    )
+                    .await
+                    .map_err(terminal_error)?;
+                processes
+                    .sort_by_key(|process| (process.created_at_ms, process.process_id.clone()));
+                Ok(Json(
+                    processes
+                        .into_iter()
+                        .map(|process| process.process_id)
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .name("e2e.session-process-ids")
+            .await?
+            .0)
     }
 
     async fn record(
