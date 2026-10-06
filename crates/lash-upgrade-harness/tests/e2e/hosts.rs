@@ -49,7 +49,8 @@ async fn live_row(row: &str) -> Result<()> {
     std::fs::create_dir_all(&root)?;
     let mut lease = CaseLease {
         gate_id: gate.clone(),
-        namespace: format!("h6-{gate}-{}", row.replace('/', "-")),
+        // A Restate namespace is lowercase ASCII, digits and `-`.
+        namespace: format!("h6-{gate}-{}", row.replace('/', "-").to_ascii_lowercase()),
         authority: format!("h6-{gate}"),
         directory: root,
         postgres_url: None,
@@ -68,29 +69,48 @@ async fn live_row(row: &str) -> Result<()> {
         output_token_cap: required("LASH_E2E_OUTPUT_TOKEN_CAP")?.parse()?,
         python: required("LASH_E2E_PYTHON")?.into(),
     };
-    let receipt = match row {
-        "S36/workbench-weather" => {
-            config
-                .weather(&artifact("WORKBENCH", "workbench")?, &mut lease)
-                .await?
-        }
+    let host = match row {
+        "S36/workbench-weather" => artifact("WORKBENCH", "workbench")?,
+        _ => artifact("RLM_HOST", "rlm-host")?,
+    };
+    let collected = match row {
+        "S36/workbench-weather" => config.weather(&host, &mut lease).await,
         _ => {
             config
                 .rlm_row(
                     row.strip_prefix("S35/").context("unknown paid row")?,
-                    &artifact("RLM_HOST", "rlm-host")?,
+                    &host,
                     &mut lease,
                 )
-                .await?
+                .await
         }
     };
+    // The runner certifies a row from its CaseReceipt: the live host's
+    // artifact, its turn journals on the served Restate and its cleanup,
+    // written whether or not the row's oracle passed.
+    let mut evidence = Evidence::empty(row.into());
+    evidence.artifacts = vec![host];
+    evidence.cleanup = lease.cleanup.clone();
+    let mut errors = Vec::new();
+    match &collected {
+        Ok(receipt) => {
+            evidence.effects = vec![serde_json::to_value(receipt)?];
+            if receipt.row != row || receipt.selected != 1 || receipt.executed != 1 {
+                errors.push("live collection did not execute its selected row".into());
+            }
+        }
+        Err(error) => errors.push(format!("{error:#}")),
+    }
+    let view = RestateView::new(&config.admin, &lease.namespace)?;
+    match turn_journals(&view).await {
+        Ok(journals) => evidence.journals = journals,
+        Err(error) => errors.push(format!("turn journals: {error:#}")),
+    }
+    let errors = write_case_receipt(&lease.directory, evidence, errors, &[])?;
+    collected?;
     ensure!(
-        receipt.row == row && receipt.selected == 1 && receipt.executed == 1,
-        "live collection did not execute its selected row"
-    );
-    ensure!(
-        lease.cleanup.iter().all(|receipt| receipt.closed),
-        "live host lifetime remains open"
+        errors.is_empty(),
+        "{row} case receipt recorded a failure: {errors:?}"
     );
     Ok(())
 }

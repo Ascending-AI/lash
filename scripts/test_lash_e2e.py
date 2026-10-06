@@ -255,7 +255,7 @@ class ReceiptLaws(unittest.TestCase):
         test_name = "s30_external_consumer_accept_follow_cancel"
         outputs = {
             name: self.root / f"built-{name}"
-            for name in ("workbench", "workbench_e2e", "node", "consumer", "node_next",
+            for name in ("workbench", "workbench_e2e", "node", "consumer", "rlm_host", "node_next",
                          "lashctl_n", "lashctl_next", "vm_worker", "vm_worker_next", "server")
         }
         for name, path in outputs.items():

@@ -47,6 +47,17 @@ python3 scripts/lash-e2e.py run --tier smoke \
   --sha "$(git rev-parse HEAD)" --artifacts target/e2e-smoke
 ```
 
+The paid live rows (S35's three RLM workspace cases, S36's workbench weather)
+take their provider from the operator's environment, which the runner
+forwards: `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `LASH_E2E_OUTPUT_TOKEN_CAP`
+and `LASH_E2E_LIVE_BUDGET`, a capped account policy (`model`, `max_calls`,
+`max_input_bytes`, `max_output_tokens`, `max_spend_usd`, per-token
+`input_usd_per_token`/`output_usd_per_token` and a relative `receipts` path).
+Each case writes its own copy of the policy and its usage receipts inside its
+case directory, so one policy serves every selected case. S35 builds the
+`//runbooks/rlm-smoke:rlm-smoke` host and needs Docker for its jailed exec;
+S36's collection still needs the runbook's judgement before it certifies.
+
 Every ready registration names one of the runner's labels and a full test
 path that must exist in this tree; there is no registration commit, and the
 runner's exact-one-JUnit check refuses a stale or zero selection. Execution

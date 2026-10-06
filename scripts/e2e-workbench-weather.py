@@ -75,8 +75,17 @@ def main():
             page.locator("#send").click()
             expect(page.locator("#busyText")).to_have_text("running", timeout=30000)
             deadline = time.monotonic() + 300
-            running = state(session)
-            assert running["active_turns"], "UI running without an active API turn"
+            # The page renders running as soon as Send leaves it; the API claims
+            # the turn once the POST lands. Wait for the API to agree (or for the
+            # turn to have settled already), bounded.
+            claimed = time.monotonic() + 30
+            while True:
+                running = state(session)
+                if running["active_turns"] or any(
+                        record["type"] == "turn_completed" for record in trace(session)):
+                    break
+                assert time.monotonic() < claimed, "UI running without an active API turn"
+                page.wait_for_timeout(100)  # Bounded polling of the API claim above.
             save("01-running-state.json", running)
             while True:
                 final = state(session)

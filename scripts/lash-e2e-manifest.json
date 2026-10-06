@@ -5016,9 +5016,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Paid live row: hosts.rs s35_file_edit_bugfix runs only with capped live credentials and is NotRun without them; outside FIG-4986.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s35_file_edit_bugfix"
+          },
+          "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         },
         {
           "variant": "missing-helper-file",
@@ -5042,9 +5046,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Paid live row: hosts.rs s35_missing_helper_file runs only with capped live credentials and is NotRun without them; outside FIG-4986.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s35_missing_helper_file"
+          },
+          "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         },
         {
           "variant": "config-contract-edit",
@@ -5068,9 +5076,13 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "Paid live row: hosts.rs s35_config_contract_edit runs only with capped live credentials and is NotRun without them; outside FIG-4986.",
-          "registration": null
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s35_config_contract_edit"
+          },
+          "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         }
       ],
       "setup": "Existing rlm-smoke copied case workspaces, real provider and jailed exec.",
@@ -5113,7 +5125,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Paid live row: hosts.rs s36_workbench_weather runs only with capped live credentials and is NotRun without them; outside FIG-4986.",
+          "hold_reason": "Paid live row: hosts.rs s36_workbench_weather collects with capped live credentials, but its runbook judgement failed with z-ai/glm-5.3-flash, which finished with the raw search results instead of extracted weather values (FIG-5150).",
           "registration": null
         }
       ],

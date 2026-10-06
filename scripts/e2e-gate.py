@@ -33,6 +33,7 @@ SERVER = "native//:restate"
 NODE = "//crates/lash-upgrade-harness:lash-upgrade-node__bin"
 LASHCTL = "//crates/lashctl:lashctl"
 CONSUMER = "//examples/e2e-consumer:e2e-consumer"
+RLM_HOST = "//runbooks/rlm-smoke:rlm-smoke"
 RESTATE = ROOT / "scripts/ci/restate_suite.py"
 INVENTORY = ROOT / "tools/buck2/target-inventory.json"
 
@@ -149,7 +150,7 @@ def certify_case(artifacts: Path, junit: Path, outputs: dict[str, Path], source:
         }
         hosts = {
             name: hashlib.sha256(outputs[name].read_bytes()).hexdigest()
-            for name in ("workbench", "workbench_e2e", "node", "consumer")
+            for name in ("workbench", "workbench_e2e", "node", "consumer", "rlm_host")
         }
         matched = sorted(name for name, sha in hosts.items() if sha in artifact_shas)
         if len({hosts[name] for name in matched}) == 1:
@@ -282,7 +283,8 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
         build = artifacts / "build.json"
         subprocess.run([
             "kiln", "build", WORKBENCH, workbench_e2e, WORKER, SERVER, NODE, node_next,
-            lashctl_n, lashctl_next, worker_next, CONSUMER, label, "--materializations", "final",
+            lashctl_n, lashctl_next, worker_next, CONSUMER, RLM_HOST, label,
+            "--materializations", "final",
             "--target-platforms", "prelude//platforms:default",
             "--build-report", str(build),
         ], cwd=ROOT, env=env, check=True)
@@ -294,6 +296,7 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
             "lashctl_n": Path(output(build, lashctl_n)),
             "lashctl_next": Path(output(build, lashctl_next)),
             "consumer": Path(output(build, CONSUMER)),
+            "rlm_host": Path(output(build, RLM_HOST)),
             "vm_worker": Path(output(build, WORKER)),
             "vm_worker_next": Path(output(build, worker_next)),
             "server": Path(output(build, SERVER)),
@@ -347,6 +350,8 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
             "LASH_E2E_CONSUMER_BIN": str(outputs["consumer"]),
             "LASH_E2E_CONSUMER_SHA256": hashlib.sha256(outputs["consumer"].read_bytes()).hexdigest(),
             "LASH_E2E_CONSUMER_GENERATION": generation,
+            "LASH_E2E_RLM_HOST_BIN": str(outputs["rlm_host"]),
+            "LASH_E2E_RLM_HOST_SHA256": hashlib.sha256(outputs["rlm_host"].read_bytes()).hexdigest(),
             "LASH_RESTATE_SERVER_BIN": str(outputs["server"]),
             "LASH_VM_WORKER": worker,
         })
@@ -366,6 +371,9 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
                  "LASH_UPGRADE_LASHCTL_N", "LASH_UPGRADE_LASHCTL_NEXT",
                  "LASH_PHASE_A_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH", "TMPDIR",
                  "RESTATE_INGRESS_URL", "RESTATE_ADMIN_URL"]
+        # The paid live rows' provider credential and model reach the case only
+        # when the operator supplies them; without them those rows record NotRun.
+        keys += [key for key in ("OPENROUTER_API_KEY", "OPENROUTER_MODEL") if env.get(key)]
         postgres = store == "postgresql" or live_replay == "postgresql"
         if postgres:
             # with-service.sh exports the server address into serve's environment;

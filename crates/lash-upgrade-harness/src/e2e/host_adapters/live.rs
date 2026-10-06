@@ -76,12 +76,15 @@ pub struct LiveConfig {
 }
 
 impl LiveConfig {
-    fn environment(&self, lease: &CaseLease) -> Result<BTreeMap<String, String>> {
+    /// The case's own copy of the explicit capped account policy. One policy
+    /// serves every selected case, so its usage receipt path is relative and
+    /// resolves inside the case directory.
+    fn environment(&self, lease: &CaseLease) -> Result<(BTreeMap<String, String>, PathBuf)> {
         ensure!(
             std::env::var("OPENROUTER_API_KEY").is_ok_and(|key| !key.trim().is_empty()),
             "paid row requires a credential; use missing_credentials before selecting it"
         );
-        let budget: Value = serde_json::from_slice(&std::fs::read(&self.budget)?)?;
+        let mut budget: Value = serde_json::from_slice(&std::fs::read(&self.budget)?)?;
         ensure!(
             budget["model"] == self.model
                 && budget["max_output_tokens"]
@@ -89,30 +92,38 @@ impl LiveConfig {
                     .is_some_and(|cap| cap >= self.output_token_cap as u64),
             "live row differs from its explicit capped account policy"
         );
-        let receipts = PathBuf::from(
+        let receipts = Path::new(
             budget["receipts"]
                 .as_str()
                 .context("live budget has no usage receipt path")?,
         );
         ensure!(
-            receipts.starts_with(&lease.directory),
-            "live usage receipt must belong to this case"
+            receipts
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_))),
+            "live usage receipt path must be relative to its case"
         );
-        Ok(BTreeMap::from([
+        let receipts = lease.directory.join(receipts);
+        budget["receipts"] = json!(receipts);
+        std::fs::create_dir_all(&lease.directory)?;
+        let resolved = lease.directory.join("live-budget.json");
+        std::fs::write(&resolved, serde_json::to_vec_pretty(&budget)?)?;
+        let environment = BTreeMap::from([
             ("RESTATE_INGRESS_URL".into(), self.ingress.clone()),
             ("RESTATE_ADMIN_URL".into(), self.admin.clone()),
             ("RESTATE_AUTHORITY_ID".into(), lease.authority.clone()),
             ("OPENROUTER_MODEL".into(), self.model.clone()),
             (
                 "LASH_E2E_LIVE_BUDGET".into(),
-                self.budget.display().to_string(),
+                resolved.display().to_string(),
             ),
             (
                 "LASH_E2E_OUTPUT_TOKEN_CAP".into(),
                 self.output_token_cap.to_string(),
             ),
             ("LASH_E2E_RESTATE_NAMESPACE".into(), lease.namespace.clone()),
-        ]))
+        ]);
+        Ok((environment, receipts))
     }
 
     pub async fn rlm_row(
@@ -122,7 +133,7 @@ impl LiveConfig {
         lease: &mut CaseLease,
     ) -> Result<LiveReceipt> {
         ensure!(RLM_ROWS.contains(&row), "unknown RLM workspace row");
-        let environment = self.environment(lease)?;
+        let (environment, usage) = self.environment(lease)?;
         let source = self.repo.join("runbooks/rlm-smoke/cases").join(row);
         let workspace = lease.directory.join("workspace");
         ensure!(!workspace.exists(), "live workspace must start fresh");
@@ -191,7 +202,7 @@ impl LiveConfig {
             );
             let trace = records(&lease.directory.join("artifacts/trace.jsonl"))?;
             no_identical_error_loop(&trace)?;
-            let usage: Value = serde_json::from_slice(&std::fs::read(usage_path(&self.budget)?)?)?;
+            let usage: Value = serde_json::from_slice(&std::fs::read(&usage)?)?;
             ensure!(
                 usage["calls"]
                     .as_array()
@@ -225,7 +236,7 @@ impl LiveConfig {
         artifact: &ArtifactIdentity,
         lease: &mut CaseLease,
     ) -> Result<LiveReceipt> {
-        let mut environment = self.environment(lease)?;
+        let (mut environment, usage) = self.environment(lease)?;
         let data = lease.directory.join("data");
         ensure!(!data.exists(), "weather store must start fresh");
         environment.extend(BTreeMap::from([
@@ -342,7 +353,7 @@ impl LiveConfig {
             verdict: LiveVerdict::NeedsJudgement {
                 runbook: "runbooks/workbench-weather/runbook.md".into(),
             },
-            evidence: json!({"directory":lease.directory,"usage":usage_path(&self.budget)?,"judge_receipt_required":true}),
+            evidence: json!({"directory":lease.directory,"usage":usage,"judge_receipt_required":true}),
         };
         write_receipt(lease, &receipt)?;
         Ok(receipt)
@@ -357,10 +368,6 @@ async fn hash(path: &Path) -> Result<String> {
         .next()
         .context("digest")?
         .into())
-}
-fn usage_path(budget: &Path) -> Result<PathBuf> {
-    let budget: Value = serde_json::from_slice(&std::fs::read(budget)?)?;
-    Ok(budget["receipts"].as_str().context("usage path")?.into())
 }
 fn persist_cleanup(
     lease: &mut CaseLease,

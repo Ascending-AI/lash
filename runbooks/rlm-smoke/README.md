@@ -46,7 +46,7 @@ judge reads. Each row fails unless its trace carries both readings:
 - The configured driver model is recorded separately from the provider-reported served
   model: the request slug is `llm_call_completed.response.request_model`, and the served
   slug the provider actually reported is
-  `llm_call_completed.attempts[].execution_evidence.served_model`. The row fails when a
+  `llm_call_completed.attempts[].detail.execution_evidence.served_model`. The row fails when a
   completed attempt reports no served model, and when the served models in the trace
   disagree with the ones the host wrote to `host-evidence.json`.
 
