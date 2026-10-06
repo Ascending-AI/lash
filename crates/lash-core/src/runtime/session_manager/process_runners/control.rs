@@ -97,7 +97,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
                 .cloned()
                 .expect("process service requires process-work wiring"),
             self.current.host.core.process_engines.clone(),
-            crate::runtime::HostStartAdmission::default(),
+            // A start executed in its Run body is issued from no journal
+            // frontier, so the host's runtime proposes its process scope.
+            crate::runtime::HostStartAdmission {
+                tracing: Some(self.current.host.core.tracing.clone()),
+                ..Default::default()
+            },
         )
         .with_process_starts(
             self.current

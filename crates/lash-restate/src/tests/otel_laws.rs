@@ -367,11 +367,13 @@ async fn golden_tree_survives_replay_and_redrive() {
             _ => unreachable!(),
         },
     };
-    for (record, owner) in [(turn, turn_owner), (tool, tool_owner)] {
+    // A Run-routed call's receipt is its scope's terminal at ordinal 0, and
+    // the projected tool terminal follows it at ordinal 1 (FIG-4830).
+    for (record, owner, ordinal) in [(turn, turn_owner, 0), (tool, tool_owner, 1)] {
         let expected = lash_trace::TraceRecordIdentity::Transition {
             scope: lash_trace::TraceScopeId::admission(owner),
             transition: lash_trace::TraceTransitionKind::Terminal,
-            ordinal: 0,
+            ordinal,
         }
         .record_id()
         .expect("terminal identity");

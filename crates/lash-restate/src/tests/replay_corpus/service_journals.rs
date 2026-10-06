@@ -43,7 +43,7 @@ struct CountingTool {
 }
 
 /// The tool's definition: one that awaits its declared child declares it may
-/// defer.
+/// defer and the start intent its launch reports.
 fn tool_definition(awaited_child: bool) -> lash_core::ToolDefinition {
     let definition = lash_core::ToolDefinition::raw(
         format!("tool:{TOOL}"),
@@ -54,7 +54,10 @@ fn tool_definition(awaited_child: bool) -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas");
     if awaited_child {
-        definition.with_declaration(lash_core::ToolDeclaration::deferring())
+        definition.with_declaration(
+            lash_core::ToolDeclaration::deferring()
+                .with_intents([lash_core::ToolIntentKind::StartProcess]),
+        )
     } else {
         definition.with_declaration(
             lash_core::ToolDeclaration::default()
@@ -488,6 +491,10 @@ fn model_reply(request: &LlmRequest) -> LlmResponse {
             text if text.contains("state") => {
                 vec![tool_call("call-1", "state_add", json!({}))]
             }
+            text if text.contains("answer") => vec![LlmOutputPart::Text {
+                text: "answered".to_owned(),
+                response_meta: None,
+            }],
             _ => vec![tool_call("call-1", TOOL, json!({}))],
         }
     };

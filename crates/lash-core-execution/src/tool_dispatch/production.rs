@@ -1166,12 +1166,22 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         let parent = self
             .context
             .language_runtime_invocation(&format!("run:start:{}", obligation.start_key()));
+        // The child descends from its call's trace scope. The cause rides
+        // beside the journaled registration and is no part of its identity.
+        let mut registration = obligation.registration.clone();
+        let scoped = &self.context.dispatch().effect_controller;
+        if let Some(observer) = scoped.controller().run_record_observer()
+            && let Some(scope) = observer.tool_scope(&obligation.call_id).await
+        {
+            registration = registration
+                .with_trace(lash_trace::TraceScopeOffer::caused_by(scope.parent_cause()));
+        }
         let started = self
             .context
             .dispatch()
             .processes
             .start_bound(
-                obligation.registration.clone(),
+                registration,
                 self.context.process_scope_for_language_call(
                     parent.into_runtime_invocation(),
                     &obligation.call_id,

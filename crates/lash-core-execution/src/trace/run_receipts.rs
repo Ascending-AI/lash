@@ -48,6 +48,37 @@ impl RunRecordObserver {
         });
     }
 
+    /// The trace scope a Run-routed call was admitted under, anchored as its
+    /// request receipt retained it: what work the call launches descends
+    /// from. `None` when nothing is bound or traced, or the call's admission
+    /// was never observed.
+    pub(crate) async fn tool_scope(&self, call_id: &ToolCallId) -> Option<DurableTraceScope> {
+        let bound = self
+            .bound
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()?;
+        let opener = EffectOpener::for_scope(&bound.admitted).ok()?;
+        let key = request_key(&TraceToolOwner::from(&opener), call_id).ok()?;
+        let accepted = self
+            .accepted
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+            .cloned();
+        let request = match accepted {
+            Some(request) => request,
+            None => bound
+                .frontier
+                .runtime()?
+                .tool_receipts()?
+                .tool_request_receipt(&key)
+                .await
+                .ok()??,
+        };
+        request.scope
+    }
+
     /// Journal the body with original observation facts, then project only
     /// the accepted entry returned by the engine, including served entries.
     pub async fn record(
