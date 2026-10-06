@@ -1157,7 +1157,10 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn immediate_abort_during_retry_sleep_unwinds_without_the_retry() {
+async fn immediate_abort_during_retry_sleep_lands_at_wake_without_the_retry() {
+    // The Run observes a cancellation at its retry backoff's durable wake,
+    // not by racing the sleep (FIG-5009): under the manual clock the abort
+    // holds until the test moves the server's time, and then no retry runs.
     let double = kernel_double(
         SEED + 7,
         lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
@@ -1202,6 +1205,10 @@ async fn immediate_abort_during_retry_sleep_unwinds_without_the_retry() {
     })
     .await
     .expect("the retry backoff is a live server timer");
+    let timers = double.server().timers();
+    assert_eq!(timers.len(), 1, "only the retry sleep is scheduled");
+    let wake_at_ms = timers[0].fire_at_ms;
+    assert_eq!(tool.attempts.load(Ordering::SeqCst), 1);
     let receipt = driver
         .request_cancel(request(
             &TurnId::from(turn_id),
@@ -1211,10 +1218,11 @@ async fn immediate_abort_during_retry_sleep_unwinds_without_the_retry() {
         .await
         .expect("request during the sleep");
     assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
+    assert_eq!(double.server().advance_to(wake_at_ms), 1);
 
     let turn = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
         .await
-        .expect("immediate abort unwinds the held sleep")
+        .expect("the immediate abort lands at the backoff's wake")
         .expect("turn task")
         .expect("turn assembles");
     let evidence = cancelled_evidence(&turn);
@@ -1224,6 +1232,6 @@ async fn immediate_abort_during_retry_sleep_unwinds_without_the_retry() {
     assert_eq!(
         tool.attempts.load(Ordering::SeqCst),
         1,
-        "the cooperative token cuts the sleep short; no retry runs"
+        "the abort decides the backed-off call at its wake; no retry runs"
     );
 }
