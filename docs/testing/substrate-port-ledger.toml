@@ -287,6 +287,7 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+note = "l06_cold_replay no longer asserts the Once loser is redelivered after the crash (ruling #74); planned:F2 owns its never-twice, folds-to-Interrupted law"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/native_cancel.rs"

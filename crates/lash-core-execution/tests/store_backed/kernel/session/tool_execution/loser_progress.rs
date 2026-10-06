@@ -267,12 +267,19 @@ async fn loser_beside_sleep(crash: bool) {
         1,
         "the winner's body ran exactly once"
     );
-    let expected_losers = if crash { 2 } else { 1 };
-    assert_eq!(
-        entries.iter().filter(|symbol| *symbol == "L").count(),
-        expected_losers,
-        "the loser's body ran once, plus once more redelivered after the crash"
-    );
+    let losers = entries.iter().filter(|symbol| *symbol == "L").count();
+    if crash {
+        // The loser is `Once`, which promises no redelivery: the redriven
+        // owner can reach its close before the unfinished loser's body is
+        // first polled, and Closing then stops that body unstarted. Ruling
+        // #74 makes it exactly one (planned law F2).
+        assert!(
+            (1..=2).contains(&losers),
+            "the loser's body ran in the owner that died and at most once more after the crash, ran {losers}"
+        );
+    } else {
+        assert_eq!(losers, 1, "the loser's body ran exactly once");
+    }
     if crash {
         assert_eq!(
             crashes.load(Ordering::SeqCst),
