@@ -81,16 +81,18 @@ pauses with its journal kept, and `send` answers the turn as parked with
 finishes on its own.
 
 Declare long work `isolated` instead: the call starts a lash process whose
-OS worker outlives the process invocation's aborted attempts. Each
-redelivery adopts the live worker and never launches another. Each abort
-still spends one of the process handler's 8 attempts, though. Work that runs
-longer than about 8 abort windows (about 90 minutes on the defaults) parks
-its process, and the worker's result stays unrecorded until the park is
-resumed.
+OS worker runs outside every invocation. The process invocation never waits
+on the worker itself. It records whether the worker has ended and otherwise
+sleeps on a durable timer, from one second doubling to a minute, so it
+suspends while the worker runs and the invoker's timeouts never abort it,
+however long the worker lives. Each wake adopts the live worker and never
+launches another, and the worker's result is recorded once, at most a minute
+after it ends.
 
 Size the server's two timeouts above the longest inline tool body you admit.
-The `long-tool-body` suite of `scripts/restate-suites.toml` holds both rules
-on a live server with a 1 second inactivity and 2 second abort timeout.
+The `long-tool-body` suite of `scripts/restate-suites.toml` holds the tool
+body rule, and the `long-process` suites the isolated one, on a live server
+with a 1 second inactivity and 2 second abort timeout.
 
 ## Read the compatibility report
 

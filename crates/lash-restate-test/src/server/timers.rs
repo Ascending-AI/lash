@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::Shared;
-use super::model::{InvKey, Status, TimerAction};
+use super::model::{AttemptFailure, InvKey, Status, TimerAction};
 use crate::protocol::MessageType;
 use crate::protocol::generated::{self as pb, notification_template};
 
@@ -208,6 +208,59 @@ impl State {
         }
     }
 }
+impl State {
+    /// Apply the invoker's silence timers in wall time, as `restate-server`
+    /// does to an attempt that exchanges no frame: past its inactivity
+    /// timeout its input closes, so the SDK suspends at its next await; past
+    /// the abort timeout after that, an attempt that still sent nothing is
+    /// aborted and retried under its retry policy, the attempt counted. A
+    /// handler that waits on its own work instead of a Restate await reaches
+    /// the abort, however healthy that work is.
+    pub(super) fn expire_silent(&mut self, sh: &Arc<Shared>) {
+        let mut aborted = Vec::new();
+        for (index, invocation) in self.invocations.iter_mut().enumerate() {
+            let Status::Running(attempt) = &mut invocation.status else {
+                continue;
+            };
+            let inactivity = invocation
+                .spec
+                .inactivity_timeout_ms
+                .map_or(sh.config.inactivity_timeout, Duration::from_millis);
+            let abort = invocation
+                .spec
+                .abort_timeout_ms
+                .map_or(sh.config.abort_timeout, Duration::from_millis);
+            let silent = attempt.silent_for();
+            if silent >= inactivity.saturating_add(abort) {
+                if let Some(task) = attempt.task.take() {
+                    task.abort();
+                }
+                aborted.push((InvKey(index), attempt.number, silent));
+            } else if silent >= inactivity && attempt.is_open() {
+                attempt.close();
+            }
+        }
+        for (key, number, silent) in aborted {
+            self.stats.timeout_aborts += 1;
+            self.attempt_failed(
+                sh,
+                key,
+                number,
+                AttemptFailure {
+                    code: 500,
+                    message: format!(
+                        "[RT0001] the attempt was silent for {} ms, past its inactivity and abort timeouts",
+                        silent.as_millis()
+                    ),
+                    related_command: None,
+                },
+                None,
+                pb::ErrorBehavior::Retry,
+            );
+        }
+    }
+}
+
 pub fn duration_ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }

@@ -85,6 +85,8 @@ pub struct HandlerSpec {
     pub retry: RetryOverrides,
     /// The deployment's inactivity timeout for this handler, if it set one.
     pub inactivity_timeout_ms: Option<u64>,
+    /// The deployment's abort timeout for this handler, if it set one.
+    pub abort_timeout_ms: Option<u64>,
     /// The deployment asked for the handler's object state to load lazily
     /// (`enableLazyState`): an attempt starts with no eager state and every
     /// read is a lazy state command, as restate-server serves it.
@@ -178,6 +180,8 @@ impl Catalog {
             #[serde(default)]
             inactivity_timeout: Option<u64>,
             #[serde(default)]
+            abort_timeout: Option<u64>,
+            #[serde(default)]
             enable_lazy_state: Option<bool>,
             #[serde(default)]
             metadata: BTreeMap<String, String>,
@@ -192,6 +196,8 @@ impl Catalog {
             retry: Retry,
             #[serde(default)]
             inactivity_timeout: Option<u64>,
+            #[serde(default)]
+            abort_timeout: Option<u64>,
             #[serde(default)]
             enable_lazy_state: Option<bool>,
         }
@@ -250,6 +256,7 @@ impl Catalog {
                         inactivity_timeout_ms: handler
                             .inactivity_timeout
                             .or(service.inactivity_timeout),
+                        abort_timeout_ms: handler.abort_timeout.or(service.abort_timeout),
                         lazy_state: handler
                             .enable_lazy_state
                             .or(service.enable_lazy_state)

@@ -281,8 +281,42 @@ impl Beside {
     }
 }
 
+struct Silent;
+
+#[restate_sdk::service]
+impl Silent {
+    /// Works inside one `ctx.run` for longer than the silence timers allow:
+    /// nothing crosses the stream while it runs. Pauses after three
+    /// attempts.
+    #[handler(invocation_retry_policy(
+        initial_interval = "100ms",
+        factor = 1.0,
+        max_attempts = 3,
+        on_max_attempts = "pause",
+    ))]
+    async fn busy(&self, ctx: Context<'_>, Json(tag): Json<String>) -> HandlerResult<()> {
+        ctx.run(|| async move {
+            counter(&tag).fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            Ok(())
+        })
+        .name("busy")
+        .await?;
+        Ok(())
+    }
+
+    /// Waits as long on a durable timer.
+    #[handler]
+    async fn waits(&self, ctx: Context<'_>, Json(tag): Json<String>) -> HandlerResult<()> {
+        counter(&tag).fetch_add(1, Ordering::SeqCst);
+        ctx.sleep(Duration::from_secs(3)).await?;
+        Ok(())
+    }
+}
+
 fn endpoint() -> Endpoint {
     Endpoint::builder()
+        .bind(Silent)
         .bind(Counter)
         .bind(Flow)
         .bind(Caller)
@@ -571,6 +605,49 @@ async fn awakeables_route_their_completion_to_the_owning_invocation() {
             (200, "\"resolved\"".into())
         );
     }
+}
+
+/// Restate's silence timers (FIG-5152): an attempt that sends nothing past
+/// its inactivity timeout has its input closed, and one still silent past
+/// the abort timeout after that is aborted and retried, the attempt counted,
+/// until its retry policy pauses it. An attempt waiting on a durable timer
+/// suspends instead and is never aborted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_silent_busy_attempt_is_aborted_while_a_durable_wait_suspends() {
+    let server = server(
+        ServerConfig::default()
+            .silence_timeouts(Duration::from_millis(200), Duration::from_millis(300)),
+    )
+    .await;
+    let busy = send_invocation(&server, "Silent/busy", "\"silent-busy\"").await;
+    let waits = send_invocation(&server, "Silent/waits", "\"silent-waits\"").await;
+    let view = |id: &str| {
+        server
+            .invocations()
+            .into_iter()
+            .find(|view| view.id == id)
+            .unwrap()
+    };
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while view(&busy).status != "paused" || view(&waits).status != "completed" {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the busy invocation pauses and the waiting one completes");
+    let busy = view(&busy);
+    assert_eq!(counter("silent-busy").load(Ordering::SeqCst), 3);
+    let (_, message) = busy.last_failure.expect("the abort is the failure");
+    assert!(message.starts_with("[RT0001]"), "{message}");
+    assert_eq!(server.stats().timeout_aborts, 3);
+    let waits = view(&waits);
+    assert!(waits.suspensions >= 1, "{waits:?}");
+    assert_eq!(waits.retry_count, 0, "{waits:?}");
+    assert_eq!(waits.last_failure, None);
+    assert_eq!(
+        counter("silent-waits").load(Ordering::SeqCst),
+        1 + waits.suspensions as usize
+    );
 }
 
 #[tokio::test]

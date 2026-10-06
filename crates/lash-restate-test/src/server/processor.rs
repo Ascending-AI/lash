@@ -114,6 +114,9 @@ pub struct Stats {
     pub suspensions: u64,
     pub retries: u64,
     pub crashes: u64,
+    /// Attempts the abort timeout ended: silent past the inactivity and
+    /// abort timeouts, as a body that cannot suspend is.
+    pub timeout_aborts: u64,
     /// Cancellations a [`cancel_on`](super::RestateTestServer::cancel_on)
     /// rule delivered.
     pub scripted_cancels: u64,
@@ -767,9 +770,10 @@ impl State {
 
     /// Apply one frame the SDK wrote on attempt `number` of `key`.
     pub fn on_frame(&mut self, sh: &Arc<Shared>, key: InvKey, number: u32, frame: Frame) -> Flow {
-        if self.running_attempt(key, number).is_none() {
+        let Some(attempt) = self.running_attempt(key, number) else {
             return Flow::Stop;
-        }
+        };
+        attempt.heard();
         let site = self.crash_site(key, &frame);
         // A random crash's draw is keyed to the frame it would hit, so one
         // seed crashes the same frames however attempts interleave.

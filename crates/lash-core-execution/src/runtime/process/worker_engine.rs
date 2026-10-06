@@ -15,6 +15,16 @@
 //! never launching another worker. A payload is released only after the launch
 //! is durable. A host lost before that write closes the gate with EOF, so
 //! no configured work has run and a retry is safe (ADR 0110).
+//!
+//! The process's invocation never waits on the worker itself (FIG-5152).
+//! It journals whether the worker has ended, and while it has not, it
+//! sleeps on a durable timer raced against the process's cancellation, so
+//! the engine suspends the invocation and no silence timer aborts it,
+//! however long the worker runs. Each wake adopts the worker again, so a
+//! host lost meanwhile is replaced on the next wake: the worker's death is
+//! the ledger's typed `SubstrateLost`, and its result is read from the
+//! retained terminal exactly once, at the first journaled observation that
+//! saw it.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -39,6 +49,14 @@ use super::{
 const STDOUT_LIMIT: u64 = 1024 * 1024;
 /// How long a termination waits for the run that spawns the worker.
 const DEFAULT_SPAWN_WAIT: Duration = Duration::from_secs(30);
+/// The first durable sleep between two observations of a running worker.
+const DEFAULT_FIRST_POLL: Duration = Duration::from_secs(1);
+/// The longest durable sleep between two observations: each sleep doubles
+/// the last up to here, so a long worker costs its journal a few entries a
+/// minute and its result waits at most this long to be seen.
+const DEFAULT_MAX_POLL: Duration = Duration::from_secs(60);
+/// The journaled observation of whether the worker has ended.
+const OBSERVE_OPERATION: &str = "lash.worker.ended";
 
 /// The host-configured program a [`WorkerProcessEngine`] runs, one OS
 /// process per lash process. It runs with an empty environment.
@@ -89,6 +107,8 @@ pub struct WorkerProcessEngine {
     command: WorkerCommand,
     ownership_dir: PathBuf,
     spawn_wait: Duration,
+    first_poll: Duration,
+    max_poll: Duration,
     workers: Mutex<BTreeMap<ProcessId, Slot>>,
     spawned: watch::Sender<u64>,
 }
@@ -104,6 +124,8 @@ impl WorkerProcessEngine {
             command,
             ownership_dir,
             spawn_wait: DEFAULT_SPAWN_WAIT,
+            first_poll: DEFAULT_FIRST_POLL,
+            max_poll: DEFAULT_MAX_POLL,
             workers: Mutex::default(),
             spawned: watch::Sender::new(0),
         }
@@ -115,6 +137,24 @@ impl WorkerProcessEngine {
     pub fn with_spawn_wait(mut self, spawn_wait: Duration) -> Self {
         self.spawn_wait = spawn_wait;
         self
+    }
+
+    /// The durable sleeps between two observations of a running worker:
+    /// `first`, doubling up to `max`. A process records the sleeps its
+    /// first execution took, so changing them changes only processes that
+    /// start afterwards.
+    #[must_use]
+    pub fn with_completion_poll(mut self, first: Duration, max: Duration) -> Self {
+        self.first_poll = first;
+        self.max_poll = max.max(first);
+        self
+    }
+
+    /// The durable sleep after observation `index` saw the worker running.
+    fn poll_delay(&self, index: u32) -> Duration {
+        self.first_poll
+            .saturating_mul(2u32.saturating_pow(index.min(31)))
+            .min(self.max_poll)
     }
 
     #[expect(
@@ -287,6 +327,87 @@ impl WorkerProcessEngine {
         ));
         Ok((receiver, kill))
     }
+}
+
+impl WorkerProcessEngine {
+    /// Wait for `process_id`'s worker on journaled observations and
+    /// durable sleeps only, never on the worker itself (FIG-5152): the
+    /// invocation suspends between observations.
+    ///
+    /// Every observation first launches or adopts the worker, unjournaled:
+    /// the ledger makes that idempotent, and its faults end the attempt
+    /// without recording anything. A cancellation that wins a sleep kills
+    /// the worker and waits for its reap; the reaped or exited terminal the
+    /// ledger retains is immutable, so a replay reads the same one.
+    async fn await_worker(
+        &self,
+        runtime: &crate::RuntimeExecutionContext<'_>,
+        process_id: &ProcessId,
+        start_key: Option<&super::StartKey>,
+        payload: &serde_json::Value,
+    ) -> Result<ProcessAwaitOutput, ProcessInfraError> {
+        let mut observation = 0u32;
+        loop {
+            let (state, kill) = self.start_worker(process_id, start_key, payload)?;
+            let observed = state.clone();
+            let ended =
+                runtime
+                    .journaled_language_value_with(
+                        format!("lash:worker:{observation}:observe"),
+                        OBSERVE_OPERATION.to_owned(),
+                        move || async move {
+                            Ok(serde_json::Value::Bool(observed.borrow().is_terminal()))
+                        },
+                    )
+                    .await
+                    .map_err(effect_fault)?;
+            if ended.as_bool() == Some(true) {
+                return settled(process_id, state).await;
+            }
+            let delay = self.poll_delay(observation);
+            let slept = runtime
+                .sleep_command(
+                    &crate::CommandReplayKey::new(format!("lash:worker:{observation}")),
+                    crate::SleepSpec::For {
+                        duration_ms: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
+                    },
+                )
+                .await;
+            match slept {
+                Ok(()) => observation = observation.saturating_add(1),
+                Err(error)
+                    if error.code == crate::RuntimeErrorCode::RuntimeEffectSleepCancelled =>
+                {
+                    kill.notify_one();
+                    return settled(process_id, state).await;
+                }
+                Err(error) => return Err(effect_fault(error)),
+            }
+        }
+    }
+}
+
+/// The terminal a worker's ledger retains, once its supervisor wrote it.
+async fn settled(
+    process_id: &ProcessId,
+    mut state: watch::Receiver<WorkerState>,
+) -> Result<ProcessAwaitOutput, ProcessInfraError> {
+    loop {
+        let current = state.borrow_and_update().clone();
+        match current {
+            WorkerState::Exited { output, .. } => return Ok(*output),
+            WorkerState::Reaped(_) => return Ok(terminated_output()),
+            WorkerState::Running { .. } => {}
+        }
+        state
+            .changed()
+            .await
+            .map_err(|_| supervisor_gone(process_id))?;
+    }
+}
+
+fn effect_fault(error: crate::RuntimeEffectControllerError) -> ProcessInfraError {
+    ProcessInfraError::new(crate::PluginError::RuntimeEffectController(error))
 }
 
 /// Own one worker until it ends: by itself, or killed and reaped on request.
@@ -542,41 +663,26 @@ impl ProcessEngine for WorkerProcessEngine {
         payload: serde_json::Value,
     ) -> Result<ProcessRunOutcome, ProcessInfraError> {
         let process_id = context.process_id().clone();
-        let (mut state, kill) = self.start_worker(
-            &process_id,
-            context.registration().start_key.as_ref(),
-            &payload,
-        )?;
-        let cancellation = context.cancellation_token();
-        let mut kill_requested = false;
-        loop {
-            let current = state.borrow_and_update().clone();
-            match current {
-                WorkerState::Exited { mut output, .. } => {
-                    // The ledger owns the physical observation; the replayed
-                    // process admission supplies its execution owner evidence.
-                    if let ProcessAwaitOutput::Abandoned { evidence, .. } = output.as_mut() {
-                        evidence.owner = context
-                            .execution_context()
-                            .execution_write_authority
-                            .as_ref()
-                            .map(|authority| authority.owner_identity());
-                    }
-                    return Ok((*output).into());
-                }
-                WorkerState::Reaped(_) => return Ok(terminated_output().into()),
-                WorkerState::Running { .. } => {}
-            }
-            tokio::select! {
-                changed = state.changed() => {
-                    changed.map_err(|_| supervisor_gone(&process_id))?;
-                }
-                () = cancellation.cancelled(), if !kill_requested => {
-                    kill.notify_one();
-                    kill_requested = true;
-                }
-            }
+        let start_key = context.registration().start_key.clone();
+        // The ledger owns the physical observation; the replayed process
+        // admission supplies a lost worker's execution owner evidence.
+        let owner = context
+            .execution_context()
+            .execution_write_authority
+            .as_ref()
+            .map(|authority| authority.owner_identity());
+        let catalog = context.resolved_tool_catalog()?;
+        let (runtime, guard) = context.into_runtime_context(catalog)?.into_parts();
+        let ended = self
+            .await_worker(&runtime, &process_id, start_key.as_ref(), &payload)
+            .await;
+        drop(runtime);
+        guard.shutdown(false).await?;
+        let mut output = ended?;
+        if let ProcessAwaitOutput::Abandoned { evidence, .. } = &mut output {
+            evidence.owner = owner;
         }
+        Ok(output.into())
     }
 
     fn start_artifacts(

@@ -100,7 +100,16 @@ pub struct ServerConfig {
     /// Virtual epoch milliseconds the server starts at.
     pub start_time_ms: u64,
     /// Virtual idle time after which the invoker closes a starved stream.
+    /// In [`TimeMode::AutoAdvance`] it is also wall time: an attempt that
+    /// exchanged no frame for this long has its input closed, busy or not,
+    /// as `restate-server` asks a silent invocation to suspend.
     pub inactivity_timeout: Duration,
+    /// Wall time, after the inactivity timeout, that a silent attempt may
+    /// go without sending a frame before the invoker aborts it and retries
+    /// it under its retry policy, as `restate-server`'s `abort_timeout`
+    /// does to a body that cannot suspend. Only the
+    /// [`TimeMode::AutoAdvance`] driver checks it.
+    pub abort_timeout: Duration,
     /// The invoker retry policy handlers inherit unless their deployment
     /// overrides it.
     pub retry: RetryPolicy,
@@ -122,6 +131,7 @@ impl Default for ServerConfig {
             time: TimeMode::auto(),
             start_time_ms: 1_800_000_000_000,
             inactivity_timeout: Duration::from_secs(60),
+            abort_timeout: Duration::from_secs(600),
             retry: RetryPolicy {
                 initial_interval: Duration::from_millis(500),
                 exponentiation_factor: 2.0,
@@ -166,6 +176,14 @@ impl ServerConfig {
 
     pub fn retry(mut self, retry: RetryPolicy) -> Self {
         self.retry = retry;
+        self
+    }
+
+    /// The invoker's silence timers: `inactivity` asks a silent attempt to
+    /// suspend, and `abort` later aborts one that still sends nothing.
+    pub fn silence_timeouts(mut self, inactivity: Duration, abort: Duration) -> Self {
+        self.inactivity_timeout = inactivity;
+        self.abort_timeout = abort;
         self
     }
 
@@ -1435,6 +1453,7 @@ async fn auto_advance(shared: Weak<Shared>, idle: Duration, horizon: Duration) {
             // Time flows at wall speed between jumps: a timer past the
             // horizon fires when a real server would have fired it.
             let flowed = state.wall_flowed_ms();
+            state.expire_silent(&strong);
             if state
                 .next_timer_ms()
                 .is_some_and(|fire_at| fire_at <= flowed)

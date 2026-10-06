@@ -110,6 +110,9 @@ pub struct LiveAttempt {
     /// Virtual time since which the attempt has been starved, as last
     /// observed by a time advance; the inactivity timeout counts from here.
     pub starved_since_ms: Option<u64>,
+    /// The wall instant of the last frame either way: the silence timers
+    /// count from here.
+    last_frame: std::time::Instant,
 }
 
 impl LiveAttempt {
@@ -128,7 +131,18 @@ impl LiveAttempt {
             task: Some(task),
             unseen_from: None,
             starved_since_ms: None,
+            last_frame: std::time::Instant::now(),
         }
+    }
+
+    /// A frame crossed the attempt's stream: its silence starts over.
+    pub fn heard(&mut self) {
+        self.last_frame = std::time::Instant::now();
+    }
+
+    /// Wall time since the last frame either way.
+    pub fn silent_for(&self) -> std::time::Duration {
+        self.last_frame.elapsed()
     }
 
     /// Whether the server holds the attempt's input open.
@@ -142,6 +156,7 @@ impl LiveAttempt {
             return false;
         }
         self.starved_since_ms = None;
+        self.heard();
         self.send(frame)
     }
 

@@ -143,6 +143,17 @@ reads that launch, never starts a replacement, and adopts its live worker.
 A pidfd is opened before checking boot, namespace and start time, so a
 reused numeric PID cannot receive a signal intended for the recorded worker.
 
+The process invocation never waits on the worker itself (FIG-5152). It
+journals whether the worker has ended and, while it has not, sleeps on a
+durable timer raced against the process's cancel promise, doubling from one
+second to a minute. The invocation therefore suspends while the worker runs,
+and Restate's inactivity and abort timeouts never abort or replay it however
+long the worker lives. Every wake launches or adopts the worker through its
+ownership record before it observes, so a host lost while the invocation
+slept is replaced at the next wake. The first journaled observation that saw
+the worker ended reads the terminal the record retains, so the result
+reaches the invocation exactly once.
+
 Adoption retains the live worker instead of setting a parent-death signal.
 Cancellation signals that pidfd, observes death and waits for the original
 parent or kernel init to reap it. Termination and natural-exit output are
@@ -158,9 +169,10 @@ receipt or replacement launch is allowed there. Retained terminals remain
 readable without another physical observation.
 
 Evidence: `crates/lash-core-execution/src/runtime/process/worker_engine.rs`,
-`crates/lash-core-execution/src/runtime/process/worker_ownership.rs`, and the
+`crates/lash-core-execution/src/runtime/process/worker_ownership.rs`, the
 L08 cold-process-redelivery laws in
-`crates/lash/src/tests/isolated_tool_route.rs` (FIG-5011).
+`crates/lash/src/tests/isolated_tool_route.rs` (FIG-5011), and its long-worker
+laws on the double and on live Restate (FIG-5152).
 
 ## Consequences
 
