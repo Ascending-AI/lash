@@ -88,8 +88,6 @@ mod artifact_races;
 mod attachment_catalog;
 #[path = "conformance/attachment_recovery.rs"]
 mod attachment_recovery;
-#[path = "conformance/generation_drain.rs"]
-mod generation_drain;
 #[path = "conformance/obligation_relay.rs"]
 mod obligation_relay;
 #[path = "conformance/occurrence_listing.rs"]

@@ -6644,13 +6644,6 @@
           "minimum": 0,
           "type": "integer"
         },
-        "build_generation": {
-          "description": "The drain generation of the build whose checkpoint the park resumes\n(FIG-3795 S8), spelled as the store holds it.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "engine": {
           "description": "The engine's opaque handle on the stopped execution, when the engine\nparked the process itself.",
           "type": [
@@ -6995,13 +6988,6 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
-        },
-        "build_generation": {
-          "description": "The drain generation of the build that admitted the incarnation\n(FIG-3795 S1), spelled as the store holds it.",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "generation": {
           "description": "The executable generation the incarnation was started under\n(FIG-3571), spelled as the store holds it.",

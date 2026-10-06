@@ -484,40 +484,6 @@ byte for byte (removal row M0201):
 
 A change that moves one of these is an identity change, never a shape change.
 
-## Journal generation lanes
-
-A build's drain generation hashes every drain-surface format version,
-`JOURNAL_LOGIC_EPOCH`, the session admission window and the ordered plugin
-composition (ADR 0106 §1). Every landing that changes a handler's journaled
-command structure — what it records, the order of its records, or a step's
-name — moves that handler's lane in the same commit:
-
-| Handler | Journal owner | Shape owner |
-| --- | --- | --- |
-| `LashTurn` `run`/`close`, including A/X/D/V | Admitted generation | Effect journal and session-shift formats |
-| `LashSession` `shift`, including operation input | Admitted generation | Session-shift format |
-| `LashProcessWorkflow` segments and starts | Fixed segment generation | Process journal, command payload and effect formats |
-| `LashDurableWaitWorkflow` source seals | Shared stamped state | Durable-wait registry format |
-
-During the version freeze those stored shapes change in place. Any changed
-handler command stream, step name or order still increments `JOURNAL_LOGIC_EPOCH`
-and its synthetic-next counterpart.
-At final rebase use main's epoch plus one, never merge counter values. The new
-lane refuses a predecessor journal before decode; the predecessor retains its
-drain lane. No compatibility reader or old/new command-stream coexistence is
-introduced by an in-place shape refresh.
-
-Shared object state keeps its stamped coexistence rules and has no lane. Moving the
-journal logic epoch is the generation change the pre-1.0 freeze still requires: stored
-shapes change in place, but a journal never replays under another command
-structure. No revision replays old and new structure together. FIG-4862's
-`unfinished_invocations` drain hold keeps the old deployment registered until
-its invocations finish.
-
-The landings that change command structure are FIG-4876, FIG-4877, FIG-4879,
-FIG-4880, FIG-4882, FIG-4883, FIG-4740, FIG-4884 through FIG-4888, FIG-4893,
-FIG-4894, FIG-1863, FIG-4895, FIG-4855 and FIG-4878. Each owns its lane move.
-
 ## Laws
 
 | Law | Subject | Owners | Tiers |

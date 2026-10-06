@@ -290,12 +290,7 @@ pub(crate) fn admit_run_conn(
     let changed = crate::conn::cached_execute(
         tx,
         runs.runs.write_admission.sql(),
-        params![
-            session_id.as_str(),
-            request.run.as_str(),
-            json,
-            request.admitted_generation.as_str()
-        ],
+        params![session_id.as_str(), request.run.as_str(), json],
     )
     .map_err(sqlite_error)?;
     if changed != 1 {

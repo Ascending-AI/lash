@@ -91,13 +91,12 @@ impl TestTurnExecution for LashRuntime {
         let request = ShiftRequest {
             session: self.state().session_id.clone(),
             request: ShiftRequestId::new(opts.execution_scope_id()),
-            intended_lane: None,
         };
         let mut ordinal = 0_u32;
         let mut rules = ShiftLoop::new();
         loop {
             let AdmitVerdict::Admit(admitted) =
-                crate::shift::admit_shift(self, &controller, &request, ordinal, None)
+                crate::shift::admit_shift(self, &controller, &request, ordinal)
                     .await
                     .map_err(crate::engine::ShiftAbort::into_error)?
             else {
@@ -159,7 +158,6 @@ impl TestTurnExecution for LashRuntime {
         let request = ShiftRequest {
             session: self.state().session_id.clone(),
             request: ShiftRequestId::new(format!("turn:{turn_id}")),
-            intended_lane: None,
         };
         let sinks = crate::shift::ShiftSinks {
             events: opts.events_or_noop(),
@@ -170,7 +168,7 @@ impl TestTurnExecution for LashRuntime {
         let mut rules = ShiftLoop::new();
         let mut ordinal = 0_u32;
         loop {
-            let verdict = crate::shift::admit_shift(self, &controller, &request, ordinal, None)
+            let verdict = crate::shift::admit_shift(self, &controller, &request, ordinal)
                 .await
                 .map_err(|abort| aborted(abort.into_error()))?;
             let admitted = match verdict {
@@ -265,10 +263,9 @@ impl TestTurnExecution for LashRuntime {
         let request = ShiftRequest {
             session: self.state().session_id.clone(),
             request: ShiftRequestId::new(request),
-            intended_lane: None,
         };
         let AdmitVerdict::Admit(admitted) =
-            crate::shift::admit_shift(self, &controller, &request, 0, None)
+            crate::shift::admit_shift(self, &controller, &request, 0)
                 .await
                 .map_err(crate::engine::ShiftAbort::into_error)?
         else {

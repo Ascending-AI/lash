@@ -40,8 +40,6 @@ mod driver_turn_ownership_under_replay {}
 mod admission_atomicity;
 #[path = "attachment_store.rs"]
 mod attachment_store;
-#[path = "generation_drain.rs"]
-mod generation_drain;
 #[path = "lineage.rs"]
 mod lineage;
 #[path = "obligation_relay.rs"]

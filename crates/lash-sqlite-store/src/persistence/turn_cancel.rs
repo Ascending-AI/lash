@@ -93,7 +93,6 @@ pub(super) fn raise_pending_follow_on_conn(
     conn: &Connection,
     fence: &lash_core_execution::store::ShiftFence,
     follow_on_turn_id: &lash_core_execution::TurnId,
-    recovering: &lash_core_execution::engine::BuildGeneration,
 ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
     require_shift_fence_conn(conn, fence)?;
     let session_id = fence.session();
@@ -124,21 +123,6 @@ pub(super) fn raise_pending_follow_on_conn(
     if updated != 1 {
         return Err(not_pending());
     }
-    // The recovering build holds the run from here on. A follow-on whose
-    // run was never admitted through a shift has no stamp to move.
-    crate::conn::cached_execute(
-        conn,
-        crate::session_runs::session_runs_sql()
-            .runs
-            .restamp_admitted_generation
-            .sql(),
-        params![
-            session_id.as_str(),
-            raised.run_turn_id().as_str(),
-            recovering.as_str(),
-        ],
-    )
-    .map_err(sqlite_error)?;
     Ok(raised)
 }
 

@@ -105,9 +105,7 @@ fn commit_count_entropy_seed() -> u64 {
 mod backend;
 mod catalog;
 mod compat;
-mod finalize;
 mod forks;
-mod generation_drain;
 mod graph;
 mod history;
 mod ingress_obligation;

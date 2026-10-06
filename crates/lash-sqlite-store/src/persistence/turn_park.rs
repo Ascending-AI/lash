@@ -41,7 +41,6 @@ pub(crate) fn turn_park_conn(
         i64,
         Option<String>,
         Option<i64>,
-        Option<String>,
     );
     let row: Option<Row> = conn
         .query_row(
@@ -58,7 +57,6 @@ pub(crate) fn turn_park_conn(
                     row.get(7)?,
                     row.get(8)?,
                     row.get(9)?,
-                    row.get(10)?,
                 ))
             },
         )
@@ -75,7 +73,6 @@ pub(crate) fn turn_park_conn(
             attempts,
             engine_ref,
             resume_intent,
-            build_generation,
         )| {
             let stored = |field: &str, value: i64| {
                 u64::try_from(value)
@@ -94,7 +91,6 @@ pub(crate) fn turn_park_conn(
                 resume_intent
                     .map(|intent| stored("resume_intent", intent))
                     .transpose()?,
-                build_generation.as_deref(),
             )
         },
     )
@@ -181,10 +177,6 @@ pub(crate) fn record_turn_park_conn(
         .reason
         .retired_executable_generation_key()
         .map(str::to_string);
-    let park_build_generation = write
-        .build_generation
-        .as_ref()
-        .map(|generation| generation.as_str().to_string());
     let stored = turn_park_conn(conn, session_id)?;
     let (head, redrive) = match stored.as_ref() {
         Some(park) => {
@@ -221,8 +213,7 @@ pub(crate) fn record_turn_park_conn(
                     reason_json,
                     at_ms,
                     park_executable_generation,
-                    engine_ref,
-                    park_build_generation
+                    engine_ref
                 ],
             )
             .map_err(sqlite_error)?;
@@ -246,11 +237,6 @@ pub(crate) fn record_turn_park_conn(
             park.resume_intent = None;
             if let Some(engine) = write.engine() {
                 park.engine = Some(engine.clone());
-            }
-            // COALESCE on the row: a stamp-less write keeps the recorded
-            // generation.
-            if write.build_generation.is_some() {
-                park.build_generation = write.build_generation.clone();
             }
             return Ok(lash_core_execution::store::StoreTransition::changed(park));
         }
@@ -296,7 +282,6 @@ pub(crate) fn record_turn_park_conn(
         write.turn_id.as_str(),
         &write.reason,
         at_ms,
-        park_build_generation.as_deref(),
     )?;
     crate::conn::cached_execute(
         conn,
@@ -311,8 +296,7 @@ pub(crate) fn record_turn_park_conn(
             at_ms,
             1,
             park_executable_generation,
-            engine_ref,
-            park_build_generation
+            engine_ref
         ],
     )
     .map_err(sqlite_error)?;
@@ -329,7 +313,6 @@ pub(crate) fn record_turn_park_conn(
             attempts: 1,
             engine: write.engine().cloned(),
             resume_intent: None,
-            build_generation: write.build_generation.clone(),
         },
     ))
 }

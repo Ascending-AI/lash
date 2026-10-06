@@ -16,8 +16,6 @@ pub(crate) struct CoreSessionShiftsConfig {
     pub(super) store_factory: Arc<dyn DeploymentStore>,
     pub(super) live_replay_store: Arc<dyn LiveReplayStore>,
     pub(super) process_lifecycle_available: bool,
-    /// The build generation this core composed from its plugins.
-    pub(super) build_generation: lash_core::engine::BuildGeneration,
 }
 
 /// The core's `SessionShifts` (FIG-3600): opens a session's runtime with the
@@ -221,7 +219,6 @@ impl lash_core::shift::ShiftAdmissionMaterializer for FreshAdmissionMaterializer
         &self,
         store: &lash_core::SessionStore,
         selection: &lash_core::store::ShiftAdmissionSelection,
-        admitted_generation: &lash_core::engine::BuildGeneration,
         preparation: &lash_core::store::ShiftAdmissionPreparation,
         executor: lash_core::store::RunExecutor,
         scope: &lash_core::AdmittedScope,
@@ -251,7 +248,6 @@ impl lash_core::shift::ShiftAdmissionMaterializer for FreshAdmissionMaterializer
             &template,
             store,
             selection,
-            admitted_generation,
             preparation,
             executor,
             scope,
@@ -414,23 +410,6 @@ impl lash_core::SessionShifts for CoreSessionShifts {
         };
         let ports = slot.ports().await;
         let work = ports.queued_port();
-        let process_port = self.config.env.process_work();
-        let backend = self.config.env.core.backend();
-        let drain = backend.generation_drain();
-        let generation = self.config.build_generation.clone();
-        let processes = self
-            .config
-            .env
-            .process_registry()
-            .zip(process_port.as_ref())
-            .map(
-                |(registry, port)| lash_core::runtime::shift::ReconcileProcesses {
-                    registry: registry.as_ref(),
-                    port: port.as_ref(),
-                    drain: drain.as_ref(),
-                    generation: &generation,
-                },
-            );
         // Which recovery duties this deployment runs this tick (ADR 0109
         // §1.7).
         let duties = self.config.recovery.duties().await;
@@ -447,7 +426,6 @@ impl lash_core::SessionShifts for CoreSessionShifts {
                 sessions: self.config.store_factory.as_ref(),
                 work: work.as_ref(),
                 scopes: self.config.env.core.control.scope_close.as_ref(),
-                processes,
                 clock: self.config.env.core.clock.as_ref(),
                 duties,
                 relays: &relays,
@@ -471,9 +449,7 @@ impl lash_core::SessionShifts for CoreSessionShifts {
         &self,
         controller: lash_core::ActorContext,
         request: &lash_core::engine::ShiftRequest,
-        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
-        draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::ShiftAbort> {
         // The admission runs on no runtime of the session, whether a host
         // holds it open, this shift holds it, or nothing does: its recorded
@@ -499,7 +475,6 @@ impl lash_core::SessionShifts for CoreSessionShifts {
                     return lash_core::shift::admit_shift_retired(
                         &controller,
                         request,
-                        admitting_generation,
                         ordinal,
                         Arc::clone(&self.config.store_factory),
                     )
@@ -518,9 +493,7 @@ impl lash_core::SessionShifts for CoreSessionShifts {
             ),
             &controller,
             request,
-            admitting_generation,
             ordinal,
-            draining,
         )
         .await
     }

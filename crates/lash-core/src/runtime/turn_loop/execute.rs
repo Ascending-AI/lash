@@ -408,7 +408,7 @@ impl LashRuntime {
                 scoped_effect_controller.execution_scope().logical_run(),
                 &trace_turn_id,
             );
-            self.record_turn_park_after_abort(&error, &run, None).await;
+            self.record_turn_park_after_abort(&error, &run).await;
             return Err(error);
         }
         // The model binding is the turn's recorded config (D3 §2.1). Nothing
@@ -493,10 +493,6 @@ impl LashRuntime {
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             shift_fence: shift_fence.cloned(),
             shift_run: self.shift_run.as_ref().map(|run| run.run().clone()),
-            drive_generation: self
-                .shift_run
-                .as_ref()
-                .map(|run| run.journal_generation().clone()),
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_control: Arc::clone(&turn_control),
             protocol_reply: Default::default(),
@@ -583,7 +579,7 @@ impl LashRuntime {
                         .logical_run(),
                     &trace_turn_id,
                 );
-                Box::pin(self.record_turn_park_after_abort(&err, &run, None)).await;
+                Box::pin(self.record_turn_park_after_abort(&err, &run)).await;
                 return Err(err);
             }
         };

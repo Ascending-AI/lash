@@ -32,7 +32,6 @@ test coalesced_batch_oracles::interrupted_admission_identity_stands_over_a_later
 ok
 test cross_backend_store_differential_agrees ... PASS obligation_ledgers_and_recovery_lease: backends=3 ledger_steps=25
 PASS session_delete_ledger: backends=3 steps=18
-PASS generation_drains: backends=3 steps=15
 RUNNING cross-backend store differential; cases=33
 PASSED cross-backend store differential
 ok

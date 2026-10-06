@@ -8,27 +8,6 @@ use std::sync::{Arc, Condvar, Mutex};
 
 pub use crate::migration::{SqliteMigrationFault, SqliteMigrationHook, SqliteMigrationStep};
 
-/// Observes finalize's commit.
-#[derive(Clone)]
-pub struct SqliteFinalizeHook(Arc<dyn Fn() + Send + Sync>);
-
-impl SqliteFinalizeHook {
-    /// Run `committed` immediately after finalize commits its epoch.
-    pub fn new(committed: impl Fn() + Send + Sync + 'static) -> Self {
-        Self(Arc::new(committed))
-    }
-
-    pub(crate) fn committed(&self) {
-        (self.0)();
-    }
-}
-
-impl std::fmt::Debug for SqliteFinalizeHook {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("SqliteFinalizeHook")
-    }
-}
-
 /// Returns the production trigger-subscription listing SQL for conformance assertions.
 ///
 /// The filter no longer builds the statement; it selects one (FIG-3385). The
@@ -257,9 +236,9 @@ fn stored_documents(bytes: &[u8]) -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// Finalize the store at `location` as a build whose writable range is
-/// `[1, fleet]`, without checking retirement, for a test that races writers
-/// against it or stands in for a build other than the linked one.
+/// Move the store at `location`'s `F` to `fleet`, as a build whose writable
+/// range is `[1, fleet]`, for a test that races writers against it or stands
+/// in for a build other than the linked one.
 pub fn finalize_fleet_format(
     location: &crate::SqliteLocation,
     fleet: u32,
@@ -271,7 +250,6 @@ pub fn finalize_fleet_format(
         std::time::Duration::from_millis(u64::from(crate::conn::BUSY_TIMEOUT_MS)),
         writable,
     )
-    .map(|_| ())
     .map_err(crate::sqlite_error)
 }
 

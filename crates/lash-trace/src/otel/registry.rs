@@ -89,8 +89,6 @@ attributes! {
     ObligationKind => ("lash.obligation.kind", String),
     ObligationOutcome => ("lash.obligation.outcome", String),
     RecoveryLease => ("lash.recovery_leader.name", String),
-    DrainGeneration => ("lash.generation_drain.generation", String),
-    DrainKind => ("lash.generation_drain.kind", String),
 }
 
 #[cfg(feature = "otel")]
@@ -173,7 +171,6 @@ metrics! {
     ObligationsStalled => ("lash.obligations.stalled", Gauge, "", Gauge),
     RecoveryLeader => ("lash.recovery_leader", Gauge, "", Physical),
     RecoveryTerm => ("lash.recovery_leader.term", Gauge, "", Physical),
-    DrainWork => ("lash.generation_drain.work", Gauge, "", Gauge),
 }
 
 /// L6 writes this generated contract into the public reference and checks equality.

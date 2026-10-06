@@ -446,7 +446,6 @@ fn surface_admit_request(
         lash_core::testing::store_fixtures::admit_run_request_for_test(fence, &run, head);
     request.max_inputs = 8;
     request.policy = lash_core::testing::queued_work_admission_policy(1);
-    request.admitted_generation = lash_core::engine::BuildGeneration::for_test("surface-run");
     request
 }
 
@@ -1444,7 +1443,6 @@ impl BackendRunner {
                     .raise_pending_follow_on_attempts(
                         &lease_fence,
                         &lash_core::TurnId::from(turn_id),
-                        &lash_core::engine::BuildGeneration::for_test("surface-recovering"),
                     )
                     .await?;
                 format!("attempts={}", raised.attempts)

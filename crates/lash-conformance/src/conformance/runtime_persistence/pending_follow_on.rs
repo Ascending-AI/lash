@@ -49,11 +49,6 @@ fn commit_as(
     commit
 }
 
-/// The generation of the build the law's recoveries run on.
-fn recovering_generation() -> crate::engine::BuildGeneration {
-    crate::engine::BuildGeneration::for_test("follow-on-recovering")
-}
-
 fn follow_on(frame_id: crate::FrameNodeId) -> crate::store::PendingFollowOn {
     crate::store::PendingFollowOn {
         follow_on_turn_id: TurnId::from(FOLLOW_ON_TURN),
@@ -360,11 +355,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
     let lease = seal_shift_fence_for_test(&store, &session(), "recovering").await;
     for expected in 1..=2 {
         let raised = store
-            .raise_pending_follow_on_attempts(
-                &lease,
-                &owed.follow_on_turn_id,
-                &recovering_generation(),
-            )
+            .raise_pending_follow_on_attempts(&lease, &owed.follow_on_turn_id)
             .await
             .expect("a recovering shift raises the count");
         assert_eq!(raised.attempts, expected);
@@ -378,11 +369,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
     }
     assert!(matches!(
         store
-            .raise_pending_follow_on_attempts(
-                &lease,
-                &TurnId::from("not-owed"),
-                &recovering_generation(),
-            )
+            .raise_pending_follow_on_attempts(&lease, &TurnId::from("not-owed"),)
             .await,
         Err(StoreError::FollowOnNotPending { .. })
     ));
@@ -392,11 +379,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
         .expect("release the recovering lane");
     assert!(
         store
-            .raise_pending_follow_on_attempts(
-                &lease,
-                &owed.follow_on_turn_id,
-                &recovering_generation()
-            )
+            .raise_pending_follow_on_attempts(&lease, &owed.follow_on_turn_id,)
             .await
             .is_err(),
         "a raise outside the live lane is refused"
@@ -432,11 +415,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
     let successor = seal_shift_fence_for_test(&store, &session(), "after").await;
     assert!(matches!(
         store
-            .raise_pending_follow_on_attempts(
-                &successor,
-                &owed.follow_on_turn_id,
-                &recovering_generation()
-            )
+            .raise_pending_follow_on_attempts(&successor, &owed.follow_on_turn_id,)
             .await,
         Err(StoreError::FollowOnNotPending { .. })
     ));

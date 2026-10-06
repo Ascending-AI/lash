@@ -661,8 +661,6 @@ async fn segment_handover_commit_law(
     let handover = lash_core::PersistedSegmentHandover {
         writer: "segment-writer".into(),
         segment_ordinal: 1,
-        written_generation: lash_core::engine::BuildGeneration::for_test("handover-law"),
-        route: "recorded-route".into(),
         handover: lash_core::SegmentHandover {
             reason: lash_core::BoundaryReason::JournalBudget,
             program_hash: "program".into(),

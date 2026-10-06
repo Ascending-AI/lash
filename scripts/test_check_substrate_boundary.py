@@ -69,6 +69,11 @@ COLLAPSED_NAMES = (
     "AwaitEventResolver",
 )
 FIXTURE_COLLAPSE_FILE = "crates/lash-core/src/runtime/turn_loop/drive.rs"
+GENERATION_NAMES = (
+    "BuildGeneration", "EngineGeneration", "JOURNAL_LOGIC_EPOCH", "generation_drain",
+    "fleet_finalize", "DeploymentRegistry", "draining_generations", "generation_fence",
+)
+FIXTURE_GENERATION_FILE = "crates/lash-core-store/src/store/park.rs"
 FIXTURE_DEFAULTS_FILE = "crates/lash-core-execution/src/runtime/effect/engine.rs"
 
 
@@ -524,6 +529,38 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
                 "fn lift(result: Result<(), RuntimeEffectControllerError>) {",
                 "    let _ = result.map_err(crate::PluginError::RuntimeEffectController);",
                 "}",
+            ])
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_deleted_generation_name_fails(self) -> None:
+        for name in GENERATION_NAMES:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.build_fixture(root, ["fn shift() {", "}"], [])
+                self.write_rust(root, FIXTURE_GENERATION_FILE, [f"fn stamp(_: &{name}) {{}}"])
+                result = self.run_check(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("rule 7c failed: a deleted generation-lane name", result.stderr)
+
+    def test_a_table_name_embedding_a_deleted_generation_name_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.write_rust(root, FIXTURE_GENERATION_FILE, [
+                'const TABLE: &str = "lash_draining_generations";',
+            ])
+            result = self.run_check(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rule 7c failed", result.stderr)
+
+    def test_surviving_generation_vocabulary_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn shift() {", "}"], [])
+            self.write_rust(root, FIXTURE_GENERATION_FILE, [
+                "fn park(_: ExecutableGeneration, _: SessionStateGeneration) {}",
+                "fn reason(_: ParkReason) -> bool { matches!(_, ParkReason::RetiredGeneration { .. }) }",
             ])
             result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)

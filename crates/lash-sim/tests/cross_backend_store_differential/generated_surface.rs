@@ -198,7 +198,6 @@ fn surface_turn_park(key: u8) -> lash_core::store::TurnParkWrite {
         reason,
         at_ms: 1_000 + u64::from(key),
         origin: lash_core::store::TurnParkOrigin::Refusal,
-        build_generation: None,
     }
 }
 

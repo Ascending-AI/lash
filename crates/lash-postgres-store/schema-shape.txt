@@ -145,10 +145,6 @@ table lash_deleted_sessions
   column relation_kind text not-null
   column session_id text not-null
   primary-key (session_id)
-table lash_draining_generations
-  column generation text not-null
-  column marked_at_ms bigint not-null
-  primary-key (generation)
 table lash_exec_snapshots
   column exec_key text not-null
   column executable_identity text not-null
@@ -158,8 +154,6 @@ table lash_exec_snapshots
   column written_epoch bigint not-null
   primary-key (exec_key)
 table lash_fleet_format
-  column finalize_held_at_ms bigint nullable
-  column finalize_hold_reason text nullable
   column format_version integer not-null
   column singleton boolean not-null default
   primary-key (singleton)
@@ -292,7 +286,6 @@ table lash_process_park_events
   column at_ms bigint not-null
   column cause_json text nullable
   column kind text not-null
-  column park_build_generation text nullable
   column park_id bigint not-null
   column process_id text not-null
   column reason_json text nullable
@@ -303,10 +296,8 @@ table lash_process_segment_handovers
   column committed_at_ms bigint not-null
   column handover_json text not-null
   column process_id text not-null
-  column route text not-null
   column segment_ordinal bigint not-null
   column started_json text nullable
-  column written_generation text not-null
   primary-key (process_id, segment_ordinal)
   foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_tombstones
@@ -354,13 +345,11 @@ table lash_processes
   column obligation_stall_reason text nullable
   column obligation_state text nullable
   column originator_id text not-null
-  column park_build_generation text nullable
   column park_executable_generation text nullable
   column parked_reason_code text nullable
   column parked_since_ms bigint nullable
   column process_id text not-null
   column record_json text not-null
-  column segment_generation text nullable
   column start_key text nullable
   column start_obligation_attempts integer not-null default
   column start_obligation_claim_token text nullable
@@ -537,7 +526,6 @@ table lash_session_run_specs
   primary-key (session_id, spec_hash)
 table lash_session_runs
   column admission_json text nullable
-  column admitted_generation text nullable
   column executor_json text nullable
   column obligation_attempts integer not-null default
   column obligation_claim_token text nullable
@@ -714,7 +702,6 @@ table lash_turn_park_events
   column at_ms bigint not-null
   column cause_json text nullable
   column kind text not-null
-  column park_build_generation text nullable
   column park_id bigint not-null
   column reason_json text nullable
   column redrive_intent bigint nullable
@@ -726,7 +713,6 @@ table lash_turn_parks
   column attempts bigint not-null
   column engine_ref text nullable
   column last_refused_ms bigint not-null
-  column park_build_generation text nullable
   column park_executable_generation text nullable
   column park_id bigint not-null
   column reason_code text not-null

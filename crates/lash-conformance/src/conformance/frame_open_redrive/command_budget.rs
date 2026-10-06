@@ -115,19 +115,14 @@ pub(super) async fn engine_shift(
             let mut rules = ShiftLoop::new();
             let mut refusals = Vec::new();
             for ordinal in 0..LOOP_BOUND {
-                let admitted = match lash_core::shift::admit_shift(
-                    &mut runtime,
-                    &scope,
-                    &request,
-                    ordinal,
-                    None,
-                )
-                .await
-                {
-                    Ok(AdmitVerdict::Admit(admitted)) => admitted,
-                    Ok(AdmitVerdict::Idle) => return Ok((refusals, ShiftStop::Idle)),
-                    other => return Err(format!("admission answered {other:?}")),
-                };
+                let admitted =
+                    match lash_core::shift::admit_shift(&mut runtime, &scope, &request, ordinal)
+                        .await
+                    {
+                        Ok(AdmitVerdict::Admit(admitted)) => admitted,
+                        Ok(AdmitVerdict::Idle) => return Ok((refusals, ShiftStop::Idle)),
+                        other => return Err(format!("admission answered {other:?}")),
+                    };
                 if let Err(stop) = rules.before(&admitted) {
                     return Ok((refusals, stop));
                 }

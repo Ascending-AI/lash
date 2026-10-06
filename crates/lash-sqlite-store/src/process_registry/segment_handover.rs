@@ -70,8 +70,6 @@ impl SqliteProcessRegistry {
                             process_id.as_str(),
                             handover.segment_ordinal as i64,
                             encoded,
-                            handover.written_generation.as_str(),
-                            handover.route,
                             committed_at_ms as i64
                         ],
                     )
@@ -87,54 +85,6 @@ impl SqliteProcessRegistry {
             })
             .await
             .map_err(process_sqlite_error)?
-    }
-
-    pub(super) async fn record_segment_handover_route_impl(
-        &self,
-        process_id: &ProcessId,
-        segment_ordinal: u64,
-        route: &str,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        let process_id = process_id.clone();
-        let route = route.to_owned();
-        self.conn
-            .write_flow(move |tx| {
-                Ok(tx_outcome((|| {
-                    let existing: Option<String> = tx
-                        .query_row(
-                            process_sql().handover.select_by_ordinal.sql(),
-                            params![process_id.as_str(), segment_ordinal as i64],
-                            |row| row.get(0),
-                        )
-                        .optional()
-                        .map_err(process_sqlite_error)?;
-                    let Some(existing) = existing else {
-                        return Ok(());
-                    };
-                    let mut handover: PersistedSegmentHandover =
-                        serde_json::from_str(&existing).map_err(process_decode_error)?;
-                    if handover.route == route {
-                        return Ok(());
-                    }
-                    handover.route = route;
-                    let encoded = process_encode_json(&handover)?;
-                    crate::conn::cached_execute(
-                        tx,
-                        process_sql().handover.set_route.sql(),
-                        params![
-                            process_id.as_str(),
-                            segment_ordinal as i64,
-                            encoded,
-                            handover.route
-                        ],
-                    )
-                    .map_err(process_sqlite_error)?;
-                    Ok(())
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)??;
-        Ok(())
     }
 
     pub(super) async fn get_segment_handover_impl(
@@ -258,22 +208,6 @@ impl SqliteProcessRegistry {
                     };
                     let recorded: lash_core_execution::SegmentStartMarker =
                         serde_json::from_str(&recorded).map_err(process_decode_error)?;
-                    // The recorded marker's admission stamp projects onto the
-                    // process row in the same transaction (FIG-3795 S2): the
-                    // drain's live-generation index reads the generation the
-                    // segment's start actually recorded, never a losing
-                    // caller's.
-                    crate::conn::cached_execute(tx,
-                        process_sql().process.set_segment_generation.sql(),
-                        params![
-                            process_id.as_str(),
-                            recorded
-                                .build_generation
-                                .as_ref()
-                                .map(|generation| generation.as_str())
-                        ],
-                    )
-                    .map_err(process_sqlite_error)?;
                     Ok(recorded)
                 })()))
             })

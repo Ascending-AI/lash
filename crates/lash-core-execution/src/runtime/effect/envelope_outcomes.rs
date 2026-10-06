@@ -216,7 +216,6 @@ impl RuntimeEffectOutcome {
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
-            Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::RestoreRunMaterial { .. } => RuntimeEffectKind::RestoreRunMaterial,

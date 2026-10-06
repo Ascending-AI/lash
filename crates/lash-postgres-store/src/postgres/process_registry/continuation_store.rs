@@ -65,8 +65,6 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
             .bind(process_id.as_str())
             .bind(handover.segment_ordinal as i64)
             .bind(encoded)
-            .bind(handover.written_generation.as_str())
-            .bind(handover.route.as_str())
             .bind(committed_at_ms as i64)
             .execute(&mut **tx)
             .await
@@ -175,61 +173,8 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
         };
         let recorded: lash_core_execution::SegmentStartMarker =
             serde_json::from_str(&recorded).map_err(process_decode_error)?;
-        // The recorded marker's admission stamp projects onto the process
-        // row in the same transaction (FIG-3795 S2): the drain's
-        // live-generation index reads the generation the segment's start
-        // actually recorded, never a losing caller's.
-        sqlx::query(process_sql().process.set_segment_generation.sql())
-            .bind(process_id.as_str())
-            .bind(
-                recorded
-                    .build_generation
-                    .as_ref()
-                    .map(|generation| generation.as_str()),
-            )
-            .execute(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(recorded)
-    }
-
-    async fn record_segment_handover_route(
-        &self,
-        process_id: &ProcessId,
-        segment_ordinal: u64,
-        route: &str,
-    ) -> Result<(), PluginError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let existing: Option<String> =
-            sqlx::query_scalar(process_sql().handover.select_by_ordinal.sql())
-                .bind(process_id.as_str())
-                .bind(segment_ordinal as i64)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-        let Some(existing) = existing else {
-            return Ok(());
-        };
-        let mut handover: PersistedSegmentHandover =
-            serde_json::from_str(&existing).map_err(process_decode_error)?;
-        if handover.route == route {
-            return Ok(());
-        }
-        handover.route = route.to_owned();
-        let encoded = serde_json::to_string(&handover).map_err(process_decode_error)?;
-        sqlx::query(process_sql().handover.set_route.sql())
-            .bind(process_id.as_str())
-            .bind(segment_ordinal as i64)
-            .bind(encoded)
-            .bind(route)
-            .execute(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(())
     }
 
     async fn retire_segment_handovers_through(

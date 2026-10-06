@@ -330,20 +330,15 @@ impl Fixture {
                 let request = request.clone();
                 let run = run.clone();
                 Box::pin(async move {
-                    let admitted = match lash_core::shift::admit_shift(
-                        &mut runtime,
-                        &scope,
-                        &request,
-                        0,
-                        None,
-                    )
-                    .await?
-                    {
-                        AdmitVerdict::Admit(admitted) => admitted,
-                        other => {
-                            panic!("the session's shift admits the accepted row: {other:?}")
-                        }
-                    };
+                    let admitted =
+                        match lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0)
+                            .await?
+                        {
+                            AdmitVerdict::Admit(admitted) => admitted,
+                            other => {
+                                panic!("the session's shift admits the accepted row: {other:?}")
+                            }
+                        };
                     assert_eq!(admitted.run(), &run);
                     lash_core::shift::execute_admitted_run(&mut runtime, &scope, admitted).await
                 })

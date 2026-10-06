@@ -165,28 +165,11 @@ pub trait SessionShifts: Send + Sync {
     /// The step reads the session's store and takes no runtime's writer:
     /// an admission never waits for a run running in this process
     /// (FIG-4755).
-    ///
-    /// `admitting_generation` is the generation of the build that
-    /// admits, which the admitted run is stamped with (FIG-4742): an engine
-    /// whose shift requests cross builds supplies its own generation independently
-    /// of the request's intended lane.
-    ///
-    /// `draining` is the build generation whose drain this admission hands
-    /// over for (FIG-4639, ADR 0106 §1): the generation of the build the
-    /// engine's shift invocation is pinned to, named for every admission
-    /// after the run the invocation's shift started on. When that
-    /// generation is marked draining and work is pending, the step admits
-    /// nothing and records
-    /// [`AdmitVerdict::Draining`](crate::engine::AdmitVerdict::Draining).
-    /// `None` admits whatever drains: the shift's first admission, whose
-    /// run always runs on the build that took it.
     async fn admit(
         &self,
         controller: crate::ActorContext,
         request: &crate::engine::ShiftRequest,
-        admitting_generation: &crate::engine::BuildGeneration,
         ordinal: u32,
-        draining: Option<&crate::engine::BuildGeneration>,
     ) -> Result<crate::engine::AdmitVerdict, crate::engine::ShiftAbort>;
 
     /// Run `admitted`'s run to its terminal through `controller`, which
@@ -256,59 +239,6 @@ pub trait ProcessWorkSubstrate: Send + Sync {
         request: &crate::CancelRequest,
         key: &str,
     ) -> Result<(), PluginError>;
-
-    /// Wake `process_id`'s live execution so it hands its open signal wait
-    /// to a successor on the newest build (FIG-3799): the drain of
-    /// `generation` asks it of every process waiting on that generation.
-    /// Only an execution admitted under `generation` hands over; one on
-    /// another generation keeps waiting. Idempotent: a repeated wake of the
-    /// same execution is a no-op, and a wake that lands while the execution
-    /// is not waiting holds for its next wait.
-    ///
-    /// A process whose next execution the newest build refused, parked for
-    /// `generation`, has no live execution to wake: an engine that routes by
-    /// generation sends that execution to a build of `generation` instead
-    /// ([`Self::resend_refused_successor`]), and leaves an execution already
-    /// running there to finish.
-    ///
-    /// An engine that routes no work by build generation has nothing to hand
-    /// over to and refuses.
-    async fn deliver_hand_over(
-        &self,
-        process_id: &crate::ProcessId,
-        generation: &crate::engine::BuildGeneration,
-    ) -> Result<(), PluginError> {
-        Err(PluginError::Invoke(format!(
-            "this engine routes no work by build generation, so it cannot hand \
-             process `{process_id}` over from generation {}",
-            generation.as_str()
-        )))
-    }
-
-    /// Send `process_id`'s next execution, which the newest build refused, to
-    /// a build of the generation that sent it (FIG-4750): the generation its
-    /// park names. `true` when it was sent.
-    ///
-    /// The refusal is the whole reason to send: the newest build cannot run
-    /// the execution, and a build of the sender's generation can, whether or
-    /// not that generation is draining and whichever build holds the
-    /// recovery lease (FIG-4739). `false` when the process is not such a
-    /// refusal: it is not parked for another generation, its park names an
-    /// execution the engine still holds — one that stopped on its own
-    /// journal and is its engine's to resume, never a second send's — or its
-    /// next execution already started. Idempotent: a repeated send names the
-    /// first. When no build of the generation is left the call is refused
-    /// typed and the park stands.
-    ///
-    /// An engine that routes no work by build generation refuses nothing and
-    /// has nothing to send.
-    async fn resend_refused_successor(
-        &self,
-        process_id: &crate::ProcessId,
-    ) -> Result<bool, PluginError> {
-        let _ = process_id;
-        Ok(false)
-    }
 
     /// Publish `process`'s stored terminal `output` to the engine's waiters
     /// under `key`: the delivery of its `ProcessTerminal` obligation (ADR

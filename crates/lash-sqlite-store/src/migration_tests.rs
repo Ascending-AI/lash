@@ -37,8 +37,10 @@ const FIXTURE_ROWS: [(&str, &str); 3] = [
         "INSERT INTO session_meta (session_id, relation_kind) VALUES ('fixture-session', 'root')",
     ),
     (
-        "draining_generations",
-        "INSERT INTO draining_generations (generation, marked_at_ms) VALUES ('fixture', 7)",
+        "process_tombstones",
+        "INSERT INTO process_tombstones \
+         (process_id, terminal_label, pruned_at_ms, pruned_change_seq) \
+         VALUES ('fixture', 'completed', 7, 7)",
     ),
     (
         "trigger_mutation_receipts",

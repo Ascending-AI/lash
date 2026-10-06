@@ -1434,7 +1434,6 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
                 },
                 at_ms: 1_700_000_000_000,
                 origin: lash_core_execution::store::TurnParkOrigin::Refusal,
-                build_generation: None,
             })
             .await
             .map(lash_core::store::StoreTransition::into_record)

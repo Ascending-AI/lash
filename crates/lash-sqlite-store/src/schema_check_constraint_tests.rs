@@ -571,13 +571,9 @@ fn trigger_delivery_cannot_settle_without_binding() {
 }
 
 #[test]
-fn park_feed_columns_refuse_mixed_variants_and_closing_generations() {
+fn park_feed_columns_refuse_mixed_variants() {
     let conn = Connection::open_in_memory().expect("park feed fixture");
     conn.execute_batch(SCHEMA).expect("schema");
-    assert_check_rejects(&conn, "INSERT INTO turn_park_events
-        (seq, session_id, turn_id, park_id, kind, cause_json, at_ms, park_build_generation)
-        VALUES (1, 'session', 'turn', 1, 'unparked', '{\"type\":\"turn_committed\"}', 0, 'generation')",
-        "ck_turn_park_events_parked_reason");
     assert_check_rejects(
         &conn,
         "INSERT INTO turn_park_events

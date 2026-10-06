@@ -23,11 +23,8 @@
 //!    so it needs no edit; the facade's catalog law lists every core
 //!    command name and moves with it.
 //! 4. A reducer has no identity of its own: a queued transaction is resolved
-//!    by the build whose lane admits its command run. When an existing
-//!    reducer's behavior changes, bump `JOURNAL_LOGIC_EPOCH`, as for any
-//!    handler logic that moves without a format version, so the changed
-//!    build runs on its own lane. Adding a command changes no existing
-//!    reducer.
+//!    by the build that admits its command run. Adding a command changes no
+//!    existing reducer.
 
 use super::{
     CORE_CONFIG_OWNER, CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar,

@@ -15,7 +15,7 @@
 # (scripts/shift-store-allowlist.count caps them).
 crates/lash-core/src/runtime/shift/admission.rs  |  .read_session_state_version()  |  1  # RECORDED
 crates/lash-core/src/runtime/shift/run.rs  |  .load_pending_follow_on()  |  1  # RECORDED follow-on recovery decision step reads the owed fact once (FIG-4361)
-crates/lash-core/src/runtime/shift/run.rs  |  .raise_pending_follow_on_attempts(  |  1  # RECORDED follow-on recovery decision step raises the recovery count under the fence (FIG-4361) and restamps its root with the recovering generation (FIG-4739)
+crates/lash-core/src/runtime/shift/run.rs  |  .raise_pending_follow_on_attempts(&self.fence, &owed.follow_on_turn_id)  |  1  # RECORDED follow-on recovery decision step raises the recovery count under the fence (FIG-4361)
 crates/lash-core/src/runtime/shift/run.rs  |  generation: self.store.read_session_state_version().await?,  |  1  # RECORDED follow-on recovery decision step reads the base generation once (FIG-4380)
 crates/lash-core/src/runtime/shift/run.rs  |  self.store.retain_admission_base(&self.fence, &base).await?;  |  1  # RECORDED follow-on recovery decision step retains the base its turn runs on under the fence (FIG-4380)
 crates/lash-core/src/runtime/shift/plugin_transition.rs  |  let generation = self.store.read_session_state_version().await?;  |  1  # RECORDED command transition selects its complete base inside the journaled local runner (FIG-4857)

@@ -37,7 +37,6 @@ fn insert_turn_park_event_conn(
     park_id: i64,
     kind: &lash_core_execution::store::ParkEventKind,
     at_ms: i64,
-    build_generation: Option<&str>,
 ) -> Result<(), StoreError> {
     let (cause, reason_json, redrive_intent) = kind.encode_columns()?;
     crate::conn::cached_execute(
@@ -55,7 +54,6 @@ fn insert_turn_park_event_conn(
             cause,
             reason_json,
             at_ms,
-            build_generation,
             redrive_intent
         ],
     )
@@ -64,16 +62,13 @@ fn insert_turn_park_event_conn(
 }
 
 /// Append the `Parked` event that opens a park, returning the feed sequence
-/// the park record stores as its `park_id`. `build_generation` stamps the
-/// drain generation of the build whose checkpoint the park resumes
-/// (FIG-3795).
+/// the park record stores as its `park_id`.
 pub(crate) fn log_turn_parked_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
     turn_id: &str,
     reason: &lash_core_execution::store::ParkReason,
     at_ms: i64,
-    build_generation: Option<&str>,
 ) -> Result<i64, StoreError> {
     let seq = allocate_turn_park_seq_conn(conn)?;
     insert_turn_park_event_conn(
@@ -86,14 +81,12 @@ pub(crate) fn log_turn_parked_conn(
             reason: reason.clone(),
         },
         at_ms,
-        build_generation,
     )?;
     Ok(seq)
 }
 
 /// Append the event a park clear writes — `Unparked` or `Cancelled` — naming
-/// the park `park_id` the delete returned. A closing transition names no
-/// checkpoint, so its `park_build_generation` is NULL.
+/// the park `park_id` the delete returned.
 pub(crate) fn log_turn_park_closed_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
@@ -103,5 +96,5 @@ pub(crate) fn log_turn_park_closed_conn(
     at_ms: i64,
 ) -> Result<(), StoreError> {
     let seq = allocate_turn_park_seq_conn(conn)?;
-    insert_turn_park_event_conn(conn, seq, session_id, turn_id, park_id, kind, at_ms, None)
+    insert_turn_park_event_conn(conn, seq, session_id, turn_id, park_id, kind, at_ms)
 }

@@ -353,6 +353,20 @@ if [[ -s "$tmp_dir/rule7.hits" ]]; then
   failed=1
 fi
 
+# Rule 7c — generation lanes are gone (ADR 0132; L10g, FIG-5200). A node is
+# not addressed by a build generation: the generation, its engine slot, the
+# journal-logic epoch, the drain marks and their store, the generation fence,
+# finalize and the deployment registry are deleted, and none of their names
+# may come back. The names are matched as substrings, so a store table or
+# helper that embeds one (`lash_draining_generations`) is a hit too.
+generation_names='BuildGeneration|EngineGeneration|JOURNAL_LOGIC_EPOCH|generation_drain|fleet_finalize|DeploymentRegistry|draining_generations|generation_fence'
+capture_search "deleted generation machinery" "$generation_names" "$tmp_dir/rule7c.hits" "${rule4_runs[@]}"
+if [[ -s "$tmp_dir/rule7c.hits" ]]; then
+  cat "$tmp_dir/rule7c.hits" >&2
+  echo "substrate boundary rule 7c failed: a deleted generation-lane name was found; generation drain is gone (ADR 0132)" >&2
+  failed=1
+fi
+
 # Rule 7b — no silent defaults (law S1). A method of `ProcessEngine`,
 # `ProjectionProvider` or `DurableStore` has no default body: each
 # implementation answers every method itself.

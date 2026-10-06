@@ -10,15 +10,10 @@
 use std::time::Duration;
 
 use lash_core_execution::compat::{CompatRefusal, VersionRange};
-use lash_core_execution::engine::BuildGeneration;
-use lash_core_execution::store::fleet_finalize::{
-    DeploymentRegistry, DeploymentRegistryError, FinalizeError, FinalizeRefusal, FleetEpochFlip,
-    RetainedDeployment,
-};
 use lash_core_execution::{
-    FleetFormat, FleetFormatStore, ProcessOriginator, SessionCatalogStore as _, SessionId,
-    SessionMeta, SessionRelation, StoreError, StoreSet, TriggerCommand, TriggerOwnerScope,
-    TriggerStore as _,
+    FleetFormat, FleetFormatStore, ProcessLifecycle as _, ProcessOriginator,
+    SessionCatalogStore as _, SessionId, SessionMeta, SessionRelation, StoreError, TriggerCommand,
+    TriggerOwnerScope, TriggerStore as _,
 };
 use rusqlite::Connection;
 
@@ -73,9 +68,10 @@ const PROBES: [(&str, &str); 3] = [
          VALUES ('fence-probe-' || (SELECT COUNT(*) FROM session_meta), 'root')",
     ),
     (
-        "draining_generations",
-        "INSERT INTO draining_generations (generation, marked_at_ms) \
-         VALUES ('fence-probe-' || (SELECT COUNT(*) FROM draining_generations), 0)",
+        "process_tombstones",
+        "INSERT INTO process_tombstones \
+         (process_id, terminal_label, pruned_at_ms, pruned_change_seq) \
+         VALUES ('fence-probe-' || (SELECT COUNT(*) FROM process_tombstones), 'completed', 0, 0)",
     ),
     (
         "trigger_mutation_receipts",
@@ -163,13 +159,19 @@ async fn sqlite_fence_refuses_a_writer_of_each_family_after_finalize() {
     );
 
     let registry_error = set
-        .generation_drain()
-        .mark_draining(&BuildGeneration::from_digest([7; 6]), 1)
+        .process_registry()
+        .record_parent_end(&lash_core_execution::ScopeId::turn(
+            SessionId::from("fence-parent"),
+            lash_core_execution::TurnId::from("fence-turn"),
+        ))
         .await
         .expect_err("the process-registry writer is fenced");
-    assert!(is_fenced(&registry_error, next), "{registry_error}");
+    assert!(
+        registry_error.to_string().contains("writer fenced"),
+        "{registry_error}"
+    );
     assert_eq!(
-        count(&location, "draining_generations"),
+        count(&location, "parent_end_plans"),
         0,
         "a fenced process-registry writer wrote nothing"
     );
@@ -523,133 +525,4 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
     let stored: serde_json::Value = serde_json::from_str(&stored).expect("decode receipt");
     assert_ne!(stored["schema_version"], serde_json::json!(7));
     assert_eq!(store.fleet_format().version(), 2);
-}
-
-/// The engine's deployments, as the SQLite finalize law stands them up.
-#[derive(Default)]
-struct Deployments(std::sync::Mutex<Vec<RetainedDeployment>>);
-
-#[async_trait::async_trait]
-impl DeploymentRegistry for Deployments {
-    async fn unfinished_invocations(
-        &self,
-        _generation: &BuildGeneration,
-    ) -> Result<u64, DeploymentRegistryError> {
-        Ok(0)
-    }
-
-    async fn deployments_serving(
-        &self,
-        _generation: &BuildGeneration,
-    ) -> Result<Vec<RetainedDeployment>, DeploymentRegistryError> {
-        Ok(self.0.lock().expect("deployments").clone())
-    }
-}
-
-/// The store set's finalize (FIG-3800 B): refused typed while the retired
-/// generation is undrained or still has a deployment, with `F` unchanged and
-/// this build's writers still admitted. Once it moves `F` past this build's
-/// range, a writer of this build — through the store's ports and through a
-/// connection opened before the finalize — is refused `WriterFenced` and
-/// writes nothing. A rerun finds the store finalized.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_stale_writer_is_fenced_after_finalize() {
-    let (_run, set) = file_set().await;
-    let location = set.location().clone();
-    let writable = FleetFormat::writable();
-    let next = writable.max() + 1;
-    let successor = VersionRange::new(writable.min(), next).expect("writable range");
-    let retired = BuildGeneration::for_test("sqlite-finalize-old");
-    let deployments = Deployments::default();
-    let fleet = || {
-        raw(&location)
-            .query_row("SELECT fleet_format FROM lash_compat", [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .expect("read F")
-    };
-
-    match set
-        .finalize_as(&retired, &deployments, &[], 5, successor)
-        .await
-    {
-        Err(FinalizeError::Refused(FinalizeRefusal::GenerationNotDrained { .. })) => {}
-        other => panic!("an undrained generation must refuse finalize: {other:?}"),
-    }
-    set.generation_drain()
-        .mark_draining(&retired, 1)
-        .await
-        .expect("mark the retired generation draining");
-    deployments
-        .0
-        .lock()
-        .expect("deployments")
-        .push(RetainedDeployment {
-            id: "dp_old".to_owned(),
-            uri: None,
-        });
-    match set
-        .finalize_as(&retired, &deployments, &[], 5, successor)
-        .await
-    {
-        Err(FinalizeError::Refused(FinalizeRefusal::DeploymentsRetained { .. })) => {}
-        other => panic!("a retained deployment must refuse finalize: {other:?}"),
-    }
-    assert_eq!(fleet(), i64::from(writable.min()));
-    let core = set.process_env_store();
-    core.admit_session(
-        &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
-            session_meta("before-finalize"),
-        ),
-    )
-    .await
-    .expect("this build writes while finalize is refused");
-    let connection = writer(&location).await;
-
-    deployments.0.lock().expect("deployments").clear();
-    let flip = set
-        .finalize_as(&retired, &deployments, &[], 5, successor)
-        .await
-        .expect("finalize");
-    assert_eq!(
-        flip,
-        FleetEpochFlip::Finalized {
-            from: writable.min(),
-            to: next
-        }
-    );
-    assert_eq!(fleet(), i64::from(next));
-
-    let sessions = count(&location, "session_meta");
-    let error = core
-        .admit_session(
-            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
-                session_meta("after-finalize"),
-            ),
-        )
-        .await
-        .expect_err("the session writer is fenced");
-    assert!(is_fenced(&error, next), "{error}");
-    assert_eq!(count(&location, "session_meta"), sessions);
-    let error = set
-        .generation_drain()
-        .mark_draining(&BuildGeneration::for_test("sqlite-stale-mark"), 2)
-        .await
-        .expect_err("the process-registry writer is fenced");
-    assert!(is_fenced(&error, next), "{error}");
-    for (table, sql) in PROBES {
-        let before = count(&location, table);
-        let error = insert(&connection, sql)
-            .await
-            .expect_err("a writer opened before finalize is fenced");
-        assert!(is_fenced(&error, next), "{table}: {error}");
-        assert_eq!(count(&location, table), before, "{table}");
-    }
-
-    assert_eq!(
-        set.finalize_as(&retired, &deployments, &[], 5, successor)
-            .await
-            .expect("finalize reruns"),
-        FleetEpochFlip::AlreadyFinalized { fleet: next }
-    );
 }

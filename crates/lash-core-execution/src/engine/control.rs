@@ -325,27 +325,6 @@ pub trait SessionControlEngine: Send + Sync {
         ))
     }
 
-    /// The drain of `generation` asking `session`'s parked turn to hand over
-    /// (FIG-4739): a turn of the session that runs on a build of
-    /// `generation` and is parked on a durable wait its Run's successor
-    /// segment may take over ends at a segment boundary there, with the wait
-    /// left open, and the Run goes on in a new execution on the newest
-    /// build. A turn parked on no such wait, or running on another
-    /// generation, is left as it is: it hands over at its next quiet point
-    /// by itself.
-    ///
-    /// Idempotent: a wait already handed over is not parked any more. An
-    /// engine whose turns hold no execution across a wait has nothing to
-    /// wake.
-    async fn hand_over_turns(
-        &self,
-        session: &crate::SessionId,
-        generation: &super::BuildGeneration,
-    ) -> Result<(), EngineRefusal> {
-        let _ = (session, generation);
-        Ok(())
-    }
-
     /// O4 release: stop the run's execution for good, AFTER the store
     /// recorded the run's terminal evidence. Never proof of a lash outcome
     /// (ADR 0104 O4): the evidence is the store's.

@@ -4,7 +4,6 @@ use lash_core_execution::compat::{
     self, CompatAdmission, CompatRefusal, CompatStamp, StampRead, VersionRange,
 };
 #[cfg(any(test, feature = "testing"))]
-use lash_core_execution::store::fleet_finalize::FleetEpochFlip;
 use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -242,7 +241,7 @@ pub(crate) enum AdvanceStep {
     Committed,
 }
 
-/// Advance the store: a migration or an authorized finalize (ADR 0115 §2.2).
+/// Advance the store: a migration (ADR 0115 §2.2).
 ///
 /// It takes `BEGIN EXCLUSIVE` on the database, lets `rewrite` change it (its
 /// DDL and its `lash_compat` row) and commits. While it holds the database
@@ -270,31 +269,27 @@ pub(crate) fn advance_observed<T>(
     Ok(value)
 }
 
-/// A bare epoch flip for writer-fence tests. Production finalize checks a
-/// retirement first through [`crate::finalize`].
+/// Move `F` to the top of `writable` in one exclusive transaction, for a
+/// writer-fence test that stands in for a newer fleet.
 #[cfg(any(test, feature = "testing"))]
 pub(crate) fn flip_epoch_for_testing(
     location: &SqliteLocation,
     busy_timeout: std::time::Duration,
     writable: VersionRange,
-) -> rusqlite::Result<FleetEpochFlip> {
+) -> rusqlite::Result<()> {
     let target = writable.max();
     advance_observed(
         location,
         busy_timeout,
         |tx| {
             let recorded = fence(tx, writable)?.version();
-            if recorded == target {
-                return Ok(FleetEpochFlip::AlreadyFinalized { fleet: target });
+            if recorded != target {
+                tx.execute(
+                    "UPDATE lash_compat SET fleet_format = ?1 WHERE singleton = 1",
+                    [i64::from(target)],
+                )?;
             }
-            tx.execute(
-                "UPDATE lash_compat SET fleet_format = ?1 WHERE singleton = 1",
-                [i64::from(target)],
-            )?;
-            Ok(FleetEpochFlip::Finalized {
-                from: recorded,
-                to: target,
-            })
+            Ok(())
         },
         |_| Ok(()),
     )

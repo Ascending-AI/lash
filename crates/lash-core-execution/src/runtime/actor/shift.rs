@@ -5,10 +5,10 @@ use super::ActorContext;
 
 impl ActorContext {
     /// The shift's and ingress's effects: `TransitionPlugins`, `AdmitShift`,
-    /// `DrawRunStart`, `AcceptTurnInput`, `ObserveDrainMark` and
-    /// `PluginCallbacks`. Admission is the actor claim: each becomes a write
-    /// under the session's epoch in `drain_session_mail`, or is deleted with
-    /// the shift fence (`DrawRunStart`, `ObserveDrainMark`). Any other
+    /// `DrawRunStart`, `AcceptTurnInput` and `PluginCallbacks`. Admission is
+    /// the actor claim: each becomes a write under the session's epoch in
+    /// `drain_session_mail`, or is deleted with the shift fence
+    /// (`DrawRunStart`). Any other
     /// command is refused.
     ///
     /// # Errors

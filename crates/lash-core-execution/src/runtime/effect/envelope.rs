@@ -461,12 +461,6 @@ pub enum RuntimeEffectCommand {
     AcceptTurnInput {
         draft: Box<crate::PendingTurnInputDraft>,
     },
-    /// Read, at a quiet point of a turn, whether `generation` — the build
-    /// the turn's invocation runs on — is draining (FIG-4739). The body
-    /// reads the store's drain marks once; replay uses its recorded answer.
-    ObserveDrainMark {
-        generation: crate::engine::BuildGeneration,
-    },
     /// Record a sequential callback slot's decisions with the resolutions of
     /// the state commands its callbacks returned (K10, FIG-4878). Replay
     /// serves the decisions and publishes the resolutions; no callback or
@@ -648,7 +642,6 @@ impl RuntimeEffectCommand {
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
-            Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::RestoreRunMaterial { .. } => RuntimeEffectKind::RestoreRunMaterial,
@@ -1241,10 +1234,6 @@ pub enum RuntimeEffectOutcome {
     /// same acceptance identity the first execution minted.
     AcceptTurnInput {
         accepted: Box<crate::PendingTurnInput>,
-    },
-    /// Whether the build was draining when the turn read its mark.
-    ObserveDrainMark {
-        draining: bool,
     },
     /// A sequential callback slot's recorded decisions, or the failure of
     /// one of its callbacks, which publishes none of the slot's commands.

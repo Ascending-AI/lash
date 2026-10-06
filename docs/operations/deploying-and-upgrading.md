@@ -6,16 +6,15 @@ defines the compatibility contract.
 
 ## Upgrading lash before 1.0
 
-Until 1.0, lash keeps its stored format versions and journal logic epoch
-frozen: a build may change stored and journal shapes in place without
-moving the build generation, so an unchanged generation is not evidence
-that two builds are compatible.
+Until 1.0, lash keeps its stored format versions frozen: a build may change
+stored shapes in place without moving a version, so unchanged versions are
+not evidence that two builds are compatible.
 
 Every lash version bump before 1.0 must therefore reset lash's state
 instead of rolling: stop the old build and recreate the stores.
 
-From 1.0 on, any replay or format change moves the generation, and the
-drain and finalize path in this guide applies.
+From 1.0 on, any format change moves its version, and the upgrade path in
+this guide applies.
 [ADR 0115](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
 states the freeze in its release-cut guardrails and defines the post-1.0
 contract.
@@ -65,17 +64,11 @@ lashctl version --json
 ```
 
 The JSON envelope has `schema_version`, `command`, `result` and `error`.
-The CLI reports no generation of its own: a deployment's drain generation `G`
-folds in its registered plugins, so only the serving node knows it.
-`result.fleet_generations` lists generations with pinned work or a drain mark
-in the PostgreSQL store. Each entry has `generation`, `draining`, and
-`source: "postgres"`. Use `fleet_generations` to find the generation to drain,
-and confirm the serving node's generation before stopping it. The result also
-reports the release, fleet epoch `F`'s writable range, each component's
-`reads` and `writes` ranges, and the remote wire range.
+`version` reads no store. It reports the release, fleet epoch `F`'s writable
+range, each component's `reads` and `writes` ranges, and the remote wire
+range.
 
-One release runs one worker feature set. If workers use mixed feature sets,
-they occupy separate generation lanes, and each lane must drain separately.
+One release runs one worker feature set.
 A component is the PostgreSQL schema or the SQLite database. Each store stamp has a version and a
 `min_reader` floor. An older build admits a safely expanded component while
 the floor still allows it; an unsafe schema addition is refused. `F` selects
@@ -138,27 +131,21 @@ affected state while investigating the refusal.
    watch both builds' errors and in-flight work. Do not stop N during the
    roll.
 
-3. When new traffic is on N+1, mark N's recorded generation for drain:
+3. Build generations, their drain marks and `lashctl drain` and `end-drain`
+   are gone (FIG-5200). Stopping N waits for the drain by release that
+   replaces them.
 
-   ```sh
-   lashctl drain "$OLD_GENERATION" --json
-   ```
-
-   `drain` marks the generation and hands its work over at once, as a core's
-   drain does: every turn parked on a durable wait and every live process on
-   N is asked to move to N+1.
-
-   Stalled obligations do not hold the drain. `lashctl stalled list <kind>`
-   lists each one of a kind in id order, with its `obligation_id`, typed
-   `reason` (`attempts_exhausted`, `refused` or `undecodable`), the `row` it
-   lives on, and, when this build cannot name that row, an `undecodable`
-   detail such as a kind no build of this release knows. No obligation is
-   pinned to a generation: whichever build leads recovery delivers one that
-   is re-armed (`lashctl stalled rearm <kind> <id>`), and an `undecodable` one
-   stays stalled whichever builds remain. Stopping N neither loses nor
-   settles them. Read the list before you stop N, settle each obligation through
-   the owning host (re-arm it once its cause is fixed), and keep the ones no
-   build can decode, with the listing, in the release record.
+   Until then, read the stalled obligations before you stop N.
+   `lashctl stalled list <kind>` lists each one of a kind in id order, with
+   its `obligation_id`, typed `reason` (`attempts_exhausted`, `refused` or
+   `undecodable`), the `row` it lives on, and, when this build cannot name
+   that row, an `undecodable` detail such as a kind no build of this release
+   knows. No obligation is pinned to a build: whichever build leads recovery
+   delivers one that is re-armed (`lashctl stalled rearm <kind> <id>`), and an
+   `undecodable` one stays stalled whichever builds remain. Stopping N neither
+   loses nor settles them. Settle each obligation through the owning host
+   (re-arm it once its cause is fixed), and keep the ones no build can decode,
+   with the listing, in the release record.
 
    A `scope_close` obligation stalled as `refused` under
    `runtime_store_corrupt` also left a fault on its session (ADR 0109 §9):
@@ -167,50 +154,19 @@ affected state while investigating the refusal.
    close. `LashCore::session_faults` lists every faulted session, including
    one whose shift admission met the corruption with no obligation to stall.
 
-4. Finalize (next section) while N's drain mark still stands, and close the
-   generation drain after it:
-
-   ```sh
-   lashctl end-drain "$OLD_GENERATION" --json
-   ```
-
-   Record the drain and the finalize result with the release record.
-
 ## Finalize the release
 
-Finalize ends the rollback window. It is the last step of N's drain, and it
-is irreversible: it moves the fleet epoch `F` to N+1's, every writer whose
-writable range excludes the new `F` stops with `WriterFenced` at its next
-transaction, and N no longer opens the store. Finalize changes nothing until
-N's generation is drained, and refuses `held` while an operator holds it,
-carrying the hold's reason and when it was set. This build's `lashctl` has no
-`finalize` verb.
+No build moves the fleet epoch `F` now. The generation drain's finalize and
+`lashctl finalize-hold` are gone (FIG-5200), and the drain by release replaces
+them. Backfill and contract below still wait for `F` to move.
 
-An operator who wants to keep the rollback window open, for example to
-watch N+1 under production traffic, holds the automatic finalize first:
-
-```sh
-lashctl finalize-hold set --reason "watch N+1 for a day" --json
-lashctl finalize-hold show --json
-lashctl finalize-hold clear --json
-```
-
-The hold lives on the fleet-format row, which finalize locks to move `F`, so
-a hold set while a rollout finalizes is either seen by that finalize or set
-after it committed. While the hold stands, the automatic finalize refuses
-`held`.
-
-After it moves `F`, finalize runs every backfill N+1 carries to completion.
 A backfill rewrites rows into N+1's shape in batches. Each batch is one
 transaction that rewrites a bounded run of rows after the backfill's cursor
 and moves the cursor in the same commit, so an interruption loses at most the
 batch in flight, and rows already in the new shape are left as they are. The
 `lash_migrations` ledger records each backfill's `running` or `applied`
-state, its cursor and its rewritten-row count, and the result lists every
-backfill finalize completed. If finalize is interrupted after it moved `F`,
-run it again before `end-drain`: it reports `already_finalized` and resumes
-the backfills from their cursors. The backfills alone can also be resumed, at
-any time after finalize:
+state, its cursor and its rewritten-row count. A backfill is resumed from
+its cursor, at any time after `F` moved:
 
 ```sh
 lashctl migrate --phase backfill --json
@@ -235,32 +191,16 @@ Before finalize it is refused `contract_before_finalize`; before its
 backfills are done, `contract_before_backfills`, naming each pending one.
 Both are exit 3, and the dry run refuses the same way the run does.
 
-A SQLite store is not finalized by `lashctl`. The host that owns it
-finalizes with `SqliteStoreSet::finalize`, which applies the drain checks and
-commits `F` and the plugin writer ranges in one
-transaction that holds the database exclusively, so a crash leaves the old
-epoch or the new one, never a mix. Finalize and migration share the store's
-ownership lock. A SQLite store has no operator hold.
 
 ## Roll back before finalize
 
 Before finalize, N+1 writes the format selected by N's `F`, so a healthy N
-build can reopen the expanded store. Route new traffic back to N. Reverse the
-drain against N+1's `G`, then stop it and end its drain:
-
-```sh
-lashctl drain "$NEW_GENERATION" --json
-lashctl end-drain "$NEW_GENERATION" --json
-```
-
-An N+1 continuation that N cannot decode stays on its recorded generation; a
-rollback must not delete that state. If either build reports
+build can reopen the expanded store. Route new traffic to N. If either build reports
 a typed incompatibility, stop traffic to that build and resolve the recorded
 version or route before resuming.
 
-Rollback is safe until finalize, and only until then. Finalize moves `F`
-only after N has drained, and that move fences N's writers; recovery then
-rolls forward.
+Rollback is safe until `F` moves, and only until then: the move fences N's
+writers, and recovery then rolls forward.
 
 ## Client and server version skew
 

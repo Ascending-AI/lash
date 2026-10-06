@@ -313,10 +313,6 @@ fn emitted_domain_shape_matches_registry() {
         .metrics
         .obligations
         .record_leadership("recovery", true, 1);
-    adapter
-        .metrics
-        .generation_drain
-        .record_work("1", "live_processes", 2);
     meter.force_flush().unwrap();
     let spans = exporter.get_finished_spans().unwrap();
     for span in &spans {

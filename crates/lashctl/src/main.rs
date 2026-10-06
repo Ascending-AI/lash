@@ -1,19 +1,16 @@
-//! Operator commands for migrations, generation drains, finalize and
-//! compatibility checks.
+//! Operator commands for migrations, recovery and compatibility checks.
 
 // This binary reads argv and the environment on behalf of the operator.
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_execution::engine::BuildGeneration;
 use lash_core_store::compat::DESCRIPTORS;
-use lash_core_store::store::fleet_finalize::FinalizeHold;
 use lash_core_store::store::{
     FLEET_WRITABLE_RANGE, StorePreflight, StoreSchemaOutcome, StoreSchemaStatus,
 };
 use lash_core_store::store::{ObligationKey, StalledObligation, StoreError};
 use lash_postgres_store::{
     MigrateError, MigrationPhase, MigrationReport, MigrationStep, PostgresConnectionBudget,
-    PostgresConnectionBudgetReport, PostgresStorage, PostgresStoreConfig, PostgresStorePreflight,
+    PostgresConnectionBudgetReport, PostgresStorage, PostgresStorePreflight,
 };
 mod recovery;
 
@@ -25,8 +22,8 @@ use serde_json::{Value, json};
 ///     roots(Exit, CliError),
 ///     roots(path = "crates/lash-postgres-store/src/postgres/migrate.rs", MigrationRefusal),
 ///     items(
-///         name, from, run, output, error_json, hold_result, migration_result, stalled_row,
-///         stalled_result, version_result, preflight_result,
+///         name, from, run, output, error_json, migration_result, stalled_row, stalled_result,
+///         version_result, preflight_result,
 ///     ),
 ///     shapes(
 ///         path = "crates/lash-postgres-store/src/connection_budget.rs",
@@ -37,7 +34,7 @@ use serde_json::{Value, json};
 /// format_outside_manifest = "operator CLI wire: gates a --json consumer, not state lash reopens"
 const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
 const OPERATOR_POOL_MAX: u32 = 2;
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | end-drain <generation> | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | park list|events [--after <json>] [--limit <n>] | park redrive|cancel|fork --target <json> --park-id <n> | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery and drain commands accept --sqlite-path <database-file>) | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | park list|events [--after <json>] [--limit <n>] | park redrive|cancel|fork --target <json> --park-id <n> | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery commands accept --sqlite-path <database-file>) | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -64,7 +61,7 @@ struct CliError {
     exit: Exit,
     message: String,
     /// The typed refusal, as its tagged JSON: a store's `CompatRefusal`, or
-    /// a finalize or migration precondition.
+    /// a migration precondition.
     refusal: Option<Value>,
 }
 
@@ -118,27 +115,10 @@ enum Command {
         phase: MigrationPhase,
         dry_run: bool,
     },
-    /// Mark the generation draining and hand its turns and processes over
-    /// through the deployment's engine, as a core's drain does (FIG-5059).
-    Drain {
-        generation: BuildGeneration,
-        sqlite_path: Option<std::path::PathBuf>,
-    },
-    EndDrain {
-        generation: BuildGeneration,
-        sqlite_path: Option<std::path::PathBuf>,
-    },
-    FinalizeHold(HoldAction),
     Preflight {
         budget: Option<PostgresConnectionBudget>,
     },
     Version,
-}
-
-enum HoldAction {
-    Show,
-    Set { reason: String },
-    Clear,
 }
 
 impl Command {
@@ -146,9 +126,6 @@ impl Command {
         match self {
             Self::Recovery(invocation) => invocation.command.name(),
             Self::Migrate { .. } => "migrate",
-            Self::Drain { .. } => "drain",
-            Self::EndDrain { .. } => "end-drain",
-            Self::FinalizeHold(_) => "finalize-hold",
             Self::Preflight { .. } => "preflight",
             Self::Version => "version",
         }
@@ -200,35 +177,6 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
             }
             Command::Migrate { phase, dry_run }
         }
-        "drain" | "end-drain" => {
-            let (words, sqlite_path) = recovery::split_sqlite_path(rest)?;
-            let Some((generation, options)) = words.split_first() else {
-                return Err(CliError::new(Exit::Usage, USAGE));
-            };
-            let generation = BuildGeneration::parse(generation)
-                .map_err(|_| CliError::new(Exit::Usage, "invalid build generation"))?;
-            match (verb, options) {
-                ("drain", []) => Command::Drain {
-                    generation,
-                    sqlite_path,
-                },
-                ("end-drain", []) => Command::EndDrain {
-                    generation,
-                    sqlite_path,
-                },
-                _ => return Err(CliError::new(Exit::Usage, USAGE)),
-            }
-        }
-        "finalize-hold" => match rest.iter().map(String::as_str).collect::<Vec<_>>()[..] {
-            ["show"] => Command::FinalizeHold(HoldAction::Show),
-            ["clear"] => Command::FinalizeHold(HoldAction::Clear),
-            ["set", "--reason", reason] if !reason.trim().is_empty() => {
-                Command::FinalizeHold(HoldAction::Set {
-                    reason: reason.to_owned(),
-                })
-            }
-            _ => return Err(CliError::new(Exit::Usage, USAGE)),
-        },
         "preflight" => Command::Preflight {
             budget: parse_connection_budget(rest)?,
         },
@@ -341,14 +289,6 @@ impl<'a> From<&'a MigrationStep> for StepDto<'a> {
     }
 }
 
-fn hold_result(hold: Option<&FinalizeHold>) -> Value {
-    json!({
-        "held": hold.is_some(),
-        "reason": hold.map(|hold| hold.reason.as_str()),
-        "held_at_ms": hold.map(|hold| hold.held_at_ms),
-    })
-}
-
 fn migration_result(report: &MigrationReport, dry_run: bool) -> Value {
     json!({
         "namespace": report.namespace,
@@ -408,14 +348,9 @@ fn stalled_result(stalled: &StalledObligation) -> Value {
     })
 }
 
-fn version_result(fleet_generations: &[(BuildGeneration, bool)]) -> Value {
+fn version_result() -> Value {
     json!({
         "release": env!("CARGO_PKG_VERSION"),
-        "fleet_generations": fleet_generations.iter().map(|(generation, draining)| json!({
-            "generation": generation.as_str(),
-            "draining": draining,
-            "source": "postgres",
-        })).collect::<Vec<_>>(),
         "fleet_writable": FLEET_WRITABLE_RANGE,
         "components": DESCRIPTORS.iter().map(|descriptor| json!({
             "component": descriptor.component.as_str(),
@@ -440,19 +375,7 @@ fn database_url() -> Result<String, CliError> {
 async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
     let outcome = match command {
         Command::Recovery(invocation) => (invocation.run().await?, Exit::Done),
-        Command::Version => {
-            let storage = PostgresStorage::connect_with(
-                &database_url()?,
-                PostgresStoreConfig {
-                    max_connections: OPERATOR_POOL_MAX,
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(CliError::store)?;
-            let generations = storage.fleet_generations().await.map_err(CliError::store)?;
-            (version_result(&generations), Exit::Done)
-        }
+        Command::Version => (version_result(), Exit::Done),
         Command::Migrate { phase, dry_run } => {
             let url = database_url()?;
             let report = if *dry_run {
@@ -462,42 +385,6 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             }
             .map_err(CliError::migrate)?;
             (migration_result(&report, *dry_run), Exit::Done)
-        }
-        Command::FinalizeHold(action) => {
-            let storage = PostgresStorage::connect_with(
-                &database_url()?,
-                PostgresStoreConfig {
-                    max_connections: OPERATOR_POOL_MAX,
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(CliError::store)?;
-            let result = match action {
-                HoldAction::Show => hold_result(
-                    storage
-                        .finalize_hold()
-                        .await
-                        .map_err(CliError::store)?
-                        .as_ref(),
-                ),
-                HoldAction::Set { reason } => hold_result(Some(
-                    &storage
-                        .set_finalize_hold(reason)
-                        .await
-                        .map_err(CliError::store)?,
-                )),
-                HoldAction::Clear => {
-                    let cleared = storage
-                        .clear_finalize_hold()
-                        .await
-                        .map_err(CliError::store)?;
-                    let mut result = hold_result(None);
-                    result["cleared"] = hold_result(cleared.as_ref());
-                    result
-                }
-            };
-            (result, Exit::Done)
         }
         Command::Preflight { budget } => {
             let url = database_url()?;
@@ -533,40 +420,6 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             };
             (preflight_result(&status, capacity.as_ref())?, exit)
         }
-        Command::Drain {
-            generation,
-            sqlite_path,
-        } => {
-            // The same drain a core runs: the mark, then the hand-over that
-            // wakes turns parked on durable waits (FIG-5059).
-            let stores = recovery::open_stores(sqlite_path.as_deref()).await?;
-            let backend = recovery::durable_backend(stores)?;
-            let changed = lash::drain_generation(&backend, generation)
-                .await
-                .map_err(|error| match error {
-                    lash::EmbedError::Store(error) => CliError::store(error),
-                    error => recovery::core_error(error),
-                })?;
-            (
-                json!({"generation":generation.as_str(),"marked":changed}),
-                Exit::Done,
-            )
-        }
-        Command::EndDrain {
-            generation,
-            sqlite_path,
-        } => {
-            let changed = recovery::open_stores(sqlite_path.as_deref())
-                .await?
-                .generation_drain()
-                .clear_draining(generation)
-                .await
-                .map_err(CliError::store)?;
-            (
-                json!({"generation":generation.as_str(),"cleared":changed}),
-                Exit::Done,
-            )
-        }
     };
     Ok(outcome)
 }
@@ -587,17 +440,6 @@ fn output(command: &str, result: Option<Value>, error: Option<&CliError>, json_m
                 "release: {}",
                 result["release"].as_str().unwrap_or("unknown")
             );
-            println!("fleet generations:");
-            if let Some(generations) = result["fleet_generations"].as_array() {
-                for generation in generations {
-                    println!(
-                        "  {} (draining: {}, source: {})",
-                        generation["generation"].as_str().unwrap_or("unknown"),
-                        generation["draining"].as_bool().unwrap_or(false),
-                        generation["source"].as_str().unwrap_or("unknown"),
-                    );
-                }
-            }
             println!(
                 "compatibility: {}",
                 json!({"fleet_writable":result["fleet_writable"],"components":result["components"],"wires":result["wires"]})
@@ -728,7 +570,7 @@ mod tests {
         println!(
             "release-inventory-build={}",
             json!({
-                "version": version_result(&[]), "formats": formats,
+                "version": version_result(), "formats": formats,
             })
         );
     }

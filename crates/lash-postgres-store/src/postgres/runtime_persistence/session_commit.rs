@@ -270,7 +270,6 @@ impl SessionCommitStore for PostgresStore {
         &self,
         fence: &lash_core_execution::store::ShiftFence,
         follow_on_turn_id: &lash_core_execution::TurnId,
-        recovering: &lash_core_execution::engine::BuildGeneration,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
@@ -302,20 +301,6 @@ impl SessionCommitStore for PostgresStore {
         if updated.rows_affected() != 1 {
             return Err(not_pending());
         }
-        // The recovering build holds the run from here on. A follow-on whose
-        // run was never admitted through a shift has no stamp to move.
-        sqlx::query(
-            crate::session_runs::session_runs_sql()
-                .runs
-                .restamp_admitted_generation
-                .sql(),
-        )
-        .bind(session_id.as_str())
-        .bind(raised.run_turn_id().as_str())
-        .bind(recovering.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(raised)
     }

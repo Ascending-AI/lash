@@ -29,10 +29,7 @@ pub use interval::{RECOVERY_TICK, RecoveryInterval};
 pub use lanes::{LanesTick, RelayLanes};
 pub use parent_end_relay::ParentEndRelay;
 pub use park::{StoreParkRecovery, run_park_recorded};
-pub use reconcile::{
-    DrainHandOverCursor, DrainHandOverPass, ReconcileParts, ReconcileProcesses, TurnHandOverPass,
-    drain_hand_over_slot, reconcile_once, turn_hand_over_slot,
-};
+pub use reconcile::{ReconcileParts, reconcile_once};
 pub use relays::{
     ObligationRelayUnavailable, RelayNeed, RelayParts, RelaySupply, obligation_relays,
 };
@@ -116,11 +113,6 @@ pub(crate) struct RunExecution {
     /// the recovery's; its evidence names the run that owed the follow-on.
     run: TurnId,
     pub(crate) fence: crate::store::ShiftFence,
-    /// The drain generation stamped on the journal the run executes on: the
-    /// admitting build's (FIG-3795 S9, FIG-4742). A park this run writes
-    /// records it, so the drain routes the run's resume to the build its
-    /// journal belongs to.
-    journal_generation: crate::engine::BuildGeneration,
     /// Whether the run's terminal evidence is durable: a commit of this run
     /// wrote it, or answered the receipt of the commit that did. It gates the
     /// recorded scope-close step, so it is a durable fact every execution of
@@ -137,7 +129,6 @@ impl RunExecution {
         Self {
             run: evidence_run(admitted),
             fence,
-            journal_generation: admitted.admitted_generation().clone(),
             terminal_written: false,
             work_remaining: true,
             trace_scope: None,
@@ -181,11 +172,6 @@ impl RunExecution {
     /// The logical run this execution's evidence and park name.
     pub(crate) fn run(&self) -> &TurnId {
         &self.run
-    }
-
-    /// The drain generation stamped on the journal this execution's run executes on.
-    pub(crate) fn journal_generation(&self) -> &crate::engine::BuildGeneration {
-        &self.journal_generation
     }
 
     pub(crate) fn mark_terminal_written(&mut self) {
@@ -316,9 +302,7 @@ pub async fn work_session_with(
 /// Admission `ordinal` of `request`: one recorded `AdmitShift` step through
 /// `controller`, which must serve
 /// [`shift_admission_scope`](crate::engine::shift_admission_scope) for the
-/// request. `draining` is the build generation whose drain the admission
-/// hands over for
-/// ([`SessionShifts::admit`](crate::runtime::work::SessionShifts::admit)).
+/// request.
 ///
 /// While the session's unfinished run is recorded under an executor that
 /// excludes the run's own execution, the step admits nothing and fails retryably
@@ -329,7 +313,6 @@ pub async fn admit_shift(
     controller: &ActorContext,
     request: &ShiftRequest,
     ordinal: u32,
-    draining: Option<&crate::engine::BuildGeneration>,
 ) -> Result<AdmitVerdict, ShiftAbort> {
     // An engine that admits through this step executes each run as the run's
     // own run ([`execute_admitted_run`]).
@@ -337,15 +320,14 @@ pub async fn admit_shift(
         controller,
         request,
         ordinal,
-        draining,
         crate::store::RunExecutor::run(&admission::admission_id(&request.request, ordinal)),
     ))
     .await
 }
 
 /// [`admit_shift`] on no runtime of the session: the step reads only
-/// `store`, the session's history store, and `host`'s control-intent ledger
-/// and drain marks. Nothing here takes a runtime's writer, so an admission,
+/// `store`, the session's history store, and `host`'s control-intent ledger.
+/// Nothing here takes a runtime's writer, so an admission,
 /// a replayed one included, never waits for a run that is running on one
 /// (FIG-4755).
 #[doc(hidden)]
@@ -357,9 +339,7 @@ pub async fn admit_shift_on_store(
     ),
     controller: &ActorContext,
     request: &ShiftRequest,
-    admitting_generation: &crate::engine::BuildGeneration,
     ordinal: u32,
-    draining: Option<&crate::engine::BuildGeneration>,
 ) -> Result<AdmitVerdict, ShiftAbort> {
     // An engine that admits on the store executes each run as the run's own
     // run.
@@ -368,25 +348,13 @@ pub async fn admit_shift_on_store(
         store,
         controller,
         request,
-        AdmissionAuthority {
-            generation: admitting_generation,
-            executor: crate::store::RunExecutor::run(&admission::admission_id(
-                &request.request,
-                ordinal,
-            )),
-        },
+        crate::store::RunExecutor::run(&admission::admission_id(&request.request, ordinal)),
         ordinal,
-        draining,
     )
     .await
 }
 
-struct AdmissionAuthority<'a> {
-    generation: &'a crate::engine::BuildGeneration,
-    executor: crate::store::RunExecutor,
-}
-
-/// [`admit_shift_on_store`] for `authority`, the execution that runs the
+/// [`admit_shift_on_store`] for `executor`, the execution that runs the
 /// runs the shift admits.
 async fn admit_on_store(
     host: &crate::RuntimeHostConfig,
@@ -396,9 +364,8 @@ async fn admit_on_store(
     ),
     controller: &ActorContext,
     request: &ShiftRequest,
-    authority: AdmissionAuthority<'_>,
+    executor: crate::store::RunExecutor,
     ordinal: u32,
-    draining: Option<&crate::engine::BuildGeneration>,
 ) -> Result<AdmitVerdict, ShiftAbort> {
     let (store, materializer) = store;
     // A generation this build cannot run is refused typed before anything
@@ -413,7 +380,7 @@ async fn admit_on_store(
     emit_admission_step(
         &admission_controller,
         request,
-        authority,
+        executor,
         ordinal,
         Some(AdmissionStore {
             store,
@@ -422,10 +389,6 @@ async fn admit_on_store(
             tracing: host.tracing.clone(),
         }),
         host.session_store_factory(),
-        draining.map(|generation| admission::DrainRead {
-            marks: host.backend().generation_drain(),
-            generation: generation.clone(),
-        }),
     )
     .await
 }
@@ -447,11 +410,10 @@ struct AdmissionStore {
 async fn emit_admission_step(
     controller: &ActorContext,
     request: &ShiftRequest,
-    authority: AdmissionAuthority<'_>,
+    executor: crate::store::RunExecutor,
     ordinal: u32,
     store: Option<AdmissionStore>,
     stores: Arc<dyn crate::DeploymentStore>,
-    drain: Option<admission::DrainRead>,
 ) -> Result<AdmitVerdict, ShiftAbort> {
     let scope = shift_admission_scope(&request.session, &request.request);
     let invocation = RuntimeEffectInvocation::new(
@@ -494,7 +456,6 @@ async fn emit_admission_step(
     let admit_request = AdmitRequest {
         session: request.session.clone(),
         request: request.request.clone(),
-        build_generation: authority.generation.clone(),
         run_start,
     };
     let (store, materializer, tracing) = match store {
@@ -523,7 +484,7 @@ async fn emit_admission_step(
                     // The admission controller is already rescoped to the
                     // session. Inline runs retain their executor's physical
                     // cancellation authority instead of that step's scope.
-                    run_scope: match &authority.executor {
+                    run_scope: match &executor {
                         crate::store::RunExecutor::Acceptor { scope }
                         | crate::store::RunExecutor::Inline { scope } => match scope {
                             crate::ExecutionScope::Process { process_id } => {
@@ -539,8 +500,7 @@ async fn emit_admission_step(
                     stores,
                     request: admit_request,
                     ordinal,
-                    drain,
-                    executor: authority.executor,
+                    executor,
                 }),
                 None,
             ),
@@ -562,7 +522,6 @@ async fn emit_admission_step(
 pub async fn admit_shift_retired(
     controller: &ActorContext,
     request: &ShiftRequest,
-    admitting_generation: &crate::engine::BuildGeneration,
     ordinal: u32,
     stores: Arc<dyn crate::DeploymentStore>,
 ) -> Result<AdmitVerdict, ShiftAbort> {
@@ -570,17 +529,10 @@ pub async fn admit_shift_retired(
     emit_admission_step(
         controller,
         request,
-        AdmissionAuthority {
-            generation: admitting_generation,
-            executor: crate::store::RunExecutor::run(&admission::admission_id(
-                &request.request,
-                ordinal,
-            )),
-        },
+        crate::store::RunExecutor::run(&admission::admission_id(&request.request, ordinal)),
         ordinal,
         None,
         stores,
-        None,
     )
     .await
 }
@@ -914,27 +866,15 @@ impl LashRuntime {
             crate::store::RunExecutor::Inline { scope }
         };
         let stop = loop {
-            // This loop's shift is pinned to no build an engine drains: its
-            // admissions name no drain, and none answers `Draining`.
             let admitted = match Box::pin(self.admit_shift_step(
                 controller,
                 request,
                 ordinal,
-                None,
                 executor.clone(),
             ))
             .await?
             {
                 AdmitVerdict::Admit(admitted) => admitted,
-                AdmitVerdict::Draining { generation } => {
-                    return Err(ShiftAbort::Refused(RuntimeError::new(
-                        RuntimeErrorCode::QueuedWork,
-                        format!(
-                            "admission answered the drain of generation `{generation}` to a \
-                             shift that named none"
-                        ),
-                    )));
-                }
                 AdmitVerdict::Idle => break ShiftStop::Idle,
                 AdmitVerdict::Parked(park) => break ShiftStop::Parked(park),
                 AdmitVerdict::SubstrateLost { run } => break ShiftStop::SubstrateLost { run },
@@ -1005,7 +945,6 @@ impl LashRuntime {
         controller: &ActorContext,
         request: &ShiftRequest,
         ordinal: u32,
-        draining: Option<&crate::engine::BuildGeneration>,
         executor: crate::store::RunExecutor,
     ) -> Result<AdmitVerdict, ShiftAbort> {
         if request.session != self.state.session_id {
@@ -1021,12 +960,6 @@ impl LashRuntime {
         // session; the run's recorded admission, taken under the lease on a
         // head refreshed there, is the head the run executes on (FIG-3682).
         let store = self.shift_store()?;
-        // No engine binds a build generation any more (I0, FIG-5194): a
-        // shift admission refuses as on an unbound backend until L3s
-        // (FIG-5196) replaces shift admission with the actor claim.
-        let admitting_generation: crate::engine::BuildGeneration =
-            Err(crate::engine::GenerationUnbound)
-                .map_err(|error| ShiftAbort::Refused(error.into()))?;
         Box::pin(admit_on_store(
             &self.host.core,
             (
@@ -1038,12 +971,8 @@ impl LashRuntime {
             ),
             controller,
             request,
-            AdmissionAuthority {
-                generation: &admitting_generation,
-                executor,
-            },
+            executor,
             ordinal,
-            draining,
         ))
         .await
     }

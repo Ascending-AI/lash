@@ -35,7 +35,6 @@ fn park_write(
         reason,
         at_ms,
         origin: crate::store::TurnParkOrigin::Refusal,
-        build_generation: None,
     }
 }
 
@@ -284,20 +283,11 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
 ) {
     let session_id = SessionId::from("park-supersede");
     let store = create_bound_store(&factory, &session_id).await;
-    // S7: a park whose writer knows the checkpoint's build generation records
-    // it on the park and stamps the `Parked` feed event it opens.
-    let mut first_write = park_write(&session_id, "turn-a", divergence("first"), 100);
-    first_write.build_generation = Some(lash_core::engine::BuildGeneration::for_test("f3795c"));
     let first = store
-        .record_turn_park(&first_write)
+        .record_turn_park(&park_write(&session_id, "turn-a", divergence("first"), 100))
         .await
         .map(lash_core::store::StoreTransition::into_record)
         .expect("park the first turn");
-    assert_eq!(
-        first.build_generation,
-        Some(lash_core::engine::BuildGeneration::for_test("f3795c")),
-        "the park keeps the checkpoint's recorded build generation"
-    );
     let reparked = store
         .record_turn_park(&park_write(&session_id, "turn-a", drift("again"), 200))
         .await
@@ -329,11 +319,6 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
         crate::store::ParkEventKind::Parked { .. }
     ));
     assert_eq!(page.events[0].park_id, first.park_id);
-    assert_eq!(
-        page.events[0].build_generation,
-        first.build_generation.clone(),
-        "the `Parked` event carries the checkpoint's build generation"
-    );
 
     let second = store
         .record_turn_park(&park_write(
@@ -381,10 +366,6 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
     assert_eq!(
         page.events[1].park_id, first.park_id,
         "the close event names the park it closed"
-    );
-    assert_eq!(
-        page.events[1].build_generation, None,
-        "a closing event names no checkpoint and carries no generation"
     );
     assert!(
         matches!(

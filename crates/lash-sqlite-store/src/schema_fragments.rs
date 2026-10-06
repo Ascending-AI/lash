@@ -38,7 +38,6 @@ CREATE TABLE IF NOT EXISTS session_runs (
     run                    TEXT NOT NULL,
     executor_json           TEXT,
     admission_json          TEXT,
-    admitted_generation     TEXT,
     terminal_kind           TEXT,
     terminal_cause_json     TEXT,
     terminal_head_revision  INTEGER,
@@ -63,9 +62,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_session_runs_obligation_id
     ON session_runs(obligation_id);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_session_runs_unfinished
     ON session_runs(session_id)
-    WHERE admission_json IS NOT NULL AND terminal_kind IS NULL;
-CREATE INDEX IF NOT EXISTS idx_session_runs_admitted_generation
-    ON session_runs(admitted_generation)
     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL;
 CREATE INDEX IF NOT EXISTS idx_session_runs_obligation_due
     ON session_runs(obligation_due_at_ms, obligation_id)

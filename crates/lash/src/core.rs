@@ -21,7 +21,7 @@ pub(crate) mod session_shifts;
 pub use session_deletion::SessionDeleteCompletion;
 mod work_drivers;
 
-pub use drain::{DeploymentDrainStatus, GenerationDrainStatus, drain_generation};
+pub use drain::DeploymentDrainStatus;
 use session_shifts::{CoreSessionShifts, CoreSessionShiftsConfig};
 use work_drivers::{CoreWorkSetup, WakeDeliveryDriverSetup};
 pub(crate) use work_drivers::{CoreWorkSlot, ResolvedQueuedWork};
@@ -33,9 +33,6 @@ pub struct LashCore {
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     /// The one substrate every port and the effect host come from.
     pub(crate) backend: Backend,
-    /// The generation this core's engine runs on: the one the core computed
-    /// from its formats and its registered plugins and bound at build.
-    pub(crate) build_generation: lash_core::engine::BuildGeneration,
     /// The backend's session catalog.
     pub(crate) store_factory: Arc<dyn DeploymentStore>,
     /// The backend's process registry, as the core sees it (watched, and
@@ -189,15 +186,6 @@ impl LashCore {
         ))
     }
 
-    /// The drain generation `G` of this deployment (FIG-3795, FIG-4744): the
-    /// digest of the build's drain formats and of this core's plugins in
-    /// hook order, computed when the core was built and bound into its
-    /// engine. Work the host opens beside the core, such as an effect host
-    /// or a controller of its own, is stamped with this value.
-    pub fn build_generation(&self) -> &lash_core::engine::BuildGeneration {
-        &self.build_generation
-    }
-
     /// The backend this core takes every port and its effect host from.
     pub fn backend(&self) -> &Backend {
         &self.backend
@@ -251,100 +239,6 @@ impl LashCore {
             stalled_obligations,
             checked_at,
         })
-    }
-
-    /// Mark `generation` draining and request every active turn and process
-    /// Run's physical cut. Issued native work reaches durable acknowledgement
-    /// before its retained continuation moves to the newest build. Recovery
-    /// retries any delivery an interrupted drain left owed. An operator that
-    /// holds no core runs the same drain through
-    /// [`drain_generation`](crate::drain_generation). Poll
-    /// [`generation_drain_status`](Self::generation_drain_status) until it
-    /// reports drained, then retire the generation's deployment.
-    ///
-    /// Idempotent: `true` when this call marked the generation, `false` when
-    /// it was already draining. A deployment cannot drain its own generation
-    /// ([`EmbedError::DrainOwnGeneration`](crate::EmbedError::DrainOwnGeneration)):
-    /// run it from a deployment of the replacing build. The generation's
-    /// deployment keeps serving until the host retires it — the hand-over
-    /// runs inside the segments it pinned.
-    pub async fn drain_generation(
-        &self,
-        generation: &lash_core::engine::BuildGeneration,
-    ) -> Result<bool> {
-        if *generation == self.build_generation {
-            return Err(crate::EmbedError::DrainOwnGeneration {
-                generation: generation.clone(),
-            });
-        }
-        drain::drain_generation(&self.backend, generation).await
-    }
-
-    /// Stop draining `generation`: the recovery leader wakes none of its
-    /// processes from the next tick (a rollback to the generation, or a drain
-    /// abandoned). Segments already handed over stay where they run. `true`
-    /// when a mark was removed.
-    pub async fn end_generation_drain(
-        &self,
-        generation: &lash_core::engine::BuildGeneration,
-    ) -> Result<bool> {
-        Ok(self
-            .backend
-            .generation_drain()
-            .clear_draining(generation)
-            .await?)
-    }
-
-    /// What `generation` still holds (FIG-3799): whether it is marked
-    /// draining, its live processes, the parked processes and turns its
-    /// checkpoints hold, the turns its shifts admitted that have not settled
-    /// (FIG-3884), the closing sessions every drain waits on, the unfinished
-    /// invocations still pinned to its deployments (FIG-4454), and
-    /// the stalled obligations, which it counts but does not wait on
-    /// (FIG-4076).
-    ///
-    /// Reading the status is also the metrics refresh: the per-generation
-    /// work gauges and each obligation kind's stalled gauge use the core's
-    /// injected telemetry instruments.
-    pub async fn generation_drain_status(
-        &self,
-        generation: &lash_core::engine::BuildGeneration,
-    ) -> Result<GenerationDrainStatus> {
-        let drain = self.backend.generation_drain();
-        let session_delete = self.backend.session_delete_ledger();
-        let backend = self.backend.clone();
-        let status = GenerationDrainStatus::collect(
-            drain.as_ref(),
-            session_delete.as_ref(),
-            move |kind| backend.obligation_ledger(kind),
-            &lash_core::store::fleet_finalize::NoDeployments,
-            generation,
-            self.env.core.clock.timestamp_ms(),
-        )
-        .await?;
-        let metrics = self.env.core.tracing.metrics();
-        for (kind, count) in [
-            ("live_processes", status.live_processes),
-            ("parked_processes", status.parked_processes),
-            ("parked_turns", status.parked_turns),
-            ("in_flight_turns", status.in_flight_turns),
-            ("unfinished_invocations", status.unfinished_invocations),
-        ] {
-            lash_core::operational_metrics::record_generation_drain_work(
-                metrics,
-                generation.as_str(),
-                kind,
-                count,
-            );
-        }
-        for (kind, count) in &status.stalled_obligations {
-            lash_core::operational_metrics::record_obligations_stalled(
-                metrics,
-                kind.label(),
-                *count,
-            );
-        }
-        Ok(status)
     }
 
     /// The stalled obligations of `kind` after `after`, in id order, at most
@@ -1249,10 +1143,9 @@ impl LashCoreBuilder {
             &plugin_factories,
             &core,
         )?);
-        // The generation exists only now that the plugins are registered:
-        // it folds in their declarations in hook order.
-        let build_generation =
-            crate::formats::composed_generation(&default_plugin_host.composition()?);
+        // A plugin whose declaration contradicts itself refuses the build
+        // before anything runs under it.
+        default_plugin_host.composition()?;
         // Every backend supplies a process registry, so process lifecycle
         // is available on every core. Threaded to every plugin host so core
         // installs the same plugin-contributed process engines wherever it
@@ -1283,7 +1176,6 @@ impl LashCoreBuilder {
             Arc::clone(&live_replay_store),
             process_lifecycle_available,
             self.recovery_lease.unwrap_or_default(),
-            build_generation.clone(),
         );
         // The `SessionShifts`'s reconcile tick runs every obligation kind's relay
         // (ADR 0109 §1.4): the backend's process wiring always supplies a
@@ -1323,7 +1215,6 @@ impl LashCoreBuilder {
             shift_owner,
             env,
             backend,
-            build_generation,
             store_factory,
             process_registry,
             plugin_factories,
@@ -1355,7 +1246,6 @@ impl LashCoreBuilder {
         live_replay_store: Arc<dyn LiveReplayStore>,
         process_lifecycle_available: bool,
         recovery_lease: lash_core::engine::RecoveryLeaseConfig,
-        build_generation: lash_core::engine::BuildGeneration,
     ) -> (Arc<CoreSessionShifts>, Arc<dyn lash_core::SessionShifts>) {
         let owner = shift_owner.clone();
         let recovery = Arc::new(recovery::RecoverySlot::new(&env, recovery_lease));
@@ -1369,7 +1259,6 @@ impl LashCoreBuilder {
             store_factory: Arc::clone(store_factory),
             live_replay_store,
             process_lifecycle_available,
-            build_generation,
         })));
         let installed = install_session_shifts(session_work, shifts.clone(), &owner);
         (shifts, installed)

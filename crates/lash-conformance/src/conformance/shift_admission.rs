@@ -194,7 +194,6 @@ impl ShiftParts {
         ShiftRequest {
             session: self.session_id.clone(),
             request: ShiftRequestId::new(id),
-            intended_lane: None,
         }
     }
 
@@ -273,7 +272,6 @@ impl ShiftParts {
         authority: &crate::store::ShiftFence,
         run: &str,
         head: crate::store::AdmittedHead,
-        admitted_generation: &'static str,
     ) -> crate::store::AdmitRunRequest {
         crate::store::AdmitRunRequest {
             unsealed_epoch: None,
@@ -295,7 +293,6 @@ impl ShiftParts {
                 checkpoint: None,
             },
             turn_index: 1,
-            admitted_generation: crate::engine::BuildGeneration::for_test(admitted_generation),
             executor: crate::store::RunExecutor::run(&crate::store::AdmissionId::new("fixture#0")),
             plugins: Default::default(),
             turn_cancellation: None,
@@ -323,9 +320,7 @@ pub async fn run_admission_binds_cancellation_authority_with_its_rows(
             "bound-authority",
         )
         .await;
-        let mut request = parts
-            .admit_request(&fence, "bound-run", head, "binding-law")
-            .await;
+        let mut request = parts.admit_request(&fence, "bound-run", head).await;
         let scope = crate::ExecutionScope::turn(&parts.session_id, &request.run);
         request.turn_cancellation = Some(crate::store::TurnCancellationBinding {
             binding_id: "selected-authority".into(),
@@ -396,7 +391,6 @@ pub async fn preparing_or_refusing_admission_leaves_cancellation_authority_unbou
                 &fence,
                 "proposed-run",
                 crate::store::AdmittedHead::Input(input.clone()),
-                "binding-law",
             )
             .await;
         let scope = crate::ExecutionScope::turn(&parts.session_id, &request.run);
@@ -668,7 +662,7 @@ pub async fn one_unfinished_run_per_session(
             .await;
             let run = TurnId::from("first-run");
             let request = parts
-                .admit_request(&authority, "first-run", head.clone(), "one-unfinished-run")
+                .admit_request(&authority, "first-run", head.clone())
                 .await;
             assert!(
                 parts
@@ -695,7 +689,7 @@ pub async fn one_unfinished_run_per_session(
             );
             let second_head = parts.enqueue_head(second_kind, "second").await;
             let second = parts
-                .admit_request(&authority, "second-run", second_head, "one-unfinished-run")
+                .admit_request(&authority, "second-run", second_head)
                 .await;
             assert!(
                 matches!(
@@ -740,9 +734,7 @@ pub async fn a_run_admission_is_idempotent_across_new_rows_and_fences(
             "run-admission-first",
         )
         .await;
-        let mut request = parts
-            .admit_request(&first, "same-run", head, "first-admission")
-            .await;
+        let mut request = parts.admit_request(&first, "same-run", head).await;
         let recorded = parts
             .store
             .admit_run(&request)
@@ -758,7 +750,6 @@ pub async fn a_run_admission_is_idempotent_across_new_rows_and_fences(
         request.max_inputs = 8;
         request.policy = crate::testing::queued_work_admission_policy(8);
         request.turn_index = 7;
-        request.admitted_generation = crate::engine::BuildGeneration::for_test("later-admission");
         let replay = parts
             .store
             .admit_run(&request)
@@ -1097,7 +1088,6 @@ pub async fn parked_run_blocks_admission(
             },
             at_ms: 1,
             origin: crate::store::TurnParkOrigin::Refusal,
-            build_generation: None,
         })
         .await
         .map(lash_core::store::StoreTransition::into_record)
@@ -1164,10 +1154,9 @@ pub async fn a_command_enqueued_after_an_input_runs_admission_waits_for_the_next
             let tx = tx.clone();
             Box::pin(async move {
                 let mut runtime = parts.runtime().await;
-                let verdict =
-                    lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None)
-                        .await
-                        .expect("admit the input run");
+                let verdict = lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0)
+                    .await
+                    .expect("admit the input run");
                 let admitted = admitted(verdict);
                 // The command and a later input arrive between the run's
                 // shift admission and its own. Both are keyed, so a tier that
@@ -1333,7 +1322,7 @@ pub async fn a_host_task_is_admitted_as_its_own_operation_run(
         let commands = commands.clone();
         Box::pin(async move {
             let admitted = admitted(
-                lash_core::shift::admit_shift(&mut runtime, &scope, &commands, 0, None)
+                lash_core::shift::admit_shift(&mut runtime, &scope, &commands, 0)
                     .await
                     .expect("admit the command lane"),
             );
@@ -1387,7 +1376,7 @@ pub async fn a_host_task_is_admitted_as_its_own_operation_run(
                 let mut runtime = parts.runtime().await;
                 let request = parts.request("operation-run");
                 let admitted = admitted(
-                    lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None)
+                    lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0)
                         .await
                         .expect("admit the task"),
                 );
@@ -1539,7 +1528,7 @@ async fn idle_admission(
     on_tier(runner, parts, move |mut runtime, scope| {
         let request = request.clone();
         Box::pin(async move {
-            match lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None).await {
+            match lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0).await {
                 Ok(AdmitVerdict::Admit(admitted)) => match admitted.work() {
                     lash_core::engine::AdmittedWork::Queued { .. } => "queued".to_owned(),
                     lash_core::engine::AdmittedWork::Commands { .. } => "commands".to_owned(),

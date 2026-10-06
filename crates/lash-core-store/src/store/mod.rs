@@ -30,10 +30,8 @@ mod error_samples;
 pub mod fencing;
 #[cfg(test)]
 mod fencing_tests;
-pub mod fleet_finalize;
 mod fleet_format;
 mod fork_plan;
-pub mod generation_drain;
 mod graph_commit;
 mod head_ownership;
 pub mod history;
@@ -882,17 +880,10 @@ pub trait SessionCommitStore: Send + Sync {
     /// back with `attempts` raised by one. The head revision does not move:
     /// the raise changes no other head fact, and nothing ever lowers the count.
     /// Returns the raised fact.
-    ///
-    /// The same transaction restamps the unfinished run the follow-on
-    /// belongs to with `recovering`, the generation of the build whose
-    /// recovery runs the rest of the run (FIG-4739): from here on that build
-    /// holds the run, and the build that ran its earlier turns counts it no
-    /// longer.
     async fn raise_pending_follow_on_attempts(
         &self,
         fence: &ShiftFence,
         follow_on_turn_id: &TurnId,
-        recovering: &crate::build_generation::BuildGeneration,
     ) -> Result<PendingFollowOn, StoreError>;
 
     /// Replace only the pending observer intents of an admitted session.

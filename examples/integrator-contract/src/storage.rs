@@ -233,7 +233,6 @@ impl SessionCommitStore for Integrator {
         &self,
         fence: &ShiftFence,
         follow_on_turn_id: &TurnId,
-        recovering: &BuildGeneration,
     ) -> Result<PendingFollowOn, StoreError> {
         unreachable!("external signature witness")
     }
@@ -767,45 +766,6 @@ impl DeploymentStore for Integrator {
         &self,
         bound: RetentionBound,
     ) -> MaintenanceResult<RetentionReport> {
-        unreachable!("external signature witness")
-    }
-}
-
-#[lash::async_trait]
-impl GenerationDrainStore for Integrator {
-    async fn mark_draining(
-        &self,
-        generation: &BuildGeneration,
-        now_ms: u64,
-    ) -> Result<bool, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn clear_draining(&self, generation: &BuildGeneration) -> Result<bool, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn draining_generations(&self) -> Result<Vec<DrainingGeneration>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn generation_work(
-        &self,
-        generation: &BuildGeneration,
-    ) -> Result<GenerationWork, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn live_processes(
-        &self,
-        generation: &BuildGeneration,
-        after: Option<&ProcessId>,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<ProcessId>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn sessions_in_flight(
-        &self,
-        generation: &BuildGeneration,
-        after: Option<&SessionId>,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<SessionId>, StoreError> {
         unreachable!("external signature witness")
     }
 }

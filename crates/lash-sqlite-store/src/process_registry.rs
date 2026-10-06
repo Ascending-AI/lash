@@ -816,22 +816,6 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         wake_delivery_config,
                         fleet_format,
                     )?;
-                    // The run admission's build-generation stamp projects
-                    // onto the process row in the same transaction (FIG-3795
-                    // S2): the drain's live-generation index reads it without
-                    // unfolding the event.
-                    crate::conn::cached_execute(
-                        tx,
-                        process_sql().process.set_segment_generation.sql(),
-                        params![
-                            process_id.as_str(),
-                            started
-                                .build_generation
-                                .as_ref()
-                                .map(|generation| generation.as_str())
-                        ],
-                    )
-                    .map_err(process_sqlite_error)?;
                     Ok(ProcessStartOutcome::Started(record))
                 })()))
             })

@@ -20,12 +20,6 @@ pub struct ProcessStarted {
     /// `None` for an engine whose runs carry no generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<crate::ExecutableGeneration>,
-    /// The drain generation of the build that admitted this execution
-    /// (FIG-3795 S1): the build the admitting deployment ran as, stamped once
-    /// at the first claim and never derived on recovery. `None` for a
-    /// substrate whose runs carry no drain generation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub build_generation: Option<crate::engine::BuildGeneration>,
     /// The plugin composition the process started under and the writer
     /// format chosen for each plugin (FIG-4747), recorded once at the first
     /// claim and never derived on recovery: every attempt of the first
@@ -117,7 +111,6 @@ impl ProcessExecutionWriteAuthority {
             attempt: self.attempt()?,
             started_at_ms: 0,
             generation: None,
-            build_generation: None,
             plugins: None,
         })
     }

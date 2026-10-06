@@ -88,41 +88,12 @@ crate::statements! {
         /// `?8`/`?9` are the parked projection: the live park's `since_ms`
         /// and reason code, both `NULL` while the process is not parked.
         /// `?10` is the retired executable generation a `retired_generation`
-        /// park names, `NULL` for any other park (FIG-3571). `?11` is the
-        /// build generation of the parked checkpoint, `NULL` when the park's
-        /// writer records none (FIG-3795).
+        /// park names, `NULL` for any other park (FIG-3571).
         update_mutable_columns = "UPDATE processes
              SET updated_at_ms = ?2, change_seq = ?3, status = ?4,
                  last_event_sequence = ?5, cancel_requested_at_ms = ?6, record_json = ?7,
-                 parked_since_ms = ?8, parked_reason_code = ?9, park_executable_generation = ?10,
-                 park_build_generation = ?11
+                 parked_since_ms = ?8, parked_reason_code = ?9, park_executable_generation = ?10
              WHERE process_id = ?1";
-
-        /// Record the build generation of the build that admitted the
-        /// process's current segment (FIG-3795 S2): written in the same
-        /// transaction as the segment's start stamp — `first_started` for
-        /// segment 0, the retained handover's start marker past it.
-        set_segment_generation = "UPDATE processes SET segment_generation = ?2
-             WHERE process_id = ?1";
-
-        /// The live processes whose current segment build generation `?1`
-        /// admitted (FIG-3799), over the live-generation partial index.
-        count_live_by_segment_generation = "SELECT COUNT(*) FROM processes
-             WHERE segment_generation = ?1 AND {{live_process_status(status)}}";
-
-        /// The live processes of segment generation `?1` strictly after key
-        /// `?2` (`''` from the start), at most `?3`, in key order: the page
-        /// the drain's hand-over wakes (FIG-3799).
-        list_live_by_segment_generation = "SELECT process_id FROM processes
-             WHERE segment_generation = ?1 AND {{live_process_status(status)}}
-               AND process_id > ?2
-             ORDER BY process_id
-             LIMIT ?3";
-
-        /// The parked processes whose parked checkpoint build generation `?1`
-        /// wrote (FIG-3799), over the park build-generation index.
-        count_parked_by_build_generation = "SELECT COUNT(*) FROM processes
-             WHERE park_build_generation = ?1 AND parked_since_ms IS NOT NULL";
 
         /// Live process parks per reason code, with each code's oldest
         /// `since_ms`, over the parked projection's partial index.

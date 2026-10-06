@@ -155,7 +155,6 @@ impl LayeredBackend {
         let stores = Arc::new(LayeredStoreSet {
             binding: inner_stores.binding_identity().clone(),
             attachment_referrers: inner_stores.attachment_referrers(),
-            generation_drain: inner_stores.generation_drain(),
             inner: inner_stores,
             clock: self.clock,
             session_store_factory: self.session_store_factory,
@@ -195,7 +194,6 @@ impl LayeredStores {
             obligation_ledgers: None,
             artifact_cleanup: inner.artifact_cleanup(),
             worker_recovery: inner.worker_recovery(),
-            generation_drain: inner.generation_drain(),
             inner,
         })
     }
@@ -203,17 +201,6 @@ impl LayeredStores {
     /// Stamp and sleep on `clock` in place of the inner store set's clock.
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.0.clock = clock;
-        self
-    }
-
-    /// Replace the generation-drain store with `layer` over it.
-    pub fn map_generation_drain(
-        mut self,
-        layer: impl FnOnce(
-            Arc<dyn crate::store::generation_drain::GenerationDrainStore>,
-        ) -> Arc<dyn crate::store::generation_drain::GenerationDrainStore>,
-    ) -> Self {
-        self.0.generation_drain = layer(self.0.generation_drain);
         self
     }
 
@@ -318,7 +305,6 @@ struct LayeredStoreSet {
     obligation_ledgers: Option<ObligationLedgerLayer>,
     artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
     worker_recovery: Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>,
-    generation_drain: Arc<dyn crate::store::generation_drain::GenerationDrainStore>,
 }
 
 impl StoreSet for LayeredStoreSet {
@@ -385,10 +371,6 @@ impl StoreSet for LayeredStoreSet {
 
     fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
         self.inner.recovery_leader()
-    }
-
-    fn generation_drain(&self) -> Arc<dyn crate::store::generation_drain::GenerationDrainStore> {
-        Arc::clone(&self.generation_drain)
     }
 
     fn obligation_ledger(

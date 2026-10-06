@@ -22,7 +22,6 @@ fn park(
         reason,
         at_ms: 1_234,
         origin: crate::store::TurnParkOrigin::Refusal,
-        build_generation: None,
     }
 }
 
@@ -98,7 +97,6 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
     let reparked = store
         .record_turn_park(&crate::store::TurnParkWrite {
             at_ms: 4_567,
-            build_generation: None,
             ..park(&session_id, &parked_turn, cutover.clone())
         })
         .await

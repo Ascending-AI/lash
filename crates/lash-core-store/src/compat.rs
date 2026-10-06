@@ -454,14 +454,8 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// park gains `engine_ref` and `resume_intent`, and a park event may be
 /// `redrive_requested`. A pre-99 database is rejected at open and recreated;
 /// it is not migrated.
-/// Version 99 also lets a parked turn record the drain generation of the
-/// build whose checkpoint it resumes (FIG-3795, changed in place under the
-/// pre-1.0 version freeze, FIG-3846): `turn_parks` and `turn_park_events`
-/// gain the projected `park_build_generation` column, and `turn_parks` the
-/// partial index drain status counts it by. `session_runs` records each
-/// run's admission (`admission_json`) and the drain generation of the shift
-/// that admitted it (`admitted_generation`, indexed for the drain's in-flight
-/// count per generation, FIG-3795 S9), with at most one unfinished run per
+/// Version 99 also has `session_runs` record each run's admission
+/// (`admission_json`), with at most one unfinished run per
 /// session; the queued-run ledger is gone and a queued-work head is admitted
 /// as an ordinary run (FIG-3927). `session_runs` also records the executor
 /// the seal of a run's admission named (`executor_json`, FIG-4814).

@@ -7,11 +7,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use lash_core_store::build_generation::{
-    BuildGeneration, BuildGenerationParseError, EngineGeneration, GenerationRebound,
-    GenerationUnbound,
-};
-
 use super::admission::ShiftRequestId;
 use crate::SessionId;
 
@@ -19,16 +14,15 @@ use crate::SessionId;
 ///
 /// The type lives in the kernel rather than the facade's format table so an
 /// effect engine can declare the policy for the formats it registers
-/// (ADR 0104 §2): an engine's durable formats are its own to describe, and
-/// the drain generation that depends on the answer is kernel vocabulary too.
+/// (ADR 0104 §2): an engine's durable formats are its own to describe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum UpgradePolicy {
     /// Forward migration: schema DDL or a read upcaster, then writing at the
     /// fleet format.
     Migrate,
-    /// A journal replays only under the code that wrote it, so it finishes on
-    /// its own build; the drain generation carries these formats.
+    /// Stored bytes only the build that wrote them decodes, so the work
+    /// finishes on its own build before a newer one takes it.
     Drain,
     /// Both versions live during the roll window: content addresses,
     /// idempotency keys, namespaced object state and negotiated wire versions.
@@ -40,30 +34,4 @@ pub enum UpgradePolicy {
 pub struct ShiftRequest {
     pub session: SessionId,
     pub request: ShiftRequestId,
-    /// The generation lane this request must use, or the stable lane.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub intended_lane: Option<BuildGeneration>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_drive_request_carries_no_admitting_generation() {
-        let request = ShiftRequest {
-            session: SessionId::from("s"),
-            request: ShiftRequestId::new("r"),
-            intended_lane: Some(BuildGeneration::for_test("sender")),
-        };
-        let encoded = serde_json::to_value(&request).expect("encode shift request");
-        assert!(
-            encoded.get("build_generation").is_none(),
-            "a wire request cannot supply the admitting build's generation: {encoded}",
-        );
-        assert_eq!(
-            serde_json::from_value::<ShiftRequest>(encoded).expect("decode shift request"),
-            request
-        );
-    }
 }

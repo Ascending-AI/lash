@@ -1,7 +1,6 @@
 //! Named backend test registration. Every generated test owns a fresh fixture.
 
 mod declared_start;
-mod generation_drain;
 mod obligation_relay;
 mod session_ingress;
 mod tool_batch;

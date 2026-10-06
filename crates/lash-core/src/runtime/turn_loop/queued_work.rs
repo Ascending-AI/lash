@@ -129,7 +129,6 @@ impl LashRuntime {
         let request = crate::engine::ShiftRequest {
             session: self.state.session_id.clone(),
             request: crate::engine::ShiftRequestId::new(controller.scope_id()),
-            intended_lane: None,
         };
         let sinks = crate::runtime::shift::ShiftSinks {
             events: bound.events_or_noop(),

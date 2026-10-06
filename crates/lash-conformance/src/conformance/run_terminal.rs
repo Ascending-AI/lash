@@ -321,7 +321,7 @@ pub async fn a_run_whose_admission_a_successor_sealed_commits_nothing(
         let request = request.clone();
         Box::pin(async move {
             let admitted = admitted(
-                lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None)
+                lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0)
                     .await
                     .expect("admit the run"),
             );
@@ -528,7 +528,6 @@ async fn reconcile_tick(
             sessions: factory.as_ref(),
             work: &work,
             scopes: &scopes,
-            processes: None,
             clock: clock.as_ref(),
             duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
             relays: &relays,

@@ -22,7 +22,6 @@ pub mod admitted_scope;
 pub mod artifact_referrer;
 pub mod attachments;
 pub mod await_event_identity;
-pub mod build_generation;
 pub mod chronological;
 pub mod compat;
 pub mod config_transaction;

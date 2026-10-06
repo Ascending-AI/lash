@@ -92,58 +92,6 @@ impl serde::Serialize for DeploymentDrainStatus {
     }
 }
 
-/// What one build generation still holds while it drains (FIG-3799): the
-/// read an operator polls after
-/// [`LashCore::drain_generation`](crate::LashCore::drain_generation) until
-/// the generation's deployment can be retired. The report type and its
-/// composition live beside the store port that answers them, so this facade
-/// and the operator binary share one definition (FIG-3884).
-pub use lash_core::store::generation_drain::GenerationDrainStatus;
-
-/// Mark `generation` draining in `backend`'s stores and wake every live
-/// process on it: the whole drain
-/// [`LashCore::drain_generation`](crate::LashCore::drain_generation) runs,
-/// for an operator that holds no core, such as `lashctl drain` (FIG-5059).
-/// The two share this one function, so an operator drain wakes a Run parked
-/// on a durable wait as promptly as a core's drain does.
-///
-/// Each live process the generation holds is woken at once; the durable
-/// mark remains recovery's retry authority for any wake an interrupted drain
-/// left owed. Idempotent: `true` when this call marked the generation, `false`
-/// when it was already draining.
-pub async fn drain_generation(
-    backend: &crate::Backend,
-    generation: &lash_core::engine::BuildGeneration,
-) -> crate::Result<bool> {
-    let marks = backend.generation_drain();
-    let changed = marks
-        .mark_draining(generation, backend.clock().timestamp_ms())
-        .await?;
-    // No turn hands over at a drain any more (ADR 0132): a turn's next
-    // activation runs on whichever build claims its actor. A live process
-    // is woken so its activation reads the mark.
-    let page = std::num::NonZeroUsize::MIN.saturating_add(255);
-    let mut after = None;
-    loop {
-        let processes = marks
-            .live_processes(generation, after.as_ref(), page)
-            .await?;
-        if processes.is_empty() {
-            break;
-        }
-        for process in processes {
-            backend.wake_process(&process).await.map_err(|error| {
-                lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::StoreCommitFailed,
-                    error.to_string(),
-                )
-            })?;
-            after = Some(process);
-        }
-    }
-    Ok(changed)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;

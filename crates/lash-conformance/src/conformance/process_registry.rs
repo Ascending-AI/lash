@@ -1084,7 +1084,6 @@ async fn refolded_process_record_matches_stored_projection(
                 owner: authority.owner_identity(),
                 attempt: 1,
                 started_at_ms: base.created_at_ms,
-                build_generation: None,
                 generation: None,
                 plugins: None,
             },

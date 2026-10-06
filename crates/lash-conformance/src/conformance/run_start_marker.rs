@@ -155,7 +155,6 @@ pub async fn a_fresh_root_journal_refuses_the_retained_admission_nonce(
     let request = ShiftRequest {
         session: session_id.clone(),
         request: ShiftRequestId::new(format!("{prefix}-run-start-marker")),
-        intended_lane: None,
     };
 
     let admission_scope =
@@ -166,7 +165,7 @@ pub async fn a_fresh_root_journal_refuses_the_retained_admission_nonce(
             let request = request.clone();
             Box::pin(async move {
                 let AdmitVerdict::Admit(admitted) =
-                    lash_core::shift::admit_shift(&mut runtime, &scoped, &request, 0, None)
+                    lash_core::shift::admit_shift(&mut runtime, &scoped, &request, 0)
                         .await
                         .expect("the first root admits its input")
                 else {
@@ -206,7 +205,7 @@ pub async fn a_fresh_root_journal_refuses_the_retained_admission_nonce(
             let request = request.clone();
             Box::pin(async move {
                 let AdmitVerdict::Admit(admitted) =
-                    lash_core::shift::admit_shift(&mut runtime, &scoped, &request, 0, None)
+                    lash_core::shift::admit_shift(&mut runtime, &scoped, &request, 0)
                         .await
                         .expect("the fresh root reads the retained admission")
                 else {

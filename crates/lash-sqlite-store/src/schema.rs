@@ -345,15 +345,12 @@ CREATE TABLE IF NOT EXISTS turn_parks (
     attempts INTEGER NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1),
     park_executable_generation TEXT,
     engine_ref TEXT,
-    resume_intent INTEGER,
-    park_build_generation TEXT
+    resume_intent INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_turn_parks_since
     ON turn_parks(since_ms, session_id);
 CREATE INDEX IF NOT EXISTS idx_turn_parks_executable_generation
     ON turn_parks(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_turn_parks_build_generation
-    ON turn_parks(park_build_generation) WHERE park_build_generation IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS turn_park_clock (
     singleton           INTEGER PRIMARY KEY CONSTRAINT ck_turn_park_clock_singleton CHECK (singleton = 1),
@@ -374,9 +371,8 @@ CREATE TABLE IF NOT EXISTS turn_park_events (
     cause_json       TEXT,
     reason_json TEXT,
     at_ms       INTEGER NOT NULL,
-    park_build_generation TEXT,
     redrive_intent INTEGER,
-    CONSTRAINT ck_turn_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL AND park_build_generation IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0 AND park_build_generation IS NULL)) IS TRUE)
+    CONSTRAINT ck_turn_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0)) IS TRUE)
 );
 
 CREATE TABLE IF NOT EXISTS queued_work_batches (
@@ -709,8 +705,6 @@ CREATE TABLE IF NOT EXISTS processes (
     parked_since_ms       INTEGER,
     parked_reason_code    TEXT,
     park_executable_generation TEXT,
-    park_build_generation TEXT,
-    segment_generation    TEXT,
     record_json           TEXT NOT NULL,
     start_obligation_id         TEXT,
     start_obligation_state      TEXT,
@@ -824,16 +818,6 @@ CREATE INDEX IF NOT EXISTS idx_processes_parked
 -- drain counts retired process parks per executable generation off it.
 CREATE INDEX IF NOT EXISTS idx_processes_park_executable_generation
     ON processes(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
--- The build generation of the parked checkpoint a park resumes (FIG-3795):
--- drain status counts retired parks by it.
-CREATE INDEX IF NOT EXISTS idx_processes_park_build_generation
-    ON processes(park_build_generation) WHERE park_build_generation IS NOT NULL;
--- The build generation that admitted each live process's current segment
--- (FIG-3795 S2): the drain routes a refused redrive to the build that wrote
--- the segment's journal. Partial: a terminal segment's writer is no route,
--- and a NULL stamp is no lookup key.
-CREATE INDEX IF NOT EXISTS idx_processes_live_generation
-    ON processes(segment_generation) WHERE status IN ('running', 'waiting') AND segment_generation IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS process_park_clock (
     singleton           INTEGER PRIMARY KEY CONSTRAINT ck_process_park_clock_singleton CHECK (singleton = 1),
@@ -853,9 +837,8 @@ CREATE TABLE IF NOT EXISTS process_park_events (
     cause_json       TEXT,
     reason_json TEXT,
     at_ms       INTEGER NOT NULL,
-    park_build_generation TEXT,
     redrive_intent INTEGER,
-    CONSTRAINT ck_process_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL AND park_build_generation IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0 AND park_build_generation IS NULL)) IS TRUE)
+    CONSTRAINT ck_process_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0)) IS TRUE)
 );
 
 CREATE TABLE IF NOT EXISTS process_change_clock (
@@ -951,15 +934,9 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
     committed_at_ms INTEGER NOT NULL,
     handover_json    TEXT NOT NULL,
     started_json     TEXT,
-    written_generation TEXT NOT NULL,
-    route            TEXT NOT NULL,
     PRIMARY KEY (process_id, segment_ordinal),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
--- The route a retained handover's successor was sent under (FIG-3795 S3):
--- drain re-routing finds every successor addressed to a retired deployment.
-CREATE INDEX IF NOT EXISTS idx_process_segment_handovers_route
-    ON process_segment_handovers(route);
 
 -- One row per ended parent scope, keyed by the scope itself rather than by a
 -- process row: a turn-scoped parent has no process row at all, and a
@@ -1026,13 +1003,6 @@ CREATE TABLE IF NOT EXISTS tool_intent_retired_owners (
     owner TEXT PRIMARY KEY
 );
 
--- The build generations an operator marked draining (FIG-3799): the recovery
--- leader wakes every live process whose current segment a marked generation
--- admitted, so each hands its open wait to a successor on the newest build.
-CREATE TABLE IF NOT EXISTS draining_generations (
-    generation   TEXT PRIMARY KEY,
-    marked_at_ms INTEGER NOT NULL
-);
 
 ";
 

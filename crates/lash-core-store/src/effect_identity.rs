@@ -66,11 +66,6 @@ pub enum RuntimeEffectKind {
     ExecCode,
     /// Durable admission of a turn input (ADR 0069 section 6).
     AcceptTurnInput,
-    /// A turn's recorded read, at a quiet point, of whether the build its
-    /// invocation runs on is draining (FIG-4739): the fact its segment
-    /// boundary is decided from, so a replay ends the turn where its first
-    /// execution did.
-    ObserveDrainMark,
     /// A follow-on recovery run's recorded decision before its turn
     /// (FIG-4361): run the owed follow-on under its raised recovery count,
     /// commit it exhausted, or cede a follow-on the head owes no longer.
@@ -141,7 +136,6 @@ impl RuntimeEffectKind {
             Self::Process => "process",
             Self::ExecCode => "exec_code",
             Self::AcceptTurnInput => "accept_turn_input",
-            Self::ObserveDrainMark => "observe_drain_mark",
             Self::PluginCallbacks => "plugin_callbacks",
             Self::RecoverFollowOn => "recover_follow_on",
             Self::RestoreRunMaterial => "restore_run_material",

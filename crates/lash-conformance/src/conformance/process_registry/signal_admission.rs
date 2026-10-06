@@ -277,7 +277,6 @@ pub(super) async fn signal_admission_retains_its_identity_and_selected_wait(
                 attempt: 1,
                 started_at_ms: record.created_at_ms,
                 generation: None,
-                build_generation: None,
                 plugins: None,
             },
         )

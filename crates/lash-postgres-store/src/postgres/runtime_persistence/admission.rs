@@ -270,7 +270,6 @@ pub(crate) async fn admit_run_tx(
         .bind(session_id.as_str())
         .bind(request.run.as_str())
         .bind(json)
-        .bind(request.admitted_generation.as_str())
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?

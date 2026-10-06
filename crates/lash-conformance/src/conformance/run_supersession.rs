@@ -198,7 +198,7 @@ pub async fn an_obsolete_executor_never_ends_its_successors_run(
         let request = request.clone();
         Box::pin(async move {
             let admitted = admitted(
-                lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None)
+                lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0)
                     .await
                     .expect("admit the run"),
             );

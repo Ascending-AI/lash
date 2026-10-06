@@ -24,9 +24,7 @@ use crate::{AdmittedScope, RuntimeError, SessionId, TurnId};
 const SHIFT_ADMISSION_SCOPE_PREFIX: &str = "shift:";
 
 /// Maximum runs admitted by one engine shift invocation before it hands
-/// remaining work to a new request. An invocation whose build is draining
-/// hands over sooner, after the run it is running
-/// ([`ShiftStop::Draining`]).
+/// remaining work to a new request.
 pub const MAX_RUNS_PER_SHIFT: usize = 64;
 
 /// What a `SessionShifts` keeps open for one attempt of one shift invocation
@@ -234,17 +232,6 @@ pub enum ShiftStop {
     /// waiter follows the continuation; this is one leg's stop, never a
     /// whole shift's.
     HandedOff { run: TurnId },
-    /// The engine's shift invocation ended before its next run because
-    /// `generation`, the build it is pinned to, is draining (ADR 0106 §1):
-    /// admission recorded the drain mark and admitted nothing
-    /// ([`AdmitVerdict::Draining`](super::admission::AdmitVerdict::Draining)),
-    /// and the invocation sent the rest of the shift to its continuation
-    /// request ([`shift_continuation_request`]) under the stable name, which
-    /// the newest build serves. One leg's stop, as
-    /// [`HandedOff`](Self::HandedOff) is: a waiter follows the continuation.
-    Draining {
-        generation: super::contracts::BuildGeneration,
-    },
 }
 
 /// The stop rules every shift loop keeps, in process or split across an
@@ -410,7 +397,6 @@ impl ShiftAbort {
 #[doc(hidden)]
 pub mod admission_body {
     use super::super::admission::{AdmissionId, Admitted, ShiftRequestId};
-    use super::super::contracts::BuildGeneration;
     use crate::SessionId;
 
     #[must_use]
@@ -418,10 +404,9 @@ pub mod admission_body {
         session: SessionId,
         request: ShiftRequestId,
         admission: AdmissionId,
-        admitted_generation: BuildGeneration,
         receipt: lash_core_store::store::ShiftAdmissionReceipt,
     ) -> Admitted {
-        Admitted::minted(session, request, admission, admitted_generation, receipt)
+        Admitted::minted(session, request, admission, receipt)
     }
 }
 
@@ -470,7 +455,6 @@ mod tests {
             receipt_session.clone(),
             ShiftRequestId::new("r"),
             receipt_admission.clone(),
-            super::super::contracts::BuildGeneration::for_test("t0"),
             lash_core_store::store::ShiftAdmissionReceipt {
                 selection: lash_core_store::store::ShiftAdmissionSelection {
                     run: run.clone(),

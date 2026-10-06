@@ -189,20 +189,6 @@ pub fn record_obligations_stalled(metrics: &TelemetryMetrics, kind: &'static str
     metrics.obligations.record_stalled(kind, count);
 }
 
-/// Gauge observation for `lash.generation_drain.work`.
-pub fn record_generation_drain_work(
-    metrics: &TelemetryMetrics,
-    generation: &str,
-    kind: &'static str,
-    count: u64,
-) {
-    #[cfg(any(test, feature = "testing"))]
-    observe_test_metric("lash.generation_drain.work");
-    metrics
-        .generation_drain
-        .record_work(generation, kind, count);
-}
-
 /// Physical lease observation for `lash.recovery_leader`.
 pub fn record_recovery_leadership(
     metrics: &TelemetryMetrics,

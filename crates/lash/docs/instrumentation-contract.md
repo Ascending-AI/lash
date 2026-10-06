@@ -69,8 +69,6 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.obligation.kind` | String |
 | `lash.obligation.outcome` | String |
 | `lash.recovery_leader.name` | String |
-| `lash.generation_drain.generation` | String |
-| `lash.generation_drain.kind` | String |
 
 | Metric | Kind | Unit | Ownership |
 |---|---|---|---|
@@ -90,4 +88,3 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.obligations.stalled` | Gauge | `` | Gauge |
 | `lash.recovery_leader` | Gauge | `` | Physical |
 | `lash.recovery_leader.term` | Gauge | `` | Physical |
-| `lash.generation_drain.work` | Gauge | `` | Gauge |

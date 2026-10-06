@@ -29,8 +29,6 @@ pub async fn process_continuation_store(
     let handover = PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
-        written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
-        route: "LashProcessWorkflow".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
             program_hash: "program-v1".to_string(),
@@ -76,8 +74,6 @@ pub async fn process_continuation_store(
     let written = PersistedSegmentHandover {
         writer: "segment-nonce-a".to_string(),
         segment_ordinal: 2,
-        written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
-        route: "LashProcessWorkflow".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
             program_hash: "program-v1".to_string(),
@@ -112,60 +108,6 @@ pub async fn process_continuation_store(
         "another writer's handover at the same ordinal must conflict"
     );
 
-    // FIG-4750: the route is re-recorded in place. The handover's other
-    // bytes stay, a repeat changes nothing, the writer's own retried put
-    // still keeps what is parked, and an ordinal with no handover stays
-    // absent.
-    let lane = "LashProcessWorkflow_gt0";
-    for _ in 0..2 {
-        store
-            .record_segment_handover_route(&process_id, 2, lane)
-            .await
-            .expect("record the segment's route");
-    }
-    let rerouted = PersistedSegmentHandover {
-        route: lane.to_string(),
-        ..written.clone()
-    };
-    assert_eq!(
-        store
-            .get_segment_handover(&process_id, 2)
-            .await
-            .expect("read the re-routed handover"),
-        Some(rerouted.clone()),
-        "only the route changed"
-    );
-    assert_eq!(
-        store
-            .latest_segment_handover(&process_id)
-            .await
-            .expect("read the latest handover"),
-        Some(rerouted.clone())
-    );
-    store
-        .put_segment_handover(&process_id, written)
-        .await
-        .expect("the writer's retried write after the re-route is idempotent");
-    assert_eq!(
-        store
-            .get_segment_handover(&process_id, 2)
-            .await
-            .expect("read the re-routed handover"),
-        Some(rerouted),
-        "the recorded route stays"
-    );
-    store
-        .record_segment_handover_route(&process_id, 9, lane)
-        .await
-        .expect("a route for no handover is a no-op");
-    assert_eq!(
-        store
-            .get_segment_handover(&process_id, 9)
-            .await
-            .expect("read the absent handover"),
-        None
-    );
-
     // FIG-3588: a retained handover carries its segment's start marker,
     // written set-if-absent. The first nonce stays; a second write reads it
     // back unchanged, which is how a different execution learns it lost.
@@ -181,7 +123,6 @@ pub async fn process_continuation_store(
     let first = crate::SegmentStartMarker {
         nonce: "nonce-first".to_string(),
         started_at_ms: 10,
-        build_generation: Some(lash_core::engine::BuildGeneration::for_test("conformance")),
         plugins: None,
     };
     assert_eq!(
@@ -205,7 +146,6 @@ pub async fn process_continuation_store(
                 crate::SegmentStartMarker {
                     nonce: "nonce-other".to_string(),
                     started_at_ms: 20,
-                    build_generation: None,
                     plugins: None,
                 },
             )
@@ -225,7 +165,6 @@ pub async fn process_continuation_store(
                 crate::SegmentStartMarker {
                     nonce: "nonce-unretained".to_string(),
                     started_at_ms: 30,
-                    build_generation: None,
                     plugins: None,
                 },
             )
@@ -273,8 +212,6 @@ pub async fn process_continuation_store(
     let pruned_handover = PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
-        written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
-        route: "LashProcessWorkflow".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
             program_hash: "pruned-program-v1".to_string(),
@@ -303,8 +240,6 @@ pub async fn process_continuation_store(
             &pruned_process_id,
             PersistedSegmentHandover {
                 segment_ordinal: 2,
-                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
-                route: "LashProcessWorkflow".to_string(),
                 writer: String::new(),
                 handover: SegmentHandover {
                     reason: BoundaryReason::JournalBudget,
@@ -339,7 +274,6 @@ pub async fn process_continuation_store(
             crate::SegmentStartMarker {
                 nonce: "nonce-after-terminal".to_string(),
                 started_at_ms: 40,
-                build_generation: None,
                 plugins: None,
             },
         )

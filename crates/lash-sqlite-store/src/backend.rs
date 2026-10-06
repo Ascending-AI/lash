@@ -46,9 +46,6 @@ pub struct SqliteStoreSetOptions {
     /// its steps.
     #[cfg(feature = "testing")]
     pub migration_hook: Option<crate::testing::SqliteMigrationHook>,
-    /// Observes finalize's commits for crash-injection laws.
-    #[cfg(feature = "testing")]
-    pub finalize_hook: Option<crate::testing::SqliteFinalizeHook>,
 }
 
 impl SqliteStoreSetOptions {
@@ -252,96 +249,6 @@ impl SqliteStoreSet {
         &self.inner.location
     }
 
-    /// Finalize the release this build belongs to over this store set (ADR
-    /// 0106 §2, ADR 0115 §2.2): the last step of `retired`'s drain.
-    ///
-    /// It is refused typed unless `retired` reads drained in this store and
-    /// `registry` holds no deployment serving it. It then moves `F` to this
-    /// build's `F_self` in one exclusive transaction, and every writer whose
-    /// writable range excludes the new `F` is fenced from its next
-    /// transaction on.
-    ///
-    /// A SQLite store has no operator hold: the hold stops the fleet's
-    /// automatic finalize, `lashctl finalize` over PostgreSQL, and a host
-    /// that owns a SQLite store finalizes exactly when it calls this.
-    ///
-    /// `plugins` are the finalizing build's plugin registrations (FIG-4746):
-    /// the transaction that moves `F` also raises each registered plugin's
-    /// writer range to its native format, so the two never disagree. A
-    /// registration that would change a recorded range while `F` already is
-    /// this build's epoch is refused typed, and nothing changes.
-    pub async fn finalize(
-        &self,
-        retired: &lash_core_execution::engine::BuildGeneration,
-        registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
-        plugins: &[lash_core_execution::store::plugin_writers::PluginWriterRegistration],
-        now_ms: u64,
-    ) -> Result<
-        lash_core_execution::store::fleet_finalize::FleetEpochFlip,
-        lash_core_execution::store::fleet_finalize::FinalizeError,
-    > {
-        self.finalize_as(
-            retired,
-            registry,
-            plugins,
-            now_ms,
-            lash_core_execution::FleetFormat::writable(),
-        )
-        .await
-    }
-
-    /// [`Self::finalize`] as a build whose writable range is `writable`.
-    pub(crate) async fn finalize_as(
-        &self,
-        retired: &lash_core_execution::engine::BuildGeneration,
-        registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
-        plugins: &[lash_core_execution::store::plugin_writers::PluginWriterRegistration],
-        now_ms: u64,
-        writable: lash_core_execution::compat::VersionRange,
-    ) -> Result<
-        lash_core_execution::store::fleet_finalize::FleetEpochFlip,
-        lash_core_execution::store::fleet_finalize::FinalizeError,
-    > {
-        use lash_core_execution::StoreSet as _;
-        use lash_core_execution::store::fleet_finalize::{FinalizeError, require_retired};
-        let busy_timeout = self.inner.options.store.connection_policy.busy_timeout;
-        let ownership =
-            crate::store_ownership::exclusive(&self.inner.location, busy_timeout).await?;
-        let drain = lash_core_execution::store::generation_drain::GenerationDrainStatus::collect(
-            self.generation_drain().as_ref(),
-            self.session_delete_ledger().as_ref(),
-            |kind| self.obligation_ledger(kind),
-            registry,
-            retired,
-            now_ms,
-        )
-        .await?;
-        require_retired(&drain, registry).await?;
-        let location = self.inner.location.clone();
-        let plugins = plugins.to_vec();
-        #[cfg(feature = "testing")]
-        let hook = self.inner.options.finalize_hook.clone();
-        tokio::task::spawn_blocking(move || {
-            let _ownership = ownership;
-            crate::finalize::finalize(&location, busy_timeout, writable, drain, &plugins, |step| {
-                #[cfg(feature = "testing")]
-                if let (Some(hook), crate::compat::AdvanceStep::Committed) = (&hook, step) {
-                    hook.committed();
-                }
-                #[cfg(not(feature = "testing"))]
-                let _ = step;
-                Ok(())
-            })
-            .map_err(crate::finalize::finalize_error)
-        })
-        .await
-        .map_err(|error| {
-            FinalizeError::Store(lash_core_execution::StoreError::Backend(format!(
-                "the SQLite finalize task ended: {error}"
-            )))
-        })?
-    }
-
     /// `sqlite:<canonical database path>` or `sqlite-memory:<id>`.
     pub fn identity(&self) -> &str {
         &self.inner.identity
@@ -470,14 +377,6 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
 
     fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
         self.inner.recovery_leader.clone()
-    }
-
-    fn generation_drain(
-        &self,
-    ) -> Arc<dyn lash_core_execution::store::generation_drain::GenerationDrainStore> {
-        Arc::new(crate::generation_drain::SqliteGenerationDrain::new(
-            self.inner.process_env_store.conn.clone(),
-        ))
     }
 
     fn obligation_ledger(

@@ -21,18 +21,6 @@ pub struct ReconcileCursor {
     /// The engine's position in its own stalled-work listing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parks: Option<EngineCursor>,
-    /// The last live process of a draining generation the previous tick's
-    /// hand-over slot woke (FIG-3799), with that generation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub drain: Option<(super::BuildGeneration, crate::ProcessId)>,
-    /// The last parked process the previous tick's re-send scan read
-    /// (FIG-4739), by its park's instant and its id.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resend: Option<(u64, crate::ProcessId)>,
-    /// The last session of a draining generation whose parked turn the
-    /// previous tick asked to hand over (FIG-4739), with that generation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turns: Option<(super::BuildGeneration, crate::SessionId)>,
 }
 
 /// The arm of a tick a failure came from.
@@ -40,8 +28,6 @@ pub struct ReconcileCursor {
 pub enum ReconcileArm {
     /// The engine's stalled work into lash parks (O3).
     Parks,
-    /// The FIG-3799 drain hand-over slot.
-    DrainHandOver,
     /// Due obligations claimed through a kind's due index (ADR 0109 §1.4).
     Obligations,
 }
@@ -52,15 +38,6 @@ pub enum ReconcileArm {
 pub struct ReconcileFailure {
     pub arm: ReconcileArm,
     pub error: String,
-}
-
-/// What a slot's pass did.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SlotPass {
-    /// Items the pass settled.
-    pub handled: usize,
-    /// Items the pass left for a later tick.
-    pub deferred: usize,
 }
 
 /// What one due-obligation pass of one kind did (ADR 0109 §1.4).
@@ -90,11 +67,6 @@ pub struct ReconcileTick {
     pub next: ReconcileCursor,
     /// The engine's park reconcile, when it answered.
     pub parks: Option<ParkReconcileReport>,
-    /// The FIG-3799 slot.
-    pub drain_hand_over: SlotPass,
-    /// The sessions of draining generations whose parked turns this tick
-    /// asked to hand over (FIG-4739).
-    pub turn_hand_over: SlotPass,
     /// Every arm failure, in arm order.
     pub failures: Vec<ReconcileFailure>,
     /// Whether this tick ran the leader-only arms (ADR 0109 §1.7).

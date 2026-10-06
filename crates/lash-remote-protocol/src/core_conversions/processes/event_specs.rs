@@ -258,7 +258,6 @@ impl TryFrom<lash_core::ProcessStarted> for RemoteProcessStarted {
             attempt,
             started_at_ms,
             generation,
-            build_generation,
             plugins,
         } = value;
         Ok(Self {
@@ -266,7 +265,6 @@ impl TryFrom<lash_core::ProcessStarted> for RemoteProcessStarted {
             attempt,
             started_at_ms,
             generation: generation.map(|generation| generation.as_str().to_owned()),
-            build_generation: build_generation.map(|generation| generation.as_str().to_owned()),
             plugins: plugins.map(|admission| {
                 admission
                     .plugins()
@@ -291,25 +289,13 @@ impl TryFrom<RemoteProcessStarted> for lash_core::ProcessStarted {
             attempt,
             started_at_ms,
             generation,
-            build_generation,
             plugins,
         } = value;
-        let build_generation = build_generation
-            .map(|text| {
-                lash_core::engine::BuildGeneration::parse(&text).map_err(|error| {
-                    RemoteProtocolError::InvalidEnvelope {
-                        type_name: "ProcessStarted",
-                        message: error.to_string(),
-                    }
-                })
-            })
-            .transpose()?;
         Ok(Self {
             owner: owner.into(),
             attempt,
             started_at_ms,
             generation: generation.map(lash_core::ExecutableGeneration::new),
-            build_generation,
             plugins: plugins.map(|plugins| {
                 lash_core::store::plugin_writers::PluginAdmission::from_plugins(
                     plugins

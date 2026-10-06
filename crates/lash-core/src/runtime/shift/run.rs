@@ -81,7 +81,7 @@ impl LashRuntime {
                     .validate_plugin_admission(&admission.plugins)
                 {
                     let error = error.into_turn_failure(RuntimeErrorCode::Plugin);
-                    self.record_turn_park_after_abort(&error, &ran_execution, None)
+                    self.record_turn_park_after_abort(&error, &ran_execution)
                         .await;
                     return Err(abort(error));
                 }
@@ -112,7 +112,7 @@ impl LashRuntime {
                     )
                     .await
                 {
-                    self.record_turn_park_after_abort(&error, &ran_execution, None)
+                    self.record_turn_park_after_abort(&error, &ran_execution)
                         .await;
                     return Err(abort(error));
                 }
@@ -120,7 +120,7 @@ impl LashRuntime {
                     .publish_plugin_transition(transition, fence, resume)
                     .await
                 {
-                    self.record_turn_park_after_abort(&error, &ran_execution, None)
+                    self.record_turn_park_after_abort(&error, &ran_execution)
                         .await;
                     return Err(abort(error));
                 }
@@ -282,7 +282,7 @@ impl LashRuntime {
                     });
                 }
                 Err(crate::runtime::session_api::CommandDrainStop::Failed(error)) => {
-                    self.record_turn_park_after_abort(&error, &run, None).await;
+                    self.record_turn_park_after_abort(&error, &run).await;
                     return Err(shift_abort(Some(&run), error));
                 }
             }
@@ -385,7 +385,7 @@ impl LashRuntime {
                 });
             }
             Err(crate::runtime::session_api::CommandDrainStop::Failed(error)) => {
-                self.record_turn_park_after_abort(&error, &run, None).await;
+                self.record_turn_park_after_abort(&error, &run).await;
                 return Err(shift_abort(Some(&run), error));
             }
         }
@@ -466,7 +466,6 @@ impl LashRuntime {
                     fence: fence.clone(),
                     follow_on: follow_on.turn.clone(),
                     attempts: follow_on.attempts,
-                    generation: admitted.admitted_generation().clone(),
                     plugin_host: Some(self.services.plugins.host().clone()),
                     base: crate::store::SessionHeadRef {
                         // Read by the decision body on its first execution.
@@ -526,7 +525,7 @@ impl LashRuntime {
             .validate_plugin_admission(&plugins)
         {
             let error = error.into_turn_failure(RuntimeErrorCode::Plugin);
-            self.record_turn_park_after_abort(&error, &run, None).await;
+            self.record_turn_park_after_abort(&error, &run).await;
             return Err(shift_abort(Some(&run), error));
         }
         let (crate::store::FollowOnRecovery::Run(owed)
@@ -544,7 +543,7 @@ impl LashRuntime {
             .publish_plugin_transition(transition, fence, None)
             .await
         {
-            self.record_turn_park_after_abort(&error, &run, None).await;
+            self.record_turn_park_after_abort(&error, &run).await;
             return Err(shift_abort(Some(&run), error));
         }
         self.admitted_turn_index = Some(usize::try_from(turn_index).map_err(|_| {
@@ -779,9 +778,6 @@ struct RecoverFollowOnRunner {
     fence: crate::store::ShiftFence,
     follow_on: TurnId,
     attempts: u32,
-    /// The generation of the build this recovery runs on, which holds the
-    /// follow-on's run from the raise on (FIG-4739).
-    generation: crate::engine::BuildGeneration,
     /// The plugins the follow-on's turn runs, whose composition and writer
     /// formats the decision records (FIG-4747). `None` for a runtime with
     /// no session.
@@ -828,11 +824,7 @@ impl RecoverFollowOnRunner {
                     owed
                 } else {
                     self.store
-                        .raise_pending_follow_on_attempts(
-                            &self.fence,
-                            &owed.follow_on_turn_id,
-                            &self.generation,
-                        )
+                        .raise_pending_follow_on_attempts(&self.fence, &owed.follow_on_turn_id)
                         .await?
                 },
                 base,

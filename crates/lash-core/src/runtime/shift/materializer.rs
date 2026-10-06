@@ -7,7 +7,6 @@ pub trait ShiftAdmissionMaterializer: Send + Sync {
         &self,
         store: &crate::store::SessionStore,
         selection: &crate::store::ShiftAdmissionSelection,
-        admitted_generation: &crate::engine::BuildGeneration,
         preparation: &crate::store::ShiftAdmissionPreparation,
         executor: crate::store::RunExecutor,
         scope: &crate::AdmittedScope,
@@ -89,7 +88,6 @@ impl ShiftAdmissionMaterializer for ShiftAdmissionTemplate {
         &self,
         store: &crate::store::SessionStore,
         selection: &crate::store::ShiftAdmissionSelection,
-        admitted_generation: &crate::engine::BuildGeneration,
         preparation: &crate::store::ShiftAdmissionPreparation,
         executor: crate::store::RunExecutor,
         scope: &crate::AdmittedScope,
@@ -177,7 +175,6 @@ impl ShiftAdmissionMaterializer for ShiftAdmissionTemplate {
             policy: self.policy.clone(),
             base,
             turn_index,
-            admitted_generation: admitted_generation.clone(),
             executor,
             plugins,
             turn_cancellation: Some(crate::store::TurnCancellationBinding {

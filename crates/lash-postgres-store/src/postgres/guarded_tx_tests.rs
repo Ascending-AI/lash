@@ -1,5 +1,5 @@
-//! The PostgreSQL writer fence against a finalize that moves `F` (ADR 0115
-//! §2.2–2.4), each on its own isolated database.
+//! The PostgreSQL writer fence against a move of `F` (ADR 0115 §2.2–2.4),
+//! each on its own isolated database.
 
 // FIG-2971: this file is test code; ambient env access is sanctioned here
 // (the workspace clippy ban targets production library code).
@@ -8,10 +8,9 @@
 use std::time::Duration;
 
 use lash_core_execution::compat::VersionRange;
-use lash_core_execution::engine::BuildGeneration;
 use lash_core_execution::{
-    FleetFormat, SessionCatalogStore as _, SessionCommitStore as _, SessionId, SessionMeta,
-    SessionRelation, StoreError, WriterPin,
+    FleetFormat, ProcessContinuationStore as _, ProcessLifecycle as _, SessionCatalogStore as _,
+    SessionCommitStore as _, SessionId, SessionMeta, SessionRelation, StoreError, WriterPin,
 };
 
 use super::WriterFence;
@@ -178,27 +177,23 @@ async fn pg_fence_refuses_a_writer_after_finalize_with_zero_writes() {
     );
     assert_eq!(meta_rows(&storage, &session_id).await, 0);
 
-    let generation = BuildGeneration::from_digest([0xfe, 0xce, 0, 0, 0, 1]);
     let error = storage
-        .generation_drain()
-        .mark_draining(&generation, 1)
+        .process_registry()
+        .record_parent_end(&lash_core_execution::ScopeId::turn(
+            SessionId::from("fence-parent"),
+            lash_core_execution::TurnId::from("fence-turn"),
+        ))
         .await
-        .expect_err("a drain mark after finalize is fenced");
+        .expect_err("a process-registry write after the move of F is fenced");
     assert!(
-        matches!(
-            error,
-            StoreError::WriterFenced {
-                recorded: PAST_WRITABLE,
-                ..
-            }
-        ),
+        error.to_string().contains("writer fenced"),
         "expected WriterFenced, got {error:?}"
     );
-    let marks: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_draining_generations")
+    let plans: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_parent_end_plans")
         .fetch_one(storage.pool())
         .await
-        .expect("count drain marks");
-    assert_eq!(marks, 0, "a fenced writer wrote nothing");
+        .expect("count parent-end plans");
+    assert_eq!(plans, 0, "a fenced writer wrote nothing");
     assert_eq!(
         storage.fleet_format().version(),
         seeded,
@@ -300,11 +295,16 @@ async fn pg_fence_retries_contended_with_a_fresh_read() {
     let held = HeldFinalize::begin(storage.pool(), NEXT)
         .await
         .expect("finalize holds the fence row");
-    let generation = BuildGeneration::from_digest([0xfe, 0xce, 0, 0, 0, 2]);
     let writer = tokio::spawn({
-        let drain = storage.generation_drain();
-        let generation = generation.clone();
-        async move { drain.mark_draining(&generation, 1).await }
+        let registry = storage.process_registry();
+        async move {
+            registry
+                .retire_segment_handovers_through(
+                    &lash_core_execution::ProcessId::fixture("fence-retry"),
+                    1,
+                )
+                .await
+        }
     });
     tokio::time::timeout(Duration::from_secs(30), async {
         while seam.contended() == 0 {
@@ -315,13 +315,10 @@ async fn pg_fence_retries_contended_with_a_fresh_read() {
     .expect("the writer's fence times out behind finalize");
     held.commit().await.expect("finalize commits");
 
-    assert!(
-        writer
-            .await
-            .expect("join the writer")
-            .expect("the retried writer commits under the new epoch"),
-        "the drain mark is new"
-    );
+    writer
+        .await
+        .expect("join the writer")
+        .expect("the retried writer commits under the new epoch");
     assert!(seam.contended() >= 1);
     assert_eq!(
         seam.passed(),

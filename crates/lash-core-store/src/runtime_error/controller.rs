@@ -158,7 +158,6 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::LanguageRuntimeValue
                 | RuntimeEffectKind::AdmitShift
                 | RuntimeEffectKind::TransitionPlugins
-                | RuntimeEffectKind::ObserveDrainMark
                 | RuntimeEffectKind::RecoverFollowOn
                 | RuntimeEffectKind::RestoreRunMaterial
                 | RuntimeEffectKind::ResolveTurnConfig
@@ -357,16 +356,5 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
 impl From<&crate::StoreError> for RuntimeEffectControllerError {
     fn from(err: &crate::StoreError) -> Self {
         err.runtime_error().into()
-    }
-}
-
-/// A generation read before a core bound it is a deployment fact no retry
-/// changes: no generation lane is served yet.
-impl From<crate::build_generation::GenerationUnbound> for RuntimeError {
-    fn from(error: crate::build_generation::GenerationUnbound) -> Self {
-        Self::new(
-            RuntimeErrorCode::EngineServiceUnregistered,
-            error.to_string(),
-        )
     }
 }

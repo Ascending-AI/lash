@@ -286,7 +286,6 @@ pub async fn session_delete_closes_active_and_parked_runs_as_session_deleted(
             },
             at_ms: 1,
             origin: lash_core::store::TurnParkOrigin::Refusal,
-            build_generation: None,
         })
         .await
         .map(lash_core::store::StoreTransition::into_record)

@@ -483,7 +483,7 @@ pub trait RunStore: Send + Sync {
     /// obligation, reads the session's state generation into the base, retains
     /// that base, binds the admitted inputs' answer-of-record to the run and
     /// records the [`RunAdmission`] on the run
-    /// (`session_runs.admission_json`, with `admitted_generation`). A
+    /// (`session_runs.admission_json`). A
     /// composition that misses the head takes nothing and returns `None`, as
     /// does an empty lane. While the head owes a follow-on, nothing is
     /// admitted and the call returns `None`.
@@ -981,7 +981,6 @@ pub struct AdmitRunRequest {
     pub policy: crate::TurnLaneAdmissionPolicy,
     pub base: SessionHeadRef,
     pub turn_index: u64,
-    pub admitted_generation: crate::build_generation::BuildGeneration,
     /// The execution that executes the run, recorded as given.
     pub executor: RunExecutor,
     /// The admitting build's plugin composition and the writer chosen for

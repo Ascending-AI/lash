@@ -189,7 +189,6 @@ impl World {
                 sessions: factory.as_ref(),
                 work: self.engine.as_ref(),
                 scopes: &NoScopeClose,
-                processes: None,
                 clock: self.clock.as_ref(),
                 duties,
                 relays: &relays,

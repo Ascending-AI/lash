@@ -17,7 +17,7 @@ pub(super) async fn admit(
         let request = request.clone();
         Box::pin(async move {
             admitted(
-                lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None)
+                lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0)
                     .await
                     .expect("the real root admits the law's input"),
             )

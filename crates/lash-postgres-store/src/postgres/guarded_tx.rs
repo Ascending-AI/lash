@@ -446,45 +446,25 @@ pub(crate) async fn begin_migration<'c>(
     })
 }
 
-/// The fleet-format row locked for an update: finalize's side of the fence
-/// (§2.2), and the operator hold's.
+/// The fleet-format row locked for an update: a move of `F`'s side of the
+/// fence (§2.2), which tests stand up for a newer fleet.
 ///
 /// `BEGIN`, then the row read `FOR UPDATE` as the transaction's only lock.
 /// It waits behind every writer holding the row `FOR SHARE`, and every
 /// writer that fences after it waits until it commits and then reads what it
 /// wrote. The recorded epoch is admitted against the fence's writable range
-/// like any writer's: a build that a newer release fenced out can neither
-/// finalize nor move the hold.
+/// like any writer's: a build that a newer release fenced out cannot move it.
+#[cfg(any(test, feature = "testing"))]
 pub(crate) struct FleetRowTx {
     tx: Transaction<'static, Postgres>,
     /// The epoch the row records.
     pub(crate) recorded: u32,
-    /// The operator's hold on the automatic finalize, if one stands.
-    pub(crate) hold: Option<lash_core_execution::store::fleet_finalize::FinalizeHold>,
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl FleetRowTx {
     pub(crate) fn connection(&mut self) -> &mut PgConnection {
         &mut self.tx
-    }
-
-    /// Record `ranges` in the fleet record, replacing each named plugin's
-    /// range: finalize's move, in the transaction that moves `F`.
-    pub(crate) async fn record_plugin_writers(
-        &mut self,
-        ranges: &PluginWriterRanges,
-    ) -> Result<(), StoreError> {
-        for (plugin, range) in ranges.iter() {
-            let (min, max) = plugin_writer_bounds(plugin, range)?;
-            sqlx::query(session_sql().fleet_plugin_writers.upsert.sql())
-                .bind(plugin)
-                .bind(min)
-                .bind(max)
-                .execute(&mut *self.tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        }
-        Ok(())
     }
 
     pub(crate) async fn commit(self) -> Result<(), StoreError> {
@@ -493,17 +473,17 @@ impl FleetRowTx {
 }
 
 /// Lock the fleet-format row for an update ([`FleetRowTx`]).
+#[cfg(any(test, feature = "testing"))]
 pub(crate) async fn begin_fleet_row(
     pool: &PgPool,
     fence: &WriterFence,
 ) -> Result<FleetRowTx, StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
-    let row: Option<(i32, Option<String>, Option<i64>)> =
-        sqlx::query_as(session_sql().fleet_format.select_for_update.sql())
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    let Some((recorded, reason, held_at_ms)) = row else {
+    let row: Option<i32> = sqlx::query_scalar(session_sql().fleet_format.select_for_update.sql())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let Some(recorded) = row else {
         return Err(missing_fence_row("the fleet-format row is absent"));
     };
     let recorded = u32::try_from(recorded).map_err(|_| {
@@ -513,16 +493,7 @@ pub(crate) async fn begin_fleet_row(
     })?;
     FleetFormat::fence(recorded, fence.state.writable)?;
     fence.observe(recorded);
-    let hold = match (reason, held_at_ms) {
-        (Some(reason), Some(held_at_ms)) => {
-            Some(lash_core_execution::store::fleet_finalize::FinalizeHold {
-                reason,
-                held_at_ms: u64::try_from(held_at_ms).unwrap_or_default(),
-            })
-        }
-        _ => None,
-    };
-    Ok(FleetRowTx { tx, recorded, hold })
+    Ok(FleetRowTx { tx, recorded })
 }
 
 /// The body [`guarded`] runs inside each attempt's transaction.

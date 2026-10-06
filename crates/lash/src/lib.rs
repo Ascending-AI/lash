@@ -198,9 +198,8 @@ pub use crate::admin::{
     SessionCommandWithdrawal, SessionTriggerAdmin, ToolAdmin,
 };
 pub use crate::core::{
-    DeploymentDrainStatus, GenerationDrainStatus, LashCore, LashCoreBuilder, SessionClosing,
-    SessionDeleteCompletion, SessionDeleteFailure, SessionDeleteReport, SessionDeleteWait,
-    SessionDeletion, drain_generation,
+    DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionClosing, SessionDeleteCompletion,
+    SessionDeleteFailure, SessionDeleteReport, SessionDeleteWait, SessionDeletion,
 };
 pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, SendError};
@@ -225,15 +224,6 @@ pub use crate::turn::{
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
 /// `async-trait` dependency to keep version-aligned.
 pub use lash_core::async_trait;
-/// The one substrate a [`LashCore`] takes every persistence port and its
-/// durable store from: the concrete durable backend over one store set
-/// (ADR 0132 §1). [`LashCore::builder`] requires one, which
-/// [`durable::DurableBackendBuilder`] builds over a SQLite or PostgreSQL store
-/// set.
-pub use lash_core::engine::BuildGeneration;
-/// The slot an engine holds its build generation in, and the typed refusals
-/// of reading it before a core bound it and of binding it twice (FIG-4744).
-pub use lash_core::engine::{EngineGeneration, GenerationRebound, GenerationUnbound};
 /// Store→engine delivery obligations (ADR 0109): what a stalled obligation
 /// reports, and how this deployment competes for the recovery leader lease.
 pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryPassBudget};
@@ -327,7 +317,6 @@ pub use lash_core::session_delete::SessionDeleteStores;
 pub use lash_core::shift::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
 pub use lash_core::shift::{ObligationRelayUnavailable, RelayNeed};
 pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
-pub use lash_core_store::build_generation::BuildGenerationParseError;
 pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use lash_core_store::turn_input_vocabulary::ResolvedRun;
 pub use lash_sansio::llm::types::{
@@ -594,9 +583,6 @@ pub mod persistence {
     /// Retained tool material: a store's dependency leases on bundles.
     pub use lash_core_store::store::ToolMaterialStore;
     pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
-    pub use lash_core_store::store::fleet_finalize::{
-        DeploymentRegistry, DeploymentRegistryError, RetainedDeployment,
-    };
     pub use lash_core_store::store::{
         DurableRecord, EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow,
         StoreFault, StoreRefusal, StoredRunTerminal, SurfaceFormat, WriterPin,
@@ -645,12 +631,6 @@ pub mod persistence {
     pub use lash_core::store::ProcessParkWrite;
     /// Head and usage values returned by custom session stores.
     pub use lash_core::store::SessionHeadRef;
-    /// A build generation's drain marks and remaining work (FIG-3799): the
-    /// store half a [`StoreSet`](crate::StoreSet) supplies for
-    /// [`LashCore::drain_generation`](crate::LashCore::drain_generation).
-    pub use lash_core::store::generation_drain::{
-        DrainingGeneration, GenerationDrainStore, GenerationWork,
-    };
     pub use lash_core::store::worker_recovery::{
         WorkerRecoveryClaim, WorkerRecoveryError, WorkerRecoveryLimits, WorkerRecoveryStore,
         WorkerRecoveryTotals,
@@ -1380,9 +1360,6 @@ pub mod schema {
 pub mod sqlite {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core_store::process_identity::ProcessIdMint;
-    pub use lash_core_store::store::fleet_finalize::{
-        FinalizeError, FinalizeHold, FinalizeRefusal, FleetEpochFlip,
-    };
 
     pub use lash_sqlite_store::*;
 }
@@ -1390,9 +1367,6 @@ pub mod sqlite {
 /// PostgreSQL durable store backend.
 #[cfg(feature = "postgres")]
 pub mod postgres {
-    // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core_store::store::fleet_finalize::FinalizeMode;
-
     pub use lash_postgres_store::*;
 
     /// The live replay store every replica of a host shares through one

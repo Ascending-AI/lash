@@ -275,7 +275,6 @@ impl DurableProcessWorker {
                         owner,
                         attempt,
                         started_at_ms: self.now_ms(),
-                        build_generation: None,
                         generation,
                         plugins: started_plugins,
                     },

@@ -24,9 +24,6 @@ mod enabled {
     const OBLIGATION_KIND_ATTRIBUTE: &str = AttributeKey::ObligationKind.definition().key;
     const OBLIGATION_OUTCOME_ATTRIBUTE: &str = AttributeKey::ObligationOutcome.definition().key;
     const RECOVERY_LEASE_ATTRIBUTE: &str = AttributeKey::RecoveryLease.definition().key;
-    const GENERATION_DRAIN_GENERATION_ATTRIBUTE: &str =
-        AttributeKey::DrainGeneration.definition().key;
-    const GENERATION_DRAIN_KIND_ATTRIBUTE: &str = AttributeKey::DrainKind.definition().key;
 
     /// Runtime-facing OpenTelemetry instruments for host-tunable operational limits.
     #[derive(Clone)]
@@ -242,34 +239,6 @@ mod enabled {
         }
     }
 
-    /// Runtime-facing OpenTelemetry instruments for a build generation's drain
-    /// (FIG-3884): the counts an operator polls while the generation runs down.
-    #[derive(Clone)]
-    pub struct GenerationDrainMetrics {
-        work: Gauge<u64>,
-    }
-
-    impl GenerationDrainMetrics {
-        pub fn new(meter: Meter) -> Self {
-            Self {
-                work: gauge(&meter, Metric::DrainWork),
-            }
-        }
-
-        /// Report one (generation, kind) cell's count, including zero so a
-        /// drained cell drops back. `kind` is one of `live_processes`,
-        /// `parked_processes`, `parked_turns`, `in_flight_turns`.
-        pub fn record_work(&self, generation: &str, kind: &'static str, count: u64) {
-            self.work.record(
-                count,
-                &[
-                    KeyValue::new(GENERATION_DRAIN_GENERATION_ATTRIBUTE, generation.to_owned()),
-                    KeyValue::new(GENERATION_DRAIN_KIND_ATTRIBUTE, kind),
-                ],
-            );
-        }
-    }
-
     fn counter(meter: &Meter, metric: Metric) -> Counter<u64> {
         let def = metric.definition();
         meter.u64_counter(def.name).with_unit(def.unit).build()
@@ -351,13 +320,6 @@ mod disabled {
             let _ = (name, leading, term);
         }
     }
-    #[derive(Clone, Default)]
-    pub struct GenerationDrainMetrics;
-    impl GenerationDrainMetrics {
-        pub fn record_work(&self, generation: &str, kind: &'static str, count: u64) {
-            let _ = (generation, kind, count);
-        }
-    }
 }
 #[cfg(not(feature = "otel"))]
 pub use disabled::*;
@@ -369,7 +331,6 @@ pub struct TelemetryMetrics {
     pub parked_work: ParkedWorkMetrics,
     pub tool_intent: ToolIntentMetrics,
     pub obligations: ObligationMetrics,
-    pub generation_drain: GenerationDrainMetrics,
 }
 #[cfg(feature = "otel")]
 impl TelemetryMetrics {
@@ -383,8 +344,7 @@ impl TelemetryMetrics {
             runtime_tuning: RuntimeTuningMetrics::new(meter.clone()),
             parked_work: ParkedWorkMetrics::new(meter.clone()),
             tool_intent: ToolIntentMetrics::new(meter.clone()),
-            obligations: ObligationMetrics::new(meter.clone()),
-            generation_drain: GenerationDrainMetrics::new(meter),
+            obligations: ObligationMetrics::new(meter),
         }
     }
 }
@@ -406,7 +366,6 @@ impl Default for TelemetryMetrics {
                 parked_work: ParkedWorkMetrics,
                 tool_intent: ToolIntentMetrics,
                 obligations: ObligationMetrics,
-                generation_drain: GenerationDrainMetrics,
             }
         }
     }
@@ -462,9 +421,6 @@ mod tests {
         metrics.obligations.record_attempt("turn", "success");
         metrics.obligations.record_stalled("turn", 1);
         metrics.obligations.record_leadership("recovery", true, 1);
-        metrics
-            .generation_drain
-            .record_work("build", "parked_turns", 1);
         // Neither a different injected provider nor the default may receive these observations.
         other_metrics.tool_intent.record_executed("other_provider");
         TelemetryMetrics::default()
@@ -499,7 +455,7 @@ mod tests {
             .collect::<Vec<_>>();
         expected.sort_unstable_by_key(|entry| entry.0);
         assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 17);
+        assert_eq!(actual.len(), 16);
         let isolated = second.get_finished_metrics().expect("second export");
         let names = isolated
             .iter()

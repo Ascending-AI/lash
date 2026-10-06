@@ -23,7 +23,7 @@ crate::statements! {
 
         /// Record the admission in the same transaction as its row bindings.
         write_admission = "UPDATE session_runs
-             SET admission_json = ?3, admitted_generation = ?4
+             SET admission_json = ?3
              WHERE session_id = ?1 AND run = ?2 AND admission_json IS NULL";
 
         /// What run `?2` of session `?1` holds, as a seal reads it: the
@@ -49,37 +49,11 @@ crate::statements! {
              WHERE session_id = ?1 AND run = ?2
                AND admission_json IS NULL AND terminal_kind IS NULL";
 
-        /// Restamp unfinished run `?2` of session `?1` with generation `?3`:
-        /// the build whose follow-on recovery runs the rest of the run holds
-        /// it from here on (FIG-4739).
-        restamp_admitted_generation = "UPDATE session_runs
-             SET admitted_generation = ?3
-             WHERE session_id = ?1 AND run = ?2 AND admission_json IS NOT NULL
-               AND terminal_kind IS NULL";
-
         /// The one admitted run of session `?1` without terminal evidence,
         /// with its recorded admission.
         select_unfinished = "SELECT run, admission_json FROM session_runs
              WHERE session_id = ?1 AND admission_json IS NOT NULL
                AND terminal_kind IS NULL";
-
-        /// The unfinished runs generation `?1` admitted, input-headed and
-        /// queued-headed alike (FIG-3884, FIG-3927). Each dialect's partial
-        /// index on `admitted_generation` serves the read.
-        count_unfinished_by_admitted_generation = "SELECT COUNT(*) FROM session_runs
-             WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
-               AND admitted_generation = ?1";
-
-        /// The sessions holding an unfinished run generation `?1` admitted,
-        /// strictly after session `?2` (`''` from the start), at most `?3`,
-        /// in session order: the page the drain's turn hand-over wakes
-        /// (FIG-4739). The same partial index serves the read.
-        list_unfinished_sessions_by_admitted_generation = "SELECT DISTINCT session_id FROM session_runs
-             WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
-               AND admitted_generation = ?1
-               AND session_id > ?2
-             ORDER BY session_id
-             LIMIT ?3";
 
         /// The terminal evidence of run `?2` of session `?1`: all three
         /// columns NULL while the run has none.

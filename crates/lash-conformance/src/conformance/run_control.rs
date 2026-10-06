@@ -285,7 +285,6 @@ impl AdmittedRun {
                     checkpoint: state.checkpoint_ref.clone(),
                 },
                 turn_index: state.turn_index as u64 + 1,
-                admitted_generation: lash_core::engine::BuildGeneration::for_test("run-control"),
                 executor: lash_core::store::RunExecutor::run(&lash_core::store::AdmissionId::new(
                     "fixture#0",
                 )),
@@ -465,7 +464,6 @@ impl Fixture {
                 sessions: self.factory.as_ref(),
                 work: work.as_ref(),
                 scopes: close.as_ref(),
-                processes: None,
                 clock: later.as_ref(),
                 duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
                 relays: &relays,
@@ -742,7 +740,6 @@ pub async fn a_refused_run_ends_once_and_its_next_input_admits_a_new_run(
         policy: lash_core::testing::queued_work_admission_policy(1),
         base: base.clone(),
         turn_index: state.turn_index as u64 + 1,
-        admitted_generation: lash_core::engine::BuildGeneration::for_test("refused-end"),
         executor: lash_core::store::RunExecutor::run(&lash_core::store::AdmissionId::new(
             "fixture#0",
         )),

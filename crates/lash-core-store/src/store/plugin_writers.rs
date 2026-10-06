@@ -347,40 +347,10 @@ impl PluginWriterRanges {
             .collect()
     }
 
-    /// The ranges a finalize by a build holding `registrations` records: each
-    /// registered plugin's range reaches its native format, and its floor
-    /// stays where history was written. A plugin no registration names keeps
-    /// its range.
-    pub fn finalized(&self, registrations: &[PluginWriterRegistration]) -> Self {
-        let mut ranges = self.ranges.clone();
-        for registration in registrations {
-            let target = match ranges.get(&registration.plugin) {
-                Some(recorded) => VersionRange::between(
-                    recorded.min(),
-                    recorded.max().max(registration.native.get()),
-                ),
-                None => registration.seed(true),
-            };
-            ranges.insert(registration.plugin.clone(), target);
-        }
-        Self { ranges }
-    }
-
     /// The ranges with `entries` recorded over them.
     pub fn with(mut self, entries: BTreeMap<String, VersionRange>) -> Self {
         self.ranges.extend(entries);
         self
-    }
-
-    /// The plugins whose recorded range differs between `self` and `target`,
-    /// counting only ranges `self` already records: an entry `target` adds is
-    /// a provisioning, not a change.
-    pub fn changed_in(&self, target: &Self) -> Vec<String> {
-        self.ranges
-            .iter()
-            .filter(|(plugin, range)| target.ranges.get(*plugin) != Some(*range))
-            .map(|(plugin, _)| plugin.clone())
-            .collect()
     }
 }
 
@@ -600,27 +570,6 @@ mod tests {
             recorded.provisioned(&registrations, true),
             BTreeMap::from([("new".to_owned(), VersionRange::between(1, 2))])
         );
-    }
-
-    #[test]
-    fn finalize_raises_each_registered_range_and_keeps_its_floor() {
-        let recorded = ranges(&[("moved", 1, 1), ("kept", 1, 3), ("absent", 2, 2)]);
-        let target = recorded.finalized(&[
-            registration("moved", 2, &[1, 2]),
-            registration("kept", 2, &[2]),
-            registration("fresh", 3, &[2, 3]),
-        ]);
-        assert_eq!(
-            target,
-            ranges(&[
-                ("moved", 1, 2),
-                ("kept", 1, 3),
-                ("absent", 2, 2),
-                ("fresh", 2, 3)
-            ])
-        );
-        assert_eq!(recorded.changed_in(&target), vec!["moved".to_owned()]);
-        assert!(target.changed_in(&target).is_empty());
     }
 
     #[test]

@@ -27,8 +27,7 @@ pub use opentelemetry as api;
 mod payload;
 pub use crate::telemetry::metrics::registry;
 pub use crate::telemetry::metrics::{
-    GenerationDrainMetrics, ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics,
-    TelemetryMetrics, ToolIntentMetrics,
+    ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics, TelemetryMetrics, ToolIntentMetrics,
 };
 use registry::{AttributeKey as A, DomainSpan, Ownership};
 pub use registry::{GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT};

@@ -75,10 +75,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) shift_fence: Option<ShiftFence>,
     /// The logical run the turn's checkpoint admissions bind rows to.
     pub(super) shift_run: Option<crate::TurnId>,
-    /// The build generation the turn's run invocation runs on: the one its
-    /// admission stamped (FIG-4742), whose drain mark the turn reads at a
-    /// quiet point (FIG-4739).
-    pub(super) drive_generation: Option<crate::engine::BuildGeneration>,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     pub(super) turn_control: Arc<ActiveTurnControl>,
     /// Names the reply the protocol driver materialized, for the boundary's

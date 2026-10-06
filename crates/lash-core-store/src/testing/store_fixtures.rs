@@ -322,7 +322,6 @@ pub fn admit_run_request_for_test(
             checkpoint: None,
         },
         turn_index: 1,
-        admitted_generation: crate::build_generation::BuildGeneration::for_test("conformance"),
         executor: crate::store::RunExecutor::run(&crate::store::AdmissionId::new("fixture#0")),
         plugins: Default::default(),
         turn_cancellation: None,

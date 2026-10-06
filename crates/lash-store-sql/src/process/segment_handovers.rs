@@ -3,12 +3,8 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "process_segment_handovers";
 
-/// Every column, in insert order. `written_generation` and `route` are the
-/// drain-generation stamps the handover's writer records beside the handover
-/// (FIG-3795 S3): the build generation the send was made under and the full
-/// service name the successor was sent under.
-pub const INSERT_COLUMNS: &str =
-    "process_id, segment_ordinal, handover_json, written_generation, route, committed_at_ms";
+/// Every column, in insert order.
+pub const INSERT_COLUMNS: &str = "process_id, segment_ordinal, handover_json, committed_at_ms";
 
 /// What the SQLite preflight walk reports for a parked segment.
 ///
@@ -53,11 +49,6 @@ crate::statements! {
         select_latest = "SELECT handover_json FROM process_segment_handovers
                  WHERE process_id = ?1
                  ORDER BY segment_ordinal DESC LIMIT 1";
-
-        /// Re-record the route of the handover of `?1` at segment `?2`: `?3`
-        /// is the handover re-encoded with the route `?4` (FIG-4750).
-        set_route = "UPDATE process_segment_handovers SET handover_json = ?3, route = ?4
-                 WHERE process_id = ?1 AND segment_ordinal = ?2";
 
         /// Retire the handovers of `?1` up to and including segment `?2`.
         delete_through = "DELETE FROM process_segment_handovers

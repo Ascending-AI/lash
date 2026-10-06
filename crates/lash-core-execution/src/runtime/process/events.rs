@@ -1101,12 +1101,6 @@ impl ProcessEventAppendRequest {
                 serde_json::to_value(engine).expect("an engine park serializes"),
             );
         }
-        if let Some(generation) = &park.build_generation {
-            object.insert(
-                "build_generation".to_string(),
-                serde_json::to_value(generation).expect("a build generation serializes"),
-            );
-        }
         Self::new("process.parked", payload).with_replay_key(format!(
             "process:{process_id}:parked:after:{after_event_sequence}"
         ))

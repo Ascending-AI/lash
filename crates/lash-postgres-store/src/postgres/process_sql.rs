@@ -580,8 +580,8 @@ lash_store_sql::statements! {
         /// Insert after the ordinal was read as absent under the owning
         /// process row lock, which also fences terminal completion.
         insert = "INSERT INTO process_segment_handovers
-             (process_id, segment_ordinal, handover_json, written_generation, route, committed_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+             (process_id, segment_ordinal, handover_json, committed_at_ms)
+             VALUES (?1, ?2, ?3, ?4)";
 
         /// The parked-continuation page of the preflight walk: after `?1` /
         /// `?2`, at most `?3`.

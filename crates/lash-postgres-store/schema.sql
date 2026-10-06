@@ -55,19 +55,13 @@ CREATE TABLE IF NOT EXISTS lash_migrations (
 
 -- The durable-format generation every writer in the fleet emits (ADR 0106
 -- §1 `F`). The installer seeds the row below; opens read the recorded
--- generation, never record one, and keep writing it until `lashctl finalize`
--- (FIG-3800) moves it. The same row carries the operator's hold on the
--- automatic finalize, so the finalize that locks the row to move it reads the
--- hold in the same transaction. One row, like the other deployment-scoped
--- singletons in this schema.
+-- generation, never record one, and keep writing it until a move of `F`
+-- changes it. One row, like the other deployment-scoped singletons in this
+-- schema.
 CREATE TABLE IF NOT EXISTS lash_fleet_format (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
     format_version INTEGER NOT NULL,
-    finalize_hold_reason TEXT,
-    finalize_held_at_ms BIGINT,
-    CONSTRAINT ck_fleet_format_singleton CHECK (singleton),
-    CONSTRAINT ck_fleet_format_finalize_hold
-        CHECK ((finalize_hold_reason IS NULL) = (finalize_held_at_ms IS NULL))
+    CONSTRAINT ck_fleet_format_singleton CHECK (singleton)
 );
 
 -- The fleet record's per-plugin writer ranges (FIG-4746), beside `F`: the
@@ -151,14 +145,6 @@ CREATE TABLE IF NOT EXISTS lash_recovery_leader (
     term BIGINT NOT NULL,
     elected_at_ms BIGINT NOT NULL,
     expires_at_ms BIGINT NOT NULL
-);
-
--- The build generations an operator marked draining (FIG-3799): the recovery
--- leader wakes every live process whose current segment a marked generation
--- admitted, so each hands its open wait to a successor on the newest build.
-CREATE TABLE IF NOT EXISTS lash_draining_generations (
-    generation TEXT PRIMARY KEY,
-    marked_at_ms BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS lash_deleted_sessions (
@@ -380,15 +366,12 @@ CREATE TABLE IF NOT EXISTS lash_turn_parks (
     attempts BIGINT NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1),
     park_executable_generation TEXT,
     engine_ref TEXT,
-    resume_intent BIGINT,
-    park_build_generation TEXT
+    resume_intent BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_lash_turn_parks_since
     ON lash_turn_parks(since_ms, session_id);
 CREATE INDEX IF NOT EXISTS idx_lash_turn_parks_executable_generation
     ON lash_turn_parks(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_lash_turn_parks_build_generation
-    ON lash_turn_parks(park_build_generation) WHERE park_build_generation IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS lash_turn_park_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
@@ -406,9 +389,8 @@ CREATE TABLE IF NOT EXISTS lash_turn_park_events (
     cause_json TEXT,
     reason_json TEXT,
     at_ms BIGINT NOT NULL,
-    park_build_generation TEXT,
     redrive_intent BIGINT,
-    CONSTRAINT ck_turn_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL AND park_build_generation IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0 AND park_build_generation IS NULL)) IS TRUE)
+    CONSTRAINT ck_turn_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0)) IS TRUE)
 );
 
 CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
@@ -568,7 +550,6 @@ CREATE TABLE IF NOT EXISTS lash_session_runs (
     run TEXT NOT NULL,
     executor_json TEXT,
     admission_json TEXT,
-    admitted_generation TEXT,
     terminal_kind TEXT,
     terminal_cause_json TEXT,
     terminal_head_revision BIGINT,
@@ -593,9 +574,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_session_runs_obligation_id
     ON lash_session_runs(obligation_id);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_session_runs_unfinished
     ON lash_session_runs(session_id)
-    WHERE admission_json IS NOT NULL AND terminal_kind IS NULL;
-CREATE INDEX IF NOT EXISTS idx_lash_session_runs_admitted_generation
-    ON lash_session_runs(admitted_generation)
     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_session_runs_obligation_due
     ON lash_session_runs(obligation_due_at_ms, obligation_id)
@@ -722,8 +700,6 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     parked_since_ms BIGINT,
     parked_reason_code TEXT,
     park_executable_generation TEXT,
-    park_build_generation TEXT,
-    segment_generation TEXT,
     record_json TEXT NOT NULL,
     start_obligation_id TEXT,
     start_obligation_state TEXT,
@@ -847,17 +823,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_parked
 -- drain counts retired process parks per executable generation off it.
 CREATE INDEX IF NOT EXISTS idx_lash_processes_park_executable_generation
     ON lash_processes(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
--- The build generation of the parked checkpoint a park resumes (FIG-3795):
--- drain status counts retired parks by it.
-CREATE INDEX IF NOT EXISTS idx_lash_processes_park_build_generation
-    ON lash_processes(park_build_generation) WHERE park_build_generation IS NOT NULL;
--- The build generation that admitted each live process's current segment
--- (FIG-3795 S2): the drain routes a refused redrive to the build that wrote
--- the segment's journal. Partial: a terminal segment's writer is no route,
--- and a NULL stamp is no lookup key — the IS NOT NULL clause also keeps the
--- planner from preferring this index for the unprefixed non-terminal scans.
-CREATE INDEX IF NOT EXISTS idx_lash_processes_live_generation
-    ON lash_processes(segment_generation) WHERE status IN ('running', 'waiting') AND segment_generation IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS lash_process_park_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
@@ -874,9 +839,8 @@ CREATE TABLE IF NOT EXISTS lash_process_park_events (
     cause_json TEXT,
     reason_json TEXT,
     at_ms BIGINT NOT NULL,
-    park_build_generation TEXT,
     redrive_intent BIGINT,
-    CONSTRAINT ck_process_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL AND park_build_generation IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0 AND park_build_generation IS NULL)) IS TRUE)
+    CONSTRAINT ck_process_park_events_parked_reason CHECK (((kind = 'parked' AND reason_json IS NOT NULL AND cause_json IS NULL AND redrive_intent IS NULL) OR (kind IN ('unparked', 'cancelled') AND reason_json IS NULL AND cause_json IS NOT NULL AND redrive_intent IS NULL) OR (kind = 'redrive_requested' AND reason_json IS NULL AND cause_json IS NULL AND redrive_intent IS NOT NULL AND redrive_intent >= 0)) IS TRUE)
 );
 
 CREATE TABLE IF NOT EXISTS lash_process_events (
@@ -961,14 +925,8 @@ CREATE TABLE IF NOT EXISTS lash_process_segment_handovers (
     committed_at_ms BIGINT NOT NULL,
     handover_json TEXT NOT NULL,
     started_json TEXT,
-    written_generation TEXT NOT NULL,
-    route TEXT NOT NULL,
     PRIMARY KEY (process_id, segment_ordinal)
 );
--- The route a retained handover's successor was sent under (FIG-3795 S3):
--- drain re-routing finds every successor addressed to a retired deployment.
-CREATE INDEX IF NOT EXISTS idx_lash_process_segment_handovers_route
-    ON lash_process_segment_handovers(route);
 
 -- One row per ended parent scope, keyed by the scope itself rather than by a
 -- process row: a turn-scoped parent has no process row at all, and a

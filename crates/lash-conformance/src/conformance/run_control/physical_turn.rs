@@ -57,7 +57,7 @@ pub async fn a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit(
             let request = request.clone();
             Box::pin(async move {
                 super::super::shift_admission::admitted(
-                    lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None)
+                    lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0)
                         .await
                         .expect("the real root admits the input"),
                 )

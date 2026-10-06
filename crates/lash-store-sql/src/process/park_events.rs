@@ -17,23 +17,21 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "process_park_events";
 
-/// Every column an event row carries, in insert order. `park_build_generation`
-/// is the generation stamped on the checkpoint a `Parked` row records
-/// (FIG-3795): NULL on the closing rows, which name no checkpoint.
-pub const INSERT_COLUMNS: &str = "seq, process_id, park_id, kind, cause_json, reason_json, at_ms, park_build_generation, redrive_intent";
+/// Every column an event row carries, in insert order.
+pub const INSERT_COLUMNS: &str =
+    "seq, process_id, park_id, kind, cause_json, reason_json, at_ms, redrive_intent";
 
 crate::statements! {
     /// `process_park_events` statements both backends issue verbatim.
     pub struct ProcessParkEventStatements @ "process_park_event" {
         /// Append transition `?4`/`?5` of park `?3` of process `?2`,
         /// sequenced `?1`, carrying reason `?6` when it is a `Parked`, at
-        /// `?7`, stamped `?8` with the checkpoint's build generation when the
-        /// park's writer records one (FIG-3795).
-        insert_event = "INSERT INTO process_park_events (seq, process_id, park_id, kind, cause_json, reason_json, at_ms, park_build_generation, redrive_intent)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
+        /// `?7`, naming redrive intent `?8` when it is a `RedriveRequested`.
+        insert_event = "INSERT INTO process_park_events (seq, process_id, park_id, kind, cause_json, reason_json, at_ms, redrive_intent)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
 
         /// The `?2` oldest events strictly after cursor `?1`, in commit order.
-        select_events_after = "SELECT seq, process_id, park_id, kind, cause_json, reason_json, at_ms, park_build_generation, redrive_intent
+        select_events_after = "SELECT seq, process_id, park_id, kind, cause_json, reason_json, at_ms, redrive_intent
              FROM process_park_events
              WHERE seq > ?1
              ORDER BY seq

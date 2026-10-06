@@ -268,7 +268,6 @@ pub(super) fn turn_effect_executor(
         checkpoint_messages: driver.checkpoint_messages.clone(),
         shift_fence: driver.shift_fence.clone(),
         shift_run: driver.shift_run.clone(),
-        drive_generation: driver.drive_generation.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
         turn_control: Arc::clone(&driver.turn_control),
         protocol_reply: Default::default(),

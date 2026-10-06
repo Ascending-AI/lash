@@ -141,7 +141,6 @@ impl LashRuntime {
         fence: &crate::store::ShiftFence,
         resume: Option<&crate::store::SessionHeadRef>,
     ) -> Result<(), crate::RuntimeError> {
-        let generation = record.generation.clone();
         let store = self.shift_store().map_err(ShiftAbort::into_error)?;
         let crate::plugin::PluginTransitionBase::Session { head } = &record.request.base else {
             return Err(crate::RuntimeError::new(
@@ -193,12 +192,7 @@ impl LashRuntime {
                 let (mut state, staged) = *staged;
                 state.apply_persisted_commit_result(receipt);
                 state.mark_node_ids_persisted(staged.persisted_node_ids);
-                return Box::pin(self.adopt_published_in_place(
-                    state,
-                    &staged.native_view,
-                    generation.as_ref(),
-                ))
-                .await;
+                return Box::pin(self.adopt_published_in_place(state, &staged.native_view)).await;
             }
             base
         } else if let Some(resume) = resume {
@@ -207,11 +201,9 @@ impl LashRuntime {
             if in_place && is_head(&self.state, resume) {
                 let native_view = native_view_of(&record, self.fleet_format())
                     .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
-                return Box::pin(self.adopt_published_in_place(
-                    self.resident_as_head(),
-                    &native_view,
-                    generation.as_ref(),
-                ))
+                return Box::pin(
+                    self.adopt_published_in_place(self.resident_as_head(), &native_view),
+                )
                 .await;
             }
             resume.clone()
@@ -278,8 +270,7 @@ impl LashRuntime {
         }
         Box::pin(self.materialize_published_session())
             .await
-            .map_err(session_error)?;
-        crate::runtime::turn_loop::generation_fence::admit(self, generation.as_ref())
+            .map_err(session_error)
     }
 }
 
@@ -332,7 +323,6 @@ impl LashRuntime {
         &mut self,
         mut state: crate::RuntimeSessionState,
         native_view: &[u8],
-        generation: Option<&crate::ExecutableGeneration>,
     ) -> Result<(), crate::RuntimeError> {
         self.services
             .plugins
@@ -353,8 +343,7 @@ impl LashRuntime {
             .map_err(crate::RuntimeError::from)?;
         Box::pin(self.materialize_published_session())
             .await
-            .map_err(session_error)?;
-        crate::runtime::turn_loop::generation_fence::admit(self, generation)
+            .map_err(session_error)
     }
 }
 

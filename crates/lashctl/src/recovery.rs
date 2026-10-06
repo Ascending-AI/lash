@@ -79,7 +79,7 @@ fn kind(value: &str) -> Result<ObligationKind, CliError> {
         .ok_or_else(usage)
 }
 
-/// Consume backend selection separately so every recovery and drain verb
+/// Consume backend selection separately so every recovery verb
 /// addresses the same store: the words left over, and the SQLite database
 /// file `--sqlite-path` names.
 pub(super) fn split_sqlite_path(rest: &[String]) -> Result<(Vec<&str>, Option<PathBuf>), CliError> {

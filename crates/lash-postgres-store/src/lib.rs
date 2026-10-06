@@ -603,25 +603,14 @@ async fn acquire_runtime_connection(
 // the `session` scope kind. A catalog provisioned before the change fails the
 // open-time shape check and is recreated.
 //
-// Version 141 also stamps drain generations across the process and turn-park
-// relations (FIG-3795), changed in place under the pre-1.0 version freeze
-// (FIG-3846): `lash_processes` gains `segment_generation` — the build
-// generation that admitted the process's current segment — and
-// `park_build_generation` — the build generation of the checkpoint a parked
-// process resumes — each indexed; `lash_turn_parks`,
-// `lash_turn_park_events` and `lash_process_park_events` gain
-// `park_build_generation`; and `lash_process_segment_handovers` gains
-// `written_generation` and `route` (both non-null: every write names the
-// generation that made it and the route its send took); and
-// `lash_session_runs` records each run's admission (`admission_json`) and
-// `admitted_generation` — the drain generation of the shift that admitted
-// it — plus the drain's in-flight count index over it (FIG-3795 S9) and at
-// most one unfinished run per session; the queued-run ledger is gone and a
-// queued-work head is admitted as an ordinary run (FIG-3927, changed in
-// place under the version freeze); and `lash_session_runs` gains
-// `executor_json`, the executor the seal of a run's admission recorded
-// (FIG-4814, changed in place likewise). A catalog provisioned before the
-// change fails the open-time shape check and is recreated.
+// Version 141 also has `lash_session_runs` record each run's admission
+// (`admission_json`), with at most one unfinished run per session; the
+// queued-run ledger is gone and a queued-work head is admitted as an ordinary
+// run (FIG-3927, changed in place under the version freeze); and
+// `lash_session_runs` gains `executor_json`, the executor the seal of a run's
+// admission recorded (FIG-4814, changed in place likewise). A catalog
+// provisioned before the change fails the open-time shape check and is
+// recreated.
 //
 // Version 141 also admits process-definition and trigger registration in the
 // tool-intent submission ledger's kind constraint (FIG-4057, changed in place
@@ -664,18 +653,6 @@ const SCHEMA_VERSION: i32 = lash_core_execution::compat::POSTGRES_SCHEMA_VERSION
 /// the range. For the 1.0 cut the range is the single current version — a
 /// compatibility release widens the floor when it is declared, never silently.
 const MIN_SUPPORTED_SCHEMA_VERSION: i32 = SCHEMA_VERSION;
-
-/// What [`PostgresStorage::finalize`] found and did.
-#[derive(Clone, Debug)]
-pub struct FinalizeReport {
-    /// The retired generation's drain status the finalize admitted.
-    pub drain: lash_core_execution::store::generation_drain::GenerationDrainStatus,
-    /// The move of `F`, or the finding that it had already moved.
-    pub flip: lash_core_execution::store::fleet_finalize::FleetEpochFlip,
-    /// The backfills this finalize ran to completion, each as its final
-    /// ledger row. Empty when none was pending.
-    pub backfills: Vec<MigrationStep>,
-}
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -922,108 +899,6 @@ impl PostgresStorage {
         phase: MigrationPhase,
     ) -> Result<MigrationReport, MigrateError> {
         migrate::plan_migrations(database_url, phase).await
-    }
-
-    /// Finalize the release this build belongs to (ADR 0106 §2, ADR 0115
-    /// §2.1 and §3.5): the last step of `retired`'s drain.
-    ///
-    /// It reads `retired`'s drain status from this store and the deployments
-    /// `registry` still holds, and refuses typed unless the generation reads
-    /// drained and no deployment serves it. It then moves `F` to this build's
-    /// `F_self` in one transaction on the fleet-format row — refused while an
-    /// operator hold stands, when `mode` is [`FinalizeMode::Automatic`] — and
-    /// from that commit every writer whose writable range excludes the new
-    /// `F` is fenced. Last, it runs every pending backfill to completion.
-    /// Rerunning it after `F` has moved finds it finalized and resumes the
-    /// backfills, so an interrupted finalize is finished by running it again.
-    ///
-    /// `plugins` are the finalizing build's plugin registrations (FIG-4746):
-    /// the transaction that moves `F` also raises each registered plugin's
-    /// writer range to its native format, so a writer never fences on an
-    /// epoch that disagrees with the ranges it is admitted against. A
-    /// registration that would change a recorded range while `F` already is
-    /// this build's epoch is refused typed, and nothing changes. A caller
-    /// holding no registrations passes none and moves `F` alone.
-    ///
-    /// [`FinalizeMode::Automatic`]: lash_core_execution::store::fleet_finalize::FinalizeMode::Automatic
-    pub async fn finalize(
-        &self,
-        retired: &lash_core_execution::engine::BuildGeneration,
-        registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
-        mode: lash_core_execution::store::fleet_finalize::FinalizeMode,
-        plugins: &[lash_core_execution::store::plugin_writers::PluginWriterRegistration],
-        now_ms: u64,
-    ) -> Result<FinalizeReport, lash_core_execution::store::fleet_finalize::FinalizeError> {
-        self.finalize_with(
-            retired,
-            registry,
-            mode,
-            plugins,
-            now_ms,
-            migrate::BACKFILL_BATCH_ROWS,
-        )
-        .await
-    }
-
-    /// [`Self::finalize`] with backfill batches of `batch_rows`.
-    async fn finalize_with(
-        &self,
-        retired: &lash_core_execution::engine::BuildGeneration,
-        registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
-        mode: lash_core_execution::store::fleet_finalize::FinalizeMode,
-        plugins: &[lash_core_execution::store::plugin_writers::PluginWriterRegistration],
-        now_ms: u64,
-        batch_rows: i64,
-    ) -> Result<FinalizeReport, lash_core_execution::store::fleet_finalize::FinalizeError> {
-        use lash_core_execution::store::fleet_finalize::{FinalizeError, require_retired};
-        let drain = lash_core_execution::store::generation_drain::GenerationDrainStatus::collect(
-            self.generation_drain().as_ref(),
-            self.session_delete_ledger().as_ref(),
-            |kind| self.obligation_ledger(kind),
-            registry,
-            retired,
-            now_ms,
-        )
-        .await?;
-        require_retired(&drain, registry).await?;
-        let flip = finalize::flip(&self.pool, &self.fence, mode, plugins).await?;
-        let backfills = migrate::run_backfills(&self.pool, &self.fence, batch_rows)
-            .await
-            .map_err(|error| match error {
-                MigrateError::Store(error) => FinalizeError::Store(error),
-                MigrateError::Refused(refusal) => FinalizeError::Store(StoreError::Backend(
-                    format!("finalize moved F to {}, and then {refusal}", flip.fleet()),
-                )),
-            })?;
-        Ok(FinalizeReport {
-            drain,
-            flip,
-            backfills,
-        })
-    }
-
-    /// The operator's hold on the automatic finalize, if one stands.
-    pub async fn finalize_hold(
-        &self,
-    ) -> Result<Option<lash_core_execution::store::fleet_finalize::FinalizeHold>, StoreError> {
-        finalize::read_hold(&self.pool).await
-    }
-
-    /// Hold the automatic finalize, with the operator's `reason`. The hold
-    /// keeps the rollback window open: an automatic finalize is refused typed
-    /// until it is cleared, and an operator can still finalize by hand.
-    pub async fn set_finalize_hold(
-        &self,
-        reason: &str,
-    ) -> Result<lash_core_execution::store::fleet_finalize::FinalizeHold, StoreError> {
-        finalize::set_hold(&self.pool, &self.fence, reason).await
-    }
-
-    /// Clear the hold, answering the one that stood.
-    pub async fn clear_finalize_hold(
-        &self,
-    ) -> Result<Option<lash_core_execution::store::fleet_finalize::FinalizeHold>, StoreError> {
-        finalize::clear_hold(&self.pool, &self.fence).await
     }
 
     /// Build storage over an already-constructed pool.
@@ -1402,27 +1277,6 @@ impl PostgresStorage {
         PostgresDurableStore::new(self.pool.clone(), self.fence.clone())
     }
 
-    /// The build-generation drain marks and per-generation work reads over
-    /// this catalog (FIG-3799, FIG-3884): the port the operator binary and a
-    /// store set compose drain status from.
-    pub fn generation_drain(
-        &self,
-    ) -> Arc<dyn lash_core_execution::store::generation_drain::GenerationDrainStore> {
-        Arc::new(crate::generation_drain::PostgresGenerationDrain::new(
-            self.pool.clone(),
-            self.fence.clone(),
-        ))
-    }
-
-    /// Generations with current pinned work or an operator drain mark.
-    pub async fn fleet_generations(
-        &self,
-    ) -> Result<Vec<(lash_core_execution::engine::BuildGeneration, bool)>, StoreError> {
-        crate::generation_drain::PostgresGenerationDrain::new(self.pool.clone(), self.fence.clone())
-            .fleet_generations()
-            .await
-    }
-
     /// The store→engine delivery obligation ledger of `kind` over this
     /// catalog (ADR 0109 §1.3).
     pub fn obligation_ledger(
@@ -1515,12 +1369,8 @@ mod connection_sql;
 mod durable;
 #[path = "postgres/evidence_retention.rs"]
 mod evidence_retention;
-#[path = "postgres/finalize.rs"]
-mod finalize;
 #[path = "postgres/fleet_format.rs"]
 mod fleet_format;
-#[path = "postgres/generation_drain.rs"]
-mod generation_drain;
 #[path = "postgres/guarded_tx.rs"]
 mod guarded_tx;
 #[path = "postgres/ingress_obligation.rs"]

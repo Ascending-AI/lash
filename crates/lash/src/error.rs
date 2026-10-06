@@ -31,17 +31,6 @@ pub enum EmbedError {
     /// it reads natively (FIG-4744). Nothing is built.
     PluginDeclaration(#[from] lash_core::plugin::PluginDeclarationError),
     #[error(transparent)]
-    /// Returned when the core's plugin composition gives another build
-    /// generation than the one its engine already runs: a core with other
-    /// plugins, or the same plugins in another order, was built over the
-    /// same engine (FIG-4744). One engine serves one generation's lanes, so
-    /// a second composition takes an engine of its own.
-    BuildGenerationRebound(#[from] lash_core::engine::GenerationRebound),
-    #[error(transparent)]
-    /// Returned when the engine's build generation is read before a core
-    /// was built over its backend (FIG-4744).
-    BuildGenerationUnbound(#[from] lash_core::engine::GenerationUnbound),
-    #[error(transparent)]
     /// Returned when the core would build without some obligation kind's
     /// relay: its store set arms every kind, and a kind nothing delivers
     /// stays owed forever (ADR 0109 §1.4).
@@ -167,19 +156,6 @@ pub enum EmbedError {
     /// whole status, and every facade result carries this enum.
     #[error("send: {0}")]
     Send(Box<SendError>),
-    /// [`LashCore::drain_generation`](crate::LashCore::drain_generation)
-    /// named the build generation this deployment runs (FIG-3799). The
-    /// hand-over sends each successor to the newest build, which could be
-    /// this one, so a generation is drained from a deployment of another
-    /// generation.
-    #[error(
-        "a deployment cannot drain its own build generation {}: drain it from a deployment of the build that replaces it",
-        generation.as_str()
-    )]
-    DrainOwnGeneration {
-        /// The generation this deployment runs.
-        generation: lash_core::engine::BuildGeneration,
-    },
 }
 
 /// Blank text a host offers as an identity is the store's refusal of it.
@@ -355,8 +331,6 @@ impl EmbedError {
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
-            | Self::BuildGenerationRebound(_)
-            | Self::BuildGenerationUnbound(_)
             | Self::ObligationRelayUnavailable(_)
             | Self::UnknownSession { .. }
             | Self::SessionAlreadyExists { .. }
@@ -376,7 +350,6 @@ impl EmbedError {
             | Self::RemoteProtocol(_)
             | Self::ProtocolTurnOptions(_)
             | Self::DecodeProtocolTurnOptions(_)
-            | Self::DrainOwnGeneration { .. }
             | Self::Send(_) => false,
         }
     }
@@ -413,8 +386,6 @@ impl EmbedError {
             Self::MissingProtocolPlugin
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
-            | Self::BuildGenerationRebound(_)
-            | Self::BuildGenerationUnbound(_)
             | Self::ObligationRelayUnavailable(_)
             | Self::MissingLlmProfile
             | Self::LlmProfileUnknown(_)
@@ -425,7 +396,6 @@ impl EmbedError {
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
             | Self::SessionCreationUnrecorded { .. }
-            | Self::DrainOwnGeneration { .. }
             | Self::UnknownSession { .. }
             | Self::SessionAlreadyExists { .. }
             | Self::ConfigSubmit(_) => true,

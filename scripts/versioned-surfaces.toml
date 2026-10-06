@@ -118,6 +118,10 @@ name = "lash-journal-payload/v1"
 reason = "FIG-5190: the Restate journal payload identity went with lash-restate"
 
 [[retired_hash_domain]]
+name = "lash-build-generation/v1"
+reason = "FIG-5200: build generations and their drain lanes are gone (ADR 0132)"
+
+[[retired_hash_domain]]
 name = "lash-plugin-snapshot-revision/v2"
 reason = "FIG-2113: the plugin snapshot revision is no longer hashed"
 

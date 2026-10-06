@@ -458,12 +458,6 @@ impl ProcessSegmentKey {
 pub struct SegmentStartMarker {
     pub nonce: String,
     pub started_at_ms: u64,
-    /// The drain generation of the build that admitted the segment
-    /// (FIG-3795 S1): the deployment the marker's writer ran as. `None` for a
-    /// substrate whose segments carry no drain generation; a recorded stamp
-    /// is never derived.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub build_generation: Option<crate::engine::BuildGeneration>,
     /// The plugin composition the segment was admitted under and the writer
     /// format chosen for each plugin (FIG-4747): a successor adopts the
     /// admitting build's plugins and the fleet record's ranges as they stood
@@ -506,20 +500,6 @@ pub trait ProcessContinuationStore: Send + Sync {
         &self,
         process_id: &ProcessId,
     ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
-
-    /// Record `route` as the service name the segment resuming from
-    /// `process_id`'s handover at `segment_ordinal` runs under (FIG-4750): a
-    /// successor the newest build refused is re-sent to its sender's
-    /// generation lane, and the segment that starts there records its lane
-    /// before its start marker, so a cancel, a redrive and the drain address
-    /// the lane it runs on. The handover's other bytes are kept. Idempotent;
-    /// a handover that is not retained is left absent.
-    async fn record_segment_handover_route(
-        &self,
-        process_id: &ProcessId,
-        segment_ordinal: u64,
-        route: &str,
-    ) -> Result<(), PluginError>;
 
     /// Retire every handover of `process_id` up to and including
     /// `segment_ordinal`: the segment that resumed from it has handed the

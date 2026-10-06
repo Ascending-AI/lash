@@ -38,8 +38,8 @@ fn assert_envelope(body: &Value, command: &str, has_result: bool, has_error: boo
 #[test]
 fn operator_json_contract() {
     let (code, version) = run(&["version", "--json"], None);
-    assert_eq!(code, 3);
-    assert_envelope(&version, "version", false, true);
+    assert_eq!(code, 0);
+    assert_envelope(&version, "version", true, false);
 
     let (code, usage) = run(&["--json", "nonsense"], None);
     assert_eq!(code, 2);
@@ -48,11 +48,7 @@ fn operator_json_contract() {
 
     let cases = [
         ("migrate", vec!["migrate", "--json"]),
-        ("drain", vec!["drain", "0123456789ab", "--json"]),
-        ("end-drain", vec!["end-drain", "0123456789ab", "--json"]),
-        ("finalize-hold", vec!["finalize-hold", "show", "--json"]),
         ("preflight", vec!["preflight", "--json"]),
-        ("version", vec!["version", "--json"]),
     ];
     for (name, args) in cases {
         let (code, body) = run(&args, None);
@@ -62,15 +58,6 @@ fn operator_json_contract() {
             body["error"],
             json!({"code":"refused_precondition","message":"LASH_POSTGRES_DATABASE_URL must name the PostgreSQL database","refusal":null})
         );
-    }
-
-    for args in [
-        vec!["finalize-hold", "set", "--json"],
-        vec!["finalize-hold", "set", "--reason", " ", "--json"],
-    ] {
-        let (code, usage) = run(&args, Some("postgres://unused/unused"));
-        assert_eq!(code, 2, "{args:?}");
-        assert_eq!(usage["error"]["code"], "usage", "{args:?}");
     }
 
     let (code, failed) = run(&["migrate", "--dry-run", "--json"], Some("invalid-url"));

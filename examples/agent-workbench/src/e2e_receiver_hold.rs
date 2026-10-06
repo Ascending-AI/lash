@@ -94,10 +94,6 @@ impl lash::StoreSet for ReceiverHoldStores {
         self.inner.recovery_leader()
     }
 
-    fn generation_drain(&self) -> Arc<dyn GenerationDrainStore> {
-        self.inner.generation_drain()
-    }
-
     fn obligation_ledger(&self, kind: lash::ObligationKind) -> Arc<dyn ObligationLedger> {
         self.inner.obligation_ledger(kind)
     }

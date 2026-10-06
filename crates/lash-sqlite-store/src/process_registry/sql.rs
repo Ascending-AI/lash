@@ -713,8 +713,8 @@ lash_store_sql::statements! {
         /// same write lock and refuses a conflicting handover itself, where
         /// PostgreSQL has to express that refusal as a conflict clause.
         insert = "INSERT INTO process_segment_handovers
-                         (process_id, segment_ordinal, handover_json, written_generation, route, committed_at_ms)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+                         (process_id, segment_ordinal, handover_json, committed_at_ms)
+                         VALUES (?1, ?2, ?3, ?4)";
 
         delete_by_process_ids = "DELETE FROM process_segment_handovers
                  WHERE process_id IN (SELECT value FROM json_each(?1))";

@@ -47,11 +47,6 @@ pub struct SessionStateAdmission {
 /// and every pin the recorded `F` could select is in the build's pin table,
 /// so the descriptor reads no store: the live fleet row only chooses among
 /// [`pins`](Self::pins), it never adds one.
-///
-/// A build's drain generation `G` hashes it, so two builds whose session
-/// admission differs never serve the same lane: a child or a successor sent
-/// on its opener's lane runs on a build that admits every marker the
-/// opener's build admitted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionAdmissionWindow {
     /// The oldest marker the build's upcaster chain lifts from.
