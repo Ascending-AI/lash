@@ -2018,7 +2018,6 @@ name = "lash-internal-core-effect"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "lash-internal-core-ids",
  "lash-internal-core-store",
  "lash-internal-sansio",
  "serde",
@@ -5029,6 +5028,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

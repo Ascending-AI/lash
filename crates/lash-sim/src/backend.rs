@@ -47,6 +47,7 @@ impl SimEngine {
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let stores = Arc::new(stores);
         let backend = lash::durable::DurableBackendBuilder::new(stores.clone())
+            .completion_secrets(lash::durable::CompletionKeySecrets::for_testing())
             .build()
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         Ok(Self { stores, backend })

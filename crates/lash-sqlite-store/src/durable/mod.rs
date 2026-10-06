@@ -44,6 +44,7 @@ mod waits;
 pub(crate) use run_records::TABLES as RUN_RECORDS_TABLES;
 pub(crate) use snapshots::TABLES as EXEC_SNAPSHOTS_TABLES;
 pub(crate) use turns::TABLES as TURN_PHASES_TABLES;
+pub(crate) use waits::TABLES as WAITS_TABLES;
 
 /// The engine's tables, carried by the durable core.
 pub(crate) const DURABLE_TABLES: &str = "
@@ -155,10 +156,6 @@ type Flow<T> = rusqlite::Result<TxOutcome<Result<T, DurableError>>>;
 pub(crate) type Answer<T> = rusqlite::Result<Result<T, DurableError>>;
 
 /// The owner commit a domain write is applied in: after its fence.
-#[expect(
-    dead_code,
-    reason = "the domain writes that read it are V0, L4, L5 and L6 stubs (I0, FIG-5194)"
-)]
 pub(crate) struct Committing<'a> {
     /// The actor whose fence matched.
     pub(crate) actor: &'a ActorKey,
@@ -894,3 +891,7 @@ impl DurableReads for SqliteDurableStore {
 #[cfg(test)]
 #[path = "../durable_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../wait_law_tests.rs"]
+mod wait_law_tests;

@@ -126,12 +126,9 @@ PACKAGE_DEPS = {
     },
     "lash-internal-core-effect": {
         "build": {},
-        "dev": {
-            "lash_core_ids": "//crates/lash-core-ids:lash-core-ids"
-        },
+        "dev": {},
         "normal": {
             "async_trait": "//third-party/rust:p0015",
-            "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "serde": "//third-party/rust:p0307",
@@ -1142,7 +1139,8 @@ PACKAGE_DEPS = {
             "sha2": "//third-party/rust:p0319",
             "tokio": "//third-party/rust:p0371",
             "tracing": "//third-party/rust:p0386",
-            "tracing_subscriber": "//third-party/rust:p0390"
+            "tracing_subscriber": "//third-party/rust:p0390",
+            "uuid": "//third-party/rust:p0409"
         }
     },
     "transcript-contract": {

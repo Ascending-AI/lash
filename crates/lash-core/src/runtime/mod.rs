@@ -35,7 +35,6 @@ pub use commit_admission::run_head_advancing_commit_attempt;
 mod config_ops;
 mod config_transaction;
 pub use config_transaction::ConfigTransactionSubmitError;
-pub use effect::await_event_identity;
 #[cfg(feature = "testing")]
 pub use lash_core_execution::runtime::effect;
 #[cfg(not(feature = "testing"))]

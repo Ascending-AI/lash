@@ -36,11 +36,6 @@ pub fn composition_schema_serialization_count() -> usize {
 }
 
 mod boundary;
-#[expect(
-    dead_code,
-    reason = "L5 (FIG-5173) re-establishes wait receipts on ActorContext::wait_effect; the effect wrapper that opened them is deleted (I0)"
-)]
-pub(crate) mod wait_receipts;
 pub use boundary::TraceBoundaryReceipt;
 pub(crate) mod run_receipts;
 mod runtime;

@@ -43208,7 +43208,6 @@
       ],
       "dependencies": [
         "async-trait",
-        "lash-internal-core-ids",
         "lash-internal-core-store",
         "lash-internal-sansio",
         "serde",
@@ -46816,7 +46815,8 @@
         "sha2",
         "tokio",
         "tracing",
-        "tracing-subscriber"
+        "tracing-subscriber",
+        "uuid"
       ],
       "doc": null,
       "manifest": "examples/toolbench/Cargo.toml",

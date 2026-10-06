@@ -18,21 +18,17 @@ doctest = false
 
 [features]
 default = []
-otel-trace = ["lash-core-ids/otel-trace", "lash-core-store/otel-trace"]
-perf-witness = ["lash-core-ids/perf-witness", "lash-core-store/perf-witness"]
-testing = ["lash-core-ids/testing", "lash-core-store/testing"]
+otel-trace = ["lash-core-store/otel-trace"]
+perf-witness = ["lash-core-store/perf-witness"]
+testing = ["lash-core-store/testing"]
 
 [lints]
 workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
-lash-core-ids = { workspace = true }
 lash-core-store = { workspace = true }
 lash-sansio = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
-
-[dev-dependencies]
-lash-core-ids = { workspace = true, features = ["testing"] }

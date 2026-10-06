@@ -1511,6 +1511,3 @@ mod acquire_timeout_tests {
         );
     }
 }
-
-#[path = "postgres/wait_receipts.rs"]
-mod wait_receipts;

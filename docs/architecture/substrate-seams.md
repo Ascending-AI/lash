@@ -21,7 +21,7 @@ L13 = FIG-5193.
 | S2 commit labels, config, dues, dispatch, replay probe | `lash-durable/src/{labels,durable_config,dues,dispatch,probe}.rs`, `lash-durable-test/src/tripwire.rs` | Every label the lanes emit is in `CommitLabel::ALL`; a lane that needs a new label adds it here in its own lane. `DurableConfig` is one validated struct whose field docs name their owners. A `waiting` release uses the minimum due. `ActorDispatch` routes by actor kind. `DurableProbe` has no default bodies. | all of it, with self-tests (`Tripwire` counts each event kind) | the session activation V0, the process activation L6 |
 | S3 turn phases and the restore entry | `lash-core/src/runtime/durable/{session,session_mail}.rs` | Load rows, `restore_turn` (exactly one `restore_from_checkpoint`), re-deliver the pending effect, `run_phases`. Nothing re-executes orchestration to reach a recorded outcome. `drain_session_mail` runs first on every claim. | types | V0 then L3 (activation, admit, restore, phases), L3 (`request_turn_cancel`), L3s (`drain_session_mail`) |
 | S4 admitted executions and tool rounds | `lash-core-execution/src/runtime/actor/round.rs` | No body starts before `admit`'s commit; the fold calls no producer; a started `Once` without an outcome folds to `Interrupted`; a `Repeatable` reruns at its ordinal; `(owner, run, ordinal)` is the second fence. | types | V0 (`admit`, `run_body`, `settle`, `fold`, the run-record family), L4 (rounds, retries, sources, realization, `tool_effect`) |
-| S5 waits and completion keys | `lash-core-execution/src/runtime/actor/waits.rs`, `lash-durable/src/domain/waits.rs` | The deadline is written once at minting; the first resolution wins; host resolve refuses every kind but `tool_completion` and `custom` with `ReservedKind` and writes nothing; lock order is wait row, then actor row; a durable backend without secrets is refused (S9). | types, `CompletionKeySecrets` accessors | L5 |
+| S5 waits and completion keys | `lash-core-execution/src/runtime/actor/waits.rs`, `lash-durable/src/domain/waits.rs` | The deadline is written once at minting; the first resolution wins; host resolve refuses every kind but `tool_completion` and `custom` with `ReservedKind` and writes nothing; a resolution locks the wait row, then the actor row (an owner commit fences its actor row first, so a deadlock between them aborts one, which retries); every await races the awaiter's own `cancel` mail; a durable backend without secrets is refused (S9). | types, `CompletionKeySecrets` accessors | filled by L5 (`waits.rs`, `wait_effects.rs`, `lash_waits` in both dialects); the await-event methods L5 kept for their callers are L3's, L4's and L6's (see [left for owners](#left-for-owners)) |
 | S6 host process engines are state machines | `lash-core-execution/src/runtime/process/{engine,engine_state}.rs`, `lash-core-execution/src/runtime/actor/process.rs` | `advance(state, event) -> (state, action)`; the new state and its action's admission commit in one `process.advance` transaction. Cancel is delivered once within the grace; at `grace_until` lash forces the terminal. No `run`, no `await_terminal`, no effect controller on the run context, no default bodies. | the trait and its types | L6 (every engine's `advance`, `end_scope`, the process activation, `process_effect`) |
 | S7 VM snapshots and broker admission | `lash-vm-broker/src/snapshot.rs`, `lash-core-execution/src/runtime/actor/vm.rs`, `lash-durable/src/domain/{keys,snapshots}.rs` | The snapshot revision, its broker ledger, `admit` + `x_start` for every operation since the last snapshot and new waits commit in one `cell.snapshot+admit` transaction; restore injects saved outcomes by `OperationId`; nothing re-dispatches. | types; `SnapshotStore` replaces `CheckpointStore` | V0 (`commit_quiet_point`, `latest`, `outcomes_to_inject`), L7 (`open_frame`, `vm_effect`) |
 | S8 projection providers | `lashlang/src/runtime/projection_provider.rs`, `lashlang/src/runtime/value.rs` (`ResourceRef`), `lash-core-execution/src/runtime/actor/projection.rs` | Reads are pure, `Repeatable` and never recorded; a read answers `None` when its provider does not answer that request; a missing provider for a type found in a value or a snapshot is a typed refusal. | all of it: L7p (FIG-5197) filled the catalog, the VM's `ProjectionReader`, the worker's batched wire and the lash-provided `history` provider | none |
@@ -87,7 +87,7 @@ Each constant default was deleted and its call sites folded to the constant:
 
 Also deleted with the traits: the remote-effect runner and its forwarding, `serve_effect_controller_task_request`, `UnavailableEffectController` (replaced by `ActorContext::unavailable()`), the turn-cancel closure owner in both stores, `retire_effect_journal` and `SessionDeleteFailure::Journal`, `LayeredEngine` and the layered effect host (the store decorator `LayeredBackend` stays), the attempt sentinel, and the build-generation binding in the shift (`admitting_generation` refuses `GenerationUnbound` until L3s replaces it).
 
-Behaviours the deleted `execute_effect` wrapper added around every effect, which each group's owner re-establishes in its method: scope validation, the command journal guard, plugin publication, and wait receipts (`trace/wait_receipts.rs`, kept for L5 under `#[expect(dead_code)]`).
+Behaviours the deleted `execute_effect` wrapper added around every effect, which each group's owner re-establishes in its method: scope validation, the command journal guard, plugin publication, and wait receipts (deleted by L5 with `lash_wait_receipts`: a wait is its own row).
 
 ### Left for owners
 
@@ -95,7 +95,7 @@ Code the fold made unreachable, or nearly, that an owning lane is about to rewri
 
 - **L4:** the generation-cut plumbing in the run coordinator (`observe_generation_cuts`, `generation_cut_entry`, `check_cut`, `CutChecked`); the journal guard and owner-step gate in `runtime/actor/journal.rs`.
 - **L6 and L7b:** the `with_turn_hand_over(false)` plumbing (4 sites) and segment handover as process state; the process run-context builder (`process_runners/mod.rs`) and the capability items only it read (`session_runtime_store`, `execution_owner`, `turn_phase_probe`), kept under `#[expect(dead_code)]` for the advance-driven engine drive; `ProcessEngineRunContext` without effect accessors, and the lashlang run path (`run_lashlang_process`, which takes the context it will run under).
-- **L3 and L5:** the turn-control promise machinery, which compiles against L3's and L5's stubs.
+- **L3, L4 and L6:** the await-event methods addressed by the retired `AwaitEventKey` (`await_event_key`, `resolve_await_event`, `publish_await_event`, `peek_await_event`, `await_await_event`, `prepare_completion_key`, `wait_effect`'s `AwaitEvent` and `PeekAwaitEvent`, and `completion_host_key`), kept by L5 in `runtime/actor/await_event_legacy.rs`. Each reaches `port_pending`, whose arm names the lane by wait identity: turn control and session-command cancel L3, tool completion and custom L4, process signals L6. They are deleted with their callers' ports; no wait row serves a recomputable key.
 - **V0:** `RunRecordObserver::bind`, kept for `record_run_record`.
 - **L6:** host and test process engines whose `advance` is a stub (`IngressAdmissionEngine`, `PayloadGatedEngine`, the artifact-cleanup engine, the h2 receiver): their tests compile and reach the stub until L6 ports the engine drive.
 - At the L10a rebase I0 ported every file that still named the deleted seam, deleted `replay_read_gate.rs` (its subject was replay paths) and the pending list, and dropped Rule 7's Restate exclusion; L10a itself removed `RecordedJournal` and `read_recorded_journal`.
@@ -122,7 +122,7 @@ Created in DDL by the lane named; written by the lanes in the last column. On SQ
 
 Generated from the tree with `scripts/check-substrate-todos.py`'s scanner; each lane removes its rows as it fills them.
 
-Counts: L3 9, L3s 5, L4 15, L5 35, L6 32, L6b 2, L7 2 (100 in all).
+Counts: L3 10, L3s 5, L4 16, L6 33, L6b 2, L7 2 (68 in all).
 
 ### V0 (FIG-5170)
 
@@ -141,6 +141,7 @@ None: V0 filled its stubs. It re-tagged the journal-era ones its path never reac
 | `crates/lash-core/src/runtime/durable/session.rs` | `request_turn_cancel` | request a turn cancel as session mail |
 | `crates/lash-postgres-store/src/postgres/durable/turns.rs` | `request_cancel` | record a turn cancel request and wake the session on PostgreSQL |
 | `crates/lash-sqlite-store/src/durable/turns.rs` | `request_cancel` | record a turn cancel request and wake the session on SQLite |
+| `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the turn-control and session-command waits' port to cancel mail and L5's pin, race and resolve_host |
 
 ### L3s (FIG-5196)
 
@@ -171,46 +172,7 @@ None: V0 filled its stubs. It re-tagged the journal-era ones its path never reac
 | `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_record` | start a Run record as an admitted execution |
 | `crates/lash-core-execution/src/runtime/actor/round.rs` | `start_run_retry` | record a retry with its due time and register the due source |
 | `crates/lash-core-execution/src/runtime/actor/round.rs` | `tool_effect` | run a tool-round effect as an admitted execution or a round write |
-
-### L5 (FIG-5173)
-
-| Where | Function | Stub |
-|---|---|---|
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `await_await_event` | await a wait through race |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `await_event_authority_binding_id` | delete with await-event keys; wait keys are HMAC-minted |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `await_event_key` | mint a completion key by pin |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `await_event_scope_is_retired` | delete with scope retirement fences; revocation is per wait row |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `await_external` | await a host-resolvable wait, bounded by its deadline |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `await_process` | await a process terminal, bounded and cancellable |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `cancel_await_events_for_session` | revoke a session's waits through revoke_scope |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `list_outstanding_await_event_keys` | list a session's pending host-resolvable waits |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `new` | validate versioned completion secrets |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `peek_await_event` | read a wait row |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `pin` | mint a wait row and its HMAC key in the owner's transaction |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `prepare_completion_key` | mint a completion key by pin |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `publish_await_event` | resolve a wait through resolve_host |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `race` | race pinned waits against the awaiter's cancel mail |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `reinstate_await_event_scope` | delete with scope retirement fences; revocation is per wait row |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `resolve` | resolve a wait deadline under its default and ceiling |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `resolve_await_event` | resolve a wait through resolve_host |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `resolve_host` | verify a host key and resolve its wait, first winner |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `resolve_process_terminal_waits` | resolve a process's terminal waits in its terminal transaction |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `retire_await_events_for_scope` | revoke a scope's waits through revoke_scope |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `retire_await_events_for_scope_if_quiescent` | revoke a scope's waits through revoke_scope |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `retire_closed_run_waits` | revoke a closed run's waits through revoke_scope |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `revoke_await_events_for_session` | revoke a session's waits through revoke_scope |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `revoke_scope` | revoke a scope's pending waits |
-| `crates/lash-core-execution/src/runtime/actor/waits.rs` | `wait_effect` | run a wait effect as a pinned wait or timer, raced against cancel |
-| `crates/lash-core-execution/src/runtime/work/durable.rs` | `await_process_terminal` | await the process's terminal through a process-terminal wait row |
-| `crates/lash-core-execution/src/runtime/work/durable.rs` | `publish_process_terminal` | resolve the process's terminal waits in its terminal transaction |
-| `crates/lash-postgres-store/src/postgres/durable/waits.rs` | `apply` | pin, settle or revoke waits on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/waits.rs` | `pending` | read an actor's pending waits on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/waits.rs` | `resolve` | resolve a wait from pending, first winner, and wake its owner on PostgreSQL |
-| `crates/lash-postgres-store/src/postgres/durable/waits.rs` | `wait` | read one wait on PostgreSQL |
-| `crates/lash-sqlite-store/src/durable/waits.rs` | `apply` | pin, settle or revoke waits on SQLite |
-| `crates/lash-sqlite-store/src/durable/waits.rs` | `pending` | read an actor's pending waits on SQLite |
-| `crates/lash-sqlite-store/src/durable/waits.rs` | `resolve` | resolve a wait from pending, first winner, and wake its owner on SQLite |
-| `crates/lash-sqlite-store/src/durable/waits.rs` | `wait` | read one wait on SQLite |
+| `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the tool completion keys' port to L5's pin, race and resolve_host |
 
 ### L6 (FIG-5175)
 
@@ -249,6 +211,7 @@ None: V0 filled its stubs. It re-tagged the journal-era ones its path never reac
 | `crates/lash-sqlite-store/src/durable/processes.rs` | `request_cancel` | record a process's first cancel request and control-wake it on SQLite |
 | `crates/lash/src/tests/tool_intent_ingress.rs` | `advance` | port IngressAdmissionEngine to advance |
 | `examples/shared/h2_receiver.rs` | `advance` | port ReceiverEngine to advance: run until cancelled |
+| `crates/lash-core-execution/src/runtime/actor/await_event_legacy.rs` | `port_pending` | delete with the process signals' port to process mail and L5's pin and race |
 
 ### L6b (FIG-5176)
 

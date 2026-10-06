@@ -277,8 +277,6 @@ impl std::error::Error for StoreFault {}
 pub enum StoreError {
     #[error("prepared registration for process {process_id} is stale")]
     PreparedProcessRegistrationStale { process_id: crate::ProcessId },
-    #[error("wait {wait_id} conflicts with its retained receipt")]
-    WaitReceiptConflict { wait_id: String },
     #[error("tool request {request_key} of {owner:?} conflicts with its retained request")]
     ToolRequestConflict {
         owner: lash_trace::TraceToolOwner,
@@ -1158,8 +1156,7 @@ impl StoreError {
             | Self::Backend(_)
             | Self::SessionHeadOwned { .. }
             | Self::UnfinishedRunConflict { .. } => true,
-            Self::WaitReceiptConflict { .. }
-            | Self::ToolRequestConflict { .. }
+            Self::ToolRequestConflict { .. }
             | Self::ExecutionStateCaptureFailed { .. }
             | Self::TurnOutcomeMaterializationRefused { .. }
             | Self::CommitNodeBudgetExceeded { .. }
@@ -1332,8 +1329,7 @@ impl StoreError {
             Self::QueuedWorkRowExceedsContextWindow { .. } => {
                 Code::QueuedWorkRowExceedsContextWindow
             }
-            Self::WaitReceiptConflict { .. }
-            | Self::ToolRequestConflict { .. }
+            Self::ToolRequestConflict { .. }
             | Self::PendingTurnInputSourceKeyConflict { .. }
             | Self::QueuedWorkSourceKeyConflict { .. }
             | Self::PendingTurnInputIdConflict { .. }
@@ -1487,7 +1483,6 @@ impl StoreError {
         match self {
             Self::ExecutionStateCaptureFailed { .. } => "ExecutionStateCaptureFailed",
             Self::TurnOutcomeMaterializationRefused { .. } => "TurnOutcomeMaterializationRefused",
-            Self::WaitReceiptConflict { .. } => "WaitReceiptConflict",
             Self::ToolRequestConflict { .. } => "ToolRequestConflict",
             Self::PreparedProcessRegistrationStale { .. } => "PreparedProcessRegistrationStale",
             Self::PreparedRunAdmissionStale { .. } => "PreparedRunAdmissionStale",

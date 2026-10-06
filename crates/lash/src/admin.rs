@@ -19,52 +19,49 @@ pub struct Completions {
 }
 
 impl Completions {
-    /// Lists registered, unresolved completion keys for one session.
+    /// The completion keys of `session_id`'s unresolved host-resolvable
+    /// waits (`tool_completion` and `custom`), rebuilt from their rows under
+    /// each row's key version.
     ///
     /// This administrative read is scoped to exactly `session_id`. It returns
     /// a snapshot: another resolver may settle a returned key concurrently,
-    /// so callers must handle [`lash_core::ResolveOutcome::AlreadyResolved`]
-    /// or `UnknownOrRevoked` from [`Self::resolve`]. A returned key carries the
-    /// authority needed to resolve its wait; the caller is responsible for
-    /// authorizing this read and the later resolution.
-    ///
-    /// Deployments without an enumerable await-event registry return a typed
-    /// [`lash_core::RuntimeErrorCode::AwaitEventUnsupported`] runtime error,
-    /// distinct from an empty session.
-    pub async fn outstanding(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<lash_core::AwaitEventKey>> {
-        self.core
-            .env
-            .core
-            .control
-            .effect_host
-            .list_outstanding_await_event_keys(session_id)
+    /// so callers must handle [`lash_core::ResolveAnswer::AlreadyResolved`],
+    /// `Conflict` or `UnknownOrRevoked` from [`Self::resolve`]. A returned
+    /// key carries the authority needed to resolve its wait; the caller is
+    /// responsible for authorizing this read and the later resolution.
+    pub async fn outstanding(&self, session_id: &SessionId) -> Result<Vec<lash_core::PinnedKey>> {
+        let backend = self.core.env.core.control.effect_host.backend();
+        let owner = lash_core::durable_port::ActorKey::session(session_id.as_str())
+            .map_err(|error| durable_error(error.to_string()))?;
+        lash_core::waits::outstanding_keys(backend, &owner)
             .await
-            .map_err(EmbedError::from)
+            .map_err(|error| durable_error(error.to_string()))
     }
 
-    /// Resolves `key`'s wait, first writer wins.
+    /// Resolve the wait `key` names, first writer wins.
     ///
-    /// A key whose logical owner is already cancel-decided is
-    /// refused with a typed [`lash_core::RuntimeErrorCode::RuntimeToolRunCancelDecided`]
-    /// runtime error and nothing is written (ADR 0099 §4): the completion
-    /// arrived after the cancel decision, so it is late.
+    /// The key's MAC is verified under the deployment's completion secret of
+    /// the version its wait was minted under. A key that does not verify, or
+    /// whose wait was revoked, timed out or is unknown, answers
+    /// `UnknownOrRevoked`; a verified key of a kind a host may not resolve
+    /// answers `ReservedKind`. Neither writes anything.
     pub async fn resolve(
         &self,
-        key: lash_core::AwaitEventKey,
+        key: &str,
         resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome> {
-        self.core
-            .env
-            .core
-            .control
-            .effect_host
-            .resolve_await_event(&key, resolution)
+    ) -> Result<lash_core::ResolveAnswer> {
+        let backend = self.core.env.core.control.effect_host.backend();
+        lash_core::waits::resolve_host(backend, key, resolution)
             .await
-            .map_err(EmbedError::from)
+            .map_err(|error| durable_error(error.to_string()))
     }
+}
+
+fn durable_error(message: String) -> EmbedError {
+    EmbedError::Runtime(lash_core::RuntimeError::new(
+        lash_core::RuntimeErrorCode::EngineAwaitEventResolve,
+        message,
+    ))
 }
 
 /// Host-scoped trigger surface: emit occurrences and read registrations across

@@ -69,11 +69,6 @@ macro_rules! runtime_store_operations {
                 [session] fn set_retention(&self, session_id: &SessionId, retention: Retention) -> Result<(), StoreError>;
                 [catalog] fn delete_session(&self, session_id: &SessionId) -> MaintenanceResult<SessionBlobReclaimReport>;
             }
-            WaitReceiptStore {
-                [catalog] fn record_wait_request(&self, request: &WaitRequestReceipt) -> Result<StoreTransition<WaitRequestReceipt>, StoreError>;
-                [catalog] fn record_wait_resolution(&self, resolution: &WaitResolutionReceipt) -> Result<StoreTransition<WaitResolutionReceipt>, StoreError>;
-                [catalog] fn retire_observation_receipts(&self, owner_key: &str, retired_at_ms: u64) -> Result<(), StoreError>;
-            }
             SessionCommitStore {
                 [catalog] fn tool_request_receipt(&self, request_key: &str) -> Result<Option<ToolRequestReceipt>, StoreError>;
                 [catalog] fn record_tool_request(&self, request: &ToolRequestReceipt) -> Result<StoreTransition<ToolRequestReceipt>, StoreError>;

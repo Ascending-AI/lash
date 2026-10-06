@@ -152,8 +152,6 @@ DROP TABLE IF EXISTS lash_catalog_identity CASCADE;
 
 DROP TABLE IF EXISTS lash_worker_recovery CASCADE;
 
-DROP TABLE IF EXISTS lash_wait_receipts CASCADE;
-
 DROP TABLE IF EXISTS lash_nodes CASCADE;
 
 DROP TABLE IF EXISTS lash_actors CASCADE;
@@ -165,3 +163,5 @@ DROP TABLE IF EXISTS lash_run_records CASCADE;
 DROP TABLE IF EXISTS lash_exec_snapshots CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_phases CASCADE;
+
+DROP TABLE IF EXISTS lash_waits CASCADE;

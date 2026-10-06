@@ -1236,18 +1236,6 @@ CREATE TABLE IF NOT EXISTS lash_worker_recovery (
     in_flight INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS lash_wait_receipts (
-    wait_id TEXT PRIMARY KEY,
-    owner_key TEXT NOT NULL,
-    session_id TEXT,
-    started_at_ms BIGINT NOT NULL,
-    request_json TEXT NOT NULL,
-    resolution_json TEXT,
-    resolved_at_ms BIGINT,
-    retired_at_ms BIGINT
-);
-CREATE INDEX IF NOT EXISTS idx_lash_wait_receipts_owner ON lash_wait_receipts(owner_key);
-
 -- The durability engine (ruling #74; crates/lash-durable). A serving node's
 -- lease: one row per node, renewed by its heartbeat, deleted by a reap.
 CREATE TABLE IF NOT EXISTS lash_nodes (
@@ -1354,3 +1342,37 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
         (model_attempt IS NULL) = (model_request_ref IS NULL)
         AND (model_attempt IS NULL) = (model_deadline_ms IS NULL))
 );
+
+-- Waits, keyed promises and timers (L5, FIG-5173; ADR 0132 §6): one row per
+-- wait from its minting. The deadline is written once; a resolution is a
+-- conditional update from 'pending', so the first one wins. Only
+-- tool_completion and custom waits are host resolvable, and only they carry
+-- the completion-secret version their key was minted under.
+CREATE TABLE IF NOT EXISTS lash_waits (
+    wait_id TEXT COLLATE "C" PRIMARY KEY,
+    owner_actor TEXT COLLATE "C" NOT NULL,
+    owner_scope TEXT COLLATE "C" NOT NULL,
+    kind TEXT NOT NULL CONSTRAINT ck_waits_kind CHECK (kind IN
+        ('tool_completion', 'custom', 'process_terminal', 'signal', 'timer', 'child_session')),
+    host_resolvable BOOLEAN NOT NULL,
+    target_process TEXT COLLATE "C",
+    state TEXT NOT NULL CONSTRAINT ck_waits_state
+        CHECK (state IN ('pending', 'resolved', 'timed_out', 'revoked')),
+    deadline_ms BIGINT,
+    resolution_digest TEXT,
+    resolution_ref TEXT,
+    resolved_at_ms BIGINT,
+    key_version INTEGER,
+    created_epoch BIGINT NOT NULL,
+    CONSTRAINT ck_waits_host CHECK (host_resolvable = (kind IN ('tool_completion', 'custom'))),
+    CONSTRAINT ck_waits_key CHECK ((key_version IS NOT NULL) = host_resolvable),
+    CONSTRAINT ck_waits_target
+        CHECK ((target_process IS NOT NULL) = (kind = 'process_terminal')),
+    CONSTRAINT ck_waits_resolved CHECK ((state = 'resolved') = (resolution_digest IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS ix_lash_waits_owner ON lash_waits (owner_actor)
+    WHERE state = 'pending';
+CREATE INDEX IF NOT EXISTS ix_lash_waits_scope ON lash_waits (owner_scope);
+CREATE INDEX IF NOT EXISTS ix_lash_waits_target ON lash_waits (target_process)
+    WHERE state = 'pending' AND kind = 'process_terminal';

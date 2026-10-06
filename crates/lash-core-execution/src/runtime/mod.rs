@@ -56,7 +56,6 @@ pub use causal::tool_retry_sleep_invocation;
 pub use causal::{CommandReplayKey, command_invocation};
 pub use clock::{Clock, ClockWallTime, SystemClock};
 pub use effect::TurnCancelWait;
-pub use effect::await_event_identity;
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,

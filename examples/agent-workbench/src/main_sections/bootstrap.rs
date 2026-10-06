@@ -479,6 +479,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // The durable backend over the store set (ADR 0132 §1); it serves turns,
     // processes and session input once L3 (FIG-5172) lands.
     let host_backend = lash::durable::DurableBackendBuilder::new(Arc::clone(&stores.stores))
+        .completion_secrets(crate::completion_secrets::completion_secrets(Some(
+            &data_dir.join("completion-secret"),
+        ))?)
         .build()
         .context("build the durable backend")?;
     let attachment_store = stores.stores.attachment_store();

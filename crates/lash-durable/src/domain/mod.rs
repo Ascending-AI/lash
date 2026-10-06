@@ -46,7 +46,8 @@ pub use turns::{
     TurnTerminal, TurnWrite,
 };
 pub use waits::{
-    KeyVersion, ResolveAnswer, WaitId, WaitKind, WaitResolution, WaitRow, WaitState, WaitWrite,
+    CANCEL_MAIL, KeyVersion, ResolveAnswer, TIMER_DIGEST, WaitId, WaitKind, WaitResolution,
+    WaitRow, WaitState, WaitWrite,
 };
 
 use crate::error::DurableError;

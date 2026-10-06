@@ -133,7 +133,9 @@ crate::statements! {
              SET mail_seq = mail_seq + 1,
                  state = CASE WHEN state IN ('idle', 'waiting') THEN 'ready' ELSE state END,
                  ready_at_ms = CASE WHEN state IN ('idle', 'waiting') THEN CAST(?2 AS BIGINT)
-                                    ELSE ready_at_ms END
+                                    ELSE ready_at_ms END,
+                 next_due_ms = CASE WHEN state IN ('idle', 'waiting') THEN NULL
+                                    ELSE next_due_ms END
              WHERE actor_key = ?1 AND state <> 'terminal'
              RETURNING mail_seq, state, owner_node, owner_boot";
 

@@ -67,11 +67,8 @@ fn harness_sources() -> Vec<String> {
 
 /// Every fallible segment of `RuntimeStore`; fleet format is infallible and
 /// attachment referrers are checked separately below.
-const WAIT_RECEIPT_SOURCE: &str =
-    include_str!("../../../lash-core-store/src/store/wait_receipts.rs");
 const GATED_SESSION_TRAITS: &[(&str, &str)] = &[
     (SESSION_CATALOG_SOURCE, "SessionCatalogStore"),
-    (WAIT_RECEIPT_SOURCE, "WaitReceiptStore"),
     (SESSION_STORE_SOURCE, "SessionCommitStore"),
     (SESSION_HISTORY_SOURCE, "SessionHistoryStore"),
     (SESSION_STORE_SOURCE, "TurnInputStore"),

@@ -68,23 +68,22 @@ async fn receipts(
 
 #[derive(Deserialize)]
 struct CompletionRequest {
-    key: lash::AwaitEventKey,
+    key: String,
     value: serde_json::Value,
 }
 
 async fn resolve(
     State(state): State<ReceiverState>,
     Json(request): Json<CompletionRequest>,
-) -> AppResult<Json<lash::ResolveOutcome>> {
-    Ok(Json(
-        state
-            .app
-            .core
-            .completions()
-            .resolve(request.key, lash::Resolution::Ok(request.value))
-            .await
-            .map_err(AppError::runtime)?,
-    ))
+) -> AppResult<Json<String>> {
+    let answer = state
+        .app
+        .core
+        .completions()
+        .resolve(&request.key, lash::Resolution::Ok(request.value))
+        .await
+        .map_err(AppError::runtime)?;
+    Ok(Json(format!("{answer:?}")))
 }
 
 pub(crate) fn routes(state: ReceiverState) -> Router {

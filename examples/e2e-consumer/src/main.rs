@@ -206,6 +206,7 @@ async fn main() -> Result<()> {
         store => anyhow::bail!("unsupported consumer store {store}"),
     });
     let backend = lash::durable::DurableBackendBuilder::new(stores.clone())
+        .completion_secrets(lash::durable::CompletionKeySecrets::for_testing())
         .build()
         .context("build the durable backend")?;
     let controls = Arc::new(fixture::Controls::default());

@@ -73,16 +73,11 @@ mod session_view;
 mod shift_fence;
 pub mod tool_material;
 mod tool_receipts;
-mod wait_receipts;
 pub use session_config_views::{
     execution_session_config_from_state, persisted_session_config_from_state,
     recorded_session_policy_from_state, root_snapshot_config_from_state,
 };
 pub use tool_receipts::{ToolCompletionReceipt, ToolRequestReceipt, require_tool_request_matches};
-pub use wait_receipts::{
-    EngineWaitKind, WaitReceiptStore, WaitRequestReceipt, WaitResolutionReceipt,
-    require_wait_request_matches, require_wait_resolution_matches,
-};
 mod lease_owner;
 pub mod session_delete;
 mod session_fault;
@@ -1528,7 +1523,6 @@ pub trait RuntimeStore:
     + ShiftEpochStore
     + RunStore
     + StoreMaintenance
-    + WaitReceiptStore
 {
 }
 
@@ -1543,7 +1537,6 @@ impl<T> RuntimeStore for T where
         + ShiftEpochStore
         + RunStore
         + StoreMaintenance
-        + WaitReceiptStore
         + ?Sized
 {
 }

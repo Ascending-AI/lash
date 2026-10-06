@@ -8,7 +8,7 @@ use lash::SessionId;
 pub(crate) async fn list_session_waits(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<String>,
-) -> Result<Json<Vec<lash::AwaitEventKey>>, AppError> {
+) -> Result<Json<Vec<String>>, AppError> {
     let session_id = SessionId::parse(session_id)?;
     state
         .authorization
@@ -27,7 +27,10 @@ pub(crate) async fn list_session_waits(
             .completions()
             .outstanding(&session_id)
             .await
-            .map_err(AppError::internal)?,
+            .map_err(AppError::internal)?
+            .iter()
+            .map(|key| key.as_str().to_owned())
+            .collect(),
     ))
 }
 
@@ -126,23 +129,27 @@ pub(crate) async fn decide_approval(
     let outcome = state
         .core
         .completions()
-        .resolve(key, resolution.clone())
+        .resolve(
+            lash::durable::completion_host_key(&key).as_str(),
+            resolution.clone(),
+        )
         .await
         .map_err(AppError::internal)?;
-    match &outcome {
-        lash::ResolveOutcome::Accepted => {}
-        lash::ResolveOutcome::AlreadyResolved { terminal } if terminal == &resolution => {}
-        lash::ResolveOutcome::AlreadyResolved { .. } => {
+    match outcome {
+        lash::durable::ResolveAnswer::Resolved | lash::durable::ResolveAnswer::AlreadyResolved => {}
+        lash::durable::ResolveAnswer::Conflict => {
             return Err(AppError::bad_request(format!(
                 "approval `{key_id}` already has the opposite decision"
             )));
         }
-        lash::ResolveOutcome::UnknownOrRevoked => {
+        lash::durable::ResolveAnswer::UnknownOrRevoked
+        | lash::durable::ResolveAnswer::ReservedKind => {
             return Err(AppError::bad_request(format!(
                 "approval `{key_id}` no longer names an active durable wait"
             )));
         }
     }
+    let outcome = format!("{outcome:?}");
     state.trace_for_session(
         &SessionId::parse(requesting_session)?,
         "approval.decided",
@@ -178,12 +185,19 @@ pub(crate) async fn reconcile_decided_approvals(state: &AppState) {
         match state
             .core
             .completions()
-            .resolve(decided.completion_key.clone(), resolution.clone())
+            .resolve(
+                lash::durable::completion_host_key(&decided.completion_key).as_str(),
+                resolution,
+            )
             .await
         {
-            Ok(lash::ResolveOutcome::Accepted) | Ok(lash::ResolveOutcome::UnknownOrRevoked) => {}
-            Ok(lash::ResolveOutcome::AlreadyResolved { terminal }) if terminal == resolution => {}
-            Ok(lash::ResolveOutcome::AlreadyResolved { .. }) => eprintln!(
+            Ok(
+                lash::durable::ResolveAnswer::Resolved
+                | lash::durable::ResolveAnswer::AlreadyResolved
+                | lash::durable::ResolveAnswer::UnknownOrRevoked
+                | lash::durable::ResolveAnswer::ReservedKind,
+            ) => {}
+            Ok(lash::durable::ResolveAnswer::Conflict) => eprintln!(
                 "agent-workbench approval reconcile: {} was decided {} but the wait resolved differently",
                 decided.key,
                 decided.decision.as_str()

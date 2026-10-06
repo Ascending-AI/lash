@@ -96,11 +96,18 @@ impl ProcessWorkSubstrate for DurableProcessWork {
             .map_err(|error| PluginError::Invoke(error.to_string()))
     }
 
+    /// A caller outside an actor has no wait row to own: it reads the
+    /// process's terminal from the registry the terminal transaction
+    /// writes. An actor awaits through `waits::await_process`, bounded and
+    /// cancellable.
     async fn await_process_terminal(
         &self,
-        _process_id: &crate::ProcessId,
+        process_id: &crate::ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError> {
-        todo!("L5 (FIG-5173): await the process's terminal through a process-terminal wait row")
+        super::ProcessRegistryAwaiter::for_registry(self.backend.process_registry())
+            .await_terminal(process_id)
+            .await
+            .map(ProcessTerminalWait::Terminal)
     }
 
     async fn deliver_cancel(
@@ -112,12 +119,14 @@ impl ProcessWorkSubstrate for DurableProcessWork {
         todo!("L6 (FIG-5175): request the process's cancel as mail; the first request wins")
     }
 
+    /// Nothing to publish: the process's terminal transaction resolves its
+    /// waiters' rows itself (`waits::resolve_process_terminal_waits`).
     async fn publish_process_terminal(
         &self,
         _process_id: &crate::ProcessId,
         _output: &crate::ProcessAwaitOutput,
         _key: &str,
     ) -> Result<(), PluginError> {
-        todo!("L5 (FIG-5173): resolve the process's terminal waits in its terminal transaction")
+        Ok(())
     }
 }

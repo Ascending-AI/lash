@@ -1,3 +1,5 @@
+#[path = "../../shared/completion_secrets.rs"]
+mod completion_secrets;
 #[cfg(feature = "e2e-tools")]
 mod e2e_operation;
 #[cfg(feature = "e2e-tools")]

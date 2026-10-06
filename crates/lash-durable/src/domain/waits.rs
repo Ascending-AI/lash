@@ -9,10 +9,49 @@ use lash_sansio::ProcessId;
 
 use super::keys::ScopeKey;
 
+/// The mail kind of an awaiter's own cancel request (ADR 0132 §11: a cancel
+/// request is a mailbox row that wakes its actor). An unacknowledged mail of
+/// this kind in the awaiter's mailbox ends its race `Cancelled`; the lanes
+/// that request a cancel (L3's turn cancel, L6's process cancel) append it.
+pub const CANCEL_MAIL: &str = "cancel";
+
 /// A wait's identity: 128 random bits, minted by the owner in the
 /// transaction that pins the wait.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WaitId(pub [u8; 16]);
+
+impl WaitId {
+    /// The stored spelling: 32 lowercase hex digits.
+    #[must_use]
+    pub fn to_hex(&self) -> String {
+        use std::fmt::Write as _;
+        self.0
+            .iter()
+            .fold(String::with_capacity(32), |mut hex, byte| {
+                let _ = write!(hex, "{byte:02x}");
+                hex
+            })
+    }
+
+    /// The stored spelling read back; `None` for anything but 32 hex digits.
+    #[must_use]
+    pub fn parse_hex(stored: &str) -> Option<Self> {
+        if stored.len() != 32 || !stored.is_ascii() {
+            return None;
+        }
+        let mut id = [0_u8; 16];
+        for (index, byte) in id.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(stored.get(index * 2..index * 2 + 2)?, 16).ok()?;
+        }
+        Some(Self(id))
+    }
+}
+
+impl std::fmt::Display for WaitId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.to_hex())
+    }
+}
 
 /// The version of the completion secret a host-resolvable key was minted
 /// under. The row stores it, so a key verifies under its own version for as
@@ -43,6 +82,34 @@ impl WaitKind {
     pub const fn host_resolvable(self) -> bool {
         matches!(self, Self::ToolCompletion | Self::Custom)
     }
+
+    /// The stored spelling, which the key's MAC also covers.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ToolCompletion => "tool_completion",
+            Self::Custom => "custom",
+            Self::ProcessTerminal => "process_terminal",
+            Self::Signal => "signal",
+            Self::Timer => "timer",
+            Self::ChildSession => "child_session",
+        }
+    }
+
+    /// The stored spelling read back; `None` for anything else.
+    #[must_use]
+    pub fn parse(stored: &str) -> Option<Self> {
+        [
+            Self::ToolCompletion,
+            Self::Custom,
+            Self::ProcessTerminal,
+            Self::Signal,
+            Self::Timer,
+            Self::ChildSession,
+        ]
+        .into_iter()
+        .find(|kind| kind.as_str() == stored)
+    }
 }
 
 /// Where a wait is.
@@ -57,6 +124,30 @@ pub enum WaitState {
     /// Its scope ended first.
     Revoked,
 }
+
+impl WaitState {
+    /// The stored spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Resolved => "resolved",
+            Self::TimedOut => "timed_out",
+            Self::Revoked => "revoked",
+        }
+    }
+
+    /// The stored spelling read back; `None` for anything else.
+    #[must_use]
+    pub fn parse(stored: &str) -> Option<Self> {
+        [Self::Pending, Self::Resolved, Self::TimedOut, Self::Revoked]
+            .into_iter()
+            .find(|state| state.as_str() == stored)
+    }
+}
+
+/// The digest a due timer resolves with: a timer carries no value.
+pub const TIMER_DIGEST: &str = "timer";
 
 /// One stored wait.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,13 +196,15 @@ pub enum WaitWrite {
         /// For a host-resolvable wait, its key's secret version.
         key_version: Option<KeyVersion>,
     },
-    /// Settle a pending wait whose deadline passed: a timer resolves, any
-    /// other kind times out. A resolution committed first wins.
+    /// Settle a pending wait of the committing owner whose deadline passed
+    /// as of the commit: a timer resolves with [`TIMER_DIGEST`], any other
+    /// kind times out. A resolution committed first wins: the write changes
+    /// only a row still pending, under the same lock.
     Due {
         /// The wait.
         id: WaitId,
     },
-    /// Revoke every pending wait of `scope`.
+    /// Revoke every pending wait of `scope`, and wake each other owner.
     RevokeScope(ScopeKey),
     /// Resolve every pending process-terminal wait on `process` with
     /// `resolution`, and wake each owner.

@@ -645,9 +645,8 @@ pub mod persistence {
         session_delete::{SessionDeleteLedger, SessionDeleteObligation},
     };
     pub use lash_core::store::{
-        EngineWaitKind, PreparedRunAdmission, StoreTransition, ToolCompletionReceipt,
-        ToolRequestReceipt, TurnTraceReceipt, WaitReceiptStore, WaitRequestReceipt,
-        WaitResolutionReceipt,
+        PreparedRunAdmission, StoreTransition, ToolCompletionReceipt, ToolRequestReceipt,
+        TurnTraceReceipt,
     };
     /// Artifact ownership supplied to protocol engines and effect controllers.
     pub use lash_core::{

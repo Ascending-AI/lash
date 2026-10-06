@@ -72,15 +72,6 @@ pub(crate) async fn reclaim(
             .await
             .map_err(store_sqlx_error)?
             .rows_affected() as usize;
-        let wait_sql = lash_store_sql::wait_receipts::WaitReceiptStatements::render(
-            lash_store_sql::Dialect::postgres(),
-        );
-        removed_receipt_count += sqlx::query(wait_sql.reclaim.sql())
-            .bind(clamp_epoch_ms(bound.committed_before_epoch_ms))
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .rows_affected() as usize;
 
         // Trigger mutation receipts are durable evidence under the same lever
         // (FIG-4108): ownerless rows by age, session rows once the owner is

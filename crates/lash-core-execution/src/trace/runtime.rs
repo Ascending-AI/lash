@@ -40,7 +40,6 @@ struct TraceRuntimeParts {
     level: TraceLevel,
     base_context: TraceContext,
     metrics: TelemetryMetrics,
-    wait_receipts: Option<Arc<dyn crate::store::WaitReceiptStore>>,
     tool_receipts: Option<Arc<dyn crate::StoreSet>>,
 }
 
@@ -55,7 +54,6 @@ impl TraceRuntime {
                 level: TraceLevel::Standard,
                 base_context: TraceContext::default(),
                 metrics: TelemetryMetrics::default(),
-                wait_receipts: None,
                 tool_receipts: None,
             }),
         }
@@ -73,15 +71,6 @@ impl TraceRuntime {
         let parts = Arc::make_mut(&mut self.parts);
         parts.metrics = metrics;
         self
-    }
-
-    #[must_use]
-    pub fn with_wait_receipts(mut self, store: Arc<dyn crate::store::WaitReceiptStore>) -> Self {
-        Arc::make_mut(&mut self.parts).wait_receipts = Some(store);
-        self
-    }
-    pub(crate) fn wait_receipts(&self) -> Option<&Arc<dyn crate::store::WaitReceiptStore>> {
-        self.parts.wait_receipts.as_ref()
     }
 
     /// Binds the deployment's durable logical tool receipts. The factory is

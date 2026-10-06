@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1136 rows over 705 files, 3296 laws.
-# By class: mechanical 140, semantic 99, delete 582, replace 315.
-# By lane: L1b 11, L7p 8, L9b 59, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
-# By status: todo 492, ported 38, deleted 606.
+# 1138 rows over 706 files, 3297 laws.
+# By class: mechanical 140, semantic 99, delete 584, replace 315.
+# By lane: L1b 11, L5 2, L7p 8, L9b 59, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
+# By status: todo 492, ported 38, deleted 608.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -2089,7 +2089,6 @@ laws = [
   "nested_process_arguments_reject_forged_aliases_and_try_later_union_arms",
   "postgres_attachment_materialization_turn_witnesses",
   "a_stale_fence_receipt_replay_leaves_the_store_byte_identical",
-  "neutral_tool_receipts_are_first_writers_and_retire_with_their_scope",
   "lash_conformance::append_head_switch_tests!",
   "lash_conformance::append_receipt_rewrite_tests!",
   "lash_conformance::append_tombstone_tests!",
@@ -18617,3 +18616,27 @@ laws = [
 disposition = "subject-deleted"
 status = "deleted"
 note = "FIG-5200 deleted these tests: GenerationDrainStore is gone; its step of cross_backend_store_differential_agrees went with it"
+
+[[row]]
+path = "crates/lash-postgres-store/tests/conformance.rs"
+test = "neutral_tool_receipts_are_first_writers_and_retire_with_their_scope"
+area = "store-conformance"
+needs = ["round"]
+class = "delete"
+lane = "L5"
+laws = ["neutral tool receipts are first writers and retire with their scope"]
+disposition = "covered-by:crates/lash-sim/tests/cross_backend_store_differential/surface_sweep.rs::tool_receipt_sweep_retains_only_committed_first_writers"
+status = "deleted"
+note = "its retirement leg called WaitReceiptStore::retire_observation_receipts, deleted with lash_wait_receipts (L5, FIG-5173); the first-writer receipt law is the sweep's; L4 drops the tool receipts"
+
+[[row]]
+path = "crates/lash-core-effect/src/await_event_identity.rs"
+test = "*"
+area = "turn-control"
+needs = ["wait"]
+class = "delete"
+lane = "L5"
+laws = ["await_event_identity_golden_corpus"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the public await-event identity hash is deleted (L5, FIG-5173): wait keys are HMAC-minted over a random wait id (K1)"

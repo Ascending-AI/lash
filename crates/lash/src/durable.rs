@@ -10,7 +10,8 @@ pub use lash_core::durable_port::*;
 use lash_core::{Backend, ProcessEngine, StoreSet};
 pub use lash_core::{
     BackendParts, CompletionKeySecrets, DurableBuildError, KeyVersion, NoProjectionProviders,
-    ProjectionProviders, SecretBytes, SecretsRefusal,
+    PinnedKey, ProjectionProviders, ResolveAnswer, SecretBytes, SecretsRefusal,
+    completion_host_key,
 };
 
 /// Builds the one [`Backend`] a [`LashCore`](crate::LashCore) takes: lash's

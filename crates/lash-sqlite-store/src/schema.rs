@@ -23,18 +23,6 @@ pub(crate) use crate::trigger_schema::TRIGGER_SCHEMA;
 /// in the same transaction. Component blobs are shared and have no
 /// component-side cascade.
 pub(crate) const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS wait_receipts (
-    wait_id TEXT PRIMARY KEY,
-    owner_key TEXT NOT NULL,
-    session_id TEXT,
-    started_at_ms INTEGER NOT NULL,
-    request_json TEXT NOT NULL,
-    resolution_json TEXT,
-    resolved_at_ms INTEGER,
-    retired_at_ms INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_wait_receipts_owner ON wait_receipts(owner_key);
-
 CREATE TABLE IF NOT EXISTS tool_call_receipts (
     request_key TEXT PRIMARY KEY,
     session_id TEXT,
@@ -1024,13 +1012,14 @@ pub(crate) fn expected_version() -> i64 {
 
 /// The shared table sets provisioning applies after the schema bodies, in
 /// order; see [`crate::schema_fragments`].
-pub(crate) const FRAGMENTS: [&str; 6] = [
+pub(crate) const FRAGMENTS: [&str; 7] = [
     crate::schema_fragments::SESSION_INGRESS_TABLE,
     crate::schema_fragments::SESSION_RUNS_TABLES,
     crate::durable::DURABLE_TABLES,
     crate::durable::RUN_RECORDS_TABLES,
     crate::durable::EXEC_SNAPSHOTS_TABLES,
     crate::durable::TURN_PHASES_TABLES,
+    crate::durable::WAITS_TABLES,
 ];
 
 /// Everything provisioning applies, in order: the durable core's, process

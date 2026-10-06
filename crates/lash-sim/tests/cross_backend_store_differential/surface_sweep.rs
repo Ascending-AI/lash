@@ -14,8 +14,6 @@
 
 use super::*;
 use corrupt_input_cases::CorruptBackup;
-use lash_core::store::SessionCommitStore as _;
-use lash_core::store::WaitReceiptStore;
 
 /// A well-formed but never-sealed shift fence, for the inventory steps that
 /// take a fence in a case that holds no shift. Presenting it is itself a
@@ -58,7 +56,6 @@ pub(super) struct SurfaceScratch {
 pub(super) enum SurfaceMethod {
     RefusedRootAdmission,
     ToolReceipts,
-    WaitReceipts,
     LoadSession,
     ListPendingTurnInputs,
     /// [`IngressStore::pending_turn_input`]: the keyed point read of the
@@ -234,7 +231,6 @@ impl SurfaceMethod {
         match self {
             Self::RefusedRootAdmission => "surface:refused_root_admission",
             Self::ToolReceipts => "surface:tool_receipts",
-            Self::WaitReceipts => "surface:wait_receipts",
             Self::LoadSession => "surface:load_session",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
             Self::PendingTurnInput { known: true } => "surface:pending_turn_input",
@@ -521,7 +517,6 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             },
             surface(SurfaceMethod::RefusedRootAdmission),
             surface(SurfaceMethod::ToolReceipts),
-            surface(SurfaceMethod::WaitReceipts),
             surface(SurfaceMethod::ReadSessionStateVersion),
             surface(SurfaceMethod::AdmitSessionState),
             surface(SurfaceMethod::LoadKnownNode),
@@ -973,7 +968,6 @@ impl BackendRunner {
             }
 
             SurfaceMethod::ToolReceipts => tool_receipt_law(store.as_ref(), &session_id).await?,
-            SurfaceMethod::WaitReceipts => wait_receipt_law(store.as_ref(), &session_id).await?,
             SurfaceMethod::LoadSession => {
                 format!(
                     "present={}",
@@ -2108,115 +2102,4 @@ async fn tool_receipt_sweep_retains_only_committed_first_writers() {
             .expect("actual sweep drivers"),
         "request=first completion=first conflicts=typed permits=one"
     );
-}
-
-async fn wait_receipt_law(
-    store: &dyn RuntimeStore,
-    session: &SessionId,
-) -> Result<String, StoreError> {
-    let request = lash_core::store::WaitRequestReceipt {
-        wait_id: format!("{session}:wait"),
-        owner_key: format!("{session}:wait-owner"),
-        session_id: Some(session.clone()),
-        request_digest: "request-digest".into(),
-        kind: lash_core::store::EngineWaitKind::Event,
-        scope: None,
-        context: Default::default(),
-        started_at_ms: 7,
-    };
-    let first = store.record_wait_request(&request).await?;
-    let mut retry = request.clone();
-    retry.started_at_ms = 99;
-    let reused = store.record_wait_request(&retry).await?;
-    assert!(first.changed && first.permit().is_some());
-    assert!(!reused.changed && reused.permit().is_none());
-    assert_eq!(reused.record, first.record);
-    retry.request_digest = "changed".into();
-    assert!(matches!(
-        store.record_wait_request(&retry).await,
-        Err(StoreError::WaitReceiptConflict { .. })
-    ));
-    let resolution = lash_core::store::WaitResolutionReceipt {
-        wait_id: request.wait_id.clone(),
-        resolution_digest: "resolution-digest".into(),
-        resolution: serde_json::json!({"accepted":true}),
-        resolved_at_ms: 11,
-    };
-    let first = store.record_wait_resolution(&resolution).await?;
-    let mut retry = resolution;
-    retry.resolved_at_ms = 101;
-    let reused = store.record_wait_resolution(&retry).await?;
-    assert!(first.changed && first.permit().is_some());
-    assert!(!reused.changed && reused.permit().is_none());
-    assert_eq!(reused.record, first.record);
-    retry.resolution_digest = "changed".into();
-    assert!(matches!(
-        store.record_wait_resolution(&retry).await,
-        Err(StoreError::WaitReceiptConflict { .. })
-    ));
-    store
-        .retire_observation_receipts(&request.owner_key, 12)
-        .await?;
-    Ok("wait=request-first resolution-first conflicts=typed permits=one".into())
-}
-#[tokio::test]
-async fn wait_receipt_sweep_retains_committed_times_and_reclaims_only_retired_owners() {
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("SQLite memory");
-    let store = stores.session_store_factory();
-    let session = SessionId::fixture("wait-receipt-sweep");
-    assert_eq!(
-        wait_receipt_law(store.as_ref(), &session)
-            .await
-            .expect("actual sweep driver"),
-        "wait=request-first resolution-first conflicts=typed permits=one"
-    );
-    let active = lash_core::store::WaitRequestReceipt {
-        wait_id: "active-wait".into(),
-        owner_key: "active-owner".into(),
-        session_id: None,
-        request_digest: "active".into(),
-        kind: lash_core::store::EngineWaitKind::Timer,
-        scope: None,
-        context: Default::default(),
-        started_at_ms: 5,
-    };
-    store
-        .record_wait_request(&active)
-        .await
-        .expect("active wait");
-    let tool = lash_core::store::ToolRequestReceipt {
-        owner: lash::tracing::TraceToolOwner::Process {
-            process_id: lash_sansio::ProcessId::fixture("retiring-tool-owner"),
-        },
-        request_key: "retiring-tool".into(),
-        payload_digest: "tool".into(),
-        payload: serde_json::Value::Null,
-        scope: None,
-        context: Default::default(),
-        requested_at_ms: 5,
-    };
-    store
-        .record_tool_request(&tool)
-        .await
-        .expect("process request without a session");
-    store
-        .retire_observation_receipts(&tool.owner_key().unwrap(), 12)
-        .await
-        .expect("retire tool owner");
-    let report = store
-        .reclaim_retained_evidence(lash_core::store::RetentionBound {
-            committed_before_epoch_ms: 13,
-            turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
-        })
-        .await
-        .expect("retention sweep");
-    assert_eq!(report.removed_receipt_count, 2);
-    let reused = store
-        .record_wait_request(&active)
-        .await
-        .expect("active retained");
-    assert!(!reused.changed);
-    assert_eq!(reused.record, active);
 }

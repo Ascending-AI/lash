@@ -64,12 +64,6 @@ pub(crate) async fn reclaim(
                     removed_receipt_count +=
                         crate::conn::cached_execute(tx, tool_sql.reclaim.sql(), params![cutoff])
                             .map_err(sqlite_error)?;
-                    let wait_sql = lash_store_sql::wait_receipts::WaitReceiptStatements::render(
-                        crate::schema_layout::MAIN,
-                    );
-                    removed_receipt_count +=
-                        crate::conn::cached_execute(tx, wait_sql.reclaim.sql(), params![cutoff])
-                            .map_err(sqlite_error)?;
 
                     Ok(lash_core_execution::store::RetentionReport {
                         removed_receipt_count,

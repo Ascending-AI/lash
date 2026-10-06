@@ -201,7 +201,10 @@ pub(crate) async fn prove_pending_tool_completion_on(
     });
     let accepted = core
         .completions()
-        .resolve(key.clone(), lash_core::Resolution::Ok(resolution.clone()))
+        .resolve(
+            lash_core::completion_host_key(&key).as_str(),
+            lash_core::Resolution::Ok(resolution.clone()),
+        )
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     // The duplicate lands while the resumed turn still waits on its final
@@ -211,7 +214,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
     let duplicate = core
         .completions()
         .resolve(
-            key,
+            lash_core::completion_host_key(&key).as_str(),
             lash_core::Resolution::Ok(json!({"ok": false, "duplicate": true})),
         )
         .await
@@ -222,7 +225,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
         "tool": event.payload.get("tool").cloned().unwrap_or(Value::Null),
         "scheduler_delivered_tool_completion": true,
         "completion_key_observed": event.payload.get("completion_key_observed").cloned().unwrap_or(Value::Bool(false)),
-        "resolve_outcome": accepted.clone(),
+        "resolve_outcome": format!("{accepted:?}"),
     });
 
     let result = turn
@@ -265,8 +268,8 @@ pub(crate) async fn prove_pending_tool_completion_on(
         completed_event_count_before_resolution: completed_before,
         completed_event_count_after_resolution: completed_after,
         resolved_payload: resolution.clone(),
-        completion_outcome: accepted.clone(),
-        duplicate_completion_outcome: duplicate,
+        completion_outcome: format!("{accepted:?}"),
+        duplicate_completion_outcome: format!("{duplicate:?}"),
         turn_suspension_invariant: pending_tool_completion(
             suspended_before_completion,
             "pending ToolOutcome parked the live turn before external resolution",
@@ -274,7 +277,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
         scheduler_resolution_invariant: pending_tool_completion(
             delivered.kind == BoundaryKind::Tool
                 && delivered.scheduler.scheduler_controlled
-                && matches!(accepted, lash_core::ResolveOutcome::Accepted),
+                && accepted == lash_core::ResolveAnswer::Resolved,
             "BoundaryScheduler delivered the Tool boundary that resolved the await key",
         ),
         final_result_invariant: pending_tool_completion(

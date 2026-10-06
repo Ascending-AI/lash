@@ -22,7 +22,6 @@ mod tool_attempt_capture;
 pub use tool_attempt_capture::{TOOL_ATTEMPT_CAPTURE_VERSION, ToolAttemptCapture};
 mod outcome;
 mod shift_outcome;
-pub use lash_core_effect::await_event_identity;
 mod validation;
 
 pub use crate::store::AdmittedHeadVerdict;

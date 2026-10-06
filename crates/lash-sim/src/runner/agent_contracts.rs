@@ -674,7 +674,7 @@ finish({ recovered: true });
     let resolve_outcome = core
         .completions()
         .resolve(
-            key,
+            lash_core::completion_host_key(&key).as_str(),
             lash_core::Resolution::Ok(json!({
                 "request_id": "request-1",
                 "answer": "approved"
@@ -695,7 +695,7 @@ finish({ recovered: true });
         "suspended_before_resolution": suspended_before_resolution,
         "completed_event_count_before_resolution": completed_before_resolution,
         "completed_event_count_after_resolution": completed_after_resolution,
-        "resolve_accepted": matches!(resolve_outcome, lash_core::ResolveOutcome::Accepted),
+        "resolve_accepted": resolve_outcome == lash_core::ResolveAnswer::Resolved,
         "atomic_attempt_count": tools.attempt_count(),
     });
     agent_process_execution_result(

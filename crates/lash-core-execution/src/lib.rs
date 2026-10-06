@@ -334,7 +334,6 @@ pub mod facade_support {
     pub use crate::runtime::WakeDeliveryDriveReport;
     pub use crate::runtime::WakeDeliveryDriver;
     pub use crate::runtime::WatchedRegistry;
-    pub use crate::runtime::await_event_identity;
     pub use crate::runtime::current_epoch_ms;
 
     pub use crate::runtime::process_child_session_id;
@@ -763,9 +762,11 @@ pub use runtime::ExecutionOwner;
 pub(crate) use runtime::ToolAttemptEffectOutcome;
 pub use runtime::TurnCancelWait;
 pub use runtime::actor::ActorContext;
+pub use runtime::actor::completion_host_key;
 pub use runtime::actor::projection::{NoProjectionProviders, ProjectionProviders};
+pub use runtime::actor::waits;
 pub use runtime::actor::waits::{
-    CompletionKeySecrets, KeyVersion, PinnedKey, SecretBytes, SecretsRefusal,
+    CompletionKeySecrets, KeyVersion, PinnedKey, ResolveAnswer, SecretBytes, SecretsRefusal,
 };
 /// Intent realization publishes the execution environment a declared trigger
 /// subscription names, under the realizing scope's artifact owner (FIG-3116).

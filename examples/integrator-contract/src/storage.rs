@@ -881,26 +881,3 @@ impl StorePreflight for Integrator {
         unreachable!("external signature witness")
     }
 }
-
-#[lash::async_trait]
-impl WaitReceiptStore for Integrator {
-    async fn record_wait_request(
-        &self,
-        request: &WaitRequestReceipt,
-    ) -> Result<StoreTransition<WaitRequestReceipt>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn record_wait_resolution(
-        &self,
-        resolution: &WaitResolutionReceipt,
-    ) -> Result<StoreTransition<WaitResolutionReceipt>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn retire_observation_receipts(
-        &self,
-        owner_key: &str,
-        retired_at_ms: u64,
-    ) -> Result<(), StoreError> {
-        unreachable!("external signature witness")
-    }
-}

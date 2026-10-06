@@ -74,7 +74,6 @@ impl LashCoreBuilder {
         core.tracing = core
             .tracing
             .clone()
-            .with_wait_receipts(core.session_store_factory())
             .with_tool_receipts(core.backend().stores());
         if let Some(termination) = self.termination.take() {
             core.control.termination = termination;

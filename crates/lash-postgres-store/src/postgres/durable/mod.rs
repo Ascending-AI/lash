@@ -46,10 +46,6 @@ mod turns;
 mod waits;
 
 /// The owner commit a domain write is applied in: after its fence.
-#[expect(
-    dead_code,
-    reason = "the domain writes that read it are V0, L4, L5 and L6 stubs (I0, FIG-5194)"
-)]
 pub(crate) struct Committing<'a> {
     /// The actor whose fence matched.
     pub(crate) actor: &'a ActorKey,
@@ -854,3 +850,7 @@ impl DurableReads for PostgresDurableStore {
 #[cfg(test)]
 #[path = "../durable_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../wait_law_tests.rs"]
+mod wait_law_tests;

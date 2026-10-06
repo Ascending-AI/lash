@@ -20,6 +20,7 @@ pub use lash_core_execution::ExecutionOwner;
 pub use lash_core_execution::IngressReservedSourceKeyRefusal;
 pub use lash_core_execution::admitted_scope_wire;
 pub use lash_core_execution::compat;
+pub use lash_core_execution::completion_host_key;
 pub use lash_core_execution::direct;
 pub(crate) use lash_core_execution::direct_completion_client;
 pub use lash_core_execution::engine;
@@ -28,9 +29,10 @@ pub use lash_core_execution::process_id_for_test;
 pub use lash_core_execution::process_id_from_handle_json;
 /// Durable tool-effect format versions, re-exported for the format manifest.
 pub use lash_core_execution::runtime::{TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_PRESENTATION_VERSION};
+pub use lash_core_execution::waits;
 pub use lash_core_execution::{
     CompletionKeySecrets, KeyVersion, NoProjectionProviders, PinnedKey, ProjectionProviders,
-    SecretBytes, SecretsRefusal,
+    ResolveAnswer, SecretBytes, SecretsRefusal,
 };
 pub use lash_core_ids::operational_metrics;
 pub use lash_core_llm::llm;
@@ -360,7 +362,6 @@ pub mod facade_support {
     pub use crate::runtime::WakeDeliveryDriver;
     pub use crate::runtime::WatchedRegistry;
     pub use crate::runtime::WeakRuntimeHandle;
-    pub use crate::runtime::await_event_identity;
     pub use crate::runtime::current_epoch_ms;
 
     pub use crate::runtime::process_child_session_id;

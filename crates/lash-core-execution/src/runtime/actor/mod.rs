@@ -15,11 +15,14 @@
 //! | [`turn`] | L3 |
 //! | [`round`] | V0, then L4 |
 //! | [`shift`] | L3s |
-//! | [`waits`] | L5 |
+//! | [`waits`], `wait_effects.rs` | L5 |
+//! | `await_event_legacy.rs` | L3, L4, L6 (deleted with their ports) |
 //! | [`process`] | L6 |
 //! | [`vm`] | V0, then L7 |
 //! | [`projection`] | L7p |
 
+mod await_event_legacy;
+pub use await_event_legacy::completion_host_key;
 mod core;
 pub mod journal;
 pub mod process;
@@ -28,6 +31,9 @@ pub mod round;
 pub mod shift;
 pub mod turn;
 pub mod vm;
+mod wait_effects;
+#[cfg(feature = "testing")]
+pub mod wait_laws;
 pub mod waits;
 
 pub use core::ActorContext;

@@ -735,14 +735,19 @@ table lash_turn_phases
   column turn_deadline_ms bigint nullable
   column written_epoch bigint not-null
   primary-key (session_id, run)
-table lash_wait_receipts
-  column owner_key text not-null
-  column request_json text not-null
-  column resolution_json text nullable
+table lash_waits
+  column created_epoch bigint not-null
+  column deadline_ms bigint nullable
+  column host_resolvable boolean not-null
+  column key_version integer nullable
+  column kind text not-null
+  column owner_actor text not-null
+  column owner_scope text not-null
+  column resolution_digest text nullable
+  column resolution_ref text nullable
   column resolved_at_ms bigint nullable
-  column retired_at_ms bigint nullable
-  column session_id text nullable
-  column started_at_ms bigint not-null
+  column state text not-null
+  column target_process text nullable
   column wait_id text not-null
   primary-key (wait_id)
 table lash_wake_allocation_floors
