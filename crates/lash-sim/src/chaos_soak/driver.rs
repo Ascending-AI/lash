@@ -1222,11 +1222,25 @@ impl Driver {
         // deployment a crash replaces mid-drain must go with it, as a dead
         // process does, or its recovery lease outlives it and the deployment
         // that replaced it never leads.
-        self.world
-            .core()?
-            .drain_generation(&old)
-            .await
-            .map_err(|error| format!("mark `{old}` draining: {error}"))?;
+        let marked = {
+            let core = self.world.core()?;
+            self.host_answer(async { Some(core.drain_generation(&old).await) })
+                .await?
+        };
+        if let Some(result) = marked {
+            result.map_err(|error| format!("mark `{old}` draining: {error}"))?;
+        } else {
+            // A death can interrupt the mark or its immediate handover.
+            // Retain the requested mark in either case; recovery owns the
+            // delivery. Never keep a dead core while awaiting its endpoint.
+            let backend = self.world.backend();
+            backend
+                .generation_drain()
+                .mark_draining(&old, backend.clock().timestamp_ms())
+                .await
+                .map_err(|error| format!("retain `{old}`'s drain mark: {error}"))?;
+        }
+        self.settle_crash().await?;
         // Each host death during the drain may leave a claim that only its
         // lapse frees (ADR 0109 §1.8: `claimed_at + claim_ttl + T`), so the
         // drain's bound grows by that much per death it saw.

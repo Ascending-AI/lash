@@ -1,6 +1,66 @@
 use super::*;
 use crate::crash_matrix::deployment::HostSite;
 
+/// FIG-5140: a drain mark survives a deployment death inside its immediate
+/// handover. The roll observes that death and lets recovery deliver the mark.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_roll_observes_a_crash_during_its_drain_mark() {
+    let seed = 0x5140;
+    let mut driver = Driver::new(seed).await.expect("world");
+    driver
+        .step(
+            seed,
+            &Step::Open {
+                session: 0,
+                lane: Lane::Held,
+                parent: None,
+            },
+        )
+        .await
+        .expect("open the session");
+    let session = driver.ledger.sessions[0].id.clone();
+    driver
+        .send_held(&session, "held-drain", false)
+        .await
+        .expect("held run");
+    let durable = driver
+        .world
+        .core()
+        .expect("core")
+        .session(session.clone())
+        .durable()
+        .await
+        .expect("durable session");
+    let trip = Arc::clone(driver.world.trip());
+    let seen = trip.fires();
+    driver.world.crash_on(
+        CrashRule::new(EngineCut::BeforeCommand { index: 1 })
+            .service("LashDurableWaitIndex")
+            .handler("hand_over_turns")
+            .key(session.as_str()),
+    );
+    // End the deliberately held run once the injected death has happened.
+    // The crash event orders this cancellation, independently of wall time.
+    let cancel = tokio::spawn(async move {
+        trip.fired_beyond(seen).await;
+        durable
+            .cancel(lash::CancelTarget::Input(
+                lash_core::PendingTurnInputDraft::keyed_input_id(&session, "held-drain"),
+            ))
+            .await
+    });
+    let old = driver.deployment.clone();
+    let rolled = driver.step(seed, &Step::Roll).await;
+    let pinned = pinned_open(&driver.world, &old);
+    driver.world.finish().await;
+    cancel.abort();
+    let _ = cancel.await;
+    let rolled = rolled.expect("the interrupted drain is recovered");
+    assert_eq!(driver.counts.crashes, 1, "the handover fault executed");
+    assert_eq!(driver.ledger.retired.len(), 1, "{rolled}");
+    assert!(pinned.is_empty(), "{rolled}: {pinned:?}");
+}
+
 /// A rolling deploy's drain charges its ticks to time, never to work
 /// (FIG-4624). One shift of the first build is calling a backlog of runs
 /// when the build is rolled, and each run takes wall time: more of it,
