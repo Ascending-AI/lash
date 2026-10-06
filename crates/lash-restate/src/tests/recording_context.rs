@@ -906,37 +906,6 @@ impl ReplayableRecordingContext {
         self.runs.lock_recover().clone()
     }
 
-    /// Every recorded effect's envelope, decoded back into its command —
-    /// except a model request's, which journals its request by digest
-    /// (FIG-3980) and so has no command to decode back into.
-    pub(super) fn recorded_runtime_effect_envelopes(&self) -> Vec<(String, RuntimeEffectEnvelope)> {
-        let mut envelopes = self
-            .records
-            .lock_recover()
-            .iter()
-            .filter(|(effect_name, _)| {
-                crate::controller::is_recorded_effect_journal_name(effect_name)
-            })
-            .filter_map(|(effect_name, bytes)| {
-                let recorded = decode_recorded_runtime_effect(bytes);
-                let json: serde_json::Value = serde_json::from_str(recorded.envelope.json())
-                    .expect("canonical envelope json");
-                if matches!(
-                    json.pointer("/command/type")
-                        .and_then(serde_json::Value::as_str),
-                    Some("before_llm_call" | "llm_call")
-                ) {
-                    return None;
-                }
-                let envelope =
-                    serde_json::from_value(json).expect("canonical runtime effect envelope");
-                Some((effect_name.clone(), envelope))
-            })
-            .collect::<Vec<_>>();
-        envelopes.sort_by(|left, right| left.0.cmp(&right.0));
-        envelopes
-    }
-
     pub(super) fn install_recorded_runtime_effects(
         &self,
         records: std::collections::BTreeMap<String, RecordedRuntimeEffect>,

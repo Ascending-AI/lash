@@ -44,14 +44,6 @@ pub(crate) fn effect_replay_key(journal_name: &str) -> Option<&str> {
         .flatten()
 }
 
-/// Whether a journal name is a recorded runtime effect's, by its typed kind.
-#[cfg(test)]
-pub(crate) fn is_recorded_effect_journal_name(journal_name: &str) -> bool {
-    crate::JournalStepKind::RecordedEffect
-        .instance_of(journal_name)
-        .is_some()
-}
-
 #[cfg(test)]
 pub(crate) fn process_drive_journal_name(instance: &str) -> String {
     crate::journal_step_name(&DriveProcessStep(instance.to_owned()))

@@ -1,7 +1,6 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 use lash_core::testing::TestTurnExecution as _;
-use lash_core::testing::{Script, StoreOp};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
@@ -224,28 +223,13 @@ impl ProductionToolCell {
     }
 
     async fn run(&self, effect_host: &dyn EffectHost, start_replay: impl FnOnce()) {
-        let script = Script::new();
-        script
-            .on(StoreOp::commit_runtime_state)
-            .from_nth(1)
-            .before()
-            .fail(|| {
-                lash_core::StoreError::Backend(
-                    "the live worker died at its final commit".to_string(),
-                )
-            });
-        let mut live = replay_test_runtime_with_plugins(
-            &self.session_id,
-            self.policy.clone(),
-            self.initial_state.clone(),
-            self.host.clone(),
-            session_view(
-                script.wrap("live", Arc::clone(self.runtime_store.store())),
-                self.session_id.clone(),
-            ),
-            self.plugin_factories.clone(),
-        )
-        .await;
+        // A run opens with its own commit before the model is asked, so the
+        // crash is the turn-final commit, not the first one.
+        let crashing = decorated_view(&self.runtime_store, |inner| CrashAtFinalCommit {
+            inner,
+            armed: AtomicBool::new(true),
+        });
+        let mut live = self.runtime_on(crashing).await;
         self.run_once(&mut live, effect_host)
             .await
             .expect_err("the live worker dies at its final commit");
@@ -313,22 +297,26 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
         durable_cell
             .run(durable.effect_host(), || durable.start_replay())
             .await;
+        // A Run-routed call journals its attempt as a Run record (FIG-4899);
+        // the cell makes exactly this one call.
         let tool_attempts = durable
             .context
-            .recorded_runtime_effect_envelopes()
-            .into_iter()
-            .filter(|(_, envelope)| {
-                matches!(
-                    &envelope.command,
-                    RuntimeEffectCommand::ToolAttempt { call, .. }
-                        if call.tool_name == manifest.name
-                )
-            })
+            .records
+            .lock_recover()
+            .keys()
+            .filter(|name| name.starts_with("lash.run.attempt:"))
             .count();
         assert_eq!(
-            tool_attempts, 1,
-            "the production durable caller must emit one ToolAttempt for {}",
-            manifest.name
+            tool_attempts,
+            1,
+            "the production durable caller must journal one tool attempt for {}: {:#?}",
+            manifest.name,
+            durable
+                .context
+                .records
+                .lock_recover()
+                .keys()
+                .collect::<Vec<_>>()
         );
     }
 }
