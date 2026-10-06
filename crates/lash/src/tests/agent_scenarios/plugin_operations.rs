@@ -771,13 +771,15 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
                 _ => None,
             })
             .collect();
+        // Each persisted plugin runtime event carries its format stamp
+        // (FIG-5028).
         assert_eq!(
             persisted_events,
             vec![
-                serde_json::json!({"plugin_id": "accept", "event": {
+                serde_json::json!({"format": 1, "plugin_id": "accept", "event": {
                     "kind": "status", "key": "accept-probe", "label": "recorded", "detail": "command:cobalt-583"
                 }}),
-                serde_json::json!({"plugin_id": "accept", "event": {
+                serde_json::json!({"format": 1, "plugin_id": "accept", "event": {
                     "kind": "status", "key": "accept-probe", "label": "completed", "detail": "task:cobalt-583"
                 }}),
             ],

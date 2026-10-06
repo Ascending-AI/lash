@@ -526,11 +526,13 @@ fn sqlite_recovery_records(
         if plugin_type != "standard_compaction.overflow_recovery" {
             return None;
         }
-        let kind = body["kind"]
+        // Each marker is stamped with its format around the record (FIG-5028).
+        let record = &body["record"];
+        let kind = record["kind"]
             .as_str()
             .expect("typed recovery record kind")
             .to_string();
-        Some((kind, frame, body.clone()))
+        Some((kind, frame, record.clone()))
     })
     .collect()
 }

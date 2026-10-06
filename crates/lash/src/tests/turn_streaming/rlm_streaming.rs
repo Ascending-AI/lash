@@ -1103,12 +1103,13 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
                 entry.get("type").and_then(|value| value.as_str()) == Some("protocol_step")
                     && entry.get("plugin_id").and_then(|value| value.as_str())
                         == Some(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
+                    // The RLM event rides its format-stamped envelope (FIG-5028).
                     && entry
-                        .pointer("/payload/RlmDiagnostic/phase")
+                        .pointer("/payload/event/RlmDiagnostic/phase")
                         .and_then(|value| value.as_str())
                         == Some("llm_extraction")
                     && entry
-                        .pointer("/payload/RlmDiagnostic/payload/decision")
+                        .pointer("/payload/event/RlmDiagnostic/payload/decision")
                         .and_then(|value| value.as_str())
                         == Some("retry_native_tool_call")
             })
