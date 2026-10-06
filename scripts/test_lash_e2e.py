@@ -417,7 +417,7 @@ class ReceiptLaws(unittest.TestCase):
 
 
 class RunnerLaws(unittest.TestCase):
-    """The executor's Unix socket must fit sun_path for every registration."""
+    """Executor and fleet Unix sockets must fit sun_path for every registration."""
 
     def test_port_block_claims_are_exclusive_and_a_released_block_is_reused(self):
         gate = e2e.GATE
@@ -448,8 +448,13 @@ class RunnerLaws(unittest.TestCase):
                      / test / "0").resolve()
         # test_runner.py binds executor/orchestrator sockets under
         # <TMPDIR>/lash-tests-XXXXXXXX/.
-        socket_path = Path(e2e.GATE.scratch_dir(artifacts)) / "lash-tests-xxxxxxxx" / "executor"
-        self.assertLess(len(str(socket_path)), 107)
+        for artifacts in [artifacts, e2e.ROOT / ("資料/" * 100)]:
+            scratch = e2e.GATE.scratch_dir(artifacts)
+            for socket_path in [
+                scratch / "lash-tests-xxxxxxxx" / "executor",
+                scratch / ("fleet-" + "a" * 32 + ".sock"),
+            ]:
+                self.assertLess(len(os.fsencode(socket_path)), 107)
 
 
 class WorkbenchReadinessLaws(unittest.TestCase):

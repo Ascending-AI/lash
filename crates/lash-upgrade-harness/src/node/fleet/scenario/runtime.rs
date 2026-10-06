@@ -22,6 +22,14 @@ type SharedCluster = Arc<AsyncMutex<LocalCluster>>;
 type SharedProxy = Arc<AsyncMutex<Option<V7Proxy>>>;
 type Faults = Arc<Mutex<Vec<FaultReceipt>>>;
 
+fn control_socket(directory: &Path, scratch: &Path) -> PathBuf {
+    // e2e-gate supplies a fixed-width TMPDIR. Artifact paths can exceed
+    // sun_path even when made relative to the fork, so only hash them here.
+    // The directory includes the host role; replacements reuse its socket.
+    let identity = lash_core::stable_hash::sha256_hex(directory.as_os_str().as_encoded_bytes());
+    scratch.join(format!("fleet-{}.sock", &identity[..32]))
+}
+
 pub struct RuntimeCluster {
     cluster: SharedCluster,
     faults: Faults,
@@ -277,13 +285,7 @@ impl HostAdapter for Client {
                 .arg("--barrier-directory")
                 .arg(&config.barriers)
                 .args(["--bind", "127.0.0.1:0", "--control-socket"])
-                .arg(
-                    config
-                        .directory
-                        .join("control.sock")
-                        .strip_prefix(std::env::current_dir()?)
-                        .context("fleet control socket must be inside the fork")?,
-                )
+                .arg(control_socket(&config.directory, &std::env::temp_dir()))
                 .args(["--ready-file"])
                 .arg(&ready_file)
                 .args(["--timeout-secs", "240"]);
@@ -1296,6 +1298,32 @@ mod tests {
     use super::*;
     use serde_json::{Value, json};
     use tokio::io::AsyncReadExt;
+
+    /// FIG-5110: artifact depth and UTF-8 byte length cannot break fleet control.
+    #[test]
+    fn fleet_control_socket_binds_independently_of_artifact_path() -> Result<()> {
+        let root = std::env::current_dir()?;
+        let scratch = tempfile::tempdir_in(".")?;
+        let socket_root = scratch.path().strip_prefix(&root)?;
+        for artifacts in [
+            root.join("target/e2e-gate/e2e__test/fleet::s16_in_flight_terminal_blocks_drain_and_disconnect_keeps_fence_replay/1234567890123456789/case/s16-replay"),
+            root.join("deep/".repeat(100)).join("資料".repeat(100)),
+        ] {
+            let primary = control_socket(&artifacts.join("primary"), socket_root);
+            let successor = control_socket(&artifacts.join("successor"), socket_root);
+            ensure!(primary != successor, "fleet hosts must have distinct sockets");
+            ensure!(
+                primary.as_os_str().as_encoded_bytes().len() < 108,
+                "fleet control socket exceeds SUN_LEN: {}",
+                primary.display()
+            );
+            let listener = std::os::unix::net::UnixListener::bind(&primary)?;
+            let _client = std::os::unix::net::UnixStream::connect(&primary)?;
+            drop(listener);
+            std::fs::remove_file(primary)?;
+        }
+        Ok(())
+    }
 
     async fn admin_queries(listener: tokio::net::TcpListener) -> Result<()> {
         loop {

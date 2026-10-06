@@ -229,8 +229,9 @@ def claim_port_block(locks: Path) -> tuple[int, int]:
 def scratch_dir(artifacts: Path) -> Path:
     """The run's TMPDIR: fixed-width for every test name and artifacts path.
 
-    test_runner.py binds its executor sockets under <TMPDIR>/lash-tests-*/,
-    and an AF_UNIX path dies past sun_path (107 bytes). The artifacts path
+    test_runner.py binds executor sockets under <TMPDIR>/lash-tests-*/;
+    fleet hosts bind hashed control sockets directly under TMPDIR.
+    An AF_UNIX path dies past sun_path (107 bytes). The artifacts path
     alone already exceeds that under the default layout, so TMPDIR can never
     be derived from it by concatenation: hash it instead.
     """
