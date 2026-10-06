@@ -192,6 +192,27 @@ async fn open_admission_runtime(
 struct FreshAdmissionMaterializer {
     config: Arc<CoreSessionShiftsConfig>,
 }
+
+impl FreshAdmissionMaterializer {
+    /// The template of the session's open runtime, when a host holds one
+    /// open, it is free, and it is the head the admission prepared: that
+    /// runtime is the head, so nothing reads it from the store again
+    /// (FIG-5137). Any other runtime leaves the admission to one opened
+    /// from the store.
+    fn resident_template(
+        &self,
+        session_id: &SessionId,
+        preparation: &lash_core::store::ShiftAdmissionPreparation,
+    ) -> Option<lash_core::shift::ShiftAdmissionTemplate> {
+        let borrow = self.config.residents.borrow(session_id)?;
+        let writer = borrow.runtime().writer();
+        let runtime = writer.try_lock().ok()?;
+        runtime
+            .shift_admission_template()
+            .ok()
+            .filter(|template| template.holds_prepared_head(preparation))
+    }
+}
 #[async_trait::async_trait]
 impl lash_core::shift::ShiftAdmissionMaterializer for FreshAdmissionMaterializer {
     async fn request(
@@ -206,18 +227,23 @@ impl lash_core::shift::ShiftAdmissionMaterializer for FreshAdmissionMaterializer
         lash_core::store::AdmitRunRequest,
         lash_core::RuntimeEffectControllerError,
     > {
-        let handle = open_admission_runtime(&self.config, store.session_id())
-            .await
-            .map_err(|failure| {
-                lash_core::RuntimeEffectControllerError::from(failure.into_abort().error().clone())
-                    .retryable_uncommitted_derivation()
-            })?;
-        let template = {
-            let writer = handle.writer();
-            let runtime = writer.lock().await;
-            runtime
-                .shift_admission_template()
-                .map_err(lash_core::RuntimeEffectControllerError::from)?
+        let template = match self.resident_template(store.session_id(), preparation) {
+            Some(template) => template,
+            None => {
+                let handle = open_admission_runtime(&self.config, store.session_id())
+                    .await
+                    .map_err(|failure| {
+                        lash_core::RuntimeEffectControllerError::from(
+                            failure.into_abort().error().clone(),
+                        )
+                        .retryable_uncommitted_derivation()
+                    })?;
+                let writer = handle.writer();
+                let runtime = writer.lock().await;
+                runtime
+                    .shift_admission_template()
+                    .map_err(lash_core::RuntimeEffectControllerError::from)?
+            }
         };
         lash_core::shift::ShiftAdmissionMaterializer::request(
             &template,

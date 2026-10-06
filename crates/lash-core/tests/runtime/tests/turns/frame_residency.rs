@@ -531,3 +531,72 @@ pub(super) async fn the_admitted_window_of_a_frame_switching_turn_is_its_admissi
         "the admitted window is the resident graph the turn was admitted on"
     );
 }
+
+/// FIG-5137: a run's plugin transition stands on the resident session when
+/// the resident is the head the run was admitted at, and reads the window
+/// only when it is not. A turn on the head the resident holds reads no
+/// window. After another writer moved the head, the admission reads the
+/// prepared head's turn index and the run brings the resident to that head,
+/// one read each; the transition, its publication and the turn then read
+/// nothing more.
+#[tokio::test(flavor = "multi_thread")]
+pub(super) async fn a_run_admitted_at_a_head_the_resident_does_not_hold_reloads_once() {
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        lash_core::testing::test_standard_protocol_factories(),
+        Arc::new(EmptyTools),
+        mock_provider(vec![
+            text_call("first answer"),
+            text_call("second answer"),
+            text_call("third answer"),
+        ]),
+        test_host_config(&backend),
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
+    )
+    .await;
+    execute_text_turn(&mut runtime, &double, "resident-first", "first request").await;
+
+    let window_loads_before = store.load_session_count();
+    execute_text_turn(&mut runtime, &double, "resident-held", "second request").await;
+    assert_eq!(
+        store.load_session_count(),
+        window_loads_before,
+        "the resident is the admitted head: nothing reads the window"
+    );
+
+    let moved = advance_session_head(store.as_ref(), |_| {}).await;
+    assert_ne!(runtime.state().head_revision, moved.head_revision);
+    let window_loads_before = store.load_session_count();
+    // The run's first commit is its plugin transition's publication.
+    let at_publication = Arc::new(std::sync::atomic::AtomicUsize::new(usize::MAX));
+    let counted = Arc::downgrade(&store);
+    let published = Arc::clone(&at_publication);
+    store.before_next_runtime_commit(Arc::new(move || {
+        if let Some(store) = counted.upgrade() {
+            published.store(
+                store.load_session_count(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+        }
+        Box::pin(async {})
+    }));
+    execute_text_turn(&mut runtime, &double, "resident-behind", "third request").await;
+    let at_publication = at_publication.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        at_publication - window_loads_before,
+        2,
+        "the admission reads the moved head's turn index, and the run reads the head once"
+    );
+    assert_eq!(
+        store.load_session_count(),
+        at_publication,
+        "the publication and the turn stand on the resident: nothing reads the window back"
+    );
+    assert_eq!(
+        runtime.state().head_revision,
+        moved.head_revision + 2,
+        "the transition and the turn committed on the head the other writer moved"
+    );
+}

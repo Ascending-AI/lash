@@ -18,18 +18,66 @@ pub struct ShiftAdmissionTemplate {
     host: crate::RuntimeHostConfig,
     policy: crate::TurnLaneAdmissionPolicy,
     plugins: crate::plugin::PluginHost,
+    resident: Option<ResidentAdmissionBase>,
+}
+
+/// The head the template's runtime is settled at, and that head's
+/// physical-turn index (FIG-5137).
+struct ResidentAdmissionBase {
+    revision: u64,
+    leaf: Option<crate::NodeId>,
+    checkpoint: Option<crate::store::BlobRef>,
+    turn_index: usize,
+}
+
+impl ShiftAdmissionTemplate {
+    /// Whether the template's runtime is settled at the head `preparation`
+    /// prepared, by that head's identity: its revision, leaf and checkpoint.
+    pub fn holds_prepared_head(
+        &self,
+        preparation: &crate::store::ShiftAdmissionPreparation,
+    ) -> bool {
+        self.resident_at(preparation).is_some()
+    }
+
+    fn resident_at(
+        &self,
+        preparation: &crate::store::ShiftAdmissionPreparation,
+    ) -> Option<&ResidentAdmissionBase> {
+        let head = preparation.head.as_ref()?;
+        self.resident.as_ref().filter(|resident| {
+            resident.revision == head.head_revision
+                && resident.leaf == head.leaf_node_id
+                && resident.checkpoint == head.checkpoint_ref
+        })
+    }
 }
 
 impl LashRuntime {
     pub fn shift_admission_template(&self) -> Result<ShiftAdmissionTemplate, RuntimeError> {
+        // An installed run view swaps its run's config into the resident
+        // policy. The admission composes under the session's own, as a
+        // runtime opened at the head does.
+        let session_state = self.state.authority.run_view().is_some().then(|| {
+            let mut state = self.state.clone();
+            state.take_run_view();
+            state
+        });
+        let state = session_state.as_ref().unwrap_or(&self.state);
         Ok(ShiftAdmissionTemplate {
+            resident: self.resident_is_settled().then(|| ResidentAdmissionBase {
+                revision: self.state.head_revision,
+                leaf: self.state.session_graph.leaf_node_id.clone(),
+                checkpoint: self.state.checkpoint_ref.clone(),
+                turn_index: self.state.turn_index,
+            }),
             host: self.host.core.clone(),
             policy: self
                 .host
                 .core
                 .durability
                 .queued_work_batching
-                .admission_policy(self.max_context_tokens()?),
+                .admission_policy(crate::runtime::turn_loop::max_context_tokens_of(state)?),
             plugins: self.services.plugins.host().clone(),
         })
     }
@@ -73,29 +121,35 @@ impl ShiftAdmissionMaterializer for ShiftAdmissionTemplate {
             checkpoint: live.checkpoint_ref,
         };
         // The idle runtime may have opened before another run committed. The
-        // prepared head owns both the composition and its physical-turn index.
-        let loaded = crate::store::load_session_window_state(
-            store,
-            crate::store::WindowSelector::Admitted(base.clone()),
-        )
-        .await
-        .map_err(|error| admission::store_fault("admission turn index", error))?
-        .ok_or_else(|| {
-            admission::store_fault(
-                "admission turn index",
-                crate::StoreError::TurnBaseNotRetained {
-                    revision: base.revision,
-                },
+        // prepared head owns both the composition and its physical-turn index:
+        // the runtime's own when it is that head, otherwise the window's.
+        let base_turn_index = match self.resident_at(preparation) {
+            Some(resident) => resident.turn_index,
+            None => {
+                crate::store::load_session_window_state(
+                    store,
+                    crate::store::WindowSelector::Admitted(base.clone()),
+                )
+                .await
+                .map_err(|error| admission::store_fault("admission turn index", error))?
+                .ok_or_else(|| {
+                    admission::store_fault(
+                        "admission turn index",
+                        crate::StoreError::TurnBaseNotRetained {
+                            revision: base.revision,
+                        },
+                    )
+                })?
+                .state
+                .turn_index
+            }
+        };
+        let turn_index = (base_turn_index as u64).checked_add(1).ok_or_else(|| {
+            crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeStoreCorrupt,
+                "admission exhausted its physical-turn indices",
             )
         })?;
-        let turn_index = (loaded.state.turn_index as u64)
-            .checked_add(1)
-            .ok_or_else(|| {
-                crate::RuntimeEffectControllerError::new(
-                    RuntimeErrorCode::RuntimeStoreCorrupt,
-                    "admission exhausted its physical-turn indices",
-                )
-            })?;
         let effect_host = &self.host.control.effect_host;
         let scoped = effect_host
             .scoped(scope.clone())

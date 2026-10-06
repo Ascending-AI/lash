@@ -350,21 +350,28 @@ trait TypedTurnPhase {
     const RUNTIME_PHASE: RuntimeTurnPhase;
 }
 
+/// [`LashRuntime::max_context_tokens`] of `state`.
+pub(super) fn max_context_tokens_of(
+    state: &crate::RuntimeSessionState,
+) -> Result<usize, RuntimeError> {
+    state
+        .effective_policy()
+        .context_window_tokens()
+        .ok_or_else(|| {
+            crate::runtime::shift::llm_profile_unconfigured(
+                crate::SessionError::LlmProfileUnconfigured {
+                    session_id: state.session_id.clone(),
+                },
+            )
+        })
+}
+
 impl LashRuntime {
     /// The recorded prompt budget queued-run admission measures against.
     /// A session whose recorded config selects no model has none, and its
     /// runs are refused: no deployment can run them.
     pub(super) fn max_context_tokens(&self) -> Result<usize, RuntimeError> {
-        self.state
-            .effective_policy()
-            .context_window_tokens()
-            .ok_or_else(|| {
-                crate::runtime::shift::llm_profile_unconfigured(
-                    crate::SessionError::LlmProfileUnconfigured {
-                        session_id: self.state.session_id.clone(),
-                    },
-                )
-            })
+        max_context_tokens_of(&self.state)
     }
 
     /// Install explicitly unstable internal instrumentation for this runtime.
