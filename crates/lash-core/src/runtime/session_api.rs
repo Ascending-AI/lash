@@ -252,7 +252,15 @@ impl LashRuntime {
             // The bounded read is an optimization. If it cannot determine the
             // durable head, retain the canonical full read rather than letting
             // probe failure report the resident graph as fresh.
-            Err(_) => true,
+            Err(error) if error.is_transient() => true,
+            // A head the store proves corrupt or refuses is its typed answer,
+            // not an indeterminate probe the full read may paper over.
+            Err(source) => {
+                return Err(SessionError::Store {
+                    context: "failed to read the session head".to_string(),
+                    source,
+                });
+            }
         };
         if !requires_hydration {
             self.resident_session.mark_graph_loaded();

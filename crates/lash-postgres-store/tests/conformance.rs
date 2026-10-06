@@ -1537,7 +1537,9 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
             lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
-    let operation = lash_core_execution::OperationId::turn(SESSION_ID, TURN_ID, "final");
+    // A mid-turn commit: the stamps are the subject, and a final commit
+    // would also need its run's admitted cancellation snapshot (FIG-4848).
+    let operation = lash_core_execution::OperationId::turn(SESSION_ID, TURN_ID, "checkpoint");
     let operation_key = operation.storage_key().expect("canonical operation key");
     let (commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
         .with_committed_attachments(vec![clock_intent.attachment_id.clone()])

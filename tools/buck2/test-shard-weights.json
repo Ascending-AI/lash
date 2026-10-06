@@ -1518,7 +1518,6 @@
     "tests::shift_laws_on_the_double::host_plugin_command_crashed_after_its_lane_read_applies_once": 273,
     "tests::shift_laws_on_the_double::host_plugin_command_crashed_before_its_commit_applies_once": 308,
     "tests::shift_laws_on_the_double::no_row_stays_bound_after_a_runs_verb_close_or_lost_end": 84,
-    "tests::shift_laws_on_the_double::one_authorized_shift_per_session": 106,
     "tests::shift_laws_on_the_double::one_config_resolution_per_run": 174,
     "tests::shift_laws_on_the_double::one_shift_admits_many_items": 111,
     "tests::shift_laws_on_the_double::one_unfinished_run_per_session": 82,

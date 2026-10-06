@@ -114,34 +114,34 @@ pub async fn an_obsolete_executor_never_ends_its_successors_run(
         ),
     );
     parts.store = Arc::clone(&recording) as Arc<dyn crate::RuntimeStore>;
-    // The first model call moves the head through another writer, which
-    // commits the session under the law's own policy; every later call
-    // answers.
+    // Another writer, outside every shift, moves the head ahead of the run's
+    // first commit, under the law's own policy. That first commit is the
+    // publication of the run's recorded plugin state (FIG-4857), so the lane-
+    // less commit races it while the created head still admits one
+    // (FIG-4202); once the run has published, the head is its own.
     let policy = parts.initial_state().policy;
+    recording.before_next_runtime_commit(Arc::new({
+        let recording = Arc::clone(&recording);
+        move || {
+            let recording = Arc::clone(&recording);
+            let policy = policy.clone();
+            Box::pin(async move {
+                lash_core::testing::runtime_helpers::advance_session_head_unfenced(
+                    &recording,
+                    |state| state.policy = policy,
+                )
+                .await;
+            })
+        }
+    }));
     let calls = Arc::new(AtomicUsize::new(0));
-    let overtaken = Arc::new(AtomicBool::new(false));
     let model = crate::testing::TestProvider::builder()
         .kind("stub")
         .complete({
-            let recording = Arc::clone(&recording);
             let calls = Arc::clone(&calls);
-            let overtaken = Arc::clone(&overtaken);
             move |_request| {
-                let recording = Arc::clone(&recording);
-                let policy = policy.clone();
                 let index = calls.fetch_add(1, Ordering::SeqCst);
-                let overtake = !overtaken.swap(true, Ordering::SeqCst);
                 async move {
-                    if overtake {
-                        // Another writer, outside every shift: the lane-less
-                        // commit races the bound run's first commit, which
-                        // the created head still admits (FIG-4202).
-                        lash_core::testing::runtime_helpers::advance_session_head_unfenced(
-                            &recording,
-                            |state| state.policy = policy,
-                        )
-                        .await;
-                    }
                     Ok(crate::LlmResponse {
                         parts: vec![crate::LlmOutputPart::Text {
                             text: format!("answer {}", index + 1),
@@ -264,8 +264,8 @@ pub async fn an_obsolete_executor_never_ends_its_successors_run(
     );
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        1,
-        "the successor made no model call"
+        0,
+        "neither the obsolete run nor its successor made a model call"
     );
 
     let next = parts.enqueue("ask again", None).await;

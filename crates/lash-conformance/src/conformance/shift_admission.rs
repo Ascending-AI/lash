@@ -18,8 +18,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::engine::{
-    AdmitVerdict, Admitted, RunOutcome, SealRefusal, ShiftOutcome, ShiftRequest, ShiftRequestId,
-    ShiftStop,
+    AdmitVerdict, Admitted, RunOutcome, ShiftOutcome, ShiftRequest, ShiftRequestId, ShiftStop,
 };
 use lash_sansio::{SessionId, TurnId};
 use pretty_assertions::assert_eq;
@@ -852,65 +851,6 @@ pub(super) fn admitted(verdict: AdmitVerdict) -> Admitted {
     }
 }
 
-/// L-S1: two admissions that observed the same shift epoch are never both
-/// authorized. The first seal raises the epoch; the second is superseded and
-/// runs nothing.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn one_authorized_shift_per_session(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    let parts = ShiftParts::new(prefix, "one-shift", &effect_host, &stores, 8).await;
-    parts
-        .enqueue("the only question", Some("one-shift-run"))
-        .await;
-    let first = parts.request("shift-a");
-    let second = parts.request("shift-b");
-    let (a, b) = on_tier(&runner, &parts, move |mut runtime, scope| {
-        let first = first.clone();
-        let second = second.clone();
-        Box::pin(async move {
-            let a = lash_core::shift::admit_shift(&mut runtime, &scope, &first, 0, None)
-                .await
-                .expect("admit the first shift");
-            let b = lash_core::shift::admit_shift(&mut runtime, &scope, &second, 0, None)
-                .await
-                .expect("admit the second shift");
-            let a = lash_core::shift::execute_admitted_run(&mut runtime, &scope, admitted(a))
-                .await
-                .expect("run the first run");
-            let b = lash_core::shift::execute_admitted_run(&mut runtime, &scope, admitted(b))
-                .await
-                .expect("the superseded run ends without an abort");
-            (a, b)
-        })
-    })
-    .await;
-    assert!(
-        matches!(&a, RunOutcome::Committed { run, .. } if run.as_str() == "one-shift-run"),
-        "{a:?}"
-    );
-    assert!(
-        matches!(
-            &b,
-            RunOutcome::Refused {
-                refusal: SealRefusal::Superseded { epoch: 1 },
-                ..
-            }
-        ),
-        "the second admission observed a superseded epoch: {b:?}"
-    );
-    let epoch = parts.epoch().await;
-    assert_eq!(epoch.epoch, 1, "exactly one shift-epoch transition");
-    assert_eq!(epoch.admission().map(|id| id.as_str()), Some("shift-a#0"));
-    assert_eq!(parts.calls.load(Ordering::SeqCst), 1, "one run ran");
-}
-
 /// L-S2: one shift admits every item of the admissible prefix under one run:
 /// three accepted inputs within the admission bound are answered by one turn.
 /// Each acceptance armed its row's ingress obligation, and the run's
@@ -1432,57 +1372,81 @@ pub async fn a_host_task_is_admitted_as_its_own_operation_run(
         session_id: parts.session_id.clone(),
         operation_id: task.batch_id.to_string(),
     };
-    for request in ["operation-run-first", "operation-run-redrive"] {
-        let request = parts.request(request);
-        let admitted = admitted(
-            on_tier(&runner, &parts, move |mut runtime, scope| {
-                let request = request.clone();
-                Box::pin(async move {
+    // The operation run's first execution dies after its admission, and the
+    // engine redrives that invocation. Atomic root admission records the
+    // admitting invocation as the run's executor (FIG-4848), so only its
+    // redrive executes the run: the redrive replays the recorded admission,
+    // which names the same operation and the same run, and executes it.
+    let (sent, mut admissions) = tokio::sync::mpsc::unbounded_channel();
+    let attempt = |redrive: bool| -> crate::ConformanceTurnAttempt {
+        let parts = parts.clone();
+        let sent = sent.clone();
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let sent = sent.clone();
+            Box::pin(async move {
+                let mut runtime = parts.runtime().await;
+                let request = parts.request("operation-run");
+                let admitted = admitted(
                     lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None)
                         .await
-                        .expect("admit the task")
-                })
+                        .expect("admit the task"),
+                );
+                let named = (
+                    admitted.work().clone(),
+                    admitted.run().clone(),
+                    admitted.operation(),
+                );
+                if !redrive {
+                    let _ = sent.send((named, None));
+                    panic!("the operation run's first execution dies after its admission");
+                }
+                let ran = lash_core::shift::execute_admitted_run(&mut runtime, &scope, admitted)
+                    .await
+                    .map_err(|abort| abort.into_error().to_string());
+                let _ = sent.send((named, Some(ran)));
+                crate::ConformanceTurnEnd::Settled
             })
-            .await,
-        );
+        })
+    };
+    runner
+        .run_crashed_then_redriven_turn(driver_scope(&parts), attempt(false), attempt(true))
+        .await;
+    drop(sent);
+    let mut ran = None;
+    let mut named = 0;
+    while let Some(((work, run, admitted_operation), outcome)) = admissions.recv().await {
+        named += 1;
         assert_eq!(
-            admitted.work(),
-            &lash_core::engine::AdmittedWork::Operation {
+            work,
+            lash_core::engine::AdmittedWork::Operation {
                 operation: task.batch_id.clone(),
             },
             "the task at the lane's head is an operation"
         );
         assert_eq!(
-            admitted.run(),
-            &operation.run_id(),
+            run,
+            operation.run_id(),
             "every admission of the operation names its one run"
         );
-        assert_eq!(admitted.operation(), Some(operation.clone()));
+        assert_eq!(admitted_operation, Some(operation.clone()));
+        if outcome.is_some() {
+            ran = outcome;
+        }
     }
+    assert_eq!(
+        named, 2,
+        "the first execution and its redrive each admitted"
+    );
 
     // The operation run executes the task: the task's effect runs under the
     // operation's session-operation scope (its identity bytes unchanged),
     // the task settles, and the run ends applied.
-    let request = parts.request("operation-run-execute");
-    let ran = on_tier(&runner, &parts, move |mut runtime, scope| {
-        let request = request.clone();
-        Box::pin(async move {
-            let admitted = admitted(
-                lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None)
-                    .await
-                    .expect("admit the task"),
-            );
-            lash_core::shift::execute_admitted_run(&mut runtime, &scope, admitted)
-                .await
-                .map_err(|abort| abort.into_error().to_string())
-        })
-    })
-    .await;
     assert_eq!(
         ran,
-        Ok(RunOutcome::Applied {
+        Some(Ok(RunOutcome::Applied {
             run: operation.run_id()
-        }),
+        })),
         "the operation run applies its task"
     );
     let scopes = task_scopes

@@ -212,6 +212,12 @@ pub async fn a_host_id_naming_a_terminal_run_is_answered_not_rerun(
             },
         ),
     }));
+    // A final commit carries its run's admitted cancellation snapshot
+    // (FIG-4848): the earlier epoch admitted the run, over an input of its
+    // own, before it committed.
+    parts.enqueue("the earlier epoch's input", None).await;
+    let commit =
+        crate::conformance::admission_support::prepare_final_commit(&parts.store, commit).await;
     parts
         .store
         .commit_runtime_state(commit)
@@ -221,6 +227,7 @@ pub async fn a_host_id_naming_a_terminal_run_is_answered_not_rerun(
         terminal(&parts, &run).await.is_some(),
         "the run is terminal"
     );
+    let earlier_epoch = parts.epoch().await.epoch;
 
     parts
         .enqueue("names the ended run", Some("run-adopted"))
@@ -235,7 +242,11 @@ pub async fn a_host_id_naming_a_terminal_run_is_answered_not_rerun(
             commit: Some(TurnCommitId::new(TurnId::from("run-adopted"), 0)),
         }
     );
-    assert_eq!(parts.epoch().await.epoch, 0, "nothing was sealed");
+    assert_eq!(
+        parts.epoch().await.epoch,
+        earlier_epoch,
+        "nothing was sealed"
+    );
     assert_eq!(parts.calls(), 0, "nothing ran");
 }
 

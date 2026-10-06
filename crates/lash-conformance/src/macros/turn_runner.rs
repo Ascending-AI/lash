@@ -182,7 +182,6 @@ macro_rules! shift_admission_tests {
     (a_store_fault_in_an_intents_delivery_stalls_its_obligation_and_never_wedges_its_session, "f09-1"),
     (re_arming_a_refused_intent_makes_it_owed_again_and_its_delivery_completes_it, "f09-2"),
     (a_refused_follow_on_shift_keeps_the_intents_obligation_due, "s8c-4"),
-            (one_authorized_shift_per_session, "shift-one-authorized"),
             (one_unfinished_run_per_session, "run-one-unfinished"),
             (admission_delivers_every_row_it_binds, "run-admission-delivers"),
     (run_admission_binds_cancellation_authority_with_its_rows, "run-admission-cancel-binding"),

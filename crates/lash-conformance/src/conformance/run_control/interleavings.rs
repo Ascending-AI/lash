@@ -11,8 +11,9 @@ enum Raced {
 }
 
 /// D15 in every order: a send's shift against the settle of the redrive its
-/// session's parked run names. The shift is held before each park read and
-/// each run admission it makes through its session store, and the settle
+/// session's parked run names. The shift is held before each admission
+/// preparation, which reads the park, and each atomic root admission it makes
+/// through its session store (FIG-4848), and the settle
 /// before it claims and before it acknowledges the intent. An engine retries
 /// a refused shift, so the shift is bounded to two steps ahead of the settle.
 /// Whatever the order, the shift admits no run before the redrive is
@@ -25,15 +26,15 @@ pub async fn every_order_of_a_send_and_a_redrives_settle_admits_nothing_ahead_of
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let mut explorer = Explorer::new("send-versus-redrive").holding(&[
-        StoreOp::load_turn_park.into(),
-        StoreOp::admit_run.into(),
+        StoreOp::prepare_shift_admission.into(),
+        StoreOp::commit_shift_admission.into(),
         StoreOp::claim_intent_application.into(),
         StoreOp::acknowledge_intent.into(),
     ]);
     let mut met_unsettled = 0;
     while let Some(mut schedule) = explorer.next_schedule() {
         let name = format!("explore-send-{}", schedule.index());
-        let mut f = Fixture::new(prefix, &name, &host, &stores).await;
+        let mut f = Fixture::new_for_execution(prefix, &name, &host, &stores, &runner).await;
         let send_run = format!("{name}-send");
         let send = f.parts.enqueue("racing send", Some(&send_run)).await;
         let intent = f.verb(RunVerb::Redrive).await.expect("redrive");
@@ -77,16 +78,17 @@ pub async fn every_order_of_a_send_and_a_redrives_settle_admits_nothing_ahead_of
             .expect("the settle acknowledged the redrive through its store");
         let admitted = trace
             .iter()
-            .position(by("send", StoreOp::admit_run, Phase::Before))
+            .position(by("send", StoreOp::commit_shift_admission, Phase::Before))
             .expect("the settled shift admits the parked run");
         assert!(
             admitted > acknowledged,
             "the send's shift admitted a run while the redrive was unsettled"
         );
-        if trace[..acknowledged]
-            .iter()
-            .any(by("send", StoreOp::load_turn_park, Phase::After))
-        {
+        if trace[..acknowledged].iter().any(by(
+            "send",
+            StoreOp::prepare_shift_admission,
+            Phase::After,
+        )) {
             met_unsettled += 1;
         }
 

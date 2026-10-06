@@ -121,35 +121,16 @@ async fn a_send_under_another_authority_is_answered_with_the_binding_mismatch() 
 
 mod permanent_run_admission {
     use super::*;
-    use lash_core::store::{AdmitRunRequest, RunAdmission, RuntimeStoreDecorator, ShiftFence};
+    use lash_core::store::{RuntimeStoreDecorator, ShiftAdmissionReceipt, ShiftAdmissionWrite};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum Call {
-        Binding,
-        Admission,
-        CorruptBinding,
-    }
-
+    /// Refuses the atomic root admission (FIG-4848), which selects, seals,
+    /// binds cancellation authority and records the run in one transaction,
+    /// with the canonical writer-fence refusal once armed.
     struct AdmissionRefusalStore {
         inner: Arc<dyn lash_core::DeploymentStore>,
-        call: Call,
         armed: AtomicBool,
         refusals: AtomicUsize,
-    }
-
-    impl AdmissionRefusalStore {
-        fn check(&self, call: Call) -> std::result::Result<(), StoreError> {
-            if self.armed.load(Ordering::SeqCst) && self.call == call {
-                self.refusals.fetch_add(1, Ordering::SeqCst);
-                // Inject the canonical fence refusal at the selected admission call.
-                lash_core::store::FleetFormat::fence(
-                    2,
-                    lash_core::compat::VersionRange::exactly(1),
-                )?;
-            }
-            Ok(())
-        }
     }
 
     #[async_trait]
@@ -160,43 +141,25 @@ mod permanent_run_admission {
             self.inner.as_ref()
         }
 
-        async fn validate_turn_cancellation_binding(
+        async fn commit_shift_admission(
             &self,
-            session_id: &SessionId,
-            fence: &ShiftFence,
-            binding_id: &str,
-            admitted_scope: &lash_core::ExecutionScope,
-        ) -> std::result::Result<(), StoreError> {
-            if self.armed.load(Ordering::SeqCst) && self.call == Call::CorruptBinding {
+            request: &ShiftAdmissionWrite,
+            anchor: &lash_trace::TraceAnchor,
+        ) -> std::result::Result<ShiftAdmissionReceipt, StoreError> {
+            if self.armed.load(Ordering::SeqCst) {
                 self.refusals.fetch_add(1, Ordering::SeqCst);
-                return self
-                    .inner
-                    .validate_turn_cancellation_binding(
-                        session_id,
-                        fence,
-                        binding_id,
-                        &lash_core::ExecutionScope::runtime_operation(""),
-                    )
-                    .await;
+                lash_core::store::FleetFormat::fence(
+                    2,
+                    lash_core::compat::VersionRange::exactly(1),
+                )?;
             }
-            self.check(Call::Binding)?;
-            self.inner
-                .validate_turn_cancellation_binding(session_id, fence, binding_id, admitted_scope)
-                .await
-        }
-
-        async fn admit_run(
-            &self,
-            request: &AdmitRunRequest,
-        ) -> std::result::Result<Option<RunAdmission>, StoreError> {
-            self.check(Call::Admission)?;
-            self.inner.admit_run(request).await
+            self.inner.commit_shift_admission(request, anchor).await
         }
     }
 
     impl lash_core::DeploymentStoreDecorator for AdmissionRefusalStore {}
 
-    async fn refusal_reaches_sender(postgres: bool, call: Call) {
+    async fn refusal_reaches_sender(postgres: bool) {
         let (stores, _held): (Arc<dyn lash_core::StoreSet>, Box<dyn std::any::Any>) = if postgres {
             postgres_store_set().await.expect("PostgreSQL gate")
         } else {
@@ -215,7 +178,6 @@ mod permanent_run_admission {
         .expect("the double over the admission-law stores");
         let store = Arc::new(AdmissionRefusalStore {
             inner: double.lash_backend().session_store_factory(),
-            call,
             armed: AtomicBool::new(false),
             refusals: AtomicUsize::new(0),
         });
@@ -250,34 +212,21 @@ mod permanent_run_admission {
         .await
         .unwrap_or_else(|_| {
             panic!(
-                "{call:?}: the sender must receive the refusal, {:?}",
+                "the sender must receive the refusal, {:?}",
                 invocations(&double)
             )
         });
         let Err(EmbedError::Runtime(error)) = answer else {
-            panic!("{call:?}: the sender receives the typed runtime refusal: {answer:?}");
+            panic!("the sender receives the typed runtime refusal: {answer:?}");
         };
-        let (code, cause) = if call == Call::CorruptBinding {
-            let message = lash_core::ExecutionScope::runtime_operation("")
-                .validate()
-                .unwrap_err()
-                .to_string();
-            (
-                lash_core::RuntimeErrorCode::RuntimeStoreCorrupt,
-                serde_json::json!({
-                    "kind": "stored_data_corrupt", "record_kind": "TurnCancellationBinding", "message": message,
-                }),
-            )
-        } else {
-            let expected = lash_core::store::StoreRefusal::WriterFenced {
-                recorded: 2,
-                writable: lash_core::compat::VersionRange::exactly(1),
-            };
-            (
-                expected.code(),
-                serde_json::json!({ "kind": "store_refusal", "refusal": expected }),
-            )
+        let expected = lash_core::store::StoreRefusal::WriterFenced {
+            recorded: 2,
+            writable: lash_core::compat::VersionRange::exactly(1),
         };
+        let (code, cause) = (
+            expected.code(),
+            serde_json::json!({ "kind": "store_refusal", "refusal": expected }),
+        );
         assert_eq!(error.code, code);
         assert_eq!(serde_json::to_value(&error.cause).unwrap(), cause);
         assert!(error.is_terminal() && !error.is_retryable());
@@ -324,18 +273,8 @@ mod permanent_run_admission {
                 use super::*;
                 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
                 $(#[$ignore])?
-                async fn a_binding_writer_refusal_is_recorded_and_reaches_the_sender() {
-                    refusal_reaches_sender($postgres, Call::Binding).await;
-                }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-                $(#[$ignore])?
                 async fn an_admission_writer_refusal_is_recorded_and_reaches_the_sender() {
-                    refusal_reaches_sender($postgres, Call::Admission).await;
-                }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-                $(#[$ignore])?
-                async fn a_corrupt_binding_is_recorded_and_reaches_the_sender() {
-                    refusal_reaches_sender($postgres, Call::CorruptBinding).await;
+                    refusal_reaches_sender($postgres).await;
                 }
             }
         };

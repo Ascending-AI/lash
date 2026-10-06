@@ -9,11 +9,14 @@ use lash_core::Target;
 
 /// What a session's head publishes: the state a fork of it must read back.
 /// A fork copies the revision's history, checkpoint and recorded config in
-/// full, at its own first config revision.
+/// full, at its own first config revision. The one exception is the plugin
+/// admission the checkpoint records: it belongs to the session that admitted
+/// it, so a fork's checkpoint omits it and the fork records its own
+/// (FIG-4913).
 #[derive(Clone, Debug, PartialEq)]
 struct Published {
     leaf: Option<lash_core::NodeId>,
-    checkpoint: Option<lash_core::BlobRef>,
+    checkpoint: Option<serde_json::Value>,
     config: lash_core::PersistedSessionConfig,
 }
 
@@ -28,9 +31,23 @@ async fn published_by(core: &LashCore, session: &str) -> Result<Published> {
     )
     .await?
     .expect("the session has a head");
+    let checkpoint = lash_core::store::SessionHistoryStore::load_session_window(
+        core.store_factory.as_ref(),
+        &SessionId::fixture(session),
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .expect("the session has a window")
+    .checkpoint
+    .map(|mut checkpoint| {
+        checkpoint
+            .components
+            .remove(lash_core::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT);
+        serde_json::to_value(checkpoint).expect("a checkpoint serializes")
+    });
     Ok(Published {
         leaf: head.leaf_node_id,
-        checkpoint: head.checkpoint_ref,
+        checkpoint,
         config: lash_core::PersistedSessionConfig {
             config_revision: 0,
             ..head.config

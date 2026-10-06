@@ -133,8 +133,13 @@ pub(super) fn post_commit_delivery_issue(
     }
 }
 
+/// A refresh that met the store keeps the store error's one typed
+/// classification: a corrupt or refused head is not a redrivable refresh.
 fn session_head_refresh_error(err: SessionError) -> RuntimeError {
-    RuntimeError::new(RuntimeErrorCode::SessionHeadRefresh, err.to_string())
+    match err {
+        SessionError::Store { source, .. } => source.runtime_error(),
+        err => RuntimeError::new(RuntimeErrorCode::SessionHeadRefresh, err.to_string()),
+    }
 }
 
 fn queued_work_payload_type(payload: &crate::QueuedWorkPayload) -> &'static str {

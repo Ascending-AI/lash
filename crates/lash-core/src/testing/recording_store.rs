@@ -43,6 +43,7 @@ pub struct RecordingStore {
     fail_next_turn_terminal_commit: Mutex<Option<StoreError>>,
     fail_next_end_refused_run: Mutex<Option<StoreError>>,
     before_next_end_refused_run: Mutex<Option<EndRefusedRunHook>>,
+    before_next_runtime_commit: Mutex<Option<EndRefusedRunHook>>,
     inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
     fail_next_load_session_head_meta: AtomicBool,
     fail_load_session_on_call: Mutex<Option<usize>>,
@@ -55,8 +56,8 @@ pub struct RecordingStore {
 /// A hook a test runs as the next admission reaches the store.
 pub type AdmissionHook = Arc<dyn Fn() + Send + Sync>;
 
-/// A hook a test awaits as the next refused execution's run-end write reaches the
-/// store, before the wrapped store sees it.
+/// A hook a test awaits as the next refused execution's run-end write, or the
+/// next runtime commit, reaches the store, before the wrapped store sees it.
 pub type EndRefusedRunHook =
     Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
 
@@ -76,6 +77,7 @@ impl RecordingStore {
             fail_next_turn_terminal_commit: Mutex::new(None),
             fail_next_end_refused_run: Mutex::new(None),
             before_next_end_refused_run: Mutex::new(None),
+            before_next_runtime_commit: Mutex::new(None),
             inject_turn_cancel_before_next_runtime_commit: Mutex::new(None),
             fail_next_load_session_head_meta: AtomicBool::new(false),
             fail_load_session_on_call: Mutex::new(None),
@@ -189,6 +191,13 @@ impl RecordingStore {
         *self.before_next_end_refused_run.lock_recover() = Some(hook);
     }
 
+    /// Await `hook` as the next runtime commit reaches the store, before the
+    /// wrapped store sees it: whatever the hook writes lands ahead of that
+    /// commit.
+    pub fn before_next_runtime_commit(&self, hook: EndRefusedRunHook) {
+        *self.before_next_runtime_commit.lock_recover() = Some(hook);
+    }
+
     /// Record `request` on the wrapped store immediately before the next
     /// runtime commit reaches it: a cancel that races the commit and lands
     /// first.
@@ -295,6 +304,10 @@ impl RuntimeStoreDecorator for RecordingStore {
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
         self.commit_attempt_count.fetch_add(1, Ordering::SeqCst);
+        let hook = self.before_next_runtime_commit.lock_recover().take();
+        if let Some(hook) = hook {
+            hook().await;
+        }
         let injected_failure = self.fail_next_runtime_commit.lock_recover().take();
         if let Some(error) = injected_failure {
             return Err(error);

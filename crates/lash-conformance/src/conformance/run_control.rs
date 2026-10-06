@@ -573,13 +573,18 @@ fn spawn_shift(
 }
 
 /// Puts the law session's store under `script` and holds its second
-/// parked-run probe at the returned gate. Admission reads the park before it
-/// decides, so every probe is one admission evaluation. On Restate a
-/// refusal's retry re-decides admission inside its recorded step, and holding
-/// that re-decision at the park read keeps it suspended rather than burning
-/// the invocation's attempt budget, so the law's settle cannot lose the race.
+/// admission preparation at the returned gate. The atomic root admission
+/// reads the park in its preparation (FIG-4848), so every preparation is one
+/// admission evaluation. On Restate a refusal's retry re-decides admission
+/// inside its recorded step, and holding that re-decision at its preparation
+/// keeps it suspended rather than burning the invocation's attempt budget, so
+/// the law's settle cannot lose the race.
 fn hold_the_second_park_probe(f: &mut Fixture, script: &Script) -> Arc<Gate> {
-    let held = script.on(StoreOp::load_turn_park).nth(2).before().pause();
+    let held = script
+        .on(StoreOp::prepare_shift_admission)
+        .nth(2)
+        .before()
+        .pause();
     f.parts.store = script.wrap("racing", Arc::clone(&f.parts.store));
     held
 }
@@ -1260,7 +1265,7 @@ pub async fn redrive_under_a_restored_build_completes_once_and_clears_the_park(
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let f = Fixture::new(prefix, "restored-redrive", &host, &stores).await;
+    let f = Fixture::new_for_execution(prefix, "restored-redrive", &host, &stores, &runner).await;
     let intent = f.verb(RunVerb::Redrive).await.expect("redrive");
     let (work, close) = f.control(false, false);
     assert!(matches!(
@@ -1806,7 +1811,8 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let mut f = Fixture::new(prefix, "send-redrive-race", &host, &stores).await;
+    let mut f =
+        Fixture::new_for_execution(prefix, "send-redrive-race", &host, &stores, &runner).await;
     let send = f.parts.enqueue("racing send", Some("racing-run")).await;
     let command = f
         .parts
@@ -1831,7 +1837,7 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
     let held = hold_the_second_park_probe(&mut f, &script);
     let mut racing = spawn_shift(&f, &runner, "racing");
     // The racing shift evaluated the parked run.
-    script.called(StoreOp::load_turn_park, 1).await;
+    script.called(StoreOp::prepare_shift_admission, 1).await;
     assert_eq!(
         f.parts.calls(),
         0,

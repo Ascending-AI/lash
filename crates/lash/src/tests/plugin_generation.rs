@@ -454,17 +454,7 @@ async fn in_flight_segments_finish_on_the_old_build(storage: Storage) -> Result<
     .await;
     let mut recorded = Vec::new();
     for ran in &outcome.ran {
-        let admission = store
-            .admit_run(
-                &lash_core::testing::store_fixtures::admit_run_request_for_test(
-                    &fence,
-                    ran.run(),
-                    lash_core::store::AdmittedHead::Input(lash_core::InputId::from("recorded")),
-                ),
-            )
-            .await
-            .expect("read the Run's admission back")
-            .expect("the Run's admission is recorded");
+        let admission = recorded_admission(&store, &fence, ran.run()).await;
         let composition: Vec<&str> = admission
             .plugins
             .plugins()
@@ -492,6 +482,31 @@ async fn in_flight_segments_finish_on_the_old_build(storage: Storage) -> Result<
     drop(next_core);
     drop(old_core);
     Ok(())
+}
+
+/// `run`'s recorded admission, read back as a later admission of it under
+/// `fence`. The read presents the executor the run records: the store
+/// refuses any other engine-held executor before it reads (FIG-4765).
+async fn recorded_admission(
+    store: &lash_core::store::SessionStore,
+    fence: &lash_core::store::ShiftFence,
+    run: &lash_core::TurnId,
+) -> lash_core::store::RunAdmission {
+    let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
+        fence,
+        run,
+        lash_core::store::AdmittedHead::Input(lash_core::InputId::from("recorded")),
+    );
+    request.executor =
+        lash_core::store::RunStore::run_executor(store.store().as_ref(), store.session_id(), run)
+            .await
+            .expect("read the Run's executor")
+            .expect("the Run's executor is recorded");
+    store
+        .admit_run(&request)
+        .await
+        .expect("read the Run's admission back")
+        .expect("the Run's admission is recorded")
 }
 
 macro_rules! in_flight_laws {
@@ -676,17 +691,7 @@ async fn in_flight_work_keeps_its_recorded_hook_order_across_an_order_change() -
     .await;
     let mut recorded = Vec::new();
     for ran in &outcome.ran {
-        let admission = store
-            .admit_run(
-                &lash_core::testing::store_fixtures::admit_run_request_for_test(
-                    &fence,
-                    ran.run(),
-                    lash_core::store::AdmittedHead::Input(lash_core::InputId::from("recorded")),
-                ),
-            )
-            .await
-            .expect("read the Run's admission back")
-            .expect("the Run's admission is recorded");
+        let admission = recorded_admission(&store, &fence, ran.run()).await;
         let tail: Vec<String> = admission
             .plugins
             .plugins()
