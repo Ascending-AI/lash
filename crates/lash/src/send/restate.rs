@@ -67,7 +67,9 @@ use crate::support::{EmbedError, TurnActivitySink};
 use crate::{DurableSession, SessionBuilder, SessionCreation};
 
 /// A Restate handler context that holds no exclusive object lock, and so may
-/// wait for a run (see the module docs on the dependency cycle).
+/// wait for a run (see the module docs on the dependency cycle). The
+/// `lash-restate` README's "Waiting on lash from a Restate handler" shows how
+/// an exclusive handler keeps per-key single execution in front of the wait.
 ///
 /// Implemented here for exactly the Restate SDK's non-exclusive contexts.
 /// The orphan rule keeps a host from marking the SDK's exclusive

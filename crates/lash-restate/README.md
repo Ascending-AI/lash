@@ -52,6 +52,64 @@ the invocation's timers. An exclusive object handler cannot wait for a run its
 own object may serve: it accepts, returns the receipt, and a shared handler or
 the caller waits.
 
+## Waiting on lash from a Restate handler
+
+A handler that waits on lash work through `RestateWaitContext` —
+`outcome_restate` on a send or run handle — runs only where no exclusive lock
+is held. The trait is implemented only for the SDK's non-exclusive contexts
+(`Context`, `SharedObjectContext`, `WorkflowContext`,
+`SharedWorkflowContext`), so the wait never compiles under an `ObjectContext`:
+a virtual-object handler that waits must be `#[shared]`.
+
+Shared handlers do not serialize per key: Restate may run two `#[shared]`
+invocations of one object at once, so a handler moved to `#[shared]` to wait
+drops the object's single-execution guarantee on that path. To keep it, put an
+exclusive handler in front that calls the shared one. The exclusive handler
+holds the key's lock across the call — suspension and replay do not release it —
+so one `run` per key proceeds at a time, and the call cannot deadlock because a
+shared callee never asks for that lock:
+
+```rust,ignore
+#[restate_sdk::object]
+trait WorkItem {
+    // Exclusive: at most one `run` per key at a time.
+    async fn run(request: Json<RunRequest>) -> HandlerResult<Json<Report>>;
+    // Shared: the lash wait lives here, where no lock is held.
+    #[shared]
+    async fn execute(request: Json<RunRequest>) -> HandlerResult<Json<Report>>;
+}
+
+impl WorkItem for WorkItemImpl {
+    async fn run(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RunRequest>,
+    ) -> HandlerResult<Json<Report>> {
+        ctx.object_client::<WorkItemClient>(ctx.key())
+            .execute(Json(request))
+            .call()
+            .await
+    }
+
+    async fn execute(
+        &self,
+        ctx: SharedObjectContext<'_>,
+        Json(request): Json<RunRequest>,
+    ) -> HandlerResult<Json<Report>> {
+        let handle = self
+            .session
+            .send(lash::TurnInput::text(request.text.clone()))
+            .accept_restate(&ctx)
+            .await?;
+        let outcome = handle.outcome_restate(&ctx, RestateWait::new()).await?;
+        Ok(Json(report_from(&outcome)))
+    }
+}
+```
+
+A `send()` instead of `call()` works the same way when `run` should not await
+the outcome.
+
 The adapter records Lash LLM calls, tool attempts, independent direct
 completions, checkpoints and execution-surface syncs with named Restate runs.
 A direct completion made by opaque tool code is captured inside that attempt.
