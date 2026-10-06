@@ -58,6 +58,7 @@ class ReceiptLaws(unittest.TestCase):
                         for role in row["binaries"]}
             artifacts["provenance"] = self.artifact(f"{index}-provenance", {
                 "source_sha": SOURCE, "case": key, "protocol": "V7",
+                "live_replay": row.get("live_replay", "memory"),
                 "server_nodes": row["server_nodes"], "binaries": binaries,
                 "server": {"version": manifest["server"]["version"],
                            "archive_sha256": manifest["server"]["archive_sha256"], "artifact": server},
@@ -362,7 +363,7 @@ class ReceiptLaws(unittest.TestCase):
         for scenario in manifest["scenarios"]:
             if scenario["id"] == "S17":
                 for case in scenario["cases"]:
-                    if (case["store"], case["leg"]) != ("sqlite_file", "live"):
+                    if (case["variant"], case["store"], case["leg"]) != ("default", "sqlite_file", "live"):
                         case.update(state="held", hold_reason="R8 fixture: missing sibling oracle",
                                     registration=None)
         server_file = self.root / "server-bin"
@@ -393,6 +394,7 @@ class ReceiptLaws(unittest.TestCase):
             server_link.write_text("synthetic server")
             e2e.write(directory / "provenance.json", {
                 "source_sha": SOURCE, "case": key, "protocol": "V7",
+                "live_replay": row.get("live_replay", "memory"),
                 "server_nodes": row["server_nodes"], "binaries": binaries,
                 "server": {"version": manifest["server"]["version"],
                            "archive_sha256": manifest["server"]["archive_sha256"],

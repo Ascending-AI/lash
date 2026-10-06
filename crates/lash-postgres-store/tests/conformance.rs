@@ -89,7 +89,7 @@ async fn process_event_host_failure_stops_execution() {
 }
 
 // No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
-// No live_replay_tests!: live replay is an in-process cache, not PostgreSQL-backed storage.
+// live_replay_tests! run in tests/live_replay.rs, against the facade's PostgreSQL live replay store.
 // No runtime_persistence_clock_tests!: the backend clock is PostgreSQL-owned and not controllable.
 // No queued-lane resolver macro: engine pacing belongs to Restate, not a persistence store.
 

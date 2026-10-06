@@ -11,37 +11,140 @@ fn workbench_restate_namespace() -> AnyhowResult<lash::restate::RestateNamespace
 /// The environment variable naming the live replay store the workbench's
 /// core publishes observation events to and its session feeds tail.
 pub(crate) const LIVE_REPLAY_STORE_ENV: &str = "AGENT_WORKBENCH_LIVE_REPLAY_STORE";
+/// The environment variable holding the selected live replay store's
+/// configuration as one JSON object; unset keeps every default.
+pub(crate) const LIVE_REPLAY_CONFIG_ENV: &str = "AGENT_WORKBENCH_LIVE_REPLAY_CONFIG";
+/// The environment variable naming the PostgreSQL database the `postgresql`
+/// live replay store uses; unset falls back to `AGENT_WORKBENCH_DATABASE_URL`.
+pub(crate) const LIVE_REPLAY_DATABASE_URL_ENV: &str = "AGENT_WORKBENCH_LIVE_REPLAY_DATABASE_URL";
 
-/// The live replay store a workbench core runs on (FIG-5090). The feed's
-/// snapshot is the durable head whichever is selected; the store decides
-/// which processes' events reach a feed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The live replay store a workbench core runs on (FIG-5090, FIG-5101). The
+/// feed's snapshot is the durable head whichever is selected; the store
+/// decides which processes' events reach a feed.
+#[derive(Clone, Debug)]
 pub(crate) enum WorkbenchLiveReplay {
     /// The process-local in-memory store, the default: one workbench
     /// process serves its own sessions' events.
-    Memory,
+    Memory(lash::observe::InMemoryLiveReplayStoreConfig),
+    /// The PostgreSQL store every replica shares: each replica's feed
+    /// carries every replica's events.
+    Postgresql {
+        database_url: String,
+        config: lash::postgres::PostgresLiveReplayConfig,
+    },
+}
+
+/// The in-memory store's window, as `AGENT_WORKBENCH_LIVE_REPLAY_CONFIG`
+/// states it; an absent field keeps its default.
+#[derive(Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct MemoryLiveReplayConfig {
+    max_events_per_session: Option<usize>,
+    max_age_ms: Option<u64>,
+    max_sessions: Option<usize>,
+    max_retained_bytes: Option<usize>,
+}
+
+impl MemoryLiveReplayConfig {
+    fn resolve(self) -> AnyhowResult<lash::observe::InMemoryLiveReplayStoreConfig> {
+        let defaults = lash::observe::InMemoryLiveReplayStoreConfig::default();
+        let positive = |field: &str, value: Option<usize>, default: usize| match value {
+            Some(0) => Err(anyhow!(
+                "{LIVE_REPLAY_CONFIG_ENV} `{field}` must be positive"
+            )),
+            Some(value) => Ok(value),
+            None => Ok(default),
+        };
+        let max_age = match self.max_age_ms {
+            Some(0) => {
+                return Err(anyhow!(
+                    "{LIVE_REPLAY_CONFIG_ENV} `max_age_ms` must be positive"
+                ));
+            }
+            Some(millis) => Duration::from_millis(millis),
+            None => defaults.max_age,
+        };
+        Ok(lash::observe::InMemoryLiveReplayStoreConfig {
+            max_events_per_session: positive(
+                "max_events_per_session",
+                self.max_events_per_session,
+                defaults.max_events_per_session,
+            )?,
+            max_age,
+            max_sessions: positive("max_sessions", self.max_sessions, defaults.max_sessions)?,
+            max_retained_bytes: positive(
+                "max_retained_bytes",
+                self.max_retained_bytes,
+                defaults.max_retained_bytes,
+            )?,
+        })
+    }
 }
 
 impl WorkbenchLiveReplay {
-    /// The selection [`LIVE_REPLAY_STORE_ENV`] names; unset or blank is
-    /// [`Self::Memory`].
+    /// The selection [`LIVE_REPLAY_STORE_ENV`] names, configured by
+    /// [`LIVE_REPLAY_CONFIG_ENV`]; unset or blank is the in-memory store.
     pub(crate) fn from_environment() -> AnyhowResult<Self> {
-        Self::named(std::env::var(LIVE_REPLAY_STORE_ENV).ok().as_deref())
+        let variable = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        };
+        Self::configured(
+            variable(LIVE_REPLAY_STORE_ENV).as_deref(),
+            variable(LIVE_REPLAY_CONFIG_ENV).as_deref(),
+            variable(LIVE_REPLAY_DATABASE_URL_ENV)
+                .or_else(|| variable("AGENT_WORKBENCH_DATABASE_URL"))
+                .as_deref(),
+        )
     }
 
-    fn named(name: Option<&str>) -> AnyhowResult<Self> {
+    fn configured(
+        name: Option<&str>,
+        config: Option<&str>,
+        database_url: Option<&str>,
+    ) -> AnyhowResult<Self> {
+        let config = config.unwrap_or("{}");
         match name.map(str::trim).filter(|name| !name.is_empty()) {
-            None | Some("memory") => Ok(Self::Memory),
+            None | Some("memory") => Ok(Self::Memory(
+                serde_json::from_str::<MemoryLiveReplayConfig>(config)
+                    .with_context(|| format!("{LIVE_REPLAY_CONFIG_ENV} for the memory store"))?
+                    .resolve()?,
+            )),
+            Some("postgresql") => {
+                let config: lash::postgres::PostgresLiveReplayConfig = serde_json::from_str(config)
+                    .with_context(|| {
+                        format!("{LIVE_REPLAY_CONFIG_ENV} for the postgresql store")
+                    })?;
+                config.validate()?;
+                let database_url = database_url.ok_or_else(|| {
+                    anyhow!(
+                        "{LIVE_REPLAY_STORE_ENV}=postgresql needs {LIVE_REPLAY_DATABASE_URL_ENV} or AGENT_WORKBENCH_DATABASE_URL"
+                    )
+                })?;
+                Ok(Self::Postgresql {
+                    database_url: database_url.to_string(),
+                    config,
+                })
+            }
             Some(other) => Err(anyhow!(
-                "{LIVE_REPLAY_STORE_ENV}=`{other}` names no live replay store; expected `memory`"
+                "{LIVE_REPLAY_STORE_ENV}=`{other}` names no live replay store; expected `memory` or `postgresql`"
             )),
         }
     }
 
-    fn store(self) -> Arc<dyn lash::observe::LiveReplayStore> {
-        match self {
-            Self::Memory => Arc::new(lash::observe::InMemoryLiveReplayStore::default()),
-        }
+    pub(crate) async fn store(self) -> AnyhowResult<Arc<dyn lash::observe::LiveReplayStore>> {
+        Ok(match self {
+            Self::Memory(config) => Arc::new(lash::observe::InMemoryLiveReplayStore::new(config)),
+            Self::Postgresql {
+                database_url,
+                config,
+            } => Arc::new(
+                lash::postgres::PostgresLiveReplayStore::connect(&database_url, config)
+                    .await
+                    .context("connect the postgresql live replay store")?,
+            ),
+        })
     }
 }
 
@@ -136,6 +239,8 @@ struct WorkbenchCorePlugins {
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
     approvals: approvals::WorkbenchApprovals,
     mcp: Arc<dyn PluginFactory>,
+    /// The live replay store the core publishes to and its feeds tail.
+    live_replay: Arc<dyn lash::observe::LiveReplayStore>,
     #[cfg(feature = "e2e-tools")]
     operation: Arc<crate::e2e_operation::Controls>,
     /// The tool fixture's isolated worker engine, when its scenario binds one.
@@ -162,6 +267,7 @@ async fn workbench_core_builder(
         deferred_tools,
         approvals,
         mcp,
+        live_replay,
         #[cfg(feature = "e2e-tools")]
         operation,
         #[cfg(feature = "e2e-tools")]
@@ -195,7 +301,7 @@ async fn workbench_core_builder(
     }
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .live_replay_store(WorkbenchLiveReplay::from_environment()?.store())
+    .live_replay_store(live_replay)
     .delta_coalescing(delta_coalescing_from_environment()?);
     if let Some(tool_provider) = tool_provider {
         builder = builder.tools(tool_provider);
@@ -263,6 +369,8 @@ pub(crate) async fn bound_workbench_engine(
             .context("open the registration core's scratch approval ledger")?,
         // Bind the same MCP declaration without starting another live peer.
         mcp: Arc::new(lash::mcp::McpPluginFactory::empty()),
+        // Registration publishes nothing; it never reaches a shared store.
+        live_replay: Arc::new(lash::observe::InMemoryLiveReplayStore::default()),
         #[cfg(feature = "e2e-tools")]
         operation: Arc::new(crate::e2e_operation::Controls::default()),
         #[cfg(feature = "e2e-tools")]
@@ -585,6 +693,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         deferred_tools,
         approvals: approvals.clone(),
         mcp: Arc::clone(&mcp_search) as Arc<dyn PluginFactory>,
+        live_replay: WorkbenchLiveReplay::from_environment()?.store().await?,
         #[cfg(feature = "e2e-tools")]
         operation: operation_controls.clone(),
         #[cfg(feature = "e2e-tools")]

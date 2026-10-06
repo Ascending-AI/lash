@@ -53,6 +53,14 @@ pub const MEMORY_LIVE_REPLAY: Variant = Variant {
     shared: false,
 };
 
+/// Both replicas share the PostgreSQL live replay store (FIG-5101): A's
+/// feeds carry B's live activity and converge without a gap.
+pub const POSTGRESQL_LIVE_REPLAY: Variant = Variant {
+    id: "s37-postgresql-live-replay",
+    live_replay_store: "postgresql",
+    shared: true,
+};
+
 /// The production RLM stream: one cell that prints and finishes. The first
 /// request is held after its first frame and B dies under it, so it ends
 /// with no terminating chunk; the recovered B's request replays in full.
@@ -156,7 +164,8 @@ struct Observer {
     /// The snapshot the observer started from: the durable head's rows
     /// and the cursor bound to its revision.
     start: Snapshot,
-    frames: Arc<Mutex<Vec<Value>>>,
+    /// Every frame with the instant it arrived.
+    frames: Arc<Mutex<Vec<(Instant, Value)>>>,
     changed: Arc<Notify>,
     reader: JoinHandle<Result<()>>,
 }
@@ -261,7 +270,7 @@ impl Observer {
                         frames
                             .lock()
                             .map_err(|_| anyhow!("observer frames poisoned"))?
-                            .push(frame);
+                            .push((Instant::now(), frame));
                         changed.notify_waiters();
                     }
                 }
@@ -279,6 +288,14 @@ impl Observer {
     }
 
     fn frames(&self) -> Vec<Value> {
+        self.arrivals()
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect()
+    }
+
+    /// Every frame with the instant it arrived.
+    fn arrivals(&self) -> Vec<(Instant, Value)> {
         self.frames
             .lock()
             .map(|frames| frames.clone())
@@ -340,7 +357,23 @@ struct Folded {
     /// first commit that carried any of the turn's rows.
     activity: usize,
     activity_before_commit: usize,
-    gaps: Vec<u64>,
+    gaps: Vec<FeedGap>,
+}
+
+/// A replay gap the feed delivered.
+#[derive(Debug, serde::Serialize)]
+struct FeedGap {
+    /// The gap frame's index among the feed's frames.
+    frame: usize,
+    latest_revision: u64,
+    reason: String,
+}
+
+fn is_commit(frame: &Value) -> bool {
+    matches!(
+        frame["type"].as_str(),
+        Some("observation" | "terminal_replacement")
+    ) && frame["event"]["type"] == "committed"
 }
 
 fn is_turn_activity(frame: &Value, turn: &str) -> bool {
@@ -363,7 +396,7 @@ fn fold(start: &Snapshot, frames: &[Value], turn: &str, final_rows: &[String]) -
         gaps: Vec::new(),
     };
     let mut turn_committed = false;
-    for frame in frames {
+    for (index, frame) in frames.iter().enumerate() {
         if is_turn_activity(frame, turn) {
             folded.activity += 1;
             if !turn_committed {
@@ -372,20 +405,22 @@ fn fold(start: &Snapshot, frames: &[Value], turn: &str, final_rows: &[String]) -
             continue;
         }
         let rows = match frame["type"].as_str() {
-            Some("observation" | "terminal_replacement")
-                if frame["event"]["type"] == "committed" =>
-            {
-                row_ids(
-                    frame["event"]["rows"]
-                        .as_array()
-                        .context("commit without rows")?,
-                )
-            }
+            _ if is_commit(frame) => row_ids(
+                frame["event"]["rows"]
+                    .as_array()
+                    .context("commit without rows")?,
+            ),
             Some("replay_gap") => {
-                let latest = frame["gap"]["latest_revision"]
-                    .as_u64()
-                    .context("gap has no latest revision")?;
-                folded.gaps.push(latest);
+                folded.gaps.push(FeedGap {
+                    frame: index,
+                    latest_revision: frame["gap"]["latest_revision"]
+                        .as_u64()
+                        .context("gap has no latest revision")?,
+                    reason: frame["gap"]["reason"]
+                        .as_str()
+                        .context("gap has no reason")?
+                        .to_owned(),
+                });
                 folded.rows = None;
                 folded.suffix.clear();
                 continue;
@@ -416,8 +451,59 @@ impl Folded {
             // A gap re-anchors on the durable head at its revision; the
             // feed holds the final rows once that head is the final one
             // and no commit followed it.
-            None => self.gaps.last() == Some(&final_revision) && self.suffix.is_empty(),
+            None => {
+                self.gaps
+                    .last()
+                    .is_some_and(|gap| gap.latest_revision == final_revision)
+                    && self.suffix.is_empty()
+            }
         }
+    }
+
+    /// A shared store's feed gaps only where the scenario forced it: a
+    /// writer crash forces a gap, never a silent resume. The killed
+    /// publisher may have committed a revision durably without publishing
+    /// it, because a run's mid-run commits are published at settle
+    /// (`crates/lash/src/turn.rs:70`/`:91`); the restarted publisher's first `Committed`
+    /// then extends a revision the feed never saw, and the feed rebuilds
+    /// from the durable head (the Diverged rebuild, reason `unavailable`).
+    /// So at most one gap per kill, of that reason, arriving after the kill
+    /// and no later than the first commit the feed delivers after it, and
+    /// the feed converges afterwards (checked by the caller). Any other gap
+    /// is a lost event.
+    fn gaps_only_from_kills(
+        &self,
+        label: &str,
+        arrivals: &[(Instant, Value)],
+        kills: &[Instant],
+    ) -> Result<()> {
+        let mut gapped = BTreeSet::new();
+        for gap in &self.gaps {
+            let (arrived, _) = &arrivals[gap.frame];
+            let Some(kill) = kills.iter().rposition(|killed| killed <= arrived) else {
+                bail!("{label}: a shared store's feed gapped before any kill: {gap:?}");
+            };
+            let killed = &kills[kill];
+            ensure!(
+                gapped.insert(kill),
+                "{label}: a shared store's feed gapped more than once for one kill: {:?}",
+                self.gaps
+            );
+            ensure!(
+                gap.reason == "unavailable",
+                "{label}: a shared store's feed gapped after a kill for a reason other than \
+                 the restarted publisher's divergence: {gap:?}"
+            );
+            let committed_first = arrivals[..gap.frame]
+                .iter()
+                .any(|(at, frame)| at >= killed && is_commit(frame));
+            ensure!(
+                !committed_first,
+                "{label}: a shared store's feed gapped after the first commit that followed \
+                 the kill, so the kill did not cause it: {gap:?}"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -732,6 +818,8 @@ async fn scenario(
         killed["killed"] == true && killed["reaped"] == true,
         "B was not killed: {killed}"
     );
+    // B is reaped: a gap a feed delivers from here on may be this kill's.
+    let kills = [Instant::now()];
     fixture.release(BARRIER)?;
     let restarted = host_b
         .command(HostCommand::Process {
@@ -801,7 +889,8 @@ async fn scenario(
                     .is_ok_and(|folded| folded.converged(&final_rows, final_a.revision))
             })
             .await;
-        let mut frames = observer.frames();
+        let arrivals = observer.arrivals();
+        let mut frames: Vec<Value> = arrivals.iter().map(|(_, frame)| frame.clone()).collect();
         let live = fold(&observer.start, &frames, &turn, &final_rows)?;
         let reconnected = if live.converged(&final_rows, final_a.revision) {
             false
@@ -849,12 +938,7 @@ async fn scenario(
             observer.label
         );
         if variant.shared {
-            ensure!(
-                folded.gaps.is_empty(),
-                "{}: a shared store's feed gapped: {:?}",
-                observer.label,
-                folded.gaps
-            );
+            folded.gaps_only_from_kills(&observer.label, &arrivals, &kills)?;
         } else {
             ensure!(
                 folded.activity == 0,

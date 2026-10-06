@@ -21,7 +21,8 @@ Restate authority and one PostgreSQL store, runs a turn on replica B while
 replica A's feeds observe it, and kills B mid-turn. Its variant names the
 live replay store both replicas run with: with the process-local `memory`
 store, B's live activity never reaches A and A converges through the
-durable head. S33 reuses the existing Phase A operator
+durable head; with the shared `postgresql` store (FIG-5101), A's feeds carry
+B's live activity before commit and converge without a gap. S33 reuses the existing Phase A operator
 choreography; it does not introduce another operator supervisor. Existing
 supervisors and the Restate law board remain until parity.
 
@@ -61,7 +62,15 @@ test. Stale case or test selectors refuse before boot. This script owns no
 service processes and inserts no journal commands.
 
 Each row declares its store and leg, and every permutation is its own test
-function named `<test>[_postgresql][_replay]`. For `--store postgresql` the
+function named `<test>[_postgresql][_replay]`. A row may also declare
+`"live_replay": "postgresql"` (variant `postgresql-live-replay`): the planner
+passes `--live-replay postgresql`, the runner supplies PostgreSQL as for a
+PostgreSQL store and sets `LASH_E2E_LIVE_REPLAY`, and every workbench of the
+case whose test names no live replay store runs on the shared PostgreSQL live
+replay store, in a schema of the case's namespace (FIG-5101). Its durable
+store stays the row's `store`. S01/S02/S17/S18/S26 carry such a row in full
+and release; S30's host is the external consumer, which has no live replay
+seam. For `--store postgresql` the
 runner supplies PostgreSQL through `scripts/ci/with-service.sh pg16`, and the
 case creates a fresh database and applies the committed schema itself. For
 `--leg replay` the runner serves the always-suspending Restate

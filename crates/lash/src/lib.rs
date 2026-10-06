@@ -92,6 +92,8 @@ pub use parked_work_verbs::{
     ControlIntentPage, ControlIntentQuery, ForkedTurn, ParkCancelled, ParkVerbRefused,
     RedriveAccepted, RunRedriveAccepted,
 };
+#[cfg(feature = "postgres")]
+mod postgres_live_replay;
 pub mod preflight;
 pub(crate) mod process_admin;
 mod process_lifecycle;
@@ -1374,6 +1376,13 @@ pub mod postgres {
     pub use lash_core_store::store::fleet_finalize::FinalizeMode;
 
     pub use lash_postgres_store::*;
+
+    /// The live replay store every replica of a host shares through one
+    /// PostgreSQL database (FIG-5101).
+    pub use crate::postgres_live_replay::{
+        PostgresLiveReplayConfig, PostgresLiveReplayConfigError, PostgresLiveReplayError,
+        PostgresLiveReplayStore,
+    };
 }
 
 /// S3 attachment store backend.

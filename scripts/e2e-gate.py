@@ -238,7 +238,7 @@ def scratch_dir(artifacts: Path) -> Path:
 
 
 def run(label: str, name: str, artifacts: Path, case: str | None,
-        store: str, leg: str) -> int:
+        store: str, leg: str, live_replay: str) -> int:
     gate = os.environ["KILN_GATE_ID"]
     # S28 owns a second cluster in this block and fleet PostgreSQL owns
     # offset 40; serve owns offsets 45–47.
@@ -330,6 +330,9 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
             "LASH_E2E_CANDIDATE_SHA": source,
             "LASH_E2E_STORE": store,
             "LASH_E2E_LEG": leg,
+            # The live replay store every workbench of the case runs on
+            # unless the case names one (FIG-5101).
+            "LASH_E2E_LIVE_REPLAY": live_replay,
             "LASH_E2E_HOST_GENERATION": generation,
             "LASH_E2E_REPO": str(ROOT),
             "LASH_E2E_PYTHON": str(python),
@@ -362,7 +365,8 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
                  "LASH_UPGRADE_LASHCTL_N", "LASH_UPGRADE_LASHCTL_NEXT",
                  "LASH_PHASE_A_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH", "TMPDIR",
                  "RESTATE_INGRESS_URL", "RESTATE_ADMIN_URL"]
-        if store == "postgresql":
+        postgres = store == "postgresql" or live_replay == "postgresql"
+        if postgres:
             # with-service.sh exports the server address into serve's environment;
             # Kiln resolves this --test_env key against that environment like it
             # does serve's own RESTATE_* endpoints.
@@ -375,7 +379,7 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
             "--port-base", str(base + 45), "--keep-log", str(artifacts / "restate.log"),
             "--", *command,
         ]
-        if store == "postgresql":
+        if postgres:
             serve = [
                 str(ROOT / "scripts/ci/with-service.sh"), "pg16", "--", *serve,
             ]
@@ -389,6 +393,7 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
                                       "scenario": name, "label": label, "source_sha": source,
                                       "gate": gate, "port_base": base, "generation": generation,
                                       "store": store, "leg": leg,
+                                      "live_replay": live_replay,
                                       "playwright": "1.62.0",
                                       "workbench": {"path": workbench,
                                                     "sha256": env["LASH_E2E_WORKBENCH_SHA256"]},
@@ -417,6 +422,8 @@ def main() -> int:
                         help="invocation leg the served Restate runs")
     parser.add_argument("--artifacts", type=Path, help="fresh directory inside this fork")
     parser.add_argument("--case", help="manifest scenario/variant/store/leg/channel key")
+    parser.add_argument("--live-replay", choices=("memory", "postgresql"), default="memory",
+                        help="live replay store the case's workbenches run on unless the case names one")
     args = parser.parse_args()
     if not re.fullmatch(r"[a-zA-Z0-9_:]+", args.test):
         parser.error("test must be a full test path")
@@ -428,7 +435,7 @@ def main() -> int:
         command = [
             "kiln", "gate", "lash", ROOT.name, "--", "python3", str(Path(__file__).resolve()),
             args.label, args.test, "--store", args.store, "--leg", args.leg,
-            "--artifacts", str(artifacts),
+            "--live-replay", args.live_replay, "--artifacts", str(artifacts),
         ]
         if args.case is not None:
             command += ["--case", args.case]
@@ -443,7 +450,7 @@ def main() -> int:
         print(f"e2e artifacts: {artifacts}", flush=True)
         try:
             return run(args.label, args.test, artifacts, args.case,
-                       args.store, args.leg)
+                       args.store, args.leg, args.live_replay)
         except (OSError, ValueError, KeyError, ET.ParseError, subprocess.CalledProcessError) as error:
             write(artifacts / "execution.json", {
                 "scenario": args.test, "label": args.label,

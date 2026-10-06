@@ -58,6 +58,8 @@ uuid = { workspace = true }
 lashlang = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# The PostgreSQL live replay store (`postgres` feature).
+sqlx = { workspace = true, optional = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 tokio-util = { workspace = true }
@@ -81,7 +83,7 @@ rlm = [
 # `lash::<name>` module that re-exports the matching internal crate's
 # host-facing surface; none is enabled by default.
 sqlite = ["dep:lash-sqlite-store"]
-postgres = ["dep:lash-postgres-store"]
+postgres = ["dep:lash-postgres-store", "dep:sqlx", "tokio/rt", "tokio/time", "tokio/macros"]
 s3 = ["dep:lash-s3-store"]
 restate = ["dep:lash-restate"]
 openai = ["dep:lash-provider-openai", "dep:lash-llm-transport", "dep:lash-provider-auth"]

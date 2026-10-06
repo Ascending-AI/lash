@@ -1131,6 +1131,7 @@ PACKAGE_DEPS = {
             "lashlang": "//crates/lashlang:lashlang",
             "serde": "//third-party/rust:p0331",
             "serde_json": "//third-party/rust:p0338",
+            "sqlx": "//third-party/rust:p0361",
             "thiserror": "//third-party/rust:p0392",
             "tokio": "//third-party/rust:p0399",
             "tokio_util": "//third-party/rust:p0405",

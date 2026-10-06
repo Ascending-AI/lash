@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 54,
-  "cargo_target_count": 217,
+  "cargo_target_count": 218,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_122c210f[static]",
     "//crates/lash-conformance:lash-conformance__fv_1e77b00c[static]",
@@ -325,6 +325,9 @@
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_76ec1060",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_c8af19c8",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_dc2cef6c",
+    "//crates/lash-postgres-store:live_replay__test__fv_76ec1060",
+    "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8",
+    "//crates/lash-postgres-store:live_replay__test__fv_dc2cef6c",
     "//crates/lash-postgres-store:migrate__test__fv_76ec1060",
     "//crates/lash-postgres-store:migrate__test__fv_c8af19c8",
     "//crates/lash-postgres-store:migrate__test__fv_dc2cef6c",
@@ -1419,6 +1422,9 @@
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_76ec1060[check]",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_c8af19c8[check]",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_dc2cef6c[check]",
+    "//crates/lash-postgres-store:live_replay__test__fv_76ec1060[check]",
+    "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8[check]",
+    "//crates/lash-postgres-store:live_replay__test__fv_dc2cef6c[check]",
     "//crates/lash-postgres-store:migrate__test__fv_76ec1060[check]",
     "//crates/lash-postgres-store:migrate__test__fv_c8af19c8[check]",
     "//crates/lash-postgres-store:migrate__test__fv_dc2cef6c[check]",
@@ -2513,6 +2519,9 @@
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_76ec1060",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_c8af19c8",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_dc2cef6c",
+    "//crates/lash-postgres-store:live_replay__test__fv_76ec1060",
+    "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8",
+    "//crates/lash-postgres-store:live_replay__test__fv_dc2cef6c",
     "//crates/lash-postgres-store:migrate__test__fv_76ec1060",
     "//crates/lash-postgres-store:migrate__test__fv_c8af19c8",
     "//crates/lash-postgres-store:migrate__test__fv_dc2cef6c",
@@ -22451,6 +22460,65 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_dc2cef6c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "build_label": "//crates/lash-postgres-store:live_replay__test__fv_76ec1060",
+      "check_label": "//crates/lash-postgres-store:live_replay__test__fv_76ec1060[check]",
+      "clippy_label": "//crates/lash-postgres-store:live_replay__test__fv_76ec1060__clippy[clippy.txt]",
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:live_replay__test__fv_76ec1060",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "build_label": "//crates/lash-postgres-store:live_replay__test__fv_76ec1060",
+      "check_label": "//crates/lash-postgres-store:live_replay__test__fv_76ec1060[check]",
+      "clippy_label": "//crates/lash-postgres-store:live_replay__test__fv_76ec1060__clippy[clippy.txt]",
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:live_replay__test__fv_76ec1060",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "build_label": "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8",
+      "check_label": "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8[check]",
+      "clippy_label": "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8__clippy[clippy.txt]",
+      "features": [
+        "synthetic-next",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "build_label": "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8",
+      "check_label": "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8[check]",
+      "clippy_label": "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8__clippy[clippy.txt]",
+      "features": [
+        "synthetic-next",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "build_label": "//crates/lash-postgres-store:live_replay__test__fv_dc2cef6c",
+      "check_label": "//crates/lash-postgres-store:live_replay__test__fv_dc2cef6c[check]",
+      "clippy_label": "//crates/lash-postgres-store:live_replay__test__fv_dc2cef6c__clippy[clippy.txt]",
+      "features": [
+        "perf-witness",
+        "synthetic-next",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-postgres-store:live_replay__test__fv_dc2cef6c",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -49948,6 +50016,7 @@
       "//crates/lash-postgres-store:lash-postgres-store__fv_53140407",
       "//crates/lash-postgres-store:lash-postgres-store__fv_974cf9f1",
       "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_76ec1060",
+      "//crates/lash-postgres-store:live_replay__test__fv_76ec1060",
       "//crates/lash-postgres-store:migrate__test__fv_76ec1060",
       "//crates/lash-postgres-store:preflight_durable_walk__test__fv_76ec1060",
       "//crates/lash-postgres-store:preflight_schema_status__test__fv_76ec1060",
@@ -50218,6 +50287,9 @@
       "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_76ec1060",
       "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_c8af19c8",
       "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_dc2cef6c",
+      "//crates/lash-postgres-store:live_replay__test__fv_76ec1060",
+      "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8",
+      "//crates/lash-postgres-store:live_replay__test__fv_dc2cef6c",
       "//crates/lash-postgres-store:migrate__test__fv_76ec1060",
       "//crates/lash-postgres-store:migrate__test__fv_c8af19c8",
       "//crates/lash-postgres-store:migrate__test__fv_dc2cef6c",
@@ -50447,7 +50519,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_b81ca3f5"
     ]
   },
-  "generated_label_count": 284,
+  "generated_label_count": 285,
   "packages": [
     {
       "declared_features": [
@@ -51638,6 +51710,17 @@
           "kind": "test",
           "label": "//crates/lash-postgres-store:conformance__test",
           "shard_count": 6,
+          "tags": [
+            "hermetic-postgres"
+          ]
+        },
+        {
+          "build_label": "//crates/lash-postgres-store:live_replay__test",
+          "cargo": "live_replay",
+          "check_label": "//crates/lash-postgres-store:live_replay__test[check]",
+          "clippy_label": "//crates/lash-postgres-store:live_replay__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-postgres-store:live_replay__test",
           "tags": [
             "hermetic-postgres"
           ]
@@ -55216,6 +55299,8 @@
       "//crates/lash-postgres-store:integration__test__fv_c8af19c8",
       "//crates/lash-postgres-store:lash-postgres-store__unit_test",
       "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_c8af19c8",
+      "//crates/lash-postgres-store:live_replay__test",
+      "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8",
       "//crates/lash-postgres-store:migrate__test",
       "//crates/lash-postgres-store:migrate__test__fv_c8af19c8",
       "//crates/lash-postgres-store:preflight_durable_walk__test",
@@ -55388,6 +55473,10 @@
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_76ec1060": 300,
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_c8af19c8": 300,
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_dc2cef6c": 300,
+    "//crates/lash-postgres-store:live_replay__test": 300,
+    "//crates/lash-postgres-store:live_replay__test__fv_76ec1060": 300,
+    "//crates/lash-postgres-store:live_replay__test__fv_c8af19c8": 300,
+    "//crates/lash-postgres-store:live_replay__test__fv_dc2cef6c": 300,
     "//crates/lash-postgres-store:migrate__test": 300,
     "//crates/lash-postgres-store:migrate__test__fv_76ec1060": 300,
     "//crates/lash-postgres-store:migrate__test__fv_c8af19c8": 300,
@@ -56013,6 +56102,7 @@
     "//crates/lash-postgres-store:integration__test",
     "//crates/lash-postgres-store:lash-postgres-store[static]",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:live_replay__test",
     "//crates/lash-postgres-store:migrate__test",
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",
@@ -56299,6 +56389,7 @@
     "//crates/lash-postgres-store:integration__test[check]",
     "//crates/lash-postgres-store:lash-postgres-store[check]",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test[check]",
+    "//crates/lash-postgres-store:live_replay__test[check]",
     "//crates/lash-postgres-store:migrate__test[check]",
     "//crates/lash-postgres-store:preflight_durable_walk__test[check]",
     "//crates/lash-postgres-store:preflight_schema_status__test[check]",
@@ -56584,6 +56675,7 @@
     "//crates/lash-postgres-store:integration__test__clippy[clippy.txt]",
     "//crates/lash-postgres-store:lash-postgres-store__clippy[clippy.txt]",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test__clippy[clippy.txt]",
+    "//crates/lash-postgres-store:live_replay__test__clippy[clippy.txt]",
     "//crates/lash-postgres-store:migrate__test__clippy[clippy.txt]",
     "//crates/lash-postgres-store:preflight_durable_walk__test__clippy[clippy.txt]",
     "//crates/lash-postgres-store:preflight_schema_status__test__clippy[clippy.txt]",
@@ -56869,6 +56961,7 @@
     "//crates/lash-postgres-store:integration__test",
     "//crates/lash-postgres-store:lash-postgres-store",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:live_replay__test",
     "//crates/lash-postgres-store:migrate__test",
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",
@@ -57154,6 +57247,7 @@
     "//crates/lash-postgres-store:integration__test",
     "//crates/lash-postgres-store:lash-postgres-store",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:live_replay__test",
     "//crates/lash-postgres-store:migrate__test",
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",
@@ -57408,6 +57502,7 @@
     "//crates/lash-postgres-store:host_provisioned_rollout__test",
     "//crates/lash-postgres-store:integration__test",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:live_replay__test",
     "//crates/lash-postgres-store:migrate__test",
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",
@@ -57549,6 +57644,7 @@
     "//crates/lash-postgres-store:host_provisioned_rollout__test",
     "//crates/lash-postgres-store:integration__test",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:live_replay__test",
     "//crates/lash-postgres-store:migrate__test",
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",
@@ -57705,6 +57801,7 @@
     "//crates/lash-postgres-store:host_provisioned_rollout__test",
     "//crates/lash-postgres-store:integration__test",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:live_replay__test",
     "//crates/lash-postgres-store:migrate__test",
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",
@@ -58066,6 +58163,7 @@
     "//crates/lash-postgres-store:host_provisioned_rollout__test",
     "//crates/lash-postgres-store:integration__test",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:live_replay__test",
     "//crates/lash-postgres-store:migrate__test",
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",
@@ -58231,6 +58329,7 @@
     "//crates/lash-postgres-store:host_provisioned_rollout__test",
     "//crates/lash-postgres-store:integration__test",
     "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:live_replay__test",
     "//crates/lash-postgres-store:migrate__test",
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",

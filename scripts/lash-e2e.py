@@ -72,6 +72,7 @@ def load_manifest(path: Path = MANIFEST) -> dict:
             require(case["store"] in {"sqlite_memory", "sqlite_file", "postgresql"}, f"{key}: invalid store")
             require(case["leg"] in {"live", "replay"}, f"{key}: invalid leg")
             require(case["channel"] in {"standard", "rlm"}, f"{key}: invalid channel")
+            require(case.get("live_replay", "memory") in {"memory", "postgresql"}, f"{key}: invalid live replay store")
             tiers = case["tiers"]
             require(bool(tiers) and set(tiers) <= {"smoke", "full", "release", "live"}, f"{key}: invalid tiers")
             require("full" not in tiers or "release" in tiers, f"{key}: full row missing release")
@@ -195,6 +196,7 @@ def reconcile(expected: dict, receipt: dict, root: Path, manifest: dict) -> dict
         provenance = json.loads(paths["provenance"].read_text())
         require(provenance.get("evidence_error") is None, f"{row['key']}: evidence error: {provenance.get('evidence_error')}")
         require(provenance["source_sha"] == expected["source_sha"] and provenance["case"] == row["key"], "wrong binary provenance")
+        require(provenance.get("live_replay", "memory") == spec.get("live_replay", "memory"), "wrong live replay store")
         require(provenance["protocol"] == "V7", "missing negotiated V7 receipt")
         require(provenance["server_nodes"] == spec["server_nodes"], "wrong cluster size")
         binaries = provenance["binaries"]
@@ -268,6 +270,7 @@ def run_cases(expected: dict, artifacts: Path, manifest: dict) -> dict:
             "python3", str(ROOT / RUNNER), row["registration"]["label"], row["registration"]["test"],
             "--artifacts", str(directory), "--case", case_key(row),
             "--store", row["store"], "--leg", row["leg"],
+            "--live-replay", row.get("live_replay", "memory"),
         ], cwd=ROOT)
         execution_path = directory / "execution.json"
         if execution_path.is_file():

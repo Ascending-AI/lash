@@ -18,6 +18,43 @@ use crate::e2e::{
 mod mcp;
 mod store;
 
+/// The PostgreSQL live replay mode (FIG-5101): with
+/// `LASH_E2E_LIVE_REPLAY=postgresql`, a workbench whose case names no live
+/// replay store runs on the shared PostgreSQL store at
+/// `LASH_POSTGRES_DATABASE_URL`, in a schema of its case's namespace, so
+/// replicas of one case share it and cases never do.
+fn live_replay_mode(environment: &mut BTreeMap<String, String>, namespace: &str) -> Result<()> {
+    match std::env::var("LASH_E2E_LIVE_REPLAY").ok().as_deref() {
+        None | Some("memory") => return Ok(()),
+        Some("postgresql") => {}
+        Some(other) => bail!("LASH_E2E_LIVE_REPLAY=`{other}` names no live replay mode"),
+    }
+    if environment.contains_key("AGENT_WORKBENCH_LIVE_REPLAY_STORE") {
+        return Ok(());
+    }
+    let database_url = std::env::var("LASH_POSTGRES_DATABASE_URL")
+        .context("the PostgreSQL live replay mode needs LASH_POSTGRES_DATABASE_URL")?;
+    let schema = format!(
+        "live_replay_{}",
+        &lash_core::stable_hash::sha256_hex(namespace.as_bytes())[..32]
+    );
+    environment.extend([
+        (
+            "AGENT_WORKBENCH_LIVE_REPLAY_STORE".to_string(),
+            "postgresql".to_string(),
+        ),
+        (
+            "AGENT_WORKBENCH_LIVE_REPLAY_DATABASE_URL".to_string(),
+            database_url,
+        ),
+        (
+            "AGENT_WORKBENCH_LIVE_REPLAY_CONFIG".to_string(),
+            json!({ "schema": schema }).to_string(),
+        ),
+    ]);
+    Ok(())
+}
+
 pub struct WorkbenchHost {
     mcp: Option<HostProcess>,
     mcp_artifact: Option<ArtifactIdentity>,
@@ -80,6 +117,8 @@ impl WorkbenchHost {
                     | "AGENT_WORKBENCH_DATA_DIR"
                     | "AGENT_WORKBENCH_DATABASE_URL"
                     | "AGENT_WORKBENCH_LIVE_REPLAY_STORE"
+                    | "AGENT_WORKBENCH_LIVE_REPLAY_CONFIG"
+                    | "AGENT_WORKBENCH_LIVE_REPLAY_DATABASE_URL"
                     | "LASH_HOST_SHUTDOWN_MARKER"
                     | "AGENT_WORKBENCH_RESTATE_ADVERTISE_URL"
                     | "OPENROUTER_API_KEY"
@@ -131,6 +170,7 @@ impl WorkbenchHost {
             ("RESTATE_ADMIN_URL".into(), self.admin.clone()),
         ]);
         environment.extend(self.environment.clone());
+        live_replay_mode(&mut environment, &lease.namespace)?;
         self.process = Some(
             HostProcess::spawn(
                 &artifact,

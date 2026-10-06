@@ -174,8 +174,24 @@ Configuration is read from `.env` or the process environment:
   `.agent-workbench`.
 - `AGENT_WORKBENCH_LIVE_REPLAY_STORE`: the live replay store session feeds
   tail. `memory` (the default when unset) keeps one process's observation
-  events in process; a feed's snapshot is the session's durable head either
-  way.
+  events in process; `postgresql` shares them through PostgreSQL, so every
+  workbench replica's feed carries every replica's events. A feed's snapshot
+  is the session's durable head either way.
+- `AGENT_WORKBENCH_LIVE_REPLAY_DATABASE_URL`: the database the `postgresql`
+  live replay store uses; unset falls back to `AGENT_WORKBENCH_DATABASE_URL`.
+- `AGENT_WORKBENCH_LIVE_REPLAY_CONFIG`: the selected live replay store's
+  configuration as one JSON object; absent fields keep their defaults and an
+  unknown or out-of-range field refuses startup. `memory` takes
+  `max_events_per_session` (2048), `max_age_ms` (120000), `max_sessions`
+  (4096) and `max_retained_bytes` (67108864). `postgresql` takes
+  `lash::postgres::PostgresLiveReplayConfig`: `schema` (`lash_live_replay`),
+  `publish_tick_ms` (5), `publish_concurrency` (4), `max_batch_events` (1024),
+  `max_events_per_session` (2048), `max_age_ms` (120000),
+  `max_bytes_per_session` (8388608), `cleanup_interval_ms` (30000),
+  `cleanup_jitter_ms` (10000), `listener_backoff_initial_ms` (100),
+  `listener_backoff_max_ms` (5000), `pool_max_connections` (8),
+  `pool_min_connections` (0), `pool_acquire_timeout_ms` (5000) and
+  `pool_idle_timeout_ms` (600000).
 - `AGENT_WORKBENCH_DATABASE_URL`: use the `lash-postgres-store` session, process,
   trigger, artifact, and process-environment stores at this URL. Unset defaults to
   SQLite.

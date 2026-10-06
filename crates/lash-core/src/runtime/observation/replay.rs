@@ -136,7 +136,11 @@ impl SessionCursor {
         Ok(parsed)
     }
 
-    fn parse(&self) -> Result<ParsedSessionCursor<'_>, SessionCursorError> {
+    /// Read the incarnation, session, revision and live position this
+    /// cursor names. A store learns the session a cursor addresses here.
+    ///
+    /// Integrator class (ADR 0051): **custom live-replay store implementors**.
+    pub fn parse(&self) -> Result<ParsedSessionCursor<'_>, SessionCursorError> {
         let payload = self.0.strip_prefix(SESSION_CURSOR_PREFIX).ok_or_else(|| {
             SessionCursorError::Malformed {
                 message: "missing cursor prefix".to_string(),

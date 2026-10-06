@@ -74,6 +74,37 @@
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "tools::s01_workbench_singleton_replay"
           }
+        },
+        {
+          "variant": "postgresql-live-replay",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s01_workbench_singleton"
+          },
+          "live_replay": "postgresql"
         }
       ],
       "setup": "Workbench Standard, one echo tool, real Restate/file SQLite.",
@@ -214,6 +245,37 @@
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "tools::s02_cold_partial_postgresql_replay"
           }
+        },
+        {
+          "variant": "postgresql-live-replay",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "tools::s02_cold_partial"
+          },
+          "live_replay": "postgresql"
         }
       ],
       "setup": "File SQLite/PG host; two tools A/B, A durable, B held.",
@@ -2178,6 +2240,37 @@
             "label": "//crates/lash-upgrade-harness:e2e__test",
             "test": "operation::s17_workbench_operation_drop_and_follow_postgresql_replay"
           }
+        },
+        {
+          "variant": "postgresql-live-replay",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e__test",
+            "test": "operation::s17_workbench_operation_drop_and_follow"
+          },
+          "live_replay": "postgresql"
         }
       ],
       "setup": "Workbench e2e-tools plugin task issues a native tool and returns completion; node::h3::double_fixture proves admission and follow on the server double.",
@@ -2230,6 +2323,37 @@
             "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
             "test": "s18_workbench_cancel_suspended_application_timer"
           }
+        },
+        {
+          "variant": "postgresql-live-replay",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s18_workbench_cancel_suspended_application_timer"
+          },
+          "live_replay": "postgresql"
         }
       ],
       "setup": "Workbench process await or durable sleep; wait for actual Restate suspended status.",
@@ -3924,6 +4048,37 @@
             "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
             "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer_replay"
           }
+        },
+        {
+          "variant": "postgresql-live-replay",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer"
+          },
+          "live_replay": "postgresql"
         }
       ],
       "setup": "Workbench production provider HTTP client; recorded SSE frames + usage.",
@@ -4972,7 +5127,7 @@
         "R7",
         "R8"
       ],
-      "dependencies": "Base, PG, FIG-5090 durable-head feed",
+      "dependencies": "Base, PG, FIG-5090 durable-head feed, FIG-5101 PostgreSQL live replay store",
       "cases": [
         {
           "variant": "memory-live-replay",
@@ -5003,11 +5158,42 @@
             "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
             "test": "s37_replica_feed_memory_live_replay_postgresql"
           }
+        },
+        {
+          "variant": "postgresql-live-replay",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+            "test": "s37_replica_feed_postgresql_live_replay_postgresql"
+          },
+          "live_replay": "postgresql"
         }
       ],
       "setup": "Two workbench replicas share one Restate authority and one PostgreSQL store; B registers last, so the turn A accepts executes on B. Observers follow the session feed on A (before and mid-turn) and on B.",
       "fault": "Hold the provider stream mid-turn, SIGKILL B under it, restart B in place.",
-      "observable": "The Run is pinned to B's deployment; both replicas' snapshots are one durable head; every A feed converges on the durable rows once and in order. With the process-local memory live replay store, B's live activity reaches B's feed and never A's, and A converges through the durable head (replay gap and snapshot).",
+      "observable": "The Run is pinned to B's deployment; both replicas' snapshots are one durable head; every A feed converges on the durable rows once and in order. With the process-local memory live replay store, B's live activity reaches B's feed and never A's, and A converges through the durable head (replay gap and snapshot). With the shared PostgreSQL live replay store (FIG-5101), A's feeds carry B's live activity before commit and converge without a gap.",
       "arc_guards": [],
       "host": "workbench"
     }

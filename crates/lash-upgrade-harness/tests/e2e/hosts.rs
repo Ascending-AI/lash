@@ -408,6 +408,18 @@ fn s37_replica_feed_memory_live_replay_postgresql() -> Result<()> {
 }
 
 #[test]
+#[ignore = "prebuilt workbench, PostgreSQL and private Restate supplied by the E2E controller"]
+fn s37_replica_feed_postgresql_live_replay_postgresql() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(workbench_replicas::run(
+            &workbench_replicas::POSTGRESQL_LIVE_REPLAY,
+        ))
+}
+
+#[test]
 #[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
 fn s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer() -> Result<()> {
     tokio::runtime::Builder::new_multi_thread()
