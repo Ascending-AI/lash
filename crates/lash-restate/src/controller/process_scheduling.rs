@@ -507,3 +507,29 @@ impl crate::JournalStep for SettleStartStep {
         self.0.clone()
     }
 }
+
+/// The kind a process start's claim journals under.
+pub(crate) const CLAIM_STEP_KIND: &str = <ClaimStartStep as crate::JournalStep>::KIND;
+
+/// The kinds of every journaled process start fact.
+#[cfg(test)]
+pub(super) const PROCESS_START_STEP_KINDS: [&str; 4] = [
+    <CompensateStartStep as crate::JournalStep>::KIND,
+    <ClaimStartStep as crate::JournalStep>::KIND,
+    <StoreExternalRefStep as crate::JournalStep>::KIND,
+    <SettleStartStep as crate::JournalStep>::KIND,
+];
+
+#[cfg(test)]
+pub(crate) fn start_claim_journal_name(effect_name: &str) -> String {
+    crate::journal_step_name(&ClaimStartStep(format!(
+        "{effect_name}.process-start-claim"
+    )))
+}
+
+#[cfg(test)]
+pub(crate) fn start_settle_journal_name(effect_name: &str) -> String {
+    crate::journal_step_name(&SettleStartStep(format!(
+        "{effect_name}.process-start-settle"
+    )))
+}

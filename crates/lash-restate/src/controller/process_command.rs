@@ -1415,3 +1415,38 @@ impl crate::JournalStep for CancelAdmissionStep {
         self.0.clone()
     }
 }
+
+/// The kinds of every process command's journaled fact.
+#[cfg(test)]
+pub(super) const PROCESS_COMMAND_STEP_KINDS: [&str; 11] = [
+    <ObserveProcessStep as crate::JournalStep>::KIND,
+    <RegisterProcessStep as crate::JournalStep>::KIND,
+    <RetainedProcessStep as crate::JournalStep>::KIND,
+    <CancelAwaitStep as crate::JournalStep>::KIND,
+    <DefinitionStep as crate::JournalStep>::KIND,
+    <TransferStep as crate::JournalStep>::KIND,
+    <DeleteProcessSessionStep as crate::JournalStep>::KIND,
+    <SignalAppendStep as crate::JournalStep>::KIND,
+    <EmitProcessEventStep as crate::JournalStep>::KIND,
+    <LocalProcessStep as crate::JournalStep>::KIND,
+    <CancelAdmissionStep as crate::JournalStep>::KIND,
+];
+
+#[cfg(test)]
+pub(crate) fn start_register_journal_name(effect_name: &str) -> String {
+    crate::journal_step_name(&RegisterProcessStep(format!(
+        "{effect_name}.process-start-register"
+    )))
+}
+
+#[cfg(test)]
+pub(crate) fn cancel_admission_journal_name(effect_name: &str) -> String {
+    crate::journal_step_name(&CancelAdmissionStep(effect_name.to_owned()))
+}
+
+/// The kind a process definition's journaled fact records under.
+pub(crate) const DEFINITION_STEP_KIND: &str = <DefinitionStep as crate::JournalStep>::KIND;
+/// The kind a process start's registration journals under.
+pub(crate) const REGISTER_STEP_KIND: &str = <RegisterProcessStep as crate::JournalStep>::KIND;
+/// The kind a process signal's append admission journals under.
+pub(crate) const SIGNAL_APPEND_STEP_KIND: &str = <SignalAppendStep as crate::JournalStep>::KIND;

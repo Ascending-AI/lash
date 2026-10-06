@@ -442,16 +442,16 @@ pub(super) async fn restate_signal_uses_declared_wait_ordinal_when_event_count_d
     assert_ne!(resolved[0].key, counted_key);
 }
 
-fn mutate_process_command_journal_payload(
+fn mutate_cancel_admission_journal_payload(
     context: &ReplayableRecordingContext,
     invocation: &RuntimeEffectInvocation,
-    operation: &str,
     mutate: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
 ) {
-    let effect_name = format!("{}.{operation}:v1", restate_effect_name(invocation));
+    let journal_name =
+        crate::controller::cancel_admission_journal_name(&restate_effect_name(invocation));
     let mut records = context.records.lock_recover();
     let bytes = records
-        .get_mut(&effect_name)
+        .get_mut(&journal_name)
         .expect("recorded process-command journal payload");
     let mut encoded: serde_json::Value =
         serde_json::from_slice(bytes).expect("decode process-command journal result");
@@ -490,10 +490,8 @@ pub(super) async fn restate_cancel_redrive_after_completion_replays_journaled_ad
         )
         .await
         .expect("first cancellation admission");
-    let admission_name = format!(
-        "{}.process-cancel-admission:v1",
-        restate_effect_name(&invocation)
-    );
+    let admission_name =
+        crate::controller::cancel_admission_journal_name(&restate_effect_name(&invocation));
     let admission: serde_json::Value = serde_json::from_slice(
         context
             .records
@@ -543,8 +541,8 @@ pub(super) async fn restate_cancel_redrive_after_completion_replays_journaled_ad
         first_sequence,
         vec![
             format!(
-                "run:{}.process-cancel-admission:v1",
-                restate_effect_name(&invocation)
+                "run:{}",
+                crate::controller::cancel_admission_journal_name(&restate_effect_name(&invocation))
             ),
             format!("call:process-cancel:{}", record.id),
         ],
@@ -661,20 +659,15 @@ pub(super) async fn restate_cancel_replay_refuses_incompatible_journal_payloads(
         )
         .await
         .expect("record current cancellation payload");
-        mutate_process_command_journal_payload(
-            &context,
-            &invocation,
-            "process-cancel-admission",
-            |payload| match mutation {
-                "wrong-version" => {
-                    payload.insert("version".to_string(), serde_json::json!(999));
-                }
-                "unknown-field" => {
-                    payload.insert("future_field".to_string(), serde_json::json!(true));
-                }
-                _ => unreachable!("bounded mutation table"),
-            },
-        );
+        mutate_cancel_admission_journal_payload(&context, &invocation, |payload| match mutation {
+            "wrong-version" => {
+                payload.insert("version".to_string(), serde_json::json!(999));
+            }
+            "unknown-field" => {
+                payload.insert("future_field".to_string(), serde_json::json!(true));
+            }
+            _ => unreachable!("bounded mutation table"),
+        });
         context.start_replay();
 
         let error = host

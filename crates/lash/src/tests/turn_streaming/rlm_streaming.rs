@@ -1453,10 +1453,11 @@ fn rlm_exec_code_seal_key_survives_continue_as_seed_and_follow_turn() -> Result<
         let mut seal_keys = std::collections::BTreeSet::new();
         for invocation in invocations {
             for entry in server.journal(&invocation.id).unwrap_or_default() {
-                if let Some(name) = &entry.name
-                    && name.ends_with(":lk2:~seal")
+                if let Some(effect) = entry.name.as_deref().and_then(|name| {
+                    lash_restate::JournalStepKind::RecordedEffect.instance_of(name)
+                }) && effect.ends_with(":lk2:~seal")
                 {
-                    seal_keys.insert(name.clone());
+                    seal_keys.insert(effect.to_owned());
                 }
                 let Some(Ok(value)) = entry.run_completion() else {
                     continue;

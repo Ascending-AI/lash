@@ -213,7 +213,8 @@ impl CellRun {
                 double
                     .server()
                     .crash_on(turn_rule(CrashPoint::BeforeRunResultStarting {
-                        prefix: "lash:shift-run-start:".into(),
+                        prefix: lash_restate::JournalStepKind::RecordedEffect
+                            .journal_name("lash:shift-run-start:"),
                     }))
             }
             _ => {}
@@ -973,7 +974,11 @@ async fn native_cut_without_wait(
                     // A refused admission probe owns no native Run. Count
                     // the physical owners whose journals contain K6 work.
                     && double.server().journal(&view.id).unwrap_or_default().iter()
-                        .any(|entry| entry.name.as_deref().is_some_and(|name| name.starts_with("lash:run:")))
+                        .any(|entry| entry.name.as_deref().is_some_and(|name| {
+                            [lash_restate::JournalStepKind::RunRecord, lash_restate::JournalStepKind::RunAttempt]
+                                .into_iter()
+                                .any(|kind| kind.instance_of(name).is_some())
+                        }))
             })
             .collect::<Vec<_>>()
     };
@@ -993,7 +998,8 @@ async fn native_cut_without_wait(
             }
         } else {
             CrashPoint::BeforeRunResultStarting {
-                prefix: "lash:run:aggregate:".into(),
+                prefix: lash_restate::JournalStepKind::RunRecord
+                    .journal_name("lash:run:aggregate:"),
             }
         };
         double.server().crash_on(

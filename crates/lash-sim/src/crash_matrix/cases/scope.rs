@@ -181,10 +181,10 @@ async fn stage_scope_close_with_claim(
             parent: scope.clone(),
         });
     }
-    let close_step = format!(
-        "lash.effect.record:lash:{}",
+    let close_step = lash_restate::JournalStepKind::RecordedEffect.journal_name(&format!(
+        "lash:{}",
         lash_core::engine::shift_close_run_replay_key(&TurnId::fixture(run)),
-    );
+    ));
     let notes = vec![format!("children={child_count}")];
     let origin_ms = match point {
         CrashPoint::AfterStateCommit => {

@@ -118,15 +118,19 @@ async fn a_wait_signal_body_redriven_over_its_stored_terminal_replays_its_wait_s
     assert!(is_process_success(output), "the signal arrived: {output:?}");
     let steps = context.runs();
     assert!(
-        steps
-            .iter()
-            .any(|name| name.starts_with("lash.process.wait.enter:")),
+        steps.iter().any(
+            |name| name.starts_with(&crate::controller::process_drive_journal_name(
+                "lash.process.wait.enter:"
+            ))
+        ),
         "entering the wait is a recorded step: {steps:?}"
     );
     assert!(
-        steps
-            .iter()
-            .any(|name| name.starts_with("lash.process.wait.clear:")),
+        steps.iter().any(
+            |name| name.starts_with(&crate::controller::process_drive_journal_name(
+                "lash.process.wait.clear:"
+            ))
+        ),
         "clearing the wait is a recorded step: {steps:?}"
     );
     // The completion step's body: the terminal is stored before the attempt

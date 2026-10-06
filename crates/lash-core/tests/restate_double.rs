@@ -91,10 +91,13 @@ async fn a_turn_finishes_in_an_open_handler(double: &lash_restate_test::RestateT
         .journal(&lent.id)
         .expect("the lent handler's journal");
     assert!(
-        journal.iter().any(|entry| entry
-            .name
-            .as_deref()
-            .is_some_and(|name| name.starts_with("lash:"))),
+        journal
+            .iter()
+            .any(|entry| entry.name.as_deref().is_some_and(|name| {
+                lash_restate_test::JournalStepKind::RecordedEffect
+                    .instance_of(name)
+                    .is_some()
+            })),
         "the turn's effects were journaled in the lent handler: {journal:?}"
     );
 }

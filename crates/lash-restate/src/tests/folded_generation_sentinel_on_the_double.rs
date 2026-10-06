@@ -486,10 +486,12 @@ async fn a_run_execution_replayed_under_another_generation_parks_at_its_first_st
     let (swap, target) = run_swap(0x3980_7a11, held_options(), TimeMode::auto()).await;
     swap.replays_parked_under_another_generation(
         &target,
-        &[format!(
-            "lash:{}",
-            shift_admission_replay_key(&ShiftRequestId::new("r-folded"), 0)
-        )],
+        &[
+            crate::JournalStepKind::RecordedEffect.journal_name(&format!(
+                "lash:{}",
+                shift_admission_replay_key(&ShiftRequestId::new("r-folded"), 0)
+            )),
+        ],
     )
     .await;
 }

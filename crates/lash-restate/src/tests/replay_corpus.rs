@@ -50,7 +50,7 @@ enum JournalBody {
 impl JournalBody {
     fn journaled(name: &str, bytes: &[u8]) -> Self {
         let value = serde_json::from_slice(bytes).expect("a journaled entry is JSON");
-        if super::recording_context::is_process_command_journal_fact(name) {
+        if crate::controller::is_process_command_journal_name(name) {
             Self::ProcessCommandFact(value)
         } else {
             Self::Effect(value)

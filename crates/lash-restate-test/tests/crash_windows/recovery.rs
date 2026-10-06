@@ -406,9 +406,11 @@ pub(super) async fn segment_journals_end_where_their_bodies_ran(
         .rposition(|name| name == "lash.segment.start" || name == "lash.segment.resume")
         .unwrap_or_else(|| panic!("the last segment was admitted: {names:#?}"));
     assert!(
-        names[admitted + 1..complete]
-            .iter()
-            .any(|name| name.starts_with("lash:")),
+        names[admitted + 1..complete].iter().any(|name| {
+            lash_restate::JournalStepKind::RecordedEffect
+                .instance_of(name)
+                .is_some()
+        }),
         "the terminal follows the body's own commands: {names:#?}"
     );
     assert_eq!(

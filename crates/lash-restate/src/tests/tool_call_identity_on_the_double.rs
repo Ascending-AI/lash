@@ -83,9 +83,10 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
         lash_core::ProcessWorkWiring::new(watched, port)
     }
 
-    /// The replay keys of every run the double journaled that names `scope`'s
-    /// session, in journal order across invocations: a turn's group children
-    /// journal in invocations of their own.
+    /// The replay keys of every recorded effect and frontier marker the double
+    /// journaled whose key names `scope`'s session, in journal order across
+    /// invocations: a turn's group children journal in invocations of their
+    /// own.
     async fn recorded_replay_keys(&self, scope: &lash_core::ExecutionScope) -> Option<Vec<String>> {
         let lash_core::ExecutionScope::Turn { session_id, .. } = scope else {
             return None;
@@ -97,7 +98,7 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
                 if let Some(key) = entry
                     .name
                     .as_deref()
-                    .and_then(|name| name.strip_prefix("lash:"))
+                    .and_then(crate::controller::effect_replay_key)
                     && key.contains(session_id.as_str())
                 {
                     keys.push(key.to_owned());
@@ -122,7 +123,7 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
     ) {
         let server = self.backend.server().clone();
         let crashes_before = server.stats().crashes;
-        let name = format!("lash:{}", cut.replay_key);
+        let name = crate::controller::effect_journal_name_for_replay_key(&cut.replay_key);
         server.crash_on(lash_restate_test::CrashRule::new(match cut.at {
             lash_conformance::JournalCutPoint::BeforeEffect => {
                 lash_restate_test::CrashPoint::BeforeRun { name }

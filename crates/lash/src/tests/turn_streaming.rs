@@ -200,8 +200,8 @@ impl lash_core::facade_support::SessionPlugin for TurnPersistedObserverPlugin {
 }
 
 /// The replay keys of every effect run `double` journaled, across all its
-/// invocations: the engine journals each effect as a `ctx.run` named
-/// `lash:<replay key>`.
+/// invocations: the engine journals each effect's recorded outcome as a
+/// typed step whose instance is `lash:<replay key>`.
 pub(super) fn journaled_run_keys(double: &lash_restate_test::RestateTestBackend) -> Vec<String> {
     let server = double.server();
     server
@@ -213,7 +213,8 @@ pub(super) fn journaled_run_keys(double: &lash_restate_test::RestateTestBackend)
             entry
                 .name
                 .as_deref()
-                .and_then(|name| name.strip_prefix("lash:"))
+                .and_then(|name| lash_restate::JournalStepKind::RecordedEffect.instance_of(name))
+                .and_then(|effect| effect.strip_prefix("lash:"))
                 .map(str::to_owned)
         })
         .collect()

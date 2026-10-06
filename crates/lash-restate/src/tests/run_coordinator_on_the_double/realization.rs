@@ -388,7 +388,9 @@ async fn l18_a_realization_command_in_flight_at_a_crash_replays_after_a_higher_d
             // The realization's nested command is journaled: release rank
             // 2's X so its decision is journaled after it.
             until_commands(&server, |commands| {
-                commands.iter().any(|(name, _)| name == NESTED)
+                commands
+                    .iter()
+                    .any(|(name, _)| *name == command_journal_name(NESTED))
             })
             .await;
             probe.gate_open.store(true, Ordering::SeqCst);
@@ -564,7 +566,9 @@ async fn l18_a_realization_spanning_two_windows_replays() {
             // The first nested command is journaled: release rank 2's X so
             // its decision lands after it.
             until_commands(&server, |commands| {
-                commands.iter().any(|(name, _)| name == FIRST)
+                commands
+                    .iter()
+                    .any(|(name, _)| *name == command_journal_name(FIRST))
             })
             .await;
             probe.gate_open.store(true, Ordering::SeqCst);
@@ -576,7 +580,9 @@ async fn l18_a_realization_spanning_two_windows_replays() {
             // The second command is journaled: release rank 3's X so it
             // wins the schedule window the journal put between them.
             until_commands(&server, |commands| {
-                commands.iter().any(|(name, _)| name == SECOND)
+                commands
+                    .iter()
+                    .any(|(name, _)| *name == command_journal_name(SECOND))
             })
             .await;
             rank_three_gate.release();
@@ -766,7 +772,9 @@ async fn l03_a_cancel_accepted_before_the_decision_admits_no_realization() {
         "no declare record was journaled"
     );
     assert!(
-        !journal.iter().any(|(entry, _)| entry == NESTED),
+        !journal
+            .iter()
+            .any(|(entry, _)| *entry == command_journal_name(NESTED)),
         "no nested command was journaled"
     );
     let events: Vec<_> = records
@@ -974,6 +982,12 @@ async fn k6_a_cut_with_realization_in_flight_hands_the_receipt_over_once() {
     );
 }
 
+/// The journal name of a nested command, which records through the typed Run
+/// record step.
+fn command_journal_name(command: &str) -> String {
+    crate::controller::record_journal_name(command.to_owned())
+}
+
 fn assert_isolated(server: &lash_restate_test::RestateTestServer, commands: &[&str]) {
     let invocations = server.invocations();
     let owner = invocations
@@ -988,15 +1002,16 @@ fn assert_isolated(server: &lash_restate_test::RestateTestServer, commands: &[&s
     let owner_journal = server.journal(&owner.id).unwrap();
     let realization_journal = server.journal(&realization.id).unwrap();
     for command in commands {
+        let command = command_journal_name(command);
         assert!(
             !owner_journal
                 .iter()
-                .any(|entry| entry.name.as_deref() == Some(command))
+                .any(|entry| entry.name.as_deref() == Some(command.as_str()))
         );
         assert!(
             realization_journal
                 .iter()
-                .any(|entry| entry.name.as_deref() == Some(command))
+                .any(|entry| entry.name.as_deref() == Some(command.as_str()))
         );
     }
 }

@@ -467,3 +467,11 @@ impl crate::JournalStep for BudgetVerdictStep {
         self.0.clone()
     }
 }
+
+/// The kind a runtime effect's recorded outcome journals under.
+pub(crate) const RECORD_EFFECT_STEP_KIND: &str = <RecordEffectStep as crate::JournalStep>::KIND;
+
+#[cfg(test)]
+pub(crate) fn effect_budget_journal_name(effect_name: &str) -> String {
+    crate::journal_step_name(&BudgetVerdictStep(effect_name.to_owned()))
+}

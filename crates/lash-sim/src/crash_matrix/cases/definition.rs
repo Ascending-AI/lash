@@ -45,7 +45,7 @@ use lash_core::sync::MutexExt;
 use lash_restate_test::{CrashPoint as EngineCut, CrashRule};
 use lashlang::testing::ast_builders as b;
 
-use super::Staged;
+use super::{Staged, kind_prefix};
 use crate::crash_matrix::CrashPoint;
 use crate::crash_matrix::catalog_audit;
 use crate::crash_matrix::invariants::{CustomCheck, Expected};
@@ -350,14 +350,14 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         ));
     }
     let cut = match point {
-        CrashPoint::DuringEngineDelivery => EngineCut::BeforeRunEnding {
-            suffix: ".process-start-register".to_owned(),
+        CrashPoint::DuringEngineDelivery => EngineCut::BeforeRunStarting {
+            prefix: kind_prefix(lash_restate::JournalStepKind::ProcessStartRegister),
         },
-        CrashPoint::MidJournalStep => EngineCut::BeforeRunResultEnding {
-            suffix: ".process-start-register".to_owned(),
+        CrashPoint::MidJournalStep => EngineCut::BeforeRunResultStarting {
+            prefix: kind_prefix(lash_restate::JournalStepKind::ProcessStartRegister),
         },
-        CrashPoint::AfterStateCommit => EngineCut::BeforeRunResultEnding {
-            suffix: ".process-start-claim".to_owned(),
+        CrashPoint::AfterStateCommit => EngineCut::BeforeRunResultStarting {
+            prefix: kind_prefix(lash_restate::JournalStepKind::ProcessStartClaim),
         },
         other => return Err(format!("definition start has no {other:?} cell")),
     };

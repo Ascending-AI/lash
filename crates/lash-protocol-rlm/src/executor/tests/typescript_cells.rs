@@ -204,6 +204,13 @@ fn journaled_prints_replay_without_calling_the_renderer() {
     });
 }
 
+/// Whether a journal step is a Run's first attempt of a call.
+fn first_run_attempt(name: &str) -> bool {
+    lash_restate_test::JournalStepKind::RunAttempt
+        .instance_of(name)
+        .is_some_and(|attempt| attempt.starts_with("lash:run:") && attempt.ends_with(":attempt:1"))
+}
+
 fn approval_request_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:approval_request",
@@ -1119,9 +1126,7 @@ fn l21_scalar_and_aggregate_record_attempts_in_the_opener() {
             .iter()
             .flat_map(|invocation| double.server().journal(&invocation.id).unwrap_or_default())
             .filter_map(|entry| entry.name)
-            .filter(|name| {
-                name.starts_with("lash.run.attempt:lash:run:") && name.ends_with(":attempt:1")
-            })
+            .filter(|name| first_run_attempt(name))
             .collect();
         assert_eq!(
             attempts.len(),
@@ -1465,10 +1470,7 @@ fn l06_race_loser_stays_owned_across_cells_until_logical_closing() {
             .filter_map(|entry| entry.name)
             .collect();
         assert_eq!(
-            frames
-                .iter()
-                .filter(|name| name.starts_with("lash:run:") && name.ends_with(":attempt:1"))
-                .count(),
+            frames.iter().filter(|name| first_run_attempt(name)).count(),
             3
         );
     });

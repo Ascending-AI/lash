@@ -120,6 +120,12 @@ pub(crate) fn held_core(held: Arc<AtomicUsize>) -> CoreBuild {
 /// ticks and a case that needs more (a lapsed claim, an attempt ceiling) would
 /// lose its leader. A deployment the case kills resigns as it drops, so the
 /// long TTL does not delay its successor.
+/// The journal-name prefix every step of `kind` starts with: a cut at a
+/// step whose instance names an effect the case only learns as it runs.
+fn kind_prefix(kind: lash_restate::JournalStepKind) -> String {
+    format!("{}:", kind.as_str())
+}
+
 fn recovery_lease() -> lash::RecoveryLeaseConfig {
     lash::RecoveryLeaseConfig {
         generation_rank: 0,

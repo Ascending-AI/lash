@@ -94,7 +94,11 @@ pub(super) async fn a_cancel_at_the_registration_await_still_submits_the_registe
     let start = CancelledStart::new().await;
     start
         .context
-        .cancel_after_next_run("process-start-register");
+        .cancel_after_next_run(crate::controller::start_register_journal_name(
+            &super::process_registry_core::start_recovery_effect_name(
+                "engine-cancel-at-registration",
+            ),
+        ));
 
     let outcome = start
         .run("engine-cancel-at-registration")
@@ -126,7 +130,11 @@ pub(super) async fn a_cancel_at_the_registration_await_still_submits_the_registe
 #[tokio::test]
 pub(super) async fn a_cancel_at_the_claim_await_still_submits_the_start() {
     let start = CancelledStart::new().await;
-    start.context.cancel_after_next_run("process-start-claim");
+    start
+        .context
+        .cancel_after_next_run(crate::controller::start_claim_journal_name(
+            &super::process_registry_core::start_recovery_effect_name("engine-cancel-at-claim"),
+        ));
     let began_ms = start.stores.clock.timestamp_ms();
 
     let outcome = start

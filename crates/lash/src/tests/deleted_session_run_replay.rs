@@ -427,13 +427,15 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
     let (crash, steps) = match work {
         Work::Input => (
             lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRun {
-                name: format!("lash:plugin-transition:{run}"),
+                name: lash_restate::JournalStepKind::RecordedEffect
+                    .journal_name(&format!("lash:plugin-transition:{run}")),
             }),
-            vec!["shift-admit:", "plugin-transition:"],
+            vec!["shift-admission:", "plugin-transition:"],
         ),
         Work::NativeCommand => (
             lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRun {
-                name: "lash:session-command-run:1".to_owned(),
+                name: lash_restate::JournalStepKind::RecordedEffect
+                    .journal_name("lash:session-command-run:1"),
             }),
             vec!["session-command-run:0", "session-command-run:1"],
         ),
@@ -441,7 +443,10 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
             let recovery = follow_on_recovery_run(&run);
             (
                 lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRunResult {
-                    name: Some(format!("lash:shift-follow-on:{recovery}")),
+                    name: Some(
+                        lash_restate::JournalStepKind::RecordedEffect
+                            .journal_name(&format!("lash:shift-follow-on:{recovery}")),
+                    ),
                 }),
                 vec!["shift-follow-on:"],
             )
@@ -560,10 +565,8 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
         !matches!(&executed.last_failure, Some((570, _))),
         "the replay followed its journal: {evidence}"
     );
-    let admission_steps = match work {
-        Work::NativeCommand => ["shift-run-start:", "shift-admission:"],
-        Work::Input | Work::FollowOn => ["shift-run-start:", "shift-seal:"],
-    };
+    // Every root records its start and its atomic admission (FIG-4848).
+    let admission_steps = ["shift-run-start:", "shift-admission:"];
     for step in admission_steps.into_iter().chain(steps.iter().copied()) {
         assert!(
             names.iter().any(|name| name.contains(step)),

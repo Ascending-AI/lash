@@ -244,6 +244,69 @@ pub trait JournalStep: Send + 'static {
     fn instance(&self) -> String;
 }
 
+/// The kind of a journal step's name: the text before its instance. A kind
+/// never contains `:`.
+#[cfg(test)]
+fn journal_step_kind(name: &str) -> &str {
+    name.split_once(':').map_or(name, |(kind, _)| kind)
+}
+
+/// A journal step kind a reader of a Restate journal addresses by name —
+/// a test oracle, a crash cut, an operator's journal inspection. Each is
+/// the [`JournalStep::KIND`] of the step type that journals it, and a step
+/// is named `<kind>:<instance>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum JournalStepKind {
+    /// A runtime effect's recorded outcome; its instance is the effect name,
+    /// `lash:` and the effect's replay key.
+    RecordedEffect,
+    /// A Run's record; its instance is the record's name, such as
+    /// `lash:run:<call id>:admit`.
+    RunRecord,
+    /// A Run's attempt; its instance is `lash:run:<call id>:attempt:<n>`.
+    RunAttempt,
+    /// A process definition's recorded fact; its instance is the defining
+    /// effect's name.
+    ProcessDefinition,
+    /// A process start's registration; its instance is the starting effect's
+    /// name and `.process-start-register`.
+    ProcessStartRegister,
+    /// A process start's claim of its delivery; its instance is the starting
+    /// effect's name and `.process-start-claim`, or
+    /// `.process-start-claim-after-cancel` for the claim run again after the
+    /// engine cancelled the first.
+    ProcessStartClaim,
+    /// A process signal's append admission; its instance is the signalling
+    /// effect's name.
+    ProcessSignalAppend,
+}
+
+impl JournalStepKind {
+    /// The kind's text.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RecordedEffect => controller::RECORD_EFFECT_STEP_KIND,
+            Self::RunRecord => controller::RUN_RECORD_STEP_KIND,
+            Self::RunAttempt => controller::RUN_ATTEMPT_STEP_KIND,
+            Self::ProcessDefinition => controller::DEFINITION_STEP_KIND,
+            Self::ProcessStartRegister => controller::REGISTER_STEP_KIND,
+            Self::ProcessStartClaim => controller::CLAIM_STEP_KIND,
+            Self::ProcessSignalAppend => controller::SIGNAL_APPEND_STEP_KIND,
+        }
+    }
+
+    /// The journal name of this kind's step for `instance`.
+    pub fn journal_name(self, instance: &str) -> String {
+        format!("{}:{instance}", self.as_str())
+    }
+
+    /// The instance `journal_name` names when it is this kind's step.
+    pub fn instance_of(self, journal_name: &str) -> Option<&str> {
+        journal_name.strip_prefix(self.as_str())?.strip_prefix(':')
+    }
+}
+
 fn journal_step_name<S: JournalStep>(step: &S) -> String {
     let instance = step.instance();
     if instance.is_empty() {

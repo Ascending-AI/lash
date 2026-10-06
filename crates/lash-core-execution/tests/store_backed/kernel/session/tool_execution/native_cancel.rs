@@ -519,10 +519,12 @@ async fn l03_native_cancel_replays_before_the_inline_loser_ack() {
     double
         .server()
         .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
-            name: Some(format!(
-                "lash:run:{}:attempt:1",
-                crate::ToolCallId::fixture("A")
-            )),
+            name: Some(
+                lash_restate_test::JournalStepKind::RunAttempt.journal_name(&format!(
+                    "lash:run:{}:attempt:1",
+                    crate::ToolCallId::fixture("A")
+                )),
+            ),
         }));
     let crashes = CrashCount::new();
     assert!(double.server().on_crash(crashes.listener()));

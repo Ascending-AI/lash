@@ -38,15 +38,14 @@ fn turn_journal(server: &RestateTestServer) -> Option<Vec<JournalEntryView>> {
     turn_view(server).and_then(|view| server.journal(&view.id))
 }
 
-/// Whether the turn journal holds `run_name`'s run completion.
-fn run_completion_landed(server: &RestateTestServer, run_name: &str) -> bool {
+/// Whether the turn journal holds the run completion of the journal step
+/// named `journal_name`.
+fn run_completion_landed(server: &RestateTestServer, journal_name: &str) -> bool {
     let Some(journal) = turn_journal(server) else {
         return false;
     };
     let Some(command) = journal.iter().find(|entry| {
-        entry.ty == MessageType::RunCommand
-            && entry.name.as_deref()
-                == Some(crate::controller::attempt_journal_name(run_name.to_owned()).as_str())
+        entry.ty == MessageType::RunCommand && entry.name.as_deref() == Some(journal_name)
     }) else {
         return false;
     };
@@ -149,17 +148,17 @@ async fn k9_cold_reopen_decides_durable_attempts_in_acknowledgment_order() {
             .await;
             probe.gates[&c].release();
             wait_until(BUDGET, "C's attempt:1 completion", || {
-                run_completion_landed(&server, &name(&c, "attempt:1"))
+                run_completion_landed(&server, &attempt(&c, 1))
             })
             .await;
             probe.gates[&d].release();
             wait_until(BUDGET, "D's attempt:1 completion", || {
-                run_completion_landed(&server, &name(&d, "attempt:1"))
+                run_completion_landed(&server, &attempt(&d, 1))
             })
             .await;
             probe.gates[&a].release();
             wait_until(BUDGET, "A's attempt:1 completion", || {
-                run_completion_landed(&server, &name(&a, "attempt:1"))
+                run_completion_landed(&server, &attempt(&a, 1))
             })
             .await;
             let view = turn_view(&server).expect("the turn invocation exists");
@@ -269,12 +268,12 @@ async fn r4_a_served_d_wins_over_a_fresh_choice_and_the_popped_source_decides_ne
             .await;
             probe.gates[&a].release();
             wait_until(BUDGET, "A's attempt:1 completion", || {
-                run_completion_landed(&server, &name(&a, "attempt:1"))
+                run_completion_landed(&server, &attempt(&a, 1))
             })
             .await;
             probe.unrelated_gate.as_ref().unwrap().release();
             wait_until(BUDGET, "the unrelated effect's completion", || {
-                run_completion_landed(&server, UNRELATED)
+                run_completion_landed(&server, &unrelated())
             })
             .await;
             assert!(

@@ -176,10 +176,12 @@ fn journaled_run(
     journal: &[lash_restate_test::JournalEntryView],
     effect_name: &str,
 ) -> JournaledEffectRecord {
+    let journal_name = crate::JournalStepKind::RecordedEffect.journal_name(effect_name);
     let commands: Vec<_> = journal
         .iter()
         .filter(|entry| {
-            entry.ty == MessageType::RunCommand && entry.name.as_deref() == Some(effect_name)
+            entry.ty == MessageType::RunCommand
+                && entry.name.as_deref() == Some(journal_name.as_str())
         })
         .collect();
     assert_eq!(
@@ -438,7 +440,10 @@ async fn canonical_material_bytes_and_partial_proposal_replay_on_the_double() {
                 backend
                     .server()
                     .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
-                        name: Some(format!("lash:k2-{cut}")),
+                        name: Some(
+                            crate::JournalStepKind::RecordedEffect
+                                .journal_name(&format!("lash:k2-{cut}")),
+                        ),
                     }));
                 let executions: Arc<Vec<AtomicUsize>> =
                     Arc::new((0..=width).map(|_| AtomicUsize::new(0)).collect());

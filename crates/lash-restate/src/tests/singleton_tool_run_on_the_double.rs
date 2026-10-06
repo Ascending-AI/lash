@@ -266,7 +266,7 @@ async fn public_plugin_task_records_its_tool_in_the_operation_run() {
             let names: Vec<_> = entries
                 .iter()
                 .filter_map(|entry| entry.name.as_ref())
-                .filter(|name| name.starts_with("lash:run:"))
+                .filter(|name| crate::controller::is_run_journal_name(name))
                 .cloned()
                 .collect();
             let records: Vec<RunRecord> = entries
@@ -1348,8 +1348,8 @@ fn names(call_id: &ToolCallId, steps: &[&str]) -> Vec<String> {
     steps
         .iter()
         .map(|step| match *step {
-            "decide" => "lash:run:schedule:1".to_owned(),
-            step => format!("lash:run:{call_id}:{step}"),
+            "decide" => crate::controller::record_journal_name("lash:run:schedule:1".to_owned()),
+            step => crate::controller::call_step_journal_name(call_id, step),
         })
         .collect()
 }
@@ -1414,13 +1414,8 @@ fn decision(records: &[RunRecord]) -> Vec<CallDecision> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_done_singleton_is_four_records_and_reruns_only_unrecorded_work_at_every_cut() {
     let call = call("four-records");
-    // V is the Run's schedule record: the three per-call records carry one
-    // event each, so V is `lash:run:schedule:3`.
-    let journaled = [
-        names(&call.call_id, &["admit", "attempt:1", "decide"]),
-        vec!["lash:run:schedule:3".to_owned()],
-    ]
-    .concat();
+    // V is the call's presentation record (FIG-4989: A+X+D+V).
+    let journaled = names(&call.call_id, &["admit", "attempt:1", "decide", "present"]);
     for cut in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
         let crash = match cut {
             None => Vec::new(),
@@ -1556,12 +1551,8 @@ async fn final_and_cancel_choose_one_terminal_around_the_durable_decision() {
             assert_eq!(probe.presentations.load(Ordering::SeqCst), 0);
             assert_eq!(
                 journaled,
-                // A withheld V is the schedule record at ordinal 3.
-                [
-                    names(&call.call_id, &["admit", "attempt:1", "decide"]),
-                    vec!["lash:run:schedule:3".to_owned()]
-                ]
-                .concat()
+                // A withheld V is the call's presentation record too.
+                names(&call.call_id, &["admit", "attempt:1", "decide", "present"])
             );
         } else {
             assert!(
@@ -1582,10 +1573,25 @@ async fn final_and_cancel_choose_one_terminal_around_the_durable_decision() {
             );
             assert_eq!(
                 journaled,
-                // The declaring call's V follows its declare record.
+                // The declaring call's realization is issued after its declare
+                // record and decided in the schedule before its V; the
+                // realization's own invocation opens with its generation step.
                 [
-                    names(&call.call_id, &["admit", "attempt:1", "decide", "declare"]),
-                    vec!["lash:run:schedule:4".to_owned()]
+                    names(
+                        &call.call_id,
+                        &[
+                            "admit",
+                            "attempt:1",
+                            "decide",
+                            "declare",
+                            "realization:issued"
+                        ],
+                    ),
+                    vec![crate::controller::record_journal_name(
+                        "lash:run:schedule:6".to_owned(),
+                    )],
+                    names(&call.call_id, &["present"]),
+                    vec![crate::sentinel::GENERATION_SENTINEL.to_owned()],
                 ]
                 .concat()
             );

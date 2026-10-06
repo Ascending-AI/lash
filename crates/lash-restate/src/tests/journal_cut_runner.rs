@@ -1,9 +1,9 @@
 //! Journal cuts on the Restate server double: the runner-supplied crash point
 //! of the turn-executing laws that cut a turn at a named effect (FIG-3587).
 //!
-//! lash-restate journals every effect as a `ctx.run` named `lash:` plus the
-//! effect's replay key, so a [`JournalCut`] names a run of the invocation's
-//! journal. [`JournalCutRunner`] arms the double's crash plan at that run —
+//! lash-restate journals every effect's recorded outcome, and its frontier
+//! marker, as a typed step whose instance is `lash:` plus the replay key, so a
+//! [`JournalCut`] names a run of the invocation's journal. [`JournalCutRunner`] arms the double's crash plan at that run —
 //! before its command is stored for [`JournalCutPoint::BeforeEffect`],
 //! before its result is for [`JournalCutPoint::BeforeResult`] — and lets the
 //! double do what a deployment crash does: drop the handler and retry the
@@ -28,11 +28,6 @@ use lash_restate_test::{CrashPoint, CrashRule, RestateTestServer};
 pub(super) struct JournalCutRunner {
     inner: Arc<dyn ConformanceTurnRunner>,
     server: RestateTestServer,
-}
-
-/// The `ctx.run` name lash-restate journals an effect under.
-fn run_name(replay_key: &str) -> String {
-    format!("lash:{replay_key}")
 }
 
 impl JournalCutRunner {
@@ -86,8 +81,9 @@ impl ConformanceTurnRunner for JournalCutRunner {
             .await;
     }
 
-    /// The replay keys of every run the double journaled whose name spells
-    /// `scope`'s session and turn, in journal order across invocations.
+    /// The replay keys of every recorded effect and frontier marker the
+    /// double journaled whose key spells `scope`'s session and turn, in
+    /// journal order across invocations.
     async fn recorded_replay_keys(&self, scope: &lash_core::ExecutionScope) -> Option<Vec<String>> {
         let lash_core::ExecutionScope::Turn {
             session_id,
@@ -102,7 +98,7 @@ impl ConformanceTurnRunner for JournalCutRunner {
                 if let Some(key) = entry
                     .name
                     .as_deref()
-                    .and_then(|name| name.strip_prefix("lash:"))
+                    .and_then(crate::controller::effect_replay_key)
                     && key.contains(session_id.as_str())
                     && key.contains(turn_id.as_str())
                 {
@@ -121,7 +117,7 @@ impl ConformanceTurnRunner for JournalCutRunner {
         redrive: ConformanceTurnAttempt,
     ) {
         let crashes_before = self.server.stats().crashes;
-        let name = run_name(&cut.replay_key);
+        let name = crate::controller::effect_journal_name_for_replay_key(&cut.replay_key);
         self.server.crash_on(CrashRule::new(match cut.at {
             JournalCutPoint::BeforeEffect => CrashPoint::BeforeRun { name },
             JournalCutPoint::BeforeResult => CrashPoint::BeforeRunResult { name: Some(name) },

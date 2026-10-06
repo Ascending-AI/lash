@@ -95,12 +95,10 @@ impl RecordingContext {
     }
 
     /// The engine cancels the invocation while the next run of the journal
-    /// step `operation` awaits its answer: the closure ran, and the step
-    /// answers `409`.
-    pub(super) fn cancel_after_next_run(&self, operation: &str) {
-        self.cancel_after_runs
-            .lock_recover()
-            .push(format!(".{operation}:v1"));
+    /// step named `journal_name` awaits its answer: the closure ran, and the
+    /// step answers `409`.
+    pub(super) fn cancel_after_next_run(&self, journal_name: String) {
+        self.cancel_after_runs.lock_recover().push(journal_name);
     }
 
     /// The next submission is refused, after another delivery of the start
@@ -355,7 +353,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             let mut pending = self.cancel_after_runs.lock_recover();
             pending
                 .iter()
-                .position(|operation| effect_name.ends_with(operation.as_str()))
+                .position(|journal_name| *journal_name == effect_name)
                 .map(|index| pending.remove(index))
                 .is_some()
         };
@@ -884,7 +882,9 @@ impl ReplayableRecordingContext {
             .records
             .lock_recover()
             .iter()
-            .filter(|(effect_name, _)| !is_process_command_journal_fact(effect_name))
+            .filter(|(effect_name, _)| {
+                crate::controller::is_recorded_effect_journal_name(effect_name)
+            })
             .filter_map(|(effect_name, bytes)| {
                 let recorded = decode_recorded_runtime_effect(bytes);
                 let json: serde_json::Value = serde_json::from_str(recorded.envelope.json())
@@ -943,7 +943,7 @@ impl ReplayableRecordingContext {
         self.records
             .lock_recover()
             .iter()
-            .filter(|(name, _)| is_process_command_journal_fact(name))
+            .filter(|(name, _)| crate::controller::is_process_command_journal_name(name))
             .map(|(name, bytes)| {
                 (
                     name.clone(),
@@ -960,7 +960,7 @@ impl ReplayableRecordingContext {
         self.records
             .lock_recover()
             .extend(facts.into_iter().map(|(name, value)| {
-                assert!(is_process_command_journal_fact(&name));
+                assert!(crate::controller::is_process_command_journal_name(&name));
                 (
                     name,
                     serde_json::to_vec(&value).expect("encode process command fact"),
@@ -999,32 +999,6 @@ fn select_first_offered<'run>(keys: Vec<u32>) -> crate::JournaledFuture<'run, us
         }
         Ok(0)
     })
-}
-
-pub(super) fn is_process_command_journal_fact(effect_name: &str) -> bool {
-    [
-        ".process-cancel-admission:v1",
-        ".process-await-observation:v1",
-        ".process-signal-append:v1",
-        ".process-list:v1",
-        ".process-transfer:v1",
-        ".process-delete-session:v1",
-        ".process-emit-event:v1",
-        ".process-definition:v1",
-        ".process-start-register:v1",
-        ".process-start-register-after-cancel:v1",
-        ".process-start-claim:v1",
-        ".process-start-claim-after-cancel:v1",
-        ".process-start-settle:v1",
-        ".process-start-settle-after-cancel:v1",
-        ".process-start-compensate:v1",
-        ".process-start-external-ref:v1",
-        ".process-start-external-ref-after-cancel:v1",
-    ]
-    .iter()
-    .any(|suffix| effect_name.ends_with(suffix))
-        || effect_name.starts_with("lash.process.wait.")
-        || effect_name.ends_with(":frontier")
 }
 
 /// Decodes one journaled record into its recorded effect. A step whose engine

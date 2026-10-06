@@ -16,8 +16,67 @@ mod journaled_effect;
 use journaled_effect::EngineFaults;
 mod live_frontier;
 mod run_record;
+pub(crate) use journaled_effect::RECORD_EFFECT_STEP_KIND;
 #[cfg(test)]
-pub(crate) use run_record::{attempt_journal_name, record_journal_name};
+pub(crate) use journaled_effect::effect_budget_journal_name;
+pub(crate) use process_command::{
+    DEFINITION_STEP_KIND, REGISTER_STEP_KIND, SIGNAL_APPEND_STEP_KIND,
+};
+#[cfg(test)]
+pub(crate) use process_command::{cancel_admission_journal_name, start_register_journal_name};
+pub(crate) use process_scheduling::CLAIM_STEP_KIND;
+#[cfg(test)]
+pub(crate) use process_scheduling::{start_claim_journal_name, start_settle_journal_name};
+pub(crate) use run_record::{RUN_ATTEMPT_STEP_KIND, RUN_RECORD_STEP_KIND};
+#[cfg(test)]
+pub(crate) use run_record::{
+    attempt_journal_name, call_step_journal_name, is_run_journal_name, prepare_journal_name,
+    record_journal_name,
+};
+
+/// The replay key of a recorded effect's or a frontier marker's journal
+/// name, by its typed step kind; `None` for every other step.
+#[cfg(test)]
+pub(crate) fn effect_replay_key(journal_name: &str) -> Option<&str> {
+    let (kind, instance) = journal_name.split_once(':')?;
+    (kind == RECORD_EFFECT_STEP_KIND || kind == live_frontier::FRONTIER_STEP_KIND)
+        .then(|| instance.strip_prefix("lash:"))
+        .flatten()
+}
+
+/// Whether a journal name is a recorded runtime effect's, by its typed kind.
+#[cfg(test)]
+pub(crate) fn is_recorded_effect_journal_name(journal_name: &str) -> bool {
+    crate::JournalStepKind::RecordedEffect
+        .instance_of(journal_name)
+        .is_some()
+}
+
+/// The journal name of the step a replay key names: a `…:frontier` key names
+/// its effect's frontier marker, any other key its recorded effect.
+#[cfg(test)]
+pub(crate) fn effect_journal_name_for_replay_key(replay_key: &str) -> String {
+    match replay_key.strip_suffix(":frontier") {
+        Some(effect_key) => live_frontier::frontier_journal_name(&format!("lash:{effect_key}")),
+        None => crate::JournalStepKind::RecordedEffect.journal_name(&format!("lash:{replay_key}")),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn process_drive_journal_name(instance: &str) -> String {
+    crate::journal_step_name(&DriveProcessStep(instance.to_owned()))
+}
+
+/// Whether a journal name is a process command's or process start's fact, a
+/// process drive step, or a frontier marker, by its typed step kind.
+#[cfg(test)]
+pub(crate) fn is_process_command_journal_name(name: &str) -> bool {
+    let kind = crate::journal_step_kind(name);
+    process_command::PROCESS_COMMAND_STEP_KINDS.contains(&kind)
+        || process_scheduling::PROCESS_START_STEP_KINDS.contains(&kind)
+        || kind == <DriveProcessStep as crate::JournalStep>::KIND
+        || kind == live_frontier::FRONTIER_STEP_KIND
+}
 mod scope_recording;
 mod scoped;
 mod turn_cancel_request;

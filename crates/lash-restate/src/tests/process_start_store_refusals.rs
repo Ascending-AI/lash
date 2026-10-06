@@ -10,6 +10,9 @@ use lash_core::{RuntimeEffectControllerError, RuntimeErrorCause, RuntimeErrorCod
 use lash_restate_test::{RestateTestBackend, ServerConfig, protocol::MessageType};
 use std::num::NonZeroUsize;
 
+/// The start effect every law drives.
+const START_KEY: &str = "start-store-fault";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Step {
     Claim,
@@ -17,10 +20,15 @@ pub(super) enum Step {
 }
 
 impl Step {
-    fn journal_name(self) -> &'static str {
+    /// The faulted step's journal name, through its typed start step.
+    fn journal_name(self) -> String {
         match self {
-            Self::Claim => "process-start-claim",
-            Self::Settle => "process-start-settle",
+            Self::Claim => crate::controller::start_claim_journal_name(
+                &super::process_registry_core::start_recovery_effect_name(START_KEY),
+            ),
+            Self::Settle => crate::controller::start_settle_journal_name(
+                &super::process_registry_core::start_recovery_effect_name(START_KEY),
+            ),
         }
     }
 }
@@ -201,7 +209,7 @@ pub(super) async fn start_store_fault_law<S: lash_core::StoreSet + ?Sized>(
                 );
                 let result = scoped
                     .execute_effect(
-                        start_recovery_effect(env_store.as_ref(), "start-store-fault", &spec).await,
+                        start_recovery_effect(env_store.as_ref(), START_KEY, &spec).await,
                         registry_local_executor(registry)
                             .with_process_env_store(env_store)
                             .with_process_starts(
@@ -307,7 +315,7 @@ pub(super) async fn start_store_fault_law<S: lash_core::StoreSet + ?Sized>(
                 && entry
                     .name
                     .as_deref()
-                    .is_some_and(|name| name.ends_with(&format!(".{}:v1", step.journal_name())))
+                    .is_some_and(|name| name == step.journal_name())
         })
         .count();
     assert_eq!(step_runs, 1, "one journal command owns the faulted step");

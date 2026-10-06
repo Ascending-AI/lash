@@ -274,6 +274,11 @@ impl crate::JournalStep for AttemptRunStep {
     }
 }
 
+/// The kind a Run's record journals under.
+pub(crate) const RUN_RECORD_STEP_KIND: &str = <RecordRunStep as crate::JournalStep>::KIND;
+/// The kind a Run's attempt journals under.
+pub(crate) const RUN_ATTEMPT_STEP_KIND: &str = <AttemptRunStep as crate::JournalStep>::KIND;
+
 #[cfg(test)]
 pub(crate) fn record_journal_name(instance: String) -> String {
     crate::journal_step_name(&RecordRunStep(instance))
@@ -282,6 +287,42 @@ pub(crate) fn record_journal_name(instance: String) -> String {
 #[cfg(test)]
 pub(crate) fn attempt_journal_name(instance: String) -> String {
     crate::journal_step_name(&AttemptRunStep(instance))
+}
+
+#[cfg(test)]
+pub(crate) fn prepare_journal_name(instance: String) -> String {
+    crate::journal_step_name(&PrepareRunStep(instance))
+}
+
+/// The journal name of a call's Run step labelled `step`, through the typed
+/// step that label records under: an attempt, a declared start's prepare, or
+/// a record.
+#[cfg(test)]
+pub(crate) fn call_step_journal_name(call_id: &impl std::fmt::Display, step: &str) -> String {
+    let instance = format!("lash:run:{call_id}:{step}");
+    if step.starts_with("attempt:") {
+        attempt_journal_name(instance)
+    } else if step == "start:prepare" {
+        prepare_journal_name(instance)
+    } else {
+        record_journal_name(instance)
+    }
+}
+
+/// Whether a journal name is one of a Run's typed steps.
+#[cfg(test)]
+pub(crate) fn is_run_journal_name(name: &str) -> bool {
+    use crate::JournalStep as _;
+    [
+        RecordRunStep::KIND,
+        PrepareRunStep::KIND,
+        AttemptRunStep::KIND,
+    ]
+    .iter()
+    .any(|kind| {
+        name.strip_prefix(kind)
+            .is_some_and(|instance| instance.starts_with(':'))
+    })
 }
 
 #[cfg(test)]

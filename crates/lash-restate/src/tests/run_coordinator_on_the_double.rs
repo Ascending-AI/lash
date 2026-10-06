@@ -439,7 +439,7 @@ async fn drive(
                         let held = probe.gate.as_ref().unwrap().0.clone();
                         let issued = entries.iter().find(|entry|
                             entry.ty == MessageType::RunCommand
-                                && entry.name.as_deref() == Some(crate::controller::attempt_journal_name(name(&held, "attempt:1")).as_str()))
+                                && entry.name.as_deref() == Some(attempt(&held, 1).as_str()))
                             .expect("A1 was issued before the cut");
                         let held_key = issued.completion_id().unwrap();
                         assert!(!entries.iter().any(|entry| entry.completion_id() == Some(held_key)
@@ -718,14 +718,30 @@ async fn drive(
     }
 }
 
+/// The journal name of a call's Run record `step`, through its typed step.
 fn name(call_id: &ToolCallId, step: &str) -> String {
-    format!("lash:run:{call_id}:{step}")
+    crate::controller::record_journal_name(format!("lash:run:{call_id}:{step}"))
+}
+
+/// The journal name of a call's attempt `ordinal`, through its typed step.
+fn attempt(call_id: &ToolCallId, ordinal: u32) -> String {
+    crate::controller::attempt_journal_name(format!("lash:run:{call_id}:attempt:{ordinal}"))
+}
+
+/// The journal name of a declared start's prepare step, through its typed step.
+fn prepare(call_id: &ToolCallId) -> String {
+    crate::controller::prepare_journal_name(format!("lash:run:{call_id}:start:prepare"))
 }
 
 /// The schedule record that decides a call of a one-member round, named by
 /// its first event ordinal.
 fn schedule(first: u64) -> String {
-    format!("lash:run:schedule:{first}")
+    crate::controller::record_journal_name(format!("lash:run:schedule:{first}"))
+}
+
+/// The unrelated effect's journal name, through its typed Run record step.
+fn unrelated() -> String {
+    crate::controller::record_journal_name(UNRELATED.to_owned())
 }
 
 /// The ported oracle: every violation of the Run's drain order in `records`.
@@ -878,15 +894,15 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
         let mut program = vec![Step::Decide(0), Step::Decide(1), Step::Decide(2)];
         let mut steps = vec![
             name(&ids[0], "admit"),
-            name(&ids[0], "attempt:1"),
+            attempt(&ids[0], 1),
             schedule(1),
             name(&ids[1], "admit"),
-            name(&ids[1], "attempt:1"),
+            attempt(&ids[1], 1),
             schedule(4),
             name(&ids[2], "admit"),
-            name(&ids[2], "attempt:1"),
+            attempt(&ids[2], 1),
             schedule(7),
-            UNRELATED.to_owned(),
+            unrelated(),
             name(&ids[0], "declare"),
             name(&ids[0], "realization:issued"),
             // Each child receipt is accepted before V settles its declarations.
@@ -906,7 +922,7 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
             program.extend([Step::Decide(3), Step::Drain]);
             steps.extend([
                 name(&ids[3], "admit"),
-                name(&ids[3], "attempt:1"),
+                attempt(&ids[3], 1),
                 schedule(29),
                 name(&ids[3], "present"),
             ]);
@@ -973,7 +989,7 @@ async fn a_committed_final_drains_every_lower_rank_before_it_declares_at_every_c
             }
 
             for (index, id) in ids.iter().enumerate().take(3) {
-                let lost = cut.as_deref() == Some(name(id, "attempt:1").as_str());
+                let lost = cut.as_deref() == Some(attempt(id, 1).as_str());
                 assert_eq!(
                     probe.executions_of(id),
                     1 + usize::from(lost),
@@ -1154,7 +1170,7 @@ async fn protected_drain_is_transitive_under_seeded_interleavings() {
             "{label}, cut {cut}: the same Run"
         );
         for (call, kind) in calls.iter() {
-            let lost = cut == name(&call.call_id, "attempt:1");
+            let lost = cut == attempt(&call.call_id, 1);
             assert_eq!(
                 probe.executions_of(&call.call_id),
                 1 + usize::from(lost),
@@ -1267,15 +1283,13 @@ async fn l02_l17_replay_registers_b2_before_waiting_for_unfinished_a1() {
             ty: MessageType::SleepCommand,
         }),
         Some(CrashPoint::BeforeRunResult {
-            name: Some(name(&b, "attempt:2")),
+            name: Some(attempt(&b, 2)),
         }),
         // The old BeforeRun(D6) held A1 behind a borrowed D. Short D6
         // follows A1, so cut the same held-A1 window after B-final D4.
-        Some(CrashPoint::AfterRunResult {
-            name: "lash:run:schedule:4".to_owned(),
-        }),
+        Some(CrashPoint::AfterRunResult { name: schedule(4) }),
         Some(CrashPoint::BeforeRunResult {
-            name: Some(name(&a, "attempt:2")),
+            name: Some(attempt(&a, 2)),
         }),
         Some(CrashPoint::BeforeFrame {
             ty: MessageType::OutputCommand,
@@ -1371,15 +1385,10 @@ async fn l17_two_registered_timers_replay_the_recorded_wake_order() {
     let b = calls[1].0.call_id.clone();
     for (cut, unfinished_b2) in [
         (None, false),
-        (
-            Some(CrashPoint::BeforeRun {
-                name: "lash:run:schedule:8".to_owned(),
-            }),
-            false,
-        ),
+        (Some(CrashPoint::BeforeRun { name: schedule(8) }), false),
         (
             Some(CrashPoint::BeforeRunResult {
-                name: Some(name(&b, "attempt:2")),
+                name: Some(attempt(&b, 2)),
             }),
             true,
         ),
@@ -1541,9 +1550,7 @@ async fn l19_only_the_durable_selected_final_publishes_body_commands_on_cold_rep
             let probe = Arc::new(probe);
             // The old BeforeRun(D3) existed while A1 was held. Short D3
             // follows A1, so crash after B-final D1 while A1 is unfinished.
-            let cut = crash.then(|| CrashPoint::AfterRunResult {
-                name: crate::controller::record_journal_name(schedule(1)),
-            });
+            let cut = crash.then(|| CrashPoint::AfterRunResult { name: schedule(1) });
             let driven = drive(
                 487919,
                 cut.into_iter().collect(),
@@ -1673,7 +1680,7 @@ async fn l04_stream_publishes_only_after_presentation_acceptance() {
             492608,
             // V is the schedule record after the three per-call records.
             vec![CrashPoint::BeforeRunResult {
-                name: Some("lash:run:schedule:3".to_owned()),
+                name: Some(schedule(3)),
             }],
             Arc::clone(&calls),
             Arc::new(program),

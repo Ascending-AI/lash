@@ -147,6 +147,14 @@ fn journaled_steps(backend: &RestateTestBackend, service: &str) -> Vec<(String, 
         .collect()
 }
 
+/// Whether `step` records a runtime effect whose effect name starts with
+/// `prefix`.
+fn recorded_effect_starts_with(step: &str, prefix: &str) -> bool {
+    lash_restate::JournalStepKind::RecordedEffect
+        .instance_of(step)
+        .is_some_and(|effect| effect.starts_with(prefix))
+}
+
 /// The run's `run` invocations and their steps: its scope close runs on the
 /// same key's `close` handler, which runs no turn (FIG-4035).
 fn run_executions(backend: &RestateTestBackend) -> Vec<(String, Vec<String>)> {
@@ -280,7 +288,7 @@ async fn an_empty_commit_finishes_the_shift_without_another_admission() {
     let admissions: Vec<_> = shifts[0]
         .1
         .iter()
-        .filter(|name| name.starts_with("lash:shift-admission:"))
+        .filter(|name| recorded_effect_starts_with(name, "lash:shift-admission:"))
         .collect();
     assert_eq!(
         admissions.len(),
@@ -320,17 +328,17 @@ async fn a_run_admission_records_its_head_verdict_without_another_step() {
         !runs[0]
             .1
             .iter()
-            .any(|name| name.starts_with("lash:shift-head:")),
+            .any(|name| recorded_effect_starts_with(name, "lash:shift-head:")),
         "the admission records its head verdict: {runs:?}",
     );
     assert_eq!(
         runs[0]
             .1
             .iter()
-            .filter(|name| name.starts_with("lash:shift-admit:"))
+            .filter(|name| recorded_effect_starts_with(name, "lash:shift-admission:"))
             .count(),
         1,
-        "one step binds and validates the run: {runs:?}",
+        "one step, the atomic root admission (FIG-4848), binds and validates the run: {runs:?}",
     );
     barrier.release.notify_one();
     assert_eq!(

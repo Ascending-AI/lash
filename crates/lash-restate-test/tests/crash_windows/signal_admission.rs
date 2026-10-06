@@ -13,8 +13,6 @@
 use super::*;
 
 const SIGNAL: &str = "go";
-/// The recorded step a signal's append runs as.
-const APPEND_STEP_SUFFIX: &str = ".process-signal-append:v1";
 
 fn worker(core: &lash::LashCore) -> lash::durability::DurableProcessWorker {
     lash::durability::DurableProcessWorker::new(
@@ -228,8 +226,13 @@ pub(super) async fn signal_id_deduplicates_append_without_caller_replay_key(engi
     // The append commits; the deployment dies before its run result reaches
     // the journal, and the append runs again.
     let crashes_before = engine.crashes();
-    engine.crash_on(CrashRule::new(CrashPoint::BeforeRunResultEnding {
-        suffix: APPEND_STEP_SUFFIX.to_owned(),
+    // The append is the signal append step of an effect this law only
+    // learns as it runs: cut every step of that kind.
+    engine.crash_on(CrashRule::new(CrashPoint::BeforeRunResultStarting {
+        prefix: format!(
+            "{}:",
+            lash_restate::JournalStepKind::ProcessSignalAppend.as_str()
+        ),
     }));
     let first = match try_deliver(
         &engine,

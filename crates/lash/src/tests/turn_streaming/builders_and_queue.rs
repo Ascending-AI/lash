@@ -355,13 +355,16 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
             .filter(|entry| entry.ty.is_command() && entry.ty != MessageType::InputCommand)
             .collect::<Vec<_>>();
         assert!(
-            commands
-                .first()
-                .is_some_and(|first| first.ty == MessageType::RunCommand
+            commands.first().is_some_and(|first| {
+                first.ty == MessageType::RunCommand
                     && first
                         .name
                         .as_deref()
-                        .is_some_and(|name| name.starts_with("lash:shift-admission:"))),
+                        .and_then(|name| {
+                            lash_restate::JournalStepKind::RecordedEffect.instance_of(name)
+                        })
+                        .is_some_and(|effect| effect.starts_with("lash:shift-admission:"))
+            }),
             "the immutable intent admission is its first command: {:?}",
             commands.first()
         );

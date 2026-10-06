@@ -1146,7 +1146,8 @@ async fn live_restate_run_killed_after_its_session_was_deleted_ends_typed() {
     // The run dies with its admission journaled and its plugin transition not.
     backend.crash_on(
         CrashRule::new(CrashPoint::BeforeRun {
-            name: format!("lash:plugin-transition:{run}"),
+            name: lash_restate::JournalStepKind::RecordedEffect
+                .journal_name(&format!("lash:plugin-transition:{run}")),
         })
         .service(backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE)),
     );
@@ -2015,7 +2016,8 @@ async fn live_restate_follow_on_run_killed_after_its_session_was_deleted_ends_ty
     // decision not.
     backend.crash_on(
         CrashRule::new(CrashPoint::BeforeRun {
-            name: format!("lash:shift-follow-on:{recovery}"),
+            name: lash_restate::JournalStepKind::RecordedEffect
+                .journal_name(&format!("lash:shift-follow-on:{recovery}")),
         })
         .service(backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE)),
     );

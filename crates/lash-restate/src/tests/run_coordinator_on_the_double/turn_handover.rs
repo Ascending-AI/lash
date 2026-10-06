@@ -215,10 +215,14 @@ async fn turn_receipts(side: CrashSide) {
                     if !armed.swap(true, Ordering::SeqCst) {
                         let point = match side {
                             CrashSide::BeforePublication => Some(CrashPoint::BeforeRun {
-                                name: "b01:publish".to_string(),
+                                name: crate::controller::record_journal_name(
+                                    "b01:publish".to_string(),
+                                ),
                             }),
                             CrashSide::AfterPublication => Some(CrashPoint::BeforeRunResult {
-                                name: Some("b01:publish".to_string()),
+                                name: Some(crate::controller::record_journal_name(
+                                    "b01:publish".to_string(),
+                                )),
                             }),
                             CrashSide::SuccessorAdopted => None,
                         };
@@ -353,7 +357,9 @@ async fn turn_receipts(side: CrashSide) {
             backend
                 .server()
                 .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
-                    name: Some("fig4928:adopted".to_string()),
+                    name: Some(crate::controller::record_journal_name(
+                        "fig4928:adopted".to_string(),
+                    )),
                 }));
         }
         assert!(
@@ -703,9 +709,7 @@ async fn l13_k6_old_cut_replays_after_successor_material_retirement() {
     let retired = Arc::new(AtomicBool::new(false));
     backend
         .server()
-        .crash_on(CrashRule::new(CrashPoint::BeforeRun {
-            name: UNRELATED.to_owned(),
-        }));
+        .crash_on(CrashRule::new(CrashPoint::BeforeRun { name: unrelated() }));
     let crashes = lash_restate_test::CrashCount::new();
     assert!(backend.server().on_crash(crashes.listener()));
     let attempt: lash_restate_test::HandlerAttempt = {
@@ -814,10 +818,11 @@ async fn l13_k6_old_cut_replays_after_successor_material_retirement() {
             .journal(&old.id)
             .unwrap()
             .iter()
-            .filter(|entry| entry
-                .name
-                .as_deref()
-                .is_some_and(|name| name.starts_with("lash:run:cut:retain:")))
+            .filter(
+                |entry| entry.name.as_deref().is_some_and(|name| name.starts_with(
+                    &crate::controller::record_journal_name("lash:run:cut:retain:".to_owned())
+                ))
+            )
             .count(),
         1
     );

@@ -679,6 +679,13 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
     };
 
     context.await_sleep_started().await;
+    // The process opener records its plugin transition before the sleep; the
+    // post-wake suffix is what the attempt records after the wake.
+    let recorded_before_wake: Vec<_> = context
+        .recorded_runtime_effect_envelopes()
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
     // Armed once the sleep is parked: the sleep's own frontier marker
     // (FIG-3779) is a run commit too, and the crash belongs after the wake.
     context.crash_after_next_run_commit();
@@ -690,18 +697,22 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
         .expect_err("injected worker failure must crash the first attempt");
     assert!(crash.is_panic(), "unexpected first-attempt exit: {crash}");
 
-    let recorded_before_crash = context.recorded_runtime_effect_envelopes();
+    let recorded_after_wake: Vec<_> = context
+        .recorded_runtime_effect_envelopes()
+        .into_iter()
+        .filter(|(name, _)| !recorded_before_wake.contains(name))
+        .collect();
     assert_eq!(
-        recorded_before_crash.len(),
+        recorded_after_wake.len(),
         1,
         "exactly one post-wake effect must commit before the injected crash"
     );
     assert!(
-        recorded_before_crash.iter().all(|(_, envelope)| matches!(
+        recorded_after_wake.iter().all(|(_, envelope)| matches!(
             envelope.command,
             RuntimeEffectCommand::ToolAttempt { .. }
         )),
-        "the committed post-wake suffix must be the tool attempt: {recorded_before_crash:#?}"
+        "the committed post-wake suffix must be the tool attempt: {recorded_after_wake:#?}"
     );
     assert_eq!(
         context.sleeps.lock_recover().as_slice(),

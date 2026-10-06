@@ -44,6 +44,8 @@ pub use backend::{
     TURN_DRIVER_SERVICE, backend, backend_with, backend_with_build, backend_with_segment_budget,
     backend_with_store_set, backend_with_store_set_and_segment_budget,
 };
+/// The journal step kinds a test reads the double's journals by.
+pub use lash_restate::JournalStepKind;
 pub use open_handler::OpenHandler;
 pub use protocol::ProtocolVersion;
 pub use server::{

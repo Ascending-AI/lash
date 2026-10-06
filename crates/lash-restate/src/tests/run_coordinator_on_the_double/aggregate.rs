@@ -1291,7 +1291,7 @@ async fn l06_l16_worker_loss_recovers_the_loser_without_closing_or_consuming_it(
     backend
         .server()
         .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
-            name: Some(UNRELATED.to_owned()),
+            name: Some(unrelated()),
         }));
     let crashes = lash_restate_test::CrashCount::new();
     assert!(backend.server().on_crash(crashes.listener()));
@@ -1396,7 +1396,7 @@ async fn l05_timer_replay_keeps_the_recorded_admission_instant_and_wake() {
     backend
         .server()
         .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
-            name: Some("lash:run:schedule:2".to_owned()),
+            name: Some(schedule(2)),
         }));
     let crashes = lash_restate_test::CrashCount::new();
     assert!(backend.server().on_crash(crashes.listener()));
@@ -1644,7 +1644,7 @@ async fn l03_l05_tool_free_timers_replay_and_close_without_group_services() {
     backend
         .server()
         .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
-            name: Some("lash:run:schedule:1".to_owned()),
+            name: Some(schedule(1)),
         }));
     let crashes = lash_restate_test::CrashCount::new();
     assert!(backend.server().on_crash(crashes.listener()));
@@ -1806,7 +1806,7 @@ async fn l18_started_prepare_does_not_hold_other_attempt_decisions() {
     backend
         .server()
         .crash_on(CrashRule::new(CrashPoint::AfterRunResult {
-            name: name(&ids[0], "start:prepare"),
+            name: prepare(&ids[0]),
         }));
     let mut probe = Probe::new(&all);
     probe.body_barrier = Some(Arc::new(tokio::sync::Barrier::new(3)));

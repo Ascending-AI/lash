@@ -265,10 +265,11 @@ async fn process_effects_make_no_index_hops() {
         .iter()
         .filter(|entry| {
             entry.ty == MessageType::RunCommand
-                && entry
-                    .name
-                    .as_deref()
-                    .is_some_and(|name| name.starts_with("lash:process-hop-"))
+                && entry.name.as_deref().is_some_and(|name| {
+                    name.starts_with(
+                        &crate::JournalStepKind::RecordedEffect.journal_name("lash:process-hop-"),
+                    )
+                })
         })
         .count();
     println!(
@@ -336,7 +337,7 @@ async fn process_journal_crash_mid_segment_retains_pin_until_end() {
     assert!(world.server.on_crash(crashes.listener()));
     world.server.crash_on(
         CrashRule::new(CrashPoint::BeforeRunResult {
-            name: Some("lash:process-hop-1".to_string()),
+            name: Some(crate::JournalStepKind::RecordedEffect.journal_name("lash:process-hop-1")),
         })
         .service("LashProcessWorkflow")
         .handler("run")

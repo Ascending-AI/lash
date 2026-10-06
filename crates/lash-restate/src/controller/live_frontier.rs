@@ -249,3 +249,11 @@ impl crate::JournalStep for FrontierStep {
         self.0.clone()
     }
 }
+
+#[cfg(test)]
+pub(super) const FRONTIER_STEP_KIND: &str = <FrontierStep as crate::JournalStep>::KIND;
+
+#[cfg(test)]
+pub(super) fn frontier_journal_name(effect_name: &str) -> String {
+    crate::journal_step_name(&FrontierStep(format!("{effect_name}:frontier")))
+}

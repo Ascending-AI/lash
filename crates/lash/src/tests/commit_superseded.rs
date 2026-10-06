@@ -100,7 +100,8 @@ async fn a_first_admission_redrives_under_its_bound_executor_generation() -> Res
         .build(crate::testing::runtime_lease_owner())?;
     double.server().crash_on(
         lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRunResultStarting {
-            prefix: "lash:generation-redrive:generation-run:1:0:checkpoint:".into(),
+            prefix: lash_restate::JournalStepKind::RecordedEffect
+                .journal_name("lash:generation-redrive:generation-run:1:0:checkpoint:"),
         })
         .service(lash_restate_test::TURN_DRIVER_SERVICE)
         .handler("run"),
@@ -391,7 +392,8 @@ async fn a_lost_atomic_admission_result_reuses_its_nonce_and_bound_rows() -> Res
     let (core, double, calls) = nonce_core().await;
     double.server().crash_on(
         lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRunResultStarting {
-            prefix: "lash:shift-admission:".into(),
+            prefix: lash_restate::JournalStepKind::RecordedEffect
+                .journal_name("lash:shift-admission:"),
         })
         .service(lash_restate_test::TURN_DRIVER_SERVICE)
         .handler("run"),

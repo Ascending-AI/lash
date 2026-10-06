@@ -13,8 +13,11 @@ use crate::crash_matrix::invariants::{CustomCheck, Expected};
 use crate::crash_matrix::world::{CoreBuild, CrashWorld};
 use crate::crash_matrix::{CrashPoint, Seam};
 
-/// The run a realized create journals its definition under.
-const CREATE_REALIZATION_STEP: &str = "process-definition:lash:tool-intent:";
+/// The journal-name prefix of the definition step a realized create
+/// journals under its intent's key.
+fn create_realization_step() -> String {
+    lash_restate::JournalStepKind::ProcessDefinition.journal_name("lash:tool-intent:")
+}
 
 const CODE: &str = "const made = await processes.create({ source: 'const answer = async () => 31;', dialect: 'typescript' }); finish(made.id);";
 
@@ -148,10 +151,10 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         // The create is a protected intent: its realization journals the
         // definition step under the intent's key.
         CrashPoint::AfterStateCommit => EngineCut::BeforeRunStarting {
-            prefix: CREATE_REALIZATION_STEP.into(),
+            prefix: create_realization_step(),
         },
         CrashPoint::AfterDeliveryBeforeSettle => EngineCut::BeforeRunResultStarting {
-            prefix: CREATE_REALIZATION_STEP.into(),
+            prefix: create_realization_step(),
         },
         other => return Err(format!("create has no {other:?} cut")),
     };

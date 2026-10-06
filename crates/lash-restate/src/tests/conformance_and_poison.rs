@@ -1108,7 +1108,7 @@ pub(super) async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_t
     );
     assert_eq!(
         context.runs.lock_recover().as_slice(),
-        ["lash:restate-poison-list"],
+        [crate::JournalStepKind::RecordedEffect.journal_name("lash:restate-poison-list")],
         "the give-up is journaled once, so replay reproduces it"
     );
 }
@@ -1138,7 +1138,7 @@ pub(super) async fn fig1464_over_budget_give_up_replays_identically_under_a_larg
     .expect_err("the over-budget envelope must give up");
     assert_eq!(
         context.runs.lock_recover().as_slice(),
-        ["lash:restate-budget-flip"],
+        [crate::JournalStepKind::RecordedEffect.journal_name("lash:restate-budget-flip")],
         "the give-up must occupy its journal slot"
     );
 
@@ -1160,7 +1160,10 @@ pub(super) async fn fig1464_over_budget_give_up_replays_identically_under_a_larg
     );
     assert_eq!(
         context.runs.lock_recover().as_slice(),
-        ["lash:restate-budget-flip", "lash:restate-budget-flip"],
+        [
+            crate::JournalStepKind::RecordedEffect.journal_name("lash:restate-budget-flip"),
+            crate::JournalStepKind::RecordedEffect.journal_name("lash:restate-budget-flip"),
+        ],
         "the redrive must consume the same journal slot, not add one"
     );
 }
@@ -1233,15 +1236,17 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     // Pin the payload codec's canonical bytes, including the journal generation.
 
     {
-        let process_verdict_key = "lash:fig1767-process-cmd.journal-budget";
-        let process_record_key = "lash:fig1767-process-cmd";
+        let process_verdict_key =
+            crate::controller::effect_budget_journal_name("lash:fig1767-process-cmd");
+        let process_record_key =
+            crate::JournalStepKind::RecordedEffect.journal_name("lash:fig1767-process-cmd");
 
         let records = context.records.lock_recover();
         let process_verdict_bytes = records
-            .get(process_verdict_key)
+            .get(&process_verdict_key)
             .expect("process budget verdict journal entry");
         let process_record_bytes = records
-            .get(process_record_key)
+            .get(&process_record_key)
             .expect("process effect record journal entry");
 
         let process_record: serde_json::Value =
@@ -1282,9 +1287,9 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     assert_eq!(
         context.runs.lock_recover().as_slice(),
         [
-            "lash:fig1767-process-cmd.journal-budget",
-            "lash:fig1767-process-cmd.process-signal-append:v1",
-            "lash:fig1767-process-cmd"
+            crate::controller::effect_budget_journal_name("lash:fig1767-process-cmd"),
+            crate::JournalStepKind::ProcessSignalAppend.journal_name("lash:fig1767-process-cmd"),
+            crate::JournalStepKind::RecordedEffect.journal_name("lash:fig1767-process-cmd"),
         ],
         "the eager effect must journal its decisions after its budget verdict and before its recorded effect"
     );
@@ -1414,8 +1419,8 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     assert_eq!(
         context.runs.lock_recover().as_slice(),
         [
-            "lash:fig1767-over-budget-proc.journal-budget",
-            "lash:fig1767-over-budget-proc.journal-budget"
+            crate::controller::effect_budget_journal_name("lash:fig1767-over-budget-proc"),
+            crate::controller::effect_budget_journal_name("lash:fig1767-over-budget-proc"),
         ],
         "a give-up redrive must consume only the verdict slot"
     );

@@ -816,7 +816,8 @@ impl Crash {
             .key(session),
             Self::ContinuationBeforeItsFirstStep => {
                 run_execution(CrashPoint::BeforeRunResultStarting {
-                    prefix: "lash:shift-run-start:".to_owned(),
+                    prefix: lash_restate::JournalStepKind::RecordedEffect
+                        .journal_name("lash:shift-run-start:"),
                 })
             }
             Self::ContinuationAfterItsCommit => run_execution(outcome(continuation)),

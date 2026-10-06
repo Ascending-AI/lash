@@ -655,10 +655,12 @@ async fn drive_with_config(
 /// every V is one too); any other step is the call's own record.
 fn step_name(call_id: &ToolCallId, step: &str) -> String {
     match step.strip_prefix("schedule:") {
-        Some(ordinal) => format!("lash:run:schedule:{ordinal}"),
+        Some(ordinal) => {
+            crate::controller::record_journal_name(format!("lash:run:schedule:{ordinal}"))
+        }
         None => match step {
-            "decide" => "lash:run:schedule:1".to_owned(),
-            _ => format!("lash:run:{call_id}:{step}"),
+            "decide" => crate::controller::record_journal_name("lash:run:schedule:1".to_owned()),
+            _ => crate::controller::call_step_journal_name(call_id, step),
         },
     }
 }

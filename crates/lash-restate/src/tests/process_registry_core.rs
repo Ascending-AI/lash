@@ -688,6 +688,11 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
     assert_eq!(stored.id, first.id);
 }
 
+/// The effect name [`start_recovery_effect`] journals its steps under.
+pub(super) fn start_recovery_effect_name(start_key: &str) -> String {
+    restate_effect_name(&runtime_invocation(RuntimeEffectKind::Process, start_key))
+}
+
 pub(super) async fn start_recovery_effect(
     env_store: &dyn lash_core::ProcessExecutionEnvStore,
     start_key: &str,
