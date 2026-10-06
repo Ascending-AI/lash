@@ -63,12 +63,14 @@ impl crate::testing::EffectLayer for SeamLayer {
         step: crate::tool_dispatch::RunAttemptStep<'run>,
     ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
         // This fixture declares one tool. Native attempts cross the Run's
-        // independent X registration.
+        // independent X registration. A replay registers the attempt too and
+        // reads its recorded result back, so the seam records the attempt
+        // only where it runs: a refused registration, or the attempt's body.
         let operation = TurnSeamOperation::Effect(EffectOperation::ToolAttempt {
             name: "trace_effect".to_string(),
         });
-        self.control.record(operation.clone());
         if let Some(placement) = self.control.take_tool_attempt_error_return() {
+            self.control.record(operation.clone());
             let error = match placement {
                 ErrorReturnPlacement::ToolAttempt => self.injected_store_error(),
                 ErrorReturnPlacement::ToolAttemptSessionRetirement => {
@@ -90,6 +92,7 @@ impl crate::testing::EffectLayer for SeamLayer {
         let control = self.control.clone();
         let boundary = operation.clone();
         let wrapped = Box::pin(async move {
+            control.record(boundary.clone());
             if control.matches(&boundary, CrashPlacement::Boundary) {
                 control.stop_here().await;
             }
