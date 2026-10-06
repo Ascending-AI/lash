@@ -224,7 +224,7 @@ fn names(payload: &[u8], needle: &[u8]) -> bool {
 /// read of the session's index, where it was an exclusive `is_revoked` call
 /// on the index followed by a `peek` of the gate's workflow. The committed
 /// terminal is sent to the index one-way, so the turn waits for neither the
-/// index nor the workflow write behind it.
+/// index nor the workflow write behind it; only the gate's own seals wait.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_answered_turn_peeks_its_gate_in_one_shared_read_and_publishes_one_way() {
     let backend: RestateTestBackend = lash_restate_test::backend(0x3978, ServerConfig::default())
@@ -312,9 +312,8 @@ async fn an_answered_turn_peeks_its_gate_in_one_shared_read_and_publishes_one_wa
     };
     assert_eq!(
         calls_naming(b"LashDurableWaitIndex", b"peek_turn_gate"),
-        3,
-        "the start gate, the post-model gate and the teardown probe each read the index once: \
-         {by_handler:?}"
+        2,
+        "the start gate and the post-model gate each read the index once: {by_handler:?}"
     );
     assert_eq!(
         calls_naming(b"LashDurableWaitIndex", b"is_revoked")
@@ -338,10 +337,26 @@ async fn an_answered_turn_peeks_its_gate_in_one_shared_read_and_publishes_one_wa
         1,
         "the committed terminal is published to the index one-way"
     );
-    assert_eq!(
-        index_resolves(MessageType::CallCommand),
-        1,
-        "only the gate's settlement before commit waits for the index"
+    // The cancellation the turn commits is its admitted intent's (FIG-4848),
+    // so no gate write decides it; after the commit the turn wakes its gate's
+    // observers by sealing the gate and its escalation, each a waited resolve.
+    let waited_resolves = journal
+        .iter()
+        .filter(|entry| {
+            entry.ty == MessageType::CallCommand
+                && names(&entry.payload, b"LashDurableWaitIndex")
+                && names(&entry.payload, b"resolve")
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        matches!(
+            waited_resolves.as_slice(),
+            [gate, escalation]
+                if names(&gate.payload, b"turn_cancel_gate")
+                    && names(&escalation.payload, b"turn_cancel_escalation")
+        ),
+        "only the gate and its escalation, sealed after the commit, wait for the index: \
+         {by_handler:?}"
     );
 }
 
