@@ -370,6 +370,25 @@ async fn saturated_process_create_retries_without_recording_a_tool_refusal() {
         lashlang::LashlangArtifacts::new(backend.module_artifacts()),
     )
     .with_artifact_ports(lash_core::ArtifactReferrerPorts::of_backend(&backend));
+    // The deployment's worker realizes the create's PublishDefinition intent.
+    table.install_worker(
+        Vec::new(),
+        lash_core::facade_support::RuntimeHostConfig::new(
+            backend.clone(),
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_process_engine_registration(
+            lash_lashlang_runtime::lashlang_process_engine_registration(
+                lash_lashlang_runtime::LashlangProcessEngine::new(
+                    lashlang::LashlangArtifacts::new(backend.module_artifacts()),
+                    LashlangSurface::default(),
+                    backend.worker_recovery(),
+                )
+                .with_worker_service(workers.clone()),
+            ),
+        ),
+    );
     let invocation = lash_core::testing::exec_code_invocation(
         "test-session",
         "create-retry",

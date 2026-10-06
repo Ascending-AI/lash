@@ -42,21 +42,6 @@ struct FailCaptureAfterCommittedTurns {
     fail_after: usize,
 }
 
-struct FailCaptureAfterEffectLoop {
-    executor: Arc<FailingCaptureExecutor>,
-}
-
-impl lash_core::runtime::RuntimeTurnPhaseProbe for FailCaptureAfterEffectLoop {
-    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
-
-    fn end(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
-        if phase == lash_core::runtime::RuntimeTurnPhase::EffectLoop {
-            self.executor.dirty.store(true, Ordering::SeqCst);
-            self.executor.fail_capture.store(true, Ordering::SeqCst);
-        }
-    }
-}
-
 impl lash_core::runtime::RuntimeTurnPhaseProbe for FailCaptureAfterFirstCommittedTurn {
     fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
 

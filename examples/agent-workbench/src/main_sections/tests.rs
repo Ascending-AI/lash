@@ -995,6 +995,7 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
         ))
         .build(crate::test_core_owner())
         .expect("build core");
+    crate::tests::install_test_process_worker(&double, &core);
     let session = crate::created_session(&core, session_id)
         .await
         .open()
@@ -1160,6 +1161,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core");
+    crate::tests::install_test_process_worker(&double, &core);
     let process_observer = core
         .processes()
         .observer()
@@ -2054,6 +2056,7 @@ async fn persisted_trigger_route_fires_after_reopening_the_core_inner() {
 
     {
         let core = test_workbench_core(double.lash_backend());
+        crate::tests::install_test_process_worker(&double, &core);
         let session = crate::created_session(&core, session_id.clone())
             .await
             .open()

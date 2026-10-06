@@ -993,15 +993,18 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
     let saved_id = initial[0].manifest.id.clone();
     let resolved = Arc::new(policy_tests::ActorPauseHook::default());
     pool.set_resolved_target_hook(Some(Arc::clone(&resolved)));
+    let resident = crate::McpToolProvider::new(Arc::clone(&pool));
+    let saved_manifest = resident
+        .resolve_manifest_by_id(&saved_id)
+        .expect("saved tool resolves");
+    let fixture = crate::plugin::prepared_test_call(&resident, &saved_manifest)
+        .await
+        .execution_binding(json!({"kind":"mcp", "server":"directory", "tool_id":saved_id}));
     let call_pool = Arc::clone(&pool);
     let call_id = saved_id.clone();
     let call = tokio::spawn(async move {
         let deferred = crate::McpDeferredToolProvider::new(call_pool);
-        let context = lash_core::testing::mock_attempt_context_with_execution_binding(json!({
-            "kind": "mcp",
-            "server": "directory",
-            "tool_id": call_id.to_string(),
-        }));
+        let context = fixture.attempt("deferred-across-refresh");
         execute_by_id(&deferred, &call_id, &json!({}), &context).await
     });
     resolved.reached.notified().await;

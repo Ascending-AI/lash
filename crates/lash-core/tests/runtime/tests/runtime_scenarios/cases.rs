@@ -379,10 +379,22 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
 async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
     let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
+    let provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let target = Arc::new(std::sync::OnceLock::new());
+    let tool_provider: Arc<dyn lash_core::ToolProvider> = Arc::new(RuntimeScenarioIntentProvider {
+        calls: Arc::clone(&provider_calls),
+        target: Arc::clone(&target),
+    });
+    // The worker realizes the turn's intents under the turn's own plugins.
     double.install_process_worker(
         lash_core_worker::DurableProcessWorker::new(
-            lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
-                Vec::<Arc<dyn lash_core::facade_support::PluginFactory>>::new(),
+            lash_core_worker::DurableProcessWorkerConfig::new(
+                Arc::new(
+                    lash_core::testing::runtime_helpers::test_runtime_plugin_host(
+                        Vec::new(),
+                        Arc::clone(&tool_provider),
+                    ),
+                ),
                 lash_core::facade_support::RuntimeHostConfig::new(
                     backend.clone(),
                     lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -395,12 +407,6 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         )
         .expect("valid test worker config"),
     );
-    let provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let target = Arc::new(std::sync::OnceLock::new());
-    let tool_provider: Arc<dyn lash_core::ToolProvider> = Arc::new(RuntimeScenarioIntentProvider {
-        calls: Arc::clone(&provider_calls),
-        target: Arc::clone(&target),
-    });
     let model_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = lash_core::testing::TestProvider::builder()
         .kind("mock")

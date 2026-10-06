@@ -339,21 +339,6 @@ impl SqliteProcessRegistry {
         Self::open_at(&DatabaseLocation::standalone_file(path), clock, None).await
     }
 
-    #[cfg(feature = "testing")]
-    #[doc(hidden)]
-    pub async fn open_with_pauses_for_testing(
-        path: &Path,
-        pauses: crate::testing::SqlitePauses,
-    ) -> tokio_rusqlite::Result<Self> {
-        crate::location::validate_file_database_path(path, "SqliteProcessRegistry")?;
-        Self::open_at(
-            &DatabaseLocation::standalone_file(path),
-            Arc::new(lash_core_execution::facade_support::SystemClock),
-            Some(pauses),
-        )
-        .await
-    }
-
     /// The registry at `location`.
     pub(crate) async fn open_at(
         location: &DatabaseLocation,

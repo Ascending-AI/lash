@@ -126,26 +126,6 @@ async fn fixed_intent_dispatch_context_declaring(
     context
 }
 
-fn runtime_execution_for_intent_law(
-    context: ToolDispatchContext<'static>,
-    world: &IntentLawWorld,
-    cancellation: tokio_util::sync::CancellationToken,
-) -> crate::RuntimeExecutionContext<'static> {
-    let attachment_store = Arc::clone(&context.attachment_store);
-    crate::RuntimeExecutionContext::new(
-        Arc::new(context),
-        Arc::clone(&world.env_store),
-        attachment_store,
-        Arc::new(crate::ChronologicalProjection::default()),
-        crate::TurnContext::default(),
-        crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
-        ),
-    )
-    .with_cancellation_token(cancellation)
-}
-
 fn intent_law_batch_parent(label: &str) -> crate::RuntimeInvocation {
     crate::RuntimeInvocation::effect(
         crate::EffectAddress::new(
@@ -630,50 +610,6 @@ async fn an_undeclared_intent_refuses_the_outcome_before_anything_is_realized() 
 }
 
 #[tokio::test]
-async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect_abort() {
-    let world = intent_law_world().await;
-    let calls = Arc::new(AtomicUsize::new(0));
-    let controller = Arc::new(IntentReplayController::new(None).await.with_process_abort(
-        crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::EffectReplayDivergence,
-            "reconstructed process-command envelope diverged",
-        ),
-    ));
-    let context = fixed_intent_dispatch_context(
-        controller,
-        &world,
-        recorded_event_intents(
-            &crate::ProcessId::fixture("intent-law-target"),
-            &["replacement.abort"],
-        ),
-        Arc::clone(&calls),
-    )
-    .await;
-    let execution = runtime_execution_for_intent_law(
-        context,
-        &world,
-        tokio_util::sync::CancellationToken::new(),
-    );
-
-    let reply = Box::pin(execution.call_command_tool(
-        &crate::CommandReplayKey::new("fixed-intent-call"),
-        crate::session::ToolInvocation::new(
-            lash_core_execution::ToolCallId::fixture("fixed-intent-call"),
-            crate::ToolId::from("tool:fixed_intent_law"),
-            json!({"value": "shift"}),
-        ),
-    ))
-    .await;
-
-    assert!(!reply.output.is_success());
-    let error = execution
-        .take_nested_effect_error()
-        .expect("the fixed scalar host reply must latch the enclosing controller abort");
-    assert_eq!(error.code, crate::RuntimeErrorCode::EffectReplayDivergence);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
 async fn ordinary_controller_wrapped_intent_refusal_preserves_its_typed_code() {
     let world = intent_law_world().await;
     let calls = Arc::new(AtomicUsize::new(0));
@@ -707,64 +643,6 @@ async fn ordinary_controller_wrapped_intent_refusal_preserves_its_typed_code() {
         cause
             .to_string()
             .contains("process command returned the wrong outcome kind")
-    );
-}
-
-#[tokio::test]
-async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
-    let event_types = ["post.cancel.intent.0", "post.cancel.intent.1"];
-    let world = intent_law_world().await;
-    let registry = Arc::clone(&world.registry);
-    let target = register_intent_law_target(&registry, &event_types).await;
-    let calls = Arc::new(AtomicUsize::new(0));
-    let controller = Arc::new(
-        IntentReplayController::new(Some(IntentPausePoint::BeforeProcessCommand(1))).await,
-    );
-    let context = fixed_intent_dispatch_context(
-        Arc::clone(&controller),
-        &world,
-        recorded_event_intents(&target, &event_types),
-        Arc::clone(&calls),
-    )
-    .await;
-    let cancellation = tokio_util::sync::CancellationToken::new();
-    let execution = runtime_execution_for_intent_law(context, &world, cancellation.clone());
-    let run = crate::task::spawn(async move {
-        Box::pin(execution.call_command_tool(
-            &crate::CommandReplayKey::new("fixed-intent-call"),
-            crate::session::ToolInvocation::new(
-                lash_core_execution::ToolCallId::fixture("fixed-intent-call"),
-                crate::ToolId::from("tool:fixed_intent_law"),
-                json!({"value": "shift"}),
-            ),
-        ))
-        .await
-    });
-    controller.wait_until_paused().await;
-    cancellation.cancel();
-    controller.release();
-    let reply = timeout(Duration::from_secs(2), run)
-        .await
-        .expect("post-result drain must not hang")
-        .expect("call task joins");
-    assert!(
-        reply.output.is_success(),
-        "the committed result stands after a post-commit cancel: {:?}",
-        reply.output
-    );
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-    let events = registry
-        .full_event_window(&target, 0)
-        .await
-        .expect("read post-cancel events");
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| event.event_type.starts_with("post.cancel.intent."))
-            .map(|event| event.event_type.as_str())
-            .collect::<Vec<_>>(),
-        event_types,
-        "live cancellation after commit cannot truncate the durable drain"
     );
 }
 

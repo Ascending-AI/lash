@@ -40,21 +40,20 @@ mod schema_refusal;
 #[cfg(feature = "testing")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
-    use lash_core_execution::ProcessRetention as _;
-
     let dir = tempfile::tempdir().expect("process-event snapshot tempdir");
-    let path = dir.path().join("process-event-snapshot.db");
+    let path = dir.path().to_path_buf();
     let pauses = lash_sqlite_store::testing::SqlitePauses::default();
-    let reader = Arc::new(
-        SqliteProcessRegistry::open_with_pauses_for_testing(&path, pauses.clone())
-            .await
-            .expect("open paused process registry reader"),
-    );
-    let writer = Arc::new(
-        SqliteProcessRegistry::open_standalone_for_testing(&path)
-            .await
-            .expect("open competing process registry writer"),
-    );
+    let stores = lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
+        &path,
+        lash_sqlite_store::SqliteStoreSetOptions {
+            pauses: Some(pauses.clone()),
+            ..Default::default()
+        },
+        Arc::new(lash_core_execution::facade_support::SystemClock),
+    )
+    .await
+    .expect("open paused process registry reader");
+    let reader = stores.process_registry();
     let process_id = reader
         .register_process(
             ProcessRegistration::new(
@@ -126,21 +125,39 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
         }
     });
     pause.wait_until_reached().await;
-    let prune = writer
-        .prune_terminal_processes(
-            terminal.updated_at_ms.saturating_add(1),
-            None,
-            lash_core_execution::ProjectionWatermark::NoProjector,
-        )
-        .await
-        .expect("prune process through competing connection");
-    assert_eq!(prune.pruned_processes, 1);
+    // The competing writer is another OS process's connection, as in a
+    // deployment: it shares none of this process's SQLite gates, so a
+    // checkpoint queued behind the paused read cannot hold the prune back.
+    let cutoff_ms = terminal.updated_at_ms.saturating_add(1);
+    let pruner = tokio::task::spawn_blocking({
+        let path = path.clone();
+        move || {
+            std::process::Command::new(std::env::current_exe().expect("test executable"))
+                .args([
+                    "--exact",
+                    "process_event_snapshot_competing_pruner",
+                    "--include-ignored",
+                    "--nocapture",
+                ])
+                .env(SNAPSHOT_PRUNER_ROOT, &path)
+                .env(SNAPSHOT_PRUNER_CUTOFF_MS, cutoff_ms.to_string())
+                .output()
+                .expect("run the competing pruner")
+        }
+    })
+    .await
+    .expect("join the competing pruner");
     pause.release();
-
     let outcome = read_task
         .await
         .expect("join paused event-page read")
         .expect("event-page read result");
+    let stdout = String::from_utf8_lossy(&pruner.stdout);
+    assert!(
+        pruner.status.success() && stdout.contains("pruned_processes=1"),
+        "the competing connection prunes the process: {stdout}\n{}",
+        String::from_utf8_lossy(&pruner.stderr)
+    );
     assert!(
         !matches!(
             outcome,
@@ -151,6 +168,37 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
         ),
         "a prune between identity lookup and page fetch must not become false empty completion: {outcome:?}"
     );
+}
+
+const SNAPSHOT_PRUNER_ROOT: &str = "LASH_SQLITE_SNAPSHOT_PRUNER_ROOT";
+const SNAPSHOT_PRUNER_CUTOFF_MS: &str = "LASH_SQLITE_SNAPSHOT_PRUNER_CUTOFF_MS";
+
+/// The competing writer of `process_event_page_identity_and_rows_share_one_read_snapshot`:
+/// prune the law's store set from this process's own connections.
+#[cfg(feature = "testing")]
+#[tokio::test]
+#[ignore = "spawned by process_event_page_identity_and_rows_share_one_read_snapshot"]
+async fn process_event_snapshot_competing_pruner() {
+    use lash_core_execution::ProcessRetention as _;
+
+    let root = std::env::var_os(SNAPSHOT_PRUNER_ROOT).expect("the law's store root");
+    let cutoff_ms = std::env::var(SNAPSHOT_PRUNER_CUTOFF_MS)
+        .expect("the law's prune cutoff")
+        .parse()
+        .expect("a millisecond cutoff");
+    let stores = lash_sqlite_store::SqliteStoreSet::open(&root)
+        .await
+        .expect("open competing process registry writer");
+    let prune = stores
+        .process_registry()
+        .prune_terminal_processes(
+            cutoff_ms,
+            None,
+            lash_core_execution::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune process through competing connection");
+    println!("pruned_processes={}", prune.pruned_processes);
 }
 
 #[test]

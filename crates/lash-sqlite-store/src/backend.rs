@@ -36,8 +36,8 @@ pub struct SqliteStoreSetOptions {
     /// Where the open-time migration backs the store up before it changes
     /// it, and how many backups it keeps ([`crate::migration`]).
     pub migration_backup: crate::SqliteMigrationBackup,
-    /// In-store pauses, installed on every session store the store set's
-    /// factory opens.
+    /// In-store pauses, installed on the store set's process registry and on
+    /// every session store its factory opens.
     #[cfg(feature = "testing")]
     pub pauses: Option<crate::testing::SqlitePauses>,
     /// Observes, pauses, crashes or fails the open-time migration at each of
@@ -250,7 +250,7 @@ impl SqliteStoreSet {
             &registry,
             Arc::clone(&clock),
             #[cfg(feature = "testing")]
-            None,
+            options.pauses.clone(),
         )
         .await?
         .with_wake_delivery_config(options.wake_delivery)

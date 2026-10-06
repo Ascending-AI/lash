@@ -432,6 +432,7 @@ async fn cold_reopen_globals_across_turns(backend: Backend) {
         response("const run = await processes.start({ definition: saved }); finish(await run);"),
     ])));
     let first_core = rlm_core_with_queue(double, Arc::clone(&responses));
+    serve_processes(double, &first_core);
     let first_session = created_session(&first_core, "artifact-referrers-cold-reopen")
         .await
         .open()
@@ -513,6 +514,7 @@ async fn overwrite_retains_old_module_until_frame_end(backend: Backend) {
             response("finish('new frame');"),
         ],
     );
+    serve_processes(double, &core);
     let session = created_session(&core, "artifact-referrers-overwrite")
         .await
         .open()
@@ -784,6 +786,7 @@ async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
             response("finish('next frame');"),
         ],
     );
+    serve_processes(double, &core);
     let session = created_session(&core, "artifact-referrers-first-switch")
         .await
         .open()
@@ -851,6 +854,7 @@ async fn carried_definition_id_retains_the_closure_across_frame_switch(backend: 
             response("finish(kept_id);"),
         ],
     );
+    serve_processes(&fixture.double, &core);
     let session = created_session(&core, "definition-id-carry")
         .await
         .open()
@@ -938,6 +942,7 @@ async fn uncarried_frame_switch_loses_an_uncarried_definition(backend: Backend) 
             response("finish('switched');"),
         ],
     );
+    serve_processes(&fixture.double, &core);
     let session = created_session(&core, "definition-id-no-carry")
         .await
         .open()
@@ -997,6 +1002,7 @@ async fn host_pin_keeps_a_definition_across_an_uncarried_switch(backend: Backend
             response("finish('switched');"),
         ],
     );
+    serve_processes(&fixture.double, &core);
     let session = created_session(&core, "definition-id-host-pin")
         .await
         .open()
@@ -1104,6 +1110,7 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value(backend: Ba
         response("const run = await processes.start({ definition: made }); finish(await run);"),
     ])));
     let first_core = rlm_core_with_queue(double, Arc::clone(&responses));
+    serve_processes(double, &first_core);
     let first_session = created_session(&first_core, "processes-create-cold-reopen")
         .await
         .open()
@@ -1164,6 +1171,7 @@ async fn created_definition_is_reclaimed_after_session_deletion(backend: Backend
     let fixture = Fixture::new(0x3116_0002, backend).await;
     let double = &fixture.double;
     let core = rlm_core(double, vec![response(&create_definition_cell("made"))]);
+    serve_processes(&fixture.double, &core);
     let session_id = "processes-create-deletion";
     let session = created_session(&core, session_id)
         .await

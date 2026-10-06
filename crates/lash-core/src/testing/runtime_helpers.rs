@@ -823,6 +823,21 @@ impl crate::ToolProvider for EmptyTools {
     }
 }
 
+/// The plugin host a [`TestRuntime`] builds over `plugins` and `tools`.
+/// Intent realization rebuilds the declaring session's composition on the
+/// deployment's worker (ADR 0130), so a worker that realizes the runtime's
+/// intents is built over this same host.
+pub fn test_runtime_plugin_host(
+    mut plugins: Vec<Arc<dyn crate::PluginFactory>>,
+    tools: Arc<dyn crate::ToolProvider>,
+) -> crate::PluginHost {
+    plugins.push(Arc::new(StaticPluginFactory::new(
+        crate::plugin::PluginDeclaration::initial("test_tools"),
+        crate::PluginSpec::new().with_tool_provider(tools),
+    )));
+    crate::testing::test_plugin_host(plugins)
+}
+
 pub struct TestRuntime {
     attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
@@ -905,13 +920,7 @@ impl TestRuntime {
         // injection here, with the same id-override rule `PluginHost::new`
         // applies, rather than widening the builtin set for every crate that
         // turns on the `testing` feature.
-        let mut factories = self.plugins;
-        let tools = Arc::clone(&self.tools);
-        factories.push(Arc::new(StaticPluginFactory::new(
-            crate::plugin::PluginDeclaration::initial("test_tools"),
-            crate::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
-        )));
-        let plugin_host = crate::testing::test_plugin_host(factories);
+        let plugin_host = test_runtime_plugin_host(self.plugins, self.tools);
         let mut initial_state = RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),

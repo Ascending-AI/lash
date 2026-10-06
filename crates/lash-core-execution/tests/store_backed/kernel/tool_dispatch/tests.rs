@@ -238,10 +238,6 @@ impl IntentReplayController {
         self.pause_entered.notified().await;
     }
 
-    fn release(&self) {
-        self.pause_release.notify_one();
-    }
-
     fn frame_sightings(&self) -> BTreeMap<String, Vec<String>> {
         self.frame_sightings.lock_recover().clone()
     }
