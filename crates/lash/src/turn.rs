@@ -33,8 +33,9 @@ pub(crate) async fn execute_admitted_run_observed(
 ) -> lash_core::engine::RunEnd {
     let session = admitted.session().clone();
     // Marked before the run can commit: a handle that sees its commit waits
-    // for the deposit while the run is under way.
-    let _running = crate::send::running(binding, &session, admitted.run());
+    // for the deposit while the run is under way, or while its replay owes
+    // it after this execution stops short (FIG-5128).
+    let running = crate::send::running(binding, &session, admitted.run());
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
     if unsettled.is_some_and(crate::core::held_shifts::UnsettledRun::enter) {
@@ -43,8 +44,7 @@ pub(crate) async fn execute_admitted_run_observed(
     let observation_sink = SessionObservationTurnActivitySink::new(runtime.clone(), None);
     let settled = DepositSettledRun {
         runtime,
-        binding,
-        session: &session,
+        running: &running,
     };
     let sinks = lash_core::shift::ShiftSinks {
         events: &lash_core::runtime::NoopEventSink,
@@ -68,6 +68,10 @@ pub(crate) async fn execute_admitted_run_observed(
         unsettled.settle();
     }
     runtime.publish_from(&writer).await;
+    // A retried attempt replays the run, and the replay deposits.
+    if !matches!(end.result, Err(lash_core::engine::ShiftAbort::Retry(_))) {
+        running.ended();
+    }
     end
 }
 
@@ -77,8 +81,7 @@ pub(crate) async fn execute_admitted_run_observed(
 /// reads the committed head without waiting for the shift to return.
 struct DepositSettledRun<'a> {
     runtime: &'a RuntimeHandle,
-    binding: &'a lash_core::StoreBindingId,
-    session: &'a lash_core::SessionId,
+    running: &'a crate::send::RunningHere,
 }
 
 #[async_trait]
@@ -89,7 +92,7 @@ impl lash_core::shift::RunSettledSink for DepositSettledRun<'_> {
         run: lash_core::shift::SettledRun<'_>,
     ) {
         self.runtime.publish_from(runtime).await;
-        crate::send::deposit_settled_run(self.binding, self.session, run, self.runtime);
+        self.running.deposit(run, self.runtime);
     }
 }
 

@@ -49,7 +49,7 @@ use lash_core::store::{ParkId, ParkReason, StallReason};
 
 pub use batch::{BatchInput, SendBatchBuilder};
 use follow::{Subject, Tap};
-pub(crate) use mailbox::{deposit_settled_run, running};
+pub(crate) use mailbox::{RunningHere, running};
 
 /// The session a send, a handle or a cancel is bound to.
 #[derive(Clone)]
@@ -127,7 +127,7 @@ impl SendContext {
         let mut resident = match writer.try_lock() {
             Ok(resident) => resident,
             Err(_)
-                if mailbox::may_deposit(
+                if mailbox::under_way_here(
                     self.parts.work.store_binding(),
                     &self.parts.session_id,
                     run,

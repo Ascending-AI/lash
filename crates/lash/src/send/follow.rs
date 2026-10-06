@@ -319,12 +319,12 @@ impl TerminalWait {
     }
 
     /// Hold the wait on `run`'s current physical turn, unless one is held,
-    /// no further terminal will be published, or a run in this process may
-    /// still deposit the run's report.
+    /// no further terminal will be published, or the run is under way in
+    /// this process, which deposits the run's report.
     fn hold(&mut self, ctx: &SendContext, run: &TurnId) {
         if self.wait.is_some()
             || self.ended
-            || mailbox::may_deposit(ctx.parts.work.store_binding(), &ctx.parts.session_id, run)
+            || mailbox::under_way_here(ctx.parts.work.store_binding(), &ctx.parts.session_id, run)
         {
             return;
         }
