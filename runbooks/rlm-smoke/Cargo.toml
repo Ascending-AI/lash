@@ -16,7 +16,7 @@ workspace = true
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
-lash = { workspace = true, features = ["restate", "rlm", "sqlite", "openai"] }
+lash = { workspace = true, features = ["rlm", "sqlite", "openai"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "process", "rt-multi-thread", "sync", "time"] }

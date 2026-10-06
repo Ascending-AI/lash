@@ -32,7 +32,3 @@ pub use protocol_session::{RlmSessionConfigDecodeError, rlm_session_config};
 
 mod channel;
 pub use channel::RlmChannel;
-#[cfg(test)]
-mod recorded_behaviour_tests;
-#[cfg(test)]
-mod recorded_inheritance_tests;

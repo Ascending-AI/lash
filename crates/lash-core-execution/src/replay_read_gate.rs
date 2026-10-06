@@ -220,7 +220,7 @@ const RECORDED_STEPS: &[&str] = &[
 
 /// A `fn` whose signature names one of these runs on a replay path: it holds
 /// the scoped controller whose journal a replay reads, or a Restate journal
-/// context. A Restate handler's `Context` counts in `lash-restate`.
+/// context.
 const REPLAY_SIGNATURE_TYPES: &[&str] = &[
     "ScopedEffectController",
     "RestateRuntimeEffectController",
@@ -245,7 +245,6 @@ const SCANNED_ROOTS: &[&str] = &[
     "crates/lash-core-execution/src",
     "crates/lash-core-worker/src",
     "crates/lash-lashlang-runtime/src",
-    "crates/lash-restate/src",
     "examples",
     "runbooks",
 ];
@@ -306,33 +305,6 @@ const PINS: &[Pin] = &[
              cannot be pruned while it runs",
         ),
     },
-    Pin {
-        file: "crates/lash-restate/src/process/workflow.rs",
-        text: ".get_process(&process_id)",
-        count: 1,
-        class: PinClass::Exempt(
-            "a parked process's rerun marks its park store-side and issues no journal \
-             command, so it cannot move the replay",
-        ),
-    },
-    Pin {
-        file: "crates/lash-restate/src/process/workflow/park.rs",
-        text: "let parked = match self.registry.get_process(process_id).await {",
-        count: 1,
-        class: PinClass::Exempt(
-            "a diverged segment's park is an idempotent store-side fact written outside \
-             the journal it refused",
-        ),
-    },
-    Pin {
-        file: "crates/lash-restate/src/process/workflow/lanes.rs",
-        text: "let Some(record) = registry.get_process(process_id).await? else {",
-        count: 1,
-        class: PinClass::Exempt(
-            "a generation park is an idempotent store-side fact written outside any \
-             segment's journal, fenced by the recorded execution authority",
-        ),
-    },
 ];
 
 /// A function that hands one parameter, a future, to a recorded step and
@@ -347,15 +319,7 @@ struct StepWrapper {
     parameter: &'static str,
 }
 
-const STEP_WRAPPERS: &[StepWrapper] = &[
-    // The load behavior workload journals each readback, with its errors,
-    // through one `run_json_or_retry_send` (FIG-4484).
-    StepWrapper {
-        file: LOAD_BEHAVIORS,
-        function: "journal_read",
-        parameter: "future",
-    },
-];
+const STEP_WRAPPERS: &[StepWrapper] = &[];
 
 /// A method of a module-private trait whose every call sits inside a recorded
 /// step's span: its body runs inside that step, so its reads are recorded.
@@ -379,21 +343,9 @@ impl StepBody {
     }
 }
 
-const STEP_BODIES: &[StepBody] = &[
-    // The workload delete's owned-process listing runs inside its recorded
-    // `load.model-children.list` step, whose stored IDs execute cancellation
-    // (FIG-4348).
-    StepBody {
-        declaring_file: LOAD_WORKER,
-        trait_name: "WorkloadProcessCleanup",
-        method: "owned",
-    },
-];
+const STEP_BODIES: &[StepBody] = &[];
 
 const TRIGGER_ROUTER: &str = "crates/lash-core-execution/src/triggers/router.rs";
-const RESTATE_PROCESS_COMMAND: &str = "crates/lash-restate/src/controller/process_command.rs";
-const LOAD_WORKER: &str = "runbooks/restate-postgres-workers/src/load/worker.rs";
-const LOAD_BEHAVIORS: &str = "runbooks/restate-postgres-workers/src/load/behaviors.rs";
 
 /// Every failure of the gate over `files`: the step wrappers' and step
 /// bodies' proofs, then [`check`] over the hits no proven step body owns.
@@ -1140,39 +1092,6 @@ mod self_test {
         assert!(check_tree(&read_sources(), PINS, STEP_WRAPPERS, STEP_BODIES).is_empty());
     }
 
-    /// A promotion lookup moved ahead of its recorded step fails the gate.
-    #[test]
-    fn the_real_tree_fails_with_an_unrecorded_promotion_lookup() {
-        let failures = planted_tree(
-            LOAD_BEHAVIORS,
-            "journal_read(controller, PromotionStep,",
-            "let _planted = core.process_registry().get_process(&lash_core::ProcessId::new()).await;",
-        );
-        assert!(
-            failures
-                .iter()
-                .any(|failure| failure.contains("_planted") && failure.contains("get_process")),
-            "{failures:?}"
-        );
-    }
-
-    /// An owned-process listing moved outside its recorded step fails the
-    /// gate, though the listing's body is unchanged.
-    #[test]
-    fn the_real_tree_fails_with_an_owned_listing_outside_its_step() {
-        let failures = planted_tree(
-            LOAD_WORKER,
-            "let mut cleaned = std::collections::BTreeSet::new();",
-            "let _planted = admin.owned(session).await;",
-        );
-        assert!(
-            failures
-                .iter()
-                .any(|failure| failure.contains("step body `owned` is called outside")),
-            "{failures:?}"
-        );
-    }
-
     /// A route-restorer call planted in `prepare_delivery_start`, ahead of
     /// the delivery start's recorded step, fails the gate (FIG-4537).
     #[test]
@@ -1203,49 +1122,6 @@ mod self_test {
         assert!(failures.is_empty(), "{failures:?}");
     }
 
-    /// The route restore moved out of the start's recorded admission, into
-    /// the Restate start ahead of its registration step, fails the gate
-    /// (FIG-4554).
-    #[test]
-    fn the_real_tree_fails_with_the_route_restored_ahead_of_the_restate_registration() {
-        let failures = planted_tree(
-            RESTATE_PROCESS_COMMAND,
-            "let stored_registration = registration.clone();",
-            "let restorer: Arc<dyn lash_core::TriggerRouteRestorer> = host_restorer(); let _planted = restorer.restore(&capture).await;",
-        );
-        assert!(
-            failures
-                .iter()
-                .any(|failure| failure.contains("_planted") && failure.contains("`restore`")),
-            "{failures:?}"
-        );
-    }
-
-    #[test]
-    fn a_new_worker_module_is_covered_without_editing_the_proof() {
-        let mut files = read_sources();
-        for path in [
-            "runbooks/restate-postgres-workers/src/load/new_cleanup.rs",
-            "runbooks/restate-postgres-workers/src/load/worker/new_cleanup.rs",
-        ] {
-            files.push((
-                path.to_owned(),
-                "async fn cleanup(admin: &impl WorkloadProcessCleanup) { admin.owned(session).await; }"
-                    .to_owned(),
-            ));
-            let failures = check_tree(&files, PINS, STEP_WRAPPERS, STEP_BODIES);
-            assert!(
-                failures.iter().any(|failure| failure.starts_with(path)
-                    && failure.contains("step body `owned` is called outside")),
-                "a new worker module's unrecorded listing must fail the proof: {failures:?}"
-            );
-            files.last_mut().unwrap().1 =
-                "async fn cleanup(ctx: WorkflowContext<'_>, admin: &impl WorkloadProcessCleanup) { ctx.run(|| async { admin.owned(session).await }).await; }"
-                    .to_owned();
-            assert!(check_tree(&files, PINS, STEP_WRAPPERS, STEP_BODIES).is_empty());
-        }
-    }
-
     /// A wrapper that awaits its future before the step it names records
     /// nothing, and fails the gate.
     #[test]
@@ -1260,8 +1136,13 @@ mod self_test {
                 journal_read(controller, "x", async { registry.get_process(&id).await }).await;
             }
         "#;
-        let files = [(LOAD_BEHAVIORS.to_string(), planted.to_string())];
-        let failures = check_tree(&files, &[], STEP_WRAPPERS, &[]);
+        let wrappers = [StepWrapper {
+            file: "examples/load/behaviors.rs",
+            function: "journal_read",
+            parameter: "future",
+        }];
+        let files = [(wrappers[0].file.to_string(), planted.to_string())];
+        let failures = check_tree(&files, &[], &wrappers, &[]);
         assert!(
             failures
                 .iter()
@@ -1272,9 +1153,9 @@ mod self_test {
             "async move { Ok(answer) }",
             "async move { Ok(future.await) }",
         );
-        let files = [(LOAD_BEHAVIORS.to_string(), honest)];
+        let files = [(wrappers[0].file.to_string(), honest)];
         assert!(
-            check_tree(&files, &[], STEP_WRAPPERS, &[]).is_empty(),
+            check_tree(&files, &[], &wrappers, &[]).is_empty(),
             "a read inside a proven wrapper's span passes"
         );
     }

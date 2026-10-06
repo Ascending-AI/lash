@@ -1,10 +1,6 @@
 # Post-1.0 separate-machines baseline; pending account and credentials.
 # Create these labeled Kapsule pools before installation. Pool sizes and
 # instance types must provide the resource requests in values.yaml.
-restate:
-  storageClass: sbs-5k
-  antiAffinity: required
-  nodeSelector: {lash-loadtest-pool: restate}
 workers:
   nodeSelector: {lash-loadtest-pool: workers}
 postgres:

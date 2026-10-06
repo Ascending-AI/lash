@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import copy
 import importlib.util
 import io
 import json
@@ -13,7 +12,6 @@ import tarfile
 import tempfile
 import unittest
 
-import yaml
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -24,137 +22,6 @@ assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
-
-
-WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
-
-
-def named_step(job: dict[str, object], name: str) -> dict[str, object]:
-    return next(step for step in job["steps"] if step.get("name") == name)
-
-
-def workflow_contract_failures(workflow: dict[str, object]) -> list[str]:
-    failures: list[str] = []
-    if workflow.get("permissions") != {"contents": "read"}:
-        failures.append("workflow permissions must remain exactly contents: read")
-
-    jobs = workflow["jobs"]
-    producer = jobs["worker-artifacts"]
-    expected_producer_outputs = {
-        "artifact_id": "${{ steps.upload-worker-binaries.outputs.artifact-id }}",
-        "artifact_name": "${{ steps.prepare-worker-binaries.outputs.artifact_name }}",
-        "producer_attempt": "${{ steps.prepare-worker-binaries.outputs.producer_attempt }}",
-    }
-    if producer.get("outputs") != expected_producer_outputs:
-        failures.append("worker producer outputs do not bind upload ID and producer attempt")
-    upload = named_step(producer, "Upload worker binaries")
-    upload_paths = set(str(upload["with"].get("path", "")).splitlines())
-    if upload.get("id") != "upload-worker-binaries" or upload_paths != {
-        "${{ runner.temp }}/worker-binaries.tar",
-        "${{ runner.temp }}/worker-binaries.provenance.json",
-    }:
-        failures.append("worker upload does not publish the payload and provenance together")
-
-    selected_worker_id = "${{ needs.worker-artifacts.outputs.artifact_id }}"
-    for job_id in ("functional-e2e-process-operations", "restate-postgres-workers"):
-        job = jobs[job_id]
-        steps = job["steps"]
-        try:
-            guard_index = next(
-                index
-                for index, step in enumerate(steps)
-                if step.get("name") == "Require exact worker artifact selection"
-            )
-            download_index = next(
-                index
-                for index, step in enumerate(steps)
-                if step.get("name") == "Download worker binaries"
-            )
-        except StopIteration:
-            failures.append(f"{job_id} lacks worker selection guard or download")
-            continue
-        download = steps[download_index]
-        if guard_index >= download_index:
-            failures.append(f"{job_id} does not refuse blank selection before download")
-        if download.get("with") != {
-            "artifact-ids": selected_worker_id,
-            "path": "${{ runner.temp }}/worker-download",
-        }:
-            failures.append(f"{job_id} does not download only the exact producer artifact ID")
-        consume = named_step(job, "Verify and extract worker binaries").get("run", "")
-        for argument in (
-            "--require-payload worker-binaries.tar",
-            '--producer-attempt "${{ needs.worker-artifacts.outputs.producer_attempt }}"',
-            '--selected-artifact-id "${{ needs.worker-artifacts.outputs.artifact_id }}"',
-            '--current-attempt "${GITHUB_RUN_ATTEMPT}"',
-        ):
-            if argument not in consume:
-                failures.append(f"{job_id} worker verification omits {argument}")
-
-    workers = jobs["restate-postgres-workers"]
-    expected_segment_outputs = {
-        f"segment_{segment}_{field}": (
-            f"${{{{ steps.upload-segment-{segment}.outputs.artifact-id }}}}"
-            if field == "artifact_id"
-            else f"${{{{ steps.prepare-segment-{segment}.outputs.{field} }}}}"
-        )
-        for segment in (1, 2)
-        for field in ("artifact_id", "artifact_name", "producer_attempt")
-    }
-    if workers.get("outputs") != expected_segment_outputs:
-        failures.append("matrix segment outputs do not retain each exact ID/name/attempt")
-    for segment in (1, 2):
-        prepare = named_step(workers, f"Record segment {segment} result provenance")
-        prepare_run = prepare.get("run", "")
-        if "--payload worker-binaries-consumption.json" not in prepare_run:
-            failures.append(f"segment {segment} omits the consumed binary receipt")
-
-    summary = jobs["restate-postgres-workers-summary"]
-    summary_steps = summary["steps"]
-    guard_index = next(
-        (
-            index
-            for index, step in enumerate(summary_steps)
-            if step.get("name") == "Require exact segment result selections"
-        ),
-        -1,
-    )
-    for segment in (1, 2):
-        name = f"Download segment {segment} completed workflow manifest"
-        try:
-            download_index = next(
-                index
-                for index, step in enumerate(summary_steps)
-                if step.get("name") == name
-            )
-        except StopIteration:
-            failures.append(f"summary lacks exact segment {segment} download")
-            continue
-        download = summary_steps[download_index]
-        if guard_index < 0 or guard_index >= download_index:
-            failures.append(
-                f"summary does not refuse blank segment {segment} ID before download"
-            )
-        expected = {
-            "artifact-ids": (
-                "${{ needs.restate-postgres-workers.outputs."
-                f"segment_{segment}_artifact_id }}}}"
-            ),
-            "path": f"target/restate-postgres-workers-e2e-download/segment-{segment}",
-        }
-        if download.get("with") != expected:
-            failures.append(f"summary segment {segment} download is not exact-ID scoped")
-    summary_verify = named_step(
-        summary, "Verify completed workflow manifest provenance"
-    ).get("run", "")
-    for payload in (
-        "workflow-inventory.tsv",
-        "completed-workflows.txt",
-        "worker-binaries-consumption.json",
-    ):
-        if f"--require-payload {payload}" not in summary_verify:
-            failures.append(f"summary does not require verified payload {payload}")
-    return failures
 
 
 def source(**overrides: str):
@@ -353,56 +220,6 @@ class ArtifactProvenanceTest(unittest.TestCase):
         self.assertEqual("987", persisted["selected_artifact_id"])
         self.assertIn("| Producer attempt | `1` |", summary)
         self.assertIn("| Consumer attempt | `2` |", summary)
-
-
-class WorkflowArtifactProvenanceTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-
-    def test_production_wiring_uses_exact_ids_and_retained_attempts(self) -> None:
-        self.assertEqual([], workflow_contract_failures(self.workflow))
-
-    def test_contract_check_rejects_permission_fallback_and_receipt_mutations(self) -> None:
-        mutations: list[tuple[str, dict[str, object]]] = []
-
-        expanded = copy.deepcopy(self.workflow)
-        expanded["permissions"]["actions"] = "read"
-        mutations.append(("permission expansion", expanded))
-
-        fallback = copy.deepcopy(self.workflow)
-        download = named_step(
-            fallback["jobs"]["functional-e2e-process-operations"],
-            "Download worker binaries",
-        )
-        download["with"] = {
-            "name": "worker-binaries-latest",
-            "path": "${{ runner.temp }}/worker-download",
-        }
-        mutations.append(("name fallback", fallback))
-
-        missing_guard = copy.deepcopy(self.workflow)
-        summary_steps = missing_guard["jobs"]["restate-postgres-workers-summary"]["steps"]
-        summary_steps[:] = [
-            step
-            for step in summary_steps
-            if step.get("name") != "Require exact segment result selections"
-        ]
-        mutations.append(("missing pre-download guard", missing_guard))
-
-        missing_receipt = copy.deepcopy(self.workflow)
-        prepare = named_step(
-            missing_receipt["jobs"]["restate-postgres-workers"],
-            "Record segment 1 result provenance",
-        )
-        prepare["run"] = prepare["run"].replace(
-            "--payload worker-binaries-consumption.json",
-            "--payload omitted-consumption.json",
-        )
-        mutations.append(("missing binary receipt", missing_receipt))
-
-        for name, mutation in mutations:
-            with self.subTest(name=name):
-                self.assertNotEqual([], workflow_contract_failures(mutation))
 
 
 if __name__ == "__main__":

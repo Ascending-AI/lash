@@ -61,11 +61,6 @@ impl ProcessLifecycleFeed {
         let _ = self.registry.set(registry);
     }
 
-    #[cfg(test)]
-    pub(crate) fn route_count(&self) -> usize {
-        self.routes.lock_recover().values().map(Vec::len).sum()
-    }
-
     async fn publish(
         &self,
         session_id: &SessionId,

@@ -5,20 +5,6 @@ image:
   tag: local
   pullPolicy: IfNotPresent
   runtimeBase: ubuntu:24.04
-restate:
-  image: restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
-  replicas: 3
-  partitions: 24
-  replication: 2
-  storage: 10Gi
-  storageClass: ""
-  rocksdbMemory: 512 MiB
-  queryMemory: 128 MiB
-  resources:
-    requests: {cpu: "2", memory: 4Gi}
-    limits: {cpu: "2", memory: 4Gi}
-  nodeSelector: {}
-  antiAffinity: preferred
 workers:
   pgConnections: 16
   witnessConnections: 2

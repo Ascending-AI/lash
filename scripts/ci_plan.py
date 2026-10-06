@@ -41,9 +41,6 @@ FAMILIES = (
     "pr_pg_store",
     "pr_host_restate",
     "functional_e2e",
-    "workers_e2e",
-    "restate_suites",
-    "rolling_upgrade",
     "feature_lanes",
     "workbench",
     "regress",
@@ -277,12 +274,8 @@ GATED_JOBS = {
     "stack-budget": "rust",
     "postgres-store": "stores",
     "postgres-store-synthetic-next": "stores",
-    "pr-host-workers": "pr_host_restate",
-    "rolling-upgrade": "rolling_upgrade",
     "s3-store": "stores",
     "functional-e2e": "functional_e2e",
-    "restate-suites": "restate_suites",
-    "functional-e2e-process-operations": "functional_e2e",
     "fuzz-smoke": "rust",
     "unused-deps": "rust",
     "unicode-tests": "regress",
@@ -311,11 +304,9 @@ FEATURE_LANES_JOB = "feature-lanes"
 # postgres-store is not dispatch-only. Selected store PRs run PG16 and the
 # cross-backend differential; merge groups and dispatches retain their suites.
 DISPATCH_ONLY_JOBS = {
-    "restate-suites",
     "heavy-tests",
     "stack-budget",
     "s3-store",
-    "functional-e2e-process-operations",
     "unicode-tests",
     "lashlang-git-consumer",
     # The fuzz smoke stays off the pull-request critical path by design: its
@@ -354,19 +345,15 @@ def postgres_matrix(event_name: str, schema: bool = False) -> list[dict[str, str
     return [POSTGRES_PRIMARY_LEG]
 
 UNGATED_JOBS = {
-    "worker-artifacts",
     "plan",
     "lint",
     "hygiene",
-    "restate-postgres-workers",
-    "restate-postgres-workers-summary",
 }
 
 
 STORE_PR_PACKAGES = frozenset(
     {
         "crates/lash",
-        "crates/lash-restate-test",
         "crates/lash-lashlang-runtime",
         "crates/lash-plugin-process-controls",
         "crates/lash-protocol-rlm",
@@ -395,24 +382,7 @@ def _is_pr_host_restate_path(path: str) -> bool:
             path.startswith(f"crates/lash-core/src/runtime/{part}")
             for part in ("shift/", "shift.rs", "turn_loop/", "turn_loop.rs")
         )
-    if path.startswith("crates/lash-restate/src/"):
-        return any(
-            path.startswith(f"crates/lash-restate/src/{part}")
-            for part in ("handlers/", "handlers.rs", "turn_handler.rs", "session_shifts/", "session_shifts.rs")
-        )
     return False
-
-WORKERS_E2E_JOBS = {
-    "worker-artifacts",
-    "restate-postgres-workers",
-    "restate-postgres-workers-summary",
-}
-
-# The functional-e2e legs that host live Restate suites. Host PRs run the
-# agent-workbench legs; dispatches run the full matrix.
-RESTATE_SUITE_JOBS = frozenset(
-    {"functional-e2e", "functional-e2e-process-operations"}
-)
 
 BUCK2_TEST_JOB = "buck2-tests"
 # Trusted Rust events run the core partition in `buck2-tests`. The tail is
@@ -529,23 +499,23 @@ CI_GLOBAL_PATHS = frozenset({CI_WORKFLOW})
 # `test_ci_plan.py` fails when an entry gains a consumer or is removed.
 UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     ".github/actionlint.yaml": "actionlint finds it by name in `lint`, which runs on every event",
-    "scripts/restate-sdk-acceptance.py": "run by hand as documented in crates/lash-restate/SDK_ACCEPTANCE.md for the locked SDK acceptance receipt",
     "scripts/ci_ensure_run.sh": "run by hand to recover a CI run GitHub dropped",
     "scripts/perf_baseline.py": "run by hand to compare two lash-perf ledgers",
-    "scripts/test-mcp-catalog.sh": "run by hand through kiln gate to repeat the MCP catalog turn-path and native Restate witnesses",
-    "scripts/tool-batch-baseline.sh": "run by hand for the tool-batch baseline measurement",
     "scripts/test_landing_gates.py": "run on the lander beside scripts/ci/landing-gates.sh; it needs `kiln` on PATH, which the repository-gates runners do not have",
     "scripts/generate-process-env-identity-golden.py": "run by hand to rewrite the process-environment identity fixture from the ignored generator's test log",
     "scripts/release-rehearsal.sh": "run by hand in a disposable Kiln fork through its private PostgreSQL gate to rehearse the 1.0 baseline reset",
+    "scripts/e2e-workbench-operation.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
+    "scripts/e2e-workbench-recovery.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
+    "scripts/e2e-workbench-weather.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
+    "scripts/session_operator_e2e.py": "its engine E2E caller went with Restate (FIG-5190); L9h (FIG-5186) rewires it",
+    "scripts/generate_loadtest_ledger.py": "its recipe built the deleted Restate workers runbook's ledger (FIG-5190); L9h (FIG-5186) rewires it",
 }
 
 # Directories a CI script reads whole, one file per change -- the
 # replay-divergence shards. Name matching cannot see the glob, so each
 # directory declares its reader here: every tracked file under the key is
 # consumed by the value, which passes its own families on transitively.
-SHARD_DIR_READERS: Mapping[str, str] = {
-    "scripts/restate-divergences": "scripts/ci/restate_suite.py",
-}
+SHARD_DIR_READERS: Mapping[str, str] = {}
 
 # The plan outputs a `ci.yml` job may read that are not families. A job's
 # families are the family outputs it reads (`_job_families`); an output in
@@ -555,7 +525,6 @@ SHARD_DIR_READERS: Mapping[str, str] = {
 PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     **{family: frozenset({family}) for family in FAMILIES},
     "postgres_compatibility": frozenset({"schema"}),
-    "release_journal_replay": frozenset({"rolling_upgrade"}),
     "buck2_trusted": frozenset(),
     "fail_open": frozenset(),
     "docs_only": frozenset(),
@@ -564,7 +533,6 @@ PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     "pr_tail_labels": frozenset(),
     "pr_test_labels": frozenset(),
     "pr_build_targets": frozenset(),
-    "restate_matrix": frozenset({"restate_suites"}),
 }
 _PLAN_OUTPUT = re.compile(r"needs\.plan\.outputs\.([A-Za-z0-9_]+)")
 
@@ -973,111 +941,11 @@ def _is_stores_path(path: str, path_class: PathClass, store_dirs: frozenset[str]
     return path_class.kind is PathKind.DATA and path.startswith("fixtures/")
 
 
-# `restate_suites` gates the live Restate board: the functional-e2e legs that
-# run pinned `restate-server`s and the Restate + Postgres + S3 workers jobs.
-# They ran on `workflow_dispatch` alone, so a pull request that broke the
-# Restate execution path merged green and surfaced only in the next manual
-# run — #2106 (FIG-3699) and #2148 (FIG-3697) both landed that way, and the
-# workbench's Restate recovery coverage died with #2085.
-#
-# The selection is a path rule, not a dependency closure: the suite owners'
-# first-party closures cover most of the workspace, so "whatever the suites
-# link" would run the board on nearly every diff. The rule instead names the
-# code the suites exercise, from three sources:
-#
-# * `restate_suite_dirs()` — the manifest directories of the test binaries
-#   `scripts/restate-suites.toml` registers. The registry is the suite
-#   inventory; deriving the owners from it keeps a new suite covered without
-#   a second table.
-# * `RESTATE_SUITE_PACKAGES` — what the registry cannot name: the Restate
-#   endpoints and runbooks the suites mount, and `lash-conformance`, whose
-#   law definitions the run-conformance suite expands into its test binary.
-# * `RESTATE_CORE_SUBTREES` — the Restate execution path inside the two
-#   shared runtime crates, matched on path segments so `src/` and its
-#   `tests/` kernel mirrors count alike.
-RESTATE_SUITES_REGISTRY = "scripts/restate-suites.toml"
-
-
-@lru_cache(maxsize=None)
-def restate_suite_dirs(root: str | None = None) -> frozenset[str]:
-    """The manifest directories owning the registered live Restate suites."""
-
-    base = Path(root) if root is not None else REPO_ROOT
-    with (base / RESTATE_SUITES_REGISTRY).open("rb") as handle:
-        registry = tomllib.load(handle)
-    return frozenset(
-        PurePosixPath(suite["label"][2:].split(":", 1)[0]).as_posix()
-        for suite in registry["suites"].values()
-    )
-
-
-# Packages whose whole tree a live Restate suite mounts or expands: the
-# workbench endpoint (`agent-workbench-restate-e2e` tests it beside a
-# Restate container), the runbooks whose binaries and scenarios the workers
-# and process-operations legs drive, and the conformance law catalogue the
-# run-conformance suite's `conformance_and_poison` cases are built from — a law
-# edit can fail the suite without touching another selected path (#2148).
-RESTATE_SUITE_PACKAGES = frozenset(
-    {
-        "crates/lash-conformance",
-        "runbooks/process-operations",
-        "runbooks/restate-postgres-workers",
-    }
-)
-
-# The Restate execution path inside the shared runtime crates: the subtrees
-# #2106 and #2148 changed when they broke the live suites. A run of stems is
-# matched consecutively, so `src/session/tool_execution`, its
-# `tests/store_backed/kernel/...` mirror and a flat `tool_dispatch.rs` all
-# count, while the crate's other machinery stays out.
-RESTATE_CORE_SUBTREES: Mapping[str, tuple[tuple[str, ...], ...]] = {
-    "crates/lash-core-execution": (
-        ("runtime", "effect"),
-        ("session", "tool_execution"),
-        ("tool_dispatch",),
-    ),
-    "crates/lash-core": (
-        ("turn_driver",),
-        ("turn_loop",),
-    ),
-}
-
-
-def _contains_stem_run(path: str, run: tuple[str, ...]) -> bool:
-    stems = [PurePosixPath(part).stem for part in PurePosixPath(path).parts]
-    width = len(run)
-    return any(
-        tuple(stems[index : index + width]) == run
-        for index in range(len(stems) - width + 1)
-    )
-
-
-def _is_restate_suite_path(
-    path: str, path_class: PathClass, suite_dirs: frozenset[str]
-) -> bool:
-    if path_class.kind is not PathKind.PACKAGE or path_class.package is None:
-        return False
-    if path_class.package in suite_dirs or path_class.package in RESTATE_SUITE_PACKAGES:
-        return True
-    subtrees = RESTATE_CORE_SUBTREES.get(path_class.package)
-    if subtrees is None:
-        return False
-    # A shared crate's manifest can change the suites' build even though it
-    # sits beside, not inside, the execution subtrees.
-    return path_class.manifest or any(
-        _contains_stem_run(path, subtree) for subtree in subtrees
-    )
-
-
 # A registered versioned surface is more than the file that defines its
 # constant: the constant's `version_guard` marker names the shapes it guards,
 # wherever they live. So the files of a surface are read from the markers, by
-# the strict version-bump gate's own reader, and the three jobs that run on a
-# change to a surface select on that one set: the gate (FIG-4494), the
-# rolling-upgrade gate and the release-journal replay (FIG-4097).
-ROLLING_UPGRADE_PACKAGES = frozenset(
-    {"crates/lash-upgrade-harness", "crates/lashctl", "runbooks/rolling-upgrade"}
-)
+# the strict version-bump gate's own reader, and the gate (FIG-4494) selects on
+# that one set.
 
 
 @lru_cache(maxsize=None)
@@ -1102,17 +970,6 @@ def versioned_surface_paths(root: str | None = None) -> frozenset[str]:
 def _is_versioned_surface_path(path: str, surface_paths: frozenset[str]) -> bool:
     return path in surface_paths or any(
         fnmatch.fnmatchcase(path, pattern) for pattern in surface_paths
-    )
-
-
-# `rolling_upgrade` selects Phase A's rolling-upgrade gate (ADR 0115 §6,
-# FIG-3805): `just e2e-rolling` rolls two builds of the diff's tree, N and the
-# `synthetic-next` N+1, over live stores and a live Restate server. ADR 0115
-# requires it on every change to a registered versioned surface, and the
-# harness, lashctl and the runbook select it too.
-def _is_rolling_upgrade_path(path: str, surface_paths: frozenset[str]) -> bool:
-    return _is_versioned_surface_path(path, surface_paths) or any(
-        path.startswith(f"{package}/") for package in ROLLING_UPGRADE_PACKAGES
     )
 
 
@@ -2167,7 +2024,6 @@ def fail_open(reason: str) -> dict[str, str]:
     outputs = {
         "docs_only": "false",
         "fail_open": "true",
-        "release_journal_replay": "true",
         "reason": reason,
         "pr_tail_labels": tail,
         # The pull-request leg runs the whole fast suite plus the deferred
@@ -2188,9 +2044,7 @@ def classify(
     event_name: str = "",
     workbench_dirs: frozenset[str] | None = None,
     store_dirs: frozenset[str] | None = None,
-    restate_dirs: frozenset[str] | None = None,
     lane_dirs: frozenset[str] | None = None,
-    surface_paths: frozenset[str] | None = None,
 ) -> dict[str, str]:
     if not changes:
         raise PlanError("the changed path set was empty")
@@ -2204,16 +2058,6 @@ def classify(
             store_dirs = postgres_store_dependency_dirs()
         except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
             return fail_open(f"Postgres store dependency closure is underivable: {error}")
-    if restate_dirs is None:
-        try:
-            restate_dirs = restate_suite_dirs()
-        except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
-            return fail_open(f"Restate suite registry is underivable: {error}")
-    if surface_paths is None:
-        try:
-            surface_paths = versioned_surface_paths()
-        except (OSError, KeyError, TypeError, ValueError) as error:
-            return fail_open(f"versioned surface registry is underivable: {error}")
     if lane_dirs is None:
         try:
             lane_dirs = feature_lane_package_dirs()
@@ -2254,24 +2098,6 @@ def classify(
     run_everything = global_invalidator or bool(ambiguous) or docs_deletion
 
     outputs = {
-        "release_journal_replay": str(
-            event_name in {"push", "workflow_dispatch"}
-            or run_everything
-            or any(
-                _is_versioned_surface_path(path, surface_paths)
-                or path.startswith("crates/lash-restate/testdata/replay-corpus/")
-                or path.startswith(("fixtures/release/", "fixtures/release-rehearsal/"))
-                or path in {
-                    "crates/lash-restate/src/tests/replay_corpus.rs",
-                    "scripts/capture_release_fixtures.py",
-                    "scripts/test_capture_release_fixtures.py",
-                    "scripts/ci_plan.py",
-                    "scripts/test_ci_plan.py",
-                    ".github/workflows/release-journal-replay.yml",
-                }
-                for path in paths
-            )
-        ).lower(),
         "docs_only": str(docs_only).lower(),
         "fail_open": str(bool(ambiguous)).lower(),
         "reason": (
@@ -2337,16 +2163,8 @@ def classify(
         ),
         "pr_host_restate": any(_is_pr_host_restate_path(path) for path in build),
         "functional_e2e": breadth,
-        "workers_e2e": breadth,
         "workbench": workbench_hit,
         "regress": any(_is_regress_path(path) for path in build),
-        "restate_suites": any(
-            _is_restate_suite_path(path, classes[path], restate_dirs)
-            for path in build
-        ),
-        "rolling_upgrade": any(
-            _is_rolling_upgrade_path(path, surface_paths) for path in build
-        ),
         "feature_lanes": any(
             _is_feature_gate_path(path, classes[path], lane_dirs) for path in build
         ),
@@ -2355,7 +2173,7 @@ def classify(
         "tooling": any(_is_tooling_class(classes[path]) for path in build),
         # `stores` follows the Postgres store closure for merge groups and
         # dispatches. The narrower PR selectors are independent of that
-        # closure. `restate_suites` still selects full-profile work.
+        # closure.
         "stores": any(
             _is_stores_path(path, classes[path], store_dirs) for path in build
         ),
@@ -2369,12 +2187,8 @@ def classify(
 def evaluate_conclusion(
     needs: Mapping[str, Mapping[str, object]],
     event_name: str = "",
-    workers_e2e_enabled: bool | None = None,
     buck2_is_trusted: bool = True,
 ) -> list[str]:
-    if workers_e2e_enabled is None:
-        workers_e2e_enabled = True
-
     expected_jobs = UNGATED_JOBS | set(GATED_JOBS) | BUCK2_TEST_JOBS
     problems: list[str] = []
 
@@ -2432,17 +2246,6 @@ def evaluate_conclusion(
             if result != wanted:
                 problems.append(f"{job} ended with {result!r} on a {event_name} event, expected {wanted}")
             continue
-        if job == "pr-host-workers":
-            wanted = (
-                "success"
-                if event_name == "pull_request"
-                and plan_outputs.get("pr_host_restate") == "true"
-                and buck2_is_trusted
-                else "skipped"
-            )
-            if result != wanted:
-                problems.append(f"{job} ended with {result!r} on a {event_name} event, expected {wanted}")
-            continue
         if job in BUCK2_TEST_JOBS:
             rust_on = plan_outputs.get("rust") == "true"
             wanted = (
@@ -2456,15 +2259,6 @@ def evaluate_conclusion(
                     f" {'trusted' if buck2_is_trusted else 'untrusted'}"
                     f"{'' if rust_on else ' non-rust'} event,"
                     f" expected {wanted}"
-                )
-            continue
-        if job in WORKERS_E2E_JOBS and (
-            event_name == "pull_request" or not workers_e2e_enabled
-        ):
-            if result != "skipped":
-                problems.append(
-                    f"workers E2E job {job} ended with {result!r} on a"
-                    f" {event_name} event that does not run it, expected skipped"
                 )
             continue
         if job in DISPATCH_ONLY_JOBS and event_name in DEFERRED_EVENTS:
@@ -2692,13 +2486,6 @@ def main() -> int:
     except (KeyError, json.JSONDecodeError) as error:
         print(f"Invalid needs JSON: {error}", file=sys.stderr)
         return 1
-    workers_e2e_enabled = os.environ.get("WORKERS_E2E_ENABLED")
-    if workers_e2e_enabled not in {"true", "false"}:
-        print(
-            f"Invalid WORKERS_E2E_ENABLED: {workers_e2e_enabled!r}, expected 'true' or 'false'",
-            file=sys.stderr,
-        )
-        return 1
     buck2_is_trusted = os.environ.get("BUCK2_TRUSTED")
     if buck2_is_trusted not in {"true", "false"}:
         print(
@@ -2709,7 +2496,6 @@ def main() -> int:
     problems = evaluate_conclusion(
         needs,
         os.environ.get("GITHUB_EVENT_NAME", ""),
-        workers_e2e_enabled == "true",
         buck2_is_trusted == "true",
     )
     print(json.dumps(needs, indent=2, sort_keys=True))

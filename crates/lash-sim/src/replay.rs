@@ -372,8 +372,6 @@ fn normalize(kind: BoundaryKind, value: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generator::generate_workload;
-    use crate::runner::run_generated_workload_for_fixture;
 
     #[test]
     fn provider_release_replay_preserves_the_boundary_across_host_poll_orders() {
@@ -520,85 +518,6 @@ mod tests {
             replay_trace(path, &missing),
             Err(ReplayError::Divergence(message)) if message.contains("observed payload changed")
         ));
-    }
-
-    #[tokio::test]
-    async fn replay_reproduces_boundary_sequence_and_summary() {
-        let workload = generate_workload(5, "fast-random", 24).expect("workload");
-        let trace = run_generated_workload_for_fixture(workload, "bundle")
-            .await
-            .expect("trace");
-        let report = replay_trace(Path::new("trace.json"), &trace).expect("replay");
-
-        assert_eq!(report.delivered_event_count, trace.events.len());
-        assert_eq!(report.final_summary, trace.final_summary);
-        assert!(report.terminal_verdict.is_passed());
-        let reverification = &report.runtime_invariant_reverification;
-        assert!(
-            reverification.reverified_turn_count > 0,
-            "replay must re-verify at least one runtime turn's invariant facts"
-        );
-        assert_eq!(
-            reverification.graph_invariant_checks,
-            reverification.reverified_turn_count
-        );
-        assert_eq!(
-            reverification.agent_frame_invariant_checks,
-            reverification.reverified_turn_count
-        );
-        assert_eq!(
-            reverification.usage_invariant_checks,
-            reverification.reverified_turn_count
-        );
-    }
-
-    #[tokio::test]
-    async fn replay_reverification_rejects_tampered_runtime_invariant_facts() {
-        let workload = generate_workload(5, "fast-random", 24).expect("workload");
-        let mut trace = run_generated_workload_for_fixture(workload, "bundle")
-            .await
-            .expect("trace");
-        // Corrupt a recorded runtime invariant fact so the structural re-derivation
-        // contradicts the stored `passed` flag; replay must surface it as a
-        // runtime-level divergence even though the abstract summary still matches.
-        let tampered = trace
-            .events
-            .iter_mut()
-            .find(|event| {
-                event.kind == BoundaryKind::Provider
-                    && event.observed.get("runtime_invariant_facts").is_some()
-            })
-            .expect("a provider turn with recorded invariant facts");
-        tampered.observed["runtime_invariant_facts"]["graph"]["cycle_node_ids"] =
-            serde_json::json!(["node-a", "node-b"]);
-        let err = replay_trace(Path::new("trace.json"), &trace)
-            .expect_err("tampered runtime invariant facts must diverge");
-        assert!(
-            matches!(err, ReplayError::Divergence(message) if message.contains("graph")),
-            "expected a graph invariant divergence"
-        );
-    }
-
-    #[tokio::test]
-    async fn seeded_replay_rejects_runtime_usage_the_old_mask_hid() {
-        let workload = generate_workload(5, "fast-random", 24).expect("workload");
-        let mut trace = run_generated_workload_for_fixture(workload, "bundle")
-            .await
-            .expect("trace");
-        let tampered = trace
-            .events
-            .iter_mut()
-            .find(|event| event.kind == BoundaryKind::Provider)
-            .expect("seed 5 includes a provider turn");
-        tampered.observed["runtime_invariant_facts"]["usage"]["total_usage"]["input_tokens"] =
-            serde_json::json!(999);
-
-        let err = replay_trace(Path::new("trace.json"), &trace)
-            .expect_err("the unmasked model diff must reject corrupted runtime usage");
-        assert!(
-            matches!(err, ReplayError::Divergence(message) if message.contains("observed payload changed") && message.contains("999")),
-            "expected the boundary model diff to expose the formerly hidden runtime field"
-        );
     }
 
     #[test]

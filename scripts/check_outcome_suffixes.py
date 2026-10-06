@@ -24,11 +24,7 @@ Exempt, each with the reason the rule does not reach it:
 * `tests/` directories — separate test targets, not part of a crate's
   public surface;
 * `#[cfg(test)]`-gated items (`mod` blocks, file modules, and standalone
-  items) — private test support no host can name;
-* `crates/lash-restate-test/src/protocol/generated.rs` — vendored
-  prost-build output, byte-for-byte the file restate-sdk-shared-core
-  compiles from the pinned protocol; its names are the Restate spec's, not
-  this workspace's.
+  items) — private test support no host can name.
 """
 
 from __future__ import annotations
@@ -69,11 +65,7 @@ RESULT_ALIASES = frozenset(
 
 # Files exempted beyond test support, each named with its reason in the
 # module docstring.
-EXEMPT_FILES = frozenset(
-    {
-        "crates/lash-restate-test/src/protocol/generated.rs",
-    }
-)
+EXEMPT_FILES: frozenset[str] = frozenset()
 
 
 def blank_noncode(text: str) -> str:

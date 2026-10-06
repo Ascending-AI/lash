@@ -475,18 +475,6 @@ pub const GUARDED_SURFACES: &[GuardedSurface] = &[
         owner: "lash-sqlite-store",
         reads: SurfaceReads::Mutable,
     },
-    GuardedSurface {
-        constant: "DURABLE_WAIT_REGISTRY_FORMAT_VERSION",
-        owner: "lash-restate",
-        reads: SurfaceReads::Mutable,
-    },
-    // A `LashTurn` workflow's outcome is written once by its `run` and no
-    // handler may rewrite a finished workflow's state, so it is history.
-    GuardedSurface {
-        constant: "LASH_TURN_OUTCOME_FORMAT_VERSION",
-        owner: "lash-restate",
-        reads: SurfaceReads::History { floor: 1 },
-    },
 ];
 
 /// The [`GUARDED_SURFACES`] row of `surface`, when one guards it.

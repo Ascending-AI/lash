@@ -12,7 +12,6 @@ if [[ $# -eq 0 ]]; then
         crates/lash-protocol-standard/tests/protocol_scenarios.rs \
         crates/lash-protocol-rlm/tests/protocol_drivers.rs \
         crates/lash-protocol-rlm/tests/protocol_drivers \
-        crates/lash/src/tests/agent_scenarios \
         docs/adr/0007-four-layer-scenario-harnesses.md
 fi
 

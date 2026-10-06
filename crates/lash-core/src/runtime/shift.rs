@@ -7,8 +7,6 @@
 mod admission;
 mod materializer;
 pub use materializer::{ShiftAdmissionMaterializer, ShiftAdmissionTemplate};
-#[cfg(test)]
-mod attempt_drop_tests;
 mod close;
 mod control;
 pub mod ingress;

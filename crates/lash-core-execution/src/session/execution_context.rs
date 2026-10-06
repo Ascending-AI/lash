@@ -932,24 +932,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         context
     }
 
-    /// The recorded-frontier read of this execution's scope (FIG-3586): the
-    /// journal rows its controller holds in `range`, with this opener's group
-    /// keys read back as the commands that formed them.
-    pub async fn read_recorded_journal(
-        &self,
-        range: &crate::RecordedKeyRange,
-    ) -> Result<crate::RecordedJournal, crate::RuntimeEffectControllerError> {
-        let range = crate::RecordedKeyRange {
-            group_key_prefix: self.own_group_key_prefix(),
-            ..range.clone()
-        };
-        self.dispatch
-            .effect_controller
-            .controller()
-            .read_recorded_journal(&range)
-            .await
-    }
-
     /// Shares the session-scoped attachment store with code-executor implementors so code-produced
     /// artifacts follow the same durable ownership contract as turn input.
     pub fn attachment_store(&self) -> Arc<crate::RuntimeAttachmentStore> {

@@ -600,29 +600,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
-
-    /// The recorded-frontier read (FIG-3586): every journal row this
-    /// controller's scope holds inside `range`, compared bytewise.
-    ///
-    /// A replayed language runtime issues it once per run, over its own key
-    /// namespace, before any command leaves: it is how the run knows which
-    /// commands the journal already holds, so that nothing is dispatched live
-    /// while a recorded entry at or beyond the current command still exists.
-    ///
-    /// The default refuses: every controller journals its effects, and an
-    /// empty answer from a journal that does hold rows is exactly the hole
-    /// the fence exists to close. Forwarding wrappers forward.
-    async fn read_recorded_journal(
-        &self,
-        range: &super::super::recorded_keys::RecordedKeyRange,
-    ) -> Result<RecordedJournal, RuntimeEffectControllerError> {
-        let _ = range;
-        Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RecordedJournalReadUnsupported,
-            "this effect controller does not answer the recorded-frontier read; a replayed \
-             language runtime cannot know which of its commands the journal holds",
-        ))
-    }
 }
 
 /// One registry step of a process drive, for
@@ -642,20 +619,6 @@ pub type RunRecordStep<'step> = std::pin::Pin<
             + 'step,
     >,
 >;
-
-/// A controller's answer to
-/// [`read_recorded_journal`](RuntimeEffectController::read_recorded_journal).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RecordedJournal {
-    /// The journal rows the scope holds in the range, readable by key.
-    Keys(super::super::recorded_keys::RecordedKeys),
-    /// The host replays its journal by position and checks each entry's name
-    /// as it goes (Restate's journal-mismatch check): a range read has nothing
-    /// to add, because that positional check is already the fence — a command
-    /// issued out of recorded order meets a recorded entry of another name
-    /// before anything is dispatched.
-    Positional,
-}
 
 #[cfg(test)]
 #[path = "control/tests.rs"]

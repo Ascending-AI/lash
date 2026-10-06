@@ -1,11 +1,12 @@
 //! The backends the simulator executes its runtimes over.
 //!
-//! A simulated turn runs where a deployment runs one: inside a handler of
-//! lash-restate's engine, on the in-process Restate server double
-//! ([`SimEngine`]), over a SQLite memory store set; SQLite is storage only.
-//! When the simulator records the checkpoint writes a run commits, it wraps
-//! the engine backend's session factory in an observer, and every other port
-//! stays the backend's.
+//! A simulated turn runs where a deployment runs one: on lash's durable
+//! engine ([`SimEngine`]), over a SQLite memory store set. The engine is
+//! built through [`lash::durable::DurableBackendBuilder`], which I0
+//! (FIG-5194) assembles and L3 (FIG-5172) makes serve; until then a world
+//! that runs a turn stops at the builder. When the simulator records the
+//! checkpoint writes a run commits, it wraps the engine backend's session
+//! factory in an observer, and every other port stays the backend's.
 
 use std::sync::Arc;
 
@@ -15,59 +16,50 @@ use lash_core::sync::MutexExt as _;
 use crate::runner::FixedScriptRunnerError;
 use crate::store::{CheckpointWriteCollector, ObservedDeploymentStore};
 
-/// Where the simulator runs turns: lash-restate's engine on a fresh
-/// in-process Restate server double under the scenario's seed, with concurrent
-/// handlers, over a SQLite memory store set.
+/// Where the simulator runs turns: lash's durable engine over a SQLite
+/// memory store set.
 ///
-/// A turn is sent to the session and the engine's session shift runs it
-/// ([`run_turn`](Self::run_turn)); a core that starts processes serves their
-/// segments through [`serve_processes`](Self::serve_processes).
-#[derive(Clone, Debug)]
+/// A turn is sent to the session and the engine runs it
+/// ([`run_turn`](Self::run_turn)).
+#[derive(Clone)]
 pub struct SimEngine {
-    restate: lash_restate_test::RestateTestBackend,
+    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    backend: Backend,
+}
+
+impl std::fmt::Debug for SimEngine {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("SimEngine").finish_non_exhaustive()
+    }
 }
 
 /// Builds the send a turn starts from. The input is accepted on the
-/// session and the engine's session shift runs it, on the server double.
+/// session and the engine runs it.
 pub type SimTurnBuild =
     Arc<dyn Fn(&lash::LashSession) -> lash::Result<lash::SendBuilder> + Send + Sync>;
 
 impl SimEngine {
-    /// A fresh engine on a concurrent server double under `seed`.
-    pub async fn new(seed: u64) -> Result<Self, FixedScriptRunnerError> {
-        let mut config = lash_restate_test::ServerConfig::default();
-        // A crashed attempt is retried at once: retry timing is no contract,
-        // and a simulated world crashes an attempt on every durable effect.
-        config.retry.initial_interval = std::time::Duration::from_millis(1);
-        config.retry.max_interval = std::time::Duration::from_millis(10);
-        lash_restate_test::backend(seed, config)
+    /// A fresh engine over a fresh SQLite memory store set. `_seed` names
+    /// the world; the durable engine takes no seed of its own.
+    pub async fn new(_seed: u64) -> Result<Self, FixedScriptRunnerError> {
+        let stores = lash_sqlite_store::SqliteStoreSet::memory()
             .await
-            .map(|restate| Self { restate })
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        let stores = Arc::new(stores);
+        let backend = lash::durable::DurableBackendBuilder::new(stores.clone())
+            .build()
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        Ok(Self { stores, backend })
     }
 
-    /// The server double and the engine wired to it.
-    pub fn restate(&self) -> &lash_restate_test::RestateTestBackend {
-        &self.restate
+    /// The store set the engine runs over.
+    pub fn stores(&self) -> &lash_sqlite_store::SqliteStoreSet {
+        &self.stores
     }
 
-    /// The backend a core runs on: the engine's own backend, with its
-    /// Lashlang artifacts in the engine's store set.
+    /// The backend a core runs on.
     pub fn backend(&self) -> Backend {
         DecoratedBackend::over_engine(self).into()
-    }
-
-    /// Serve process segments with `core`'s durable worker, as a Restate
-    /// deployment does.
-    pub fn serve_processes(&self, core: &lash::LashCore) -> Result<(), FixedScriptRunnerError> {
-        let config = core
-            .durable_process_worker_config()
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        self.restate.install_process_worker(
-            lash::durability::DurableProcessWorker::new(config)
-                .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?,
-        );
-        Ok(())
     }
 
     /// Run one turn of `session` on `prompt`, named `turn_id`, keeping only
@@ -90,11 +82,10 @@ impl SimEngine {
         .await
     }
 
-    /// Send one turn of `session`, named `turn_id`, and wait for the
-    /// engine's session shift to settle it on the server double, streaming
-    /// its activity to `events`. The host never executes the run (D5): it
-    /// accepts the input and waits. The outer result is the harness's; the
-    /// inner one is the turn's own.
+    /// Send one turn of `session`, named `turn_id`, and wait for the engine
+    /// to settle it, streaming its activity to `events`. The host never
+    /// executes the run (D5): it accepts the input and waits. The outer
+    /// result is the harness's; the inner one is the turn's own.
     pub async fn run_turn(
         &self,
         session: &lash::LashSession,
@@ -102,138 +93,19 @@ impl SimEngine {
         events: Arc<dyn lash::TurnActivitySink>,
         build: SimTurnBuild,
     ) -> Result<lash::Result<lash::TurnOutput>, FixedScriptRunnerError> {
-        self.run_turn_releasing(session, turn_id, events, build, None)
-            .await
-    }
-
-    /// [`run_turn`](Self::run_turn) on a session whose shift `hold` holds:
-    /// the hold is released once the input is accepted, so the shift admits
-    /// it together with whatever the hold kept pending — one run, as a turn
-    /// sent while those inputs wait is admitted.
-    pub async fn run_turn_releasing(
-        &self,
-        session: &lash::LashSession,
-        turn_id: impl Into<lash::TurnId>,
-        events: Arc<dyn lash::TurnActivitySink>,
-        build: SimTurnBuild,
-        hold: Option<lash_restate_test::Hold>,
-    ) -> Result<lash::Result<lash::TurnOutput>, FixedScriptRunnerError> {
-        let turn_id = turn_id.into();
         let collected = CollectedTurnActivity {
             live: Some(events),
             activities: std::sync::Mutex::new(Vec::new()),
         };
-        let accepted = match build(session) {
-            Ok(send) => send.id(turn_id).await,
-            Err(err) => Err(err),
-        };
-        drop(hold);
-        let report = match accepted {
-            Ok(handle) => {
-                if let Some(paused) = self.await_input_shift(session, handle.input_id()).await {
-                    return Err(FixedScriptRunnerError::Runtime(format!(
-                        "engine invocation {} paused after {} attempt(s) and settles no turn until it is resumed; last failure: {:?}",
-                        paused.target, paused.attempts, paused.last_failure
-                    )));
-                }
-                handle.output_into(&collected).await
-            }
+        let report = match build(session) {
+            Ok(send) => match send.id(turn_id.into()).await {
+                Ok(handle) => handle.output_into(&collected).await,
+                Err(err) => Err(err),
+            },
             Err(err) => Err(err),
         };
         let activities = std::mem::take(&mut *collected.activities.lock_recover());
         Ok(report.map(|result| lash::TurnOutput { result, activities }))
-    }
-
-    /// Wait for the shift `input`'s acceptance scheduled to stop: by then the
-    /// run that took the input has settled on the engine, and this
-    /// process's `SessionShifts` has deposited its report. The handle read after it
-    /// answers from that report at once, so a harness waiting on a turn
-    /// makes no request of its own to the server while the turn runs, and
-    /// the server's grant order stays a function of the seed. A shift runs
-    /// over as many invocations as hand it off, and the run that took the
-    /// input may run in any of them, so the wait follows every leg that
-    /// stops [`HandedOff`](lash_core::engine::ShiftStop::HandedOff), or
-    /// [`Draining`](lash_core::engine::ShiftStop::Draining), to the one
-    /// after it. A shift the engine refused ends the wait too; the
-    /// handle then reports why.
-    ///
-    /// A shift whose handler, or whose run's, exhausted its attempts is
-    /// paused: the server runs it no further and its attach never answers.
-    /// The wait ends there and returns the paused invocation (FIG-4753).
-    /// The watch reads the server's introspection; it sends no request.
-    async fn await_input_shift(
-        &self,
-        session: &lash::LashSession,
-        input: &lash::InputId,
-    ) -> Option<lash_restate_test::InvocationView> {
-        let session_id = session.session_id();
-        let paused = async {
-            loop {
-                if let Some(view) = self.restate.paused_session_work(&session_id) {
-                    return view;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        };
-        tokio::select! {
-            () = self.attach_input_shift(session, input) => None,
-            view = paused => Some(view),
-        }
-    }
-
-    async fn attach_input_shift(&self, session: &lash::LashSession, input: &lash::InputId) {
-        // No generation means no shift was sent: there is nothing to wait on.
-        if self.restate.lash_backend().build_generation().is_err() {
-            return;
-        }
-        let mut leg = lash_core::engine::ShiftRequest {
-            session: session.session_id(),
-            request: lash_core::shift::ingress_shift_request(
-                input.as_str(),
-                lash_core::shift::FIRST_INGRESS_ATTEMPT,
-            ),
-            intended_lane: None,
-        };
-        loop {
-            match self
-                .restate
-                .attach_shift(&leg.session, leg.request.clone())
-                .await
-            {
-                Err(error) if error.is_timeout() => {}
-                Ok(outcome)
-                    if matches!(
-                        outcome.stop,
-                        lash_core::engine::ShiftStop::HandedOff { .. }
-                            | lash_core::engine::ShiftStop::Draining { .. }
-                    ) =>
-                {
-                    leg.request = lash_core::engine::shift_continuation_request(&leg);
-                }
-                Ok(_) | Err(_) => return,
-            }
-        }
-    }
-
-    /// Wait until the engine has no shift of `session` in flight: every
-    /// `LashSession` invocation for it has completed. A turn sent while the
-    /// session's last shift is still winding down (its closing admission
-    /// answering idle) would race that admission, and which shift admits the
-    /// new input would then depend on task timing; a world that wants one
-    /// grant order per seed sends into a settled session.
-    pub async fn settle_session_shift(&self, session: &lash::LashSession) {
-        self.restate
-            .settle_session_shift(&session.session_id())
-            .await;
-    }
-
-    /// Hold the engine's shift of `session` on the server double
-    /// ([`RestateTestBackend::hold_session_shift`](lash_restate_test::RestateTestBackend::hold_session_shift)):
-    /// what is sent there meanwhile stays pending until the hold is
-    /// released. The world asserts what is still pending this way; it never
-    /// executes a turn itself.
-    pub async fn hold_session_shift(&self, session: &lash::LashSession) -> lash_restate_test::Hold {
-        self.restate.hold_session_shift(&session.session_id()).await
     }
 }
 
@@ -286,21 +158,9 @@ impl DecoratedBackend {
         }
     }
 
-    /// `engine`'s backend, undecorated: it reaches the server double only
-    /// through its connection, so a core over it never keeps the server
-    /// alive.
-    ///
-    /// The session-work port is the engine's minus its wall-clock
-    /// reconcile interval: a pass that ticks on wall time would land its
-    /// shift asks wherever store reads happen to finish. A scenario reconciles explicitly
-    /// through `SessionShifts::reconcile` when it wants a pass.
+    /// `engine`'s backend, undecorated.
     pub fn over_engine(engine: &SimEngine) -> Self {
-        Self {
-            layered: lash_core::testing::runtime_helpers::LayeredBackend::over(
-                engine.restate.lash_backend(),
-            )
-            .with_session_work(engine.restate.explicit_reconcile_session_work()),
-        }
+        Self::over(engine.backend.clone())
     }
 
     /// Observe the commits made through the session factory into
@@ -314,8 +174,7 @@ impl DecoratedBackend {
     }
 
     /// Wrap the effect host in `layer`, once: every controller this
-    /// backend's host lends crosses the layer. The wrapped Restate backend
-    /// keeps the engine journal; its SQL stores retain application facts.
+    /// backend's host lends crosses the layer.
     pub fn with_effect_layer(self, layer: Arc<dyn lash_core::testing::EffectLayer>) -> Self {
         Self {
             layered: self.layered.map_effect_host(|host| {

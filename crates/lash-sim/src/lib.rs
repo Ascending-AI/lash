@@ -3,9 +3,7 @@ pub mod backend_fault;
 #[cfg(test)]
 mod cache_regression;
 mod canonical_scripts;
-pub mod chaos_soak;
 pub mod content_oracle;
-pub mod crash_matrix;
 #[cfg(test)]
 mod ingress_bound;
 #[cfg(test)]
@@ -14,10 +12,6 @@ mod obligation_bounds;
 mod oracle_coverage_tests;
 #[cfg(test)]
 mod recorded_reality;
-#[cfg(test)]
-mod recorded_termination_redrive;
-#[cfg(test)]
-mod request_snapshot;
 #[cfg(test)]
 mod tool_call_replay;
 
@@ -39,10 +33,7 @@ mod provider_variation_matrix;
 pub mod provider_variations;
 pub mod recording;
 pub mod replay;
-#[cfg(test)]
-mod response_body_budget;
 pub mod runner;
-pub mod runtime_boundaries;
 pub mod runtime_contracts;
 pub mod runtime_providers;
 pub mod scheduler;

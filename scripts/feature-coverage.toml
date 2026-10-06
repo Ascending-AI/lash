@@ -247,7 +247,6 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-postgres-store", "--tests", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-s3-store", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-s3-store", "--lib", "--no-default-features", "--features", "testing", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--locked"],
 ]
 
 [[lane]]
@@ -263,8 +262,6 @@ features = [
   "lash-runtime/postgres:off",
   "lash-runtime/s3:on",
   "lash-runtime/s3:off",
-  "lash-runtime/restate:on",
-  "lash-runtime/restate:off",
   "lash-runtime/openai:on",
   "lash-runtime/openai:off",
   "lash-runtime/anthropic:on",
@@ -297,14 +294,6 @@ commands = [
   # with them. This was the `default-off-tests` leg of the retired
   # `Runtime feature boundary` matrix.
   ["cargo", "test", "-p", "lash-runtime", "--no-default-features", "--locked"],
-  # The Restate host at its release resolution (FIG-3610). The `--all-targets`
-  # restate command below unifies the dev-dependency `lash-core/testing` into
-  # lash-restate, so it cannot see a testing-gated path that the release
-  # worker build, which has no dev-dependencies, refuses. It precedes that command: the generator keys optional-dependency
-  # activations by package and features alone, so a library variant emitted
-  # after a `--all-targets` command of the same features would inherit its
-  # dev-dependency edges.
-  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "restate", "--locked"],
   # ADR 0079 host-wired extension features. Each gates one `lash::<name>`
   # module in the library and one `#[cfg]` block in
   # `tests/integration/facade_inventory.rs`, so the ON witness has to compile both
@@ -314,7 +303,6 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "sqlite", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "postgres", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "s3", "--locked"],
-  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "restate", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "openai", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "anthropic", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "google", "--locked"],
@@ -337,13 +325,13 @@ commands = [
 # features off. The lane owns no coverage rows -- every feature it combines
 # already has its ON/OFF witnesses in the `runtime-features` and
 # `otel-feature-chain` lanes, and a coverage row's exact-ON command could not
-# carry the seven-feature set anyway.
+# carry the six-feature set anyway.
 [[lane]]
 name = "figments-facade"
 features = []
 commands = [
-  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm,postgres,restate,openai,typescript,testing,otel-trace", "--locked"],
-  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "rlm,postgres,restate,openai,typescript,testing,otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm,postgres,openai,typescript,testing,otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "rlm,postgres,openai,typescript,testing,otel-trace", "--locked"],
 ]
 
 [[lane]]
@@ -457,8 +445,6 @@ features = [
   "lash-internal-vm-broker/synthetic-next:off",
   "lash-internal-vm-client/synthetic-next:on",
   "lash-internal-vm-client/synthetic-next:off",
-  "lash-upgrade-harness/synthetic-next:on",
-  "lash-upgrade-harness/synthetic-next:off",
   "lash-runtime/synthetic-next:on",
   "lash-runtime/synthetic-next:off",
   "lash-internal-core/synthetic-next:on",
@@ -477,8 +463,6 @@ features = [
   "lash-internal-postgres-store/synthetic-next:off",
   "lash-internal-sqlite-store/synthetic-next:on",
   "lash-internal-sqlite-store/synthetic-next:off",
-  "lash-internal-restate/synthetic-next:on",
-  "lash-internal-restate/synthetic-next:off",
   "lash-internal-protocol-rlm/synthetic-next:on",
   "lash-internal-protocol-rlm/synthetic-next:off",
 ]
@@ -519,13 +503,8 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-sqlite-store", "--no-default-features", "--features", "synthetic-next", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-restate", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
-  ["cargo", "check", "-p", "lash-upgrade-harness", "--all-targets", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-upgrade-harness", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
 ]
 
 # The FIG-4169 rolling deploy replaces the load-test workers with the same
@@ -534,14 +513,10 @@ commands = [
 [[lane]]
 name = "loadtest-worker-synthetic-next"
 features = [
-  "lash-restate-postgres-workers-e2e/synthetic-next:on",
-  "lash-restate-postgres-workers-e2e/synthetic-next:off",
   "lash-internal-vm-worker/synthetic-next:on",
   "lash-internal-vm-worker/synthetic-next:off",
 ]
 commands = [
-  ["cargo", "check", "-p", "lash-restate-postgres-workers-e2e", "--all-targets", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-restate-postgres-workers-e2e", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
 ]
@@ -595,11 +570,4 @@ commands = [
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--features", "provider-wire-fixtures", "--locked"],
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--features", "e2e-tools", "--locked"],
-]
-
-# Root admission and pre-tool process cuts refuse predecessor journals before decoding.
-[[lane]]
-name = "turn-admission-synthetic-next"
-commands = [
-  ["cargo", "test", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "restate,testing,synthetic-next", "--locked", "formats::tests::plugin_transition_generation::atomic_root_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane", "formats::tests::plugin_transition_generation::process_run_environment_refuses_predecessor_journals_and_keeps_their_drain_lane", "formats::tests::plugin_transition_generation::borrowed_run_schedules_refuse_predecessor_journals_and_keep_their_drain_lane", "--", "--exact"],
 ]

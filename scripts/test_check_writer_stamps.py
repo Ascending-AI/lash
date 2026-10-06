@@ -76,14 +76,6 @@ class CheckTests(unittest.TestCase):
         self.write("crates/widget-store/src/lib.rs", ROUTED_STAMP)
         self.assertEqual(self.check(), [])
 
-    def test_engine_format_manifest_rows_are_not_write_stamps(self):
-        # The Restate engine's durable-format table declares the version the
-        # build writes for the facade's manifest; the bytes themselves live in
-        # the Restate deployment `F` does not govern. Same shape as the facade's
-        # own `crates/lash/src/formats.rs` exemption.
-        self.write("crates/lash-restate/src/formats.rs", MANIFEST_ROW)
-        self.assertEqual(self.check(), [])
-
     def test_manifest_exemption_does_not_leak_to_other_paths(self):
         self.write("crates/widget-store/src/lib.rs", MANIFEST_ROW)
         failures = self.check()

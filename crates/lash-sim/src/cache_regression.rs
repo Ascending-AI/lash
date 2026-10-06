@@ -1,7 +1,5 @@
-use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
-use lash::rlm::RlmSendBuilderExt;
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRequest, LlmRole};
 use lash_core::provider::{CacheControlDialect, CacheRetention};
 use lash_llm_transport::cache_regression::{
@@ -12,7 +10,6 @@ use serde_json::{Value, json};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProtocolKind {
     Standard,
-    Rlm,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,89 +113,6 @@ fn standard_iterations(model: &str) -> Vec<LlmRequest> {
         request(model, second),
         request(model, third),
     ]
-}
-
-async fn captured_rlm_iterations() -> Vec<LlmRequest> {
-    use std::collections::VecDeque;
-
-    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from([
-        "<typescript>\nlet value = 1;\nprint(value);\n</typescript>".to_string(),
-        "<typescript>\nvalue = value + 1;\nprint(value);\n</typescript>".to_string(),
-        "<typescript>\nfinish(value);\n</typescript>".to_string(),
-    ])));
-    let provider = lash_core::testing::TestProvider::builder()
-        .kind("cache-regression-rlm")
-        .complete({
-            let captures = Arc::clone(&captures);
-            move |request| {
-                let captures = Arc::clone(&captures);
-                let responses = Arc::clone(&responses);
-                async move {
-                    captures.lock_recover().push(request);
-                    let text = responses
-                        .lock()
-                        .await
-                        .pop_front()
-                        .expect("RLM response script");
-                    Ok(lash_core::LlmResponse {
-                        parts: vec![lash_core::LlmOutputPart::Text {
-                            text,
-                            response_meta: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..lash_core::LlmResponse::default()
-                    })
-                }
-            }
-        })
-        .build()
-        .into_handle();
-    let engine = crate::backend::SimEngine::new(0x5eed_7004)
-        .await
-        .expect("sim engine");
-    let backend = engine.backend();
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-            .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
-    );
-    let core = lash::LashCore::rlm_builder(backend, factory)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_llm_profile(
-            provider,
-            lash_core::LlmProfileMetadata::builder("cache-regression-model")
-                .context_window_tokens(200_000)
-                .build()
-                .expect("cache regression model"),
-        )
-        .build(crate::sim_process_owner())
-        .expect("RLM cache regression core");
-    let session =
-        crate::open_created_session("cache-regression-model", &core, "cache-regression-session")
-            .await
-            .expect("RLM cache regression session");
-    engine
-        .run_turn(
-            &session,
-            "cache-regression-turn",
-            Arc::new(crate::backend::DiscardedTurnActivity),
-            Arc::new(|session: &lash::LashSession| {
-                session
-                    .send(lash::TurnInput::text("increment a bound value twice"))
-                    .require_finish()
-            }),
-        )
-        .await
-        .expect("RLM cache regression handler")
-        .expect("RLM cache regression turn");
-
-    captures.lock_recover().clone()
 }
 
 fn prefix_for_openai_chat(body: Value, stable_messages: usize) -> SerializedPromptRequest {
@@ -338,40 +252,6 @@ fn chat_cache_dialect_prefix_shape_is_stable_as_breakpoints_roll() {
         let iterations = standard_iterations(model);
         assert_prefix_stability(
             &format!("{:?} x {serializer:?}", ProtocolKind::Standard),
-            &iterations,
-            |request, stable_messages| serialize_prefix(serializer, request, stable_messages),
-        );
-    }
-}
-
-#[tokio::test]
-async fn rlm_live_bound_state_is_prefix_stable_for_every_serializer() {
-    let captured = captured_rlm_iterations().await;
-    assert_eq!(captured.len(), 3, "RLM protocol call count");
-    for serializer in [
-        ProviderSerializer::ChatAnthropicDialect,
-        ProviderSerializer::ChatGeminiDialect,
-        ProviderSerializer::AnthropicDirect,
-        ProviderSerializer::GoogleDirect,
-    ] {
-        let model = match serializer {
-            ProviderSerializer::ChatAnthropicDialect | ProviderSerializer::AnthropicDirect => {
-                "anthropic/claude-sonnet-4.6"
-            }
-            ProviderSerializer::ChatGeminiDialect | ProviderSerializer::GoogleDirect => {
-                "google/gemini-3.1-pro-preview"
-            }
-        };
-        let iterations = captured
-            .iter()
-            .cloned()
-            .map(|mut request| {
-                request.model.metadata_mut().wire_model = model.to_string();
-                request
-            })
-            .collect::<Vec<_>>();
-        assert_prefix_stability(
-            &format!("{:?} x {serializer:?}", ProtocolKind::Rlm),
             &iterations,
             |request, stable_messages| serialize_prefix(serializer, request, stable_messages),
         );

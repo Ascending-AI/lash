@@ -33,13 +33,6 @@
 # --- Test partition policy ---------------------------------------------------
 
 [[rule]]
-packages = ["lash-upgrade-harness"]
-kinds = ["test"]
-targets = ["h1_recovery"]
-tags = ["manual", "cargo-service-gate"]
-reason = "requires private native Restate and owned node artifacts; run each full-path witness through scripts/e2e-gate.py in a Kiln gate"
-
-[[rule]]
 packages = ["lash-internal-s3-store"]
 kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["manual", "cargo-service-gate"]
@@ -55,23 +48,6 @@ reason = "proves nothing without a live S3 server; the service job executes this
 packages = ["lash-internal-postgres-store"]
 kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["hermetic-postgres"]
-
-[[rule]]
-packages = ["lash-restate-postgres-workers-e2e"]
-kinds = ["test"]
-targets = ["provider_stream_bounds"]
-tags = ["manual", "cargo-service-gate"]
-reason = "requires native Restate and SQL services; execute this label uncached through scripts/ci/with-service.sh"
-args = ["--ignored"]
-
-# H0 mixes cheap controller guards and cases requiring gate-owned native
-# Restate/process artifacts. Exact labels still run the cheap full-path filters.
-[[rule]]
-packages = ["lash-upgrade-harness"]
-kinds = ["test"]
-targets = ["e2e"]
-tags = ["manual", "cargo-service-gate"]
-reason = "contains private native-Restate and prebuilt-host witnesses; select exact guard filters or run provisioned witnesses through kiln gate"
 
 # The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
 # ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
@@ -97,13 +73,6 @@ shards = 2
 packages = ["lash-internal-protocol-rlm"]
 kinds = ["unit-test"]
 shards = 8
-
-# The Restate unit suite is the largest single libtest binary: about 104 s
-# quiet over 1431 cases, it timed out under contention at 939/1431.
-[[rule]]
-packages = ["lash-internal-restate"]
-kinds = ["unit-test"]
-shards = 4
 
 # The lash unit suite's 702 run cases add up to about 1120 s on four test
 # threads; whole, it ran 299 s and then hit the 300 s watchdog with a store-fault
@@ -135,33 +104,6 @@ kinds = ["unit-test"]
 tags = ["dev-deferred"]
 reason = "the generated-profile, minimizer and replay-artifact cases run 109--213 s, and the serial-lane determinism sweep is bounded to 4 of its 20 seeds per run (LASH_SIM_SERIAL_LANE_SEEDS) after measuring ~74--118 s at all twenty; too slow for the developer loop, still in the PR Buck2 partition"
 shards = 8
-timeout = "long"
-
-# The crash-point matrix (FIG-3849): every cell kills and restarts a
-# deployment on the Restate server double for each of its seeds and ticks the
-# recovery interval on virtual time until the end-state invariants hold. The
-# whole binary runs minutes, not seconds, so it stays out of the developer
-# loop; the Buck2 tail runs it on every full-profile dispatch of main.
-# Measured p50 138 s and p95 178 s whole, contention pushes it past its
-# timeout, so its cases split across four balanced shards.
-[[rule]]
-packages = ["lash-sim"]
-kinds = ["test"]
-targets = ["crash_point_matrix"]
-tags = ["dev-deferred"]
-reason = "the crash-point matrix restarts a deployment per cell and seed and ticks recovery on virtual time; minutes per run, too slow for the developer loop; the Buck2 tail runs it on main's full-profile dispatch"
-shards = 4
-
-# The chaos soak (FIG-3873): its smoke mode runs two seeded epochs of
-# randomized workload under kills, lease loss and rolling deploys on the
-# Restate server double, about two minutes; its release mode is ignored and
-# runs from `just chaos-soak`. Tagged as the crash-point matrix is.
-[[rule]]
-packages = ["lash-sim"]
-kinds = ["test"]
-targets = ["chaos_soak"]
-tags = ["dev-deferred"]
-reason = "the chaos-soak smoke runs two seeded epochs of randomized workload under kills, lease loss and rolling deploys on the server double; minutes per run, too slow for the developer loop; the Buck2 tail runs it on main's full-profile dispatch"
 timeout = "long"
 
 # The no-abort guarantee forks a dozen children that each parse deliberately
@@ -208,11 +150,6 @@ tags = ["pr-deferred"]
 reason = "RGI Unicode suites are too slow for the PR Buck2 partition; they run on lash-regress diffs and on trunk"
 
 # --- Library and unit-test compile inputs -----------------------------------
-
-[[rule]]
-packages = ["lash-upgrade-harness"]
-kinds = ["lib", "unit-test"]
-compile_data = ["//examples:shared_rust_sources"]
 
 [[rule]]
 packages = ["lash-perf"]
@@ -328,20 +265,6 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["dialect_cost"]
 compile_data = ["//:perf_guard_budgets"]
 
-# The tool-batch scaling guard holds each double to its checked-in budget by
-# reading the budget file with `include_str!`, the way lash-perf does
-# (FIG-4068).
-[[rule]]
-packages = ["lash-internal-protocol-rlm", "lash-internal-protocol-standard"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["tool_batch_parallelism"]
-compile_data = ["//:perf_guard_budgets"]
-
-[[rule]]
-packages = ["lash-internal-restate"]
-kinds = ["unit-test"]
-compile_data = ["//:perf_guard_budgets"]
-
 [[rule]]
 packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
 kinds = ["bin", "test", "example", "bench"]
@@ -433,14 +356,6 @@ kinds = ["bin-unit-test"]
 data = ["native//:node"]
 env = { LASH_WORKBENCH_TEST_NODE = "$(location native//:node)" }
 
-# S28 uses the workbench's own MCP subcommand and browser/native-journal oracle.
-[[rule]]
-packages = ["lash-upgrade-harness"]
-kinds = ["test"]
-targets = ["e2e_hosts"]
-data = ["//examples/agent-workbench:agent-workbench", "native//:restate", "//examples/agent-workbench:package_files"]
-env = { LASH_E2E_WORKBENCH_BIN = "$(location //examples/agent-workbench:agent-workbench)", LASH_RESTATE_SERVER_BIN = "$(location native//:restate)" }
-
 # --- Test-run requests --------------------------------------------------------
 
 # A test run's request comes from its measured row in test-run-sizes.json.
@@ -463,7 +378,6 @@ service_floor = { memory_kb = 1048576, packages = ["lash-internal-postgres-store
 [test_runs.large_suites]
 "agent-workbench/agent_workbench" = { cpu_count = 8, memory_kb = 4194304 }
 "lash-internal-core/lash_core" = { cpu_count = 8, memory_kb = 6815744 }
-"lash-internal-restate/lash_restate" = { cpu_count = 8, memory_kb = 4194304 }
 # The no-abort stress binary forks a dozen children that each parse
 # deliberately deep sources up to the stack bound. Measured 2026-09-23 as one
 # cgroup at four test threads: 7612 MiB peak, 2.6 cores over 37 s.
@@ -475,10 +389,6 @@ service_floor = { memory_kb = 1048576, packages = ["lash-internal-postgres-store
 # (FIG-4733).
 "lash-internal-typescript/test262_full" = { cpu_count = 8, memory_kb = 1572864 }
 "lash-internal-typescript/test262_ratchet" = { cpu_count = 8, memory_kb = 1572864 }
-# tool_batch_parallelism runs 53 s at its measured 2 cores; inside the 1-CPU
-# protocol-standard batch it stretched to ~105 s of a 115 s batch (FIG-4733).
-# As a large suite it runs as its own target, out of the batch.
-"lash-internal-protocol-standard/tool_batch_parallelism" = { cpu_count = 2, memory_kb = 1048576 }
 "lash-runtime/lash" = { cpu_count = 8, memory_kb = 4194304 }
 
 # Requests pinned per Buck2 label, for runs and batches whose size is policy
@@ -576,13 +486,6 @@ store_seam = [
 # takes from Cargo's resolve (tools/buck2/facade_completeness.bzl).
 [facade]
 package = "lash-runtime"
-
-# S34 uses the executing consumer's exact host-owned exporter fixture.
-[[rule]]
-packages = ["lash-upgrade-harness"]
-kinds = ["test"]
-targets = ["e2e_telemetry"]
-compile_data = ["//examples/e2e-consumer:rust_sources"]
 
 [[rule]]
 packages = ["transcript-contract"]

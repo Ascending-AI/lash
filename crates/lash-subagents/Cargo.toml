@@ -33,9 +33,6 @@ tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 
 [dev-dependencies]
 jsonschema = { workspace = true, default-features = false }
-# Kernel tests whose effects need an engine run on the Restate server double
-# (FIG-3668, D1 PR-S2).
-lash-restate-test = { workspace = true }
 lash-conformance = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-worker = { workspace = true, features = ["testing"] }

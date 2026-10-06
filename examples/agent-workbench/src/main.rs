@@ -19,29 +19,16 @@ mod deferred_tools;
 mod e2e_live_budget;
 mod execution_graphs;
 mod failure_provider;
-#[cfg(feature = "provider-wire-fixtures")]
-#[path = "../../shared/local_restate.rs"]
-mod local_restate;
 mod mail;
 mod mcp_fixture;
 mod mcp_host;
 mod mcp_policy;
-mod restate;
-mod restate_ingress;
 #[path = "../../shared/shutdown_marker.rs"]
 mod shutdown_marker;
+mod turns;
 mod ui;
 #[cfg(feature = "provider-wire-fixtures")]
 mod valid_empty_completion;
-
-// `#[restate_sdk::*]` expansions name `::restate_sdk` absolute paths; the SDK
-// reaches this crate through lash's re-export, so the crate answers to that
-// name and generated code resolves the modules below at the crate root.
-extern crate self as restate_sdk;
-#[allow(unused_imports)]
-use lash::restate::restate_sdk::{
-    context, discovery, endpoint, errors, handler, ingress, object, prelude, service, workflow,
-};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::SocketAddr;
@@ -75,13 +62,6 @@ use lash::{
     },
 };
 
-#[cfg(test)]
-fn test_core_owner() -> lash::persistence::LeaseOwnerIdentity {
-    lash::persistence::LeaseOwnerIdentity::opaque(
-        "agent-workbench-test-worker",
-        "agent-workbench-test-boot",
-    )
-}
 use lash::openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash::remote::Envelope;
 use lash::remote::observations::RemoteLiveReplayGap;
@@ -120,17 +100,6 @@ pub(crate) const MAIL_EVENT_EVENT: &str = "received";
 pub(crate) const MAIL_RECEIVED_SOURCE_TYPE: &str = "mail.received";
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 8 * 1024 * 1024;
 
-/// An attachment store of its own for a test state whose routes never read
-/// the core's attachments.
-#[cfg(test)]
-fn test_attachment_store() -> Arc<dyn lash::persistence::AttachmentStore> {
-    Arc::new(lash::persistence::FileAttachmentStore::new(
-        std::env::temp_dir().join(format!(
-            "agent-workbench-attachments-{}",
-            uuid::Uuid::new_v4()
-        )),
-    ))
-}
 /// How long a cancel route stays attached waiting for a terminal before it
 /// reports the cancellation as recorded-but-pending.
 ///
@@ -220,41 +189,6 @@ mod tests;
 #[path = "main_sections/tests/turn_control.rs"]
 mod turn_control_timeout_tests;
 
-#[cfg(test)]
-/// This test crate's one path to a session that may not exist yet
-/// (FIG-4112): only `create` creates, so this creates `session_id` from the
-/// test workbench's default spec unless the catalog already holds it, then
-/// hands back the builder for the verb under test. An existing or deleted id
-/// is left for that verb to report.
-async fn created_session(
-    core: &lash::LashCore,
-    session_id: impl Into<lash::SessionId>,
-) -> lash::SessionBuilder {
-    created_session_from(core, crate::tests::test_session_defaults(), session_id).await
-}
-
-#[cfg(test)]
-/// [`created_session`], created from `spec`: a test whose core serves a
-/// model of its own states it.
-async fn created_session_from(
-    core: &lash::LashCore,
-    spec: lash::SessionSpec,
-    session_id: impl Into<lash::SessionId>,
-) -> lash::SessionBuilder {
-    let session_id = session_id.into();
-    match core
-        .session(session_id.clone())
-        .create(lash::SessionCreation::root(spec))
-        .await
-    {
-        Ok(_)
-        | Err(lash::EmbedError::SessionAlreadyExists { .. })
-        | Err(lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. })) => {}
-        Err(error) => panic!("create session `{session_id}`: {error:?}"),
-    }
-    core.session(session_id)
-}
-
 fn main() -> AnyhowResult<()> {
     let stack_bytes = std::env::var("AGENT_WORKBENCH_TOKIO_STACK_BYTES")
         .ok()
@@ -270,12 +204,6 @@ fn main() -> AnyhowResult<()> {
             let command = args.next();
             if command.as_deref() == Some("mcp-fixture") {
                 return mcp_fixture::serve().await;
-            }
-            if command.as_deref() == Some("register-deployment") {
-                let endpoint_url = args
-                    .next()
-                    .context("usage: agent-workbench register-deployment <endpoint-url>")?;
-                return register_deployment_command(&endpoint_url).await;
             }
             async_main().await
         })

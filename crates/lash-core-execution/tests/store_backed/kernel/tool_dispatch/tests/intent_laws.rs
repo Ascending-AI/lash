@@ -2,8 +2,6 @@ use super::*;
 use crate::ProcessId;
 use crate::SessionId;
 
-const SEED: u64 = 0x5_2d28;
-
 /// One memory backend's registry, env store, trigger store and artifact
 /// referrer ports: every port an intent law's dispatch, process service,
 /// runtime execution and trigger router share.
@@ -641,85 +639,6 @@ async fn ordinary_controller_wrapped_intent_refusal_preserves_its_typed_code() {
             .to_string()
             .contains("process command returned the wrong outcome kind")
     );
-}
-
-#[tokio::test]
-async fn retry_drains_only_the_final_attempts_intents() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let definition = named_beta_tool("retry_intents")
-        .with_execution_policy(crate::ExecutionPolicy::repeatable(
-            std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
-            0,
-            0,
-        ))
-        .with_declaration(
-            crate::ToolDeclaration::default()
-                .with_intents([crate::ToolIntentKind::EmitProcessEvent]),
-        );
-    let calls = Arc::new(AtomicUsize::new(0));
-    let world = intent_law_world().await;
-    let registry = Arc::clone(&world.registry);
-    let target = registry
-        .register_process(
-            crate::testing::held_engine_registration(
-                serde_json::Value::Null,
-                crate::ProcessProvenance::host(),
-                crate::Lifetime::Detached,
-            )
-            .with_extra_event_types([crate::ProcessEventType {
-                name: "attempt.retry.final".to_string(),
-                payload_schema: crate::JsonSchema::any(),
-                semantics: crate::ProcessEventSemanticsSpec::default(),
-            }]),
-        )
-        .await
-        .expect("register retry intent target")
-        .id;
-    let provider: Arc<dyn ToolProvider> = Arc::new(RetryingIntentTools {
-        definition: definition.clone(),
-        calls: Arc::clone(&calls),
-        target: target.clone(),
-    });
-    let mut context = exact_dispatch_context(
-        crate::support::double_dispatch_ports(&double, &handler),
-        provider,
-    )
-    .await;
-    context.processes = crate::testing::effect_backed_process_service(
-        Arc::clone(&registry),
-        Arc::clone(&world.env_store),
-    );
-    let prepared = crate::PreparedToolCall {
-        call_id: crate::ToolCallId::fixture("retry-intents-call"),
-        provider_call_id: None,
-        tool_id: definition.id().to_string().into(),
-        tool_name: "retry_intents".into(),
-        args: json!({"value": "shift"}),
-        replay: None,
-        prepared_payload: serde_json::Value::Null,
-    };
-    let tool_context = tool_context_for_prepared(&context, &prepared);
-    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
-        &context,
-        prepared,
-        None,
-        tool_context,
-    )
-    .await;
-    let ToolCallLaunch::Done(outcome) = launch else {
-        panic!("retrying provider completes on its second attempt");
-    };
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert_eq!(outcome.attempts.len(), 2);
-    assert_eq!(outcome.intent_outcomes.len(), 1);
-    let events = registry
-        .full_event_window(&target, 0)
-        .await
-        .expect("read retry intent target events");
-    assert_eq!(events.len(), 1, "the retried declaration never drains");
-    assert_eq!(events[0].payload, json!({"attempt": 2}));
-    drop(context);
-    handler.close().await.expect("close the dispatch handler");
 }
 
 async fn register_trigger_intent_subscription(

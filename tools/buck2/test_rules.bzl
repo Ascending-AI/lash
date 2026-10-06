@@ -39,14 +39,6 @@ test_helper_bundle = rule(
     },
 )
 
-def _restate_inputs_impl(ctx):
-    return [DefaultInfo(default_output = ctx.actions.copied_dir("restate-suite", ctx.attrs.srcs))]
-
-restate_suite_inputs = rule(
-    impl = _restate_inputs_impl,
-    attrs = {"srcs": attrs.dict(attrs.string(), attrs.source())},
-)
-
 def _external_test_impl(ctx):
     test_info = ctx.attrs.test[DefaultInfo]
     # The native rust_test's own command and environment, not its RunInfo:
@@ -144,65 +136,6 @@ _POSTGRES_PREFIX = [
     "$(location native//:nss_wrapper)",
     "$(location //crates/lash-postgres-store:schema.sql)",
 ]
-
-def lash_restate_suite(name, test, env, timeout_seconds, suite, leg, shard_count):
-    budget = TEST_RUN_REQUESTS["//{}:{}".format(native.package_name(), name)]
-    cpu, memory_kb = budget["cpu_count"], budget["memory_kb"]
-    wrappers = []
-    for index in range(shard_count):
-        wrapper_name = name if shard_count == 1 else name + "__shard_{}".format(index + 1)
-        prefix = _POSTGRES_PREFIX + [
-            "/usr/bin/python3",
-            "$(location //tools/buck2:restate_action_runner)",
-            "$(location //:restate_suite_inputs)",
-            "$(location native//:restate)",
-            suite,
-            leg,
-            str(shard_count),
-            str(index),
-        ]
-        run_env = dict(env)
-        run_env.update({
-            "BUILD_WORKSPACE_DIRECTORY": ".",
-            "INSTA_WORKSPACE_ROOT": ".",
-            "KILN_ACTION_CPU_COUNT": str(cpu),
-            "KILN_ACTION_MEMORY_KB": str(memory_kb),
-            "LASH_TEST_EXECUTION_PREFIX_ARG_COUNT": str(len(prefix)),
-            "PATH": "/usr/bin:/bin",
-            "TEST_BINARY": "//{}:{}".format(native.package_name(), name),
-            "TEST_TARGET": "//{}:{}".format(native.package_name(), name),
-            "TEST_SHARD_INDEX": str(index),
-            "TEST_TOTAL_SHARDS": str(shard_count if shard_count > 1 else 0),
-        })
-        labels = [
-            "manual",
-            "hermetic-restate",
-            "lash.timeout_seconds={}".format(timeout_seconds),
-            "lash.resource_cpu={}".format(cpu),
-            "lash.resource_memory_kb={}".format(memory_kb),
-        ]
-        if shard_count > 1:
-            labels.append("lash.shard={}/{}".format(index + 1, shard_count))
-        _external_test(
-            name = wrapper_name,
-            runner = "//tools/buck2:test_helpers",
-            test = test,
-            args = ["--ignored"],
-            env = run_env,
-            labels = labels,
-            properties = pool_properties(str(cpu), str(memory_kb)),
-            prefix = prefix,
-            visibility = ["PUBLIC"],
-        )
-        wrappers.append(":" + wrapper_name)
-    if shard_count > 1:
-        _sharded_test_suite(
-            name = name,
-            compile = test,
-            labels = ["manual", "hermetic-restate"],
-            tests = wrappers,
-            visibility = ["PUBLIC"],
-        )
 
 def lash_test_wrapper(
         name,

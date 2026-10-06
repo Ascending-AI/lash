@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde::Serialize;
 
 use lash_sansio::SessionId;
@@ -34,8 +34,7 @@ use lash_sansio::sync::MutexExt;
 use super::provider::{
     HoldRegistry, LaneHold, LatencyProviderKind, ProviderTiming, latency_provider,
 };
-use super::restate::{LocalDeployment, LocalRestate, LocalRestateServer};
-use super::work_engine::{AwaitShiftMode, LatencySessionWork};
+use super::work_engine::AwaitShiftMode;
 use crate::perf_support::memory::process_memory_sample;
 use crate::perf_support::metrics::percentile_sorted;
 use crate::perf_support::scheduler::process_cpu_ms;
@@ -57,8 +56,6 @@ const STORE_POLL_TIMEOUT: Duration = Duration::from_secs(120);
 /// The follower poll schedule the `poll_detect` phase simulates.
 const POLL_FLOOR_MS: f64 = 25.0;
 const POLL_CEILING_MS: f64 = 1_000.0;
-/// How long a cross-worker child has to serve its endpoint.
-const WORKER_READY: Duration = Duration::from_secs(120);
 
 /// Where a case's turns execute.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -85,30 +82,17 @@ pub(crate) struct CaseSpec {
     pub(crate) busy: bool,
 }
 
-/// Shared run environment: the server, its addresses and the store root.
+/// Shared run environment: the store root.
 pub(crate) struct LatencyEnv {
-    pub(crate) restate: LocalRestate,
-    /// The seed the cross-worker child hashes into the same authority id.
-    pub(crate) authority_seed: String,
-    _server: Option<LocalRestateServer>,
     store_dir: PathBuf,
 }
 
 impl LatencyEnv {
-    /// The server this run measures: `RESTATE_*` env when a launcher handed
-    /// one over, a spawned private server otherwise.
+    /// The run's environment over `store_dir`.
     pub(crate) async fn open(store_dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(store_dir)
             .with_context(|| format!("create {}", store_dir.display()))?;
-        let authority_seed = std::env::var("LASH_LATENCY_AUTHORITY_SEED")
-            .ok()
-            .filter(|seed| !seed.is_empty())
-            .unwrap_or_else(|| format!("lash-perf-latency-{}", std::process::id()));
-        let (restate, server) = LocalRestate::discover(&authority_seed).await?;
         Ok(Self {
-            restate,
-            authority_seed,
-            _server: server,
             store_dir: store_dir.to_path_buf(),
         })
     }
@@ -116,10 +100,7 @@ impl LatencyEnv {
     /// What the report records about the engine under measurement.
     pub(crate) fn describe(&self) -> serde_json::Value {
         serde_json::json!({
-            "engine": "restate-server",
-            "server_source": self.restate.source,
-            "ingress_url": self.restate.ingress_url,
-            "admin_url": self.restate.admin_url,
+            "engine": "lash-durable",
             "store": "sqlite-file",
         })
     }
@@ -257,8 +238,7 @@ impl LaneSession {
     }
 }
 
-/// The topology a case's lanes run over, holding the deployment or the
-/// worker child alive for the case's duration.
+/// The topology a case's lanes run over.
 ///
 /// `observer` is a second core over its own store set on the same directory:
 /// the per-sample durable pollers read through its connections (WAL readers
@@ -267,8 +247,6 @@ impl LaneSession {
 struct CaseTopology {
     core: lash::LashCore,
     observer: lash::LashCore,
-    _deployment: Option<LocalDeployment>,
-    _worker: Option<LatencyWorkerProcess>,
 }
 
 /// Run one case to completion and collect every sample.
@@ -293,8 +271,7 @@ pub(crate) async fn run_case(
             let stores = lash::sqlite::SqliteStoreSet::open(stores_dir.join("lash.db"))
                 .await
                 .map_err(|error| anyhow::anyhow!("open case store set: {error}"))?;
-            let engine = env.restate.engine(Arc::new(stores));
-            let backend = lash::Backend::new(engine.clone());
+            let backend = durable_backend(stores)?;
             let core = build_core(
                 backend,
                 spec,
@@ -302,49 +279,15 @@ pub(crate) async fn run_case(
                 holds.clone(),
                 &compat_server,
             )?;
-            let worker = lash::durability::DurableProcessWorker::new(
-                core.durable_process_worker_config()
-                    .context("latency process worker config")?,
-            )
-            .map_err(|error| anyhow::anyhow!("build the latency process worker: {error}"))?;
-            let deployment = env
-                .restate
-                .serve(&engine, engine.endpoint_builder(worker)?.build())
-                .await?;
-            let observer = build_observer(&env.restate, &stores_dir).await?;
-            CaseTopology {
-                core,
-                observer,
-                _deployment: Some(deployment),
-                _worker: None,
-            }
+            let observer = build_observer(&stores_dir).await?;
+            CaseTopology { core, observer }
         }
-        Topology::CrossWorker => {
-            let worker_dir = case_dir.join("worker");
-            let worker = LatencyWorkerProcess::spawn(&worker_dir, env).await?;
-            let stores = lash::sqlite::SqliteStoreSet::open(worker_dir.join("lash.db"))
-                .await
-                .map_err(|error| anyhow::anyhow!("open host store set: {error}"))?;
-            let engine = env.restate.engine(Arc::new(stores));
-            let backend = lash::Backend::new(engine);
-            let backend = match spec.await_shift {
-                AwaitShiftMode::Real => backend,
-                mode => {
-                    let wrapped = LatencySessionWork::wrap(&backend, mode);
-                    lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
-                        .with_session_work(wrapped)
-                        .into_backend()
-                }
-            };
-            let core = build_core(backend, spec, Arc::clone(&timing), None, &compat_server)?;
-            let observer = build_observer(&env.restate, &worker_dir).await?;
-            CaseTopology {
-                core,
-                observer,
-                _deployment: None,
-                _worker: Some(worker),
-            }
-        }
+        // A cross-worker case's child served the engine's endpoint for the
+        // host; L9h (FIG-5186) ports these cases to the durable engine.
+        Topology::CrossWorker => anyhow::bail!(
+            "latency case `{}` runs cross-worker, and no worker serves the durable engine until L9h (FIG-5186)",
+            spec.name
+        ),
     };
 
     let started = Instant::now();
@@ -371,7 +314,6 @@ pub(crate) async fn run_case(
         }
     }
     samples.sort_by_key(|sample| (sample.lane, sample.index));
-    quiesce_shifts(&env.restate, spec).await;
     let wall = started.elapsed();
     let report = CaseReport::assemble(spec, &samples, errors, wall);
     Ok((report, samples))
@@ -420,13 +362,12 @@ fn build_core(
 
 /// A read-only core over a second store set on `stores_dir`. The per-sample
 /// durable pollers read through its connections (WAL readers beside the
-/// writer) so their cadence never serializes on the shift's own connections;
-/// it never serves an endpoint, so it can never work.
-async fn build_observer(restate: &LocalRestate, stores_dir: &Path) -> Result<lash::LashCore> {
+/// writer) so their cadence never serializes on the shift's own connections.
+async fn build_observer(stores_dir: &Path) -> Result<lash::LashCore> {
     let stores = lash::sqlite::SqliteStoreSet::open(stores_dir.join("lash.db"))
         .await
         .map_err(|error| anyhow::anyhow!("open observer store set: {error}"))?;
-    let backend = lash::Backend::new(restate.engine(Arc::new(stores)));
+    let backend = durable_backend(stores)?;
     let spec = CaseSpec {
         name: "observer",
         topology: Topology::SameProcess,
@@ -443,6 +384,13 @@ async fn build_observer(restate: &LocalRestate, stores_dir: &Path) -> Result<las
         None,
         &None,
     )
+}
+
+/// The durable engine's backend over `stores`.
+fn durable_backend(stores: lash::sqlite::SqliteStoreSet) -> Result<lash::Backend> {
+    lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+        .build()
+        .map_err(|error| anyhow::anyhow!("build the durable backend: {error}"))
 }
 
 fn latency_llm_profile_spec() -> Result<lash::LlmProfileMetadata> {
@@ -466,37 +414,6 @@ fn compat_profile() -> BenchmarkStreamProfile {
         full_text: deltas.concat(),
         deltas,
         parts: Vec::new(),
-    }
-}
-
-/// Let the case's last shift legs finish before the endpoint drops. A shift
-/// still running when its deployment goes away is retried against the dead
-/// address for the rest of the run — dead retry traffic that would inflate
-/// the next case's numbers. The server's own invocation table names every
-/// lash invocation of the case's sessions — a `LashSession` shift keyed by
-/// the session, a run's execution keyed by a turn workflow key that carries it —
-/// so it sees worker-process shifts too.
-async fn quiesce_shifts(restate: &LocalRestate, spec: &CaseSpec) {
-    let admin = lash_restate::RestateAdminClient::new(restate.admin_url.clone());
-    let query = format!(
-        "SELECT target_service_key FROM sys_invocation \
-         WHERE status IN ('pending', 'scheduled', 'running', 'backing-off', 'suspended', 'paused') \
-         AND target_service_name LIKE '%Lash%' \
-         AND target_service_key LIKE '%latency-{}-%'",
-        spec.name
-    );
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        // An admin read that fails counts as open work: the deadline ends
-        // the wait either way.
-        let open = match admin.query_json::<serde::de::IgnoredAny>(&query).await {
-            Ok(rows) => !rows.is_empty(),
-            Err(_) => true,
-        };
-        if !open || Instant::now() >= deadline {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -797,63 +714,6 @@ fn simulated_poll_detect_ms(settled_ms: f64) -> f64 {
             return at;
         }
         interval = (interval * 2.0).min(POLL_CEILING_MS);
-    }
-}
-
-/// The `latency-worker` child a cross-worker case executes: serves lash's
-/// Restate services over the shared store directory.
-struct LatencyWorkerProcess {
-    child: std::process::Child,
-}
-
-impl LatencyWorkerProcess {
-    async fn spawn(store_dir: &Path, env: &LatencyEnv) -> Result<Self> {
-        std::fs::create_dir_all(store_dir)
-            .with_context(|| format!("create {}", store_dir.display()))?;
-        let ready = store_dir.join("worker-ready");
-        let _ = std::fs::remove_file(&ready);
-        let binary = std::env::current_exe().context("resolve the lash-perf binary")?;
-        let endpoint_bind = std::env::var("LASH_LATENCY_WORKER_BIND")
-            .ok()
-            .and_then(|value| value.parse::<std::net::SocketAddr>().ok())
-            .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
-        let mut child = std::process::Command::new(binary)
-            .arg("latency-worker")
-            .arg("--store-dir")
-            .arg(store_dir)
-            .arg("--ready-file")
-            .arg(&ready)
-            .arg("--endpoint-bind")
-            .arg(endpoint_bind.to_string())
-            .env("RESTATE_INGRESS_URL", &env.restate.ingress_url)
-            .env("RESTATE_ADMIN_URL", &env.restate.admin_url)
-            .env("LASH_LATENCY_AUTHORITY_SEED", &env.authority_seed)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::inherit())
-            .spawn()
-            .context("spawn the latency worker")?;
-        let deadline = Instant::now() + WORKER_READY;
-        loop {
-            if ready.is_file() {
-                break;
-            }
-            if let Some(status) = child.try_wait()? {
-                bail!("latency worker exited early with {status}");
-            }
-            if Instant::now() > deadline {
-                let _ = child.kill();
-                bail!("latency worker did not report ready within {WORKER_READY:?}");
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        Ok(Self { child })
-    }
-}
-
-impl Drop for LatencyWorkerProcess {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
     }
 }
 

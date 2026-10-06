@@ -118,10 +118,6 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/pending_announcement_requires_a_replay_key.rs");
     t.compile_fail("tests/ui/after_turn_cannot_abort.rs");
     t.compile_fail("tests/ui/frame_key_is_not_a_frame_node_id.rs");
-    // FIG-3588: a Restate segment's effects need its committed start marker.
-    t.compile_fail("tests/ui/restate_segment_effects_require_a_committed_start.rs");
-    // FIG-3837: an exclusive object handler cannot wait for a run.
-    t.compile_fail("tests/ui/restate_exclusive_handler_cannot_wait_for_a_run.rs");
     // FIG-4024: the resident runtime state changes only through the
     // publishing install path.
     t.compile_fail("tests/ui/runtime_resident_state_is_private.rs");

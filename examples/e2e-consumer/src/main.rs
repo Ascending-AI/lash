@@ -20,7 +20,6 @@ mod telemetry_scenario;
 #[derive(Clone)]
 struct Host {
     core: LashCore,
-    stores: Arc<lash::sqlite::SqliteStoreSet>,
     controls: Arc<fixture::Controls>,
     telemetry: Option<Arc<telemetry::HostTelemetry>>,
 }
@@ -132,17 +131,7 @@ async fn binding(
         .run()
         .await
         .map_err(api_error)?;
-    let invocation_key = match &run {
-        Some(run) => lash::restate::recorded_turn_invocation_key(
-            host.stores.session_store_factory().as_ref(),
-            &session_id,
-            run,
-        )
-        .await
-        .map_err(api_error)?,
-        None => None,
-    };
-    Ok(Json(json!({"run":run,"invocation_key":invocation_key})))
+    Ok(Json(json!({"run":run})))
 }
 
 async fn task(
@@ -209,24 +198,16 @@ fn required(key: &str) -> Result<String> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let http_addr: SocketAddr = required("E2E_CONSUMER_ADDR")?.parse()?;
-    let endpoint_addr: SocketAddr = required("E2E_CONSUMER_RESTATE_ADDR")?.parse()?;
     let root = PathBuf::from(required("E2E_CONSUMER_DATA_DIR")?);
-    let mut config = lash::restate::RestateConfig::new(
-        required("RESTATE_INGRESS_URL")?,
-        required("RESTATE_ADMIN_URL")?,
-        lash::restate::RestateAuthorityId::new(required("RESTATE_AUTHORITY_ID")?)?,
-    )
-    .with_namespace(required("E2E_CONSUMER_NAMESPACE")?.parse()?);
-    if let Ok(budget) = std::env::var("E2E_CONSUMER_RUN_EFFECT_BUDGET") {
-        config = config.with_run_effect_budget(budget.parse()?);
-    }
     std::fs::create_dir_all(&root)?;
     let stores = Arc::new(match required("E2E_CONSUMER_STORE")?.as_str() {
         "memory" => lash::sqlite::SqliteStoreSet::memory().await?,
         "file" => lash::sqlite::SqliteStoreSet::open(root.join("lash.db")).await?,
         store => anyhow::bail!("unsupported consumer store {store}"),
     });
-    let engine = Arc::new(lash::restate::RestateEngine::new(stores.clone(), config));
+    let backend = lash::durable::DurableBackendBuilder::new(stores.clone())
+        .build()
+        .context("build the durable backend")?;
     let controls = Arc::new(fixture::Controls::default());
     let scenario = match std::env::var("E2E_CONSUMER_SCENARIO").ok().as_deref() {
         None => None,
@@ -250,7 +231,7 @@ async fn main() -> Result<()> {
     let trace = std::env::var_os("E2E_CONSUMER_TRACE")
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("trace.jsonl"));
-    let builder = LashCore::standard_builder(lash::Backend::new(engine.clone()))
+    let builder = LashCore::standard_builder(backend)
         .llm_profiles(Arc::new(profiles))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -269,23 +250,7 @@ async fn main() -> Result<()> {
         "external-consumer",
         std::process::id().to_string(),
     ))?;
-    let worker =
-        lash::durability::DurableProcessWorker::new(core.durable_process_worker_config()?)?;
-    let endpoint = engine.endpoint_builder(worker)?.build();
-    let listener = tokio::net::TcpListener::bind(endpoint_addr).await?;
-    let (stop, stopped) = tokio::sync::oneshot::channel();
-    let endpoint_task = tokio::spawn(lash::restate::serve_endpoint(
-        listener,
-        endpoint,
-        lash::restate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
-        async move {
-            let _ = stopped.await;
-        },
-    ));
     let operation = async {
-        engine
-            .register_deployment(&format!("http://{endpoint_addr}"))
-            .await?;
         let app = Router::new()
             .route(
                 "/healthz",
@@ -325,7 +290,6 @@ async fn main() -> Result<()> {
             )
             .with_state(Host {
                 core: core.clone(),
-                stores: stores.clone(),
                 controls,
                 telemetry: telemetry.clone(),
             });
@@ -340,8 +304,6 @@ async fn main() -> Result<()> {
         anyhow::Ok(())
     }
     .await;
-    let _ = stop.send(());
-    endpoint_task.await.context("join consumer endpoint")?;
     core.shutdown().await?;
     provider.close().await?;
     core.flush_trace_sink()?;

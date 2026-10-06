@@ -20,21 +20,16 @@ import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LABELS = {
-    "//crates/lash-upgrade-harness:e2e__test",
-    "//crates/lash-upgrade-harness:e2e_hosts__test",
-    "//crates/lash-upgrade-harness:e2e_h3__test",
-    "//crates/lash-upgrade-harness:e2e_telemetry__test",
-    "//crates/lash-upgrade-harness:h1_recovery__test",
-}
+# No registration runs until L9h (FIG-5186) rebuilds the E2E hosts on the
+# durable runtime: the upgrade harness that owned them went with Restate
+# (FIG-5190).
+LABELS: frozenset[str] = frozenset()
 WORKBENCH = "//examples/agent-workbench:agent-workbench"
 WORKER = "//crates/lash-vm-worker:lash-vm-worker__bin"
 SERVER = "native//:restate"
-NODE = "//crates/lash-upgrade-harness:lash-upgrade-node__bin"
 LASHCTL = "//crates/lashctl:lashctl"
 CONSUMER = "//examples/e2e-consumer:e2e-consumer"
 RLM_HOST = "//runbooks/rlm-smoke:rlm-smoke"
-RESTATE = ROOT / "scripts/ci/restate_suite.py"
 INVENTORY = ROOT / "tools/buck2/target-inventory.json"
 
 
@@ -151,13 +146,15 @@ def certify_case(artifacts: Path, junit: Path, outputs: dict[str, Path], source:
         hosts = {
             name: hashlib.sha256(outputs[name].read_bytes()).hexdigest()
             for name in ("workbench", "workbench_e2e", "node", "consumer", "rlm_host")
+            if name in outputs
         }
         matched = sorted(name for name, sha in hosts.items() if sha in artifact_shas)
         if len({hosts[name] for name in matched}) == 1:
             binaries["host"] = descriptor("host", outputs[matched[0]])
         else:
             errors.append(f"expected one host artifact match, found {len({hosts[name] for name in matched})}")
-        if hashlib.sha256(outputs["node_next"].read_bytes()).hexdigest() in artifact_shas:
+        if "node_next" in outputs and \
+                hashlib.sha256(outputs["node_next"].read_bytes()).hexdigest() in artifact_shas:
             binaries["synthetic_next_host"] = descriptor("synthetic_next_host", outputs["node_next"])
             binaries["operator"] = descriptor("operator", outputs["lashctl_n"])
             binaries["synthetic_next_operator"] = descriptor(
@@ -243,7 +240,7 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
         store: str, leg: str, live_replay: str) -> int:
     gate = os.environ["KILN_GATE_ID"]
     # S28 owns a second cluster in this block and fleet PostgreSQL owns
-    # offset 40; serve owns offsets 45–47.
+    # offset 40.
     base, block_fd = claim_port_block(Path(os.environ.get(
         "LASH_GATE_STATE_ROOT", f"/tmp/lash-gate-{os.getuid()}")))
     reservations = []
@@ -275,14 +272,13 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
     try:
         units = json.loads(INVENTORY.read_text())["feature_lane_units"]
         workbench_e2e = feature_variant(units, "agent-workbench", WORKBENCH, ["e2e-tools"])
-        node_next = feature_variant(units, "lash-upgrade-harness", NODE, ["synthetic-next"])
         worker_next = feature_variant(
             units, "lash-internal-vm-worker", WORKER, ["synthetic-next", "testing"])
         lashctl_n = feature_variant(units, "lashctl", LASHCTL, [])
         lashctl_next = feature_variant(units, "lashctl", LASHCTL, ["synthetic-next"])
         build = artifacts / "build.json"
         subprocess.run([
-            "kiln", "build", WORKBENCH, workbench_e2e, WORKER, SERVER, NODE, node_next,
+            "kiln", "build", WORKBENCH, workbench_e2e, WORKER, SERVER,
             lashctl_n, lashctl_next, worker_next, CONSUMER, RLM_HOST, label,
             "--materializations", "final",
             "--target-platforms", "prelude//platforms:default",
@@ -291,8 +287,6 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
         outputs = {
             "workbench": Path(output(build, WORKBENCH)),
             "workbench_e2e": Path(output(build, workbench_e2e)),
-            "node": Path(output(build, NODE)),
-            "node_next": Path(output(build, node_next)),
             "lashctl_n": Path(output(build, lashctl_n)),
             "lashctl_next": Path(output(build, lashctl_next)),
             "consumer": Path(output(build, CONSUMER)),
@@ -321,9 +315,6 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
             "    browser = p.chromium.launch(headless=True)\n"
             "    browser.close()\n",
         ], cwd=ROOT, env=env, check=True)
-        # Read the frozen current epoch rather than inventing a runner generation.
-        epochs = (ROOT / "crates/lash-restate/src/process/admission.rs").read_text()
-        generation = re.search(r"pub const JOURNAL_LOGIC_EPOCH: u32 = (\d+);", epochs).group(1)
         source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         env.update({
             "LASH_E2E_HOST_ARTIFACTS": str(artifacts / "case"),
@@ -337,22 +328,17 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
             # The live replay store every workbench of the case runs on
             # unless the case names one (FIG-5101).
             "LASH_E2E_LIVE_REPLAY": live_replay,
-            "LASH_E2E_HOST_GENERATION": generation,
             "LASH_E2E_REPO": str(ROOT),
             "LASH_E2E_PYTHON": str(python),
             "LASH_E2E_WORKBENCH_BIN": workbench,
             "LASH_E2E_WORKBENCH_SHA256": hashlib.sha256(Path(workbench).read_bytes()).hexdigest(),
             "LASH_WORKBENCH_E2E_BIN": str(outputs["workbench_e2e"]),
-            "LASH_UPGRADE_NODE_N": str(outputs["node"]),
-            "LASH_UPGRADE_NODE_NEXT": str(outputs["node_next"]),
             "LASH_UPGRADE_LASHCTL_N": str(outputs["lashctl_n"]),
             "LASH_UPGRADE_LASHCTL_NEXT": str(outputs["lashctl_next"]),
             "LASH_E2E_CONSUMER_BIN": str(outputs["consumer"]),
             "LASH_E2E_CONSUMER_SHA256": hashlib.sha256(outputs["consumer"].read_bytes()).hexdigest(),
-            "LASH_E2E_CONSUMER_GENERATION": generation,
             "LASH_E2E_RLM_HOST_BIN": str(outputs["rlm_host"]),
             "LASH_E2E_RLM_HOST_SHA256": hashlib.sha256(outputs["rlm_host"].read_bytes()).hexdigest(),
-            "LASH_RESTATE_SERVER_BIN": str(outputs["server"]),
             "LASH_VM_WORKER": worker,
         })
         (artifacts / "case").mkdir()
@@ -363,44 +349,32 @@ def run(label: str, name: str, artifacts: Path, case: str | None,
             "--test_arg=--nocapture", "--test-report", str(report),
             "--test-output-dir", str(artifacts / "test-results"),
         ]
-        # Kiln actions receive only explicitly forwarded runtime variables. serve
-        # fills the endpoint URLs before Kiln resolves these two --test_env keys.
+        # Kiln actions receive only explicitly forwarded runtime variables.
         keys = [key for key in env if key.startswith("LASH_E2E_")]
-        keys += ["KILN_GATE_ID", "LASH_RESTATE_SERVER_BIN", "LASH_VM_WORKER",
-                 "LASH_WORKBENCH_E2E_BIN", "LASH_UPGRADE_NODE_N", "LASH_UPGRADE_NODE_NEXT",
+        keys += ["KILN_GATE_ID", "LASH_VM_WORKER",
+                 "LASH_WORKBENCH_E2E_BIN",
                  "LASH_UPGRADE_LASHCTL_N", "LASH_UPGRADE_LASHCTL_NEXT",
-                 "LASH_PHASE_A_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH", "TMPDIR",
-                 "RESTATE_INGRESS_URL", "RESTATE_ADMIN_URL"]
+                 "LASH_PHASE_A_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH", "TMPDIR"]
         # The paid live rows' provider credential and model reach the case only
         # when the operator supplies them; without them those rows record NotRun.
         keys += [key for key in ("OPENROUTER_API_KEY", "OPENROUTER_MODEL") if env.get(key)]
         postgres = store == "postgresql" or live_replay == "postgresql"
         if postgres:
-            # with-service.sh exports the server address into serve's environment;
-            # Kiln resolves this --test_env key against that environment like it
-            # does serve's own RESTATE_* endpoints.
+            # with-service.sh exports the server address into the command's
+            # environment; Kiln resolves this --test_env key against it.
             keys.append("LASH_POSTGRES_DATABASE_URL")
         command.extend(f"--test_env={key}" for key in sorted(keys))
-        serve = [
-            "python3", str(RESTATE), "serve", "--name", f"e2e-{gate}",
-            "--leg", leg,
-            "--server-env", "RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true",
-            "--port-base", str(base + 45), "--keep-log", str(artifacts / "restate.log"),
-            "--", *command,
-        ]
         if postgres:
-            serve = [
-                str(ROOT / "scripts/ci/with-service.sh"), "pg16", "--", *serve,
+            command = [
+                str(ROOT / "scripts/ci/with-service.sh"), "pg16", "--", *command,
             ]
-        code = subprocess.call(serve, cwd=ROOT, env=env)
+        code = subprocess.call(command, cwd=ROOT, env=env)
         counts = test_counts(report, label, name)
         junit = Path(counts.pop("junit_xml"))
-        # serve's port roles are ingress/admin/node, so the runner-served admin URL
-        # the journal facts record is base + 46.
         provenance = certify_case(artifacts, junit, outputs, source, case,
                                   f"http://127.0.0.1:{base + 46}", {
                                       "scenario": name, "label": label, "source_sha": source,
-                                      "gate": gate, "port_base": base, "generation": generation,
+                                      "gate": gate, "port_base": base,
                                       "store": store, "leg": leg,
                                       "live_replay": live_replay,
                                       "playwright": "1.62.0",
@@ -428,7 +402,7 @@ def main() -> int:
     parser.add_argument("--store", choices=("sqlite_memory", "sqlite_file", "postgresql"), required=True,
                         help="store the case runs its host over")
     parser.add_argument("--leg", choices=("live", "replay"), required=True,
-                        help="invocation leg the served Restate runs")
+                        help="invocation leg the case runs")
     parser.add_argument("--artifacts", type=Path, help="fresh directory inside this fork")
     parser.add_argument("--case", help="manifest scenario/variant/store/leg/channel key")
     parser.add_argument("--live-replay", choices=("memory", "postgresql"), default="memory",

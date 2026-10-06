@@ -1,29 +1,15 @@
-//! One re-executed lashlang run's command ordinals and its recorded frontier
-//! (FIG-3586).
+//! One lashlang run's command ordinals (FIG-3586).
 //!
-//! A lashlang run — a code cell, or a process body — replays by running its
-//! program again (ADR 0103). Every command that leaves the VM through
-//! `ExecutionHost::perform` and reaches the effect host — a resource
-//! operation, a whole aggregate, a sleep, an await of a handle, a signal wait
-//! — takes the next **issue ordinal** of the run, and every journal row the
-//! command writes lives under that ordinal's key. Nothing a compiler produces
-//! reaches a key: a redrive on a build whose lowering differs finds each
-//! command where it left it, as long as it issues the same commands in the
-//! same order.
+//! A lashlang run — a code cell, or a process body — runs its program. Every
+//! command that leaves the VM through `ExecutionHost::perform` and reaches
+//! the effect host — a resource operation, a whole aggregate, a sleep, an
+//! await of a handle, a signal wait — takes the next **issue ordinal** of the
+//! run, and every journal row the command writes lives under that ordinal's
+//! key. Nothing a compiler produces reaches a key.
 //!
-//! The ordinal alone would let a changed program walk *past* its recorded
-//! prefix and dispatch live. The **recorded frontier** closes that: before
-//! the run's first command reaches the host, the run reads its whole key
-//! namespace once, and from then on no command is dispatched live while the
-//! journal still holds an entry at or beyond it. A command whose recorded
-//! entry has another shape (a scalar call replayed as an aggregate) refuses at
-//! its ordinal, and a completed run's seal refuses a run that ends early. Every
-//! refusal is [`RuntimeErrorCode::LashlangCellReplayDivergence`] with zero
-//! dispatch; the run stops, and its turn parks.
-//!
-//! Engines that replay their journal by position and name-check each entry
-//! (Restate) answer the frontier read as positional: their own check is the
-//! fence, and this run only mints the keys and journals the seal.
+//! A run starts fresh: the recorded-frontier read a replayed run made went
+//! with Restate's journal (FIG-5190); L6 and L7b rebuild resume on
+//! snapshots.
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_LASHLANG_CELL_GENERATION_DOMAIN_VERSION, lashlang_cell_generation))
@@ -37,12 +23,10 @@ const LASHLANG_PREFIX_VERSION: &str = "lashlang:v2:";
 /// version_guard(items(LASHLANG_DISPATCHED_ORDINALS_DOMAIN_VERSION, hash))
 const LASHLANG_DISPATCHED_ORDINALS_DOMAIN_VERSION: &str = "lashlang-dispatched-ordinals/v1";
 
-use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use lash_core::{
-    CommandReplayKey, RecordedJournal, RecordedKeyRange, RecordedKeys,
-    RuntimeEffectControllerError, RuntimeErrorCode,
+    CommandReplayKey, RecordedKeyRange, RuntimeEffectControllerError, RuntimeErrorCode,
 };
 use lash_sansio::sync::MutexExt;
 
@@ -205,27 +189,10 @@ impl LashlangReplayNamespace {
     pub fn as_str(&self) -> &str {
         &self.prefix
     }
-
-    /// Splits a recorded key of this namespace into its ordinal and the
-    /// sub-key after it (`""` for the command's own row). `None` for a key
-    /// outside the namespace or one that does not parse as an ordinal key —
-    /// the seal among them.
-    fn split<'k>(&self, key: &'k str) -> Option<(u64, &'k str)> {
-        let rest = key.strip_prefix(&self.prefix)?.strip_prefix(':')?;
-        let digits = rest.get(..ORDINAL_WIDTH)?;
-        if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
-        }
-        let ordinal = digits.parse().ok()?;
-        match &rest[ORDINAL_WIDTH..] {
-            "" => Some((ordinal, "")),
-            tail => tail.strip_prefix(':').map(|sub| (ordinal, sub)),
-        }
-    }
 }
 
-/// What one command writes to its journal, as a frontier read tells it
-/// apart: the shape of the rows at its ordinal.
+/// What one command writes to its journal: the shape of the rows at its
+/// ordinal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandShape {
     /// A tool call: `{command}:{call_id}:attempt:{n}` and its sub-rows, its deferred
@@ -248,153 +215,6 @@ pub enum CommandShape {
     /// append, or an ability this host refuses before dispatch. It holds its
     /// ordinal so every later command keeps its key.
     Silent,
-}
-
-impl CommandShape {
-    fn of_sub_key(sub: &str) -> Option<Self> {
-        use lash_core::runtime::CommandSubKey;
-        Some(match CommandSubKey::parse(sub)? {
-            CommandSubKey::Value => Self::Value,
-            CommandSubKey::Sleep => Self::Sleep,
-            CommandSubKey::SignalWait => Self::SignalWait,
-            CommandSubKey::TimersAdmitted
-            | CommandSubKey::AggregateRequests
-            | CommandSubKey::AggregateChild(_) => Self::Aggregate,
-            CommandSubKey::ToolAttempt { .. }
-            | CommandSubKey::ToolRetrySleep { .. }
-            | CommandSubKey::ToolAwait { .. }
-            | CommandSubKey::ToolCancelWork { .. }
-            | CommandSubKey::ProcessStart(_)
-            | CommandSubKey::ProcessSubscribeTerminal(_) => Self::ToolCall,
-            CommandSubKey::ProcessAwait(_) => Self::AwaitHandle,
-        })
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::ToolCall => "tool call",
-            Self::Value => "journaled value",
-            Self::Sleep => "sleep",
-            Self::Aggregate => "aggregate",
-            Self::AwaitHandle => "handle await",
-            Self::SignalWait => "signal wait",
-            Self::Silent => "unjournaled command",
-        }
-    }
-}
-
-/// What the journal holds at one ordinal.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum RecordedCommand {
-    Shape(CommandShape),
-    /// Rows of more than one shape, or a sub-key no command writes: nothing
-    /// may be admitted at this ordinal.
-    Unreadable(String),
-}
-
-/// A run's journal as the frontier read found it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct RecordedRun {
-    commands: BTreeMap<u64, RecordedCommand>,
-    /// Keys under the namespace that name no ordinal: the run cannot tell
-    /// where they sit, so it treats them as recorded beyond every command.
-    foreign: Vec<String>,
-    sealed: bool,
-    /// The recorded seal's outcome, served for attribution only.
-    seal_outcome: Option<String>,
-    /// Every replay key the journal holds in the namespace: a replayed
-    /// command's writes must land on these while entries lie beyond it.
-    keys: std::sync::Arc<std::collections::BTreeSet<String>>,
-}
-
-impl RecordedRun {
-    fn read(namespace: &LashlangReplayNamespace, keys: RecordedKeys) -> Self {
-        // The seal row holds its journaled outcome; the producer is its value.
-        let seal_outcome = keys.closing_outcome.map(|outcome| {
-            serde_json::from_str::<serde_json::Value>(&outcome)
-                .ok()
-                .and_then(|outcome| outcome.get("value").cloned())
-                .map_or(outcome, |producer| producer.to_string())
-        });
-        let mut run = Self {
-            seal_outcome,
-            ..Self::default()
-        };
-        run.keys = std::sync::Arc::new(keys.replay_keys.iter().cloned().collect());
-        let seal = namespace.seal();
-        let mut shapes: BTreeMap<u64, Vec<(String, Option<CommandShape>)>> = BTreeMap::new();
-        for key in keys.replay_keys {
-            if key == seal {
-                run.sealed = true;
-                continue;
-            }
-            match namespace.split(&key) {
-                Some((ordinal, sub)) => {
-                    let shape = CommandShape::of_sub_key(sub);
-                    shapes.entry(ordinal).or_default().push((key, shape));
-                }
-                None => run.foreign.push(key),
-            }
-        }
-        for key in keys.group_keys {
-            match namespace.split(&key) {
-                Some((ordinal, "")) => shapes
-                    .entry(ordinal)
-                    .or_default()
-                    .push((key, Some(CommandShape::Aggregate))),
-                _ => run.foreign.push(key),
-            }
-        }
-        for (ordinal, rows) in shapes {
-            let mut shape = None;
-            let mut unreadable = None;
-            for (key, row_shape) in rows {
-                match (row_shape, shape) {
-                    (None, _) => {
-                        unreadable = Some(format!("`{key}` is not a key any command writes"));
-                    }
-                    (Some(row), None) => shape = Some(row),
-                    (Some(row), Some(seen)) if row == seen => {}
-                    (Some(row), Some(seen)) => {
-                        unreadable = Some(format!(
-                            "rows of a {} and a {} share it (`{key}`)",
-                            seen.label(),
-                            row.label()
-                        ));
-                    }
-                }
-            }
-            let recorded = match (unreadable, shape) {
-                (Some(reason), _) => RecordedCommand::Unreadable(reason),
-                (None, Some(shape)) => RecordedCommand::Shape(shape),
-                (None, None) => continue,
-            };
-            run.commands.insert(ordinal, recorded);
-        }
-        run
-    }
-
-    /// The first recorded entry at or beyond `ordinal`, when there is one.
-    fn first_at_or_beyond(&self, ordinal: u64) -> Option<String> {
-        if let Some((recorded, _)) = self.commands.range(ordinal..).next() {
-            return Some(format!("a recorded command at ordinal {recorded}"));
-        }
-        if let Some(key) = self.foreign.first() {
-            return Some(format!("the unordered recorded key `{key}`"));
-        }
-        self.sealed.then(|| "the run's seal".to_string())
-    }
-}
-
-/// How this run's host answered the frontier read.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Frontier {
-    /// Not read yet: the run has not dispatched a command.
-    Unread,
-    /// The journal's rows, by ordinal.
-    Recorded(RecordedRun),
-    /// The host checks its journal by position as it replays.
-    Positional,
 }
 
 /// A running hash of the ordinals a run dispatched, in dispatch order.
@@ -447,7 +267,7 @@ impl LashlangRunOrdinals {
     }
 }
 
-/// One run's ordinal mint, dispatch record and recorded frontier.
+/// One run's ordinal mint and dispatch record.
 #[derive(Debug)]
 pub struct LashlangReplayRun {
     namespace: LashlangReplayNamespace,
@@ -457,7 +277,6 @@ pub struct LashlangReplayRun {
 #[derive(Debug)]
 struct RunState {
     ordinals: LashlangRunOrdinals,
-    frontier: Frontier,
 }
 
 /// One command's issue: its ordinal and key.
@@ -534,10 +353,7 @@ impl LashlangReplayRun {
     pub fn new(namespace: LashlangReplayNamespace, ordinals: LashlangRunOrdinals) -> Self {
         Self {
             namespace,
-            state: Mutex::new(RunState {
-                ordinals,
-                frontier: Frontier::Unread,
-            }),
+            state: Mutex::new(RunState { ordinals }),
         }
     }
 
@@ -574,140 +390,13 @@ impl LashlangReplayRun {
         })
     }
 
-    /// Whether the frontier has been read.
-    fn frontier_read(&self) -> bool {
-        !matches!(self.state.lock_recover().frontier, Frontier::Unread)
-    }
-
-    /// Reads the recorded frontier if this run has not yet: the one range
-    /// read of the run's namespace.
-    pub async fn ensure_frontier(
-        &self,
-        ctx: &lash_core::RuntimeExecutionContext<'_>,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        if self.frontier_read() {
-            return Ok(());
-        }
-        let frontier = match ctx.read_recorded_journal(&self.namespace.range()).await? {
-            RecordedJournal::Keys(keys) => {
-                Frontier::Recorded(RecordedRun::read(&self.namespace, keys))
-            }
-            RecordedJournal::Positional => Frontier::Positional,
-        };
-        let mut state = self.state.lock_recover();
-        if matches!(state.frontier, Frontier::Unread) {
-            state.frontier = frontier;
-        }
-        Ok(())
-    }
-
-    /// Decides how `command`, about to reach the host as a `shape`, may write
-    /// the journal. The frontier must have been read.
-    ///
-    /// * The journal holds `command`'s ordinal as another shape, or as rows no
-    ///   one command writes: refused here, before anything reaches the host.
-    /// * The journal holds it as this shape: [`CommandAdmission::Replay`] —
-    ///   its writes pass, and it must make one.
-    /// * The journal holds nothing at it but still holds entries beyond it:
-    ///   [`CommandAdmission::RefuseWrites`] — the command may run, but its
-    ///   first journal write under the namespace is refused, because the
-    ///   recorded run did not write here and nothing may be dispatched live
-    ///   inside it. A write outside the namespace is the host's to judge: a
-    ///   call settled in preparation wrote only its presentation, and replays
-    ///   by serving it (FIG-3680).
-    /// * The journal holds nothing at or beyond it, or checks itself by
-    ///   position: [`CommandAdmission::Live`].
-    pub fn enter(
-        &self,
-        command: &IssuedCommand,
-        shape: CommandShape,
-    ) -> Result<CommandAdmission, ReplayDivergence> {
-        let state = self.state.lock_recover();
-        let Frontier::Recorded(recorded) = &state.frontier else {
-            return Ok(CommandAdmission::Live);
-        };
-        match recorded.commands.get(&command.ordinal) {
-            Some(RecordedCommand::Shape(recorded_shape)) if *recorded_shape == shape => {
-                Ok(match recorded.first_at_or_beyond(command.ordinal + 1) {
-                    // Entries lie beyond this command: its writes must land
-                    // on the keys the journal holds, or something that did
-                    // not happen here would be dispatched live inside the
-                    // recorded run.
-                    Some(beyond) => CommandAdmission::ReplayRecordedKeys {
-                        keys: std::sync::Arc::clone(&recorded.keys),
-                        divergence: ReplayDivergence::at(
-                            &self.namespace,
-                            Some(command.ordinal),
-                            format!(
-                                "this {} wrote an entry the journal does not hold here, and \
-                                 the journal still holds {beyond}",
-                                shape.label()
-                            ),
-                        ),
-                    },
-                    None => CommandAdmission::Replay,
-                })
-            }
-            Some(RecordedCommand::Shape(recorded_shape)) => Err(ReplayDivergence::at(
-                &self.namespace,
-                Some(command.ordinal),
-                format!(
-                    "the journal recorded a {} here and this run issued a {}",
-                    recorded_shape.label(),
-                    shape.label()
-                ),
-            )),
-            Some(RecordedCommand::Unreadable(reason)) => Err(ReplayDivergence::at(
-                &self.namespace,
-                Some(command.ordinal),
-                format!("the journal's rows here cannot be read as one command: {reason}"),
-            )),
-            None => Ok(match recorded.first_at_or_beyond(command.ordinal) {
-                Some(beyond) => CommandAdmission::RefuseWrites(ReplayDivergence::at(
-                    &self.namespace,
-                    Some(command.ordinal),
-                    format!(
-                        "the journal recorded nothing here but still holds {beyond}, so this {} \
-                         would be dispatched live inside the recorded run",
-                        shape.label()
-                    ),
-                )),
-                None => CommandAdmission::Live,
-            }),
-        }
-    }
-
-    /// Whether the run's host replays its journal by position, answering no
-    /// frontier read: which commands it holds is known only as the replay
-    /// reaches them (Restate).
-    pub fn is_positional(&self) -> bool {
-        matches!(self.state.lock_recover().frontier, Frontier::Positional)
-    }
-
     /// Closes `command`: `wrote` says whether it wrote the journal. A written
-    /// command joins the run's dispatched digest. A command the journal holds
-    /// rows for that wrote nothing — it now fails before reaching the host, or
-    /// settles without dispatching — refuses here, at its ordinal: the
-    /// recorded run dispatched it, and this one answered it some other way.
-    pub fn finish(&self, command: &IssuedCommand, wrote: bool) -> Result<(), ReplayDivergence> {
-        let mut state = self.state.lock_recover();
+    /// command joins the run's dispatched digest.
+    pub fn finish(&self, command: &IssuedCommand, wrote: bool) {
         if wrote {
+            let mut state = self.state.lock_recover();
             state.ordinals.dispatched = state.ordinals.dispatched.extend(command.ordinal);
-            return Ok(());
         }
-        if let Frontier::Recorded(recorded) = &state.frontier
-            && let Some(RecordedCommand::Shape(shape)) = recorded.commands.get(&command.ordinal)
-        {
-            return Err(ReplayDivergence::at(
-                &self.namespace,
-                Some(command.ordinal),
-                format!(
-                    "the journal recorded a {} here that this run did not dispatch",
-                    shape.label()
-                ),
-            ));
-        }
-        Ok(())
     }
 
     /// Returns `command` to the mint: its host left it open for the segment
@@ -731,62 +420,23 @@ impl LashlangReplayRun {
         Ok(())
     }
 
-    /// The seal this run writes as its last nested effect, after checking
-    /// that no recorded command lies beyond the commands it issued.
-    pub fn seal(&self) -> Result<RunSeal, ReplayDivergence> {
+    /// The seal this run writes as its last nested effect.
+    pub fn seal(&self) -> RunSeal {
         let state = self.state.lock_recover();
-        let issued_count = state.ordinals.next;
-        if let Frontier::Recorded(recorded) = &state.frontier
-            && let Some((ordinal, _)) = recorded.commands.range(issued_count..).next()
-        {
-            return Err(ReplayDivergence::at(
-                &self.namespace,
-                None,
-                format!(
-                    "the run ended after {issued_count} commands but the journal recorded a \
-                     command at ordinal {ordinal}"
-                ),
-            ));
-        }
-        Ok(RunSeal {
+        RunSeal {
             key: self.namespace.seal(),
-            issued_count,
+            issued_count: state.ordinals.next,
             dispatched_ordinals_digest: state.ordinals.dispatched.clone(),
-        })
+        }
     }
 
-    /// Who wrote the journal, for a refusal's message.
+    /// Who is running the journal's run, for a refusal's message.
     pub fn attribution(&self, current: impl Into<String>) -> SealAttribution {
-        let state = self.state.lock_recover();
         SealAttribution {
-            recorded: match &state.frontier {
-                Frontier::Recorded(recorded) => recorded.seal_outcome.clone(),
-                Frontier::Unread | Frontier::Positional => None,
-            },
+            recorded: None,
             current: current.into(),
         }
     }
-}
-
-/// How one command may write the journal: see [`LashlangReplayRun::enter`].
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CommandAdmission {
-    /// The journal holds this command and nothing beyond it; its writes
-    /// replay it, and any it did not record are live.
-    Replay,
-    /// The journal holds this command and entries beyond it: its writes
-    /// replay it, and a write to a key the journal does not hold refuses
-    /// with `divergence`.
-    ReplayRecordedKeys {
-        keys: std::sync::Arc<std::collections::BTreeSet<String>>,
-        divergence: ReplayDivergence,
-    },
-    /// Nothing is recorded at or beyond this command; its writes are live.
-    Live,
-    /// Nothing is recorded here but entries are recorded beyond: the first
-    /// write under the run's namespace, or one naming no key, is refused with
-    /// this divergence.
-    RefuseWrites(ReplayDivergence),
 }
 
 /// A run's seal: the count of commands it issued and the digest of those it
@@ -812,7 +462,3 @@ impl lash_core::store::DurableRecord for DispatchedOrdinalsDigest {
     const SURFACE: lash_core::store::SurfaceFormat =
         lash_core::surface_format!(crate::replay_run::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION);
 }
-
-#[cfg(test)]
-#[path = "replay_run_tests.rs"]
-mod tests;

@@ -13,17 +13,6 @@ runtime-commit-pins:
   source ./env.sh
   python3 scripts/regenerate-runtime-commit-pins.py
 
-# FIG-4495 cut tooling. Call inside kiln gate lash <fork> -- just ...
-release-fixtures-capture tag dest:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  : "${KILN_GATE_ID:?release capture requires kiln gate}"
-  cd "{{repo}}"
-  source ./env.sh
-  export LASH_VM_WORKER="$(python3 scripts/ci/restate_suite.py build //crates/lash-vm-worker:lash-vm-worker__bin)"
-  test -x "$LASH_VM_WORKER"
-  scripts/ci/with-service.sh pg16 -- bash -c 'python3 scripts/capture_release_fixtures.py --tag "$1" --dest "$2" --regenerate && python3 scripts/verify_release_fixtures.py "$2"' bash "{{tag}}" "{{dest}}"
-
 release-fixtures-read-back corpus *args:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -64,11 +53,8 @@ agent-workbench-down port='3030':
 agent-workbench-foreground port='3030':
   ./scripts/agent-workbench-dev.sh foreground --port "{{port}}"
 
-# The runs share one restate-server the process starts, the pinned binary,
-# each in a namespace of its own.
 toolbench model='z-ai/glm-5.3-flash' *args:
-  LASH_RESTATE_SERVER_BIN="$(python3 "{{repo}}/scripts/ci/restate_suite.py" server-path)" \
-    kiln run //examples/toolbench:toolbench -- --model "{{model}}" {{args}}
+  kiln run //examples/toolbench:toolbench -- --model "{{model}}" {{args}}
 
 rlm-smoke-e2e:
   bash "{{repo}}/scripts/rlm-smoke-e2e.sh"
@@ -96,26 +82,6 @@ workflow-schema-generate:
 workflow-schema-check:
   python3 scripts/generate-workflow-schemas.py --check
 
-loadtest-ledger mode='generate':
-  #!/usr/bin/env bash
-  set -euo pipefail
-  cd "{{repo}}"
-  source ./env.sh
-  ledger_args=()
-  case "$1" in
-    generate) ;;
-    check) ledger_args=(--check) ;;
-    *) printf 'usage: just loadtest-ledger [generate|check]\n' >&2; exit 2 ;;
-  esac
-  kiln build //runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin \
-    --materializations final --build-report .buck2/ledger-build.json
-  ledger_generator="$(python3 tools/buck2/outputs.py --report .buck2/ledger-build.json \
-    --label //runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin --single)"
-  python3 scripts/generate_loadtest_ledger.py --generator "$ledger_generator" "${ledger_args[@]}"
-
-agent-workbench-restate-e2e:
-  bash "{{repo}}/scripts/agent-workbench-restate-e2e.sh"
-
 # FIG-4042: token-free RLM warning and frame-switch companion for the manual
 # workbench continue_as runbook. The provider responses are scripted in-process.
 workbench-continue-as-budget-gate:
@@ -124,171 +90,6 @@ workbench-continue-as-budget-gate:
   kiln test //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test --test_arg=budget_warning --test_output=errors
   kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=continue_as_warning_override --test_output=errors
   kiln test //crates/lash-protocol-rlm:protocol_drivers__test --test_arg=scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_seed --test_output=errors
-
-# The regression gate for the Restate tool Run contract. Its suites are
-# `#[ignore]`d because they need a Restate server, so this recipe is the only
-# thing that runs them: `scripts/ci/restate_suite.py` selects remote actions
-# that run every ignored law of the suite (they ask libtest for
-# `--ignored` tests only, which `scripts/check_service_gate_pinning.py` pins)
-# beside pinned `restate-server`s, one law per process, and then runs the same
-# laws again with every await suspended and replayed (the replay leg). The
-# suite's filters are registered in `scripts/restate-suites.toml`, its replay
-# divergences in `scripts/restate-divergences/`.
-run-conformance-e2e:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  source "{{repo}}/scripts/worktree-gate-env.sh"
-  lash_gate_acquire_locks run-conformance-e2e
-
-  # The test binaries run with the crate dir as cwd, so a relative artifact
-  # dir (which is what CI exports) is anchored at the repo root.
-  artifacts="${LASH_RUN_CONFORMANCE_ARTIFACT_DIR:-target/functional-e2e-artifacts/run-conformance}"
-  case "$artifacts" in
-    /*) ;;
-    *) artifacts="{{repo}}/$artifacts" ;;
-  esac
-  mkdir -p "$artifacts"
-
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite run-conformance --leg live \
-    --artifacts "$artifacts"
-
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite run-conformance --leg replay \
-    --artifacts "$artifacts"
-
-  # Run-control's crash-gap laws run on both server legs (FIG-4516).
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite run-control --leg live \
-    --artifacts "$artifacts"
-
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite run-control --leg replay \
-    --artifacts "$artifacts"
-
-  # The remote turn-cancellation law (FIG-4650): a remote AfterStep cancel
-  # waits for the committed step boundary, on both legs.
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite remote-cancellation --leg live \
-    --artifacts "$artifacts"
-
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite remote-cancellation --leg replay \
-    --artifacts "$artifacts"
-
-  # The drain hand-over's PostgreSQL legs (FIG-4639) use the action's database.
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over-postgres --leg live \
-    --artifacts "$artifacts"
-
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over-postgres --leg replay \
-    --artifacts "$artifacts"
-
-# The server double's deployment laws against a live restate-server (FIG-3795
-# part B): newest-deployment routing and invocation pinning, so the double
-# cannot drift; and the deployment-namespace laws (FIG-3898): namespaced cores
-# share the server, and a registration over another deployment's names is
-# refused; and the crash windows (FIG-4095): a crash inside a process
-# segment's handover, and between a tool presentation's put and its journaled
-# outcome; and the host session law (FIG-4277): a host whose session was
-# deleted while it was parked replays its journal after its deployment dies.
-# The load workload's deletion and behavior evidence replay laws also run
-# here, through the production delete handler; and the session shift's
-# continuation law (FIG-4523): a shift crashed around its handoff redrives one
-# successor, in run-bound legs and, replayed, in legs of one run; and the
-# facade's recorded-run laws (FIG-4390's response-phase replay, FIG-4376's
-# deployment restart under a recorded turn budget). Suite wiring lives in
-# `scripts/restate-suites.toml`.
-server-double-e2e:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  source "{{repo}}/scripts/worktree-gate-env.sh"
-  lash_gate_acquire_locks server-double-e2e
-
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite server-double --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite server-double --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite namespaces --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite namespaces --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite crash-windows --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite crash-windows --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite host-send-wait --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite host-send-wait --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite workload-delete --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite workload-delete --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite load-behavior-replay --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite load-behavior-replay --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite session-shifts --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite session-shifts --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-runs --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-runs --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite refused-successor-drain --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite refused-successor-drain --leg replay
-
-# The crash-point matrix (FIG-3849) with a live `restate-server` as its engine
-# (FIG-3872): every active cell of `lash_sim::crash_matrix::MATRIX` over its
-# seeds, the deployment killed for real at each crash point (its endpoint's
-# connections dropped, or cut at the journal frame the cell names), and the
-# same invariants checked. The test binary is the double's own, switched by
-# `LASH_CRASH_MATRIX_ENGINE=live`; it runs one cell at a time because every
-# world shares the one server. Under `kiln gate lash <fork> -- just
-# crash-matrix-restate-e2e` the gate's KILN_GATE_ID names the server and picks
-# the port block.
-crash-matrix-restate-e2e:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if [ -n "${KILN_GATE_ID:-}" ] && [ -z "${LASH_GATE_SLOT_OVERRIDE:-}" ]; then
-    gate_sum="$(printf '%s' "$KILN_GATE_ID" | cksum)"
-    export LASH_GATE_SLOT_OVERRIDE="$(( ${gate_sum%% *} % 90 ))"
-  fi
-  source "{{repo}}/scripts/worktree-gate-env.sh"
-  lash_gate_acquire_locks crash-matrix-restate-e2e
-  gate="${KILN_GATE_ID:-lash-${LASH_GATE_WORKTREE_SLUG}}"
-
-  artifacts="${LASH_CRASH_MATRIX_ARTIFACT_DIR:-target/functional-e2e-artifacts/crash-matrix-restate}"
-  case "$artifacts" in
-    /*) ;;
-    *) artifacts="{{repo}}/$artifacts" ;;
-  esac
-  mkdir -p "$artifacts"
-  log="$artifacts/crash-matrix.log"
-
-  mapfile -t built < <(python3 "{{repo}}/scripts/ci/restate_suite.py" build \
-    //crates/lash-sim:crash_point_matrix__test \
-    //crates/lash-vm-worker:lash-vm-worker__bin)
-  [[ "${#built[@]}" -eq 2 ]]
-  binary="${built[0]}"
-  export LASH_VM_WORKER="${built[1]}"
-
-  # The server redelivers a failed attempt within a quarter second of the
-  # deployment coming back, and never kills or pauses one on its own: a cell
-  # judges a paused shift a wedge, so a retry budget must not decide it.
-  set +e
-  LASH_CRASH_MATRIX_ENGINE=live \
-  LASH_CRASH_MATRIX_ENDPOINT_BIND="127.0.0.1:$((LASH_E2E_PORT_BASE + 33))" \
-    timeout --kill-after=30 2400 \
-    python3 "{{repo}}/scripts/ci/restate_suite.py" serve \
-      --name "$gate" \
-      --port-base "$((LASH_E2E_PORT_BASE + 30))" \
-      --keep-log "$artifacts/restate-server.log" \
-      --server-env RESTATE_DEFAULT_RETRY_POLICY__INITIAL_INTERVAL=10ms \
-      --server-env RESTATE_DEFAULT_RETRY_POLICY__EXPONENTIATION_FACTOR=2.0 \
-      --server-env RESTATE_DEFAULT_RETRY_POLICY__MAX_INTERVAL=250ms \
-      --server-env RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS=1000000 \
-      --server-env RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS=pause \
-      -- bash -c 'cd "$1" && "$2" --test-threads=1 --nocapture && exec "$2" --ignored --exact live_short_settle_budget_is_bounded --test-threads=1 --nocapture' _ \
-        "{{repo}}/crates/lash-sim" "$binary" 2>&1 | tee "$log"
-  status="${PIPESTATUS[0]}"
-  set -e
-
-  # The counts: every cell that ran says which engine it ran on.
-  live_cells="$(grep -c ' on the live engine: ' "$log" || true)"
-  other_cells="$(grep -E ' on the [a-z]+ engine: ' "$log" | grep -vc ' on the live engine: ' || true)"
-  echo "crash matrix on live Restate: ${live_cells} cell(s) ran live, ${other_cells} elsewhere"
-  grep -E ' on the [a-z]+ engine: ' "$log" || true
-  grep -E '^test result: ' "$log" || true
-  if [ "$status" -ne 0 ]; then
-    echo "crash matrix on live Restate failed (exit $status); log: $log" >&2
-    exit "$status"
-  fi
-  if [ "$live_cells" -eq 0 ] || [ "$other_cells" -ne 0 ]; then
-    echo "crash matrix on live Restate: expected every cell on the live engine" >&2
-    exit 1
-  fi
 
 # The send-to-completion latency gate (FIG-3843): `send()` → Restate shift →
 # `outcome()` measured end to end on a live `restate-server`, the same-process
@@ -316,7 +117,6 @@ latency-gate *args:
   fi
   source "{{repo}}/scripts/worktree-gate-env.sh"
   lash_gate_acquire_locks latency-gate
-  gate="${KILN_GATE_ID:-lash-${LASH_GATE_WORKTREE_SLUG}}"
 
   artifacts="${LASH_LATENCY_ARTIFACT_DIR:-target/functional-e2e-artifacts/latency-gate}"
   case "$artifacts" in
@@ -330,14 +130,9 @@ latency-gate *args:
   binary="${CARGO_TARGET_DIR:-{{repo}}/target}/release/lash-perf"
 
   set +e
-  LASH_LATENCY_WORKER_BIND="127.0.0.1:$((LASH_E2E_PORT_BASE + 39))" \
-    timeout --kill-after=30 5400 \
+  timeout --kill-after=30 5400 \
     python3 "{{repo}}/scripts/latency_load_record.py" \
       --out "$artifacts/latency-load.json" \
-      -- python3 "{{repo}}/scripts/ci/restate_suite.py" serve \
-      --name "$gate" \
-      --port-base "$((LASH_E2E_PORT_BASE + 36))" \
-      --keep-log "$artifacts/restate-server.log" \
       -- "$binary" latency \
         --out "$artifacts/latency-report.json" \
         --samples-out "$artifacts/latency-samples.json" \
@@ -355,135 +150,8 @@ latency-gate *args:
     exit "$status"
   fi
 
-# Builds Phase A's two builds of head (ADR 0115 §6, FIG-3805) with Buck2: N
-# (the default build) and N+1 (the `synthetic-next` feature), each as a
-# `lash-upgrade-node`, a `lashctl` and a `lash-vm-worker`, copied into `<artifacts>/bin/n` and
-# `<artifacts>/bin/n+1`. Each feature variant's label is read from its
-# generated target inventory, so a change to either build's feature set moves no
-# recipe. Each node gets the worker that speaks its own protocol.
-_upgrade-harness-builds artifacts:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  cd "{{repo}}"
-  artifacts="{{artifacts}}"
-  mkdir -p "$artifacts/bin/n" "$artifacts/bin/n+1"
-  node_n="$(python3 scripts/resolve_buck2_target.py //crates/lash-upgrade-harness lash-upgrade-node__bin)"
-  node_next="$(python3 scripts/resolve_buck2_target.py //crates/lash-upgrade-harness lash-upgrade-node__bin --feature synthetic-next)"
-  lashctl_next="$(python3 scripts/resolve_buck2_target.py //crates/lashctl lashctl --feature synthetic-next)"
-  report="$artifacts/build-report.json"
-  worker_n=//crates/lash-vm-worker:lash-vm-worker__bin
-  worker_next="$(python3 scripts/resolve_buck2_target.py //crates/lash-vm-worker lash-vm-worker__bin --feature synthetic-next --feature testing)"
-  scripts/hermetic-build.sh build --materializations final --build-report "$report" \
-    "$node_next" "$node_n" //crates/lashctl:lashctl "$lashctl_next" "$worker_n" "$worker_next"
-  output() {
-    python3 tools/buck2/outputs.py --report "$report" --label "$1" --single
-  }
-  cp "$(output "$node_next")" "$artifacts/bin/n+1/lash-upgrade-node"
-  cp "$(output "$node_n")" "$artifacts/bin/n/lash-upgrade-node"
-  cp "$(output //crates/lashctl:lashctl)" "$artifacts/bin/n/lashctl"
-  cp "$(output "$lashctl_next")" "$artifacts/bin/n+1/lashctl"
-  cp "$(output "$worker_n")" "$artifacts/bin/n/lash-vm-worker"
-  cp "$(output "$worker_next")" "$artifacts/bin/n+1/lash-vm-worker"
-
-# Phase A's rolling upgrade (ADR 0115 §6, FIG-3805): head built twice, N
-# (the default build) and N+1 (the `synthetic-next` feature), run as separate
-# `lash-upgrade-node` processes over real PostgreSQL, a SQLite store directory
-# and one live `restate-server`. Buck2 builds both nodes and lashctl. The
-# operator binary runs the PostgreSQL version, migrate, preflight, drain,
-# finalize and contract steps, over a database the run creates for itself;
-# SQLite migrates on open. The `phase_a` legs run under `just phase-a`.
-# `LASH_POSTGRES_DATABASE_URL` reuses a server the caller provides; otherwise
-# a throwaway pg16 container serves the run. Evidence (the step report and every node's log) lands under the
-# artifact directory, which `runbooks/rolling-upgrade/` judges.
-e2e-rolling:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  cd "{{repo}}"
-  artifacts="${LASH_E2E_ROLLING_ARTIFACT_DIR:-target/functional-e2e-artifacts/e2e-rolling}"
-  case "$artifacts" in
-    /*) ;;
-    *) artifacts="{{repo}}/$artifacts" ;;
-  esac
-  rm -rf "$artifacts"
-  just _upgrade-harness-builds "$artifacts"
-  cargo test --locked -p lash-upgrade-harness --test rolling --no-run
-
-  export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"
-  export LASH_UPGRADE_NODE_NEXT="$artifacts/bin/n+1/lash-upgrade-node"
-  export LASH_UPGRADE_LASHCTL_N="$artifacts/bin/n/lashctl"
-  export LASH_UPGRADE_LASHCTL_NEXT="$artifacts/bin/n+1/lashctl"
-  export LASH_E2E_ROLLING_ARTIFACT_DIR="$artifacts"
-  run=(
-    python3 scripts/ci/restate_suite.py serve --name e2e-rolling
-      --keep-log "$artifacts/restate-server.log"
-      -- cargo test --locked -p lash-upgrade-harness --test rolling
-      -- --ignored --nocapture --test-threads=1
-  )
-  if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-    "${run[@]}" 2>&1 | tee "$artifacts/e2e-rolling.log"
-  else
-    scripts/ci/with-service.sh pg16 -- "${run[@]}" 2>&1 | tee "$artifacts/e2e-rolling.log"
-  fi
-
-# Phase A's legs (ADR 0115 §6, FIG-3805) over the same two builds, real
-# PostgreSQL (each leg creates a database of its own) and one live
-# `restate-server` whose retries back off within a second, so a leg that
-# crashes or swaps a deployment sees Restate redeliver promptly. Name the
-# legs to run (`just phase-a negotiated_wire_both_directions`); with none,
-# every leg runs, and a leg whose lane has not landed fails by design.
-# `LASH_POSTGRES_DATABASE_URL` reuses a server the caller provides; otherwise
-# a throwaway pg16 container serves the run. Each leg's evidence lands under
-# the artifact directory.
-phase-a *legs:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  cd "{{repo}}"
-  artifacts="${LASH_PHASE_A_ARTIFACT_DIR:-target/functional-e2e-artifacts/phase-a}"
-  case "$artifacts" in
-    /*) ;;
-    *) artifacts="{{repo}}/$artifacts" ;;
-  esac
-  rm -rf "$artifacts"
-  just _upgrade-harness-builds "$artifacts"
-
-  export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"
-  export LASH_UPGRADE_NODE_NEXT="$artifacts/bin/n+1/lash-upgrade-node"
-  export LASH_UPGRADE_LASHCTL_N="$artifacts/bin/n/lashctl"
-  export LASH_UPGRADE_LASHCTL_NEXT="$artifacts/bin/n+1/lashctl"
-  export LASH_PHASE_A_ARTIFACT_DIR="$artifacts"
-  filters=()
-  for leg in {{legs}}; do
-    filters+=("$leg::$leg")
-  done
-  if [ "${#filters[@]}" -gt 0 ]; then
-    filters=(--exact "${filters[@]}")
-  fi
-  run=(
-    python3 scripts/ci/restate_suite.py serve --name phase-a
-      --server-env RESTATE_DEFAULT_RETRY_POLICY__INITIAL_INTERVAL=50ms
-      --server-env RESTATE_DEFAULT_RETRY_POLICY__EXPONENTIATION_FACTOR=2.0
-      --server-env RESTATE_DEFAULT_RETRY_POLICY__MAX_INTERVAL=1s
-      --keep-log "$artifacts/restate-server.log"
-      -- cargo test --locked -p lash-upgrade-harness --test phase_a
-      -- --include-ignored --test-threads 1 --nocapture "${filters[@]}"
-  )
-  if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-    "${run[@]}" 2>&1 | tee "$artifacts/phase-a.log"
-  else
-    scripts/ci/with-service.sh pg16 -- "${run[@]}" 2>&1 | tee "$artifacts/phase-a.log"
-  fi
-
 agent-workbench-attachment-usage-gate port='3030':
   bash "{{repo}}/scripts/agent-workbench-attachment-usage-gate.sh" "{{port}}"
-
-restate-postgres-workers-e2e:
-  bash "{{repo}}/scripts/restate-postgres-workers-e2e.sh"
-
-session-operator-e2e:
-  bash "{{repo}}/scripts/session-operator-e2e.sh"
-
-process-operations-e2e:
-  bash "{{repo}}/scripts/process-operations-e2e.sh"
 
 # Fast live proof of the shared Postgres/S3/Restate gate isolation contract.
 gate-container-smoke:
@@ -491,12 +159,6 @@ gate-container-smoke:
 
 gate-worktree-concurrency-check peer:
   bash "{{repo}}/scripts/test-gate-worktree-concurrency.sh" "{{peer}}"
-
-gate-stale-trace-regression:
-  bash "{{repo}}/scripts/test-restate-workers-trace-scrub.sh"
-
-context-overflow-recovery-e2e:
-  bash "{{repo}}/scripts/context-overflow-recovery-e2e.sh"
 
 stack-budget:
   bash "{{repo}}/scripts/ci-stack-budget.sh"
@@ -652,32 +314,6 @@ runtime-persistence-soak cases='256':
   run_property_soak //crates/lash-sqlite-store:conformance__test
   run_property_soak //crates/lash-postgres-store:conformance__test
 
-# The release gate's chaos soak (FIG-3873): randomized lash-sim workloads
-# under deployment kills, leader-lease loss and rolling deploys on the Restate
-# server double, checked against the crash matrix's invariants. An empty
-# `seed` draws one from the clock; the soak prints it, and a failed epoch
-# prints the `LASH_CHAOS_SOAK_*` settings that replay it alone. release.yml's
-# `chaos-soak` job runs the same test under Cargo. The 90-minute default is
-# longer than NativeLink's 3600-second action limit, so Buck compiles remotely
-# and the external runner executes this one test locally without caching it.
-chaos-soak duration='90m' seed='':
-  #!/usr/bin/env bash
-  set -euo pipefail
-  replay=()
-  for setting in LASH_CHAOS_SOAK_EPOCHS LASH_CHAOS_SOAK_STEPS; do
-    if [[ -n "${!setting:-}" ]]; then
-      replay+=("--test_env=${setting}")
-    fi
-  done
-  test_timeout="$(python3 scripts/chaos_soak_timeout.py '{{duration}}')"
-  kiln test --local-test-execution --no-test-cache \
-    --test_timeout="$test_timeout" --test_output=all \
-    '--test_env=LASH_CHAOS_SOAK_DURATION={{duration}}' \
-    '--test_env=LASH_CHAOS_SOAK_SEED={{seed}}' \
-    "${replay[@]}" \
-    --test_arg=chaos_soak_release --test_arg=--exact --test_arg=--ignored \
-    --test_arg=--nocapture //crates/lash-sim:chaos_soak__test
-
 # Opt-in three-backend raw durable-state soak. Requires the standard Postgres
 # configuration and logs the operation kinds omitted by each bounded seed.
 cross-backend-store-soak cases='64' seed='852':
@@ -791,23 +427,12 @@ check-file-size:
 multi-node-load target="local":
   bash "{{repo}}/scripts/multi-node-load.sh" "{{target}}"
 
-# Phase B of the rolling upgrade (FIG-3805, `runbooks/rolling-upgrade/`): N
-# and the synthetic N+1 side by side on the FIG-4167 topology (three Restate
-# nodes, PostgreSQL, kind) under the load driver's sessions, through the
-# half roll, the rollback before finalize, the roll, finalize with the
-# object sweep, and the stale-writer fence (`scripts/loadtest_upgrade.py`).
-# Short, with no measurement archive: the witness verdict is the proof. Run
-# through kiln gate, like `multi-node-load`.
-e2e-rolling-cluster target="local":
-  bash "{{repo}}/scripts/multi-node-load.sh" "{{target}}" rolling-upgrade
-
 loadtest-chart-check:
   bash "{{repo}}/scripts/check-loadtest-chart.sh"
   python3 "{{repo}}/scripts/test_loadtest_topology.py"
   python3 "{{repo}}/scripts/test_loadtest_faults.py"
   python3 "{{repo}}/scripts/test_loadtest_upgrade.py"
   python3 "{{repo}}/scripts/test_loadtest_manifest.py"
-  python3 "{{repo}}/scripts/test_loadtest_repro.py"
 
 # Deterministic DOM/API/SQL transcript acceptance (Surfaces A-E).
 workbench-transcript-projection-e2e:

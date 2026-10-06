@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Run a command against a throwaway service: a container, or for Restate the
-# pinned native `restate-server`.
+# Run a command against a throwaway service container.
 #
 # This is the single owner of "what a service-backed suite needs to talk to":
 # the image, the container port, the container environment, the readiness
@@ -17,12 +16,7 @@
 # every connection string interpolates the chosen port. The container is
 # removed on success, on failure, and on Ctrl-C alike.
 #
-# `restate` is lash's zero-infra effect engine (ADR 0104 section 4): one pinned
-# `restate-server` release binary on free loopback ports, not a container, so a
-# host binding its endpoint on 127.0.0.1 is reachable from the server. The
-# binary, its pin and its lifecycle belong to `scripts/ci/restate_suite.py
-# serve`; this wrapper names the service and hands the command its addresses.
-# `all` runs the store containers only: a command that needs Restate names it.
+# `all` runs every store container in turn.
 #
 # Usage:
 #   scripts/ci/with-service.sh                       # list services and exit
@@ -32,7 +26,6 @@
 #
 # Example:
 #   scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store
-#   scripts/ci/with-service.sh restate -- cargo run -p agent-workbench
 set -euo pipefail
 
 readonly PROGRAM="scripts/ci/with-service.sh"
@@ -50,9 +43,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/s3-service.sh"
 # final server, never its socket-only temporary init server.
 # shellcheck source=scripts/ci/pg-service.sh
 source "$(dirname "${BASH_SOURCE[0]}")/pg-service.sh"
-readonly SERVICES=(pg14 pg16 pg18 s3 restate)
-# The services `all` expands to: the store containers. A store suite has
-# nothing to run against a Restate server.
+readonly SERVICES=(pg14 pg16 pg18 s3)
+# The services `all` expands to: the store containers.
 readonly ALL_SERVICES=(pg14 pg16 pg18 s3)
 # Databases a PostgreSQL service carries beside the default `lash`, one per
 # test that `scripts/ci/store-tests.sh pg-store` runs at once. Each is named
@@ -66,7 +58,6 @@ service_description() {
     pg16) echo "PostgreSQL 16 primary lane (conformance, pool-wait, agent scenario, cross-backend)" ;;
     pg18) echo "PostgreSQL 18 compatibility lane (catalog artifact + version stamp)" ;;
     s3) echo "Garage S3 object store (S3 conformance + attachment blob-store differential)" ;;
-    restate) echo "Restate server, the zero-infra effect engine (RESTATE_INGRESS_URL, RESTATE_ADMIN_URL, RESTATE_AUTHORITY_ID)" ;;
   esac
 }
 
@@ -76,7 +67,6 @@ service_image() {
     pg16) echo "postgres:16-alpine" ;;
     pg18) echo "postgres:18-alpine" ;;
     s3) echo "$LASH_S3_IMAGE" ;;
-    restate) echo "restate-server (native binary pinned in scripts/ci/restate_suite.py)" ;;
   esac
 }
 
@@ -219,17 +209,6 @@ NOT covered by scripts/ci/with-service.sh -- run each of these yourself:
       why: the fault-matrix chunks fork real cargo test invocations of their own,
            so neither Buck2 nor a container owns them
       run: cargo nextest run --profile ci-heavy --workspace --locked --no-fail-fast
-  * Build worker E2E binaries
-      why: staged between jobs rather than run against a service; trusted
-           events take them from the shared build cache
-      run: python3 scripts/ci/restate_suite.py stage-binaries //runbooks/restate-postgres-workers <dir>
-  * Restate + Postgres + S3 Workers
-      why: shell E2E drivers over release binaries rather than any Cargo or Buck2
-           test label
-      run: just restate-postgres-workers-e2e
-  * Functional E2E process operations
-      why: a compose runbook that stands up its own S3 service beside Restate and PostgreSQL
-      run: bash scripts/process-operations-e2e.sh
 REPORT
 }
 
@@ -310,37 +289,9 @@ wait_ready() {
   return 1
 }
 
-# The Restate service: `restate_suite.py serve` starts the pinned server on
-# free loopback ports, exports RESTATE_INGRESS_URL and RESTATE_ADMIN_URL to the
-# command, and stops the server and deletes its data however the command ends.
-# The server's state lives for this one run, so the authority naming it does
-# too: a host's RESTATE_AUTHORITY_ID must change whenever the Restate state
-# behind it does, and a value left over from an earlier server would name
-# state that is gone.
-run_restate() {
-  local started rc
-  started="$SECONDS"
-  rc=0
-  set +e
-  RESTATE_AUTHORITY_ID="with-service-restate:$$-${RANDOM}-$(date +%s)" \
-    python3 "${repo_root}/scripts/ci/restate_suite.py" serve --leg live -- "$@"
-  rc=$?
-  set -e
-  if [ "$rc" -eq 0 ]; then
-    note "restate: command passed in $((SECONDS - started))s"
-  else
-    note "restate: FAILED (exit ${rc}) after $((SECONDS - started))s"
-  fi
-  return "$rc"
-}
-
 run_with_service() {
   local name="$1"
   shift
-  if [ "$name" = restate ]; then
-    run_restate "$@"
-    return
-  fi
   local port container image started rc
   port="$(free_port)"
   container="with-service-${name}-$$-${RANDOM}"
@@ -427,9 +378,7 @@ main() {
       if { [ "$want" = all ] && printf '%s\n' "${ALL_SERVICES[@]}" | grep -qx -- "$name"; } ||
         [ "$want" = "$name" ]; then
         chosen+=("$name")
-        if [ "$name" != restate ]; then
-          containerised=1
-        fi
+        containerised=1
         break
       fi
     done

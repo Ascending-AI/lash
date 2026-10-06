@@ -178,9 +178,6 @@ run_rust_source_guards() {
   step "Facade-only example imports"
   python3 scripts/check_facade_only_examples.py
 
-  step "Restate handler panic boundary"
-  python3 scripts/check-restate-handler-panics.py
-
   step "Canonical transcript projection boundary"
   python3 scripts/check_transcript_projection.py
 
@@ -247,27 +244,6 @@ run_api_surface_seal() {
 run_workflow_graph_integration() {
   step "Workflow graph example integration"
   just workflow-graph-integration-verify
-}
-
-run_e2e_suite() {
-  # Both suites pick free loopback ports per shard (scripts/ci/restate_suite.py).
-  step "Restate e2e: agent-workbench"
-  just agent-workbench-restate-e2e
-
-  step "Restate e2e: run-conformance conformance"
-  just run-conformance-e2e
-
-  step "Restate/Postgres/S3 workers e2e"
-  LASH_E2E_S3_PORT="${LASH_E2E_S3_PORT:-$((port_base + 40))}" \
-    bash scripts/restate-postgres-workers-e2e.sh
-
-  step "Process operations e2e"
-  LASH_PROCESS_OPERATIONS_S3_PORT="${LASH_PROCESS_OPERATIONS_S3_PORT:-$((port_base + 41))}" \
-  LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT:-$((port_base + 43))}" \
-  LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT:-$((port_base + 44))}" \
-  LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT:-$((port_base + 45))}" \
-  LASH_PROCESS_OPERATIONS_POSTGRES_PORT="${LASH_PROCESS_OPERATIONS_POSTGRES_PORT:-$((port_base + 46))}" \
-    bash scripts/process-operations-e2e.sh
 }
 
 run_runtime_feature_boundary_check() {
@@ -393,8 +369,8 @@ run_s3_conformance() {
 #     or a container stack of its own — a `-p` build is a different
 #     feature-unified graph, not a slice of the workspace one — and CI shards
 #     them across jobs that this script would have to run in series. What it
-#     runs instead is the workspace suite, the Postgres-16 and S3 store
-#     lanes, and the Restate E2Es above.
+#     runs instead is the workspace suite and the Postgres-16 and S3 store
+#     lanes.
 #
 #   scripts/test-worktree-gate-env.sh
 #     Exercises the gate lock this script is currently holding, so running it
@@ -430,6 +406,5 @@ scoped RUST_COMPILE "Postgres conformance" run_postgres_conformance
 scoped RUST_COMPILE "S3 conformance" run_s3_conformance
 scoped RUST_COMPILE "Workspace tests" run_workspace_tests
 scoped RUST_COMPILE "Workflow graph example integration" run_workflow_graph_integration
-scoped RUST_COMPILE "Restate and process e2e suite" run_e2e_suite
 
 step "Push gate passed (scope: ${GATE_SCOPE_CLASSIFICATION})"

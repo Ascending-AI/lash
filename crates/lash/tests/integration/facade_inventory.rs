@@ -318,12 +318,6 @@ mod s3_inventory {
     use lash::s3::S3AttachmentStoreConfig as _;
 }
 
-#[cfg(feature = "restate")]
-mod restate_inventory {
-    use lash::restate::RestateEffectHost as _;
-    use lash::restate::RestateEngine as _;
-}
-
 #[cfg(feature = "openai")]
 mod openai_inventory {
     use lash::openai::OpenAiCompatibleProvider as _;

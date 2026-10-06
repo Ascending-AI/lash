@@ -1,7 +1,7 @@
 //! The command protocol both lashlang bridges follow for every command that
-//! leaves the VM toward the effect host (FIG-3586): mint the ordinal, admit
-//! the command against the recorded frontier, issue its effects through a
-//! context whose journal writes ask the command's guard, and close it.
+//! leaves the VM toward the effect host (FIG-3586): mint the ordinal, issue
+//! its effects through a context whose journal writes ask the command's
+//! guard, and close it.
 //!
 //! A refusal at any step stops the run the same way on both bridges: the
 //! refusal becomes the execution's nested error — so a cell's turn parks and
@@ -16,7 +16,7 @@ use std::sync::Arc;
 use lash_core::{CommandJournalGuard, RuntimeEffectControllerError, RuntimeExecutionContext};
 use lashlang::ExecutionHostError;
 
-use crate::replay_run::{CommandAdmission, CommandShape, IssuedCommand, LashlangReplayRun};
+use crate::replay_run::{CommandShape, IssuedCommand, LashlangReplayRun};
 
 /// One command in flight: its ordinal and key, the context its effects are
 /// issued through, and the guard that context's journal writes ask.
@@ -45,10 +45,9 @@ impl<'run> ReplayCommands<'_, 'run> {
         self.run.issue().map_err(|error| self.stop(error))
     }
 
-    /// Admits `command` to the host as a `shape`: reads the recorded frontier
-    /// on the run's first command, refuses a command the journal holds as
-    /// another shape, and hands back the context the command's effects are
-    /// issued through, carrying the guard its journal writes ask.
+    /// Admits `command` to the host as a `shape` and hands back the context
+    /// the command's effects are issued through, carrying the guard its
+    /// journal writes ask.
     pub async fn enter(
         &self,
         command: IssuedCommand,
@@ -60,87 +59,18 @@ impl<'run> ReplayCommands<'_, 'run> {
     /// [`Self::enter`] for a command that calls a host tool binding which
     /// drifted since the pass that wrote the journal (FIG-3587): `drift` is
     /// the refusal naming it. Such a command is served only from the
-    /// journal: one the journal does not hold refuses before anything is
-    /// dispatched, and every dispatching effect of one it holds carries
-    /// `drift` to its engine, which serves the recorded outcome and refuses —
-    /// running and recording nothing — an effect it would run live
-    /// (FIG-3719). The engine answers, not the frontier read, so this holds
-    /// on a positional journal as on a keyed one.
+    /// journal, and a fresh run's journal holds nothing, so it refuses
+    /// before anything is dispatched.
     pub async fn enter_bound(
         &self,
         command: IssuedCommand,
-        shape: CommandShape,
+        _shape: CommandShape,
         drift: Option<RuntimeEffectControllerError>,
     ) -> Result<CommandInFlight<'run>, ExecutionHostError> {
-        if let Err(error) = self.run.ensure_frontier(self.ctx).await {
-            return Err(self.abort(error));
-        }
         if let Some(drift) = drift {
-            let range = self.run.namespace().range();
-            // A drifted binding's command replays only what the journal
-            // settled; a command the journal does not hold as issued is the
-            // run's divergence first, reported as such (FIG-3587).
-            let guard = match self.run.enter(&command, shape) {
-                Ok(CommandAdmission::Replay) => CommandJournalGuard::open(),
-                Ok(CommandAdmission::ReplayRecordedKeys { keys, divergence }) => {
-                    CommandJournalGuard::fenced(lash_core::RecordedKeyFence {
-                        keys,
-                        lower: range.lower,
-                        upper: range.upper,
-                        refusal: divergence.into_error(&self.attribution()),
-                    })
-                }
-                Ok(CommandAdmission::RefuseWrites(divergence)) | Err(divergence) => {
-                    return Err(self.stop(divergence.into_error(&self.attribution())));
-                }
-                // A positional host answers as the replay reaches each
-                // effect; a keyed one holds nothing here, so the command
-                // would reach the drifted tool live.
-                Ok(CommandAdmission::Live) if self.run.is_positional() => {
-                    CommandJournalGuard::open()
-                }
-                Ok(CommandAdmission::Live) => return Err(self.stop(drift)),
-            };
-            let range = self.run.namespace().range();
-            let guard = Arc::new(guard.served_only(lash_core::ServedOnlyRange {
-                lower: range.lower,
-                upper: range.upper,
-                refusal: drift,
-            }));
-            return Ok(CommandInFlight {
-                ctx: self.ctx.with_command_journal_guard(Arc::clone(&guard)),
-                command,
-                guard,
-            });
+            return Err(self.stop(drift));
         }
-        let guard = match self.run.enter(&command, shape) {
-            Ok(CommandAdmission::Replay | CommandAdmission::Live) => CommandJournalGuard::open(),
-            Ok(CommandAdmission::ReplayRecordedKeys { keys, divergence }) => {
-                let range = self.run.namespace().range();
-                CommandJournalGuard::fenced(lash_core::RecordedKeyFence {
-                    keys,
-                    lower: range.lower,
-                    upper: range.upper,
-                    refusal: divergence.into_error(&self.attribution()),
-                })
-            }
-            // Only the run's own namespace is refused: a call the recorded run
-            // made with nothing under it (one settled in preparation) still
-            // presents its result, and the host serves that from its own
-            // record (FIG-3680).
-            Ok(CommandAdmission::RefuseWrites(divergence)) => {
-                let range = self.run.namespace().range();
-                CommandJournalGuard::refusing(lash_core::RefusedWriteRange {
-                    lower: range.lower,
-                    upper: range.upper,
-                    refusal: divergence.into_error(&self.attribution()),
-                })
-            }
-            Err(divergence) => {
-                return Err(self.stop(divergence.into_error(&self.attribution())));
-            }
-        };
-        let guard = Arc::new(guard);
+        let guard = Arc::new(CommandJournalGuard::open());
         Ok(CommandInFlight {
             ctx: self.ctx.with_command_journal_guard(Arc::clone(&guard)),
             command,
@@ -149,8 +79,7 @@ impl<'run> ReplayCommands<'_, 'run> {
     }
 
     /// Closes a command that reached the host. A replay mismatch any of its
-    /// effects met stops the run here, as the run's own divergence; so does
-    /// a command the journal recorded that wrote nothing this time.
+    /// effects met stops the run here, as the run's own divergence.
     pub fn finish(&self, in_flight: &CommandInFlight<'_>) -> Result<(), ExecutionHostError> {
         if let Some(refusal) = in_flight.guard.tripped() {
             return Err(self.stop(refusal));
@@ -163,8 +92,8 @@ impl<'run> ReplayCommands<'_, 'run> {
             )));
         }
         self.run
-            .finish(&in_flight.command, in_flight.guard.touched())
-            .map_err(|divergence| self.stop(divergence.into_error(&self.attribution())))
+            .finish(&in_flight.command, in_flight.guard.touched());
+        Ok(())
     }
 
     /// Leaves a command open for the segment that resumes the run: the wait
@@ -181,11 +110,9 @@ impl<'run> ReplayCommands<'_, 'run> {
     }
 
     /// Closes a command that never reached the host: it failed in the bridge.
-    /// A command the journal recorded as dispatched refuses here.
     pub fn skipped(&self, command: &IssuedCommand) -> Result<(), ExecutionHostError> {
-        self.run
-            .finish(command, false)
-            .map_err(|divergence| self.stop(divergence.into_error(&self.attribution())))
+        self.run.finish(command, false);
+        Ok(())
     }
 
     /// A journal error one of a command's effects returned directly. A replay
@@ -229,22 +156,8 @@ impl<'run> ReplayCommands<'_, 'run> {
     }
 
     /// Closes a run that journals no seal (a process body, whose terminal the
-    /// registry records): refuses when the journal holds a command at or
-    /// beyond the ones this run issued — the run ended earlier than the one
-    /// that wrote the journal. Writes nothing.
-    pub async fn close_unsealed(&self) {
-        if self.ctx.has_nested_effect_error() {
-            return;
-        }
-        if let Err(error) = self.run.ensure_frontier(self.ctx).await {
-            self.ctx.record_nested_runtime_effect_error(error);
-            return;
-        }
-        if let Err(divergence) = self.run.seal() {
-            self.ctx
-                .replace_nested_effect_error(divergence.into_error(&self.attribution()));
-        }
-    }
+    /// registry records). Writes nothing.
+    pub async fn close_unsealed(&self) {}
 
     /// Journals the run's seal as its last nested effect: the count of
     /// commands it issued and the digest of those it wrote, with `producer`
@@ -254,18 +167,7 @@ impl<'run> ReplayCommands<'_, 'run> {
         if self.ctx.has_nested_effect_error() {
             return;
         }
-        if let Err(error) = self.run.ensure_frontier(self.ctx).await {
-            self.ctx.record_nested_runtime_effect_error(error);
-            return;
-        }
-        let seal = match self.run.seal() {
-            Ok(seal) => seal,
-            Err(divergence) => {
-                self.ctx
-                    .replace_nested_effect_error(divergence.into_error(&self.attribution()));
-                return;
-            }
-        };
+        let seal = self.run.seal();
         let facts = format!(
             "issued={}:dispatched={}",
             seal.issued_count,

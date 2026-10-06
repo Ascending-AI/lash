@@ -1,10 +1,6 @@
 use super::*;
 
-/// The workbench's Restate backend: the Restate engine host over a store set
-/// that also keeps the RLM factory's Lashlang artifacts.
-pub(crate) type WorkbenchRestateBackend = lash::restate::RestateEngine;
-
-/// The SQL store set the workbench runs its Restate backend over: SQLite
+/// The SQL store set the workbench runs its durable backend over: SQLite
 /// under the data directory, or PostgreSQL when a database URL is configured.
 pub(crate) struct WorkbenchStores {
     pub(crate) stores: Arc<dyn lash::StoreSet>,

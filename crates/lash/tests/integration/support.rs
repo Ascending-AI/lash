@@ -12,19 +12,6 @@
 
 use std::sync::Arc;
 
-/// The Restate double a facade test runs on: lash-restate's engine and
-/// services over a fresh SQLite memory store set, connected to an in-process
-/// server double.
-///
-/// `ServerConfig::default()` schedules concurrently, so no outside gates are
-/// needed. Keep the returned double alive to the end of the test (FIG-3723):
-/// a core built over `double.lash_backend()` does not hold it.
-pub(crate) async fn restate_double(seed: u64) -> lash_restate_test::RestateTestBackend {
-    lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
-        .await
-        .expect("build the Restate double")
-}
-
 /// A fresh SQLite memory store set: storage ports only, no engine.
 pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
     Arc::new(

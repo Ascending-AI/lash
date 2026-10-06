@@ -402,11 +402,4 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         }
         outcome
     }
-
-    async fn read_recorded_journal(
-        &self,
-        range: &crate::RecordedKeyRange,
-    ) -> Result<crate::RecordedJournal, crate::RuntimeEffectControllerError> {
-        self.inner.read_recorded_journal(range).await
-    }
 }

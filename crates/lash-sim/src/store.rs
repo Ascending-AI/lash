@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_core::StoreError;
 use serde_json::{Value, json};
 
-use crate::runtime_boundaries::durable_effect_scope;
 use crate::runtime_contracts::{
     RuntimeAgentFrameInvariantFacts, RuntimeFinalValueInvariantFacts, RuntimeGraphInvariantFacts,
     RuntimeTurnObservation, RuntimeUsageInvariantFacts, RuntimeUsageTotals, runtime_turn_contract,
@@ -76,18 +75,6 @@ pub struct ModelStore {
 }
 
 impl ModelStore {
-    pub(crate) fn queued_next_turn_boundaries(&self, session: &str) -> Vec<String> {
-        self.queued_input_boundaries
-            .iter()
-            .filter(|(_, input)| {
-                input.session == session
-                    && input.mode == QueuedIngressMode::NextTurn
-                    && matches!(input.state, ModelPendingInputState::Queued)
-            })
-            .map(|(boundary, _)| boundary.clone())
-            .collect()
-    }
-
     /// Admission occurs at provider start, before its completion is delivered.
     /// Only queued next-turn inputs are eligible; cancellation remains a local
     /// lifecycle transition whose outcome is independently projected.
@@ -961,6 +948,19 @@ impl ModelStore {
             },
         })
     }
+
+    #[cfg(test)]
+    pub(crate) fn queued_next_turn_boundaries(&self, session: &str) -> Vec<String> {
+        self.queued_input_boundaries
+            .iter()
+            .filter(|(_, input)| {
+                input.session == session
+                    && input.mode == QueuedIngressMode::NextTurn
+                    && matches!(input.state, ModelPendingInputState::Queued)
+            })
+            .map(|(boundary, _)| boundary.clone())
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1071,5 +1071,13 @@ impl ModelDurableEffect {
     }
 }
 
+/// The scope a durable effect runs under: a turn of the effect's session,
+/// one per durable key, so its crash and redrive replay one invocation.
+fn durable_effect_scope(session: &str, durable_key: &str) -> lash_core::ExecutionScope {
+    lash_core::ExecutionScope::turn(
+        SessionId::fixture(session.to_string()),
+        lash_core::TurnId::fixture(format!("lash-sim-runtime-boundaries:{durable_key}")),
+    )
+}
 #[cfg(test)]
 mod tests;

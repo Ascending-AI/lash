@@ -540,14 +540,6 @@ set -e
 [ "$guard_status" -eq 1 ] \
   || fail "mounted-binary guard exited $guard_status on a non-executable file"
 
-# Every e2e script whose compose file bind-mounts host binaries must call the
-# shared guard, so no consumer can reach `docker compose` on a missing source.
-for consumer in \
-  "$repo/scripts/restate-postgres-workers-e2e.sh" \
-  "$repo/scripts/process-operations-e2e.sh"; do
-  grep -Fq "lash_gate_require_mounted_bins" "$consumer" \
-    || fail "$(basename "$consumer") does not call the mounted-binary guard"
-done
 
 printf 'worktree gate env regressions passed: distinct_slugs=%s,%s override_slot=%s leaked_child_lock=released mounted_bin_guard=ok\n' \
   "$slug_a" "$slug_b" "$override_slot"

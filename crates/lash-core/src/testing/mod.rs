@@ -111,21 +111,6 @@ pub(crate) async fn sqlite_recording_backend() -> crate::Backend {
     lash_conformance::recording_backend_over(std::sync::Arc::new(sqlite_memory_backend().await))
 }
 
-/// A fresh Restate server double under `seed` with `config`: lash-restate's
-/// engine over a SQLite memory store set, the twin of [`sqlite_recording_backend`] for a
-/// kernel test whose effects run on an engine. Hold the double to the end of
-/// the test and never build a core over the handle itself (FIG-3723); a turn
-/// runs on `double.open_handler(scope)`'s scoped controller.
-#[cfg(test)]
-pub(crate) async fn kernel_double(
-    seed: u64,
-    config: lash_restate_test::ServerConfig,
-) -> lash_restate_test::RestateTestBackend {
-    lash_restate_test::backend(seed, config)
-        .await
-        .expect("build the Restate server double")
-}
-
 #[cfg(test)]
 std::thread_local! {
     /// The store sets the running test opened, held as its backends are.

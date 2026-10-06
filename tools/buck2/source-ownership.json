@@ -8,9 +8,6 @@
         "tests/integration.rs",
         "tests/integration/**/*.rs"
       ],
-      "observation_admin_evidence": [
-        "tests/observation_admin_evidence.rs"
-      ],
       "otel_trace_evidence": [
         "tests/otel_trace_evidence.rs"
       ],
@@ -19,9 +16,6 @@
       ],
       "processes_evidence_b": [
         "tests/processes_evidence_b.rs"
-      ],
-      "protocol_evidence": [
-        "tests/protocol_evidence.rs"
       ],
       "sessions_evidence": [
         "tests/sessions_evidence.rs"
@@ -56,37 +50,24 @@
         "tests/runtime_support/**/*.rs",
         "tests/runtime/tests/effect.rs",
         "tests/runtime/tests/effect/**/*.rs",
-        "tests/runtime/tests/effect_direct_llm.rs",
-        "tests/runtime/tests/effect_response_hook.rs"
+        "tests/runtime/tests/effect_direct_llm.rs"
       ],
       "runtime_scenarios": [
         "tests/runtime_scenarios.rs",
         "tests/runtime_support/**/*.rs",
-        "tests/runtime/tests/attempt_atomicity.rs",
-        "tests/runtime/tests/attempt_atomicity/**/*.rs",
         "tests/runtime/tests/runtime_scenarios.rs",
         "tests/runtime/tests/runtime_scenarios/**/*.rs"
       ],
       "runtime_lifecycle": [
         "tests/runtime_lifecycle.rs",
         "tests/runtime_support/**/*.rs",
-        "tests/runtime/tests/attachment_continuation.rs",
-        "tests/runtime/tests/child_sessions.rs",
-        "tests/runtime/tests/persistence.rs",
-        "tests/runtime/tests/plugin_lifecycle.rs",
-        "tests/runtime/tests/tool_restore_report.rs",
         "tests/runtime/tests/tool_surface_lifecycle.rs"
       ],
       "runtime_observability": [
         "tests/runtime_observability.rs",
         "tests/runtime_support/**/*.rs",
         "tests/runtime/tests/assembler.rs",
-        "tests/runtime/tests/language_runtime_value.rs",
-        "tests/runtime/tests/projection.rs",
-        "tests/runtime/tests/replay_origin.rs",
-        "tests/runtime/tests/session_freshness.rs",
         "tests/runtime/tests/stream_accumulator.rs",
-        "tests/runtime/tests/stream_evidence.rs",
         "tests/runtime/tests/tracing.rs"
       ],
       "runtime_turns": [
@@ -94,9 +75,7 @@
         "tests/runtime_support/**/*.rs",
         "tests/runtime/tests/turns.rs",
         "tests/runtime/tests/turns/**/*.rs",
-        "tests/runtime/tests/commit_placement.rs",
-        "tests/runtime/tests/turn_cancel_modes.rs",
-        "tests/runtime/stop_publication.rs"
+        "tests/runtime/tests/commit_placement.rs"
       ]
     }
   },

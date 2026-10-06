@@ -272,8 +272,6 @@ async fn adopt_committed_head(resident: &mut lash_core::facade_support::LashRunt
 /// gap's cursor.
 pub struct SessionObservationStream {
     cursor: SessionCursor,
-    #[cfg(test)]
-    live_installed: Arc<std::sync::atomic::AtomicBool>,
     state: Option<Box<FeedState>>,
     step: Option<FeedStep>,
 }
@@ -284,31 +282,17 @@ type FeedStep = BoxFuture<'static, (Box<FeedState>, Option<Result<SessionObserva
 
 impl SessionObservationStream {
     pub(crate) fn new(source: FeedSource, cursor: SessionCursor) -> Self {
-        #[cfg(test)]
-        let live_installed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         Self {
             cursor: cursor.clone(),
-            #[cfg(test)]
-            live_installed: Arc::clone(&live_installed),
             state: Some(Box::new(FeedState {
                 source,
                 cursor,
                 done: false,
                 delivered: None,
                 live: None,
-                #[cfg(test)]
-                live_installed,
             })),
             step: None,
         }
-    }
-
-    /// Whether the feed holds a live subscription, also while a step that
-    /// owns the feed's state is in flight.
-    #[cfg(test)]
-    pub(crate) fn live_receiver_installed(&self) -> bool {
-        self.live_installed
-            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Returns the stream's current replay cursor.
@@ -360,15 +344,10 @@ struct FeedState {
     /// established it: a `Committed` at or before it is a redelivery.
     delivered: Option<SessionRevision>,
     live: Option<LiveReplaySubscription>,
-    #[cfg(test)]
-    live_installed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl FeedState {
     fn set_live(&mut self, live: Option<LiveReplaySubscription>) {
-        #[cfg(test)]
-        self.live_installed
-            .store(live.is_some(), std::sync::atomic::Ordering::Release);
         self.live = live;
     }
 

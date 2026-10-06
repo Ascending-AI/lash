@@ -122,10 +122,6 @@ pub enum EffectControllerTaskRequest {
         may_defer: bool,
         response: oneshot::Sender<Result<CompletionKeyPreparation, RuntimeError>>,
     },
-    ReadRecordedJournal {
-        range: crate::RecordedKeyRange,
-        response: oneshot::Sender<Result<RecordedJournal, RuntimeEffectControllerError>>,
-    },
 }
 
 impl EffectControllerTaskRequest {
@@ -414,9 +410,6 @@ impl EffectControllerTaskRequest {
                         .prepare_completion_key(&scope, wait, may_defer)
                         .await,
                 );
-            }),
-            Self::ReadRecordedJournal { range, response } => Box::pin(async move {
-                let _ = response.send(controller.read_recorded_journal(&range).await);
             }),
         }
     }
@@ -1104,30 +1097,6 @@ impl RuntimeEffectController for EffectTaskController {
                 }
             }
         }
-    }
-
-    async fn read_recorded_journal(
-        &self,
-        range: &crate::RecordedKeyRange,
-    ) -> Result<RecordedJournal, RuntimeEffectControllerError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.requests
-            .send(EffectControllerTaskRequest::ReadRecordedJournal {
-                range: range.clone(),
-                response: response_tx,
-            })
-            .map_err(|_| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                    "recorded-journal controller task is no longer running",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                "recorded-journal controller response was dropped",
-            )
-        })?
     }
 }
 

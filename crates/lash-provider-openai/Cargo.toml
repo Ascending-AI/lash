@@ -42,15 +42,11 @@ tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-# Kernel tests whose effects need an engine run on the Restate server double
-# (FIG-3668, D1 PR-S2).
-lash-restate-test = { workspace = true }
 # Self dev-dependency so `testing` is on for every test build of this crate:
 # a bare `cargo test -p lash-internal-provider-openai` runs the conformance law instead of
 # quietly compiling it out (FIG-1266).
 lash-provider-openai = { package = "lash-internal-provider-openai", path = ".", features = ["testing"] }
-# The runtime facade, so the Codex WebSocket path is proven end-to-end through
-# a normal `LashCore` turn in `tests/codex_websocket_runtime.rs`.
+# The runtime facade, for the unit tests that drive a turn through it.
 lash = { package = "lash-runtime", path = "../lash" }
 # `lash_core::test_support` holds the core items whose only consumers are tests.
 lash-core = { workspace = true, features = ["testing"] }
@@ -58,7 +54,3 @@ lash-llm-transport = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
 lash-tool-support = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
-
-[[test]]
-name = "codex_websocket_runtime"
-required-features = ["testing"]

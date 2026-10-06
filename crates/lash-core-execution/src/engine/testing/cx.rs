@@ -433,22 +433,6 @@ impl LocalTestCx {
         }
     }
 
-    /// The replay keys the journal this context replays holds, in `[lower,
-    /// upper]` compared bytewise.
-    pub(super) fn recorded_keys_in(&self, lower: &str, upper: &str) -> Vec<String> {
-        let CxMode::Replay(journal) = &self.shared.mode else {
-            return Vec::new();
-        };
-        let mut keys = journal
-            .entries
-            .iter()
-            .filter(|entry| lower <= entry.key.as_str() && entry.key.as_str() <= upper)
-            .map(|entry| entry.key.clone())
-            .collect::<Vec<_>>();
-        keys.sort();
-        keys
-    }
-
     /// Shift `shift` to completion on this thread.
     ///
     /// The shift may be `!Send`. It is polled only here, and resumed only when

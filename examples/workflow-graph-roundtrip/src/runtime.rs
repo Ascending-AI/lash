@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use lash::LashCore;
 use lash::process::*;
-use lash::restate::restate_sdk;
 use lash::rlm::lang::{LinkedModule, ProcessRef, WorkflowGraph};
 use lash::tracing::{TraceEvent, TraceLanguageExecutionPayload};
 use tokio::sync::mpsc;
@@ -23,17 +22,9 @@ pub(crate) enum RunError {
     #[error(transparent)]
     Display(#[from] lash::rlm::lang::ExecutionHostError),
     #[error(transparent)]
-    Ingress(Box<lash::restate::RestateHttpError>),
-    #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error("{0}")]
     Invalid(String),
-}
-
-impl From<lash::restate::RestateHttpError> for RunError {
-    fn from(error: lash::restate::RestateHttpError) -> Self {
-        Self::Ingress(Box::new(error))
-    }
 }
 
 #[derive(Clone)]
@@ -538,132 +529,27 @@ pub fn core(backend: lash::Backend) -> lash::Result<LashCore> {
         ))
 }
 
-/// Bind the host's process admissions beside the engine's workers. The HTTP
-/// host sends a command; only this journaled handler issues its effects.
-pub fn bind_commands(
-    builder: restate_sdk::endpoint::Builder,
-    core: LashCore,
-    engine: &lash::restate::RestateEngine,
-) -> restate_sdk::endpoint::Builder {
-    builder.bind(WorkflowGraphCommand {
-        authority: engine.restate_effect_host().authority_id().clone(),
-        namespace: engine.namespace().clone(),
-        core,
-    })
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", content = "request", rename_all = "snake_case")]
-enum HostCommand {
-    Start(Box<ProcessStartRequest>),
-    Signal(ProcessSignal),
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", content = "receipt", rename_all = "snake_case")]
-enum HostReceipt {
-    Started(ProcessStartReceipt),
-    Signalled,
-}
-
-struct WorkflowGraphCommand {
-    core: LashCore,
-    authority: lash::restate::RestateAuthorityId,
-    namespace: lash::restate::RestateNamespace,
-}
-
-#[restate_sdk::workflow]
-impl WorkflowGraphCommand {
-    #[handler]
-    async fn run(
-        &self,
-        context: restate_sdk::context::WorkflowContext<'_>,
-        restate_sdk::serde::Json(command): restate_sdk::serde::Json<HostCommand>,
-    ) -> restate_sdk::errors::HandlerResult<
-        restate_sdk::serde::Json<Result<HostReceipt, lash::plugins::PluginError>>,
-    > {
-        let scope = lash::runtime::AdmittedScope::runtime_operation(format!(
-            "workflow-command:{}",
-            context.key()
-        ));
-        let controller = lash::restate::RestateRuntimeEffectController::new(
-            context,
-            self.authority.clone(),
-            self.core.build_generation().clone(),
-        )
-        .in_namespace(self.namespace.clone());
-        let scoped = controller
-            .scoped_effect_controller(scope)
-            .map_err(restate_sdk::errors::TerminalError::from_error)?;
-        let result = match command {
-            HostCommand::Start(request) => self
-                .core
-                .processes()
-                .start(*request, scoped)
-                .await
-                .map(HostReceipt::Started),
-            HostCommand::Signal(signal) => self
-                .core
-                .processes()
-                .signal(signal, scoped)
-                .await
-                .map(|_| HostReceipt::Signalled),
-        };
-        let result = match result {
-            Ok(receipt) => Ok(receipt),
-            Err(error) if error.is_retryable() => {
-                return Err(restate_sdk::errors::HandlerError::from(error));
-            }
-            Err(lash::EmbedError::Plugin(error)) => Err(error),
-            Err(lash::EmbedError::Runtime(error)) => {
-                Err(lash::plugins::PluginError::Runtime(error))
-            }
-            Err(lash::EmbedError::Store(error)) => Err(lash::plugins::PluginError::from(error)),
-            Err(error) => return Err(restate_sdk::errors::HandlerError::from(error)),
-        };
-        Ok(restate_sdk::serde::Json(result))
-    }
-}
-
+/// The host's process commands. A start or signal issues its effects in a
+/// journaled handler of the engine's deployment, and the durable engine
+/// lends one from L3 (FIG-5172); until then every command is refused.
 #[derive(Clone)]
-pub(crate) struct CommandClient(lash::restate::RestateIngressClient);
+pub(crate) struct CommandClient;
 
 impl CommandClient {
-    pub(crate) fn new(connection: lash::restate::RestateConnection) -> Self {
-        Self(lash::restate::RestateIngressClient::new(connection))
-    }
-
-    async fn send(&self, key: &str, command: HostCommand) -> Result<HostReceipt, RunError> {
-        let result: Result<HostReceipt, lash::plugins::PluginError> = self
-            .0
-            .call_workflow_json("WorkflowGraphCommand", key, "run", &command)
-            .await?;
-        result.map_err(|error| RunError::Lash(lash::EmbedError::Plugin(error)))
-    }
-
     pub(crate) async fn start(
         &self,
         key: &str,
-        request: ProcessStartRequest,
+        _request: ProcessStartRequest,
     ) -> Result<ProcessStartReceipt, RunError> {
-        match self
-            .send(key, HostCommand::Start(Box::new(request)))
-            .await?
-        {
-            HostReceipt::Started(receipt) => Ok(receipt),
-            HostReceipt::Signalled => {
-                Err(RunError::Invalid("start returned a signal receipt".into()))
-            }
-        }
+        Err(RunError::Invalid(format!(
+            "process start `{key}` has no engine handler to run in until L3 (FIG-5172)"
+        )))
     }
 
-    pub(crate) async fn signal(&self, key: &str, signal: ProcessSignal) -> Result<(), RunError> {
-        match self.send(key, HostCommand::Signal(signal)).await? {
-            HostReceipt::Signalled => Ok(()),
-            HostReceipt::Started(_) => {
-                Err(RunError::Invalid("signal returned a start receipt".into()))
-            }
-        }
+    pub(crate) async fn signal(&self, key: &str, _signal: ProcessSignal) -> Result<(), RunError> {
+        Err(RunError::Invalid(format!(
+            "process signal `{key}` has no engine handler to run in until L3 (FIG-5172)"
+        )))
     }
 }
 

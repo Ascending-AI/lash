@@ -128,12 +128,6 @@ fn lift_native_driver_state(value: &mut serde_json::Value) -> Result<(), crate::
     )
 }
 
-/// A Restate object family's stamped body, or a `LashTurn` outcome's: N+1
-/// moves only the `{format, body}` stamp, so N's body is N+1's.
-fn lift_object_body(_body: &mut serde_json::Value) -> Result<(), crate::StoreError> {
-    Ok(())
-}
-
 const fn tree(
     constant: &'static str,
     from_version: u32,
@@ -216,8 +210,6 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
     owner_decoder("NATIVE_TRANSPORT_VERSION"),
     owner_tree("RLM_DRIVER_STATE_VERSION", lift_native_driver_state),
     owner_decoder("SQLITE_BLOB_ENVELOPE_VERSION"),
-    owner_tree("DURABLE_WAIT_REGISTRY_FORMAT_VERSION", lift_object_body),
-    owner_tree("LASH_TURN_OUTCOME_FORMAT_VERSION", lift_object_body),
 ];
 
 const fn pin(constant: &'static str, version: u32) -> WriterPin {
@@ -234,7 +226,7 @@ const fn owner_pin(constant: &'static str) -> WriterPin {
 }
 
 /// While `F` is N's epoch, every surface N+1 moves is written at N's version:
-/// each guarded surface's, the Restate wire's and the process cursor's.
+/// each guarded surface's and the process cursor's.
 pub(super) const WRITER_PINS: &[WriterPin] = &[
     pin(
         "SESSION_NODE_BODY_SCHEMA_VERSION",
@@ -276,9 +268,6 @@ pub(super) const WRITER_PINS: &[WriterPin] = &[
     owner_pin("NATIVE_TRANSPORT_VERSION"),
     owner_pin("RLM_DRIVER_STATE_VERSION"),
     owner_pin("SQLITE_BLOB_ENVELOPE_VERSION"),
-    owner_pin("DURABLE_WAIT_REGISTRY_FORMAT_VERSION"),
-    owner_pin("LASH_TURN_OUTCOME_FORMAT_VERSION"),
-    owner_pin("RESTATE_WIRE_VERSION"),
     pin(
         "PROCESS_CURSOR_VERSION",
         lash_sansio::PROCESS_CURSOR_VERSION - 1,

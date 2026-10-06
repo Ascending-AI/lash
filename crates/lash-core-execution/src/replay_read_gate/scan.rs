@@ -415,12 +415,10 @@ pub(super) fn survey(files: &[(String, String)], surface: &Surface<'_>) -> Resul
     }
     let mut fns = Vec::new();
     for (index, tokens) in trees.iter().enumerate() {
-        let restate = files[index].0.contains("lash-restate/");
         let context = Context {
             surface,
             owning: &owning,
             service_fields: &service_fields,
-            restate,
         };
         collect_items(tokens, index, &[], &context, &mut fns);
     }
@@ -609,8 +607,6 @@ struct Context<'a> {
     /// Every struct field declared with a live host service's trait, as
     /// `(trait, field)`.
     service_fields: &'a BTreeSet<(String, String)>,
-    /// Whether the file is in `lash-restate`, where `Context` is Restate's.
-    restate: bool,
 }
 
 /// Every type that holds a controller or journal context itself: a `type`
@@ -851,11 +847,6 @@ fn replay_seed(
         context.surface.replay_signature_types.contains(ident) || context.owning.contains(**ident)
     }) {
         return Some(format!("its signature names `{ty}`"));
-    }
-    // A Restate handler's own context; a `Poll`-shaped signature is the
-    // std task context of a hand-written future instead.
-    if context.restate && idents.contains(&"Context") && !idents.contains(&"Poll") {
-        return Some("its signature names a Restate `Context`".to_string());
     }
     impl_idents
         .iter()

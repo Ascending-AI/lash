@@ -33,9 +33,9 @@ pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDriveStep,
-    RecordedJournal, RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome,
-    RunRecordStep, RuntimeEffectController, ScopeBoundController, ScopedEffectController,
-    SegmentProgress, ServedOnlyRange, TurnCancelClosureOwnerBinding,
+    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RunRecordStep,
+    RuntimeEffectController, ScopeBoundController, ScopedEffectController, SegmentProgress,
+    ServedOnlyRange, TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectControllerTaskRequest, EffectControllerTaskRequests};
 pub use control::{EffectTaskController, drive_effect_controller_task, own_effect_controller_task};

@@ -387,11 +387,6 @@ pub(crate) fn resolution_for(decision: ApprovalDecision, arguments: &Value) -> l
     }
 }
 
-#[cfg(test)]
-pub(crate) fn approval_resolution(approval: &PendingApproval) -> lash::Resolution {
-    resolution_for(ApprovalDecision::Approved, &approval.arguments)
-}
-
 #[expect(
     clippy::expect_used,
     reason = "the literal `agent_workbench` is a fixed valid host-namespace spelling, so validation cannot fail"

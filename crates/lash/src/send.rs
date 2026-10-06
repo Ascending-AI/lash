@@ -16,8 +16,6 @@ mod cancel;
 mod follow;
 mod mailbox;
 mod resolve;
-#[cfg(feature = "restate")]
-pub(crate) mod restate;
 
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};

@@ -11,83 +11,6 @@
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
-#[tokio::test]
-#[ignore = "requires PostgreSQL"]
-async fn process_shutdown_preserves_typed_failures() {
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(
-        &lash_postgres_store::testing::required_database_url(),
-    )
-    .await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
-        .await
-        .expect("open PostgreSQL");
-    let bytes = tempfile::tempdir().expect("attachment directory");
-    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
-        &storage,
-        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(bytes.path())),
-    ));
-    let double = lash_restate_test::backend_with_store_set(
-        0x1a5_1a9,
-        lash_restate_test::ServerConfig::default(),
-        lash_restate_test::DeploymentHooks::default(),
-        move |_| async { Ok(stores as Arc<dyn lash_core::StoreSet>) },
-    )
-    .await;
-    let double = double.expect("PostgreSQL double");
-    let backend = double.lash_backend();
-    double
-        .run_in_handler(
-            lash_core::AdmittedScope::turn("shutdown-law", "guard"),
-            Arc::new(move |scoped| {
-                let backend = backend.clone();
-                Box::pin(async move {
-                    lash_lashlang_runtime::testing::process_shutdown_preserves_typed_failures(
-                        &backend, scoped,
-                    )
-                    .await;
-                })
-            }),
-        )
-        .await
-        .expect("Run-owned process shutdown fixture");
-}
-
-#[tokio::test]
-#[ignore = "requires PostgreSQL"]
-async fn process_event_host_failure_stops_execution() {
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(
-        &lash_postgres_store::testing::required_database_url(),
-    )
-    .await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
-        .await
-        .expect("open PostgreSQL");
-    let bytes = tempfile::tempdir().expect("attachment directory");
-    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
-        &storage,
-        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(bytes.path())),
-    ));
-    let backend = lash_conformance::recording_backend_over(stores.clone());
-    let double = lash_restate_test::backend_with_store_set(
-        0x4643,
-        lash_restate_test::ServerConfig::default(),
-        Default::default(),
-        |_| async { Ok(stores as Arc<dyn lash_core::StoreSet>) },
-    )
-    .await
-    .expect("PostgreSQL double");
-    let handler = double
-        .open_handler(lash_core::AdmittedScope::turn("host-law", "append"))
-        .await
-        .expect("handler");
-    lash_lashlang_runtime::testing::process_event_host_failure_stops_execution(
-        &backend,
-        handler.scoped(),
-    )
-    .await;
-    handler.close().await.expect("close handler");
-}
-
 // No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
 // live_replay_tests! run in tests/live_replay.rs, against the facade's PostgreSQL live replay store.
 // No runtime_persistence_clock_tests!: the backend clock is PostgreSQL-owned and not controllable.
@@ -177,7 +100,7 @@ use std::sync::Arc;
 use lash_conformance::{
     FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
-    ReopenableProcessRegistry, ReopenableRuntimeStore, ReopenableTriggerStore,
+    ReopenableProcessRegistry, ReopenableTriggerStore,
 };
 use lash_core_execution::compat::CompatRefusal;
 use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt as _;
@@ -196,8 +119,6 @@ mod fixture_isolation;
 
 #[path = "conformance/non_terminal_page_collation.rs"]
 mod non_terminal_page_collation;
-#[path = "conformance/session_close.rs"]
-mod session_close;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
 #[path = "conformance/session_ingress.rs"]
@@ -228,301 +149,6 @@ fn sync_await<T: Send + 'static>(
     // PoolTimedOut. `block_in_place` lets this worker block while tokio spins up a
     // replacement, so the conformance harness keeps making progress.
     tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
-}
-
-/// The promise authority a storage law's turn-control protocol runs through.
-///
-/// PostgreSQL journals no effects (ADR 0104): a deployment's promises are its
-/// Restate engine's, so the authority is the engine's own deployment effect
-/// host on the in-process server double, minting, settling and reading
-/// durable waits through the double's endpoint. What the law certifies is
-/// the PostgreSQL rows; the guard keeps the double alive until the law
-/// finishes.
-async fn promise_authority() -> (
-    lash_restate_test::RestateTestBackend,
-    Arc<dyn lash_core_execution::EffectHost>,
-) {
-    let backend =
-        lash_restate_test::backend(restate_seed(), lash_restate_test::ServerConfig::default())
-            .await
-            .expect("boot the promise authority's Restate server double");
-    let host: Arc<dyn lash_core_execution::EffectHost> = backend.restate().restate_effect_host();
-    (backend, host)
-}
-
-/// The seed of a fixture's server double: `LASH_RESTATE_TEST_SEED` replays
-/// one, otherwise each fixture draws a fresh one.
-fn restate_seed() -> u64 {
-    if let Some(seed) = std::env::var("LASH_RESTATE_TEST_SEED")
-        .ok()
-        .and_then(|seed| seed.parse::<u64>().ok())
-    {
-        return seed;
-    }
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock after the epoch")
-        .as_nanos();
-    (nanos & u128::from(u64::MAX)) as u64 ^ NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-}
-
-/// A law attempt, repacked as one of the double's handler attempts: it
-/// reports what it observed through its own channel, so the handler's job
-/// ends when the attempt ends.
-fn handler_attempt(
-    attempt: lash_conformance::ConformanceTurnAttempt,
-) -> lash_restate_test::HandlerAttempt {
-    Arc::new(move |scoped| {
-        let attempt = Arc::clone(&attempt);
-        Box::pin(async move {
-            attempt(scoped).await;
-        })
-    })
-}
-
-/// `ConformanceTurnRunner` over [`RestateTestBackend::run_in_handler`]: every
-/// turn a law executes runs inside a handler of the double's deployment, on the
-/// handler-scoped controller a Restate tier actually lends its turns, instead
-/// of on a host scoped from the calling task.
-///
-/// [`RestateTestBackend::run_in_handler`]: lash_restate_test::RestateTestBackend::run_in_handler
-struct DoubleTurnRunner {
-    backend: lash_restate_test::RestateTestBackend,
-    /// The invocations a crash left open, by the scope they run: the law's
-    /// next turn of that scope is the double's redelivery of the invocation.
-    open: std::sync::Mutex<std::collections::HashMap<String, OpenTurn>>,
-}
-
-/// An invocation whose execution a crash killed, left open for the double to
-/// redeliver.
-struct OpenTurn {
-    /// Hands the redelivered execution the law's next attempt of the scope.
-    next: tokio::sync::watch::Sender<Option<lash_conformance::ConformanceTurnAttempt>>,
-    /// How the redelivered execution's attempt ended.
-    ends: tokio::sync::mpsc::UnboundedReceiver<lash_conformance::ConformanceTurnEnd>,
-    /// The invocation's call: it returns once a redelivered execution
-    /// settled that attempt.
-    call: tokio::task::JoinHandle<Result<(), String>>,
-}
-
-impl DoubleTurnRunner {
-    fn shared(
-        backend: lash_restate_test::RestateTestBackend,
-    ) -> Arc<dyn lash_conformance::ConformanceTurnRunner> {
-        Arc::new(Self {
-            backend,
-            open: std::sync::Mutex::default(),
-        })
-    }
-
-    fn open_turns(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<String, OpenTurn>> {
-        self.open
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-}
-
-/// The key an open invocation is held under: its admitted scope.
-fn open_turn_key(admitted: &lash_core::AdmittedScope) -> String {
-    format!("{:?}", admitted.scope())
-}
-
-#[async_trait::async_trait]
-impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
-    async fn run_turn(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        attempt: lash_conformance::ConformanceTurnAttempt,
-    ) {
-        let open = self.open_turns().remove(&open_turn_key(&admitted));
-        let Some(open) = open else {
-            self.backend
-                .run_in_handler(admitted, handler_attempt(attempt))
-                .await
-                .unwrap_or_else(|error| {
-                    panic!("the law's turn did not run in its handler: {error}")
-                });
-            return;
-        };
-        let OpenTurn {
-            next,
-            mut ends,
-            mut call,
-        } = open;
-        next.send_replace(Some(attempt));
-        let settled = tokio::select! {
-            biased;
-            end = ends.recv() => end,
-            ran = &mut call => {
-                panic!("the crashed turn's invocation ended ({ran:?}) before its redelivered attempt did")
-            }
-        };
-        // An attempt that aborted leaves the invocation open, as an aborted
-        // turn's invocation stays open on Restate; a settled one completes it.
-        if settled == Some(lash_conformance::ConformanceTurnEnd::Settled) {
-            call.await
-                .expect("the open invocation's call task")
-                .unwrap_or_else(|error| {
-                    panic!("the law's crashed turn did not recover in its redelivery: {error}")
-                });
-        }
-    }
-
-    async fn run_crashed_then_redriven_turn(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        crashing: lash_conformance::ConformanceTurnAttempt,
-        redrive: lash_conformance::ConformanceTurnAttempt,
-    ) {
-        self.backend
-            .run_crashed_then_redriven(
-                admitted,
-                handler_attempt(crashing),
-                handler_attempt(redrive),
-            )
-            .await
-            .unwrap_or_else(|error| {
-                panic!("the law's crashed turn did not redrive in its handler: {error}")
-            });
-    }
-
-    async fn run_turn_until_crash(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        attempt: lash_conformance::ConformanceTurnAttempt,
-        crash: lash_conformance::ConformanceCrash,
-    ) {
-        // Inside the handler the crash kills the attempt where it stands: its
-        // future is dropped mid-poll. The execution then fails retryably as
-        // Restate's invocation of a dead deployment does, once the law has
-        // queued its next attempt of this scope, and the double's retry
-        // replays the journal the killed attempt left into that attempt. A
-        // fresh invocation would start an empty journal instead, which the
-        // shift's seal answers as a lost substrate (ADR 0105 L-S8), not as
-        // the recovery of a crashed turn.
-        let key = open_turn_key(&admitted);
-        assert!(
-            !self.open_turns().contains_key(&key),
-            "a crash of `{key}` while an earlier crash of it is still open"
-        );
-        let (next, queued) =
-            tokio::sync::watch::channel::<Option<lash_conformance::ConformanceTurnAttempt>>(None);
-        let crashing: lash_restate_test::HandlerAttempt = {
-            let crash = crash.clone();
-            let queued = queued.clone();
-            Arc::new(move |scoped| {
-                let attempt = Arc::clone(&attempt);
-                let crash = crash.clone();
-                let mut queued = queued.clone();
-                Box::pin(async move {
-                    // An execution that starts after the crash fired (the
-                    // killed one was suspended or closed) is dead as it
-                    // starts.
-                    if !crash.has_fired() {
-                        tokio::select! {
-                            biased;
-                            () = crash.fired() => {}
-                            end = attempt(scoped) => {
-                                panic!("the crashing attempt ended ({end:?}) before its crash fired")
-                            }
-                        }
-                    }
-                    if queued.wait_for(Option::is_some).await.is_err() {
-                        // The law never runs the scope again.
-                        std::future::pending::<()>().await;
-                    }
-                    panic!("the conformance crash killed the attempt")
-                })
-            })
-        };
-        let (ended, ends) = tokio::sync::mpsc::unbounded_channel();
-        let aborted = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let redelivered: lash_restate_test::HandlerAttempt = Arc::new(move |scoped| {
-            let attempt = queued.borrow().clone();
-            let ended = ended.clone();
-            let aborted = Arc::clone(&aborted);
-            Box::pin(async move {
-                let attempt = attempt.expect(
-                    "the double redelivers a crashed turn only once its next attempt is queued",
-                );
-                // The attempt aborted in an earlier execution: the invocation
-                // stays open with nothing left to run.
-                if !aborted.load(std::sync::atomic::Ordering::SeqCst) {
-                    let end = attempt(scoped).await;
-                    let _ = ended.send(end);
-                    if end == lash_conformance::ConformanceTurnEnd::Settled {
-                        return;
-                    }
-                    aborted.store(true, std::sync::atomic::Ordering::SeqCst);
-                }
-                std::future::pending::<()>().await;
-            })
-        });
-        let backend = self.backend.clone();
-        let mut call = tokio::spawn(async move {
-            backend
-                .run_crashed_then_redriven(admitted, crashing, redelivered)
-                .await
-        });
-        tokio::select! {
-            biased;
-            () = crash.fired() => {}
-            result = &mut call => {
-                panic!("the crashing turn's handler ended ({result:?}) before its crash fired")
-            }
-        }
-        self.open_turns().insert(key, OpenTurn { next, ends, call });
-    }
-
-    /// Process segments run in the double's process workflow: the worker is
-    /// installed there, and the runtime's own port only observes the
-    /// registry that workflow writes terminals into.
-    fn process_work(
-        &self,
-        watched: lash_core_execution::WatchedRegistry,
-        worker: lash_core_worker::DurableProcessWorker,
-    ) -> lash_core_execution::ProcessWorkWiring {
-        self.backend.install_process_worker(worker);
-        let port = Arc::new(lash_core_execution::NoProcessWork::new(&watched));
-        lash_core_execution::ProcessWorkWiring::new(watched, port)
-    }
-}
-
-/// A backend for a law whose turns must run inside a Restate handler:
-/// lash-restate's engine on the in-process server double, its engine stores
-/// decorated into `storage`'s PostgreSQL store set, so the effects a handler
-/// executes land on the store under test. Returns the law's stores, the
-/// engine's deployment effect host, and the handler-bound turn runner.
-async fn double_law_backend(
-    storage: &PostgresStorage,
-) -> (
-    (tempfile::TempDir, lash_restate_test::RestateTestBackend),
-    Arc<dyn lash_core_execution::StoreSet>,
-    Arc<dyn lash_core_execution::EffectHost>,
-    Arc<dyn lash_conformance::ConformanceTurnRunner>,
-) {
-    double_law_backend_on(storage, lash_restate_test::ServerConfig::default()).await
-}
-
-/// [`double_law_backend`] on a double configured by `config`.
-async fn double_law_backend_on(
-    storage: &PostgresStorage,
-    config: lash_restate_test::ServerConfig,
-) -> (
-    (tempfile::TempDir, lash_restate_test::RestateTestBackend),
-    Arc<dyn lash_core_execution::StoreSet>,
-    Arc<dyn lash_core_execution::EffectHost>,
-    Arc<dyn lash_conformance::ConformanceTurnRunner>,
-) {
-    let (attachments, stores) = pg_law_stores(storage);
-    let engine_stores = Arc::clone(&stores);
-    let backend = lash_restate_test::backend_with(restate_seed(), config, move |_| engine_stores)
-        .await
-        .expect("boot the law's Restate double over PostgreSQL stores");
-    let host: Arc<dyn lash_core_execution::EffectHost> = backend.restate().restate_effect_host();
-    let runner = DoubleTurnRunner::shared(backend.clone());
-    ((attachments, backend), stores, host, runner)
 }
 
 async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
@@ -625,74 +251,6 @@ async fn postgres_graph_node_primary_key_is_global_when_configured() {
 
     assert_eq!(definition, "PRIMARY KEY (node_id)");
 }
-
-lash_conformance::runtime_persistence_reopenable_tests!({
-    let Some((database_fixture, storage)) = storage().await else {
-        eprintln!("skipping Postgres conformance: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    // One reset per law: a law that opens several sessions (the factory
-    // laws) admits each through `make`, and the catalog must keep them all.
-    reset(storage.pool()).await;
-    drop(storage);
-    let database_url = database_fixture.url().to_owned();
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
-    let lease_clock = Arc::clone(&clock);
-    let (promise_guard, effect_host) = promise_authority().await;
-    (
-        (database_fixture, promise_guard),
-        move |session_id: &str| {
-            let effect_host = Arc::clone(&effect_host);
-            let database_url = database_url.clone();
-            let clock = Arc::clone(&clock);
-            let session_id = SessionId::fixture(session_id.to_string());
-            sync_await(async move {
-                let open_storage = PostgresStorage::connect(&database_url)
-                    .await
-                    .expect("open first Postgres conformance pool");
-                let reopen_storage = PostgresStorage::connect(&database_url)
-                    .await
-                    .expect("open independent Postgres conformance pool");
-                let request = lash_core_execution::SessionStoreCreateRequest {
-                    owning_process_id: None,
-                    pending_observer_intents: Vec::new(),
-                    session_id,
-                    relation: lash_core_execution::SessionRelation::Root,
-                    config: lash_core_execution::SessionPolicy::new(
-                        lash_core_execution::TurnBudget::Unbounded,
-                        lash_core_execution::MaxToolCalls::new(1024),
-                    )
-                    .into(),
-                    head: lash_core_execution::SessionCreationHead::Config,
-                };
-                let open_factory = open_storage
-                    .session_store_factory()
-                    .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
-                    .with_lease_clock_for_testing(
-                        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>
-                    );
-                let reopen_factory = reopen_storage
-                    .session_store_factory()
-                    .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
-                    .with_lease_clock_for_testing(clock as Arc<dyn lash_core_execution::Clock>);
-                open_factory
-                    .admit_session(&request)
-                    .await
-                    .expect("admit Postgres conformance session");
-                let open = Arc::new(open_factory) as Arc<dyn RuntimeStore>;
-                let reopen = Arc::new(reopen_factory) as Arc<dyn RuntimeStore>;
-                ReopenableRuntimeStore {
-                    open,
-                    reopen,
-                    effect_host: Arc::clone(&effect_host),
-                }
-            })
-        },
-        lash_conformance::RuntimePersistenceLeaseTiming::controlled(move |ms| {
-            lease_clock.advance(ms)
-        }),
-    )
-});
 
 lash_conformance::store_recovery_tests!({
     let Some((database_fixture, storage)) = storage().await else {
@@ -964,71 +522,6 @@ lash_conformance::store_maintenance_fault_tests!({
         },
         Arc::new(PostgresCorruptRootedManifest { storage }),
     )
-});
-
-lash_conformance::session_store_factory_tests!({
-    let Some((_database_fixture, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres session-store-factory conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    let storage = Arc::new(storage);
-    let make_storage = Arc::clone(&storage);
-    let make = move || {
-        let storage = Arc::clone(&make_storage);
-        sync_await(async move {
-            reset(storage.pool()).await;
-            Arc::new(storage.session_store_factory())
-                as Arc<dyn lash_core_execution::store::ConformanceDeployment>
-        })
-    };
-    let attachments = Arc::new(tempfile::tempdir().expect("attachment directory"));
-    let attached_storage = Arc::clone(&storage);
-    let attached_root = Arc::clone(&attachments);
-    let make_attached = move || {
-        let storage = Arc::clone(&attached_storage);
-        let root = attached_root.path().join(uuid::Uuid::new_v4().to_string());
-        sync_await(async move {
-            reset(storage.pool()).await;
-            (
-                Arc::new(storage.session_store_factory())
-                    as Arc<dyn lash_core_execution::store::ConformanceDeployment>,
-                Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(root))
-                    as Arc<dyn lash_core_execution::AttachmentStore>,
-            )
-        })
-    };
-    let (promise_guard, effect_host) = promise_authority().await;
-    (
-        (_database_fixture, attachments, promise_guard),
-        make,
-        make_attached,
-        effect_host,
-    )
-});
-
-// The settlement laws run a facade runtime over a fresh backend per law: the
-// Restate double's engine is built over this test's PostgreSQL store set, so
-// the runtime takes its durable ports from PostgreSQL while the guard keeps
-// the database, attachment and backend lifetimes.
-lash_conformance::session_config_settlement_tests!({
-    let Some((database_fixture, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres config-settlement conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    let ((attachments, double), _stores, _host, _runner) = double_law_backend(&storage).await;
-    let make = {
-        let double = double.clone();
-        move || {
-            let double = double.clone();
-            async move { double.lash_backend() }
-        }
-    };
-    ((database_fixture, attachments, double), make)
 });
 
 lash_conformance::fresh_session_admission_tests!({
@@ -1453,25 +946,6 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     );
 }
 
-lash_conformance::process_prune_session_store_tests!({
-    let Some((_database_fixture, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres process-owned session prune conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    let factory = Arc::new(storage.store()) as Arc<dyn DeploymentStore>;
-    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    let (promise_guard, effect_host) = promise_authority().await;
-    (
-        (_database_fixture, promise_guard),
-        factory,
-        registry,
-        effect_host,
-    )
-});
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() {
     let Some((_database_fixture, storage)) = storage().await else {
@@ -1843,8 +1317,6 @@ lash_conformance::trigger_retention_fault_tests!({
     (database_fixture, store, fault)
 });
 
-#[path = "conformance/admission_crash_cells.rs"]
-mod admission_crash_cells;
 #[path = "conformance/process_retention.rs"]
 mod process_retention;
 include!("conformance/append_identity.rs");
@@ -1869,182 +1341,15 @@ lash_conformance::retention_tests!({
     (database_fixture, Arc::new(storage.session_store_factory()))
 });
 
-// FIG-3607 contract 4 (FIG-4489): every logical turn a shift runs, a
-// recovered follow-on's included, is owned by `Turn(logical run)`, on the
-// Restate double over PostgreSQL stores.
-struct OwnershipDatabaseEvidence {
-    database: IsolatedDatabase,
-    pool: sqlx::PgPool,
-    engine: lash_restate_test::RestateTestBackend,
-}
-
-impl Drop for OwnershipDatabaseEvidence {
-    fn drop(&mut self) {
-        if std::thread::panicking() {
-            eprintln!(
-                "ownership database {}: pool_closed={}, connections={}, idle={}, limit={}, invocations={:#?}",
-                self.database.database_name(),
-                self.pool.is_closed(),
-                self.pool.size(),
-                self.pool.num_idle(),
-                self.pool.options().get_max_connections(),
-                self.engine.server().invocations(),
-            );
-        }
-    }
-}
-
-mod driver_turn_ownership {
-    use super::*;
-    lash_conformance::driver_turn_ownership_tests!({
-        let Some((lock, storage)) = storage().await else {
-            return;
-        };
-        reset(storage.pool()).await;
-        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
-        let evidence = OwnershipDatabaseEvidence {
-            database: lock,
-            pool: storage.pool().clone(),
-            engine: double.clone(),
-        };
-        (
-            (evidence, storage, attachments, double),
-            "pg-driver-ownership",
-            host,
-            stores,
-            runner,
-        )
-    });
-}
+mod driver_turn_ownership {}
 
 // The ownership law where every await suspends and every resumption replays
 // the handler's journal from its start (FIG-4514): a run replayed after its
 // terminal-checkpoint follow-on committed names that follow-on's effects as
 // its first execution did, so the shift ends.
-mod driver_turn_ownership_under_replay {
-    use super::*;
-    lash_conformance::driver_turn_ownership_tests!({
-        let Some((lock, storage)) = storage().await else {
-            return;
-        };
-        reset(storage.pool()).await;
-        let ((attachments, double), stores, host, runner) = double_law_backend_on(
-            &storage,
-            lash_restate_test::ServerConfig::default().always_replay(true),
-        )
-        .await;
-        let evidence = OwnershipDatabaseEvidence {
-            database: lock,
-            pool: storage.pool().clone(),
-            engine: double.clone(),
-        };
-        (
-            (evidence, storage, attachments, double),
-            "pg-driver-ownership-replay",
-            host,
-            stores,
-            runner,
-        )
-    });
-}
+mod driver_turn_ownership_under_replay {}
 
-mod run_control {
-    use super::*;
-    lash_conformance::shift_admission_tests!(@laws [] {
-        let Some((lock, storage)) = storage().await else { return; };
-        reset(storage.pool()).await;
-        // Shift-admission turns run inside the engine's handlers: the double
-        // lends each attempt the handler-scoped controller a Restate tier
-        // runs it on, over this test's PostgreSQL stores.
-        let ((attachments, double), stores, host, runner) =
-            double_law_backend(&storage).await;
-        ((lock, storage, attachments, double), "pg-run-control", host, stores, runner)
-    }; [
-    (a_terminal_run_never_reparks, "s7b-0"),
-    (one_unfinished_run_per_session, "run-one-unfinished"),
-    (admission_delivers_every_row_it_binds, "run-admission-delivers"),
-    (run_admission_binds_cancellation_authority_with_its_rows, "run-admission-cancel-binding"),
-    (preparing_or_refusing_admission_leaves_cancellation_authority_unbound, "run-admission-unbound-proposal"),
-    (a_run_admission_is_idempotent_across_new_rows_and_fences, "run-admission-idempotent"),
-    (a_diverged_run_parks_once_holds_its_admitted_rows_blocks_admission_and_completes_after_restore, "s7b-15"),
-    (an_exhausted_run_parks_engine_retry_exhausted_via_reconcile_idempotently_with_no_evidence, "s7b-13"),
-    (a_parked_runs_fence_stays_current_until_a_verb, "s7b-14"),
-
-    (sends_behind_a_parked_run_commit_but_are_not_admitted, "s7b-8"),
-    (redrive_under_a_restored_build_completes_once_and_clears_the_park, "s7b-9"),
-    (a_stale_redrive_is_fenced_by_a_later_cancel, "s7b-10"),
-    (run_scope_close_runs_after_terminal_evidence_at_least_once_never_for_parked, "s7b-11"),
-    (a_joined_inputs_turn_scope_closes_with_its_admitting_run, "shift-joined-scope-close"),
-    (a_run_crashed_at_its_report_handover_still_closes_its_scope, "s7b-11b"),
-    (cancel_fork_and_close_raise_the_shift_epoch_and_redrive_does_not, "s7b-12"),
-
-    (cancel_of_a_parked_run_writes_cancelled_settles_its_input_and_drains_the_next, "s7b-1"),
-    (no_row_stays_bound_after_a_runs_verb_close_or_lost_end, "run-verb-unbinds"),
-    (a_refused_run_ends_once_and_its_next_input_admits_a_new_run, "refused-run-end"),
-    (a_run_with_no_engine_execution_ends_only_once_it_started, "lost-run-no-run"),
-    (an_obsolete_executor_never_ends_its_successors_run, "obsolete-executor"),
-    (fork_releases_the_old_owner_before_the_new_run_executes_in_original_order_on_a_fresh_journal, "s7b-2"),
-    (verbs_are_park_id_cas, "s7b-3"),
-    (redrive_under_the_same_build_reparks_the_same_park_with_attempts_plus_one, "s7b-4"),
-    (cancel_or_fork_of_a_redriving_run_is_refused, "s7b-5"),
-    (an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it, "s7b-6"),
-    (engine_refusals_are_retained_and_listed, "s7b-7"),
-    (a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit, "s7b-16"),
-    (a_redrive_the_run_ran_past_is_never_applied_again, "s7b-17"),
-    (a_stale_paused_listing_never_reparks_a_resumed_run, "s7b-18"),
-    (a_parked_session_is_asked_to_work_only_through_its_ingress_obligation, "s7b-19"),
-    (a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles, "l2-1"),
-    (every_order_of_a_send_and_a_redrives_settle_admits_nothing_ahead_of_the_redrive, "l2-1b"),
-    (a_lost_resume_ack_is_reconciled_before_queued_work_is_admitted, "l2-2"),
-    (a_failing_child_cancel_never_wedges_its_runs_cancel_or_fork, "s8c-1"),
-    (a_delivery_whose_claim_was_retaken_never_settles_its_intent, "s8c-2"),
-    (an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session, "s8c-3"),
-    (a_store_fault_in_an_intents_delivery_stalls_its_obligation_and_never_wedges_its_session, "f09-1"),
-    (re_arming_a_refused_intent_makes_it_owed_again_and_its_delivery_completes_it, "f09-2"),
-    (a_refused_follow_on_shift_keeps_the_intents_obligation_due, "s8c-4"),
-    (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "shift-idle-turn-lane-order"),
-    (a_command_enqueued_after_an_input_runs_admission_waits_for_the_next_boundary, "shift-command-after-admission"),
-    (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "shift-turn-lane-contiguous"),
-    (a_command_runs_redrive_replays_its_recorded_outcome, "shift-command-run-redrive"),
-    (a_host_task_is_admitted_as_its_own_operation_run, "shift-operation-run"),
-    (a_run_recorded_under_one_executor_is_never_admitted_by_another, "shift-run-one-executor"),
-    (a_lost_acceptors_run_is_executed_once_by_the_sessions_shift, "shift-run-lost-acceptor"),
-    (admit_run_refuses_another_engine_held_executor, "run-admission-executor"),
-    (first_admission_wins_without_changing_business_identity, "trace-first-writer"),
-    (a_refused_acceptor_adopts_the_outcome_its_runs_executor_recorded, "shift-run-acceptor-adopts"),
-    (a_parent_turn_acceptors_run_is_closed_to_a_later_drive, "shift-run-acceptor-recorded"),
-    ]);
-
-    lash_conformance::queued_input_runs_tests!({
-        let Some((lock, storage)) = storage().await else {
-            return;
-        };
-        reset(storage.pool()).await;
-        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
-        (
-            (lock, storage, attachments, double),
-            "pg-queued-input-runs",
-            host,
-            stores,
-            runner,
-        )
-    });
-
-    lash_conformance::run_answers_its_rows_tests!({
-        let Some((lock, storage)) = storage().await else {
-            return;
-        };
-        reset(storage.pool()).await;
-        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
-        (
-            (lock, storage, attachments, double),
-            "pg-run-rows",
-            host,
-            stores,
-            runner,
-        )
-    });
-}
+mod run_control {}
 
 mod session_history {
     use super::*;
@@ -2156,68 +1461,11 @@ mod session_history {
     }
 }
 
-mod vm_broker {
-    use super::*;
-    // FIG-4159: the worker-broker laws, each turn inside a handler of the
-    // Restate double over this test's PostgreSQL stores; a lost worker fails
-    // the attempt and the double replays the invocation into the redrive.
-    lash_conformance::vm_broker_tests!({
-        let Some((lock, storage)) = storage().await else {
-            return;
-        };
-        reset(storage.pool()).await;
-        let ((attachments, double), _stores, _host, runner) = double_law_backend(&storage).await;
-        (
-            (lock, storage, attachments, double),
-            "pg-vm-broker".to_string(),
-            runner,
-        )
-    });
-}
+mod vm_broker {}
 
-mod frame_open {
-    use super::*;
-    // FIG-4110: every frame open (a context-pressure frame, a pressure frame
-    // followed by `continue_as`, an administrative compaction) killed at each
-    // crash point and redriven opens once, chained in order, with one
-    // summarizer call, over this test's PostgreSQL stores.
-    lash_conformance::frame_open_redrive_tests!({
-        let Some((lock, storage)) = storage().await else {
-            return;
-        };
-        reset(storage.pool()).await;
-        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
-        (
-            (lock, storage, attachments, double),
-            "pg-frame-open",
-            host,
-            stores,
-            runner,
-        )
-    });
-}
+mod frame_open {}
 
-mod bound_trigger_duplicate {
-    use super::*;
-    // FIG-4297: a duplicate of a bound trigger delivery's occurrence, emitted
-    // by a fresh invocation after the bound process was pruned, returns that
-    // process and starts nothing, and the original emission's replay still
-    // answers it, over this test's PostgreSQL stores.
-    lash_conformance::bound_trigger_duplicate_tests!({
-        let Some((lock, storage)) = storage().await else {
-            return;
-        };
-        reset(storage.pool()).await;
-        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
-        (
-            (lock, storage, attachments, double),
-            "pg-bound-trigger",
-            host,
-            stores,
-            runner,
-        )
-    });
-}
+mod bound_trigger_duplicate {}
 
 #[tokio::test]
 async fn fenced_process_and_trigger_registration_stays_typed() {
@@ -2323,29 +1571,7 @@ lash_conformance::process_prune_start_staging_tests!({
     (database_fixture, registry, env_store)
 });
 
-mod worker_recovery {
-    use super::*;
-    lash_conformance::worker_recovery_tests!({
-        let Some((lock, storage)) = storage().await else {
-            return;
-        };
-        reset(storage.pool()).await;
-        let (_held, stores, _host, _runner) = double_law_backend(&storage).await;
-        let recovery = stores.worker_recovery();
-        ((lock, storage, _held), recovery)
-    });
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_attachment_materialization_turn_witnesses() {
-    let Some((_lock, storage)) = storage().await else {
-        panic!("attachment turn witness requires PostgreSQL");
-    };
-    reset(storage.pool()).await;
-    let (_guard, stores, host, runner) = double_law_backend(&storage).await;
-    lash_conformance::attachment_materialization_turn_witnesses("postgres", host, stores, runner)
-        .await;
-}
+mod worker_recovery {}
 
 #[tokio::test]
 async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical() {
@@ -2381,21 +1607,7 @@ async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical() {
     .await;
 }
 
-mod session_commands {
-    use super::*;
-    lash_conformance::session_command_replay_tests!({
-        let (lock, storage) = storage().await.expect("command laws require PostgreSQL");
-        reset(storage.pool()).await;
-        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
-        (
-            (lock, storage, attachments, double),
-            "pg-commands",
-            host,
-            stores,
-            runner,
-        )
-    });
-}
+mod session_commands {}
 
 #[tokio::test]
 async fn neutral_tool_receipts_are_first_writers_and_retire_with_their_scope() {

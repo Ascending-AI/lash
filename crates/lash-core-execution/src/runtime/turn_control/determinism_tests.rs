@@ -15,9 +15,7 @@ use super::*;
 use crate::engine::testing::{
     DeterminismCheck, FailureCause, LocalEngine, LocalTestCx, ReplayMode, RunMode,
 };
-use crate::{
-    AdmittedScope, RecordedJournal, RecordedKeyRange, RecordedKeys, RuntimeEffectController,
-};
+use crate::{AdmittedScope, RuntimeEffectController};
 
 /// The gate pair's live state, shared by every run of one check: what an
 /// external requester has resolved so far, by promise key.
@@ -85,13 +83,6 @@ impl RuntimeEffectController for GateEngine<'_> {
                 })
             })
             .await
-    }
-
-    async fn read_recorded_journal(
-        &self,
-        _range: &RecordedKeyRange,
-    ) -> Result<RecordedJournal, crate::RuntimeEffectControllerError> {
-        Ok(RecordedJournal::Keys(RecordedKeys::default()))
     }
 }
 

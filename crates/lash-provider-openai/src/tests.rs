@@ -34,7 +34,6 @@ mod request_work_tests;
 mod response_body_budget;
 mod responses_text_slot_tests;
 mod session_affinity_tests;
-mod sessions;
 mod strict_tool_omission_tests;
 mod tool_result_shape_tests;
 

@@ -32,9 +32,6 @@ serde_json = { workspace = true }
 default = []
 
 [dev-dependencies]
-# Kernel tests whose effects need an engine run on the Restate server double
-# (FIG-3668, D1 PR-S2).
-lash-restate-test = { workspace = true }
 # The recording backend a storage-only test builds over a bare store set
 # (D1 F3).
 lash-conformance = { workspace = true }

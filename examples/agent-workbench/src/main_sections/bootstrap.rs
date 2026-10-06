@@ -1,13 +1,5 @@
 use super::*;
 
-fn workbench_restate_namespace() -> AnyhowResult<lash::restate::RestateNamespace> {
-    Ok(std::env::var("AGENT_WORKBENCH_RESTATE_NAMESPACE")
-        .ok()
-        .map(|namespace| namespace.parse())
-        .transpose()?
-        .unwrap_or_default())
-}
-
 /// The environment variable naming the live replay store the workbench's
 /// core publishes observation events to and its session feeds tail.
 pub(crate) const LIVE_REPLAY_STORE_ENV: &str = "AGENT_WORKBENCH_LIVE_REPLAY_STORE";
@@ -194,8 +186,7 @@ pub(crate) fn configure_workbench_plugins(
 }
 
 /// The `LASH_RLM_CHANNEL` value the workbench's RLM protocol factory is built
-/// with, read the same way for the serving engine and for the registration
-/// engine so both compose the same factories — and bind the same generation.
+/// with.
 fn workbench_rlm_channel() -> AnyhowResult<lash::rlm::RlmChannel> {
     match std::env::var("LASH_RLM_CHANNEL") {
         Ok(value) => value.parse().map_err(anyhow::Error::msg),
@@ -228,9 +219,7 @@ fn workbench_rlm_workers() -> AnyhowResult<Option<lash::rlm::WorkerService>> {
     prewarm_workbench_worker(workers).map(Some)
 }
 
-/// Everything the workbench plugin stack is configured with, shared by the
-/// serving engine and the `register-deployment` engine so both compute the
-/// same plugin composition — and the same bound build generation.
+/// Everything the workbench plugin stack is configured with.
 struct WorkbenchCorePlugins {
     rlm_workers: Option<lash::rlm::WorkerService>,
     tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
@@ -245,7 +234,7 @@ struct WorkbenchCorePlugins {
     operation: Arc<crate::e2e_operation::Controls>,
 }
 
-/// The builder behind every workbench Restate core: the selected protocol factory
+/// The builder behind every workbench core: the selected protocol factory
 /// over `host_backend`, the required budgets, the optional dev-scenario tool
 /// surface and the workbench plugin stack, shutdown marker included. The
 /// caller applies serving-only extras (tracing, model profiles) and builds;
@@ -303,8 +292,10 @@ async fn workbench_core_builder(
     }
     let shutdown_marker =
         shutdown_marker::factory_from_env("agent-workbench").map_err(anyhow::Error::msg)?;
+    // The operation's call ids derive under the default (empty) deployment
+    // namespace; the durable engine names no namespace of its own.
     #[cfg(feature = "e2e-tools")]
-    let operation_namespace = workbench_restate_namespace()?.as_str().to_owned();
+    let operation_namespace = String::new();
     Ok(builder.configure_plugins(move |plugins| {
         configure_workbench_plugins(
             plugins,
@@ -325,100 +316,6 @@ async fn workbench_core_builder(
             plugins.push(marker);
         }
     }))
-}
-
-/// A workbench `RestateEngine` whose generation a core has bound, over a
-/// scratch in-memory store set: registration reads only the engine's
-/// authority, namespace, admin connection and bound generation, never the
-/// stores. The core is built through [`workbench_core_builder`], the serving
-/// engine's own construction, so the registered deployment advertises the
-/// build the host will actually serve (FIG-4969).
-pub(crate) async fn bound_workbench_engine(
-    config: lash::restate::RestateConfig,
-) -> AnyhowResult<Arc<WorkbenchRestateBackend>> {
-    let rlm_workers = workbench_rlm_workers()?;
-    let stores = lash::sqlite::SqliteStoreSet::memory()
-        .await
-        .context("open the registration engine's scratch store set")?;
-    let engine = Arc::new(lash::restate::RestateEngine::new(Arc::new(stores), config));
-    let host_backend = lash::Backend::new(engine.clone());
-    let tool_provider = failure_provider::DevProviderScenario::from_environment()?
-        .and_then(failure_provider::DevProviderScenario::tool_provider);
-    #[cfg(feature = "e2e-tools")]
-    let tool_fixture = crate::e2e_tools::Fixture::from_env("AGENT_WORKBENCH_TOOL_FIXTURE")?;
-    #[cfg(feature = "e2e-tools")]
-    let tool_provider = match &tool_fixture {
-        Some(fixture) => Some(fixture.tools()?),
-        None => tool_provider,
-    };
-    let plugins = WorkbenchCorePlugins {
-        rlm_workers,
-        tool_provider,
-        mail_world: mail::MailWorld::new(),
-        subagent_registry: Arc::new(lash::subagents::default_registry(&BTreeMap::new())),
-        deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
-            .context("open the registration core's scratch deferred-tool grants")?,
-        approvals: approvals::WorkbenchApprovals::in_memory()
-            .context("open the registration core's scratch approval ledger")?,
-        // Bind the same MCP declaration without starting another live peer.
-        mcp: Arc::new(lash::mcp::McpPluginFactory::empty()),
-        // Registration publishes nothing; it never reaches a shared store.
-        live_replay: Arc::new(lash::observe::InMemoryLiveReplayStore::default()),
-        #[cfg(feature = "e2e-tools")]
-        operation: Arc::new(crate::e2e_operation::Controls::default()),
-    };
-    let _core = workbench_core_builder(
-        host_backend,
-        workbench_rlm_channel()?,
-        context_window_tokens_from_environment()?,
-        plugins,
-    )
-    .await?
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "agent-workbench",
-        process_incarnation_id(),
-    ))
-    .context("build Lash core")?;
-    Ok(engine)
-}
-
-/// The `register-deployment <endpoint-url>` subcommand: the dev launcher's
-/// registration step, run as an invocation of this binary so
-/// `scripts/agent-workbench-dev.sh` keeps owning when registration happens —
-/// a fresh `up` registers, a restart does not — while the registration
-/// itself goes through [`RestateEngine::register_deployment`] and its
-/// namespace collision guard (FIG-3898) exactly as the serving engine would
-/// do it.
-///
-/// `register_deployment` refuses an engine whose generation was never bound
-/// (FIG-4969), and only a core built over the engine's backend binds it, so
-/// the subcommand first builds the workbench's core — the serving engine's
-/// own construction, over a scratch in-memory store set the registration
-/// never touches — then registers through that bound engine.
-///
-/// A `NameTaken` refusal is permanent, so it exits 2 for the launcher to
-/// stop retrying; every other failure is an ordinary nonzero exit.
-pub(crate) async fn register_deployment_command(endpoint_url: &str) -> AnyhowResult<()> {
-    let ingress_url =
-        std::env::var("RESTATE_INGRESS_URL").context("RESTATE_INGRESS_URL is required")?;
-    let admin_url = std::env::var("RESTATE_ADMIN_URL").context("RESTATE_ADMIN_URL is required")?;
-    let authority = lash::restate::RestateAuthorityId::new(
-        std::env::var("RESTATE_AUTHORITY_ID").context("RESTATE_AUTHORITY_ID is required")?,
-    )
-    .map_err(|error| anyhow!("RESTATE_AUTHORITY_ID: {error}"))?;
-    let engine = bound_workbench_engine(
-        lash::restate::RestateConfig::new(ingress_url, admin_url, authority)
-            .with_namespace(workbench_restate_namespace()?),
-    )
-    .await?;
-    match engine.register_deployment(endpoint_url).await {
-        Ok(()) => Ok(()),
-        Err(error @ lash::restate::RestateRegistrationError::NameTaken { .. }) => {
-            eprintln!("{error}");
-            std::process::exit(2)
-        }
-        Err(error) => Err(error.into()),
-    }
 }
 
 pub(crate) async fn async_main() -> AnyhowResult<()> {
@@ -443,18 +340,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .unwrap_or_else(|_| "127.0.0.1:3030".to_string())
         .parse()
         .context("invalid AGENT_WORKBENCH_ADDR")?;
-    let restate_endpoint_addr: SocketAddr = std::env::var("AGENT_WORKBENCH_RESTATE_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:9081".to_string())
-        .parse()
-        .context("invalid AGENT_WORKBENCH_RESTATE_ADDR")?;
-    let restate_ingress_url = std::env::var("RESTATE_INGRESS_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
-    let restate_authority_id =
-        lash::restate::RestateAuthorityId::new(std::env::var("RESTATE_AUTHORITY_ID").context(
-            "RESTATE_AUTHORITY_ID is required and must remain stable for one Restate state",
-        )?)?;
-    let restate_admin_url =
-        std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19070".to_string());
     let data_dir = std::env::var("AGENT_WORKBENCH_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(".agent-workbench"));
@@ -552,7 +437,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // that already exists wins.
     sessions.ensure(&sessions.current());
     let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)?;
-    let restate_http = lash::http_transport::build_http_client();
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))?;
     let deferred_tools =
         deferred_tools::WorkbenchDeferredTools::open(data_dir.join("deferred-tool-grants.db"))
@@ -588,36 +472,17 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             }
         }
     });
-    let process_event_sink = Arc::new(ChannelProcessEventSink::new(process_event_tx))
+    // For I0 (FIG-5194): the durable builder takes no process event sink
+    // yet, so the freshness feed above has no producer until it does.
+    let _process_event_sink = Arc::new(ChannelProcessEventSink::new(process_event_tx))
         as Arc<dyn lash::process::ProcessEventSink>;
-    // One Restate backend over the store set: the engine host journals the
-    // turns' effects, runs the background processes, whose appended events
-    // reach the sink best-effort after their durable write, and executes each
-    // session's accepted input through its `LashSession` service.
-    let backend = Arc::new(lash::restate::RestateEngine::new(
-        Arc::clone(&stores.stores),
-        lash::restate::RestateConfig::new(
-            lash::restate::RestateConnection::with_client_and_config(
-                restate_ingress_url.clone(),
-                restate_http.clone(),
-                lash::restate::RestateConnectionConfig {
-                    control_timeout_ms: 30_000,
-                    attach_ceiling_ms: 6 * 60 * 60 * 1_000,
-                    ..lash::restate::RestateConnectionConfig::default()
-                },
-            ),
-            lash::restate::RestateConnection::with_client(
-                restate_admin_url.clone(),
-                restate_http.clone(),
-            ),
-            restate_authority_id.clone(),
-        )
-        .with_namespace(workbench_restate_namespace()?)
-        .with_process_event_sink(Arc::clone(&process_event_sink)),
-    ));
+    // The durable backend over the store set (ADR 0132 §1); it serves turns,
+    // processes and session input once L3 (FIG-5172) lands.
+    let host_backend = lash::durable::DurableBackendBuilder::new(Arc::clone(&stores.stores))
+        .build()
+        .context("build the durable backend")?;
     let attachment_store = stores.stores.attachment_store();
 
-    let host_backend = lash::Backend::new(backend.clone());
     let tracing = lash::runtime::TraceRuntime::new(host_backend.clock())
         .with_product_observer(Arc::clone(&lashlang_execution_sink));
     // FIG-1407: the workbench used to run `TurnBudget::Unbounded` with no
@@ -780,11 +645,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         }
     });
     let operation = async {
-        let process_worker = lash::durability::DurableProcessWorker::new(
-            core.durable_process_worker_config()
-                .context("build Restate process worker config")?,
-        )
-        .context("validate Restate process worker config")?;
         let process_observer = core
             .processes()
             .observer()
@@ -807,10 +667,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             trace_sink: Some(Arc::clone(&trace_sink)),
             lashlang_execution,
             event_tx,
-            restate_ingress_url,
-            restate_admin_url,
-            restate_http,
-            restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
             mail_world,
             active_turns,
             authorization: WorkbenchAuthorization::allow_all(),
@@ -823,8 +679,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         reconcile_decided_approvals(&state).await;
         // The turns a previous incarnation was following are settled by the
         // session's engine whoever follows them; this process takes them up.
-        restate::resume_turn_followers(&state).await;
-        restate::watch_session_runs(&state, &state.current_session_id()).await;
+        turns::resume_turn_followers(&state).await;
+        turns::watch_session_runs(&state, &state.current_session_id()).await;
         emit_workbench_trace(
             &state.trace_sink,
             None,
@@ -842,8 +698,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 "model": serde_json::to_value(state.selected_llm_profile()).unwrap_or(Value::Null),
                 "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
                 "store_backend": stores.backend,
-                "restate_endpoint_addr": restate_endpoint_addr.to_string(),
-                "restate_ingress_url": state.restate_ingress_url,
             }),
         );
 
@@ -919,13 +773,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .merge(crate::mcp_host::router(Arc::clone(&mcp_search)));
         #[cfg(feature = "e2e-tools")]
         let app = if let Some(fixture) = &tool_fixture {
-            let (receiver, retained_path, event_type) = fixture.receiver_binding();
+            let (receiver, _retained_path, _event_type) = fixture.receiver_binding();
             app.merge(crate::e2e_receiver::routes(
                 crate::e2e_receiver::ReceiverState {
                     app: state.clone(),
                     receiver,
-                    retained_path,
-                    event_type,
                 },
             ))
         } else {
@@ -938,42 +790,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 controls: operation_controls.clone(),
             },
         ));
-        #[cfg(feature = "provider-wire-fixtures")]
-        let app = if dev_provider_scenario
-            == Some(failure_provider::DevProviderScenario::ValidEmptyCompletion)
-        {
-            let fixture = crate::local_restate::LocalRestate {
-                ingress_url: state.restate_ingress_url.clone(),
-                admin_url: state.restate_admin_url.clone(),
-                authority: restate_authority_id.clone(),
-                namespace: lash::restate::RestateNamespace::default(),
-            }
-            .in_namespace(crate::valid_empty_completion::NAMESPACE)?;
-            app.route(
-                "/dev/valid-empty-completion",
-                get(crate::valid_empty_completion::page)
-                    .post(move || crate::valid_empty_completion::run(fixture.clone())),
-            )
-        } else {
-            app
-        };
-
         println!("agent-workbench listening on http://{addr}");
-        println!("agent-workbench Restate endpoint listening on http://{restate_endpoint_addr}");
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .context("bind listener")?;
-        let restate_listener = tokio::net::TcpListener::bind(restate_endpoint_addr)
-            .await
-            .context("bind Restate listener")?;
-        let restate_task = restate::spawn_owned_restate_endpoint(
-            restate_listener,
-            state,
-            Arc::clone(&backend),
-            process_worker,
-            host_shutdown.subscribe(),
-        )
-        .context("build the Restate endpoint")?;
         let signal_shutdown = host_shutdown.clone();
         let serve_result = axum::serve(listener, app)
             .with_graceful_shutdown(async move {
@@ -983,9 +803,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             .await
             .context("serve");
         let _ = host_shutdown.send(true);
-        if let Err(error) = restate_task.await {
-            eprintln!("agent-workbench: Restate endpoint task join failed: {error}");
-        }
         serve_result
     }
     .await;

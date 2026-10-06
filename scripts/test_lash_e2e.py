@@ -20,6 +20,30 @@ SPEC = importlib.util.spec_from_file_location("lash_e2e", Path(__file__).with_na
 e2e = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(e2e)
 SOURCE = "a" * 40
+# Every catalogue row is held until an engine serves it again; the laws run
+# over the catalogue as if one did, under a registration label of their own.
+SYNTHETIC_LABEL = "//synthetic:e2e__test"
+ENGINE_HOLD = "no engine until L3 (FIG-5172) and L9h (FIG-5186)"
+
+
+def readied(manifest):
+    """The catalogue with every row held only for want of an engine registered."""
+    manifest = copy.deepcopy(manifest)
+    for scenario in manifest["scenarios"]:
+        for row in scenario["cases"]:
+            if row["hold_reason"] == ENGINE_HOLD:
+                row.update(state="ready", hold_reason=None, registration={
+                    "label": SYNTHETIC_LABEL,
+                    "test": "::".join((scenario["id"].lower(), row["variant"].replace("-", "_"),
+                                       row["store"], row["leg"], row["channel"])),
+                })
+    return manifest
+
+
+def register_synthetic_label(case):
+    patcher = patch.object(e2e.GATE, "LABELS", frozenset({SYNTHETIC_LABEL}))
+    patcher.start()
+    case.addCleanup(patcher.stop)
 
 
 class ReceiptLaws(unittest.TestCase):
@@ -28,7 +52,8 @@ class ReceiptLaws(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(dir=e2e.ROOT / "target")
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        self.manifest = e2e.load_manifest()
+        register_synthetic_label(self)
+        self.manifest = readied(e2e.load_manifest())
 
     def artifact(self, name, value):
         path = self.root / name
@@ -41,7 +66,7 @@ class ReceiptLaws(unittest.TestCase):
             scenario["arc_guards"] = []
             for row in scenario["cases"]:
                 row.update(state="ready", hold_reason=None, registration={
-                    "label": "//crates/lash-upgrade-harness:e2e__test",
+                    "label": SYNTHETIC_LABEL,
                     "test": f"{scenario['owner'].lower()}::{scenario['id'].lower()}::{row['variant'].replace('-', '_')}",
                 })
         server = self.artifact("server", "synthetic server artifact")
@@ -210,8 +235,8 @@ class ReceiptLaws(unittest.TestCase):
             e2e.plan(self.manifest, "b" * 64, "full", ["S29"], SOURCE, [key])
 
         def runner_call(command, **kwargs):
-            self.assertEqual(command[2], "//crates/lash-upgrade-harness:e2e_hosts__test")
-            self.assertEqual(command[3], "s28_workbench_mcp_peer_restart")
+            self.assertEqual(command[2], SYNTHETIC_LABEL)
+            self.assertEqual(command[3], "s28::default::sqlite_file::live::rlm")
             self.assertEqual(command[command.index("--case") + 1], key)
             self.assertEqual(command[command.index("--store") + 1], "sqlite_file")
             self.assertEqual(command[command.index("--leg") + 1], "live")
@@ -286,7 +311,7 @@ class ReceiptLaws(unittest.TestCase):
         }))
         junit_source = self.root / "kiln-junit.xml"
         junit_source.write_text(f'<testsuite><testcase name="{test_name}" /></testsuite>')
-        base = {"scenario": test_name, "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
+        base = {"scenario": test_name, "label": SYNTHETIC_LABEL,
                 "source_sha": SOURCE, "gate": "law", "port_base": 61000, "generation": "1",
                 "playwright": "1.62.0", "workbench": {"path": "w", "sha256": "0" * 64}}
         provenance = gate.certify_case(case_dir, junit_source, outputs, SOURCE, key, admin, base)
@@ -444,7 +469,7 @@ class RunnerLaws(unittest.TestCase):
     def test_socket_path_stays_under_107_for_the_longest_registration(self):
         registrations = [
             row["registration"]
-            for scenario in e2e.load_manifest()["scenarios"]
+            for scenario in readied(e2e.load_manifest())["scenarios"]
             for row in scenario["cases"]
             if row["registration"] is not None
         ]

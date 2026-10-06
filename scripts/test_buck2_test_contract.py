@@ -449,7 +449,7 @@ class WorkflowTests(unittest.TestCase):
         cleanup = step(static, "Remove client credentials")
         self.assertEqual("always()", cleanup["if"])
 
-    def test_warmer_builds_the_partition_and_live_restate_binaries_without_tests(self) -> None:
+    def test_warmer_builds_the_partition_and_worker_binaries_without_tests(self) -> None:
         warm = workflow("cache-warm.yml")["jobs"]["warm-buck2"]
         run = step(warm, "Warm test binaries")["run"]
         inventory = json.loads((ROOT / "tools/buck2/target-inventory.json").read_text())
@@ -468,7 +468,6 @@ class WorkflowTests(unittest.TestCase):
             "//:workspace_tests",
             "//crates/lash:ui_fixtures",
             "//crates/lash:facade_completeness",
-            "//crates/lash-restate:lash-restate__unit_test",
             "//crates/lash-vm-worker:lash-vm-worker__bin",
         }
         self.assertEqual(expected, labels)
@@ -519,12 +518,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(
             [
                 "pg-store",
-                "pg-artifact-referrers",
-                "pg-attachment-referrers",
-                "pg-model-keys",
                 "pg-facade-laws",
-                "pg-rlm-frame-open",
-                "pg-rlm-tool-call-limit",
                 "pg-pool-wait",
                 "pg-sim-backend-faults",
                 "pg-cross-backend",
@@ -571,9 +565,6 @@ class WorkflowTests(unittest.TestCase):
             )
             labels = suite_labels(package_suites[0])
             if job_name == "postgres-store":
-                self.assertEqual(
-                    "//crates/lash-restate:lash-restate__unit_test", labels.pop()
-                )
                 self.assertFalse(set(labels) & variants)
             else:
                 self.assertLessEqual(set(labels), variants)
@@ -604,7 +595,7 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(store_suites(job), command[2:])
 
     def test_the_store_build_is_one_remote_build_at_the_default_jobs(self) -> None:
-        suites = ["pg-store", "pg-model-keys", "pg-catalog-compatibility"]
+        suites = ["pg-store", "pg-facade-laws", "pg-catalog-compatibility"]
         with tempfile.TemporaryDirectory() as directory:
             recorder = Path(directory) / "hermetic-build"
             calls = Path(directory) / "calls.jsonl"

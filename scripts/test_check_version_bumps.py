@@ -336,41 +336,6 @@ class FreezeVerdicts(Fixture):
         self.assertIn("does not find missing_decoder", result.stderr)
 
 
-class JournalLaneVerdicts(Fixture):
-    def setUp(self) -> None:
-        super().setUp()
-        self.admission = "crates/lash-restate/src/process/admission.rs"
-        self.commands = "crates/lash-core/src/runtime/shift/run.rs"
-        self.epoch = """
-        #[cfg(not(feature = "synthetic-next"))]
-        /// version_surface = "drain"
-        /// version_guard(items(run))
-        pub const JOURNAL_LOGIC_EPOCH: u32 = 4;
-        #[cfg(feature = "synthetic-next")]
-        /// version_surface = "drain"
-        pub const JOURNAL_LOGIC_EPOCH: u32 = 5;
-        fn run() { ctx.run("admit", || admit()); }
-        """
-        self.write(self.admission, self.epoch)
-        self.write(self.commands, 'fn commands() { ctx.run("commands", || apply_task()); }')
-        self.base = self.commit("pre-operation command stream")
-
-    def test_o01_command_stream_requires_both_epoch_lanes_during_freeze(self):
-        self.assertTrue(any(gate.fnmatch.fnmatch(self.commands, pattern)
-                            for pattern in gate.guarded_path_patterns(self.repo)),
-                        "command-only edits must select the landing gate")
-        self.write(self.commands, 'fn commands() { ctx.run("commands", || stop_at_task()); }')
-        unchanged = self.run_command(self.base, self.commit("stop at operation"), strict=False)
-        self.assertEqual(unchanged.returncode, 1, unchanged.stdout + unchanged.stderr)
-        self.assertIn("JOURNAL_LOGIC_EPOCH", unchanged.stderr)
-        self.write(self.admission, self.epoch.replace("u32 = 4;", "u32 = 5;"))
-        one_lane = self.run_command(self.base, self.commit("move ordinary lane alone"), strict=False)
-        self.assertEqual(one_lane.returncode, 1, one_lane.stdout + one_lane.stderr)
-        self.write(self.admission, self.epoch.replace("u32 = 5;", "u32 = 6;").replace("u32 = 4;", "u32 = 5;"))
-        moved = self.run_command(self.base, self.commit("move both lanes"), strict=False)
-        self.assertEqual(moved.returncode, 0, moved.stdout + moved.stderr)
-
-
 class HistoricalHookDecision(unittest.TestCase):
     def test_0059_retains_the_historical_rule_and_links_0128(self):
         root = Path(__file__).resolve().parents[1]

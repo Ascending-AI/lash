@@ -357,7 +357,6 @@ async fn run_high_traffic_step(
         scenario.name()
     ))?;
     let mut runtime = build_runtime_with_sqlite_store(scenario, sqlite_root.clone()).await?;
-    let core = runtime.core();
     let metrics = runtime.store_metrics();
     let calls_before = metrics.snapshot().counters;
     let timings_before = metrics.timing_snapshot();
@@ -370,8 +369,6 @@ async fn run_high_traffic_step(
     let mut workers = tokio::task::JoinSet::new();
 
     for (session_index, session) in sessions.into_iter().enumerate() {
-        let core = core.clone();
-        let restate = runtime.restate().clone();
         let config = config.clone();
         let queue_depth = Arc::clone(&queue_depth);
         let queue_depth_samples = Arc::clone(&queue_depth_samples);
@@ -394,8 +391,6 @@ async fn run_high_traffic_step(
                 let depth = queue_depth.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                 queue_depth_samples.lock_recover().push(depth as u64);
                 let operation = run_high_traffic_operation(
-                    &restate,
-                    &core,
                     &session,
                     ordinal,
                     config.operation_kind(ordinal),
@@ -455,8 +450,6 @@ async fn run_high_traffic_step(
 }
 
 async fn run_high_traffic_operation(
-    restate: &lash_restate_test::RestateTestBackend,
-    core: &lash::LashCore,
     session: &lash::LashSession,
     ordinal: usize,
     kind: HighTrafficOperationKind,
@@ -488,75 +481,12 @@ async fn run_high_traffic_operation(
         run_high_traffic_direct_turn(session, ordinal, kind).await?
     };
     if kind == HighTrafficOperationKind::Trigger {
-        let source_key = lash_core::facade_support::empty_trigger_source_key(
-            crate::runtime_perf::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
-        )?;
-        let request = lash_core::TriggerOccurrenceRequest::new(
-            crate::runtime_perf::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
-            source_key,
-            serde_json::json!({
-                "account": "test",
-                "title": "load",
-                "text": "runtime perf benchmark ok",
-            }),
-            format!(
-                "runtime-perf-load-trigger:{}:{ordinal}",
-                session.session_id()
-            ),
-        )
-        .with_source(serde_json::json!({}))
-        .for_session(session.session_id());
         // A trigger emission journals its process starts, so it runs in a
-        // handler of the engine's deployment, as a host's workflow runs it.
-        let emitted = Arc::new(Mutex::new(None));
-        restate
-            .run_in_handler(
-                lash_core::AdmittedScope::new(session.turn_scope(lash_core::TurnId::fixture(
-                    format!("runtime-perf-load-trigger-emission-{ordinal}"),
-                ))),
-                Arc::new({
-                    let core = core.clone();
-                    let emitted = Arc::clone(&emitted);
-                    move |controller| {
-                        let core = core.clone();
-                        let request = request.clone();
-                        let emitted = Arc::clone(&emitted);
-                        Box::pin(async move {
-                            let report = core
-                                .triggers()
-                                .emit(request, controller)
-                                .await
-                                .map_err(|error| error.to_string());
-                            *emitted.lock_recover() = Some(report);
-                        })
-                    }
-                }),
-            )
-            .await
-            .map_err(anyhow::Error::msg)?;
-        let delivery_report = emitted
-            .lock_recover()
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("the emission handler produced no report"))?
-            .map_err(anyhow::Error::msg)?;
-        let delivery_process_ids = delivery_report.started_process_ids();
-        if delivery_process_ids.is_empty() {
-            let registrations = session.admin().triggers().list_all().await?;
-            anyhow::bail!(
-                "trigger high-traffic operation {ordinal} did not expose a delivery process: report={delivery_report:?}, registrations={registrations:?}"
-            );
-        }
-        for process_id in delivery_process_ids {
-            let outcome = core.processes().await_output(&process_id).await?;
-            if !matches!(
-                outcome,
-                lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()
-            ) {
-                anyhow::bail!(
-                    "trigger high-traffic operation {ordinal} delivery process {process_id} did not succeed: {outcome:?}"
-                );
-            }
-        }
+        // handler of the engine's deployment; the durable engine lends one
+        // from L3 (FIG-5172).
+        anyhow::bail!(
+            "trigger high-traffic operation {ordinal} has no engine handler to emit in until L3 (FIG-5172)"
+        );
     }
     let latency_ms = elapsed_ms(operation_started);
     let pre_phase_dispatch_ms = probe.first_phase_delay_ms(operation_started);

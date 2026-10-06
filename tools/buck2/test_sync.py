@@ -1237,14 +1237,6 @@ def check_direct_buck_generator() -> None:
     assert {unit["label"].split(":", 1)[1].split("__fv_", 1)[0] for unit in bins_units} == {
         "lash-vm-worker__bin"
     }
-    provider_stream = next(
-        target
-        for package in inventory["packages"]
-        if package["package"] == "lash-restate-postgres-workers-e2e"
-        for target in package["targets"]
-        if target.get("cargo") == "provider_stream_bounds"
-    )
-    assert provider_stream["tags"] == ["cargo-service-gate", "manual"]
     inventory_text = json.dumps(inventory, sort_keys=True)
     assert not re.search(r":build_script_(?:\[|\")", inventory_text)
 

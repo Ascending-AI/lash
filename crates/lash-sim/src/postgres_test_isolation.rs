@@ -7,14 +7,8 @@
 //! never reproduce serially. Rather than joining the shared advisory lock and
 //! serializing, each suite here takes a database of its own.
 
+#[cfg(test)]
 use lash_postgres_store::testing::IsolatedDatabase;
-
-/// # Panics
-///
-/// Panics if an explicitly selected PostgreSQL leg has no database URL.
-pub(crate) async fn isolated_database() -> IsolatedDatabase {
-    IsolatedDatabase::create(&lash_postgres_store::testing::required_database_url()).await
-}
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL; select inside a pg16 gate"]
@@ -53,4 +47,11 @@ pub(crate) fn assert_requires_database_url(law: &str) {
             "{stdout}\n{stderr}"
         );
     }
+}
+/// # Panics
+///
+/// Panics if an explicitly selected PostgreSQL leg has no database URL.
+#[cfg(test)]
+pub(crate) async fn isolated_database() -> IsolatedDatabase {
+    IsolatedDatabase::create(&lash_postgres_store::testing::required_database_url()).await
 }

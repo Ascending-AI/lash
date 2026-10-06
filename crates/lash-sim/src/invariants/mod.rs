@@ -394,12 +394,10 @@ impl HistoryRecorder {
     }
 }
 
-/// What a sim tool records about its own runs: a recorder and the server
-/// double whose attempts run it.
+/// What a sim tool records about its own runs.
 #[derive(Clone)]
 pub struct ToolObserver {
     recorder: HistoryRecorder,
-    server: Option<lash_restate_test::RestateTestServer>,
 }
 
 impl std::fmt::Debug for ToolObserver {
@@ -412,11 +410,8 @@ impl std::fmt::Debug for ToolObserver {
 
 impl ToolObserver {
     #[must_use]
-    pub fn new(
-        recorder: HistoryRecorder,
-        server: Option<lash_restate_test::RestateTestServer>,
-    ) -> Self {
-        Self { recorder, server }
+    pub fn new(recorder: HistoryRecorder) -> Self {
+        Self { recorder }
     }
 
     /// The call `context` runs, as a [`CallRef`].
@@ -436,10 +431,8 @@ impl ToolObserver {
     /// Record one run of a tool body under `context`.
     pub fn executed(&self, context: &lash_core::AttemptContext<'_>) -> CallRef {
         let call = Self::call(context);
-        let failed_attempts_before = self.server.as_ref().map_or(0, |server| {
-            let stats = server.stats();
-            stats.crashes + stats.retries
-        });
+        // No engine reports its failed attempts until L3 (FIG-5172).
+        let failed_attempts_before = 0;
         self.recorder.record(Fact::ToolExecuted {
             call: call.clone(),
             attempt: context.attempt_number(),
@@ -455,6 +448,22 @@ impl ToolObserver {
             call,
         });
     }
+}
+
+/// Check the history of a run on one engine: `recorder`'s facts and the
+/// engine's final store.
+pub async fn check_engine(
+    scenario: impl Into<String>,
+    seed: u64,
+    recorder: &HistoryRecorder,
+    engine: &crate::backend::SimEngine,
+) -> Result<Report, String> {
+    let mut history = History::new(scenario, seed);
+    history.extend_from(recorder);
+    history
+        .capture_store_with_transcripts("engine", engine.stores())
+        .await?;
+    Ok(check(&history))
 }
 
 /// A completion key as a history names it.
@@ -760,151 +769,4 @@ pub fn render(history: &History, violation: &Violation) -> String {
         }
     }
     out
-}
-
-/// Check the history of a run on one engine: `recorder`'s facts and the
-/// engine's final store.
-pub async fn check_engine(
-    scenario: impl Into<String>,
-    seed: u64,
-    recorder: &HistoryRecorder,
-    engine: &crate::backend::SimEngine,
-) -> Result<Report, String> {
-    let mut history = History::new(scenario, seed);
-    history.extend_from(recorder);
-    capture_engines(
-        &mut history,
-        std::iter::once(("engine".to_owned(), engine.restate())),
-    )
-    .await?;
-    Ok(check(&history))
-}
-
-/// How long the end of a history waits for one session's shift to settle.
-const SETTLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// The end of a history on `engine`: every session's shift has settled,
-/// with the scope closes its runs owed. A send answers at its run's final
-/// commit, before the run's scope closes (FIG-3979), so a store read at
-/// that point sees a close still in flight. A shift that does not settle
-/// within [`SETTLE_LIMIT`] (a turn the scenario leaves parked) is judged as
-/// it stands.
-pub(crate) async fn settle_shifts(
-    engine: &lash_restate_test::RestateTestBackend,
-) -> Result<(), String> {
-    let sessions = lash_sqlite_store::testing::read_rows_for_testing(
-        engine.stores(),
-        "SELECT session_id FROM session_meta ORDER BY session_id",
-    )?;
-    for row in sessions {
-        let Some((_, serde_json::Value::String(session))) = row.into_iter().next() else {
-            continue;
-        };
-        let session = lash_core::SessionId::fixture(session);
-        let _ = tokio::time::timeout(SETTLE_LIMIT, engine.settle_session_shift(&session)).await;
-    }
-    Ok(())
-}
-
-/// Settle every session's shift on each of `engines`, then capture every
-/// store they wrote, with transcripts, into `history`.
-pub async fn capture_engines<'a>(
-    history: &mut History,
-    engines: impl IntoIterator<Item = (String, &'a lash_restate_test::RestateTestBackend)>,
-) -> Result<(), String> {
-    for (label, engine) in engines {
-        settle_shifts(engine).await?;
-        let now_ms = engine.server().now_ms();
-        history.now_ms = Some(history.now_ms.map_or(now_ms, |at| at.max(now_ms)));
-        history
-            .capture_store_with_transcripts(label, engine.stores())
-            .await?;
-    }
-    Ok(())
-}
-
-/// The global invariants over a crash-matrix or soak world whose end state
-/// held: its final store after one more recovery pass, and after every claim
-/// that store still held has lapsed and been retaken, judged under
-/// `scenario` and the world's seed. Each failing violation is one rendered
-/// line; quarantined ones are printed. A world on a live engine has no store
-/// this can read, and is not judged.
-pub async fn check_crash_world(
-    world: &crate::crash_matrix::world::CrashWorld,
-    scenario: &str,
-) -> Vec<String> {
-    match report_crash_world(world, scenario).await {
-        Ok(Some(report)) => {
-            report.print_quarantined();
-            report.rendered[..report.violations.len()].to_vec()
-        }
-        Ok(None) => Vec::new(),
-        Err(error) => vec![error],
-    }
-}
-
-/// The final recovered history and its checker counts.
-pub async fn report_crash_world(
-    world: &crate::crash_matrix::world::CrashWorld,
-    scenario: &str,
-) -> Result<Option<Report>, String> {
-    let Some(stores) = world.sqlite_stores() else {
-        return Ok(None);
-    };
-    // One more recovery pass, so the history ends after the relay had its
-    // chance at everything the run armed, its last step's writes included.
-    // A pass that fails leaves the history judged as one no pass ended.
-    let relayed = world.tick().await.is_ok();
-    world.quiesce().await;
-    let mut history = match capture_crash_world(world, stores, scenario, relayed).await {
-        Ok(history) => history,
-        Err(error) => return Err(error),
-    };
-    // A claim still held once every pass has quiesced is a dead claimant's:
-    // its deployment died inside the pass that took it. Nobody may retake it
-    // before it lapses (ADR 0109 §1.4), so the history ends only after the
-    // recovery pass past the last lapse, which retakes it; what that pass
-    // leaves claimed is judged.
-    if let Some(lapse_ms) = history
-        .last_claim_lapse_ms()
-        .filter(|lapse_ms| *lapse_ms > world.now_ms())
-    {
-        // A tick moves the clock at least 90 % of `TICK`.
-        let tick_ms = crate::crash_matrix::TICK.as_millis() as u64;
-        let ticks = lapse_ms
-            .saturating_sub(world.now_ms())
-            .div_ceil(tick_ms - tick_ms / 10);
-        let mut relayed = relayed;
-        for _ in 0..ticks {
-            if world.now_ms() >= lapse_ms {
-                break;
-            }
-            relayed = world.tick().await.is_ok();
-        }
-        world.quiesce().await;
-        history = match capture_crash_world(world, stores, scenario, relayed).await {
-            Ok(history) => history,
-            Err(error) => return Err(error),
-        };
-    }
-    Ok(Some(check(&history)))
-}
-
-/// `world`'s stores as they stand now, as a history of `scenario`.
-async fn capture_crash_world(
-    world: &crate::crash_matrix::world::CrashWorld,
-    stores: &lash_sqlite_store::SqliteStoreSet,
-    scenario: &str,
-    relayed: bool,
-) -> Result<History, String> {
-    let mut history = History::new(scenario, world.seed());
-    history.extend_from(world.history());
-    history.relay_ran = relayed;
-    history.now_ms = Some(world.now_ms());
-    history.park_events = redrive_resumes::read_park_feed(world).await?;
-    history
-        .capture_store_with_transcripts("engine", stores)
-        .await
-        .map_err(|error| format!("capture the history for the global invariants: {error}"))?;
-    Ok(history)
 }

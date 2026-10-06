@@ -1,18 +1,7 @@
+#[cfg(test)]
 use super::*;
 
-/// Trigger boundaries that register their subscription's engine process. A
-/// successful boundary registers and binds its process in the world's stores;
-/// the bind delivers the reservation's obligation (ADR 0109). The scripted
-/// world has no engine relay, so the boundary also delivers the process's
-/// start, standing in for the deployment that runs the trigger's engine.
-pub(super) struct SimTriggerHarness {
-    store: Arc<dyn lash_core::TriggerStore>,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    starts: Arc<dyn lash_core::store::ObligationLedger>,
-    clock: Arc<dyn lash_core::Clock>,
-    registered_source_keys: BTreeSet<String>,
-}
-
+#[cfg(test)]
 impl SimTriggerHarness {
     pub(super) fn over(stores: Arc<dyn lash_core::StoreSet>) -> Self {
         Self {
@@ -23,9 +12,7 @@ impl SimTriggerHarness {
             registered_source_keys: BTreeSet::new(),
         }
     }
-}
 
-impl SimTriggerHarness {
     pub(super) async fn deliver(
         &mut self,
         event: &BoundaryEvent,
@@ -199,4 +186,20 @@ impl SimTriggerHarness {
 }
 
 #[cfg(test)]
+impl SimTriggerHarness {}
+
+#[cfg(test)]
 mod tests;
+/// Trigger boundaries that register their subscription's engine process. A
+/// successful boundary registers and binds its process in the world's stores;
+/// the bind delivers the reservation's obligation (ADR 0109). The scripted
+/// world has no engine relay, so the boundary also delivers the process's
+/// start, standing in for the deployment that runs the trigger's engine.
+#[cfg(test)]
+pub(super) struct SimTriggerHarness {
+    store: Arc<dyn lash_core::TriggerStore>,
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+    starts: Arc<dyn lash_core::store::ObligationLedger>,
+    clock: Arc<dyn lash_core::Clock>,
+    registered_source_keys: BTreeSet<String>,
+}

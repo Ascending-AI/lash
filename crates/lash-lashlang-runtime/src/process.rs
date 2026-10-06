@@ -1557,8 +1557,4 @@ mod signal_wait_tests;
 #[path = "process/opaque_state_tests.rs"]
 mod opaque_state_tests;
 
-#[cfg(test)]
-#[path = "process/worker_recovery_tests.rs"]
-mod worker_recovery_tests;
-
 mod definition_publication;

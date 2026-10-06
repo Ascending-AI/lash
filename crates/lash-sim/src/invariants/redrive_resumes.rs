@@ -15,8 +15,6 @@
 //!   followed by the park's end, and, unless the park ended cancelled, by
 //!   the intent's acknowledgement and the run's resume.
 
-use std::num::NonZeroUsize;
-
 use serde::Serialize;
 
 use super::{Fact, History, HistoryChecker, HostOp, HostOutcome, Violation};
@@ -62,50 +60,6 @@ impl ParkEventRow {
     }
 }
 
-/// The feed page a read takes.
-const PAGE: NonZeroUsize = NonZeroUsize::MIN.saturating_add(255);
-
-/// `world`'s whole turn park feed, in commit order.
-pub(super) async fn read_park_feed(
-    world: &crate::crash_matrix::world::CrashWorld,
-) -> Result<Vec<ParkEventRow>, String> {
-    let store = world.backend().session_store_factory();
-    let mut rows = Vec::new();
-    let mut cursor = lash_core::store::ParkFeedCursor::initial();
-    loop {
-        let page = store
-            .turn_park_feed(cursor, PAGE)
-            .await
-            .map_err(|error| format!("read the turn park feed: {error}"))?;
-        let read = page.events.len();
-        for event in page.events {
-            let (intent, cause) = match &event.kind {
-                lash_core::store::ParkEventKind::RedriveRequested { intent } => {
-                    (Some(intent.to_string()), None)
-                }
-                lash_core::store::ParkEventKind::Unparked { cause } => (None, Some(cause.encode().map_err(|error| format!("encode the park closing cause: {error}"))?)),
-                lash_core::store::ParkEventKind::Cancelled { cause } => {
-                    (None, Some(cause.encode().map_err(|error| format!("encode the park closing cause: {error}"))?))
-                }
-                _ => (None, None),
-            };
-            rows.push(ParkEventRow {
-                seq: event.seq,
-                at_ms: event.at_ms,
-                session: event.target.session_id.to_string(),
-                run: event.target.turn_id.to_string(),
-                park: event.park_id.feed_sequence(),
-                kind: event.kind.kind_code().to_owned(),
-                intent,
-                cause,
-            });
-        }
-        if read < PAGE.get() {
-            return Ok(rows);
-        }
-        cursor = page.next;
-    }
-}
 
 /// The `redrive_requested` events of `session`'s `run` on a park a `parked`
 /// event opened for that run before them.

@@ -362,28 +362,4 @@ impl ConformanceTurnRunner for HostTurnRunner {
             }
         }
     }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "conformance-law fixture: an unscoped host is a fixture defect"
-    )]
-    async fn recorded_replay_keys(&self, scope: &crate::ExecutionScope) -> Option<Vec<String>> {
-        let scoped = self
-            .host
-            .scoped(crate::admit(scope.clone()))
-            .expect("scope the recorded turn on its host");
-        match scoped
-            .controller()
-            .read_recorded_journal(&crate::RecordedKeyRange {
-                lower: String::new(),
-                upper: "\u{10FFFF}".to_string(),
-                group_key_prefix: String::new(),
-            })
-            .await
-            .expect("read the recorded turn's journal")
-        {
-            crate::RecordedJournal::Keys(keys) => Some(keys.replay_keys),
-            _ => None,
-        }
-    }
 }

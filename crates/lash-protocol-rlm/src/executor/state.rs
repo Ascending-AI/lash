@@ -586,14 +586,6 @@ impl RlmExecutionState {
             })
     }
 
-    /// The modules the current frame is known to hold.
-    #[cfg(test)]
-    pub(super) fn frame_held_module_refs(&self) -> impl Iterator<Item = &lashlang::ModuleRef> {
-        self.frame_held_modules
-            .iter()
-            .flat_map(|(_, modules)| modules.iter())
-    }
-
     /// Record that `frame` holds an edge of `module_ref`, forgetting what an
     /// earlier frame held.
     pub(super) fn record_frame_hold(
@@ -953,11 +945,6 @@ impl RlmExecutionState {
         self.pending_snapshot = None;
     }
 
-    #[cfg(test)]
-    pub(super) fn encoded_globals_in_last_snapshot(&self) -> usize {
-        self.encoded_globals_in_last_snapshot
-    }
-
     /// Restores a persisted execution-state snapshot.
     ///
     /// `fleet_format` is the `F` the bound store recorded: the read admits
@@ -1105,14 +1092,6 @@ impl RlmExecutionState {
         Ok(())
     }
 
-    /// Every binding the session holds, read from the runtime roots that own
-    /// them rather than the host view, which omits a binding with no host
-    /// shape (ADR 0076).
-    #[cfg(test)]
-    pub(crate) fn binding_names(&self) -> impl Iterator<Item = &str> {
-        self.vm.state().binding_names()
-    }
-
     /// The bindings the "Bound Variables" section shows by summary: the ones
     /// with no host view (ADR 0076), each with its bounded runtime summary,
     /// under the same exclusions as [`Self::bound_variable_values`].
@@ -1126,13 +1105,6 @@ impl RlmExecutionState {
             .into_iter()
             .filter(|(name, _)| name != "history" && !exclude.contains(name))
             .collect()
-    }
-
-    /// The globals a cell boundary dropped for holding a function, which a
-    /// later cell's reference is refused by name for.
-    #[cfg(test)]
-    pub(crate) fn expired_functions(&self) -> &std::collections::BTreeSet<String> {
-        self.vm.state().expired_functions()
     }
 
     /// The live top-level variable namespace as JSON for the "Bound Variables"

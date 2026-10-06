@@ -6,8 +6,6 @@ mod facade_support {
     pub use lash_core::facade_support::*;
 }
 
-#[path = "integration/embed_plugins.rs"]
-mod embed_plugins;
 #[path = "integration/facade_inventory.rs"]
 mod facade_inventory;
 #[cfg(feature = "mcp")]
@@ -49,7 +47,3 @@ async fn created_session(
     }
     core.session(session_id)
 }
-
-#[cfg(feature = "restate")]
-#[path = "integration/public_process_command_replay.rs"]
-mod public_process_command_replay;

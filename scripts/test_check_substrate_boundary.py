@@ -45,15 +45,12 @@ FIXTURE_DIRS = [
     "crates/lash-protocol-rlm/src/projection",
     "crates/lashlang/src",
     "crates/lash-lashlang-runtime/src",
-    "crates/lash-restate/src/controller",
-    "crates/lash-restate/src/process",
 ]
 FIXTURE_FILES = [
     "crates/lash-core/src/runtime/logical_turn.rs",
     "crates/lash-core/src/runtime/turn_boundary.rs",
     "crates/lash-core-execution/src/session.rs",
     "crates/lash-core-execution/src/tool_dispatch.rs",
-    "crates/lash-restate/src/durable_wait.rs",
 ]
 FIXTURE_SHIFT_FILE = "crates/lash-core/src/runtime/logical_turn.rs"
 FIXTURE_HIT_LINE = "    tokio::spawn(worker());"
@@ -275,15 +272,6 @@ class ShiftDeterminismRatchetTests(unittest.TestCase):
             result = self.run_check(root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("rule 4 failed", result.stderr)
-
-    def test_engine_named_identifier_in_the_engine_crate_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.build_fixture(root, ["fn shift() {", "}"], [])
-            hit = root / "crates/lash-restate/src/controller/engine_ids.rs"
-            hit.write_text(FIXTURE_ENGINE_ID_LINE + "\n")
-            result = self.run_check(root)
-        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_engine_named_error_variant_in_runtime_error_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

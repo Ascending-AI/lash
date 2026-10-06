@@ -207,32 +207,6 @@ enum Command {
         #[arg(long, value_name = "FRAMES", requires = "dhat_out")]
         dhat_frames: Option<usize>,
     },
-
-    /// Record the live Restate/PostgreSQL substrate comparison baseline.
-    RestateBaseline {
-        #[arg(long)]
-        out: std::path::PathBuf,
-        #[arg(long, default_value_t = 10)]
-        samples: usize,
-        #[arg(long, default_value_t = 30)]
-        wait_seconds: u64,
-        #[arg(long, value_delimiter = ',')]
-        cases: Vec<String>,
-    },
-
-    /// The cross-worker child a latency case executes: serves lash's Restate
-    /// services over the shared store directory. Not run by hand; `latency`
-    /// spawns it.
-    LatencyWorker {
-        #[arg(long, value_name = "DIR")]
-        store_dir: std::path::PathBuf,
-
-        #[arg(long, value_name = "FILE")]
-        ready_file: std::path::PathBuf,
-
-        #[arg(long, value_name = "ADDR")]
-        endpoint_bind: std::net::SocketAddr,
-    },
 }
 
 fn tokio_thread_stack_bytes(args: &Args) -> usize {
@@ -299,43 +273,6 @@ fn main() -> anyhow::Result<()> {
             runtime.thread_stack_size(tokio_thread_stack_bytes(&args));
             let code = runtime.build()?.block_on(lash_perf::latency::run(run))?;
             std::process::exit(code);
-        }
-        Some(Command::RestateBaseline {
-            out,
-            samples,
-            wait_seconds,
-            cases,
-        }) => {
-            let mut runtime = tokio::runtime::Builder::new_multi_thread();
-            runtime.enable_all();
-            runtime.thread_stack_size(tokio_thread_stack_bytes(&args));
-            runtime
-                .build()?
-                .block_on(lash_perf::latency::baseline::run(
-                    out,
-                    *samples,
-                    *wait_seconds,
-                    cases,
-                ))?;
-            return Ok(());
-        }
-        Some(Command::LatencyWorker {
-            store_dir,
-            ready_file,
-            endpoint_bind,
-        }) => {
-            let worker = lash_perf::latency::LatencyWorkerArgs {
-                store_dir: store_dir.clone(),
-                ready_file: ready_file.clone(),
-                endpoint_bind: *endpoint_bind,
-            };
-            let mut runtime = tokio::runtime::Builder::new_multi_thread();
-            runtime.enable_all();
-            runtime.thread_stack_size(tokio_thread_stack_bytes(&args));
-            runtime
-                .build()?
-                .block_on(lash_perf::latency::run_worker(worker))?;
-            return Ok(());
         }
         None => {}
     }

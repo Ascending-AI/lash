@@ -17,8 +17,6 @@ EXCLUSIONS = {
     "tools/buck2/test_timeout.py": "Production test timeout wrapper, not a self-test.",
     # Live service proofs belong in their named integration gates.
     "scripts/test-gate-worktree-concurrency.sh": "Needs Docker services and a peer worktree argument.",
-    "scripts/test-mcp-catalog.sh": "Builds Rust law witnesses and runs PostgreSQL and live Restate.",
-    "scripts/test-restate-workers-trace-scrub.sh": "Creates real Docker containers and a trace volume.",
     # A lander-environment proof: it needs `kiln` on PATH and runs with
     # scripts/ci/landing-gates.sh, not on a CI runner without Kiln.
     "scripts/test_landing_gates.py": "Lander-only proof: requires `kiln` on PATH.",

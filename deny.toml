@@ -30,7 +30,6 @@ skip = [
     { crate = "hashbrown@0.14.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
     { crate = "hashbrown@0.15.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
     { crate = "hashbrown@0.16.1", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
-    { crate = "itertools@0.14.0", reason = "prost-derive 0.14.4 still requires itertools 0.14; remove when upstream dependency graph converges on itertools 0.15" },
     { crate = "md-5@0.10.6", reason = "sqlx-postgres 0.8.6 still requires md-5 0.10; remove when upstream dependency graph converges on md-5 0.11" },
     { crate = "phf@0.11.3", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on phf 0.12" },
     { crate = "phf_shared@0.11.3", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on phf_shared 0.12" },
@@ -41,13 +40,10 @@ skip = [
     { crate = "rand_core@0.6.4", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on rand_core 0.10" },
     { crate = "rand_core@0.9.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on rand_core 0.10" },
     { crate = "redox_syscall@0.5.18", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on redox_syscall 0.9" },
-    { crate = "regress@0.10.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on regress 0.11" },
-    { crate = "schemars_derive@0.8.22", reason = "pre-existing transitive duplicate owned by the workspace schemars 0.8 and rmcp schemars 1.x stacks; remove after major convergence" },
-    { crate = "serde_derive_internals@0.29.1", reason = "pre-existing transitive duplicate owned by the workspace schemars 0.8 and rmcp schemars 1.x stacks; remove after major convergence" },
     { crate = "sha2@0.10.9", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on sha2 0.11" },
     { crate = "siphasher@0.3.11", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on siphasher 1" },
-    { crate = "strum@0.27.2", reason = "croner 3.0.1 and restate-sdk-shared-core 7.0.3 still require strum 0.27; remove when upstream dependency graph converges on strum 0.28" },
-    { crate = "strum_macros@0.27.2", reason = "croner 3.0.1 and restate-sdk-shared-core 7.0.3 still require strum 0.27; remove when upstream dependency graph converges on strum 0.28" },
+    { crate = "strum@0.27.2", reason = "croner 3.0.1 still requires strum 0.27; remove when upstream dependency graph converges on strum 0.28" },
+    { crate = "strum_macros@0.27.2", reason = "croner 3.0.1 still requires strum 0.27; remove when upstream dependency graph converges on strum 0.28" },
     { crate = "windows-sys@0.48.0", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows-sys 0.61" },
     { crate = "windows-sys@0.52.0", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows-sys 0.61" },
     { crate = "windows-targets@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows-targets 0.52" },
@@ -60,7 +56,6 @@ skip = [
     { crate = "windows_x86_64_msvc@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
     # schemars 0.8.22 is the workspace API. Remove when rmcp supports the
     # workspace schemars major or the workspace can migrate without an API dance.
-    { crate = "schemars@0.8.22", reason = "Lash workspace API remains on schemars 0.8 while rmcp 1.8.0 requires 1.2; remove after rmcp/workspace major convergence" },
     # syn 3.0.3 is pulled by rmcp's schemars 1.x derive stack. Remove when
     # that upstream stack no longer needs syn 3.
     { crate = "syn@3.0.3", reason = "rmcp 1.8.0 schemars 1.x derive stack requires syn 3; remove when upstream converges on syn 2" },
@@ -103,6 +98,4 @@ ignore = true
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# FIG-4906 (U02) removes this entry when a publishable crate replaces the git pin.
-allow-git = ["https://github.com/SamGalanakis/sdk-rust"]
 required-git-spec = "rev"

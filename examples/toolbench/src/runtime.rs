@@ -113,7 +113,6 @@ async fn run_task_with_shutdown_witness(
             &recorder.base_url,
             shutdown_witness,
         )?;
-        let substrate = substrate.serve(&core).await?;
         Ok::<_, anyhow::Error>((core, session_spec, recorder, substrate))
     }
     .await;
@@ -310,102 +309,21 @@ async fn run_turn(
     ))
 }
 
-/// A run's engine: lash-restate's engine over a fresh SQLite memory store
-/// set, on the local restate-server the process's runs share (ADR 0104). Every
-/// run, concurrent ones included, binds lash's services under a namespace of
-/// its own there (ADR 0111). Unit tests run on the Restate test double
-/// instead.
+/// A run's engine: lash's durable engine over a fresh SQLite memory store
+/// set, dropped with the run.
 struct RunSubstrate {
     backend: lash::Backend,
-    engine: Serving,
-}
-
-enum Serving {
-    #[cfg_attr(
-        test,
-        expect(dead_code, reason = "unit tests run on the Restate test double")
-    )]
-    Local {
-        engine: Arc<lash::restate::RestateEngine>,
-        restate: crate::local_restate::LocalRestate,
-        server: Arc<crate::local_restate::LocalRestateServer>,
-    },
-    #[cfg(test)]
-    Double(lash_restate_test::RestateTestBackend),
-}
-
-/// A served run substrate: the core's endpoint is registered with the shared
-/// server until this drops. Fields drop in order: the deployment, then the
-/// run's hold on the server.
-enum ServedSubstrate {
-    Local {
-        _deployment: crate::local_restate::LocalDeployment,
-        _server: Arc<crate::local_restate::LocalRestateServer>,
-    },
-    #[cfg(test)]
-    Double {
-        _double: lash_restate_test::RestateTestBackend,
-    },
 }
 
 impl RunSubstrate {
     async fn open() -> Result<Self> {
-        #[cfg(test)]
-        {
-            let double = lash_restate_test::backend(0, lash_restate_test::ServerConfig::default())
-                .await
-                .context("build the Restate test double")?;
-            Ok(Self {
-                backend: double.lash_backend(),
-                engine: Serving::Double(double),
-            })
-        }
-        #[cfg(not(test))]
-        {
-            let server = crate::local_restate::LocalRestateServer::shared("toolbench").await?;
-            let restate = server.core("toolbench")?;
-            let stores = lash::sqlite::SqliteStoreSet::memory()
-                .await
-                .map_err(|error| anyhow::anyhow!("open a SQLite memory store set: {error}"))?;
-            let engine = restate.engine(Arc::new(stores));
-            Ok(Self {
-                backend: lash::Backend::new(engine.clone()),
-                engine: Serving::Local {
-                    engine,
-                    restate,
-                    server,
-                },
-            })
-        }
-    }
-
-    /// Serve `core`'s turns and processes on this substrate's engine.
-    async fn serve(self, core: &LashCore) -> Result<ServedSubstrate> {
-        let worker = lash::durability::DurableProcessWorker::new(
-            core.durable_process_worker_config()
-                .context("toolbench process worker config")?,
-        )
-        .context("build the toolbench process worker")?;
-        match self.engine {
-            Serving::Local {
-                engine,
-                restate,
-                server,
-            } => {
-                let deployment = restate
-                    .serve(&engine, engine.endpoint_builder(worker)?.build())
-                    .await?;
-                Ok(ServedSubstrate::Local {
-                    _deployment: deployment,
-                    _server: server,
-                })
-            }
-            #[cfg(test)]
-            Serving::Double(double) => {
-                double.install_process_worker(worker);
-                Ok(ServedSubstrate::Double { _double: double })
-            }
-        }
+        let stores = lash::sqlite::SqliteStoreSet::memory()
+            .await
+            .map_err(|error| anyhow::anyhow!("open a SQLite memory store set: {error}"))?;
+        let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+            .build()
+            .context("build the durable backend")?;
+        Ok(Self { backend })
     }
 }
 
@@ -444,8 +362,8 @@ fn build_turn_core(
     } else {
         lash::TurnBudget::Unbounded
     };
-    // Every run is its own substrate: a fresh SQLite memory store set in a
-    // namespace of its own on the shared restate-server, dropped with the run.
+    // Every run is its own substrate: a fresh SQLite memory store set,
+    // dropped with the run.
     let backend = substrate.backend.clone();
     let builder = match channel {
         crate::ChannelSelection::Standard => LashCore::standard_builder(backend),
@@ -608,105 +526,6 @@ fn session_options() -> lash::rlm::RlmCreateExtras {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-    struct ShutdownWitness {
-        called: Arc<AtomicBool>,
-    }
-
-    #[lash::async_trait]
-    impl lash::plugins::PluginFactory for ShutdownWitness {
-        fn id(&self) -> &'static str {
-            "toolbench_timeout_shutdown_witness"
-        }
-
-        fn build(
-            &self,
-            _ctx: &lash::plugins::PluginSessionContext,
-        ) -> std::result::Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError>
-        {
-            Ok(Arc::new(ShutdownWitnessSession))
-        }
-
-        async fn shutdown(&self) -> std::result::Result<(), lash::plugins::PluginError> {
-            self.called.store(true, Ordering::SeqCst);
-            Ok(())
-        }
-    }
-
-    impl lash::plugins::PluginDefinition for ShutdownWitness {
-        fn declaration() -> lash::plugins::PluginDeclaration {
-            lash::plugins::PluginDeclaration::initial("toolbench_timeout_shutdown_witness")
-        }
-    }
-
-    struct ShutdownWitnessSession;
-
-    impl lash::plugins::SessionPlugin for ShutdownWitnessSession {
-        fn id(&self) -> &'static str {
-            "toolbench_timeout_shutdown_witness"
-        }
-
-        fn register(
-            &self,
-            _registrar: &mut lash::plugins::PluginRegistrar,
-        ) -> std::result::Result<(), lash::plugins::PluginError> {
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn wall_limit_retains_core_and_awaits_installed_factory_shutdown() {
-        let shutdown_called = Arc::new(AtomicBool::new(false));
-        let witness = Arc::new(ShutdownWitness {
-            called: Arc::clone(&shutdown_called),
-        });
-        let local_requests = Arc::new(AtomicUsize::new(0));
-        let local_requests_for_handler = Arc::clone(&local_requests);
-        let upstream = axum::Router::new().fallback(move || {
-            let local_requests = Arc::clone(&local_requests_for_handler);
-            async move {
-                local_requests.fetch_add(1, Ordering::SeqCst);
-                std::future::pending::<()>().await;
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR
-            }
-        });
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind local provider stub");
-        let recorder_origin = format!("http://{}", listener.local_addr().unwrap());
-        let upstream_task = tokio::spawn(async move {
-            axum::serve(listener, upstream).await.unwrap();
-        });
-        let task = crate::tasks::easy_pack()
-            .into_iter()
-            .next()
-            .expect("easy task");
-        let (_world, evidence) = super::run_task_with_shutdown_witness(
-            &task,
-            "test/toolbench-timeout",
-            "unused-no-network-key",
-            0,
-            crate::ChannelSelection::Standard,
-            crate::ReasoningEffort::None,
-            1,
-            0,
-            None,
-            Some(witness),
-            Some(recorder_origin),
-        )
-        .await;
-        upstream_task.abort();
-        let _ = upstream_task.await;
-
-        assert_eq!(evidence.completion_error.as_deref(), Some("wall_limit"));
-        assert!(!evidence.completed);
-        assert_eq!(evidence.rounds, 1);
-        assert_eq!(local_requests.load(Ordering::SeqCst), 1);
-        assert!(shutdown_called.load(Ordering::SeqCst));
-    }
-
     #[test]
     fn cleanup_failure_preserves_primary_failed_turn_evidence() {
         let mut completed = false;

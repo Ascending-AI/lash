@@ -44,16 +44,6 @@ impl WorkbenchPluginFactory {
         self.approvals = approvals;
         self
     }
-
-    #[cfg(test)]
-    pub(crate) fn config_changes(&self) -> WorkbenchConfigChanges {
-        self.config_changes.clone()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn context_budget(&self) -> WorkbenchContextBudget {
-        self.context_budget.clone()
-    }
 }
 
 impl Default for WorkbenchPluginFactory {
@@ -197,12 +187,7 @@ pub(crate) struct WorkbenchContextObservation {
     pub(crate) last_prompt_context_tokens: Option<usize>,
 }
 
-impl WorkbenchContextBudget {
-    #[cfg(test)]
-    pub(crate) fn observation(&self) -> Option<WorkbenchContextObservation> {
-        self.observed.lock_recover().clone()
-    }
-}
+impl WorkbenchContextBudget {}
 
 #[async_trait]
 impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
@@ -285,11 +270,6 @@ impl WorkbenchConfigChanges {
             service_profile_key: recorded_llm_profile_id(&snapshot.policy),
         });
         Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn latest(&self) -> Option<WorkbenchConfigChange> {
-        self.latest.lock_recover().clone()
     }
 }
 

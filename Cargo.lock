@@ -33,7 +33,6 @@ dependencies = [
  "futures-util",
  "http",
  "http-body-util",
- "lash-internal-restate-test",
  "lash-runtime",
  "lash-sim",
  "percent-encoding",
@@ -42,7 +41,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "sqlx",
  "tempfile",
  "thiserror",
@@ -338,12 +337,6 @@ checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bitflags"
-version = "1.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
-
-[[package]]
-name = "bitflags"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
@@ -386,15 +379,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
 
 [[package]]
-name = "bs58"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4"
-dependencies = [
- "tinyvec",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -426,16 +410,6 @@ checksum = "577d2bf5650f8554d5a372af5ac93535110a0fc75b3e702bb853369febf227c2"
 dependencies = [
  "bytes",
  "serde",
-]
-
-[[package]]
-name = "bytes-utils"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dafe3a8757b027e2be6e4e5601ed563c55989fcf1546e933c66c8eb3a058d35"
-dependencies = [
- "bytes",
- "either",
 ]
 
 [[package]]
@@ -651,12 +625,6 @@ dependencies = [
  "libc",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "const-oid"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "constant_time_eq"
@@ -925,37 +893,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
-name = "defmt"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2953bfe4f93bbd20cc71198842756f77d161884c99ebbabc41d80231ded88d1"
-dependencies = [
- "bitflags 1.3.2",
- "defmt-macros",
-]
-
-[[package]]
-name = "defmt-macros"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bad9c72e7ca2137e0dc3813245a0d282fd6daad32fd800af018306a9169b5fe8"
-dependencies = [
- "defmt-parser",
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
-
-[[package]]
-name = "defmt-parser"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
 name = "derive_builder"
 version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1026,7 +963,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
- "const-oid",
  "crypto-common 0.2.2",
 ]
 
@@ -1065,7 +1001,6 @@ version = "0.0.0-dev"
 dependencies = [
  "anyhow",
  "axum",
- "lash-internal-restate-test",
  "lash-runtime",
  "opentelemetry_sdk",
  "reqwest",
@@ -1877,15 +1812,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
@@ -1898,42 +1824,6 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
-
-[[package]]
-name = "jiff"
-version = "0.2.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "668b7183bd07af9a4885f5c35b0cc5c83c4607a913c16b7e17291832910d2dcc"
-dependencies = [
- "defmt",
- "jiff-core",
- "jiff-static",
- "log",
- "portable-atomic",
- "portable-atomic-util",
- "serde_core",
-]
-
-[[package]]
-name = "jiff-core"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7feca88439efe53da3754500c1851dedf3cb36c524dd5cf8225cc0794de95d09"
-dependencies = [
- "defmt",
-]
-
-[[package]]
-name = "jiff-static"
-version = "0.2.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a69dcb3a21cfb32ce1cd056169337ca284af0766dd766e7878819b251a49204"
-dependencies = [
- "jiff-core",
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
 
 [[package]]
 name = "jni"
@@ -2006,16 +1896,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonptr"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5a3cc660ba5d72bce0b3bb295bf20847ccbb40fd423f3f05b61273672e561fe"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "jsonschema"
 version = "0.58.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2070,21 +1950,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonwebtoken"
-version = "10.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eba32bfb4ffdeaca3e34431072faf01745c9b26d25504aa7a6cf5684334fc4fc"
-dependencies = [
- "base64 0.22.1",
- "getrandom 0.2.17",
- "js-sys",
- "serde",
- "serde_json",
- "signature",
- "zeroize",
-]
-
-[[package]]
 name = "lash-internal-conformance"
 version = "0.0.0-dev"
 dependencies = [
@@ -2129,14 +1994,13 @@ dependencies = [
  "lash-internal-core-store",
  "lash-internal-core-worker",
  "lash-internal-postgres-store",
- "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "libc",
  "opentelemetry_sdk",
  "rmp-serde",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
@@ -2175,16 +2039,15 @@ dependencies = [
  "lash-internal-core-llm",
  "lash-internal-core-store",
  "lash-internal-core-worker",
- "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "proptest",
  "rmp-serde",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "syn 2.0.118",
  "tempfile",
  "thiserror",
@@ -2203,10 +2066,10 @@ dependencies = [
  "chrono",
  "lash-internal-sansio",
  "lash-internal-trace",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "thiserror",
  "tokio",
  "tracing",
@@ -2224,7 +2087,7 @@ dependencies = [
  "lash-internal-http-transport",
  "lash-internal-sansio",
  "lash-internal-trace",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror",
@@ -2245,7 +2108,7 @@ dependencies = [
  "lash-internal-vm-protocol",
  "proptest",
  "rmp-serde",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_bytes",
  "serde_json",
@@ -2329,12 +2192,12 @@ dependencies = [
  "rmp-serde",
  "rustc-hash 2.1.3",
  "ryu-js",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_bytes",
  "serde_ignored",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "smallvec",
  "thiserror",
  "tokio",
@@ -2353,7 +2216,6 @@ dependencies = [
  "lash-internal-core-worker",
  "lash-internal-lashlang",
  "lash-internal-remote-protocol",
- "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-tool-support",
@@ -2466,7 +2328,6 @@ dependencies = [
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
  "lash-internal-postgres-store",
- "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-store-sql",
@@ -2498,7 +2359,6 @@ dependencies = [
  "lash-internal-postgres-store",
  "lash-internal-remote-protocol",
  "lash-internal-render",
- "lash-internal-restate-test",
  "lash-internal-rlm-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
@@ -2530,7 +2390,6 @@ dependencies = [
  "lash-internal-core-worker",
  "lash-internal-postgres-store",
  "lash-internal-render",
- "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-tool-support",
@@ -2569,7 +2428,7 @@ dependencies = [
  "lash-internal-sansio",
  "reqwest",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "thiserror",
  "tokio",
  "uuid",
@@ -2585,7 +2444,6 @@ dependencies = [
  "lash-internal-llm-transport",
  "lash-internal-provider-auth",
  "lash-internal-provider-google",
- "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-runtime",
  "reqwest",
@@ -2608,7 +2466,6 @@ dependencies = [
  "lash-internal-protocol-rlm",
  "lash-internal-provider-auth",
  "lash-internal-provider-openai",
- "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-tool-support",
  "lash-runtime",
@@ -2631,7 +2488,7 @@ dependencies = [
  "lash-internal-core-store",
  "lash-internal-sansio",
  "lash-internal-trace",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror",
@@ -2647,91 +2504,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-internal-restate"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "lash-internal-conformance",
- "lash-internal-core",
- "lash-internal-core-store",
- "lash-internal-core-worker",
- "lash-internal-http-transport",
- "lash-internal-lashlang",
- "lash-internal-lashlang-runtime",
- "lash-internal-llm-tools",
- "lash-internal-plugin-process-controls",
- "lash-internal-postgres-store",
- "lash-internal-protocol-rlm",
- "lash-internal-protocol-standard",
- "lash-internal-restate-test",
- "lash-internal-sansio",
- "lash-internal-sqlite-store",
- "lash-internal-subagents",
- "lash-internal-trace",
- "lash-internal-typescript",
- "lash-runtime",
- "opentelemetry_sdk",
- "reqwest",
- "restate-sdk",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sqlx",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "lash-internal-restate-test"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "base64 0.23.1",
- "bytes",
- "chrono",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "lash-internal-conformance",
- "lash-internal-core",
- "lash-internal-core-worker",
- "lash-internal-http-transport",
- "lash-internal-lashlang",
- "lash-internal-lashlang-runtime",
- "lash-internal-postgres-store",
- "lash-internal-protocol-rlm",
- "lash-internal-restate",
- "lash-internal-sqlite-store",
- "lash-runtime",
- "prost",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
-]
-
-[[package]]
 name = "lash-internal-rlm-types"
 version = "0.0.0-dev"
 dependencies = [
  "lash-internal-render",
  "lash-internal-sansio",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -2758,7 +2536,7 @@ dependencies = [
  "blake3",
  "jsonschema",
  "proptest",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror",
@@ -2778,7 +2556,6 @@ dependencies = [
  "lash-internal-durable",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
- "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-store-sql",
@@ -2812,7 +2589,6 @@ dependencies = [
  "lash-internal-lashlang-runtime",
  "lash-internal-plugin-process-controls",
  "lash-internal-protocol-rlm",
- "lash-internal-restate-test",
  "lash-internal-rlm-types",
  "lash-internal-sansio",
  "lash-internal-tool-support",
@@ -2841,10 +2617,10 @@ dependencies = [
  "lash-internal-sansio",
  "opentelemetry",
  "opentelemetry_sdk",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "strum 0.28.0",
  "thiserror",
  "uuid",
@@ -2919,7 +2695,7 @@ dependencies = [
  "blake3",
  "lash-internal-sansio",
  "rmp-serde",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_bytes",
  "serde_json",
@@ -2934,7 +2710,6 @@ dependencies = [
  "blake3",
  "lash-internal-core-execution",
  "lash-internal-lashlang",
- "lash-internal-restate-test",
  "lash-internal-typescript",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
@@ -2974,8 +2749,6 @@ dependencies = [
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
  "lash-internal-provider-openai",
- "lash-internal-restate",
- "lash-internal-restate-test",
  "lash-internal-rlm-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
@@ -2989,10 +2762,10 @@ dependencies = [
  "rand_chacha 0.9.0",
  "reqwest",
  "rmp-serde",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "sqlx",
  "stats_alloc",
  "tempfile",
@@ -3007,33 +2780,6 @@ version = "0.0.0-dev"
 dependencies = [
  "hashbrown 0.16.1",
  "memchr",
-]
-
-[[package]]
-name = "lash-restate-postgres-workers-e2e"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "chrono",
- "lash-internal-llm-transport",
- "lash-internal-plugin-standard-compaction",
- "lash-internal-provider-anthropic",
- "lash-internal-restate-test",
- "lash-perf",
- "lash-runtime",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sqlx",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -3064,8 +2810,6 @@ dependencies = [
  "lash-internal-provider-openai",
  "lash-internal-remote-protocol",
  "lash-internal-render",
- "lash-internal-restate",
- "lash-internal-restate-test",
  "lash-internal-rlm-types",
  "lash-internal-s3-store",
  "lash-internal-sansio",
@@ -3115,8 +2859,6 @@ dependencies = [
  "lash-internal-provider-auth",
  "lash-internal-provider-google",
  "lash-internal-provider-openai",
- "lash-internal-restate",
- "lash-internal-restate-test",
  "lash-internal-rlm-types",
  "lash-internal-s3-store",
  "lash-internal-sansio",
@@ -3128,38 +2870,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "sha2 0.10.9",
- "sqlx",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "lash-upgrade-harness"
-version = "0.0.0-dev"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "futures-util",
- "lash-internal-core",
- "lash-internal-core-store",
- "lash-internal-lashlang",
- "lash-internal-lashlang-runtime",
- "lash-internal-postgres-store",
- "lash-internal-provider-openai",
- "lash-internal-remote-protocol",
- "lash-internal-restate",
- "lash-internal-restate-test",
- "lash-internal-sqlite-store",
- "lash-internal-vm-client",
- "lash-runtime",
- "opentelemetry_sdk",
- "prost",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
+ "sha2",
  "sqlx",
  "tempfile",
  "tokio",
@@ -3173,13 +2884,10 @@ dependencies = [
  "lash-internal-core-store",
  "lash-internal-postgres-store",
  "lash-internal-remote-protocol",
- "lash-internal-restate",
  "lash-runtime",
  "serde",
  "serde_json",
- "sqlx",
  "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -3200,7 +2908,7 @@ version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c943259e342f1e06ff2da7a83eabdfe7f92ce10262688dbf1895ff0b3e6e4652"
 dependencies = [
- "bitflags 2.13.0",
+ "bitflags",
  "libc",
  "plain",
  "redox_syscall 0.9.0",
@@ -3348,7 +3056,7 @@ version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
 dependencies = [
- "bitflags 2.13.0",
+ "bitflags",
  "cfg-if",
  "cfg_aliases",
  "libc",
@@ -3705,15 +3413,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 
 [[package]]
-name = "portable-atomic-util"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2a106d1259c23fac8e543272398ae0e3c0b8d33c88ed73d0cc71b0f1d902618"
-dependencies = [
- "portable-atomic",
-]
-
-[[package]]
 name = "potential_utf"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3739,16 +3438,6 @@ checksum = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d"
 dependencies = [
  "diff",
  "yansi",
-]
-
-[[package]]
-name = "prettyplease"
-version = "0.2.37"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
-dependencies = [
- "proc-macro2",
- "syn 2.0.118",
 ]
 
 [[package]]
@@ -3782,7 +3471,7 @@ checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
 dependencies = [
  "bit-set",
  "bit-vec",
- "bitflags 2.13.0",
+ "bitflags",
  "num-traits",
  "rand 0.9.5",
  "rand_chacha 0.9.0",
@@ -3791,29 +3480,6 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
-]
-
-[[package]]
-name = "prost"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
-dependencies = [
- "bytes",
- "prost-derive",
-]
-
-[[package]]
-name = "prost-derive"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
-dependencies = [
- "anyhow",
- "itertools 0.14.0",
- "proc-macro2",
- "quote",
- "syn 2.0.118",
 ]
 
 [[package]]
@@ -4030,7 +3696,7 @@ version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
- "bitflags 2.13.0",
+ "bitflags",
 ]
 
 [[package]]
@@ -4039,7 +3705,7 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5102a6aaa05aa011a238e178e6bca86d2cb56fc9f586d37cb80f5bca6e07759"
 dependencies = [
- "bitflags 2.13.0",
+ "bitflags",
 ]
 
 [[package]]
@@ -4109,26 +3775,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
-name = "regress"
-version = "0.10.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2057b2325e68a893284d1538021ab90279adac1139957ca2a74426c6f118fb48"
-dependencies = [
- "hashbrown 0.16.1",
- "memchr",
-]
-
-[[package]]
-name = "regress"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "158a764437582235e3501f683b93a0a6f8d825d04a789dbe5ed30b8799b8908a"
-dependencies = [
- "hashbrown 0.16.1",
- "memchr",
-]
-
-[[package]]
 name = "reqwest"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4168,66 +3814,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
-]
-
-[[package]]
-name = "restate-sdk"
-version = "0.12.1"
-source = "git+https://github.com/SamGalanakis/sdk-rust?rev=c74a7bb43b858462061237d7bb2ab88b2210a688#c74a7bb43b858462061237d7bb2ab88b2210a688"
-dependencies = [
- "bytes",
- "futures",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "jsonptr",
- "percent-encoding",
- "pin-project-lite",
- "prettyplease",
- "regress 0.10.5",
- "restate-sdk-macros",
- "restate-sdk-shared-core",
- "serde",
- "serde_json",
- "syn 2.0.118",
- "thiserror",
- "tokio",
- "tracing",
- "typify",
-]
-
-[[package]]
-name = "restate-sdk-macros"
-version = "0.12.1"
-source = "git+https://github.com/SamGalanakis/sdk-rust?rev=c74a7bb43b858462061237d7bb2ab88b2210a688#c74a7bb43b858462061237d7bb2ab88b2210a688"
-dependencies = [
- "jiff",
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
-
-[[package]]
-name = "restate-sdk-shared-core"
-version = "7.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4a8731358ce185d1c9663d3ac97414acf7c0d642e5724864ade03fcccb85134"
-dependencies = [
- "base64 0.22.1",
- "bs58",
- "bytes",
- "bytes-utils",
- "http",
- "jsonwebtoken",
- "pastey",
- "prost",
- "serde",
- "sha2 0.11.0",
- "strum 0.27.2",
- "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -4277,7 +3863,7 @@ dependencies = [
  "rand 0.10.2",
  "reqwest",
  "rmcp-macros",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
  "sse-stream",
@@ -4329,7 +3915,7 @@ version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "165ca6e57b20e1351573e3729b958bc62f0e48025386970b6e4d29e7a7e71f3f"
 dependencies = [
- "bitflags 2.13.0",
+ "bitflags",
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",
@@ -4370,7 +3956,7 @@ version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
 dependencies = [
- "bitflags 2.13.0",
+ "bitflags",
  "errno",
  "libc",
  "linux-raw-sys",
@@ -4503,18 +4089,6 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
-dependencies = [
- "dyn-clone",
- "schemars_derive 0.8.22",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "schemars"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a"
@@ -4522,21 +4096,9 @@ dependencies = [
  "chrono",
  "dyn-clone",
  "ref-cast",
- "schemars_derive 1.2.2",
+ "schemars_derive",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "schemars_derive"
-version = "0.8.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32e265784ad618884abaea0600a9adf15393368d840e0222d101a072f3f7534d"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde_derive_internals 0.29.1",
- "syn 2.0.118",
 ]
 
 [[package]]
@@ -4547,7 +4109,7 @@ checksum = "d98c67716b46af2f0b8cf752abc930f6f9aecfbf671ecfb531db8a31dbe4e2ba"
 dependencies = [
  "proc-macro2",
  "quote",
- "serde_derive_internals 0.30.0",
+ "serde_derive_internals",
  "syn 3.0.3",
 ]
 
@@ -4569,7 +4131,7 @@ version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
 dependencies = [
- "bitflags 2.13.0",
+ "bitflags",
  "core-foundation",
  "core-foundation-sys",
  "libc",
@@ -4591,10 +4153,6 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
-dependencies = [
- "serde",
- "serde_core",
-]
 
 [[package]]
 name = "seq-macro"
@@ -4636,17 +4194,6 @@ name = "serde_derive"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
-
-[[package]]
-name = "serde_derive_internals"
-version = "0.29.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4708,18 +4255,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_tokenstream"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7c49585c52c01f13c5c2ebb333f14f6885d76daa768d8a037d28017ec538c69"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "syn 2.0.118",
-]
-
-[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4767,17 +4302,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha2"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.3.0",
- "digest 0.11.3",
-]
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4800,15 +4324,6 @@ checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
  "errno",
  "libc",
-]
-
-[[package]]
-name = "signature"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
-dependencies = [
- "rand_core 0.6.4",
 ]
 
 [[package]]
@@ -4919,7 +4434,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "smallvec",
  "thiserror",
  "tokio",
@@ -4957,7 +4472,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "sqlx-core",
  "sqlx-postgres",
  "syn 2.0.118",
@@ -4973,7 +4488,7 @@ checksum = "db58fcd5a53cf07c184b154801ff91347e4c30d17a3562a635ff028ad5deda46"
 dependencies = [
  "atoi",
  "base64 0.22.1",
- "bitflags 2.13.0",
+ "bitflags",
  "byteorder",
  "crc",
  "dotenvy",
@@ -4993,7 +4508,7 @@ dependencies = [
  "rand 0.8.7",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "smallvec",
  "sqlx-core",
  "stringprep",
@@ -5151,7 +4666,7 @@ version = "28.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08b25e2e91491e0e82f932c7a5a07f5c90bd227dbde0c34aeb231d5b3a5e5107"
 dependencies = [
- "bitflags 2.13.0",
+ "bitflags",
  "is-macro",
  "num-bigint",
  "once_cell",
@@ -5170,7 +4685,7 @@ version = "44.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53c83ff3be8652d2caf9f074853f8c33a4a05b17079c1586f195eec17d3ec553"
 dependencies = [
- "bitflags 2.13.0",
+ "bitflags",
  "compact_str 0.7.1",
  "either",
  "num-bigint",
@@ -5493,12 +5008,11 @@ dependencies = [
  "clap",
  "dotenvy",
  "futures-util",
- "lash-internal-restate-test",
  "lash-runtime",
  "reqwest",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -5526,7 +5040,7 @@ version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
 dependencies = [
- "bitflags 2.13.0",
+ "bitflags",
  "bytes",
  "futures-util",
  "http",
@@ -5674,53 +5188,6 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
-
-[[package]]
-name = "typify"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc0b89f47309feaeb23c4509c15c9a04234f7deccef6f96c3bfe95319819a304"
-dependencies = [
- "typify-impl",
- "typify-macro",
-]
-
-[[package]]
-name = "typify-impl"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa7b026f540b148b81043c720889dbb942b08659aa8a43f624ac4f04dbfc1861"
-dependencies = [
- "heck",
- "log",
- "proc-macro2",
- "quote",
- "regress 0.11.1",
- "schemars 0.8.22",
- "semver",
- "serde",
- "serde_json",
- "syn 2.0.118",
- "thiserror",
- "unicode-ident",
-]
-
-[[package]]
-name = "typify-macro"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39ed96c57f06ae0839416b986921a98f18b220da63bbb243a8570a00c8492183"
-dependencies = [
- "proc-macro2",
- "quote",
- "schemars 0.8.22",
- "semver",
- "serde",
- "serde_json",
- "serde_tokenstream",
- "syn 2.0.118",
- "typify-impl",
-]
 
 [[package]]
 name = "unarray"
@@ -6313,10 +5780,9 @@ version = "0.0.0-dev"
 dependencies = [
  "anyhow",
  "axum",
- "lash-internal-restate-test",
  "lash-runtime",
  "reqwest",
- "schemars 1.2.2",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror",
@@ -6406,20 +5872,6 @@ name = "zeroize"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
-dependencies = [
- "zeroize_derive",
-]
-
-[[package]]
-name = "zeroize_derive"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
 
 [[package]]
 name = "zerotrie"

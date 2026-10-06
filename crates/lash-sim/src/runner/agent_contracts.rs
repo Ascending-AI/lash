@@ -17,12 +17,6 @@ pub(super) type AgentContractRunner =
     fn(&tokio::runtime::Runtime) -> Result<Value, FixedScriptRunnerError>;
 pub(super) type AgentContractRow = FixedContractRow<AgentContractRunner>;
 
-pub(super) struct AgentContractExecution {
-    pub(super) row: &'static AgentContractRow,
-    pub(super) payload: Value,
-    pub(super) checkpoint_writes: Vec<CheckpointWriteEvent>,
-}
-
 /// The seed of every fixed contract's server double.
 const CONTRACT_SEED: u64 = 0x5eed_c047;
 
@@ -47,18 +41,6 @@ async fn contract_world(
 /// A turn build that submits `prompt` as text.
 fn contract_turn(prompt: &'static str) -> crate::backend::SimTurnBuild {
     Arc::new(move |session: &lash::LashSession| Ok(session.send(lash::TurnInput::text(prompt))))
-}
-
-fn observe_contract_checkpoints<T>(
-    collector: CheckpointWriteCollector,
-    run: impl FnOnce() -> T,
-) -> T {
-    CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| {
-        let previous = slot.replace(Some(collector));
-        let result = run();
-        slot.replace(previous);
-        result
-    })
 }
 
 async fn agent_tuple_json_array_execution() -> Result<Value, FixedScriptRunnerError> {
@@ -92,35 +74,6 @@ finish({
     )
     .await?;
     Ok(result)
-}
-
-pub(super) async fn agent_contract_executions()
--> Result<Vec<AgentContractExecution>, FixedScriptRunnerError> {
-    // Aggregating every fixed Agent execution is simulation-harness work used by
-    // generated proof/minimizer packages. It may use the bounded harness stack;
-    // individual product facade executions are separately probed at 2 MiB.
-    run_on_sim_harness_stack(
-        "agent-contract-executions-aggregate",
-        SIM_HARNESS_STACK_LIMIT_BYTES,
-        || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(FixedScriptRunnerError::Io)?;
-            let mut executions = Vec::new();
-            for row in AGENT_CONTRACT_ROWS {
-                let collector = CheckpointWriteCollector::default();
-                let result =
-                    observe_contract_checkpoints(collector.clone(), || (row.execute)(&runtime))?;
-                executions.push(AgentContractExecution {
-                    row,
-                    payload: contract_execution_payload(row, result)?,
-                    checkpoint_writes: collector.events(),
-                });
-            }
-            Ok(executions)
-        },
-    )
 }
 
 pub const FIXED_AGENT_PRODUCT_CONTRACTS: &[&str] = &[
@@ -158,63 +111,54 @@ pub(super) const AGENT_CONTRACT_ROWS: &[AgentContractRow] = &[
         semantic_oracle: "agent.foreground_tool_call_round_trip",
         source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
         source_scenario: "agent_scenario_foreground_labeled_tool_call",
-        anchor: FixedContractAnchor::ProviderActor,
         execute: run_agent_foreground_tool_call_round_trip,
     },
     AgentContractRow {
         semantic_oracle: "agent.started_process_tool_call_graph",
         source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
         source_scenario: "agent_scenario_started_process_labeled_tool_call",
-        anchor: FixedContractAnchor::ProviderActor,
         execute: run_agent_started_process_tool_call_graph,
     },
     AgentContractRow {
         semantic_oracle: "agent.durable_input_suspension_resolution",
         source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
         source_scenario: "agent_scenario_process_durable_input_request_tool",
-        anchor: FixedContractAnchor::ProviderActor,
         execute: run_agent_durable_input_suspension_resolution,
     },
     AgentContractRow {
         semantic_oracle: "agent.started_process_subagent_spawn",
         source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
         source_scenario: "agent_scenario_started_process_labeled_subagent_spawn",
-        anchor: FixedContractAnchor::ProviderActor,
         execute: run_agent_started_process_subagent_spawn,
     },
     AgentContractRow {
         semantic_oracle: "agent.nested_process_start_await",
         source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
         source_scenario: "agent_scenario_nested_process_start_await",
-        anchor: FixedContractAnchor::ProviderActor,
         execute: run_agent_nested_process_start_await,
     },
     AgentContractRow {
         semantic_oracle: "agent.session_turn_process_child",
         source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
         source_scenario: "agent_scenario_session_turn_process_child",
-        anchor: FixedContractAnchor::ProviderActor,
         execute: run_agent_session_turn_process_child,
     },
     AgentContractRow {
         semantic_oracle: "agent.failed_child_preserves_failure_graph",
         source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
         source_scenario: "agent_scenario_failed_child_preserves_failure_graph",
-        anchor: FixedContractAnchor::ProviderActor,
         execute: run_agent_failed_child_preserves_failure_graph,
     },
     AgentContractRow {
         semantic_oracle: "agent.parallel_spawn_and_join",
         source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
         source_scenario: "agent_scenario_parallel_spawn_and_join",
-        anchor: FixedContractAnchor::ProviderActor,
         execute: run_agent_parallel_spawn_and_join,
     },
     AgentContractRow {
         semantic_oracle: "agent.tuple_values_finish_as_json_arrays",
         source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
         source_scenario: "agent_scenario_tuple_values_finish_as_json_arrays",
-        anchor: FixedContractAnchor::ProviderActor,
         execute: run_agent_tuple_json_array,
     },
 ];
@@ -507,7 +451,6 @@ async fn facade_final_value_execution_inner(
     let core = builder
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    engine.serve_processes(&core)?;
     let session = crate::open_created_session(provider_kind, &core, session_id)
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -866,7 +809,6 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
     let core = builder
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    engine.serve_processes(&core)?;
     Ok((core, graph_store, engine))
 }
 

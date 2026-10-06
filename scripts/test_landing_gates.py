@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Landing verdicts against reset sources and the real in-process replay law.
+"""Landing verdicts against reset sources.
 
-The scratch repository owns the version comparison and corpus mutations. Its
-Kiln launcher forwards replay to this isolated fork, where JOURNAL_LOGIC_EPOCH
-is already the reset epoch. No service, reset-tree build or CI dispatch runs.
+The scratch repository owns the version comparison. No service, reset-tree
+build or CI dispatch runs.
 """
 
 from pathlib import Path
-import json
 import os
-import shlex
 import shutil
 import subprocess
 import tarfile
@@ -22,8 +19,6 @@ import release_reset as reset
 ROOT = Path(__file__).resolve().parents[1]
 GATE = "scripts/ci/landing-gates.sh"
 VERSION_GATE = "scripts/ci/version-bump-gate.sh"
-LAW = "tests::replay_corpus::replay_corpus_fixtures_match_current_controller"
-CORPUS = "fixtures/release/v1.0.0/replay-corpus"
 PROOF = ROOT / ".buck2/landing-proof"
 
 
@@ -34,7 +29,6 @@ class LandingGatesTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.repo = Path(temporary.name)
         self.env = dict(os.environ)
-        self.env.pop("LASH_REPLAY_CORPUS_ROOT", None)
 
     def git(self, *args):
         return subprocess.run(
@@ -73,48 +67,8 @@ class LandingGatesTests(unittest.TestCase):
         for path, text in edits.items():
             path.write_text(text)
         self.assertEqual(baseline.mismatches(baseline.inventory(self.repo)), [])
-        shutil.copytree(ROOT / "crates/lash-restate/testdata/replay-corpus", self.repo / CORPUS)
-        for fixture in (self.repo / CORPUS).glob("*/journal.json"):
-            self.assertEqual(json.loads(fixture.read_text())["journal_logic_epoch"], 1)
-
-        # Only the executable's location differs from a lander's invocation.
-        # Its real report, arguments and mutated corpus are preserved.
-        kiln = shutil.which("kiln")
-        self.assertIsNotNone(kiln)
-        launcher_dir = self.repo / ".test-bin"
-        launcher_dir.mkdir()
-        launcher = launcher_dir / "kiln"
-        launcher.write_text(
-            "#!/usr/bin/env bash\nset -euo pipefail\n"
-            f"cd {shlex.quote(str(ROOT))}\n"
-            f"exec {shlex.quote(kiln)} \"$@\"\n"
-        )
-        launcher.chmod(0o755)
-        self.env["PATH"] = str(launcher_dir) + os.pathsep + self.env["PATH"]
         self.git("init", "--quiet", "--initial-branch=main")
         return self.commit("post-reset baseline")
-
-    def test_post_reset_landing_verdicts(self):
-        base = self.post_reset_repo()
-
-        unchanged = self.invoke(base, base)
-        (PROOF / "unchanged.log").write_text(unchanged.stdout + unchanged.stderr)
-        self.assertEqual(unchanged.returncode, 0, unchanged.stdout + unchanged.stderr)
-        self.assertIn("1 replay law passed", unchanged.stdout)
-        self.keep_report("unchanged")
-
-        journal = self.repo / CORPUS / "scalar-lashlang-tool-attempt/journal.json"
-        fixture = json.loads(journal.read_text())
-        fixture["journal_steps"].append("lash:release-journal-added-step")
-        fixture["records"]["lash:release-journal-added-step"] = next(iter(fixture["records"].values()))
-        journal.write_text(json.dumps(fixture, indent=2) + "\n")
-        head = self.commit("added recorded step with unchanged epoch")
-        replay = self.invoke(base, head)
-        (PROOF / "added-step.log").write_text(replay.stdout + replay.stderr)
-        self.assertNotEqual(replay.returncode, 0, replay.stdout + replay.stderr)
-        self.assertIn("journal logic changed: bump JOURNAL_LOGIC_EPOCH", replay.stdout + replay.stderr)
-        self.keep_report("added-step")
-        print("post-reset replay verdicts: unchanged=0, added-step=nonzero")
 
     def test_post_reset_unbumped_shape_fails(self):
         base = self.post_reset_repo()
@@ -131,25 +85,9 @@ class LandingGatesTests(unittest.TestCase):
         self.assertIn("REMOTE_PROTOCOL_VERSION is 1 on both sides", unbumped.stderr)
         print("post-reset unbumped guarded edit: exit 1")
 
-    def keep_report(self, name):
-        reports = list((self.repo / ".buck2/landing-gates").glob("*/test-report.json"))
-        self.assertTrue(reports, "Kiln must write a replay execution report")
-        report = max(reports, key=lambda path: path.stat().st_mtime_ns)
-        data = json.loads(report.read_text())
-        self.assertTrue(data["session_complete"])
-        results = list(data["results"].values())
-        self.assertEqual(len(results), 1)
-        result = results[0]
-        self.assertIn(f"test {LAW} ...", result["stdout"])
-        self.assertIn("1 passed" if name == "unchanged" else "1 failed", result["stdout"])
-        shutil.copy2(report, PROOF / f"{name}.json")
-        shutil.copy2(result["outputs"]["junit_xml"], PROOF / f"{name}.xml")
-        print(f"{name}: 1 replay case executed; evidence {PROOF / (name + '.json')}")
-
     def minimal_repo(self):
         self.copy_gates()
         self.git("init", "--quiet", "--initial-branch=main")
-        (self.repo / CORPUS).mkdir(parents=True)
         (self.repo / "tracked").write_text("baseline\n")
         return self.commit("baseline")
 
@@ -173,13 +111,6 @@ class LandingGatesTests(unittest.TestCase):
         result = self.invoke(head, head)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("tracked edits", result.stderr)
-
-    def test_a_missing_corpus_fails(self):
-        head = self.minimal_repo()
-        shutil.rmtree(self.repo / CORPUS)
-        result = self.invoke(head, head)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("replay corpus", result.stderr)
 
 
 if __name__ == "__main__":

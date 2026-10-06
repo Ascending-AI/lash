@@ -3538,15 +3538,14 @@ def worktree_problems(repo: Path, surfaces: Iterable[Surface]) -> list[str]:
 
 
 def guarded_path_patterns(repo: Path) -> frozenset[str]:
-    """Journal owners and every path a registered surface can touch, as the working
-    tree declares it: the registry, each constant's file, each guard's paths
-    (globs included) and each catalog's file. CI selects the gate, the
-    rolling-upgrade gate and the release-journal replay with it."""
+    """Every path a registered surface can touch, as the working tree declares
+    it: the registry, each constant's file, each guard's paths (globs included)
+    and each catalog's file. CI selects the gate with it."""
     view = WorktreeView(repo)
     registry = view.content(REGISTRY)
     if registry is None:
         raise CheckError(f"cannot read {REGISTRY}")
-    patterns = {REGISTRY, UPCASTER_REGISTRY, *JOURNAL_LOGIC_PATHS}
+    patterns = {REGISTRY, UPCASTER_REGISTRY}
     from discover_version_surfaces import surfaces as discover_surfaces
     for surface in discover_surfaces(view):
         patterns.add(surface.constant_path)
@@ -3572,145 +3571,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-JOURNAL_LOGIC_SOURCE = "crates/lash-restate/src/process/admission.rs"
-JOURNAL_LOGIC_PATHS = (
-    "crates/lash-restate/src/*.rs",
-    "crates/lash-core/src/runtime/*.rs",
-    "crates/lash-core-execution/src/runtime/*.rs",
-    "crates/lash-core-store/src/tool_run/*.rs",
-    "crates/lash-core-execution/src/tool_dispatch.rs",
-    "crates/lash-core-execution/src/tool_dispatch/*.rs",
-    "crates/lash-core-execution/src/plugin/transition.rs",
-    "crates/lash-core-execution/src/plugin/state/publication.rs",
-)
-
-
-def journal_logic_source(text: str) -> str:
-    """The ordering of suspension commands and their control-flow decisions.
-
-    Shapes, constants, signatures, and work inside synchronous codecs belong
-    to surface guards. This tripwire records async function boundaries,
-    awaited callees, journal commands, and branch/loop decisions only.
-    """
-    ranges = test_only_module_ranges(text, rust_outer_attribute_ranges(text))
-    for start, end in reversed(ranges):
-        text = text[:start] + text[end:]
-    projection = []
-    commands = {"run", "run_json_send", "run_json_or_retry_send",
-                "run_json_eager_or_retry_send", "run_json_schedule_or_retry_send",
-                "call", "send", "sleep", "select", "join", "try_join"}
-    functions = []
-    for match in re.finditer(r"\bfn\s+(\w+)\s*(?:<[^{};]*>)?\s*\(", text):
-        try:
-            end = rust_item_end(text, match.start())
-        except CheckError:
-            continue
-        item = text[match.end():end]
-        body = item[item.find("{"):]
-        if ".await" in body or any(re.search(r"\.\s*" + command + r"\b", body) for command in commands):
-            functions.append((match[1], body))
-    for name, body in functions:
-        projection.append(("function", name))
-        tokens = rust_tokens(body)
-        projection.extend(_journal_control_tokens(tokens, commands))
-    return repr(projection)
-
-
-def _journal_control_tokens(tokens, commands):
-    projection = []
-    stack = []
-    closes = {}
-    for index, (_, token) in enumerate(tokens):
-        if token == "{":
-            stack.append(index)
-        elif token == "}" and stack:
-            closes[stack.pop()] = index
-    boundaries = {}
-    for index, (_, token) in enumerate(tokens):
-        if token in {"if", "match", "while", "for", "else", "loop"}:
-            start = index + 1
-            while start < len(tokens) and tokens[start][1] != "{":
-                start += 1
-            if start in closes:
-                boundaries.setdefault(closes[start], []).append(token)
-    for index, (_, token) in enumerate(tokens):
-        projection.extend(("end", branch) for branch in boundaries.get(index, ()))
-        if token in commands and index and tokens[index - 1][1] in {".", "::"}:
-            projection.append(("command", token))
-        elif token == "await":
-            cursor = index - 2  # skip the dot
-            if cursor >= 0 and tokens[cursor][1] == ")":
-                depth = 1
-                cursor -= 1
-                while cursor >= 0 and depth:
-                    if tokens[cursor][1] == ")": depth += 1
-                    if tokens[cursor][1] == "(": depth -= 1
-                    cursor -= 1
-            projection.append(("await", tokens[cursor][1] if cursor >= 0 else ""))
-        elif token in {"if", "match", "while", "for"}:
-            end = index + 1
-            while end < len(tokens) and tokens[end][1] != "{":
-                end += 1
-            projection.append((token, tuple(value for _, value in tokens[index + 1:end])))
-        elif token == "=>":
-            cursor = index - 1
-            depth = 0
-            while cursor >= 0:
-                value = tokens[cursor][1]
-                if value in {")", "}", "]"}: depth += 1
-                elif value in {"(", "{", "["}:
-                    if depth == 0: break
-                    depth -= 1
-                elif value == "," and depth == 0: break
-                cursor -= 1
-            projection.append(("arm", tuple(value for _, value in tokens[cursor + 1:index])))
-        elif token == "?":
-            projection.append(("flow", "try"))
-        elif token in {"else", "loop", "break", "continue", "return", "select"}:
-            projection.append(("flow", token))
-    return projection
-
-
-def journal_lane_refusal(base: TreeView, head: TreeView) -> str | None:
-    """Handler logic needs both generation lanes, even during format freeze.
-
-    This compares command ordering and branch/loop decisions in the journal
-    owners; serialized shapes and step kinds have their own surface guards. Source
-    text is not a substitute for replay proof of the resulting generation.
-    """
-    old = base.content(JOURNAL_LOGIC_SOURCE)
-    if old is None:
-        return None
-    paths = sorted(set(base.matching_paths(JOURNAL_LOGIC_PATHS)) |
-                   set(head.matching_paths(JOURNAL_LOGIC_PATHS)))
-    paths = [path for path in paths if not any(
-        part == "tests" or part == "testing" or part.endswith("_tests.rs") or
-        part in ("tests.rs", "testing.rs") for part in Path(path).parts)]
-    base.preload(paths)
-    head.preload(paths)
-    changed = [path for path in paths if journal_logic_source(base.content(path) or "") !=
-               journal_logic_source(head.content(path) or "")]
-    if not changed:
-        return None
-    pattern = r"pub const JOURNAL_LOGIC_EPOCH: u32 = (\d+);"
-    before = tuple(map(int, re.findall(pattern, old)))
-    after = tuple(map(int, re.findall(pattern, head.content(JOURNAL_LOGIC_SOURCE) or "")))
-    if (len(before) == len(after) == 2 and after[0] > before[0] and
-            after[1] > before[1] and after[1] == after[0] + 1):
-        return None
-    return ("journal logic changed: move JOURNAL_LOGIC_EPOCH and its synthetic-next "
-            f"counterpart together; base {before}, head {after}; changed " + ", ".join(changed))
-
-
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         base = resolve_revision(args.repo, args.base)
         head = resolve_revision(args.repo, args.head)
-        lane_refusal = journal_lane_refusal(RevisionView(args.repo, base), RevisionView(args.repo, head))
-        if lane_refusal:
-            print(lane_refusal, file=sys.stderr)
-            return 1
         result = check_surfaces(args.repo, base, head, strict=args.strict)
     except CheckError as error:
         print(f"version-bump check error: {error}", file=sys.stderr)

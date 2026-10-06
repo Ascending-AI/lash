@@ -119,14 +119,13 @@ jobs:
             //:workspace_check //:feature_lane_compile
 
       # Build the same binaries as the core and tail partition, plus the
-      # live Restate harness and its VM worker, without executing tests.
+      # VM worker, without executing tests.
       - name: Warm test binaries
         shell: bash
         run: |
           set -euo pipefail
           scripts/hermetic-build.sh build --jobs 32 --materializations none \
             //:workspace_tests //crates/lash:ui_fixtures //crates/lash:facade_completeness \
-            //crates/lash-restate:lash-restate__unit_test \
             //crates/lash-vm-worker:lash-vm-worker__bin
 
       - name: Remove client credentials

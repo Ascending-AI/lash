@@ -261,7 +261,6 @@ class DefinitionTests(unittest.TestCase):
     def test_definition_identity_ignores_placement_access_and_run_ids(self):
         values = self.values()
         changed = copy.deepcopy(values)
-        changed['restate'].update(storageClass='other', nodeSelector={'pool': 'r'}, antiAffinity='required')
         changed['s3'].update(mode='external', externalEndpoint='https://s3', region='fr-par')
         changed['credentialsSecret'] = 'other'
         changed['image'].update(repository='registry/other', tag='fresh-build')
@@ -273,7 +272,7 @@ class DefinitionTests(unittest.TestCase):
     def test_definition_identity_changes_with_each_definition_dimension(self):
         values = self.values()
         digest = m.definition_hash(values, WORKLOAD)
-        for section, key, value in [('workers', 'count', 3), ('restate', 'replication', 3),
+        for section, key, value in [('workers', 'count', 3),
                                     ('workers', 'resources', {'requests': {'cpu': '3'}}),
                                     ('load', 'sessions', 2), ('load', 'faultCampaign', True),
                                     ('network', 'delayMs', 2), ('faults', 'rollingGeneration', 'third')]:

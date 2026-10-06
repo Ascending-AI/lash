@@ -16,12 +16,9 @@
 //! grace, which binds only while a run in the host may still deposit a
 //! report — by fixing the shift-attach wake the follower waits on.
 
-pub mod baseline;
 mod provider;
-mod restate;
 mod runner;
 mod work_engine;
-mod worker;
 
 use crate::perf_support::dhat;
 pub(crate) use provider::LatencyProviderKind;
@@ -162,17 +159,6 @@ pub struct LatencyRun {
     pub dhat_out: Option<std::path::PathBuf>,
     /// Trim dhat backtraces to this many frames.
     pub dhat_frames: Option<usize>,
-}
-
-/// The `lash-perf latency-worker` side: the second process a cross-worker
-/// case executes.
-pub struct LatencyWorkerArgs {
-    /// The store directory the host opened this worker for.
-    pub store_dir: std::path::PathBuf,
-    /// Touched once the endpoint is bound and registered; the host polls it.
-    pub ready_file: std::path::PathBuf,
-    /// Loopback address the Restate endpoint binds.
-    pub endpoint_bind: std::net::SocketAddr,
 }
 
 /// Run the gate: measure every selected case, write the JSON report and the
@@ -322,12 +308,6 @@ fn print_summary(report: &runner::LatencyReport) {
             println!("  - {violation}");
         }
     }
-}
-
-/// The worker half of a cross-worker case: serve lash's Restate services
-/// over the shared store directory until the host kills the process.
-pub async fn run_worker(args: LatencyWorkerArgs) -> anyhow::Result<()> {
-    worker::run(args).await
 }
 
 #[cfg(test)]

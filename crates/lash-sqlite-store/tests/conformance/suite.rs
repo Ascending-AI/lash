@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use lash_conformance::{
     FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
-    ReopenableProcessRegistry, ReopenableRuntimeStore, ReopenableTriggerStore,
+    ReopenableProcessRegistry, ReopenableTriggerStore,
 };
 use lash_core_execution::store::{ConformanceDeployment, RuntimeStore};
 use lash_core_execution::{
@@ -30,304 +30,11 @@ use lash_core_execution::{
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
 
-struct ScopeLawTurnRunner(lash_restate_test::RestateTestBackend);
-
-#[async_trait::async_trait]
-impl lash_conformance::ConformanceTurnRunner for ScopeLawTurnRunner {
-    async fn run_turn(
-        &self,
-        admitted: lash_core_execution::AdmittedScope,
-        attempt: lash_conformance::ConformanceTurnAttempt,
-    ) {
-        self.0
-            .run_in_handler(
-                admitted,
-                Arc::new(move |scoped| {
-                    let attempt = Arc::clone(&attempt);
-                    Box::pin(async move {
-                        attempt(scoped).await;
-                    })
-                }),
-            )
-            .await
-            .expect("the law's turn runs inside a handler");
-    }
-
-    async fn run_crashed_then_redriven_turn(
-        &self,
-        admitted: lash_core_execution::AdmittedScope,
-        crashing: lash_conformance::ConformanceTurnAttempt,
-        redrive: lash_conformance::ConformanceTurnAttempt,
-    ) {
-        let handler = |attempt: lash_conformance::ConformanceTurnAttempt| -> lash_restate_test::HandlerAttempt {
-            Arc::new(move |scoped| {
-                let attempt = Arc::clone(&attempt);
-                Box::pin(async move {
-                    attempt(scoped).await;
-                })
-            })
-        };
-        self.0
-            .run_crashed_then_redriven(admitted, handler(crashing), handler(redrive))
-            .await
-            .unwrap_or_else(|error| {
-                panic!("the law's crashed turn did not redrive in its handler: {error}")
-            });
-    }
-
-    async fn run_turn_until_crash(
-        &self,
-        admitted: lash_core_execution::AdmittedScope,
-        attempt: lash_conformance::ConformanceTurnAttempt,
-        crash: lash_conformance::ConformanceCrash,
-    ) {
-        // Inside the handler the crash kills the attempt where it stands —
-        // the double's redelivery would re-run the crashed job, so a retried
-        // attempt parks forever instead: the law's next `run_turn` is the
-        // recovery the tier promises, not Restate's retry.
-        let crashing: lash_restate_test::HandlerAttempt = {
-            let crash = crash.clone();
-            Arc::new(move |scoped| {
-                let attempt = Arc::clone(&attempt);
-                let crash = crash.clone();
-                Box::pin(async move {
-                    if crash.has_fired() {
-                        std::future::pending::<()>().await;
-                    }
-                    tokio::select! {
-                        biased;
-                        () = crash.fired() => {
-                            panic!("the conformance crash killed the attempt")
-                        }
-                        end = attempt(scoped) => {
-                            panic!("the crashing attempt ended ({end:?}) before its crash fired")
-                        }
-                    }
-                })
-            })
-        };
-        tokio::select! {
-            biased;
-            () = crash.fired() => {}
-            result = self.0.run_in_handler(admitted, crashing) => {
-                panic!("the crashing turn's handler ended ({result:?}) before its crash fired")
-            }
-        }
-    }
-
-    /// Process segments run in the double's process workflow: the worker is
-    /// installed there, and the runtime's own port only observes the
-    /// registry that workflow writes terminals into.
-    fn process_work(
-        &self,
-        watched: lash_core_execution::WatchedRegistry,
-        worker: lash_core_worker::DurableProcessWorker,
-    ) -> lash_core_execution::ProcessWorkWiring {
-        self.0.install_process_worker(worker);
-        let port = Arc::new(lash_core_execution::NoProcessWork::new(&watched));
-        lash_core_execution::ProcessWorkWiring::new(watched, port)
-    }
-}
-
-// FIG-4110: every frame open (a context-pressure frame, a pressure frame
-// followed by `continue_as`, an administrative compaction) killed at each
-// crash point and redriven opens once, chained in order, with one summarizer
-// call. Each turn runs inside a handler of the Restate double over this
-// substrate's stores.
-lash_conformance::frame_open_redrive_tests!({
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let stores = backend.as_stores();
-    let double_stores = Arc::clone(&stores);
-    let double = lash_restate_test::backend_with(
-        4110 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-        lash_restate_test::ServerConfig::default(),
-        move |_| Arc::clone(&double_stores),
-    )
-    .await
-    .expect("boot the frame-open law's handler");
-    let effect_host = double.restate().restate_effect_host();
-    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
-        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-    (
-        (backend, double),
-        "sqlite-frame-open",
-        effect_host,
-        stores,
-        runner,
-    )
-});
-
-// FIG-3607 contract 4 (FIG-4489): every logical turn a shift runs, a
-// recovered follow-on's included, is owned by `Turn(logical run)`. Each
-// shift runs inside a handler of the Restate double over this substrate's
-// stores.
-lash_conformance::driver_turn_ownership_tests!({
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let stores = backend.as_stores();
-    let double_stores = Arc::clone(&stores);
-    let double = lash_restate_test::backend_with(
-        4489 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-        lash_restate_test::ServerConfig::default(),
-        move |_| Arc::clone(&double_stores),
-    )
-    .await
-    .expect("boot the ownership law's handler");
-    let effect_host = double.restate().restate_effect_host();
-    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
-        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-    (
-        (backend, double),
-        "sqlite-driver-ownership",
-        effect_host,
-        stores,
-        runner,
-    )
-});
-
 // The ownership law where every await suspends and every resumption replays
 // the handler's journal from its start (FIG-4514): a run replayed after its
 // terminal-checkpoint follow-on committed names that follow-on's effects as
 // its first execution did, so the shift ends.
-mod driver_turn_ownership_under_replay {
-    use super::*;
-
-    lash_conformance::driver_turn_ownership_tests!({
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let backend = TestBackend::open(SUBSTRATE).await;
-        let stores = backend.as_stores();
-        let double_stores = Arc::clone(&stores);
-        let double = lash_restate_test::backend_with(
-            4514 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-            lash_restate_test::ServerConfig::default().always_replay(true),
-            move |_| Arc::clone(&double_stores),
-        )
-        .await
-        .expect("boot the ownership law's always-replay handler");
-        let effect_host = double.restate().restate_effect_host();
-        let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
-            as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-        (
-            (backend, double),
-            "sqlite-driver-ownership-replay",
-            effect_host,
-            stores,
-            runner,
-        )
-    });
-}
-
-// FIG-4457: two queued inputs, the second sent while the first one's shift
-// is down, get their own runs under the default drain, and a cancel of one
-// leaves the other untouched. Each shift runs inside a handler of the Restate
-// double over this substrate's stores.
-lash_conformance::queued_input_runs_tests!({
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let stores = backend.as_stores();
-    let double_stores = Arc::clone(&stores);
-    let double = lash_restate_test::backend_with(
-        4457 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-        lash_restate_test::ServerConfig::default(),
-        move |_| Arc::clone(&double_stores),
-    )
-    .await
-    .expect("boot the queued input runs law's handler");
-    let effect_host = double.restate().restate_effect_host();
-    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
-        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-    (
-        (backend, double),
-        "sqlite-queued-input-runs",
-        effect_host,
-        stores,
-        runner,
-    )
-});
-
-// FIG-4297: a duplicate of a bound trigger delivery's occurrence, emitted by
-// a fresh invocation after the bound process was pruned, returns that process
-// and starts nothing, and the original emission's replay still answers it.
-// Every emission runs inside a handler of the Restate double over this
-// substrate's stores, and the delivery's process runs in its process workflow.
-lash_conformance::bound_trigger_duplicate_tests!({
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let stores = backend.as_stores();
-    let double_stores = Arc::clone(&stores);
-    let double = lash_restate_test::backend_with(
-        4297 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-        lash_restate_test::ServerConfig::default(),
-        move |_| Arc::clone(&double_stores),
-    )
-    .await
-    .expect("boot the bound-trigger law's handler");
-    let effect_host = double.restate().restate_effect_host();
-    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
-        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-    (
-        (backend, double),
-        "sqlite-bound-trigger",
-        effect_host,
-        stores,
-        runner,
-    )
-});
-
-// FIG-4159: the worker-broker laws, each turn inside a handler of the
-// Restate double over this substrate's stores; a lost worker fails the
-// attempt and the double replays the invocation into the redrive.
-lash_conformance::vm_broker_tests!({
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let stores = backend.as_stores();
-    let double_stores = Arc::clone(&stores);
-    let double = lash_restate_test::backend_with(
-        4159 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-        lash_restate_test::ServerConfig::default(),
-        move |_| Arc::clone(&double_stores),
-    )
-    .await
-    .expect("boot the worker-broker law's handler");
-    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
-        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-    ((backend, double), "sqlite-vm-broker".to_string(), runner)
-});
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_joined_inputs_turn_scope_closes_with_its_admitting_run() {
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let stores = backend.as_stores();
-    let double_stores = Arc::clone(&stores);
-    let double = lash_restate_test::backend_with(
-        4023,
-        lash_restate_test::ServerConfig::default(),
-        move |_| Arc::clone(&double_stores),
-    )
-    .await
-    .expect("boot the joined-scope law's handler");
-    let effect_host = double.restate().restate_effect_host();
-    let runner =
-        Arc::new(ScopeLawTurnRunner(double)) as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-    lash_conformance::registration_macro_support::a_joined_inputs_turn_scope_closes_with_its_admitting_run(
-        "sqlite-joined-scope", effect_host, stores, runner,
-    ).await;
-}
-
-/// Engine promise authority for storage laws that cross a turn-control boundary.
-async fn promise_authority() -> (
-    lash_restate_test::RestateTestBackend,
-    Arc<dyn lash_core_execution::EffectHost>,
-) {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let seed = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let backend = lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
-        .await
-        .expect("boot the Restate promise authority");
-    let host: Arc<dyn lash_core_execution::EffectHost> = backend.restate().restate_effect_host();
-    (backend, host)
-}
+mod driver_turn_ownership_under_replay {}
 
 #[path = "admission_atomicity.rs"]
 mod admission_atomicity;
@@ -963,23 +670,6 @@ lash_conformance::process_continuation_store_tests!({
     (backend, registry, store)
 });
 
-lash_conformance::session_store_factory_tests!({
-    let retained: Retained<TestBackend> = Retained::default();
-    let make_retained = retained.clone();
-    let make =
-        move || make_retained.open_blocking().blocking_store() as Arc<dyn ConformanceDeployment>;
-    let attached_retained = retained.clone();
-    let make_attached = move || {
-        let backend = attached_retained.open_blocking();
-        (
-            backend.blocking_store() as Arc<dyn ConformanceDeployment>,
-            backend.attachment_store() as Arc<dyn lash_core_execution::AttachmentStore>,
-        )
-    };
-    let (engine, effect_host) = promise_authority().await;
-    ((retained, engine), make, make_attached, effect_host)
-});
-
 // The settlement laws run a facade runtime over a fresh backend per law: an
 // engine backend keeps its substrate alive and supplies the durable ports the
 // runtime takes from it.
@@ -1018,14 +708,6 @@ lash_conformance::session_graph_append_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let factory = backend.store().await as Arc<dyn DeploymentStore>;
     (backend, factory)
-});
-
-lash_conformance::process_prune_session_store_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
-    let factory = backend.store().await as Arc<dyn DeploymentStore>;
-    let (engine, effect_host) = promise_authority().await;
-    ((backend, engine), factory, registry, effect_host)
 });
 
 lash_conformance::trigger_store_reopenable_tests!({
@@ -1125,40 +807,6 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
         current.record.subscription_id
     );
 }
-
-lash_conformance::runtime_persistence_reopenable_tests!({
-    let retained: Retained<TestBackend> = Retained::default();
-    let (engine, effect_host) = promise_authority().await;
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
-    let store_clock = Arc::clone(&clock);
-    (
-        (retained.clone(), engine),
-        move |session_id: &str| {
-            let request = root_session_request(session_id);
-            let clock = store_clock.clone() as Arc<dyn lash_core_execution::Clock>;
-            let (backend, open, reopen) = sync_await(async move {
-                let backend = TestBackend::open_with_clock(SUBSTRATE, clock).await;
-                let open = backend.store().await;
-                open.admit_session(&request)
-                    .await
-                    .expect("admit SQLite conformance session");
-                let reopen = backend.reopen().await.store().await;
-                (backend, open, reopen)
-            });
-            let effect_host = Arc::clone(&effect_host);
-            retained.keep(&backend);
-            ReopenableRuntimeStore {
-                open: open as Arc<dyn RuntimeStore>,
-                reopen: reopen as Arc<dyn RuntimeStore>,
-                effect_host,
-            }
-        },
-        lash_conformance::RuntimePersistenceLeaseTiming::controlled({
-            let clock = Arc::clone(&clock);
-            move |duration_ms| clock.advance(duration_ms)
-        }),
-    )
-});
 
 lash_conformance::store_recovery_tests!({
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
@@ -1467,22 +1115,4 @@ async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical() {
     .await;
 }
 
-mod session_commands {
-    use super::*;
-    lash_conformance::session_command_replay_tests!({
-        let backend = TestBackend::open(SUBSTRATE).await;
-        let stores = backend.as_stores();
-        let double_stores = Arc::clone(&stores);
-        let double = lash_restate_test::backend_with(
-            4357,
-            lash_restate_test::ServerConfig::default(),
-            move |_| Arc::clone(&double_stores),
-        )
-        .await
-        .expect("boot the command law's handler");
-        let host = double.restate().restate_effect_host();
-        let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
-            as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-        ((backend, double), "sqlite-commands", host, stores, runner)
-    });
-}
+mod session_commands {}

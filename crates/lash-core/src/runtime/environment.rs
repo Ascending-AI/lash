@@ -237,44 +237,4 @@ impl RuntimeEnvironment {
 
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
-mod tests {
-    use super::*;
-
-    fn core_over(backend: &crate::Backend) -> RuntimeHostConfig {
-        RuntimeHostConfig::new(
-            backend.clone(),
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        )
-    }
-
-    /// The trigger store is the backend's, stamping from the backend's clock.
-    #[tokio::test]
-    async fn the_trigger_store_stamps_from_the_backend_clock() {
-        const NOW_MS: u64 = 4_200_000;
-        let double = crate::testing::kernel_double(
-            0xf6_0003,
-            lash_restate_test::ServerConfig {
-                start_time_ms: NOW_MS,
-                time: lash_restate_test::TimeMode::Manual,
-                ..Default::default()
-            },
-        )
-        .await;
-        let backend = double.lash_backend();
-
-        let env = RuntimeEnvironment::builder(core_over(&backend)).build();
-        let receipt = env
-            .core
-            .trigger_store()
-            .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
-                "fig1982.clock",
-                "resolved-core-clock",
-                serde_json::Value::Null,
-                "fig1982:resolved-core-clock",
-            ))
-            .await
-            .expect("ingest clock probe");
-        assert_eq!(receipt.occurrence.occurred_at_ms, NOW_MS);
-    }
-}
+mod tests {}

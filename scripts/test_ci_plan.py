@@ -64,7 +64,6 @@ class ClassifyTests(unittest.TestCase):
         cases = (
             ("crates/lash/tests/artifact_referrers_evidence.rs", "true", "false"),
             ("crates/lash/tests/artifact_referrers_evidence/fixture.rs", "true", "false"),
-            ("crates/lash-restate-test/src/backend.rs", "true", "false"),
             ("crates/lash-lashlang-runtime/src/lib.rs", "true", "false"),
             ("crates/lash-plugin-process-controls/src/lib.rs", "true", "false"),
             ("crates/lash-protocol-rlm/src/lib.rs", "true", "false"),
@@ -74,10 +73,7 @@ class ClassifyTests(unittest.TestCase):
             ("crates/lash-sim/src/lib.rs", "true", "false"),
             ("crates/lash-core/src/runtime/shift/admission.rs", "false", "true"),
             ("crates/lash-core/src/runtime/turn_loop.rs", "false", "true"),
-            ("crates/lash-restate/src/turn_handler.rs", "false", "true"),
-            ("crates/lash-restate/src/session_shifts.rs", "false", "true"),
             ("crates/lash-core/src/session/mod.rs", "false", "false"),
-            ("crates/lash-restate/src/lib.rs", "false", "false"),
         )
         for path, postgres, host in cases:
             with self.subTest(path=path):
@@ -206,7 +202,6 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual("true", plan["rust"])
         self.assertEqual("false", plan["stores"])
         self.assertEqual("false", plan["functional_e2e"])
-        self.assertEqual("false", plan["workers_e2e"])
         self.assertEqual("true", plan["workbench"])
         self.assertEqual("false", plan["facade"])
         self.assertEqual("false", plan["tooling"])
@@ -710,7 +705,7 @@ class CiMachineryTreeTests(unittest.TestCase):
         mixed = plan("scripts/ci_plan.py", "crates/lash-core/src/lib.rs")
         self.assertEqual("production-relevant diff", mixed["reason"])
         self.assertEqual("true", mixed["rust"])
-        self.assertEqual("true", mixed["workers_e2e"])
+        self.assertEqual("true", mixed["functional_e2e"])
 
 
 class RustRuntimeDocInputTests(unittest.TestCase):
@@ -1234,7 +1229,7 @@ class PreciseDevTestScopeTests(unittest.TestCase):
         self.assertEqual(((), (), ()), (scope.packages, scope.targets, scope.files))
 
     def test_ci_machinery_keeps_the_gates_and_selects_only_declared_readers(self) -> None:
-        for path in ("scripts/restate-suites.toml", "scripts/ci/buck2_event_digest.py"):
+        for path in ("scripts/ci/buck2_event_digest.py",):
             with self.subTest(path=path):
                 scope = self.scope(path)
                 self.assertTrue(scope.repository)
@@ -1462,26 +1457,26 @@ class PrTailLabelTests(unittest.TestCase):
 class DependentTestLabelTests(unittest.TestCase):
     """dev-test's `--dependents` runs what a reverse-dependency query reaches.
 
-    FIG-4558 changed five crates and broke 20 `lash-restate` unit tests it
+    FIG-4558 changed five crates and broke 20 unit tests of another crate it
     never ran: a lane's own packages are not the tests its change can break.
     """
 
     def test_a_query_splits_into_members_deferred_and_named_skips(self) -> None:
         members, deferred, skipped = ci_plan.dependent_test_labels({
-            "//crates/lash-restate:lash-restate__unit_test",
+            "//crates/lash-core-store:lash-core-store__unit_test",
             "//crates/lash-sim:lash-sim__unit_test",
             "//crates/lash-postgres-store:conformance__test",
             "//crates/lash-s3-store:lash-s3-store__unit_test",
             "//crates/lash-regress:unicodesets__test",
             # A feature variant and a helper target are not inventory tests.
             "//crates/lash:artifact_referrers_evidence__test__fv_26f56f02",
-            "//crates/lash-restate:lash-restate__unit_test__rust_test",
+            "//crates/lash-core-store:lash-core-store__unit_test__rust_test",
         })
         # The PostgreSQL store tests start their own server inside the test
         # action, so the gate runs them; the S3 store still needs a service.
         self.assertEqual(
             {
-                "//crates/lash-restate:lash-restate__unit_test",
+                "//crates/lash-core-store:lash-core-store__unit_test",
                 "//crates/lash-postgres-store:conformance__test",
             },
             members,
@@ -1520,7 +1515,7 @@ class DependentTestLabelTests(unittest.TestCase):
 
     def test_deferred_dependents_ride_the_shared_label_assembly(self) -> None:
         members, deferred, _skipped = ci_plan.dependent_test_labels({
-            "//crates/lash-restate:lash-restate__unit_test",
+            "//crates/lash-core-store:lash-core-store__unit_test",
             "//crates/lash-sim:lash-sim__unit_test",
         })
         scope = ci_plan.DevTestScope(("//crates/lash-core-store",), False, False, False, ())
@@ -1528,7 +1523,7 @@ class DependentTestLabelTests(unittest.TestCase):
         labels, _builds = ci_plan.affected_buck2_labels(scope, members, deferred, {}, builds)
         self.assertEqual(
             [
-                "//crates/lash-restate:lash-restate__unit_test",
+                "//crates/lash-core-store:lash-core-store__unit_test",
                 "//crates/lash-sim:lash-sim__unit_test",
             ],
             labels,
@@ -1537,11 +1532,11 @@ class DependentTestLabelTests(unittest.TestCase):
     def test_local_tail_exclusion_keeps_regular_dependents(self) -> None:
         scope = ci_plan.DevTestScope((), False, False, False, ())
         labels, builds = ci_plan.affected_buck2_labels(
-            scope, {"//crates/lash-restate:lash-restate__unit_test"},
+            scope, {"//crates/lash-core-store:lash-core-store__unit_test"},
             ["//crates/lash-sim:lash-sim__unit_test"], {},
             include_deferred=False,
         )
-        self.assertEqual(["//crates/lash-restate:lash-restate__unit_test"], labels)
+        self.assertEqual(["//crates/lash-core-store:lash-core-store__unit_test"], labels)
         self.assertEqual(["//:schema_checks"], builds)
 
     def test_ci_pr_selection_matches_pre_change_bytes(self) -> None:
@@ -1628,242 +1623,15 @@ class LawTickLaneTests(unittest.TestCase):
             )
 
 
-class RestateSuiteSelectionTests(unittest.TestCase):
-    """`restate_suites` selects the live Restate board on a pull request.
-
-    The suites ran on `workflow_dispatch` alone, so #2106 (FIG-3699) and
-    #2148 (FIG-3697) merged past them and broke main, and #2085's workbench
-    regression went unseen. The family answers "can this path move a live
-    Restate suite" and the workflow runs the Restate legs when a trusted
-    pull request selects it.
-    """
-
-    def plan(self, *paths: str) -> dict[str, str]:
-        return ci_plan.classify([("M", path) for path in paths])
-
-    def assert_suite_legs_selected(self, names: set[str]) -> None:
-        rows = json.loads(subprocess.check_output(
-            [sys.executable, str(ROOT / "scripts/ci/restate_matrix.py"), "matrix"], text=True
-        ))["include"]
-        selected = {(row["suite"], row["leg"]) for row in rows}
-        for name in names:
-            for leg in ("live", "replay"):
-                self.assertIn((name, leg), selected)
-        job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["restate-suites"]
-        self.assertEqual("${{ fromJSON(needs.plan.outputs.restate_matrix) }}", job["strategy"]["matrix"])
-
-    def test_run_control_runs_both_legs_in_the_derived_matrix(self) -> None:
-        self.assert_suite_legs_selected({"run-control"})
-
-    def test_session_shifts_runs_both_legs_in_the_derived_matrix(self) -> None:
-        self.assert_suite_legs_selected({"session-shifts"})
-
-    def test_load_replay_suites_run_both_legs_in_the_derived_matrix(self) -> None:
-        import tomllib
-
-        registry = tomllib.loads((ROOT / "scripts/restate-suites.toml").read_text())["suites"]
-        suites = {name for name, spec in registry.items()
-                  if spec["cwd"] == "runbooks/restate-postgres-workers"}
-        self.assertTrue(suites)
-        self.assert_suite_legs_selected(suites)
-
-    def test_the_registry_derives_the_suite_owners(self) -> None:
-        self.assertEqual(
-            {
-                "crates/lash",
-                "crates/lash-protocol-rlm",
-                "crates/lash-restate",
-                "crates/lash-restate-test",
-                "examples/agent-workbench",
-                "runbooks/restate-postgres-workers",
-            },
-            set(ci_plan.restate_suite_dirs()),
-        )
-
-    def test_a_lash_restate_change_selects_the_suites(self) -> None:
-        self.assertEqual(
-            "true",
-            self.plan("crates/lash-restate/src/effect_host.rs")["restate_suites"],
-        )
-
-    def test_the_restate_execution_path_selects_the_suites(self) -> None:
-        for path in (
-            # The native Run controller and workers runbook binary.
-            "crates/lash-restate/src/controller/run_record.rs",
-            "crates/lash-core-execution/src/tool_dispatch.rs",
-            "crates/lash-core-execution/src/session/tool_execution.rs",
-            "runbooks/restate-postgres-workers/src/bin/worker.rs",
-            # #2148's turn-driver change.
-            "crates/lash-core/src/runtime/turn_driver/tools.rs",
-            "crates/lash-core/src/runtime/turn_loop.rs",
-            # The suite's law catalogue expands into its test binary.
-            "crates/lash-conformance/src/lib.rs",
-            # The endpoints and runbooks the suites mount.
-            "crates/lash-restate/src/controller/run_record.rs",
-            # The facade crate owns the public-process-command suite
-            # (//crates/lash:integration__test), so it is a suite owner.
-            "crates/lash/tests/integration/public_process_command_replay.rs",
-            "examples/agent-workbench/src/main.rs",
-            "runbooks/process-operations/docker-compose.yml",
-            # A shared crate's manifest can change the suites' build.
-            "crates/lash-core-execution/Cargo.toml",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual("true", self.plan(path)["restate_suites"])
-
-    def test_docs_only_and_unrelated_paths_do_not_select_them(self) -> None:
-        for path in (
-            "docs/guide.md",
-            "README.md",
-            # Inside the shared crates but outside the execution subtrees.
-            "crates/lash-core-execution/src/backend.rs",
-            "crates/lash-core/src/runtime/assembly.rs",
-            # `lashlang` is a dependency of the suites, not the execution
-            # path they cover: the dependency closure of the suite owners
-            # covers most of the workspace, so selecting it would run the
-            # board on nearly every diff. The language's own suites and the
-            # merge group's full board still cover it.
-            "crates/lashlang/src/lib.rs",
-            "crates/lash-sim/src/lib.rs",
-            "examples/toolbench/src/main.rs",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual("false", self.plan(path)["restate_suites"])
-
-    def test_the_selected_packages_and_subtrees_exist_in_the_tree(self) -> None:
-        tracked = subprocess.run(
-            ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
-        ).stdout.splitlines()
-        for package in ci_plan.RESTATE_SUITE_PACKAGES | ci_plan.restate_suite_dirs():
-            with self.subTest(package=package):
-                self.assertTrue((ROOT / package).is_dir(), package)
-        for package, subtrees in ci_plan.RESTATE_CORE_SUBTREES.items():
-            for subtree in subtrees:
-                with self.subTest(package=package, subtree=subtree):
-                    self.assertTrue(
-                        any(
-                            path.startswith(f"{package}/")
-                            and ci_plan._contains_stem_run(path, subtree)
-                            for path in tracked
-                        ),
-                        f"no tracked path under {package} matches {subtree}",
-                    )
-
-    def test_an_underivable_registry_fails_open(self) -> None:
-        with mock.patch.object(
-            ci_plan, "restate_suite_dirs", side_effect=OSError("no registry")
-        ):
-            plan = self.plan("crates/lash-s3-store/src/lib.rs")
-        self.assertEqual("true", plan["fail_open"])
-        self.assertEqual("true", plan["restate_suites"])
-
-    def test_the_e2e_and_workers_jobs_are_dispatch_only(self) -> None:
-        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-        for job in (
-            "functional-e2e-process-operations",
-            "worker-artifacts",
-            "restate-postgres-workers",
-            "restate-postgres-workers-summary",
-        ):
-            with self.subTest(job=job):
-                condition = " ".join(jobs[job]["if"].split())
-                self.assertIn("github.event_name == 'workflow_dispatch'", condition)
-                # The fast board runs no E2E or workers leg at all; the merge
-                # group never had them.
-                self.assertNotIn("pull_request", condition)
-                self.assertNotIn("merge_group", condition)
-        self.assertEqual(
-            "${{ steps.classify.outputs.restate_suites }}",
-            jobs["plan"]["outputs"]["restate_suites"],
-        )
-
+class FunctionalE2ETests(unittest.TestCase):
     def test_every_leg_still_runs_behind_the_dispatch_gate(self) -> None:
         job = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
             "functional-e2e"
         ]
-        legs = job["strategy"]["matrix"]["include"]
-        self.assertEqual(
-            {
-                "agent-workbench",
-            },
-            {leg["name"] for leg in legs if leg["restate"]},
-        )
         # Every step stays behind the leg selector: a leg that does not run
         # checks out nothing.
         for step in job["steps"]:
             self.assertIn("RUN_FUNCTIONAL_E2E", str(step.get("if", "")))
-
-    def test_a_selected_pull_request_still_defers_the_board(self) -> None:
-        needs = apply_event_deferrals(successful_needs(), "pull_request")
-        for job in ci_plan.RESTATE_SUITE_JOBS | ci_plan.WORKERS_E2E_JOBS:
-            self.assertEqual("skipped", needs[job]["result"])
-        self.assertEqual(
-            [],
-            ci_plan.evaluate_conclusion(
-                needs, "pull_request", workers_e2e_enabled=False
-            ),
-        )
-        for job in sorted(ci_plan.RESTATE_SUITE_JOBS | ci_plan.WORKERS_E2E_JOBS):
-            for result in ("success", "failure", "cancelled"):
-                with self.subTest(job=job, result=result):
-                    trial = apply_event_deferrals(successful_needs(), "pull_request")
-                    trial[job]["result"] = result
-                    problems = ci_plan.evaluate_conclusion(
-                        trial, "pull_request", workers_e2e_enabled=False
-                    )
-                    self.assertTrue(any(job in p for p in problems), problems)
-
-    def test_other_events_keep_the_board_deferred(self) -> None:
-        # No pull request — trusted or not — runs a live suite, and the
-        # merge group runs the same board it had.
-        for event, trusted in (
-            ("pull_request", True),
-            ("pull_request", False),
-            ("merge_group", True),
-        ):
-            with self.subTest(event=event):
-                needs = apply_event_deferrals(
-                    successful_needs(), event, trusted=trusted
-                )
-                for job in ci_plan.RESTATE_SUITE_JOBS:
-                    self.assertEqual("skipped", needs[job]["result"])
-                for job in ci_plan.WORKERS_E2E_JOBS:
-                    needs[job]["result"] = "skipped"
-                for job in ci_plan.POSTGRES_STORE_JOBS:
-                    needs[job]["result"] = (
-                        "success" if event == "merge_group" else "skipped"
-                    )
-                needs["workspace-tests"]["result"] = "success" if not trusted else "skipped"
-                needs["check"]["result"] = "success" if not trusted else "skipped"
-                for job in ci_plan.BUCK2_TEST_JOBS:
-                    if event == "pull_request":
-                        needs["buck2-tests-tail"]["result"] = "skipped"
-                    if not trusted:
-                        needs[job]["result"] = "skipped"
-                if not trusted:
-                    needs[ci_plan.FEATURE_LANES_JOB]["result"] = "skipped"
-                self.assertEqual(
-                    [],
-                    ci_plan.evaluate_conclusion(
-                        needs,
-                        event,
-                        workers_e2e_enabled=False,
-                        buck2_is_trusted=trusted,
-                    ),
-                )
-
-    def test_an_unselected_pull_request_keeps_them_deferred(self) -> None:
-        needs = successful_needs()
-        needs["plan"]["outputs"]["restate_suites"] = "false"
-        apply_event_deferrals(needs, "pull_request")
-        for job in ci_plan.RESTATE_SUITE_JOBS | ci_plan.WORKERS_E2E_JOBS:
-            needs[job]["result"] = "skipped"
-        self.assertEqual(
-            [],
-            ci_plan.evaluate_conclusion(
-                needs, "pull_request", workers_e2e_enabled=False
-            ),
-        )
 
 
 def successful_needs() -> dict[str, dict[str, object]]:
@@ -1883,7 +1651,6 @@ def successful_needs() -> dict[str, dict[str, object]]:
     # API seal; the Cargo workspace and seal jobs are the untrusted path.
     needs["workspace-tests"]["result"] = "skipped"
     needs["check"]["result"] = "skipped"
-    needs["pr-host-workers"]["result"] = "skipped"
     return needs
 
 
@@ -1894,8 +1661,6 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
         needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
     if event == "pull_request":
         needs["buck2-tests-tail"]["result"] = "skipped"
-        for job in ci_plan.WORKERS_E2E_JOBS:
-            needs[job]["result"] = "skipped"
         for job in ci_plan.POSTGRES_STORE_JOBS:
             needs[job]["result"] = (
                 "success" if needs["plan"]["outputs"]["pr_pg_store"] == "true" else "skipped"
@@ -1905,39 +1670,31 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
             if trusted and needs["plan"]["outputs"]["pr_host_restate"] == "true"
             else "skipped"
         )
-        needs["pr-host-workers"]["result"] = needs["functional-e2e"]["result"]
     elif event == "merge_group":
         needs["functional-e2e"]["result"] = "skipped"
     return needs
 
 
 # Files a registered surface guards without defining its constant in them: a
-# whole-file DDL guard, a guarded handler body, a guarded DDL fragment, a file
-# a glob guard matches, and a DDL stamp's migration catalog.
+# whole-file DDL guard, a guarded DDL fragment, a file a glob guard matches,
+# and a DDL stamp's migration catalog.
 GUARDED_SURFACE_FILES = (
     "crates/lash-postgres-store/schema.sql",
-    "crates/lash-restate/src/durable_wait/messages.rs",
     "crates/lash-sqlite-store/src/schema_fragments.rs",
     "crates/lashlang/src/runtime/compiler/expr.rs",
     "crates/lash-postgres-store/src/postgres/migrate.rs",
 )
 
 
-class RollingUpgradeSelectionTests(unittest.TestCase):
-    """`rolling_upgrade` selects Phase A's two-build gate (ADR 0115 §6).
+class VersionedSurfaceSelectionTests(unittest.TestCase):
+    """The strict bump gate's selector reads the surfaces' own markers.
 
-    ADR 0115 requires `just e2e-rolling` on every pull request that touches a
-    registered versioned surface, so the selector reads the surfaces' own
-    `version_guard` markers through the version-bump gate's reader rather
-    than a second table.
+    A guarded shape often lives outside the file that defines its constant,
+    so the rule is the markers' paths, not the registry's constant files.
     """
-
-    def plan(self, *paths: str) -> dict[str, str]:
-        return ci_plan.classify([("M", path) for path in paths])
 
     def test_the_markers_derive_the_surface_files(self) -> None:
         paths = ci_plan.versioned_surface_paths()
-        self.assertIn("crates/lash-restate/src/process/admission.rs", paths)
         self.assertIn("crates/lash-core-store/src/compat.rs", paths)
         self.assertIn("crates/lash-sqlite-store/src/schema.rs", paths)
         self.assertIn("crates/lash-postgres-store/schema.sql", paths)
@@ -1955,113 +1712,10 @@ class RollingUpgradeSelectionTests(unittest.TestCase):
         for path in GUARDED_SURFACE_FILES:
             with self.subTest(path=path):
                 self.assertTrue((ROOT / path).is_file(), path)
-                self.assertEqual("true", self.plan(path)["rolling_upgrade"])
-
-    def test_a_marker_that_cannot_be_read_fails_open(self) -> None:
-        import check_version_bumps
-
-        ci_plan.versioned_surface_paths.cache_clear()
-        self.addCleanup(ci_plan.versioned_surface_paths.cache_clear)
-        with mock.patch.object(
-            check_version_bumps,
-            "guarded_path_patterns",
-            side_effect=check_version_bumps.CheckError("marker ends early"),
-        ):
-            plan = self.plan("crates/lash-core/src/runtime/assembly.rs")
-        self.assertEqual("true", plan["fail_open"])
-        self.assertEqual("true", plan["rolling_upgrade"])
-        self.assertEqual("true", plan["release_journal_replay"])
-        self.assertIn("marker ends early", plan["reason"])
-
-    def test_a_surface_file_or_the_harness_selects_the_gate(self) -> None:
-        for path in (
-            "crates/lash-restate/src/process/admission.rs",
-            "crates/lash-core-store/src/compat.rs",
-            "crates/lash-postgres-store/src/postgres/migrate.rs",
-            "crates/lash-sqlite-store/src/schema.rs",
-            "crates/lash-upgrade-harness/src/node.rs",
-            "crates/lash-upgrade-harness/Cargo.toml",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual("true", self.plan(path)["rolling_upgrade"])
-
-    def test_docs_and_unrelated_paths_do_not_select_it(self) -> None:
-        for path in (
-            "docs/guide.md",
-            "runbooks/rolling-upgrade/runbook.md",
-            "crates/lash-core/src/lib.rs",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual("false", self.plan(path)["rolling_upgrade"])
-
-    def test_an_unreadable_registry_fails_open(self) -> None:
-        with mock.patch.object(
-            ci_plan, "versioned_surface_paths", side_effect=OSError("gone")
-        ):
-            plan = self.plan("crates/lash-core/src/runtime/assembly.rs")
-        self.assertEqual("true", plan["fail_open"])
-        self.assertEqual("true", plan["rolling_upgrade"])
-
-
-class ReleaseJournalReplaySelectionTests(unittest.TestCase):
-    def test_replay_job_runs_on_main_and_stays_non_required_until_the_cut(self):
-        workflow = yaml.safe_load((ROOT / ".github/workflows/release-journal-replay.yml").read_text())
-        triggers = workflow.get("on", workflow.get(True))
-        self.assertNotIn("push", triggers)
-        self.assertEqual([{"cron": "53 * * * *"}], triggers["schedule"])
-        self.assertIn("workflow_dispatch", triggers)
-        self.assertIn("pull_request", triggers)
-        job = workflow["jobs"]["release-journal-replay"]
-        self.assertIn("release_journal_replay", job["if"])
-        # FIG-4985: advisory until the cut; FIG-4905/Z07 flips it back to
-        # required when it recaptures the corpus.
-        self.assertTrue(job.get("continue-on-error", False))
-        self.assertIn("FIG-4097", (ROOT / ".github/workflows/release-journal-replay.yml").read_text())
-        self.assertEqual("crates/lash-restate/testdata/replay-corpus", job["env"]["LASH_REPLAY_CORPUS_ROOT"])
-        commands = "\n".join(step.get("run", "") for step in job["steps"])
-        self.assertIn("tests::replay_corpus::", commands)
-        self.assertIn("--test_env LASH_REPLAY_CORPUS_ROOT=", commands)
-        aggregator = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["ci-conclusion"]
-        self.assertNotIn("release-journal-replay", aggregator["needs"])
-
-    def test_every_registered_constant_selects_release_journal_replay(self):
-        import check_version_bumps
-        from discover_version_surfaces import surfaces
-
-        constant_files = {surface.constant_path
-                          for surface in surfaces(check_version_bumps.WorktreeView(ROOT))}
-        self.assertLessEqual(constant_files, ci_plan.versioned_surface_paths())
-        for path in sorted(constant_files):
-            with self.subTest(path=path):
-                plan = ci_plan.classify([("M", path)], event_name="pull_request")
-                self.assertEqual("true", plan.get("release_journal_replay"))
-
-    def test_a_guarded_file_selects_release_journal_replay(self):
-        for path in GUARDED_SURFACE_FILES:
-            with self.subTest(path=path):
-                plan = ci_plan.classify([("M", path)], event_name="pull_request")
-                self.assertEqual("true", plan.get("release_journal_replay"))
-
-    def test_main_selects_release_journal_replay_even_for_docs(self):
-        plan = ci_plan.classify([("M", "docs/guide.md")], event_name="push")
-        self.assertEqual("true", plan.get("release_journal_replay"))
-
-    def test_unrelated_pull_requests_skip_release_journal_replay(self):
-        plan = ci_plan.classify([("M", "crates/lash-core/src/lib.rs")], event_name="pull_request")
-        self.assertEqual("false", plan.get("release_journal_replay"))
-
-
-class VersionedSurfaceSelectionTests(unittest.TestCase):
-    """The strict bump gate's selector reads the surfaces' own markers.
-
-    A guarded shape often lives outside the file that defines its constant,
-    so the rule is the markers' paths, not the registry's constant files.
-    """
+                self.assertTrue(ci_plan.touches_versioned_surface([path]))
 
     def test_a_constant_file_a_guarded_file_and_the_gate_select_it(self) -> None:
         for path in (
-            "crates/lash-restate/src/process/admission.rs",
-            "crates/lash-restate/src/durable_wait/messages.rs",
             "crates/lash-postgres-store/schema.sql",
             "crates/lash-remote-protocol/src/lib.rs",
             "scripts/versioned-surfaces.toml",
@@ -2245,92 +1899,6 @@ class ConclusionTests(unittest.TestCase):
         needs = successful_needs()
         del needs["hygiene"]
         self.assertTrue(ci_plan.evaluate_conclusion(needs))
-
-
-class ProducerConclusionTests(unittest.TestCase):
-    def event_needs(self, event, enabled=True):
-        needs = successful_needs()
-        if not enabled:
-            needs["plan"]["outputs"]["restate_suites"] = "false"
-        apply_event_deferrals(needs, event)
-        if event in ci_plan.DEFERRED_EVENTS:
-            for job in ci_plan.WORKERS_E2E_JOBS:
-                needs[job]["result"] = "skipped"
-        self.assertEqual([], self.evaluate(needs, event, enabled))
-        return needs
-
-    def evaluate(self, needs, event, enabled=True):
-        return ci_plan.evaluate_conclusion(needs, event, enabled)
-
-    def assert_producer_rejected(self, event, result):
-        for producer in ("worker-artifacts",):
-            with self.subTest(producer=producer):
-                needs = self.event_needs(event)
-                needs[producer]["result"] = result
-                self.assertTrue(any(producer in p for p in self.evaluate(needs, event)))
-
-    def test_dispatch_main_producer_failure_rejected(self):
-        self.assert_producer_rejected("workflow_dispatch", "failure")
-
-    def test_dispatch_main_producer_cancelled_rejected(self):
-        self.assert_producer_rejected("workflow_dispatch", "cancelled")
-
-    def test_dispatch_main_producer_skipped_rejected(self):
-        self.assert_producer_rejected("workflow_dispatch", "skipped")
-
-    def test_pr_producer_failure_rejected(self):
-        self.assert_producer_rejected("pull_request", "failure")
-
-    def test_pr_producer_cancelled_rejected(self):
-        self.assert_producer_rejected("pull_request", "cancelled")
-
-    def test_pr_producer_skipped_accepted(self):
-        needs = self.event_needs("pull_request")
-        self.assertEqual("skipped", needs["worker-artifacts"]["result"])
-        self.assertEqual([], self.evaluate(needs, "pull_request"))
-
-    def test_pr_producer_success_rejected(self):
-        self.assert_producer_rejected("pull_request", "success")
-
-    def test_skipped_consumer_cascade_rejected(self):
-        for event in ("workflow_dispatch", "pull_request"):
-            consumers = [
-                "restate-postgres-workers",
-                "restate-postgres-workers-summary",
-            ]
-            for consumer in consumers:
-                with self.subTest(event=event, consumer=consumer):
-                    needs = self.event_needs(event)
-                    # A consumer run is the violation on the fast board;
-                    # skipped is the answer it must give there.
-                    needs[consumer]["result"] = (
-                        "skipped" if event == "workflow_dispatch" else "success"
-                    )
-                    self.assertTrue(any(consumer in p for p in self.evaluate(needs, event)))
-
-    def test_process_operations_consumer_failure_cancelled_and_skipped_rejected(self):
-        for event in ("workflow_dispatch",):
-            for result in ("failure", "cancelled", "skipped"):
-                with self.subTest(event=event, result=result):
-                    needs = self.event_needs(event)
-                    needs["functional-e2e-process-operations"]["result"] = result
-                    self.assertTrue(any("functional-e2e-process-operations" in p
-                                        for p in self.evaluate(needs, event)))
-
-    def test_worker_producer_failure_cascading_to_process_operations_rejected(self):
-        for event in ("workflow_dispatch",):
-            needs = self.event_needs(event)
-            needs["worker-artifacts"]["result"] = "failure"
-            needs["functional-e2e-process-operations"]["result"] = "skipped"
-            problems = self.evaluate(needs, event)
-            for job in ("worker-artifacts", "functional-e2e-process-operations"):
-                self.assertTrue(any(job in p for p in problems))
-
-    def test_merge_group_worker_producer_and_segments_skipped_accepted(self):
-        needs = self.event_needs("merge_group", False)
-        for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
-            self.assertEqual("skipped", needs[job]["result"])
-        self.assertEqual([], self.evaluate(needs, "merge_group", False))
 
 
 POSTGRES_TEST_STEPS = {
@@ -2862,16 +2430,13 @@ class WorkflowRegistrationTests(unittest.TestCase):
             self.assertEqual(jobs["postgres-store"]["if"], jobs[job]["if"])
             self.assertIn(job, jobs["ci-conclusion"]["needs"])
         self.assertIn("pr_host_restate", jobs["functional-e2e"]["if"])
-        self.assertIn("pr_host_restate", jobs["pr-host-workers"]["if"])
-        self.assertEqual("ubuntu-24.04", jobs["pr-host-workers"]["runs-on"])
-        self.assertIn("LASH_E2E_TURN_CONTROL_ONLY", str(jobs["pr-host-workers"]["steps"]))
         self.assertIn("ci-conclusion", jobs)
-        self.assertIn("pr-host-workers", jobs["ci-conclusion"]["needs"])
+        self.assertIn("functional-e2e", jobs["ci-conclusion"]["needs"])
 
     def test_pr_service_checks_are_required_only_when_selected(self) -> None:
         for selector, jobs in (
             ("pr_pg_store", ci_plan.POSTGRES_STORE_JOBS),
-            ("pr_host_restate", ("functional-e2e", "pr-host-workers")),
+            ("pr_host_restate", ("functional-e2e",)),
         ):
             for selected in ("true", "false"):
                 with self.subTest(selector=selector, selected=selected):
@@ -2895,26 +2460,18 @@ class WorkflowRegistrationTests(unittest.TestCase):
                 any(selector in issue for issue in ci_plan.evaluate_conclusion(needs, "pull_request"))
             )
 
-    def test_only_process_operations_waits_for_worker_artifacts(self):
+    def test_the_functional_legs_need_only_the_plan(self):
         jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         other = jobs["functional-e2e"]
-        consumer = jobs["functional-e2e-process-operations"]
         self.assertEqual("plan", other["needs"])
-        self.assertEqual(["plan", "worker-artifacts"], consumer["needs"])
-        self.assertIn("github.event_name == 'workflow_dispatch'", consumer["if"])
-        self.assertNotIn("pull_request", consumer["if"])
-        self.assertEqual(["process-operations"],
-                         [leg["name"] for leg in consumer["strategy"]["matrix"]["include"]])
-        self.assertEqual({"agent-workbench", "agent-workbench-transcript", "workflow-graph-roundtrip"},
+        self.assertEqual({"agent-workbench-transcript", "workflow-graph-roundtrip"},
                          {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
         transcript = next(leg for leg in other["strategy"]["matrix"]["include"]
                           if leg["name"] == "agent-workbench-transcript")
         self.assertEqual("workbench-transcript-projection-e2e", transcript["recipe"])
         self.assertTrue(transcript["browser"])
         self.assertTrue(transcript["buck2"])
-        self.assertFalse(transcript["restate"])
         self.assertFalse(any("worker binaries" in step.get("name", "") for step in other["steps"]))
-        self.assertTrue(any(step.get("name") == "Download worker binaries" for step in consumer["steps"]))
 
     def test_the_cargo_partition_is_gated_on_the_plan_and_runs_on_trunk(self) -> None:
         workflow = yaml.safe_load(CI_WORKFLOW.read_text())
@@ -3076,7 +2633,6 @@ class DispatchOnlyJobTests(unittest.TestCase):
             "heavy-tests",
             "stack-budget",
             "s3-store",
-            "functional-e2e-process-operations",
             "fuzz-smoke",
         )
         for job in still_deferred:

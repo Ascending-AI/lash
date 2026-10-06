@@ -91,6 +91,7 @@ pub(crate) const BLAKE3_DOMAINS: &[&str] = &[
 /// version_reservations = "retired hash-domain names generated from the registry"
 #[cfg(test)]
 pub(crate) const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
+    "lash-journal-payload/v1",
     "lash-lashlang-execution-site/v2",
     "lash-lashlang-program/v2",
     "lash-model-facing-composition/v2",

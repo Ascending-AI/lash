@@ -339,61 +339,6 @@ impl lash_core::ToolProvider for AttachmentPutTool {
     }
 }
 
-fn attachment_put_transport() -> TestProvider {
-    let call_index = Arc::new(AtomicUsize::new(0));
-    TestProvider::builder()
-        .kind("mock")
-        .requires_streaming(true)
-        .complete(move |_| {
-            let call_index = Arc::clone(&call_index);
-            async move {
-                Ok(match call_index.fetch_add(1, Ordering::SeqCst) {
-                    0 => LlmResponse {
-                        parts: vec![LlmOutputPart::ToolCall {
-                            call_id: "attachment-put-call".to_string(),
-                            tool_name: "attachment_put".to_string(),
-                            input_json: "{}".to_string(),
-                            replay: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..LlmResponse::default()
-                    },
-                    1 => LlmResponse {
-                        parts: vec![LlmOutputPart::Text {
-                            text: "attachment stored".to_string(),
-                            response_meta: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..LlmResponse::default()
-                    },
-                    index => panic!("unexpected attachment provider call {index}"),
-                })
-            }
-        })
-        .build()
-}
-
-/// The tool's put was bound to the turn's execution, never to an upload, and
-/// the commit acquired the session's edge on it (ADR 0124).
-async fn assert_turn_owned_attachment(store: &RecordingStore) {
-    let id = lash_core::attachments::content_id(b"turn-owned-tool-attachment");
-    let referrers = lash_core::AttachmentReferrers::attachment_referrers(store, &id)
-        .await
-        .expect("read the attachment's referrers");
-    assert!(
-        referrers.contains(&lash_core::ArtifactReferrer::Session(SessionId::from(
-            "root"
-        ))),
-        "the commit acquired the session's edge: {referrers:?}"
-    );
-    assert!(
-        referrers
-            .iter()
-            .all(|referrer| !matches!(referrer, lash_core::ArtifactReferrer::Upload(_))),
-        "a turn's put is held by its execution, not an upload: {referrers:?}"
-    );
-}
-
 fn lease_owner(owner_id: &str) -> lash_core::LeaseOwnerIdentity {
     lash_core::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
@@ -420,24 +365,12 @@ impl lash_core::Clock for CancelWatchTestClock {
     }
 }
 
-mod active_input_settlement;
-mod cancel_watch;
-mod checkpoint_progress;
 mod config_transactions;
-mod drain_and_recovery;
-mod drop_cancel_owner_failure;
 mod effects_and_queue;
-mod frame_residency;
-mod lease_and_admissions;
-mod tool_check_control;
 mod turn_lifecycle;
-mod withheld_frame_switch;
 
 use effects_and_queue::*;
 use turn_lifecycle::*;
 
 #[path = "commit_placement.rs"]
 mod commit_placement;
-
-#[path = "turn_cancel_modes.rs"]
-mod turn_cancel_modes;

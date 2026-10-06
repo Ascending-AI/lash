@@ -4,8 +4,8 @@ use std::sync::Arc;
 use crate::runtime::process::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
     ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
-    ProcessWakeSpec, ProjectionWatermark,
+    ProcessInput, ProcessProvenance, ProcessRegistration, ProcessValueSelector, ProcessWakeSpec,
+    ProjectionWatermark,
 };
 use crate::{Lifetime, ProcessRegistry, SessionId, StoreSet as _};
 
@@ -217,115 +217,6 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
             .await
             .expect("compact after cleanup acknowledgement"),
         0
-    );
-}
-
-#[tokio::test]
-async fn delete_session_process_command_revokes_only_observer_edges() {
-    let double =
-        crate::support::kernel_double(0xde_1e7e, lash_restate_test::ServerConfig::default()).await;
-    let registry: Arc<dyn ProcessRegistry> = double.lash_backend().process_registry();
-    let registry_dyn = Arc::clone(&registry);
-    let mut ids = std::collections::BTreeMap::new();
-    for label in ["sole", "shared"] {
-        let process_id = registry
-            .register_process(registration(label))
-            .await
-            .expect("register")
-            .id;
-        registry
-            .add_observer(
-                &SessionId::from("deleted"),
-                &process_id,
-                ProcessObserverBy::host(format!("deleted:{label}")),
-            )
-            .await
-            .expect("observe from deleted");
-        ids.insert(label, process_id);
-    }
-    registry
-        .add_observer(
-            &SessionId::from("remaining"),
-            &ids["shared"],
-            ProcessObserverBy::host("remaining:shared"),
-        )
-        .await
-        .expect("observe from remaining");
-    let sole_events = serde_json::to_vec(
-        &registry
-            .full_event_window(&ids["sole"], 0)
-            .await
-            .expect("sole events before delete"),
-    )
-    .expect("serialize sole events");
-    let shared_events = serde_json::to_vec(
-        &registry
-            .full_event_window(&ids["shared"], 0)
-            .await
-            .expect("shared events before delete"),
-    )
-    .expect("serialize shared events");
-    let handler = double
-        .open_handler(crate::AdmittedScope::session_delete("deleted"))
-        .await
-        .expect("open the session-delete handler");
-    let scoped = handler.scoped();
-    let invocation = crate::RuntimeEffectInvocation::new(
-        crate::EffectAddress::new(
-            crate::ExecutionScope::session_delete("deleted"),
-            "deleted:delete-session",
-        )
-        .expect("valid delete-session address"),
-        crate::RuntimeAttribution::for_session("deleted"),
-        "process:delete-session:deleted",
-    );
-
-    let outcome = scoped
-        .execute_effect(
-            crate::RuntimeEffectEnvelope::new(
-                invocation,
-                crate::RuntimeEffectCommand::process(crate::ProcessCommand::DeleteSession {
-                    session_id: SessionId::from("deleted"),
-                }),
-            ),
-            crate::RuntimeEffectLocalExecutor::processes(
-                Arc::clone(&registry_dyn),
-                Arc::new(crate::NoProcessWork::for_registry(registry_dyn)),
-                crate::ProcessEngineRegistry::new(),
-                crate::runtime::HostStartAdmission::default(),
-            ),
-        )
-        .await
-        .expect("delete session process command");
-    drop(scoped);
-    handler.close().await.expect("close the handler");
-
-    let crate::RuntimeEffectOutcome::Process {
-        result: crate::ProcessEffectOutcome::DeleteSession { report },
-    } = outcome
-    else {
-        panic!("unexpected delete session outcome: {outcome:?}");
-    };
-    assert_eq!(report.removed_observer_count, 2);
-    assert_eq!(
-        serde_json::to_vec(
-            &registry
-                .full_event_window(&ids["sole"], 0)
-                .await
-                .expect("sole events")
-        )
-        .expect("serialize sole events"),
-        sole_events
-    );
-    assert_eq!(
-        serde_json::to_vec(
-            &registry
-                .full_event_window(&ids["shared"], 0)
-                .await
-                .expect("shared events")
-        )
-        .expect("serialize shared events"),
-        shared_events
     );
 }
 

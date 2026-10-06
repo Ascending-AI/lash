@@ -42,7 +42,6 @@ lash-provider-google = { workspace = true, optional = true }
 lash-provider-openai = { workspace = true, optional = true }
 lash-plugin-mcp = { workspace = true, optional = true }
 lash-postgres-store = { workspace = true, optional = true }
-lash-restate = { workspace = true, optional = true }
 lash-s3-store = { workspace = true, optional = true }
 lash-sqlite-store = { workspace = true, optional = true }
 lash-subagents = { workspace = true, optional = true }
@@ -85,7 +84,6 @@ rlm = [
 sqlite = ["dep:lash-sqlite-store"]
 postgres = ["dep:lash-postgres-store", "dep:sqlx", "tokio/rt", "tokio/time", "tokio/macros"]
 s3 = ["dep:lash-s3-store"]
-restate = ["dep:lash-restate"]
 openai = ["dep:lash-provider-openai", "dep:lash-llm-transport", "dep:lash-provider-auth"]
 anthropic = ["dep:lash-provider-anthropic", "dep:lash-llm-transport"]
 google = ["dep:lash-provider-google", "dep:lash-llm-transport", "dep:lash-provider-auth"]
@@ -115,7 +113,6 @@ synthetic-next = [
     "lash-remote-protocol/synthetic-next",
     "lash-postgres-store?/synthetic-next",
     "lash-sqlite-store?/synthetic-next",
-    "lash-restate?/synthetic-next",
     "lashlang?/synthetic-next",
     "lash-protocol-rlm?/synthetic-next",
     "lash-vm-worker?/synthetic-next",
@@ -132,7 +129,6 @@ lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-provider-anthropic = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
-lash-restate-test = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
@@ -141,15 +137,6 @@ rmp-serde = { workspace = true }
 serde_bytes = { workspace = true }
 trybuild = "1"
 tracing-subscriber = { workspace = true }
-# The compile-fail proof that a Restate process segment cannot reach its
-# effects without the committed start marker's proof (FIG-3588).
-lash-restate = { workspace = true }
-
-[[bin]]
-name = "lash-seam-proof-worker"
-path = "tests/seam_proof_dialect/worker.rs"
-required-features = ["rlm", "testing"]
-test = false
 
 [[example]]
 name = "worker_host"

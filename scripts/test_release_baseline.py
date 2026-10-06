@@ -173,7 +173,6 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         for path, constant, default, synthetic in [
             (compat, "POSTGRES_SCHEMA_VERSION", 141, 141),
             (compat, "SQLITE_CORE_SCHEMA_VERSION", 99, 99),
-            ("crates/lash-restate/src/process/admission.rs", "JOURNAL_LOGIC_EPOCH", 1, 2),
             ("crates/lashlang/src/workflow_graph.rs", "WORKFLOW_GRAPH_SCHEMA_VERSION", 21, 22),
         ]:
             row = by_name[f"{path}:{constant}"]
@@ -188,7 +187,7 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
             self.assertEqual(result.returncode, 0, result.stderr)
             return
         self.assertEqual(result.returncode, 1, result.stderr)
-        for name in ["REMOTE_PROTOCOL_VERSION", "RESTATE_PROCESS_JOURNAL_VERSION",
+        for name in ["REMOTE_PROTOCOL_VERSION",
                      "WORKFLOW_GRAPH_SCHEMA_VERSION", "SQLITE_CORE_SCHEMA_VERSION",
                      "compat.rs:POSTGRES_SCHEMA_VERSION"]:
             self.assertIn(name, result.stderr)
@@ -254,17 +253,17 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         with tempfile.TemporaryDirectory(dir=scratch_root) as temporary:
             repo = Path(temporary)
             self.scratch(repo)
-            source = repo / "crates/lash-upgrade-harness/src/node/h3.rs"
+            source = repo / "examples/e2e-consumer/src/fixture.rs"
             source.write_text(source.read_text().replace(
-                "lash_core::FormatVersion::ONE;", "lash_core::FormatVersion::new(7).unwrap();"))
+                "FormatVersion = FormatVersion::ONE;", "FormatVersion = FormatVersion::new(7).unwrap();"))
             _, edits = reset.plan(repo)
-            self.assertIn("const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;",
+            self.assertIn("const ERROR_VERSION: FormatVersion = FormatVersion::ONE;",
                           edits[source])
             for path, text in edits.items():
                 path.write_text(text)
             values = {row["key"]: (row["default"], row["synthetic"])
                       for row in baseline.inventory(repo)}
-            self.assertEqual(values["crates/lash-upgrade-harness/src/node/h3.rs:ERROR_VERSION"], (1, 1))
+            self.assertEqual(values["examples/e2e-consumer/src/fixture.rs:ERROR_VERSION"], (1, 1))
 
     def test_comments_cannot_supply_constants_or_hide_cfg(self):
         text = '''

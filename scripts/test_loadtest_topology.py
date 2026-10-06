@@ -181,19 +181,6 @@ lash_rust_feature_binary(name = "worker__bin__fv_split", crate_features = [],
             (root / package / 'BUCK').write_text(text)
         return root
 
-    def test_the_repository_worker_generations_pair_their_helper_features(self):
-        self.assertEqual(proof.vm_helper(ROOT, '//runbooks/restate-postgres-workers:lash-e2e-worker__bin'),
-                         ('//crates/lash-vm-worker:lash-vm-worker__bin', True))
-        rules = proof.build_rules(ROOT / 'runbooks/restate-postgres-workers/BUCK')
-        (next_worker,) = [name for name, rule in rules.items() if name.startswith('lash-e2e-worker__bin__fv_')
-                          and 'synthetic-next' in rule.get('crate_features', [])]
-        library = proof.resolve(ROOT, rules[next_worker]['variant_deps']['//crates/lash-vm-worker:lash-vm-worker'])
-        self.assertIn('synthetic-next', library['crate_features'])
-        helper, testing = proof.vm_helper(ROOT, f'//runbooks/restate-postgres-workers:{next_worker}')
-        self.assertTrue(testing)
-        self.assertEqual(sorted(proof.resolve(ROOT, proof.resolve(ROOT, helper)['library'])['crate_features']),
-                         sorted(library['crate_features']))
-
     def test_a_worker_runs_the_helper_built_with_its_helper_features(self):
         root = self.workspace()
         self.assertEqual(proof.vm_helper(root, '//runbooks/e2e:worker__bin'),
@@ -281,15 +268,6 @@ class ChartTests(unittest.TestCase):
 
     def test_local_topology_and_persistence(self):
         documents = self.documents('values-local.yaml.rendered.yaml')
-        restate = next(item for item in documents if item['kind'] == 'StatefulSet' and item['metadata']['name'].endswith('-restate'))
-        self.assertEqual(restate['spec']['replicas'], 3)
-        self.assertEqual(restate['spec']['podManagementPolicy'], 'Parallel')
-        self.assertEqual(restate['spec']['volumeClaimTemplates'][0]['spec']['accessModes'], ['ReadWriteOnce'])
-        config = next(item['data']['restate.toml'] for item in documents if item['kind'] == 'ConfigMap' and item['metadata']['name'].endswith('-restate'))
-        self.assertIn('auto-provision = false', config)
-        self.assertIn('type = "replicated"', config)
-        self.assertEqual(config.count('.lash-loadtest-peers:5122'), 3)
-        self.assertIn('snapshots', config)
         schema = next(item for item in documents if item['kind'] == 'Job' and item['metadata']['name'].endswith('-schema'))
         self.assertEqual(schema['metadata']['annotations']['helm.sh/hook'], 'post-install')
         workers = [item for item in documents if item['kind'] == 'Deployment' and '-worker-' in item['metadata']['name']]
@@ -305,31 +283,12 @@ class ChartTests(unittest.TestCase):
         env = {row['name']: row.get('value') for row in load['spec']['template']['spec']['containers'][0]['env']}
         self.assertEqual(env['LASH_LOAD_JOURNAL_RETENTION'], '5m')
         self.assertEqual(env['LASH_LOAD_MEASUREMENTS_PATH'], '/tmp/load-measurements.jsonl')
-        self.assertEqual(len(env['RESTATE_METRICS_URLS'].split(',')), 3)
         self.assertEqual(env['WORKER_CONTROL_URLS'],
                          'http://lash-loadtest-worker-0-control:18101,http://lash-loadtest-worker-1-control:18101')
-        restate = next(row for row in documents if row['kind'] == 'StatefulSet' and row['metadata']['name'].endswith('-restate'))
-        spec = restate['spec']['template']['spec']
-        self.assertTrue(spec['shareProcessNamespace'])
-        self.assertIn({'name': 'fault', 'emptyDir': {}}, spec['volumes'])
-        collector = next(row for row in restate['spec']['template']['spec']['containers'] if row['name'] == 'physical-collector')
-        self.assertTrue(collector['volumeMounts'][0]['readOnly'])
-        self.assertEqual(collector['readinessProbe']['httpGet']['path'], '/health')
-
-    def test_scaleway_storage_and_placement(self):
-        documents = self.documents('values-scaleway.yaml.rendered.yaml')
-        restate = next(item for item in documents if item['kind'] == 'StatefulSet' and item['metadata']['name'].endswith('-restate'))
-        self.assertEqual(restate['spec']['volumeClaimTemplates'][0]['spec']['storageClassName'], 'sbs-5k')
-        spec = restate['spec']['template']['spec']
-        self.assertEqual(spec['nodeSelector'], {'lash-loadtest-pool': 'restate'})
-        self.assertIn('requiredDuringSchedulingIgnoredDuringExecution', spec['affinity']['podAntiAffinity'])
 
     def test_external_s3_has_no_garage_volume(self):
         documents = self.documents('scaleway-object-storage.yaml')
         self.assertFalse(any(item['kind'] == 'StatefulSet' and item['metadata']['name'].endswith('-s3') for item in documents))
-        config = next(item['data']['restate.toml'] for item in documents if item['kind'] == 'ConfigMap' and item['metadata']['name'].endswith('-restate'))
-        self.assertIn('https://s3.fr-par.scw.cloud', config)
-        self.assertIn('aws-allow-http = false', config)
 
     def test_retained_generation_keeps_its_image_and_endpoint(self):
         documents = self.documents('retained-generations.yaml')
@@ -384,8 +343,8 @@ class ChartTests(unittest.TestCase):
         documents = self.documents('values-local.yaml.rendered.yaml')
         self.assertFalse(any(item['kind'] == 'Job' and '-migrate-' in item['metadata']['name'] for item in documents))
         pods = [item for item in documents if item['kind'] in {'Deployment', 'StatefulSet'}
-                and ('-worker-' in item['metadata']['name'] or item['metadata']['name'].endswith('-restate'))]
-        self.assertEqual(len(pods), 3)
+                and '-worker-' in item['metadata']['name']]
+        self.assertEqual(len(pods), 2)
         for item in pods:
             spec = item['spec']['template']['spec']
             self.assertTrue(spec['shareProcessNamespace'])
@@ -393,23 +352,19 @@ class ChartTests(unittest.TestCase):
             script = container['args'][0]
             self.assertIn('/fault/restart-hold', script)
             self.assertIn('/fault/held-$fault', script)
-            self.assertRegex(script.strip().splitlines()[-1], r'^exec (lash-e2e-worker|restate-server --config-file /config/restate.toml)$')
+            self.assertRegex(script.strip().splitlines()[-1], r'^exec lash-e2e-worker$')
             self.assertIn({'name': 'fault', 'mountPath': '/fault'}, container['volumeMounts'])
             self.assertIn({'name': 'fault', 'emptyDir': {}}, spec['volumes'])
         targets = json.loads(next(item['data']['targets.json'] for item in documents
                                   if item['kind'] == 'ConfigMap' and item['metadata']['name'].endswith('-faults')))
-        self.assertEqual(targets['restatePods'], [f'lash-loadtest-restate-{index}' for index in range(3)])
         self.assertEqual((targets['generation'], targets['rollingGeneration']), ('initial', 'next'))
-        self.assertEqual((targets['workerCount'], targets['partitions']), (2, 24))
+        self.assertEqual(targets['workerCount'], 2)
         probe = next(item for item in documents if item['kind'] == 'Deployment'
                      and item['metadata']['name'] == targets['probe'])
         self.assertEqual(probe['spec']['template']['spec']['containers'][0]['command'], ['sleep', 'infinity'])
 
     def test_invalid_topologies_fail_at_render(self):
         for overrides in [
-            ['--set', 'restate.replicas=1'],
-            ['--set', 'restate.replication=4'],
-            ['--set', 's3.snapshotPrefix=attachments'],
             ['--set', 'workers.retainedGenerations[0]=initial'],
             ['--set', 'faults.rollingGeneration=Next'],
             ['--set', 'load.run=Not_A_Run'],

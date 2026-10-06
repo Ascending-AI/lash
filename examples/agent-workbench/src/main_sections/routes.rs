@@ -221,10 +221,10 @@ pub(crate) async fn retrieve_attachment(
 pub(crate) async fn commit_and_start_user_turn(
     state: AppState,
     cleanup: ActiveTurnSubmissionGuard,
-    request: restate::UserTurnRequest,
+    request: turns::UserTurnRequest,
     chat_attachments: Vec<ChatAttachment>,
     client_nonce: Option<String>,
-) -> Result<tokio::task::JoinHandle<restate::TurnSettlement>, AppError> {
+) -> Result<tokio::task::JoinHandle<turns::TurnSettlement>, AppError> {
     let active = state
         .active_turns
         .for_session(&request.session_id)
@@ -240,7 +240,7 @@ pub(crate) async fn commit_and_start_user_turn(
         "api.turn.admission_committed",
         json!({ "turn_id": request.turn_id }),
     );
-    let follower = restate::start_user_turn(&state, request).await?;
+    let follower = turns::start_user_turn(&state, request).await?;
     cleanup.complete();
     Ok(follower)
 }
@@ -386,7 +386,7 @@ pub(crate) async fn send_turn(
         tokio::spawn(commit_and_start_user_turn(
             state,
             cleanup,
-            restate::UserTurnRequest {
+            turns::UserTurnRequest {
                 turn_id: turn_id.clone(),
                 session_id: session_id.clone(),
                 text,
@@ -425,21 +425,10 @@ pub(crate) async fn button_trigger(
             "model": serde_json::to_value(&turn_profile).unwrap_or(Value::Null),
         }),
     );
-    // The press shows as one row, published by the workflow once the
-    // occurrence it records has an identity (FIG-5036).
-    let pressed_at = Utc::now().to_rfc3339();
-    restate::submit_button_trigger(
-        &state,
-        restate::WorkbenchButtonTriggerWorkflowRequest {
-            operation_id: format!("workbench-button-{}", uuid::Uuid::new_v4()),
-            session_id: session_id.clone(),
-            button: request.button,
-            model,
-            pressed_at,
-        },
-    )
-    .await?;
-    Ok(Json(CommandAccepted { accepted: true }))
+    // The press ran as an engine workflow that recorded its occurrence
+    // (FIG-5036); it waits for L3 (FIG-5172).
+    let _ = model;
+    Err(AppError::no_engine("a button trigger"))
 }
 
 pub(crate) async fn list_accounts(
@@ -532,19 +521,8 @@ pub(crate) async fn set_trigger_enabled(
         }),
     );
     let registration = lash::triggers::TriggerRegistration::from(&receipt.record);
-    // Do not gate this sync on `changed`: redundant mutations reconcile stale Restate state.
-    // A sync failure leaves the mutation durable and Restate stale; the next sync reconciles.
-    Box::pin(restate::sync_cron_jobs_after_trigger_mutation(
-        &state,
-        &session_id,
-        if request.enabled {
-            "trigger_enabled"
-        } else {
-            "trigger_disabled"
-        },
-        &receipt.record,
-    ))
-    .await?;
+    // The Restate cron job sync went with Restate (FIG-5190); L9h (FIG-5186)
+    // rebuilds the cron leg.
     Ok(Json(TriggerMutationResponse {
         changed,
         registration: Some(registration),
@@ -558,7 +536,6 @@ pub(crate) async fn delete_trigger(
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
     let session_id = state.admit_session(&query, "api.triggers.delete").await?;
     let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
-    restate::cancel_cron_job_before_trigger_delete(&state, &session_id, &record).await?;
     state
         .trigger_store
         .execute_command(
@@ -738,19 +715,10 @@ pub(crate) async fn inject_message(
         "api.accounts.inject",
         json!({ "account": slug, "title": message.title }),
     );
-    // The delivery shows as one row, published by the workflow with the
-    // occurrence it records (FIG-5036).
-    restate::submit_mail_received(
-        &state,
-        restate::WorkbenchMailReceivedWorkflowRequest {
-            operation_id: format!("workbench-mail-{}", uuid::Uuid::new_v4()),
-            session_id: session_id.clone(),
-            model,
-            delivery,
-        },
-    )
-    .await?;
-    Ok(Json(CommandAccepted { accepted: true }))
+    // The delivery ran as an engine workflow that recorded its occurrence
+    // (FIG-5036); it waits for L3 (FIG-5172).
+    let _ = (model, delivery);
+    Err(AppError::no_engine("a mail delivery"))
 }
 /// Retire `old_session_id` and report the session that replaced it.
 ///
@@ -781,11 +749,10 @@ pub(crate) async fn retire_for_reset(
     state
         .admit_session_id_for_delete(old_session_id, "api.session.delete")
         .await?;
-    let attach_ceiling = restate::ambient_attach_ceiling();
     let rotation = tokio::spawn({
         let state = state.clone();
         let old_session_id = old_session_id.clone();
-        restate::carrying_attach_ceiling(attach_ceiling, async move {
+        async move {
             let outcome = retire_session(&state, &old_session_id).await;
             let settled_retired =
                 state.active_turns.retirement(&old_session_id) == Some(SessionRetirement::Retired);
@@ -807,7 +774,7 @@ pub(crate) async fn retire_for_reset(
             }
             state.event_tx.remove(&old_session_id);
             Ok(state.sessions.replace_retired(&old_session_id))
-        })
+        }
     });
     match rotation.await {
         Ok(replacement) => replacement,
@@ -1045,29 +1012,10 @@ pub(crate) async fn cancel_work(
         lash::process::ProcessOriginator::Session { session_id, .. } => session_id.clone(),
         lash::process::ProcessOriginator::Host { .. } => state.current_session_id(),
     };
-    let operation_id = format!("workbench-process-cancel-{}", uuid::Uuid::new_v4());
-    restate::submit_process_cancel(
-        &state,
-        restate::WorkbenchProcessCancelWorkflowRequest {
-            operation_id: operation_id.clone(),
-            session_id: session_id.clone(),
-            process_id: process_id.clone(),
-        },
-    )
-    .await?;
-    state.trace_for_session(
-        &session_id,
-        "api.work.cancel_submitted",
-        json!({
-            "operation_id": operation_id,
-            "process_id": process_id,
-        }),
-    );
-    Ok(Json(ProcessCancelAccepted {
-        accepted: true,
-        operation_id,
-        process_id: process_id.clone(),
-    }))
+    // Process cancellation ran as an engine workflow; it waits for L3
+    // (FIG-5172).
+    let _ = session_id;
+    Err(AppError::no_engine("a process cancel"))
 }
 
 /// Wait for one durable work item to reach a terminal state, then return its
@@ -1253,95 +1201,6 @@ pub(crate) fn fold_turn_activities<'a>(
         state.apply(activity);
     }
     state
-}
-
-pub(crate) async fn enqueue_button_trigger_command(
-    state: &AppState,
-    session_id: &SessionId,
-    button: ButtonChoice,
-    pressed_at: &str,
-    operation_id: &str,
-    scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
-) -> AnyhowResult<lash::triggers::TriggerEmitReport> {
-    let payload = json!({
-        "pressed_at": pressed_at,
-        "button": button.as_str(),
-        "message": format!("user pressed the {} button", button.lower()),
-    });
-    let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)
-        .context("button source key")?;
-    state.trace_for_session(
-        session_id,
-        "trigger.emit",
-        json!({
-            "resource_type": BUTTON_TRIGGER_RESOURCE,
-            "alias": BUTTON_TRIGGER_ALIAS,
-            "event": BUTTON_TRIGGER_EVENT,
-            "source_type": BUTTON_TRIGGER_SOURCE_TYPE,
-            "source_key": source_key,
-            "payload": payload.clone(),
-        }),
-    );
-    state
-        .core
-        .triggers()
-        .emit(
-            lash::triggers::TriggerOccurrenceRequest::new(
-                BUTTON_TRIGGER_SOURCE_TYPE,
-                source_key,
-                payload,
-                format!("workbench-button-trigger:{operation_id}"),
-            )
-            .with_source(json!({}))
-            .for_session(session_id),
-            scoped_effect_controller,
-        )
-        .await
-        .context("emit button trigger occurrence")
-}
-
-pub(crate) async fn enqueue_mail_received_trigger_command(
-    state: &AppState,
-    session_id: &SessionId,
-    message: &mail::MailDelivery,
-    operation_id: &str,
-    scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
-) -> AnyhowResult<lash::triggers::TriggerEmitReport> {
-    let payload = json!({
-        "account": message.account,
-        "title": message.title,
-        "text": message.text,
-    });
-    let source_key = lash::triggers::empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE)
-        .context("mail source key")?;
-    state.trace_for_session(
-        session_id,
-        "trigger.emit",
-        json!({
-            "resource_type": MAIL_EVENT_RESOURCE,
-            "alias": MAIL_EVENT_ALIAS,
-            "event": MAIL_EVENT_EVENT,
-            "source_type": MAIL_RECEIVED_SOURCE_TYPE,
-            "source_key": source_key,
-            "payload": payload.clone(),
-        }),
-    );
-    state
-        .core
-        .triggers()
-        .emit(
-            lash::triggers::TriggerOccurrenceRequest::new(
-                MAIL_RECEIVED_SOURCE_TYPE,
-                source_key,
-                payload,
-                format!("workbench-mail-trigger:{operation_id}"),
-            )
-            .with_source(json!({}))
-            .for_session(session_id),
-            scoped_effect_controller,
-        )
-        .await
-        .context("emit mail received trigger occurrence")
 }
 
 pub(crate) fn workbench_lashlang_abilities() -> lash::rlm::lang::LashlangAbilities {

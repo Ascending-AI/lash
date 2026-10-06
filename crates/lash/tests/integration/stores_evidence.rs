@@ -7,8 +7,6 @@
 
 use lash_sansio::SessionId;
 
-type SessionNodeRecord = lash_core::SessionNodeRecord;
-
 fn type_witness<T>() {}
 fn member_witness<T>(_: T) {}
 fn field_witness<T>(_: impl FnOnce(&T)) {}

@@ -258,7 +258,6 @@ pub(crate) async fn retire_session(
 }
 
 async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Result<(), AppError> {
-    restate::cancel_cron_jobs_for_session(state, session_id, "reset").await?;
     let driver = state.core.turn_work_driver();
     let cancellations = state
         .cancel_turns_for_session_with_driver(
@@ -273,46 +272,9 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
         "api.session.delete.turns_cancelled",
         json!({ "session_id": session_id, "cancellations": cancellations }),
     );
-    let execution_scope = lash::runtime::ExecutionScope::session_delete(session_id);
-    restate::call_session_delete(
-        state,
-        restate::WorkbenchSessionDeleteWorkflowRequest {
-            operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: session_id.clone(),
-            execution_scope,
-        },
-    )
-    .await
-}
-
-/// The physical delete's report, once Lash ran it. A session whose delete
-/// Lash still owes is closing (ADR 0109 §4): it refuses new work, and the
-/// relay finishes the delete. Retention waits for it, so that is a retryable
-/// error the delete workflow retries its step on.
-pub(crate) fn physically_deleted(
-    session_id: &SessionId,
-    deletion: lash::SessionDeletion,
-) -> Result<Option<lash::SessionDeleteReport>, AppError> {
-    match deletion {
-        lash::SessionDeletion::Deleted(report) => Ok(Some(report)),
-        lash::SessionDeletion::AlreadyDeleted { .. } | lash::SessionDeletion::Absent { .. } => {
-            Ok(None)
-        }
-        lash::SessionDeletion::Closing(closing) => Err(AppError::retryable_internal(format!(
-            "session `{session_id}` is closing; its delete waits on {:?}",
-            closing.waiting
-        ))),
-    }
-}
-
-#[cfg(test)]
-pub(crate) static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<
-    Mutex<BTreeMap<SessionId, String>>,
-> = std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
-
-#[cfg(test)]
-pub(crate) fn fail_session_delete_retention_once(session_id: &SessionId, turn_id: &lash::TurnId) {
-    SESSION_DELETE_RETENTION_FAULTS
-        .lock_recover()
-        .insert(session_id.clone(), turn_id.to_string());
+    // The delete ran as an engine workflow; it waits for L3 (FIG-5172).
+    Err(AppError::session_delete_failed(
+        session_id,
+        AppError::no_engine("a session delete"),
+    ))
 }

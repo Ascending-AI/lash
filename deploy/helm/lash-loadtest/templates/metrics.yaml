@@ -6,9 +6,6 @@ data:
   prometheus.yml: |
     global: {scrape_interval: {{ .Values.metrics.scrapeInterval }}}
     scrape_configs:
-      - job_name: restate
-        static_configs:
-          - targets: [{{ range $index := until (int .Values.restate.replicas) }}{{ if $index }}, {{ end }}"{{ $name }}-restate-{{ $index }}.{{ $name }}-peers:5122"{{ end }}]
       - job_name: prometheus
         static_configs:
           - targets: ["localhost:9090"]
@@ -38,8 +35,8 @@ spec:
   selector: {app: {{ $name }}-metrics}
   ports: [{name: http, port: 9090}]
 ---
-# The fault controller's targets (FIG-4169): every worker and Restate node it
-# may pick from, and both generations' deployment URLs.
+# The fault controller's targets (FIG-4169): every worker it may pick from,
+# and both generations' deployment URLs.
 apiVersion: v1
 kind: ConfigMap
 metadata: {name: {{ $name }}-faults}
@@ -51,14 +48,8 @@ data:
       "generation" .Values.workers.generation
       "rollingGeneration" .Values.faults.rollingGeneration
       "workerCount" (int .Values.workers.count)
-      "restatePods" (list)
-      "partitions" (int .Values.restate.partitions)
       "probe" (printf "%s-fault-probe" $name)
-      "restateAdminUrl" (printf "http://%s-restate:9070" $name)
     }}
-    {{- range $index := until (int .Values.restate.replicas) }}
-    {{- $_ := set $targets "restatePods" (append $targets.restatePods (printf "%s-restate-%d" $name $index)) }}
-    {{- end }}
     {{ toJson $targets }}
 ---
 apiVersion: apps/v1

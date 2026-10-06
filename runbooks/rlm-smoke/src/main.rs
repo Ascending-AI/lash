@@ -28,7 +28,6 @@ const RLM_LANGUAGE_ID: &str = "typescript";
 
 #[path = "../../../examples/shared/e2e_live_budget.rs"]
 mod e2e_live_budget;
-mod local_restate;
 
 #[derive(Debug, Parser)]
 #[command(about = "Live-model RLM smoke host with workspace-jailed tools")]
@@ -472,14 +471,14 @@ async fn main() -> Result<()> {
             .into_components(),
     )?);
     // One SQLite file store set under the data directory holds the sessions
-    // and the compiled Lashlang artifacts; the local restate-server's engine
-    // journals every turn over it (ADR 0104).
-    let restate = local_restate::LocalRestate::from_env()?;
+    // and the compiled Lashlang artifacts; the durable engine runs every turn
+    // over it.
     let stores = lash::sqlite::SqliteStoreSet::open(args.data_dir.join("sessions.db"))
         .await
         .context("open the RLM smoke SQLite store set")?;
-    let engine = restate.engine(Arc::new(stores));
-    let backend = lash::Backend::new(engine.clone());
+    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+        .build()
+        .context("build the durable backend")?;
     let protocol = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -525,20 +524,6 @@ async fn main() -> Result<()> {
             args.session_id.clone(),
         ))
         .context("build RLM smoke core")?;
-    // The engine's endpoint serves on the row's port: the server executes the
-    // turn in its handlers, and this host only sends (D5).
-    let worker = lash::durability::DurableProcessWorker::new(
-        core.durable_process_worker_config()
-            .context("the RLM smoke process worker config")?,
-    )
-    .context("build the RLM smoke process worker")?;
-    let _deployment = restate
-        .serve_at(
-            &engine,
-            std::net::SocketAddr::from(([127, 0, 0, 1], args.port)),
-            engine.endpoint_builder(worker)?.build(),
-        )
-        .await?;
     // A smoke run may name a session an earlier run created: create-or-use,
     // written out, since only `create` creates (FIG-4112).
     match core

@@ -35,11 +35,6 @@ pub(crate) struct AppState {
     pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
     pub(crate) lashlang_execution: Arc<TraceLashlangGraphStore>,
     pub(crate) event_tx: SessionEventRegistry,
-    pub(crate) restate_ingress_url: String,
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) restate_admin_url: String,
-    pub(crate) restate_http: reqwest::Client,
-    pub(crate) restate_cron_job_keys: Arc<Mutex<BTreeMap<SessionId, BTreeSet<String>>>>,
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) active_turns: ActiveTurns,
     /// The turns this process pruned without ever seeing a terminal.
@@ -429,21 +424,7 @@ pub(crate) enum ButtonChoice {
     Blue,
 }
 
-impl ButtonChoice {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Red => "Red",
-            Self::Blue => "Blue",
-        }
-    }
-
-    pub(crate) fn lower(self) -> &'static str {
-        match self {
-            Self::Red => "red",
-            Self::Blue => "blue",
-        }
-    }
-}
+impl ButtonChoice {}
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ButtonEventRequest {

@@ -59,13 +59,6 @@ EXEMPTIONS: list[tuple[str, str, str]] = [
         "the format manifest names every constant in its table",
     ),
     (
-        "crates/lash-restate/src/formats.rs",
-        "*",
-        "the engine's durable-format manifest names every constant in its "
-        "table; the formats' bytes live in the Restate deployment `F` does "
-        "not govern",
-    ),
-    (
         "crates/lash/src/preflight/",
         "*",
         "read-side extraction and probe reports, not durable writes",

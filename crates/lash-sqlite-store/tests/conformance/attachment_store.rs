@@ -242,22 +242,3 @@ async fn sqlite_attachment_materialization_read_budgets() {
     let backend = TestBackend::open(SUBSTRATE).await;
     lash_conformance::attachment_materialization_read_budgets(backend.attachment_store()).await;
 }
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_attachment_materialization_turn_witnesses() {
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let stores = backend.as_stores();
-    let engine_stores = Arc::clone(&stores);
-    let double = lash_restate_test::backend_with(
-        4294,
-        lash_restate_test::ServerConfig::default(),
-        move |_| Arc::clone(&engine_stores),
-    )
-    .await
-    .expect("turn engine");
-    let host = double.restate().restate_effect_host();
-    let runner =
-        Arc::new(ScopeLawTurnRunner(double)) as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-    lash_conformance::attachment_materialization_turn_witnesses("sqlite", host, stores, runner)
-        .await;
-}

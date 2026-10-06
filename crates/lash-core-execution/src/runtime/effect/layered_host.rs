@@ -827,11 +827,4 @@ impl RuntimeEffectController for LayeredController<'_> {
             .execute_effect(self.inner.as_ref(), envelope, local_executor)
             .await
     }
-
-    async fn read_recorded_journal(
-        &self,
-        range: &crate::RecordedKeyRange,
-    ) -> Result<crate::RecordedJournal, crate::RuntimeEffectControllerError> {
-        self.inner.as_ref().read_recorded_journal(range).await
-    }
 }

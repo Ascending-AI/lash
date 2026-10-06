@@ -38,32 +38,6 @@ impl UsageBuckets {
     fn is_zero(&self) -> bool {
         *self == Self::default()
     }
-
-    const FIELDS: [&'static str; 5] = [
-        "input_tokens",
-        "output_tokens",
-        "cache_read_input_tokens",
-        "cache_write_input_tokens",
-        "reasoning_output_tokens",
-    ];
-
-    /// Decode the recorded attempt's usage from its JSON rendering, so the oracle
-    /// reads the counters by name rather than through lash's type.
-    fn from_recorded_usage(usage: &Value) -> Result<Self, String> {
-        let field = |name: &str| {
-            usage
-                .get(name)
-                .and_then(Value::as_i64)
-                .ok_or_else(|| format!("recorded usage has no integer `{name}`: {usage}"))
-        };
-        Ok(Self {
-            input_tokens: field(Self::FIELDS[0])?,
-            output_tokens: field(Self::FIELDS[1])?,
-            cache_read_input_tokens: field(Self::FIELDS[2])?,
-            cache_write_input_tokens: field(Self::FIELDS[3])?,
-            reasoning_output_tokens: field(Self::FIELDS[4])?,
-        })
-    }
 }
 
 /// A tool call as it was streamed or committed.
@@ -365,80 +339,6 @@ fn google_usage(usage: &Value) -> UsageBuckets {
     }
 }
 
-/// Fresh handles on one engine's storage, for reading its sessions back.
-#[derive(Clone)]
-pub struct ReopenHandles {
-    pub sessions: std::sync::Arc<dyn DeploymentStore>,
-    pub journal: lash_restate_test::RestateTestServer,
-}
-
-impl ReopenHandles {
-    pub fn over(engine: &crate::backend::SimEngine) -> Self {
-        Self {
-            sessions: engine.backend().session_store_factory(),
-            journal: engine.restate().server().clone(),
-        }
-    }
-}
-
-/// Read the provider attempts in the model call's recorded effect result.
-/// No turn result or emitted wire script is used to manufacture this evidence.
-pub fn recorded_usage(
-    journal: &lash_restate_test::RestateTestServer,
-    session: &str,
-) -> Result<Vec<UsageBuckets>, String> {
-    let mut usages = Vec::new();
-    for invocation in journal.invocations() {
-        for entry in journal.journal(&invocation.id).unwrap_or_default() {
-            let Some(Ok(bytes)) = entry.run_completion() else {
-                continue;
-            };
-            let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
-                continue;
-            };
-            let Some(envelope_json) = value.pointer("/envelope/json").and_then(Value::as_str)
-            else {
-                continue;
-            };
-            let envelope: Value = serde_json::from_str(envelope_json)
-                .map_err(|error| format!("invalid recorded envelope: {error}"))?;
-            if envelope
-                .pointer("/invocation/attribution/session_id")
-                .and_then(Value::as_str)
-                != Some(session)
-            {
-                continue;
-            }
-            let Some(outcome) = value.pointer("/outcome/Ok") else {
-                continue;
-            };
-            if !matches!(
-                outcome.get("type").and_then(Value::as_str),
-                Some("llm_call" | "direct")
-            ) {
-                continue;
-            }
-            let Some(attempts) = outcome
-                .pointer("/call_record/attempts")
-                .and_then(Value::as_array)
-            else {
-                return Err(format!(
-                    "`{session}` recorded a model result without attempt evidence"
-                ));
-            };
-            for attempt in attempts {
-                if let Some(usage) = attempt.get("usage").filter(|usage| !usage.is_null()) {
-                    let buckets = UsageBuckets::from_recorded_usage(usage)?;
-                    if !buckets.is_zero() {
-                        usages.push(buckets);
-                    }
-                }
-            }
-        }
-    }
-    Ok(usages)
-}
-
 /// Read the committed history through explicit graph pages, and the owner's
 /// through a fresh store handle.
 #[expect(
@@ -606,7 +506,7 @@ pub fn durable_content(sessions: &[SessionContent]) -> OracleVerdict {
 /// usage; see the module docs.
 ///
 /// An attempt that reported all-zero usage contributes no tokens, so zero reports
-/// are outside both sides of the comparison ([`recorded_usage`] drops them
+/// are outside both sides of the comparison (the recorded side drops them
 /// too).
 pub fn failed_attempt_usage_recorded(sessions: &[SessionContent]) -> OracleVerdict {
     let mut checked = 0usize;

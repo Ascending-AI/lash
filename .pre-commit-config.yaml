@@ -96,12 +96,3 @@ repos:
         entry: python3 scripts/check-substrate-port-ledger.py
         files: '^(\.pre-commit-config\.yaml|docs/testing/substrate-port-ledger\.toml|(crates|examples|runbooks)/.*(\.rs|Cargo\.toml)|scripts/(check-substrate-port-ledger|test_check_substrate_port_ledger)\.py)$'
         pass_filenames: false
-
-      # Restate retries non-terminal handler failures indefinitely; production
-      # handler code must use typed errors rather than panic-capable operations.
-      - id: restate-handler-panic-boundary
-        name: Restate handler panic boundary
-        language: system
-        entry: python3 scripts/check-restate-handler-panics.py
-        files: '^(crates/lash-restate/src/.*|crates/lash-restate-test/src/backend)\.rs$'
-        pass_filenames: false

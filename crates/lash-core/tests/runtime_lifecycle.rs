@@ -6,7 +6,6 @@
 
 #![expect(
     clippy::expect_used,
-    clippy::unwrap_used,
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
@@ -48,13 +47,12 @@ mod runtime {
             pub(crate) use crate::runtime_support::effect_recording_authority::*;
         }
 
+        pub(crate) use crate::runtime_support::{durable_state, session_view};
         pub(crate) use crate::runtime_support::{
-            double_unbound_recording_store, double_unbound_store, kernel_double, reopened_backend,
-            sqlite_memory_backend, sqlite_memory_store_backend, sqlite_memory_store_set,
-            sqlite_recording_backend, sqlite_recording_backend_with_clock, unbound_recording_store,
-            unbound_recording_store_with_clock, unbound_store,
+            reopened_backend, sqlite_memory_backend, sqlite_memory_store_backend,
+            sqlite_memory_store_set, sqlite_recording_backend, sqlite_recording_backend_with_clock,
+            unbound_recording_store, unbound_recording_store_with_clock, unbound_store,
         };
-        pub(crate) use crate::runtime_support::{durable_state, durable_window, session_view};
         pub(crate) use lash_core::llm::transport::LlmTransportError;
         pub(crate) use lash_core::llm::types::{LlmProviderTraceEvent, LlmUsage};
         pub(crate) use lash_core::plugin::StaticPluginFactory;
@@ -68,11 +66,6 @@ mod runtime {
         pub(crate) use std::sync::{Arc, Mutex};
         pub(crate) use tokio_util::sync::CancellationToken;
 
-        mod attachment_continuation;
-        mod child_sessions;
-        mod persistence;
-        mod plugin_lifecycle;
-        mod tool_restore_report;
         mod tool_surface_lifecycle;
     }
 }

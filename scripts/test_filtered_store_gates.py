@@ -295,14 +295,12 @@ class StoreGateTests(Fixture):
                                      "a_compatible_expansion_still_reports_column_drift"],
         "pg-pool-wait": ["postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads"],
         "pg-sim-backend-faults": ["postgres_backend_fault_seed_set_covers_every_fault_and_oracle"],
-        "pg-model-keys": ["two_keys_sharing_a_provider_kind_select_their_own_transport::postgres"],
         "pg-facade-laws": ["a_facade_law_on_postgres"],
         "s3-attachment-differential": ["attachment_blob_store_differential_agrees"],
-        "pg-rlm-frame-open": ["restate_double_postgres::law"],
     }
 
     def test_pg_s3_restate_selector_rename_fails(self):
-        for suite in self.SUITES.keys() - {"pg-model-keys"}:
+        for suite in self.SUITES:
             with self.subTest(suite=suite):
                 self.env["FIXTURE_CASES"] = '[["renamed_law", false]]'
                 self.assert_failed(self.gate(suite), "no executable tests matched the runner arguments")
@@ -347,7 +345,6 @@ class CargoStoreGateTests(Fixture):
         "pg-catalog-compatibility": ["committed_shape_artifact_matches_the_ddl_artifact",
                                      "a_compatible_expansion_still_reports_column_drift"],
         "s3-attachment-differential": ["attachment_blob_store_differential_agrees"],
-        "pg-rlm-frame-open": ["restate_double_postgres::law"],
         "pg-facade-laws": ["a_facade_law_on_postgres"],
     }
 

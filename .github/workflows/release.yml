@@ -263,74 +263,6 @@ jobs:
           path: .benchmarks/perf-guard/*
           if-no-files-found: warn
 
-  crash-matrix-restate:
-    name: Crash-point matrix on live Restate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    needs: prepare-release
-    # The matrix's test binary builds from the shared cache; a dispatch is a
-    # trusted event, so the job may read the build-cache credentials.
-    environment: build-cache
-
-    steps:
-      - name: Check out repository
-        # Equivalent to checkout ref: ${{ needs.prepare-release.outputs.release_sha }}.
-        env:
-          CHECKOUT_REF: ${{ needs.prepare-release.outputs.release_sha }}
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
-          umask 077
-          {
-            printf '[http]\n'
-            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
-          } > "${auth_config}"
-          git config --local include.path "${auth_config}"
-          git fetch --no-tags --prune --depth=1 origin "${CHECKOUT_REF}"
-          git checkout --force --detach FETCH_HEAD
-
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Configure shared build cache
-        uses: ./.github/actions/buck2-shared-cache
-        env:
-          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
-          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
-          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
-          CACHE_CA: ${{ secrets.CACHE_CA }}
-          CACHE_CERT: ${{ secrets.CACHE_CERT }}
-          CACHE_KEY: ${{ secrets.CACHE_KEY }}
-
-      - name: Install just
-        uses: ./.github/actions/install-tools
-        with:
-          tool: just
-
-      # Every active cell of the FIG-3849 crash-point matrix, with the pinned
-      # restate-server as the engine instead of the in-process double.
-      - name: Run the crash-point matrix against a live restate-server
-        env:
-          LASH_CRASH_MATRIX_ARTIFACT_DIR: target/functional-e2e-artifacts/crash-matrix-restate
-        run: just crash-matrix-restate-e2e
-
-      - name: Remove client credentials
-        if: always()
-        shell: bash
-        run: rm -rf -- "$RUNNER_TEMP/build-cache"
-
-      - name: Upload crash-matrix artifacts
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-crash-matrix-restate-${{ needs.prepare-release.outputs.release_tag }}-attempt-${{ github.run_attempt }}
-          path: target/functional-e2e-artifacts/crash-matrix-restate
-          if-no-files-found: warn
-
   # The send-to-completion latency gate (FIG-3843): `send()` → Restate shift →
   # `outcome()` measured on a live restate-server; the same-process fast
   # fixture fails the release when added overhead reaches p50 >= 50 ms or
@@ -464,99 +396,13 @@ jobs:
           path: packaged-crate-digests.json
           if-no-files-found: warn
 
-  # The chaos soak (FIG-3873): randomized lash workloads under deployment
-  # kills, leader-lease loss and rolling deploys on the in-process Restate
-  # server double, checked against the crash matrix's end-state invariants
-  # (`crates/lash-sim/src/chaos_soak`). It runs epochs for 90 minutes on a
-  # clock-drawn seed; the log names every failed epoch's seed and trace, and
-  # `just chaos-soak` replays one locally.
-  chaos-soak:
-    name: Chaos soak
-    runs-on: ubuntu-24.04
-    # The 90-minute soak plus a shared optimized build of its test binary.
-    timeout-minutes: 150
-    needs: prepare-release
-    environment: build-cache
-
-    steps:
-      - name: Check out repository
-        # Equivalent to checkout ref: ${{ needs.prepare-release.outputs.release_sha }}.
-        env:
-          CHECKOUT_REF: ${{ needs.prepare-release.outputs.release_sha }}
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
-          umask 077
-          {
-            printf '[http]\n'
-            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
-          } > "${auth_config}"
-          git config --local include.path "${auth_config}"
-          git fetch --no-tags --prune --depth=1 origin "${CHECKOUT_REF}"
-          git checkout --force --detach FETCH_HEAD
-
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Configure shared build cache
-        uses: ./.github/actions/buck2-shared-cache
-        env:
-          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
-          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
-          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
-          CACHE_CA: ${{ secrets.CACHE_CA }}
-          CACHE_CERT: ${{ secrets.CACHE_CERT }}
-          CACHE_KEY: ${{ secrets.CACHE_KEY }}
-
-      - name: Run the chaos soak
-        env:
-          LASH_CHAOS_SOAK_DURATION: 90m
-        run: |
-          set -euo pipefail
-          kiln() { scripts/hermetic-build.sh "$@"; }
-          kiln test --config=optimized --local-test-execution --no-test-cache \
-            --test_timeout=6300 --test_output=all \
-            --test_env=LASH_CHAOS_SOAK_DURATION \
-            --test_arg=chaos_soak_release --test_arg=--exact --test_arg=--ignored \
-            --test_arg=--nocapture //crates/lash-sim:chaos_soak__test 2>&1 \
-            | tee "${RUNNER_TEMP}/chaos-soak.log"
-
-      - name: Remove client credentials
-        if: always()
-        shell: bash
-        run: rm -rf -- "$RUNNER_TEMP/build-cache"
-
-      - name: Publish the soak summary
-        if: '!cancelled()'
-        run: |
-          if [ -f "${RUNNER_TEMP}/chaos-soak.log" ]; then
-            {
-              echo '### Chaos soak'
-              echo '```'
-              grep -E '^chaos soak' "${RUNNER_TEMP}/chaos-soak.log" || true
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Upload the soak log
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-chaos-soak-${{ needs.prepare-release.outputs.release_tag }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/chaos-soak.log
-          if-no-files-found: warn
-
   publish-crates:
     if: ${{ !inputs.dry_run }}
     name: Publish crates to crates.io
     runs-on: ubuntu-latest
     # Per-layer crates.io index-visibility waits are externally paced.
     timeout-minutes: 20
-    needs: [prepare-release, validate-release-preconditions, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]
+    needs: [prepare-release, validate-release-preconditions, validate-release-ref, package-crates, latency-gate]
     # CARGO_REGISTRY_TOKEN lives in the `main` GitHub Environment; a job must
     # declare the environment to read its secrets.
     environment: main
@@ -690,7 +536,7 @@ jobs:
           python3 scripts/release_version.py stamp "${RELEASE_TAG#v}"
           kiln() { scripts/hermetic-build.sh "$@"; }
           kiln sync
-          worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_9bcce4a3
+          worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_f3e259ce
           kiln build --config=optimized --materializations=final \
             --build-report "${RUNNER_TEMP}/sdk-worker-build.json" "${worker_label}"
           worker="$(python3 tools/buck2/outputs.py \

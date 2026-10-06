@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 axum = "0.8"
-lash = { workspace = true, features = ["rlm", "typescript", "restate", "sqlite"] }
+lash = { workspace = true, features = ["rlm", "typescript", "sqlite"] }
 reqwest = { workspace = true, features = ["json", "rustls"] }
 thiserror = { workspace = true }
 schemars = { workspace = true }
@@ -25,5 +25,4 @@ tokio-stream = "0.1"
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-lash-restate-test = { workspace = true }
 lash = { workspace = true, features = ["testing"] }

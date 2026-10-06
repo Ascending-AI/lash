@@ -53,9 +53,6 @@ use lash_core::{
 };
 use serde_json::Value;
 
-#[cfg(test)]
-use lash_core::{ToolCall, ToolContract, ToolManifest, ToolOutcome, ToolProvider};
-
 /// The standard protocol plugin's id: the key of its creation options in a
 /// session spec's plugin options, and the owner of its config commands.
 pub const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
@@ -1257,13 +1254,7 @@ mod tool_result_tests;
 mod driver_contract_tests;
 
 #[cfg(test)]
-mod provider_part_persistence_tests;
-
-#[cfg(test)]
 mod recorded_behaviour_tests;
 
 #[cfg(test)]
 mod prompt_tests;
-
-#[cfg(test)]
-mod retention_failure_tests;

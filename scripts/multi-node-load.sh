@@ -73,7 +73,6 @@ path = pathlib.Path(directory)
     'generation': values['workers']['generation'],
     'loadDeadline': values['load']['activeDeadlineSeconds'],
     'workload': values['load']['workload'],
-    'restateImage': values['restate']['image'],
 }))
 PYVALUES
 values=(-f "$run/run-values.yaml")
@@ -117,13 +116,6 @@ cleanup() {
     for pod in $("${k[@]}" get pods -o name 2>/dev/null); do
       "${k[@]}" logs "$pod" --all-containers --prefix > "$run/${pod#pod/}.log" 2>&1 || true
     done
-    # A failed load run keeps its repro (FIG-4264): the witness ledgers, the
-    # outer and open invocations, and the affected sessions' turn journals,
-    # read before the namespace goes. A green run skips it.
-    if ((status != 0)) && [[ -f "$run/load-values.yaml" ]]; then
-      python3 scripts/loadtest_repro.py --run-dir "$run" --kubeconfig "$KUBECONFIG" \
-        --namespace "$namespace" --name "$resource" > "$run/repro-capture.log" 2>&1 || true
-    fi
     "${k[@]}" delete namespace "$namespace" --wait=true --timeout=120s > "$run/namespace-cleanup.log" 2>&1 || status=1
     if kubectl --kubeconfig "$KUBECONFIG" get namespace "$namespace" >/dev/null 2>&1; then status=1; fi
     kind delete cluster --name "$name" > "$run/cluster-cleanup.log" 2>&1 || status=1
@@ -185,19 +177,18 @@ image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["repos
 runtime_base="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["runtime"])' "$run/build-settings.json")"
 node_image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["nodeImage"])' "$run/build-settings.json")"
 next_image="$image-next"
-restate_image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["restateImage"])' "$run/build-settings.json")"
-docker build --build-arg "RUNTIME_BASE=$runtime_base" --build-arg "RESTATE_IMAGE=$restate_image" -t "$image" -f deploy/helm/lash-loadtest/Dockerfile . > "$run/image-build.log" 2>&1
+docker build --build-arg "RUNTIME_BASE=$runtime_base" -t "$image" -f deploy/helm/lash-loadtest/Dockerfile . > "$run/image-build.log" 2>&1
 image_id="$(docker image inspect "$image" --format '{{.Id}}')"
-docker build --build-arg "RUNTIME_BASE=$runtime_base" --build-arg "RESTATE_IMAGE=$restate_image" --build-arg BIN_DIR=target/loadtest-image/bin-next \
+docker build --build-arg "RUNTIME_BASE=$runtime_base" --build-arg BIN_DIR=target/loadtest-image/bin-next \
   -t "$next_image" -f deploy/helm/lash-loadtest/Dockerfile . >> "$run/image-build.log" 2>&1
 next_image_id="$(docker image inspect "$next_image" --format '{{.Id}}')"
 python3 - "$run/image-digests.json" "$image" "$image_id" "$next_image" "$next_image_id" \
-  "$restate_image" "$runtime_base" "$node_image" <<'PYIMAGES'
+  "$runtime_base" "$node_image" <<'PYIMAGES'
 import json, sys
-out, image, image_id, next_image, next_image_id, restate, base, node = sys.argv[1:]
+out, image, image_id, next_image, next_image_id, base, node = sys.argv[1:]
 json.dump({'runtime': {'reference': image, 'id': image_id},
            'next_runtime': {'reference': next_image, 'id': next_image_id},
-           'restate': restate, 'runtime_base': base, 'node_image': node},
+           'runtime_base': base, 'node_image': node},
           open(out, 'w'), indent=1)
 PYIMAGES
 created=1

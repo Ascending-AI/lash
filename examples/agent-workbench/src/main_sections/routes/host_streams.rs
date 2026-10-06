@@ -25,29 +25,6 @@ fn negotiate_remote(headers: &HeaderMap) -> Result<(Negotiated, String), AppErro
     Ok((negotiated, accept_json))
 }
 
-#[cfg(test)]
-fn test_remote_headers() -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        REMOTE_HELLO_HEADER,
-        serde_json::to_string(&Negotiation::Hello {
-            supported: REMOTE_PROTOCOL,
-        })
-        .expect("encode test Hello")
-        .parse()
-        .expect("valid test Hello header"),
-    );
-    headers
-}
-
-#[cfg(test)]
-pub(crate) async fn session_events(
-    State(state): State<AppState>,
-    Query(query): Query<ProductEventsQuery>,
-) -> Result<Response, AppError> {
-    session_events_with_shutdown(State(state), Query(query), None).await
-}
-
 pub(crate) async fn session_events_with_shutdown(
     State(state): State<AppState>,
     Query(query): Query<ProductEventsQuery>,
@@ -114,15 +91,6 @@ pub(crate) async fn session_events_with_shutdown(
     Ok(ndjson_response(ReceiverStream::new(rx)))
 }
 
-#[cfg(test)]
-pub(crate) async fn session_observations(
-    State(state): State<AppState>,
-    Query(query): Query<EventsQuery>,
-) -> Result<Response, AppError> {
-    session_observations_with_shutdown(State(state), Query(query), test_remote_headers(), None)
-        .await
-}
-
 pub(crate) async fn session_observations_with_shutdown(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
@@ -177,16 +145,6 @@ pub(crate) async fn session_observations_with_shutdown(
             .map_err(|error| AppError::internal(format!("protocol Accept header: {error}")))?,
     );
     Ok(response)
-}
-
-#[cfg(test)]
-pub(crate) async fn forward_session_observations(
-    session: lash::LashSession,
-    cursor: SessionCursor,
-    tx: mpsc::Sender<ObservationStreamItem>,
-) {
-    let negotiated = negotiate_remote(&test_remote_headers()).unwrap().0;
-    forward_session_observations_until_shutdown(session, cursor, tx, None, negotiated).await;
 }
 
 async fn host_shutdown_requested(shutdown: &mut tokio::sync::watch::Receiver<bool>) {

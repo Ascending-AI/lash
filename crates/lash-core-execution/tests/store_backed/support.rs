@@ -6,20 +6,6 @@ pub async fn sqlite_recording_backend() -> lash_core_execution::Backend {
     sqlite_memory_store_backend().await
 }
 
-/// A fresh Restate server double under `seed` with `config`: lash-restate's
-/// engine over a SQLite memory store set, the twin of [`sqlite_recording_backend`] for a
-/// kernel test whose effects run on an engine. Hold the double to the end of
-/// the test and never build a core over the handle itself (FIG-3723); a turn
-/// runs on `double.open_handler(scope)`'s scoped controller.
-pub async fn kernel_double(
-    seed: u64,
-    config: lash_restate_test::ServerConfig,
-) -> lash_restate_test::RestateTestBackend {
-    lash_restate_test::backend(seed, config)
-        .await
-        .expect("build the Restate server double")
-}
-
 std::thread_local! {
     /// The store sets the running test opened, held as its backends are.
     static TEST_STORE_SETS: std::cell::RefCell<Vec<std::sync::Arc<lash_sqlite_store::SqliteStoreSet>>> =
@@ -64,10 +50,10 @@ pub async fn after_millisecond_tick(epoch_ms: u64) {
 /// `_` names so a test module imports them with one glob.
 pub mod prelude {
     pub use crate::{
-        AttachmentStore as _, AwaitEventResolver as _, EffectHost as _, ProcessEventLog as _,
+        AttachmentStore as _, AwaitEventResolver as _, ProcessEventLog as _,
         ProcessEventLogTestSupport as _, ProcessExecutionEnvStore as _, ProcessLifecycle as _,
         ProcessObserverRegistry as _, ProcessQuery as _, ProcessRegistrar as _,
-        ProcessRetention as _, ProcessWakeOutbox as _, RuntimeEffectController as _,
+        ProcessRetention as _, ProcessWakeOutbox as _,
     };
 }
 
@@ -116,70 +102,6 @@ pub fn plugin_host(
 pub struct DispatchPorts<'h> {
     pub controller: crate::runtime::ScopedEffectController<'h>,
     pub attachment_store: std::sync::Arc<crate::RuntimeAttachmentStore>,
-}
-
-/// The runtime-operation scope a hand-built dispatch context's attempts run
-/// under. Open the
-/// handler [`double_dispatch_ports`] lends for it.
-pub fn dispatch_scope() -> crate::AdmittedScope {
-    crate::AdmittedScope::runtime_operation("test-runtime-effect-controller")
-}
-
-/// A fresh server double under `seed` and a handler open on it for
-/// [`dispatch_scope`]. Build the context over
-/// [`double_dispatch_ports`]`(&double, &handler)`, drop it, then close the
-/// handler.
-pub async fn open_dispatch_handler(
-    seed: u64,
-) -> (
-    lash_restate_test::RestateTestBackend,
-    lash_restate_test::OpenHandler,
-) {
-    let double = kernel_double(seed, lash_restate_test::ServerConfig::default()).await;
-    let handler = double
-        .open_handler(dispatch_scope())
-        .await
-        .expect("open the dispatch handler");
-    (double, handler)
-}
-
-/// Serve `double`'s process segments with a durable process worker over its
-/// own backend and process work, as a deployment serves them: a process
-/// intent's command reaches the engine's process workflow, which runs only
-/// with a worker installed.
-pub fn install_process_worker(double: &lash_restate_test::RestateTestBackend) {
-    let backend = double.lash_backend();
-    let process_work = backend.process_work();
-    let worker = lash_core_worker::DurableProcessWorker::new(
-        lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
-            Vec::new(),
-            crate::RuntimeHostConfig::new(
-                backend,
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            ),
-            process_work,
-            std::sync::Arc::new(crate::NoSessionWork::new()),
-            crate::testing::runtime_lease_owner(),
-        ),
-    )
-    .expect("a valid process worker configuration");
-    double.install_process_worker(worker);
-}
-
-/// Dispatch ports on the server double: `handler`, opened on `double` for
-/// [`dispatch_scope`], lends the controller, and the attachment facade is
-/// over the double's attachment port.
-pub fn double_dispatch_ports<'h>(
-    double: &lash_restate_test::RestateTestBackend,
-    handler: &'h lash_restate_test::OpenHandler,
-) -> DispatchPorts<'h> {
-    DispatchPorts {
-        controller: handler.scoped(),
-        attachment_store: std::sync::Arc::new(crate::RuntimeAttachmentStore::ephemeral(
-            double.lash_backend().attachment_store(),
-        )),
-    }
 }
 
 /// Dispatch ports for a fixture that brings its own controller (a replaying

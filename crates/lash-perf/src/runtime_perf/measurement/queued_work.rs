@@ -398,19 +398,19 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     let other_session_id = "runtime-perf-turn-input-other";
     let mut run = RunRecorder::start(scenario, chat_turns);
 
-    let (store, mut commit_state, _restate, turn_control) = run
+    let (store, mut commit_state, _engine, turn_control) = run
         .build(async {
             let store = memory_perf_store(&session_id).await?;
             let commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
             // The effect host that owns the turn-control promises the
-            // deferrals settle: the in-process lane's Restate host.
-            let restate = restate_backend().await?;
-            let host = restate.lash_backend().effect_host();
+            // deferrals settle: the in-process lane's durable host.
+            let engine = durable_backend(Arc::new(sqlite_memory_stores().await?))?;
+            let host = engine.effect_host();
             let turn_control = lash_core::TurnCancellationAuthority::new(
                 host.turn_control_binding_id(),
                 host as Arc<dyn lash_core::AwaitEventResolver>,
             );
-            Ok((store, commit_state, restate, turn_control))
+            Ok((store, commit_state, engine, turn_control))
         })
         .await?;
 

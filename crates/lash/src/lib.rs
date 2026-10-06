@@ -69,19 +69,14 @@
 //! has no allowlist and no exemption mechanism: a gap is fixed by exporting or
 //! by narrowing, never by listing it.
 
-// SDK fixture macros emit absolute `::restate_sdk` paths. Keep their private
-// test bindings on the same SDK re-export as the facade's Restate adapter.
-#[cfg(test)]
-extern crate self as restate_sdk;
-#[cfg(test)]
-use lash_restate::restate_sdk::{context, discovery, endpoint, errors, ingress, service};
-
 /// Administrative facade handles and operations.
 pub mod admin;
 mod artifacts;
 mod change_page;
 mod core;
 pub use change_page::ChangePage;
+/// The durable substrate's backend builder (ADR 0132 §1).
+pub mod durable;
 mod durable_session;
 mod error;
 pub mod formats;
@@ -575,6 +570,7 @@ pub mod direct {
 pub mod persistence {
     // The vocabulary this module's signatures name (the facade-completeness rule).
 
+    pub use lash_core::engine::AdmittedWork;
     pub use lash_core_store::artifact_referrer::{
         ArtifactCarry, ArtifactCleanup, ArtifactReferrerError, ArtifactReferrerKind,
         ArtifactStoreId, AttachmentUploadId, ReferrerGuard, ReferrerStore, SubscriptionRevisionId,
@@ -597,6 +593,9 @@ pub mod persistence {
     /// Retained tool material: a store's dependency leases on bundles.
     pub use lash_core_store::store::ToolMaterialStore;
     pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
+    pub use lash_core_store::store::fleet_finalize::{
+        DeploymentRegistry, DeploymentRegistryError, RetainedDeployment,
+    };
     pub use lash_core_store::store::{
         DurableRecord, EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow,
         StoreFault, StoreRefusal, StoredRunTerminal, SurfaceFormat, WriterPin,
@@ -605,6 +604,7 @@ pub mod persistence {
     /// The protocol-generic form [`SessionHistoryRecord`] specializes.
     pub use lash_sansio::SessionHistoryRecord as GenericSessionHistoryRecord;
     pub use lash_sansio::{AppendVec, BaseRenderCache, ConversationRecord};
+    pub use lash_sansio::{VersionRange, VersionRangeError};
 
     pub use lash_core::CheckpointKind;
     /// The store halves a [`StoreSet`](crate::StoreSet) hands out as trait
@@ -1252,7 +1252,7 @@ pub mod durability {
     };
     /// Durable group and journal values returned by effect-host implementors.
     pub use lash_core::runtime::{
-        JournalReplay, ProcessDriveStep, RecordedJournal, RecordedKeyRange, RunRecordStep,
+        JournalReplay, ProcessDriveStep, RecordedKeyRange, RunRecordStep,
     };
     pub use lash_core::tool_dispatch::{
         RunAttemptBody, RunAttemptHandle, RunAttemptStep, RunRetryTimer, RunSelectKey,
@@ -1274,11 +1274,13 @@ pub mod runtime {
     pub use lash_core::facade_support::TraceBoundaryReceipt;
     pub use lash_core::runtime::{AttemptStreamRecorder, DeclaredStartPhase, StartCancelDecision};
     // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::SessionShifts;
     pub use lash_core::engine::{
-        AdmitRequest, AdmitVerdict, EngineAck, EngineCursor, EnginePage, EngineParkRecorded,
-        EngineRefusal, ParkReconcileReport, ParkRecoveryWriter, ParkRef, ParkTarget, RefusalClass,
-        ScopeCloseSink, SealRefusal, SealVerdict, SessionControlEngine, ShiftAbort,
-        StalledExecution,
+        AdmitRequest, AdmitVerdict, Admitted, EngineAck, EngineCursor, EnginePage,
+        EngineParkRecorded, EngineRefusal, ParkReconcileReport, ParkRecoveryWriter, ParkRef,
+        ParkTarget, ReconcileCursor, RefusalClass, RunEnd, RunOutcome, ScopeCloseSink, SealRefusal,
+        SealVerdict, SessionControlEngine, ShiftAbort, ShiftHold, ShiftOutcome, ShiftRequest,
+        ShiftRequestId, ShiftStop, StalledExecution,
     };
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
     pub use lash_core::runtime::SessionTurnAdmission;
@@ -1399,54 +1401,6 @@ pub mod postgres {
 #[cfg(feature = "s3")]
 pub mod s3 {
     pub use lash_s3_store::*;
-}
-
-/// Restate durable-execution substrate: [`RestateEngine`] over a SQLite or
-/// PostgreSQL store set is the backend a [`LashCore::builder`](crate::LashCore::builder)
-/// takes (ADR 0104).
-///
-/// [`RestateEngine`]: lash_restate::RestateEngine
-#[cfg(feature = "restate")]
-pub mod restate {
-    // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::SessionShifts;
-    pub use lash_core::engine::{
-        Admitted, AdmittedWork, ReconcileCursor, RunEnd, RunOutcome, ShiftHold, ShiftLoop,
-        ShiftOutcome, ShiftRequest, ShiftRequestId, ShiftStop,
-    };
-    pub use lash_core_store::compat::ComponentId;
-    pub use lash_core_store::store::fleet_finalize::{
-        DeploymentRegistry, DeploymentRegistryError, RetainedDeployment,
-    };
-    pub use lash_sansio::VersionRangeError;
-
-    use crate::formats::{
-        DurableFormat, DurableFormatEntry, EngineFormat, FormatProbe, FormatVersion,
-    };
-    pub use crate::send::restate::{RestateWait, RestateWaitContext};
-
-    pub use lash_restate::*;
-
-    /// The durable-format rows this engine registers with the facade's
-    /// format table, projected onto the table's own row shape
-    /// (ADR 0104 §2). The engine owns its formats — [`durable_formats`] is
-    /// its registry — so the facade names them through the engine-neutral
-    /// `DurableFormat::Engine` handle rather than variants spelled for the
-    /// engine.
-    pub(crate) fn durable_format_entries() -> impl Iterator<Item = DurableFormatEntry> {
-        durable_formats().map(|format| DurableFormatEntry {
-            format: DurableFormat::Engine(EngineFormat {
-                id: format.id,
-                name: format.name,
-                unwalkable_reason: format.unwalkable_reason,
-                upgrade_policy: format.upgrade_policy,
-            }),
-            version: FormatVersion::Counter(format.version),
-            owning_crate: "lash-restate",
-            constant: format.constant,
-            probe: FormatProbe::Comparable,
-        })
-    }
 }
 
 /// OpenAI model provider. Enable with `features = ["openai"]`.

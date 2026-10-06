@@ -36,13 +36,11 @@ PROBE_ASSIGNMENT = re.compile(r"^LASH_PG_READY_PROBE='(.*)'$", re.MULTILINE)
 # anywhere fails the whole class, not just the site this change touched.
 CONSUMERS = (
     "scripts/ci/with-service.sh",
-    "scripts/restate-postgres-workers-e2e.sh",
     "scripts/push-gate.sh",
     "scripts/gate-container-smoke.sh",
     "scripts/confidence-gate.sh",
 )
 COMPOSE_FILES = (
-    "runbooks/restate-postgres-workers/docker-compose.yml",
     "runbooks/process-operations/docker-compose.yml",
 )
 WORKFLOWS = (
@@ -122,14 +120,6 @@ class PgServiceContract(unittest.TestCase):
                     text, r"source.*pg-service\.sh", f"{name} does not source pg-service.sh"
                 )
                 self.assertIn("lash_pg_", text)
-
-    def test_the_workers_e2e_wait_is_bounded(self) -> None:
-        """The schema apply's gate: a TCP wait with a deadline, not an
-        unbounded socket loop."""
-        text = (ROOT / "scripts/restate-postgres-workers-e2e.sh").read_text(
-            encoding="utf-8"
-        )
-        self.assertRegex(text, r"lash_pg_wait postgres \d+")
 
     def test_with_service_probes_through_the_helper(self) -> None:
         text = (ROOT / "scripts/ci/with-service.sh").read_text(encoding="utf-8")

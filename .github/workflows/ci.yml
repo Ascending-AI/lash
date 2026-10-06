@@ -43,16 +43,13 @@ name: CI
 # * Test heavy suites, Test S3 store against Garage, the non-host Functional
 #   E2E legs, the stack budget and the PostgreSQL pool-wait and simulator
 #   backend-fault steps: deferred for their runner cost. Store PRs also run
-#   the PG16 cross-backend differential; host PRs run three live Restate legs.
+#   the PG16 cross-backend differential.
 # * Fuzz smoke: a bounded libFuzzer run on the nightly toolchain, kept off
 #   the pull-request critical path by design (FIG-878).
 # * Test deferred Unicode suites: slow regress suites, excluded from the PR
 #   Buck2 partition.
 # * Lashlang Git consumer: a compile configuration no other job resolves,
 #   carried by the release dispatch (FIG-2854).
-# * Worker release artifacts and the full Restate + Postgres + S3 workers E2E:
-#   release builds and multi-service harnesses. Host PRs run the turn-control
-#   workers E2E with binaries from the shared build pool.
 # * The PG14/PG18 compatibility legs on a non-schema diff: they compare
 #   catalog rendering, which only a schema diff can move.
 
@@ -150,11 +147,6 @@ jobs:
       pr_pg_store: ${{ steps.classify.outputs.pr_pg_store }}
       pr_host_restate: ${{ steps.classify.outputs.pr_host_restate }}
       functional_e2e: ${{ steps.classify.outputs.functional_e2e }}
-      workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
-      restate_suites: ${{ steps.classify.outputs.restate_suites }}
-      restate_matrix: ${{ steps.restate-matrix.outputs.restate_matrix }}
-      rolling_upgrade: ${{ steps.classify.outputs.rolling_upgrade }}
-      release_journal_replay: ${{ steps.classify.outputs.release_journal_replay }}
       feature_lanes: ${{ steps.classify.outputs.feature_lanes }}
       workbench: ${{ steps.classify.outputs.workbench }}
       regress: ${{ steps.classify.outputs.regress }}
@@ -202,10 +194,6 @@ jobs:
           done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
-
-      - name: Derive registered Restate legs
-        id: restate-matrix
-        run: python3 scripts/ci/restate_matrix.py matrix --github-output >> "${GITHUB_OUTPUT}"
 
       - name: Classify exact diff
         id: classify
@@ -406,12 +394,6 @@ jobs:
       - name: Check judged build geometry
         run: python3 scripts/check_judged_build_geometry.py
 
-      - name: Check workers-E2E proxy health target
-        run: python3 scripts/check_restate_workers_proxy_health_target.py
-
-      - name: Check Restate deployment registration boundary
-        run: python3 scripts/check_restate_deployment_registration.py
-
       # The feature-lane graph replaces per-lane Cargo legs, so the resolution
       # it compiles has to be Cargo's own. This re-derives every distinct lane
       # request with `cargo tree` and diffs it against the generator's resolver;
@@ -488,7 +470,6 @@ jobs:
           python3 scripts/check_outcome_suffixes.py
           python3 scripts/check_adr_current.py
           python3 scripts/check_session_ingress_docs.py
-          python3 scripts/ci/restate_matrix.py check
           python3 scripts/check_postgres_gate_coverage.py
           GATES
 
@@ -1300,9 +1281,6 @@ jobs:
           # shellcheck disable=SC2086
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
 
-      - name: Check Restate handler panic boundary
-        run: python3 scripts/check-restate-handler-panics.py
-
       - name: Install workflow graph frontend dependencies
         run: npm --prefix examples/workflow-graph-roundtrip/frontend ci
 
@@ -1501,12 +1479,7 @@ jobs:
         run: |
           bash scripts/ci/store-build.sh \
             pg-store \
-            pg-artifact-referrers \
-            pg-attachment-referrers \
-            pg-model-keys \
             pg-facade-laws \
-            pg-rlm-frame-open \
-            pg-rlm-tool-call-limit \
             pg-pool-wait \
             pg-sim-backend-faults \
             pg-cross-backend \
@@ -1540,26 +1513,11 @@ jobs:
       # (`tools/buck2/postgres_action_runner.py`), reusing the verdicts the
       # workspace partition cached; the step then proves the shards ran every
       # listed case exactly once. The service this step starts serves the
-      # Restate ingress law of the same suite and the untrusted Cargo path.
+      # untrusted Cargo path.
       - name: Test Postgres store (conformance and attempt atomicity)
         run: |
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-store
-
-      - name: Test RLM artifact referrers on Postgres
-        run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
-            bash scripts/ci/store-tests.sh pg-artifact-referrers
-
-      - name: Test attachment referrers on Postgres
-        run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
-            bash scripts/ci/store-tests.sh pg-attachment-referrers
-
-      - name: Test model-key laws on Postgres
-        run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
-            bash scripts/ci/store-tests.sh pg-model-keys
 
       # The facade's PostgreSQL-only laws are `#[ignore]`d tests across five
       # //crates/lash binaries; before FIG-4743 no CI job selected them and
@@ -1573,16 +1531,6 @@ jobs:
         run: |
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-facade-laws
-
-      - name: Test RLM frame-open replay and live reset on Postgres
-        run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
-            bash scripts/ci/store-tests.sh pg-rlm-frame-open
-
-      - name: Test the RLM tool-call limit on Postgres
-        run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
-            bash scripts/ci/store-tests.sh pg-rlm-tool-call-limit
 
       - name: Test runtime pool-wait binding
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
@@ -1894,330 +1842,35 @@ jobs:
       - name: Enforce stack budget
         run: bash scripts/ci-stack-budget.sh
 
-  pr-host-workers:
-    name: Host workers Restate E2E
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    needs: plan
-    if: >-
-      github.event_name == 'pull_request'
-      && needs.plan.outputs.pr_host_restate == 'true'
-      && needs.plan.outputs.buck2_trusted == 'true'
-    environment: build-cache
-    steps:
-      - *checkout
-
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Configure shared build cache
-        uses: ./.github/actions/buck2-shared-cache
-        env:
-          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
-          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
-          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
-          CACHE_CA: ${{ secrets.CACHE_CA }}
-          CACHE_CERT: ${{ secrets.CACHE_CERT }}
-          CACHE_KEY: ${{ secrets.CACHE_KEY }}
-
-      - name: Run workers turn-control E2E
-        env:
-          LASH_E2E_TURN_CONTROL_ONLY: '1'
-        run: |
-          python3 scripts/ci/restate_suite.py stage-binaries \
-            //runbooks/restate-postgres-workers "${RUNNER_TEMP}/worker-binaries"
-          LASH_E2E_PREBUILT_BIN_DIR="${RUNNER_TEMP}/worker-binaries" \
-            bash scripts/restate-postgres-workers-e2e.sh
-
-      - name: Remove client credentials
-        if: always()
-        shell: bash
-        run: rm -rf -- "$RUNNER_TEMP/build-cache"
-
-  rolling-upgrade:
-    name: Rolling upgrade E2E
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    needs: plan
-    if: needs.plan.outputs.rolling_upgrade == 'true'
-    environment: build-cache
-    steps:
-      - *checkout
-
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Configure shared build cache
-        if: needs.plan.outputs.buck2_trusted == 'true'
-        uses: ./.github/actions/buck2-shared-cache
-        env:
-          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
-          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
-          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
-          CACHE_CA: ${{ secrets.CACHE_CA }}
-          CACHE_CERT: ${{ secrets.CACHE_CERT }}
-          CACHE_KEY: ${{ secrets.CACHE_KEY }}
-
-      - name: Install Buck2 without shared cache
-        if: needs.plan.outputs.buck2_trusted != 'true'
-        shell: bash
-        run: |
-          client="$(python3 tools/buck2/bootstrap.py)"
-          test -x "$client"
-          dirname "$client" >> "$GITHUB_PATH"
-
-      - name: Install Rust toolchain
-        uses: ./.github/actions/rust-toolchain
-
-      - name: Install mold
-        uses: ./.github/actions/setup-mold
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-        with:
-          tool: just,protoc
-
-      - name: Run rolling upgrade
-        run: just e2e-rolling
-
-      - name: Remove client credentials
-        if: always()
-        shell: bash
-        run: rm -rf -- "$RUNNER_TEMP/build-cache"
-
-  worker-artifacts:
-    name: Build worker release artifacts
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    needs: plan
-    outputs:
-      artifact_id: ${{ steps.upload-worker-binaries.outputs.artifact-id }}
-      artifact_name: ${{ steps.prepare-worker-binaries.outputs.artifact_name }}
-      producer_attempt: ${{ steps.prepare-worker-binaries.outputs.producer_attempt }}
-    # Dispatch-only: the fast pull-request board runs no worker E2E at all,
-    # so nothing on it consumes the binaries (the retired `ci:workers` label
-    # opt-in included); the merge group never consumed them either.
-    if: github.event_name == 'workflow_dispatch'
-    # Trusted events take the worker binaries from the shared build cache
-    # (FIG-3666): the Cargo release build took 38 of this job's 40 minutes
-    # and gated every workers and process-operations leg behind it. Untrusted
-    # events receive no cache credentials and keep the Cargo release build.
-    environment: build-cache
-    env:
-      BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
-      RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' }}
-    steps:
-      - name: Explain plan deferral
-        if: env.RUN_WORKER_ARTIFACTS != 'true'
-        run: echo "Worker artifacts are not required by the CI plan."
-
-      - name: Check out repository
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
-
-      - name: Reclaim runner disk
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Configure shared build cache
-        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED == 'true'
-        uses: ./.github/actions/buck2-shared-cache
-        env:
-          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
-          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
-          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
-          CACHE_CA: ${{ secrets.CACHE_CA }}
-          CACHE_CERT: ${{ secrets.CACHE_CERT }}
-          CACHE_KEY: ${{ secrets.CACHE_KEY }}
-
-      - name: Install Rust toolchain
-        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED != 'true'
-        uses: ./.github/actions/rust-toolchain
-
-      - name: Install protoc
-        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED != 'true'
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
-
-      - name: Install mold
-        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED != 'true'
-        uses: ./.github/actions/setup-mold
-
-      - name: Restore worker release dependencies
-        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED != 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-worker-release
-          cache-workspace-crates: true
-          # Only a main-scoped entry is readable by later runs.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Build worker binaries once
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
-        run: |
-          if [ "${BUCK2_TRUSTED}" = true ]; then
-            # Every binary of the package, under its Cargo name and
-            # stripped: the same set `--bins` builds below.
-            python3 scripts/ci/restate_suite.py stage-binaries \
-              //runbooks/restate-postgres-workers "${RUNNER_TEMP}/worker-artifacts"
-          else
-            cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
-            cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker --features testing
-            mkdir -p "${RUNNER_TEMP}/worker-artifacts"
-            find target/release -maxdepth 1 -type f -name 'lash-e2e-*' -executable \
-              -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
-            cp target/release/lash-vm-worker "${RUNNER_TEMP}/worker-artifacts/"
-          fi
-          tar -C "${RUNNER_TEMP}/worker-artifacts" -cf "${RUNNER_TEMP}/worker-binaries.tar" .
-
-      - name: Remove client credentials
-        if: always() && env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED == 'true'
-        shell: bash
-        run: rm -rf -- "$RUNNER_TEMP/build-cache"
-
-      - name: Record worker binary provenance
-        id: prepare-worker-binaries
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
-        env:
-          ARTIFACT_NAME: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
-        run: |
-          python3 scripts/ci/artifact_provenance.py create \
-            --manifest "${RUNNER_TEMP}/worker-binaries.provenance.json" \
-            --payload-root "${RUNNER_TEMP}" \
-            --payload worker-binaries.tar \
-            --artifact-name "${ARTIFACT_NAME}" \
-            --producer-job worker-artifacts \
-            --producer-instance worker-binaries \
-            --producer-attempt "${GITHUB_RUN_ATTEMPT}"
-          echo "artifact_name=${ARTIFACT_NAME}" >> "${GITHUB_OUTPUT}"
-          echo "producer_attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
-
-      - name: Upload worker binaries
-        id: upload-worker-binaries
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ steps.prepare-worker-binaries.outputs.artifact_name }}
-          path: |
-            ${{ runner.temp }}/worker-binaries.tar
-            ${{ runner.temp }}/worker-binaries.provenance.json
-          if-no-files-found: error
-          compression-level: 1
-          retention-days: 1
-
-  # The hourly main runner dispatches the full profile. Registration alone
-  # adds both legs; up to sixteen independent service jobs run at once.
-  restate-suites:
-    name: Restate ${{ matrix.suite }} / ${{ matrix.leg }}
-    env:
-      AGENT_WORKBENCH_E2E_ARTIFACT_DIR: target/functional-e2e-artifacts/agent-workbench
-    needs: plan
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    environment: build-cache
-    strategy:
-      fail-fast: false
-      max-parallel: 16
-      matrix: ${{ fromJSON(needs.plan.outputs.restate_matrix) }}
-    steps:
-      - *checkout
-
-      - name: Configure shared build cache
-        uses: ./.github/actions/buck2-shared-cache
-        env:
-          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
-          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
-          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
-          CACHE_CA: ${{ secrets.CACHE_CA }}
-          CACHE_CERT: ${{ secrets.CACHE_CERT }}
-          CACHE_KEY: ${{ secrets.CACHE_KEY }}
-
-      - name: Run registered Restate leg
-        env:
-          SUITE: ${{ matrix.suite }}
-          LEG: ${{ matrix.leg }}
-        run: python3 scripts/ci/restate_matrix.py run "$SUITE" --leg "$LEG"
-
-      - name: Upload Restate evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: restate-${{ matrix.suite }}-${{ matrix.leg }}-attempt-${{ github.run_attempt }}
-          path: |
-            target/restate-suites/**
-            target/functional-e2e-artifacts/agent-workbench/**
-          if-no-files-found: error
-
-      - name: Remove client credentials
-        if: always()
-        run: rm -rf -- "$RUNNER_TEMP/build-cache"
-
   functional-e2e:
     name: Functional E2E (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     needs: plan
-    # PRs run the two host legs on shift, handler or example changes. The
-    # other matrix legs remain full-profile work.
+    # PRs run the transcript host leg on shift, handler or example changes.
+    # The other matrix legs remain full-profile work.
     if: >-
       (github.event_name == 'pull_request' && needs.plan.outputs.pr_host_restate == 'true'
       && needs.plan.outputs.buck2_trusted == 'true')
       || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true')
-    # The live Restate suites (`restate: true`) build their test binaries from
-    # the shared cache and run them here, beside pinned restate-servers that
-    # scripts/ci/restate_suite.py starts (FIG-3666). A dispatch is always a
-    # trusted event, so every leg may read the build-cache credentials.
+    # A dispatch is always a trusted event, so every leg may read the
+    # build-cache credentials.
     environment: build-cache
     env:
       RUN_FUNCTIONAL_E2E: >-
-        ${{ (github.event_name == 'workflow_dispatch' && matrix.name != 'agent-workbench')
-        || (github.event_name == 'pull_request'
-        && (matrix.name == 'agent-workbench' || matrix.name == 'agent-workbench-transcript')) }}
+        ${{ github.event_name == 'workflow_dispatch'
+        || (github.event_name == 'pull_request' && matrix.name == 'agent-workbench-transcript') }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: agent-workbench
-            recipe: agent-workbench-restate-e2e
-            node: false
-            artifact: agent-workbench
-            browser: false
-            buck2: true
-            restate: true
-            runner: ubuntu-24.04
           - name: agent-workbench-transcript
             recipe: workbench-transcript-projection-e2e
             node: false
             artifact: transcript-projection
             browser: true
             buck2: true
-            restate: false
             runner: ubuntu-24.04
           - name: workflow-graph-roundtrip
             recipe: workflow-graph-integration-verify
@@ -2225,7 +1878,6 @@ jobs:
             artifact: none
             browser: false
             buck2: false
-            restate: false
             runner: ubuntu-24.04
 
     steps:
@@ -2313,10 +1965,6 @@ jobs:
 
       - name: Run functional E2E
         if: env.RUN_FUNCTIONAL_E2E == 'true'
-        env:
-          LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
-          LASH_RUN_CONFORMANCE_ARTIFACT_DIR: target/functional-e2e-artifacts/run-conformance
-          AGENT_WORKBENCH_E2E_ARTIFACT_DIR: target/functional-e2e-artifacts/agent-workbench
         run: |
           set -euo pipefail
           just ${{ matrix.recipe }}
@@ -2334,429 +1982,6 @@ jobs:
           path: target/functional-e2e-artifacts/${{ matrix.artifact }}
           if-no-files-found: warn
 
-
-  functional-e2e-process-operations:
-    name: Functional E2E (${{ matrix.name }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
-    needs: [plan, worker-artifacts]
-    # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
-    # ruling; reassess after the FIG-2169 test-prune sweep. The pull-request
-    # `restate_suites` exception is retired with the rest of the PR board's
-    # breadth: this leg drives the worker binaries on a Restate runbook, so
-    # it rides the same dispatch that produces them.
-    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
-    # Its test binaries come from the shared build cache (FIG-3666); a
-    # dispatch is always a trusted event.
-    environment: build-cache
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: process-operations
-            recipe: process-operations-e2e
-            node: false
-            artifact: process-operations
-            browser: false
-            runner: ubuntu-24.04
-
-    steps:
-      - *checkout
-
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Configure shared build cache
-        uses: ./.github/actions/buck2-shared-cache
-        env:
-          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
-          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
-          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
-          CACHE_CA: ${{ secrets.CACHE_CA }}
-          CACHE_CERT: ${{ secrets.CACHE_CERT }}
-          CACHE_KEY: ${{ secrets.CACHE_KEY }}
-
-      # The repo-local installer uses checksum-pinned release archives instead
-      # of the GitHub releases API; merge-queue trains fan out enough jobs that
-      # the API-listing path (extractions/setup-just) hit rate limits and
-      # ejected whole trains.
-      - name: Install just
-        uses: ./.github/actions/install-tools
-        with:
-          tool: just
-
-      # Each recipe owns its dependencies and any container lifecycle, so the
-      # matrix legs run independently without cross-job coordination.
-      - name: Require exact worker artifact selection
-        run: >-
-          python3 scripts/ci/artifact_provenance.py select
-          --artifact-name "${{ needs.worker-artifacts.outputs.artifact_name }}"
-          --expected-artifact-name "worker-binaries-${GITHUB_SHA}-${{ needs.worker-artifacts.outputs.producer_attempt }}"
-          --selected-artifact-id "${{ needs.worker-artifacts.outputs.artifact_id }}"
-          --producer-attempt "${{ needs.worker-artifacts.outputs.producer_attempt }}"
-          --current-attempt "${GITHUB_RUN_ATTEMPT}"
-
-      - name: Download worker binaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          artifact-ids: ${{ needs.worker-artifacts.outputs.artifact_id }}
-          path: ${{ runner.temp }}/worker-download
-
-      - name: Verify and extract worker binaries
-        run: |
-          python3 scripts/ci/artifact_provenance.py consume \
-            --manifest "${RUNNER_TEMP}/worker-download/worker-binaries.provenance.json" \
-            --payload-root "${RUNNER_TEMP}/worker-download" \
-            --require-payload worker-binaries.tar \
-            --artifact-name "${{ needs.worker-artifacts.outputs.artifact_name }}" \
-            --producer-job worker-artifacts \
-            --producer-instance worker-binaries \
-            --producer-attempt "${{ needs.worker-artifacts.outputs.producer_attempt }}" \
-            --selected-artifact-id "${{ needs.worker-artifacts.outputs.artifact_id }}" \
-            --current-attempt "${GITHUB_RUN_ATTEMPT}" \
-            --receipt "${RUNNER_TEMP}/worker-binaries-consumption.json" \
-            --step-summary "${GITHUB_STEP_SUMMARY}" \
-            --extract-tar worker-binaries.tar \
-            --extract-to "${RUNNER_TEMP}/worker-binaries"
-          echo "LASH_E2E_PREBUILT_BIN_DIR=${RUNNER_TEMP}/worker-binaries" >> "$GITHUB_ENV"
-
-      - name: Run functional E2E
-        env:
-          LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
-        run: just ${{ matrix.recipe }}
-
-      - name: Remove client credentials
-        if: always()
-        shell: bash
-        run: rm -rf -- "$RUNNER_TEMP/build-cache"
-
-      - name: Upload functional E2E failure artifacts
-        if: failure() && matrix.artifact != 'none'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: functional-e2e-${{ matrix.artifact }}-attempt-${{ github.run_attempt }}
-          path: target/functional-e2e-artifacts/${{ matrix.artifact }}
-          if-no-files-found: warn
-
-  restate-postgres-workers:
-    name: Restate + Postgres + S3 Workers (segment ${{ matrix.segment }})
-    runs-on: ubuntu-24.04
-    # Dispatch-only: the fast pull-request board runs no workers E2E — neither
-    # the `ci:workers` label opt-in nor the `restate_suites` exception — and
-    # the merge group never ran it. The full profile is its only home.
-    if: github.event_name == 'workflow_dispatch'
-    # The harness has grown to 24 workflows + turn-control gates; 30 minutes
-    # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
-    timeout-minutes: 75
-    needs: [plan, worker-artifacts]
-    outputs:
-      segment_1_artifact_id: ${{ steps.upload-segment-1.outputs.artifact-id }}
-      segment_1_artifact_name: ${{ steps.prepare-segment-1.outputs.artifact_name }}
-      segment_1_producer_attempt: ${{ steps.prepare-segment-1.outputs.producer_attempt }}
-      segment_2_artifact_id: ${{ steps.upload-segment-2.outputs.artifact-id }}
-      segment_2_artifact_name: ${{ steps.prepare-segment-2.outputs.artifact_name }}
-      segment_2_producer_attempt: ${{ steps.prepare-segment-2.outputs.producer_attempt }}
-    env:
-      RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        segment: [1, 2]
-
-    steps:
-      - name: Explain dispatch plan deferral
-        if: env.RUN_WORKERS_E2E != 'true'
-        run: echo "Workers E2E execution is not required by the full-profile CI plan."
-
-      - name: Check out repository
-        if: env.RUN_WORKERS_E2E == 'true'
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
-
-      - name: Reclaim runner disk
-        if: env.RUN_WORKERS_E2E == 'true'
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Install Rust toolchain
-        if: env.RUN_WORKERS_E2E == 'true'
-        uses: ./.github/actions/rust-toolchain
-
-      # Release binaries come from worker-artifacts. Segment 1 also builds the
-      # S3 tests in debug; retain those workspace outputs in a dedicated cache.
-      - name: Restore cargo cache
-        if: env.RUN_WORKERS_E2E == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-worker-tests
-          cache-workspace-crates: true
-          save-if: ${{ matrix.segment == 1 && github.ref == 'refs/heads/main' }}
-
-      - name: Install protoc
-        if: env.RUN_WORKERS_E2E == 'true'
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
-
-      # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-worker-tests` cache and installs its linker directly.
-      - name: Install mold
-        if: env.RUN_WORKERS_E2E == 'true'
-        uses: ./.github/actions/setup-mold
-
-      - name: Require exact worker artifact selection
-        if: env.RUN_WORKERS_E2E == 'true'
-        run: >-
-          python3 scripts/ci/artifact_provenance.py select
-          --artifact-name "${{ needs.worker-artifacts.outputs.artifact_name }}"
-          --expected-artifact-name "worker-binaries-${GITHUB_SHA}-${{ needs.worker-artifacts.outputs.producer_attempt }}"
-          --selected-artifact-id "${{ needs.worker-artifacts.outputs.artifact_id }}"
-          --producer-attempt "${{ needs.worker-artifacts.outputs.producer_attempt }}"
-          --current-attempt "${GITHUB_RUN_ATTEMPT}"
-
-      - name: Download worker binaries
-        if: env.RUN_WORKERS_E2E == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          artifact-ids: ${{ needs.worker-artifacts.outputs.artifact_id }}
-          path: ${{ runner.temp }}/worker-download
-
-      - name: Verify and extract worker binaries
-        if: env.RUN_WORKERS_E2E == 'true'
-        run: |
-          python3 scripts/ci/artifact_provenance.py consume \
-            --manifest "${RUNNER_TEMP}/worker-download/worker-binaries.provenance.json" \
-            --payload-root "${RUNNER_TEMP}/worker-download" \
-            --require-payload worker-binaries.tar \
-            --artifact-name "${{ needs.worker-artifacts.outputs.artifact_name }}" \
-            --producer-job worker-artifacts \
-            --producer-instance worker-binaries \
-            --producer-attempt "${{ needs.worker-artifacts.outputs.producer_attempt }}" \
-            --selected-artifact-id "${{ needs.worker-artifacts.outputs.artifact_id }}" \
-            --current-attempt "${GITHUB_RUN_ATTEMPT}" \
-            --receipt "target/restate-postgres-workers-e2e-manifests/segment-${{ matrix.segment }}/worker-binaries-consumption.json" \
-            --step-summary "${GITHUB_STEP_SUMMARY}" \
-            --extract-tar worker-binaries.tar \
-            --extract-to "${RUNNER_TEMP}/worker-binaries"
-          echo "LASH_E2E_PREBUILT_BIN_DIR=${RUNNER_TEMP}/worker-binaries" >> "$GITHUB_ENV"
-
-      - name: Run distributed backend E2E
-        if: env.RUN_WORKERS_E2E == 'true'
-        env:
-          LASH_E2E_WORKFLOW_SEGMENT: ${{ matrix.segment }}
-          LASH_E2E_COMPLETED_WORKFLOW_MANIFEST: target/restate-postgres-workers-e2e-manifests/segment-${{ matrix.segment }}/completed-workflows.txt
-        run: bash scripts/restate-postgres-workers-e2e.sh
-
-      - name: Run context-overflow recovery E2E
-        if: env.RUN_WORKERS_E2E == 'true' && matrix.segment == 1
-        env:
-          LASH_CONTEXT_OVERFLOW_ARTIFACT_DIR: target/operator-flow-artifacts/context-overflow-recovery
-          LASH_CONTEXT_OVERFLOW_VM_WORKER: ${{ runner.temp }}/worker-binaries/lash-vm-worker
-        run: bash scripts/context-overflow-recovery-e2e.sh
-
-      - name: Upload operator-flow E2E failure artifacts
-        if: failure() && env.RUN_WORKERS_E2E == 'true' && matrix.segment == 1
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: operator-flow-e2e-attempt-${{ github.run_attempt }}
-          path: target/operator-flow-artifacts
-          if-no-files-found: warn
-
-      - name: Record segment 1 result provenance
-        id: prepare-segment-1
-        if: always() && env.RUN_WORKERS_E2E == 'true' && matrix.segment == 1
-        env:
-          ARTIFACT_NAME: restate-workers-e2e-segment-1-attempt-${{ github.run_attempt }}
-        run: |
-          python3 scripts/ci/artifact_provenance.py create \
-            --manifest target/restate-postgres-workers-e2e-manifests/segment-1/provenance.json \
-            --payload-root target/restate-postgres-workers-e2e-manifests/segment-1 \
-            --payload workflow-inventory.tsv \
-            --payload completed-workflows.txt \
-            --payload worker-binaries-consumption.json \
-            --artifact-name "${ARTIFACT_NAME}" \
-            --producer-job restate-postgres-workers \
-            --producer-instance segment-1 \
-            --producer-attempt "${GITHUB_RUN_ATTEMPT}"
-          echo "artifact_name=${ARTIFACT_NAME}" >> "${GITHUB_OUTPUT}"
-          echo "producer_attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
-
-      - name: Upload segment 1 completed workflow manifest
-        id: upload-segment-1
-        if: always() && env.RUN_WORKERS_E2E == 'true' && matrix.segment == 1
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ steps.prepare-segment-1.outputs.artifact_name }}
-          path: target/restate-postgres-workers-e2e-manifests/segment-1
-          if-no-files-found: error
-
-      - name: Record segment 2 result provenance
-        id: prepare-segment-2
-        if: always() && env.RUN_WORKERS_E2E == 'true' && matrix.segment == 2
-        env:
-          ARTIFACT_NAME: restate-workers-e2e-segment-2-attempt-${{ github.run_attempt }}
-        run: |
-          python3 scripts/ci/artifact_provenance.py create \
-            --manifest target/restate-postgres-workers-e2e-manifests/segment-2/provenance.json \
-            --payload-root target/restate-postgres-workers-e2e-manifests/segment-2 \
-            --payload workflow-inventory.tsv \
-            --payload completed-workflows.txt \
-            --payload worker-binaries-consumption.json \
-            --artifact-name "${ARTIFACT_NAME}" \
-            --producer-job restate-postgres-workers \
-            --producer-instance segment-2 \
-            --producer-attempt "${GITHUB_RUN_ATTEMPT}"
-          echo "artifact_name=${ARTIFACT_NAME}" >> "${GITHUB_OUTPUT}"
-          echo "producer_attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
-
-      - name: Upload segment 2 completed workflow manifest
-        id: upload-segment-2
-        if: always() && env.RUN_WORKERS_E2E == 'true' && matrix.segment == 2
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ steps.prepare-segment-2.outputs.artifact_name }}
-          path: target/restate-postgres-workers-e2e-manifests/segment-2
-          if-no-files-found: error
-
-  restate-postgres-workers-summary:
-    name: Restate workers E2E coverage summary
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    if: always() && github.event_name == 'workflow_dispatch'
-    needs:
-      - plan
-      - restate-postgres-workers
-    env:
-      RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' }}
-
-    steps:
-      - name: Check out repository
-        if: env.RUN_WORKERS_E2E == 'true'
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
-
-      - name: Require exact segment result selections
-        if: env.RUN_WORKERS_E2E == 'true'
-        run: |
-          python3 scripts/ci/artifact_provenance.py select \
-            --artifact-name "${{ needs.restate-postgres-workers.outputs.segment_1_artifact_name }}" \
-            --expected-artifact-name "restate-workers-e2e-segment-1-attempt-${{ needs.restate-postgres-workers.outputs.segment_1_producer_attempt }}" \
-            --selected-artifact-id "${{ needs.restate-postgres-workers.outputs.segment_1_artifact_id }}" \
-            --producer-attempt "${{ needs.restate-postgres-workers.outputs.segment_1_producer_attempt }}" \
-            --current-attempt "${GITHUB_RUN_ATTEMPT}"
-          python3 scripts/ci/artifact_provenance.py select \
-            --artifact-name "${{ needs.restate-postgres-workers.outputs.segment_2_artifact_name }}" \
-            --expected-artifact-name "restate-workers-e2e-segment-2-attempt-${{ needs.restate-postgres-workers.outputs.segment_2_producer_attempt }}" \
-            --selected-artifact-id "${{ needs.restate-postgres-workers.outputs.segment_2_artifact_id }}" \
-            --producer-attempt "${{ needs.restate-postgres-workers.outputs.segment_2_producer_attempt }}" \
-            --current-attempt "${GITHUB_RUN_ATTEMPT}"
-
-      - name: Download segment 1 completed workflow manifest
-        if: env.RUN_WORKERS_E2E == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          artifact-ids: ${{ needs.restate-postgres-workers.outputs.segment_1_artifact_id }}
-          path: target/restate-postgres-workers-e2e-download/segment-1
-
-      - name: Download segment 2 completed workflow manifest
-        if: env.RUN_WORKERS_E2E == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          artifact-ids: ${{ needs.restate-postgres-workers.outputs.segment_2_artifact_id }}
-          path: target/restate-postgres-workers-e2e-download/segment-2
-
-      - name: Verify completed workflow manifest provenance
-        if: env.RUN_WORKERS_E2E == 'true'
-        run: |
-          for segment in 1 2; do
-            artifact_name="${{ needs.restate-postgres-workers.outputs.segment_1_artifact_name }}"
-            artifact_id="${{ needs.restate-postgres-workers.outputs.segment_1_artifact_id }}"
-            producer_attempt="${{ needs.restate-postgres-workers.outputs.segment_1_producer_attempt }}"
-            if [[ "${segment}" == 2 ]]; then
-              artifact_name="${{ needs.restate-postgres-workers.outputs.segment_2_artifact_name }}"
-              artifact_id="${{ needs.restate-postgres-workers.outputs.segment_2_artifact_id }}"
-              producer_attempt="${{ needs.restate-postgres-workers.outputs.segment_2_producer_attempt }}"
-            fi
-            python3 scripts/ci/artifact_provenance.py consume \
-              --manifest "target/restate-postgres-workers-e2e-download/segment-${segment}/provenance.json" \
-              --payload-root "target/restate-postgres-workers-e2e-download/segment-${segment}" \
-              --require-payload workflow-inventory.tsv \
-              --require-payload completed-workflows.txt \
-              --require-payload worker-binaries-consumption.json \
-              --artifact-name "${artifact_name}" \
-              --producer-job restate-postgres-workers \
-              --producer-instance "segment-${segment}" \
-              --producer-attempt "${producer_attempt}" \
-              --selected-artifact-id "${artifact_id}" \
-              --current-attempt "${GITHUB_RUN_ATTEMPT}" \
-              --receipt "${RUNNER_TEMP}/worker-segment-${segment}-consumption.json" \
-              --step-summary "${GITHUB_STEP_SUMMARY}"
-          done
-
-      - name: Verify complete workflow coverage
-        if: env.RUN_WORKERS_E2E == 'true'
-        run: >-
-          python3 scripts/check_restate_workers_e2e_coverage.py
-          --leg 1
-          target/restate-postgres-workers-e2e-download/segment-1/workflow-inventory.tsv
-          target/restate-postgres-workers-e2e-download/segment-1/completed-workflows.txt
-          --leg 2
-          target/restate-postgres-workers-e2e-download/segment-2/workflow-inventory.tsv
-          target/restate-postgres-workers-e2e-download/segment-2/completed-workflows.txt
-
-  # The three cheapest gates share one runner. They used to be three jobs,
-  # each paying runner start-up and its own checkout for a few seconds of
-  # work; at the current pull-request volume that was most of their cost.
-  # Nothing here is path-gated, so the job has no `if:` and runs on every
-  # event (scripts/ci_plan.py lists it in UNGATED_JOBS). The secret scan
-  # steps run even when diff hygiene fails so both verdicts surface at once.
-  #
-  # The checkout is deliberately not scripts/ci/checkout-step.sh: it deepens
-  # both sides of the scanned range in lockstep, and
-  # scripts/test_ci_plan_hygiene.py executes this step's text verbatim.
   hygiene:
     name: Hygiene
     runs-on: ubuntu-24.04
@@ -2991,13 +2216,6 @@ jobs:
       - fuzz-smoke
       - stack-budget
       - functional-e2e
-      - restate-suites
-      - functional-e2e-process-operations
-      - pr-host-workers
-      - rolling-upgrade
-      - worker-artifacts
-      - restate-postgres-workers
-      - restate-postgres-workers-summary
 
     steps:
       - *checkout
@@ -3006,5 +2224,4 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJson(needs) }}
           BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
-          WORKERS_E2E_ENABLED: ${{ github.event_name == 'workflow_dispatch' }}
         run: python3 scripts/ci/conclusion.py conclusion

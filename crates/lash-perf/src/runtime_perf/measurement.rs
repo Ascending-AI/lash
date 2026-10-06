@@ -36,10 +36,10 @@ use crate::perf_support::time::{elapsed_ms, round3};
 
 use super::harness::{
     RuntimePerfTraceConfig, TurnEntry, build_embed_core, build_runtime,
-    build_runtime_with_sqlite_store,
+    build_runtime_with_sqlite_store, durable_backend,
     durable_postgres_session_store_factory_without_commit_measurement,
     durable_sqlite_session_store_factory_without_commit_measurement, memory_perf_store,
-    restate_backend, seed_runtime_state, sqlite_memory_stores, validate_runtime_perf_turn,
+    seed_runtime_state, sqlite_memory_stores, validate_runtime_perf_turn,
 };
 use super::prompt::benchmark_prompt;
 use super::scenarios::RuntimePerfScenario;

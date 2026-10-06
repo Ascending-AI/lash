@@ -82,7 +82,7 @@ pub(crate) struct ActiveTurns {
     pub(crate) path: Option<Arc<PathBuf>>,
     /// The runs this process follows to settlement, and the sessions it
     /// watches for runs its engine starts on its own. In-process only.
-    pub(crate) follows: crate::restate::RunFollows,
+    pub(crate) follows: crate::turns::RunFollows,
 }
 
 #[derive(Default)]
@@ -278,7 +278,7 @@ impl ActiveTurns {
                 retirements: BTreeMap::new(),
             })),
             path: Some(Arc::new(path)),
-            follows: crate::restate::RunFollows::default(),
+            follows: crate::turns::RunFollows::default(),
         };
         active.persist();
         Ok(active)

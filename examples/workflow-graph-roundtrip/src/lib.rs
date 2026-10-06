@@ -9,15 +9,6 @@ mod operations;
 mod runtime;
 mod sample_tools;
 
-// `#[restate_sdk::*]` expansions name `::restate_sdk` absolute paths; the SDK
-// reaches this crate through lash's re-export, so the crate answers to that
-// name and generated code resolves the modules below at the crate root.
-extern crate self as restate_sdk;
-#[allow(unused_imports)]
-use lash::restate::restate_sdk::{
-    context, discovery, endpoint, errors, handler, ingress, object, prelude, service, workflow,
-};
-
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
@@ -49,7 +40,7 @@ pub use contract::{
     SaveWorkflowResponse, SourceProjectionErrorResponse, TypeDiagnostic, TypedVariable,
     ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument,
 };
-pub use runtime::{bind_commands, core as workflow_core};
+pub use runtime::core as workflow_core;
 
 /// Default deterministic workflow served as version 1.
 ///
@@ -116,10 +107,7 @@ impl AppState {
         clippy::expect_used,
         reason = "the built-in workflow is rendered by the graph printer"
     )]
-    pub fn new(
-        core: lash::LashCore,
-        connection: lash::restate::RestateConnection,
-    ) -> Result<Self, WorkflowGraphBuildError> {
+    pub fn new(core: lash::LashCore) -> Result<Self, WorkflowGraphBuildError> {
         let graph = workflow_graph_from_source(DEFAULT_WORKFLOW)?;
         let source = workflow_graph_to_source(&graph)
             .expect("the default workflow graph should render canonically");
@@ -133,7 +121,7 @@ impl AppState {
                 }],
             })),
             core,
-            commands: runtime::CommandClient::new(connection),
+            commands: runtime::CommandClient,
         })
     }
 
@@ -471,37 +459,5 @@ impl IntoResponse for SourceProjectionErrorResponse {
 impl From<GraphRenderError> for RenderErrorResponse {
     fn from(error: GraphRenderError) -> Self {
         Self::render(error)
-    }
-}
-
-#[cfg(test)]
-mod save_tests {
-    use super::*;
-
-    /// FIG-3630: a document projected from source that is not the saved
-    /// workflow saves as that source. Its process is a lifted literal whose
-    /// origin the save re-derives from the document's own source, and its
-    /// parameter type survives as the annotation that lowers to it.
-    #[tokio::test]
-    async fn a_projected_workflow_with_a_lifted_process_saves_as_its_source() {
-        let double = lash_restate_test::backend(4698, Default::default())
-            .await
-            .expect("Restate double");
-        let core = workflow_core(double.lash_backend()).expect("workflow core");
-        let state = AppState::new(core, double.connection()).expect("default workflow");
-        let Json(projected) = project_source(
-            State(state.clone()),
-            Json(ProjectWorkflowRequest {
-                source: "const typed = async (name: string) => {\n  return name;\n};\n".to_string(),
-            }),
-        )
-        .await
-        .unwrap_or_else(|_| panic!("the source projects"));
-        let source = projected.document.source.clone();
-        let Json(saved) = save_workflow(State(state), Json(projected.document))
-            .await
-            .unwrap_or_else(|error| panic!("the projected workflow saves: {:?}", error.body));
-        assert_eq!(saved.document.source, source);
-        assert!(saved.document.source.contains("async (name: string)"));
     }
 }

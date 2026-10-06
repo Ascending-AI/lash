@@ -1,9 +1,7 @@
 import importlib.util
-import json
 import pathlib
 import re
 import subprocess
-import sys
 import unittest
 
 import yaml
@@ -43,11 +41,7 @@ def expanded_job_names(template: str, matrix: dict) -> set:
     expanded = {template}
     keys = MATRIX_EXPRESSION.findall(template)
     if keys and isinstance(matrix, str):
-        if matrix != "${{ fromJSON(needs.plan.outputs.restate_matrix) }}":
-            raise ValueError(f"unresolved dynamic CI matrix: {matrix}")
-        matrix = json.loads(subprocess.check_output(
-            [sys.executable, str(ROOT / "scripts/ci/restate_matrix.py"), "matrix"], text=True
-        ))
+        raise ValueError(f"unresolved dynamic CI matrix: {matrix}")
     for key in keys:
         values = set(matrix.get(key) or [])
         values.update(

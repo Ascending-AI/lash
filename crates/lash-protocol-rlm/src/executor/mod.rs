@@ -10,8 +10,6 @@ use definition_holds::{
 };
 mod cell_outputs;
 use cell_outputs::record_cell_outputs;
-#[cfg(test)]
-use cell_outputs::retain_oversized_value;
 mod cell_run;
 mod cell_segment;
 mod host_bridge;
@@ -50,11 +48,6 @@ use crate::projection::{
 
 #[cfg(any(test, feature = "testing"))]
 static EXECUTION_BOUND_EXHAUSTION_LOUD: AtomicBool = AtomicBool::new(true);
-
-#[cfg(test)]
-fn set_execution_bound_exhaustion_loud(loud: bool) -> bool {
-    EXECUTION_BOUND_EXHAUSTION_LOUD.swap(loud, Ordering::SeqCst)
-}
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_owned_code(

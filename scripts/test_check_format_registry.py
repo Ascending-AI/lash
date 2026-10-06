@@ -226,17 +226,6 @@ class FormatRegistryTests(unittest.TestCase):
         self.assertNotEqual(gate.check_version_bumps.comparable(before), gate.check_version_bumps.comparable(after))
 
 
-    def test_journal_tripwire_tracks_control_flow_instead_of_payload_shapes(self) -> None:
-        projection = gate.check_version_bumps.journal_logic_source
-        body = "async fn drive() { ctx.run_json_send(step, None, body).await; if done { return; } }"
-        self.assertEqual(projection(body + "struct Payload { value: u32 }"),
-                         projection(body + "struct Payload { value: String }"))
-        self.assertNotEqual(projection(body), projection(body.replace("if done", "if cancelled")))
-        self.assertNotEqual(projection(body), projection(body.replace("run_json_send", "sleep")))
-        outside = "async fn drive() { if ready { ctx.run(body).await; } ctx.sleep(delay).await; }"
-        inside = "async fn drive() { if ready { ctx.run(body).await; ctx.sleep(delay).await; } }"
-        self.assertNotEqual(projection(outside), projection(inside))
-
     def test_source_markers_are_the_only_surface_declaration_path(self) -> None:
         self.assertNotIn("[[surface]]", self.registry_text)
         self.assertEqual(self.problems(), [])
@@ -380,8 +369,16 @@ class FormatRegistryTests(unittest.TestCase):
             problems,
         )
 
+    def engine_registry(self) -> None:
+        """A demo engine's format table, registered for this test alone."""
+        path = Path("crates/demo-engine/src/formats.rs")
+        self.write(str(path), ENGINE_REGISTRY)
+        patcher = mock.patch.object(gate, "ENGINE_REGISTRIES", (path,))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_an_engine_registered_row_satisfies_a_manifest_claim(self) -> None:
-        self.write("crates/lash-restate/src/formats.rs", ENGINE_REGISTRY)
+        self.engine_registry()
         self.write(
             "crates/demo/src/engine.rs",
             '/// version_surface = "drain"\n'
@@ -392,7 +389,7 @@ class FormatRegistryTests(unittest.TestCase):
         self.assertEqual(self.problems(), [])
 
     def test_an_engine_row_no_surface_claims_fails(self) -> None:
-        self.write("crates/lash-restate/src/formats.rs", ENGINE_REGISTRY)
+        self.engine_registry()
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("engine format `demo.engine_wire`", problems[0])
@@ -538,15 +535,13 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual(gate.check(gate.ROOT, registry, manifest), [])
 
     def test_the_gate_names_the_constants_fig_3521_found_unregistered(self) -> None:
-        # The three surviving version constants that were in neither the registry nor the
-        # manifest before FIG-3521. Dropping their source declarations must fail the gate by
-        # name; a sweep that stopped seeing them would pass silently instead.
+        # The surviving version constant that was in neither the registry nor the
+        # manifest before FIG-3521 (the other two went with the Restate engine).
+        # Dropping its source declaration must fail the gate by name; a sweep that
+        # stopped seeing it would pass silently instead.
         missing = {
             "crates/lash-core-store/src/scope_identity.rs:"
             "SCOPE_STORAGE_PAYLOAD_VERSION",
-            "crates/lash-restate/src/controller/process_command.rs:"
-            "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION",
-            "crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_REGISTRY_FORMAT_VERSION",
         }
         registry = gate.load_registry(gate.DEFAULT_CONFIG)
         view = gate.check_version_bumps.WorktreeView(gate.ROOT)

@@ -9,9 +9,9 @@
 
 use super::cx::LocalTestCx;
 use crate::{
-    AdmittedScope, AwaitEventResolver, RecordedJournal, RecordedKeyRange, RecordedKeys,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, ScopedEffectController,
+    AdmittedScope, AwaitEventResolver, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    ScopedEffectController,
 };
 
 impl LocalTestCx {
@@ -49,17 +49,5 @@ impl RuntimeEffectController for LocalTestCx {
             local_executor.execute(envelope),
         )
         .await
-    }
-
-    async fn read_recorded_journal(
-        &self,
-        range: &RecordedKeyRange,
-    ) -> Result<RecordedJournal, RuntimeEffectControllerError> {
-        let replay_keys = self.recorded_keys_in(&range.lower, &range.upper);
-        Ok(RecordedJournal::Keys(RecordedKeys {
-            replay_keys,
-            group_keys: Vec::new(),
-            closing_outcome: None,
-        }))
     }
 }

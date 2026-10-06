@@ -796,9 +796,6 @@ impl SessionAdmin {
     }
 }
 
-#[cfg(test)]
-mod config_cancel_race_tests;
-
 fn turn_input_from_plugin_message(message: PluginMessage) -> TurnInput {
     let mut input = TurnInput::empty();
     for part in message.parts {

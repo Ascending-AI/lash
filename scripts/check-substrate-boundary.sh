@@ -17,7 +17,6 @@ set -euo pipefail
 #   lash-perf/src/runtime_perf/measurement/high_traffic.rs:440;
 #   lash-perf/src/runtime_perf/measurement/checkpoint.rs:99,363;
 #   lash-perf/src/runtime_perf/measurement/live_replay.rs:231.
-# - Engine-owned pacing: lash-restate/src/process/workflow.rs:426.
 # - Store-local retry: lash-postgres-store/src/postgres/attachments.rs:108.
 # - Other deliberately out-of-scope sites: lash/src/session.rs:983;
 #   lash-provider-openai/src/codex/ws_testing.rs:286,468;
@@ -175,7 +174,7 @@ if [[ -s "$tmp_dir/rule1.hits" ]]; then
 fi
 
 capture_search "module containment" "$containment_forbidden" "$tmp_dir/rule2.raw" \
-  crates/lash-core/src crates/lash-core-ids/src crates/lash-core-llm/src crates/lash/src crates/lash-restate/src
+  crates/lash-core/src crates/lash-core-ids/src crates/lash-core-llm/src crates/lash/src
 : >"$tmp_dir/rule2.hits"
 while IFS=: read -r file line source; do
   [[ -n "$file" ]] || continue
@@ -210,7 +209,7 @@ if [[ -s "$tmp_dir/rule2.hits" ]]; then
 fi
 
 capture_search "fallback shape" "$fallback_forbidden" "$tmp_dir/rule3.hits" \
-  crates/lash-core/src crates/lash-core-ids/src crates/lash-core-llm/src crates/lash/src crates/lash-restate/src
+  crates/lash-core/src crates/lash-core-ids/src crates/lash-core-llm/src crates/lash/src
 if [[ -s "$tmp_dir/rule3.hits" ]]; then
   cat "$tmp_dir/rule3.hits" >&2
   echo "substrate boundary rule 3 failed: removed polling or optional-port fallback shape found" >&2
@@ -248,9 +247,7 @@ capture_search "engine execution identifiers" "$engine_id_forbidden" "$tmp_dir/r
 while IFS=: read -r file line source; do
   [[ -n "$file" ]] || continue
   case "$file" in
-    crates/lash-restate/* | crates/lash-restate-test/* | \
-      examples/agent-workbench/* | \
-      runbooks/restate-postgres-workers/*)
+    examples/agent-workbench/*)
       continue
       ;;
   esac
@@ -405,10 +402,6 @@ shift_paths=(
   crates/lash-protocol-rlm/src/projection
   crates/lashlang/src
   crates/lash-lashlang-runtime/src
-  crates/lash-restate/src/controller
-  crates/lash-restate/src/process
-  crates/lash-restate/src/durable_wait.rs
-  crates/lash-restate/src/session_shifts.rs
 )
 
 shift_forbidden='tokio::(spawn|select|join|sync::|time::|task::|task_local!)|use[[:space:]]+tokio::\{[^}]*\b(spawn|select|join|sync|time|task)|futures::(future::)?join_all|(futures(_util)?::)?select_biased!|futures(_util)?::select!|(^|[^[:alnum:]_])(Instant::now|SystemTime|SystemClock|Uuid::new_v4|block_on)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])rand::|dyn[[:space:]]+([[:alnum:]_]+::)*Future[^;]{0,160}\+[[:space:]]*Send|dyn[[:space:]]+([[:alnum:]_]+::)*Future[^;+]*$|(^|[^[:alnum:]_])(HashMap|HashSet)([^[:alnum:]_]|$)|shift_sync[[:space:]]*\(|system_clock[[:space:]]*\(|journaled_nonce[[:space:]]*\(|restate_now_ms[[:space:]]*\(|ProfileMark::now|llm_stream_channel[[:space:]]*\(|(^|[^[:alnum:]_])(SendBoxFuture|JournaledStepFuture|LlmStreamEventRx)([^[:alnum:]_]|$)|task::(spawn|JoinHandle|AbortHandle|JoinError)|retry_cancel_watch[[:space:]]*\(|run_step_body_until_cancelled[[:space:]]*\('
@@ -425,10 +418,9 @@ shift_allowlist=scripts/shift-determinism-allowlist.txt
 # it runs: `RECORDED` for a call inside a recorded step's body, `FENCED` for
 # a stop-only revalidation documented in ADR 0105, or a ticket id for a call
 # the shift still makes outside any step. The scope is the session
-# shift only -- the kernel's shift modules and the Restate `SessionShifts`:
+# shift only -- the kernel's shift modules:
 #
 #   crates/lash-core/src/runtime/shift{.rs,/**}
-#   crates/lash-restate/src/session_shifts.rs
 #
 # The pattern names the methods of the traits `RuntimePersistence` composes
 # and the session store factory's opener, called as methods. It also names
@@ -440,7 +432,6 @@ shift_allowlist=scripts/shift-determinism-allowlist.txt
 shift_store_paths=(
   crates/lash-core/src/runtime/shift.rs
   crates/lash-core/src/runtime/shift
-  crates/lash-restate/src/session_shifts.rs
 )
 shift_store_methods='admit_and_bind_session|admit_at_checkpoint|admit_run|admit_session_state|authorize_turn_cancel_closure|cancel_pending_turn_input_suffix|cancel_pending_turn_inputs?|cancel_queued_work_batch|commit_runtime_state|committed_turn_exists|shift_epoch|enqueue_pending_turn_input|enqueue_queued_work(_with_outcome)?|get_session_execution_lease|list_open_queued_work|list_pending_turn_inputs|list_queued_work|list_turn_input_applications|load_pending_follow_on|load_session|load_session_at|load_session_head_meta|load_session_meta|load_turn_park|open_existing_store_by_id|open_session_command_run|pending_session_work_ordering|pending_turn_cancel_closure_pins|pending_turn_cancel_closures|queued_work_batch_completion|raise_pending_follow_on_attempts|read_session_state_version|reconcile_turn_cancel_winner|record_turn_cancel_request|record_turn_park|release_session_execution_lease|renew_session_execution_lease|retain_admission_base|settle_observer_intents|seal_shift_epoch|try_claim_session_execution_lease(_with_token)?|turn_cancel_request(_intent)?|turn_is_committed|unfinished_run|validate_turn_cancellation_binding'
 shift_store_forbidden="\\.(${shift_store_methods})[[:space:]]*(::<[^>]*>)?\\("

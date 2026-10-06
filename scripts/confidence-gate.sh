@@ -513,7 +513,6 @@ declare -A confidence_artifact_paths=(
   [sqlite_substrate_faults]="sim/sqlite-substrate-faults/sqlite-faults.json"
   [env_gated_lanes]="sim/env-gated-lanes.json"
   [full_lane_prerequisites]="sim/full-lane-prerequisites.json"
-  [restate_postgres_workers_e2e]="sim/restate-postgres-workers-e2e.json"
   [backend_contention]="sim/backend-contention/backend-contention.json"
   [postgres_current_contention]="sim/postgres-current/status.json"
   [coverage_summary]="coverage/summary.json"
@@ -550,12 +549,12 @@ confidence_schedule_table=(
   "fast:fault-matrix|provider|fault-matrix|transport properties and provider failure evidence|"
   "fast:fault-matrix|store|fault-matrix|SQLite backend fault-matrix conformance|"
   "fast:sim-unit-perf-guards|sim|sim-unit-perf-guards|simulation unit/oracle and performance-guard identity suites|"
-  "fast:sim-generated|sim|sim-generated|generated deterministic simulation lane|sim_summary,provider_transport_exclusions,env_gated_lanes,full_lane_prerequisites,restate_postgres_workers_e2e"
+  "fast:sim-generated|sim|sim-generated|generated deterministic simulation lane|sim_summary,provider_transport_exclusions,env_gated_lanes,full_lane_prerequisites"
   "fast:minimizer-fixtures|sim|minimizer-fixtures|simulation minimizer fixtures|failing_minimizer_fixtures"
   "fast:summary|all|summary|validate all unscoped fast shard summaries|"
   "sim-search|sim|sim-search|deterministic simulation search shard at full budgets|"
   "default|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_current_contention,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
-  "default|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
+  "default|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "default|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "default|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "default|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
@@ -563,7 +562,7 @@ confidence_schedule_table=(
   "default|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary,sim_search_run,provider_transport_exclusions,failing_minimizer_fixtures,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_conformance,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|store|postgres-conformance|bounded Postgres conformance and dynamic backend differential|postgres_conformance"
-  "broad|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
+  "broad|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
@@ -572,8 +571,7 @@ confidence_schedule_table=(
   "broad|all|model-replay|model replay evidence|model_replay_evidence"
   "full|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_conformance,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "full|store|postgres-conformance|full Postgres conformance and dynamic backend differential|postgres_conformance"
-  "full|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
-  "full|process|restate-workers|Restate/Postgres/S3 worker e2e|restate_postgres_workers_e2e"
+  "full|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "full|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "full|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "full|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
@@ -1123,8 +1121,6 @@ run_state_machine_and_fault_matrix() {
     step "Durable fault matrix gate selection"
     run_cargo_tests -p lash-internal-core --locked durable_fault_matrix
     step "Durable process fault-matrix evidence"
-    run_cargo_tests -p lash-sim --locked --test crash_point_matrix \
-      process_terminal_mid_journal_step
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
       a_stale_fence_writes_nothing
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
@@ -1823,71 +1819,6 @@ EOF
 EOF
 }
 
-write_restate_postgres_workers_e2e_lane_status() {
-  if [ "$lane" = "full" ]; then
-    return
-  fi
-  mkdir -p "${out_dir}/sim"
-  cat >"${out_dir}/sim/restate-postgres-workers-e2e.json" <<EOF
-{
-  "schema": "lash.confidence.restate-postgres-workers-e2e.v1",
-  "status": "not_run",
-  "lane": "${lane}",
-  "reason": "distributed Restate/Postgres/S3 worker e2e is full-lane-only",
-  "script": "scripts/restate-postgres-workers-e2e.sh",
-  "full_lane_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full"
-}
-EOF
-}
-
-run_restate_postgres_workers_e2e() {
-  if [ "$lane" != "full" ]; then
-    return
-  fi
-  step "Restate/Postgres/S3 workers e2e"
-  local artifact log_dir s3_port exit_code
-  artifact="${out_dir}/sim/restate-postgres-workers-e2e.json"
-  log_dir="${out_dir}/sim/restate-postgres-workers-e2e"
-  s3_port="${LASH_CONFIDENCE_RESTATE_WORKERS_S3_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
-  mkdir -p "$log_dir"
-  set +e
-  LASH_E2E_S3_PORT="$s3_port" \
-    bash scripts/restate-postgres-workers-e2e.sh \
-    >"${log_dir}/stdout.log" 2>"${log_dir}/stderr.log"
-  exit_code=$?
-  set -e
-  if [ "$exit_code" -eq 0 ]; then
-    cat >"$artifact" <<EOF
-{
-  "schema": "lash.confidence.restate-postgres-workers-e2e.v1",
-  "status": "passed",
-  "lane": "full",
-  "script": "scripts/restate-postgres-workers-e2e.sh",
-  "s3_port": "${s3_port}",
-  "stdout": "sim/restate-postgres-workers-e2e/stdout.log",
-  "stderr": "sim/restate-postgres-workers-e2e/stderr.log",
-  "evidence": "two Restate workers behind proxy with Postgres state, S3 (Garage) attachments, host-built worker binaries, and runner-owned end-to-end assertions"
-}
-EOF
-    return
-  fi
-  cat >"$artifact" <<EOF
-{
-  "schema": "lash.confidence.restate-postgres-workers-e2e.v1",
-  "status": "failed",
-  "lane": "full",
-  "script": "scripts/restate-postgres-workers-e2e.sh",
-  "exit_code": ${exit_code},
-  "s3_port": "${s3_port}",
-  "stdout": "sim/restate-postgres-workers-e2e/stdout.log",
-  "stderr": "sim/restate-postgres-workers-e2e/stderr.log",
-  "exact_retry_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full"
-}
-EOF
-  write_confidence_summary "failed"
-  exit "$exit_code"
-}
-
 run_broad_postgres_evidence() {
   if [ "$lane" != "broad" ]; then
     return
@@ -2465,7 +2396,7 @@ run_lash_sim_runtime_completion_mutation_evidence() {
       cargo mutants \
       -p lash-sim \
       --file crates/lash-sim/src/runner/runtime_completion.rs \
-      --re 'runtime_completion_ready|register_ready_runtime_completions|RuntimeCompletionState::next_provider_turn_ready|RuntimeCompletionState::provider_completed' \
+      --re 'runtime_completion_ready|RuntimeCompletionState::next_provider_turn_ready|RuntimeCompletionState::provider_completed' \
       --baseline run \
       --build-timeout 900 \
       --shard "$shard" \
@@ -2669,21 +2600,6 @@ mutation_evidence_path() {
   fi
 }
 
-restate_postgres_workers_e2e_status() {
-  local artifact="${out_dir}/$(artifact_path restate_postgres_workers_e2e)"
-  if [ ! -f "$artifact" ]; then
-    echo "not_written"
-  elif grep -q '"status": "passed"' "$artifact"; then
-    echo "passed"
-  elif grep -q '"status": "failed"' "$artifact"; then
-    echo "failed"
-  elif grep -q '"status": "not_run"' "$artifact"; then
-    echo "not_run"
-  else
-    echo "present_unknown"
-  fi
-}
-
 write_mutation_evidence_summary() {
   if [ "$lane" = "fast" ]; then
     return
@@ -2849,7 +2765,6 @@ write_confidence_summary() {
   "postgres_current_contention": "$(scheduled_artifact_path postgres_current_contention not_in_selected_lane_or_area)",
   "backend_contention": "$(scheduled_existing_artifact_path backend_contention not_run)",
   "model_replay_evidence": "$(scheduled_existing_artifact_path model_replay_evidence not_run)",
-  "restate_postgres_workers_e2e": "$(scheduled_existing_artifact_path restate_postgres_workers_e2e not_written)",
   "provider_transport_exclusions": "$(scheduled_existing_artifact_path provider_transport_exclusions not_written)",
   "artifact_contract": {
     "schema": "lash.confidence.summary-artifact-contract.v1",
@@ -2864,9 +2779,7 @@ write_confidence_summary() {
       "effective_mutation_scope": "$(mutation_recorded_scope)",
       "mutation_evidence": "$(mutation_evidence_path)",
       "mutation_evidence_status": "$(mutation_evidence_status)",
-      "full_mutation_status": "$(full_mutation_status)",
-      "required_restate_postgres_workers_e2e": "$(scheduled_artifact_path restate_postgres_workers_e2e not_in_selected_area)",
-      "restate_postgres_workers_e2e_status": "$(restate_postgres_workers_e2e_status)"
+      "full_mutation_status": "$(full_mutation_status)"
     },
     "bounded_broad_confidence": {
       "confidence_class": "bounded_broad",
@@ -2981,12 +2894,11 @@ if errors:
 PY
 }
 
-# The three lane declaration artifacts every lane that reaches the simulation
-# evidence writes. One list, so a fourth cannot be added to one caller only.
+# The two lane declaration artifacts every lane that reaches the simulation
+# evidence writes. One list, so a third cannot be added to one caller only.
 write_sim_lane_evidence() {
   write_sim_lane_declarations
   write_full_lane_prerequisites
-  write_restate_postgres_workers_e2e_lane_status
 }
 
 # The suites every non-sharded lane runs before its lane-specific work. Each
@@ -3185,9 +3097,6 @@ fi
 if [ "$lane" = "full" ]; then
   if area_selected store; then
     run_postgres_conformance
-  fi
-  if area_selected process; then
-    run_restate_postgres_workers_e2e
   fi
   run_mutation_full
 fi

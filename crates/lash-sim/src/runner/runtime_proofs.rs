@@ -1,5 +1,4 @@
 use super::*;
-use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 
 /// The seed of the fixed runtime proofs' server doubles.
@@ -75,208 +74,6 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
     })
 }
 
-/// The (provider kind, valid-prose-deltas-before-fault) combos exercised for the
-/// live-provider-failure oracle EVERY seed. Covers more than one provider kind
-/// and more than one fault position so `live_provider_failure_coverage` cannot
-/// pass vacuously on a single degenerate case.
-const LIVE_PROVIDER_FAILURE_COMBOS: &[(&str, usize)] = &[
-    (OPENAI_COMPATIBLE, 1),
-    (OPENAI_COMPATIBLE, 2),
-    (ANTHROPIC, 1),
-];
-
-/// Execute every live-provider-failure combo for a seed, collecting the observed
-/// facts for the per-seed coverage oracle.
-pub(super) async fn drive_live_provider_failure_turns(
-    seed: u64,
-) -> Result<Vec<LiveProviderFailureFacts>, FixedScriptRunnerError> {
-    let mut facts = Vec::with_capacity(LIVE_PROVIDER_FAILURE_COMBOS.len());
-    for (provider_kind, prose_deltas) in LIVE_PROVIDER_FAILURE_COMBOS.iter().copied() {
-        let script = live_failure_script(provider_kind, prose_deltas)
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        facts.push(
-            run_live_turn_facts(
-                seed,
-                provider_kind,
-                script,
-                "malformed_sse_chunk",
-                prose_deltas,
-            )
-            .await?,
-        );
-    }
-    Ok(facts)
-}
-
-/// Run a real `session.send().output()` against `script`, releasing its
-/// scripted-transport SSE events through a REAL `BoundaryScheduler` (the same
-/// provider-event release path generated turns use — NOT an ad-hoc index loop),
-/// and record whether the turn terminalized without committing any output.
-/// Shared by the failure driver and by the end-to-end negative test (which feeds
-/// a SUCCESS script to prove the committed-output assertion bites).
-pub(super) async fn run_live_turn_facts(
-    seed: u64,
-    provider_kind: &str,
-    script: ProviderWireScript,
-    fault_kind: &str,
-    offered_prose_deltas: usize,
-) -> Result<LiveProviderFailureFacts, FixedScriptRunnerError> {
-    let schedule = ScriptedTransportSchedule::new();
-    let transport = Arc::new(
-        ScriptedLlmHttpTransport::from_scripts([script.clone()])?
-            .with_event_schedule(schedule.clone()),
-    );
-    let (provider_handle, model, provider_kind) =
-        runtime_provider_components(provider_kind, &transport)
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let engine = crate::backend::SimEngine::new(seed).await?;
-    let core = lash::LashCore::standard_builder(engine.backend())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_llm_profile(provider_handle, model.clone())
-        .build(crate::sim_process_owner())
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session_id = SessionId::fixture(format!(
-        "sim-live-failure-{provider_kind}-{offered_prose_deltas}"
-    ));
-    let session = crate::open_created_session(model.wire_model.clone(), &core, session_id.clone())
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-
-    let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let turn_engine = engine.clone();
-    let turn_session = session.clone();
-    let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
-    let turn = tokio::spawn(async move {
-        turn_engine
-            .run_turn(
-                &turn_session,
-                "sim-live-failure-turn",
-                turn_events,
-                text_turn("Run the live provider failure turn."),
-            )
-            .await
-    });
-
-    // Schedule the provider-event releases as real boundaries and deliver them
-    // through a REAL BoundaryScheduler (seeded), exactly as generated provider
-    // turns do.
-    let turn_event = BoundaryEvent::new(
-        format!("{session_id}:provider:001"),
-        session_id.clone(),
-        BoundaryKind::Provider,
-        0,
-        "provider.chat.stream.live-failure",
-        json!({ "provider_kind": provider_kind, "turn_index": 1 }),
-    );
-    let release_boundaries = script
-        .timeline()
-        .iter()
-        .enumerate()
-        .map(|(event_index, wire_event)| {
-            provider_release_boundary(
-                &turn_event,
-                &script,
-                0,
-                event_index,
-                wire_event,
-                wire_event.at(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let mut scheduler = BoundaryScheduler::with_events(seed, release_boundaries);
-
-    // The first release gate is an explicit schedule boundary. Once the turn
-    // reports that it is blocked there, it cannot finish before delivery.
-    schedule.wait_until_blocked(0, 0).await;
-    let turn_was_live_parked = !turn.is_finished();
-
-    // Deliver each release boundary through the BoundaryScheduler and release
-    // the gate it names.
-    loop {
-        if turn.is_finished() {
-            break;
-        }
-        let Some(delivered) = scheduler.deliver_next(Value::Null) else {
-            break;
-        };
-        let event = delivered.as_event();
-        let exchange_index = event
-            .payload
-            .get("exchange_index")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
-        let event_index = event
-            .payload
-            .get("event_index")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
-        let event_name = event
-            .payload
-            .get("event_name")
-            .and_then(Value::as_str)
-            .unwrap_or("provider_event")
-            .to_string();
-        if !turn.is_finished() {
-            schedule.release(exchange_index, event_index, &event_name, event.at);
-        }
-    }
-
-    let result = turn
-        .await
-        .map_err(|err| {
-            FixedScriptRunnerError::Runtime(format!(
-                "live provider failure turn task failed to join: {err}"
-            ))
-        })??
-        .map(|output| output.result);
-
-    let streamed_prose_deltas = events.assistant_prose_delta_count().await;
-    // COMMITTED output is the durable turn result + session transcript, NOT
-    // transient stream deltas: a correct runtime may STREAM partial prose and then
-    // DISCARD it on terminal failure. We require it commit none of that prose.
-    let (terminalized_failure, committed_assistant_message_nonempty, committed_final_values) =
-        match &result {
-            Ok(turn_result) => (
-                !turn_result.is_success(),
-                turn_result
-                    .assistant_message()
-                    .is_some_and(|message| !message.is_empty()),
-                usize::from(turn_result.final_value().is_some()),
-            ),
-            Err(_) => (true, false, 0),
-        };
-    let committed_prose_in_transcript =
-        committed_transcript_contains(&session, LIVE_FAILURE_LEAK_PROSE);
-    Ok(LiveProviderFailureFacts {
-        provider_kind,
-        fault_kind: fault_kind.to_string(),
-        offered_prose_deltas,
-        streamed_prose_deltas,
-        turn_was_live_parked,
-        terminalized_failure,
-        committed_assistant_message_nonempty,
-        committed_final_values,
-        committed_prose_in_transcript,
-    })
-}
-
-/// Whether the session's COMMITTED transcript contains `needle` — used to detect
-/// partial prose leaked into durable state on a terminal failure.
-fn committed_transcript_contains(session: &lash::LashSession, needle: &str) -> bool {
-    session
-        .observe()
-        .read_view()
-        .messages()
-        .iter()
-        .any(|message| {
-            message
-                .parts
-                .iter()
-                .any(|part| part.content().contains(needle))
-        })
-}
-
 /// The proof's input prompt.
 pub(super) const PENDING_TOOL_PROMPT: &str = "use async tool";
 
@@ -322,10 +119,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
         )
         .tools(Arc::new(PendingToolProvider::new(
             key_tx,
-            crate::invariants::ToolObserver::new(
-                recorder.clone(),
-                Some(engine.restate().server().clone()),
-            ),
+            crate::invariants::ToolObserver::new(recorder.clone()),
         )) as Arc<dyn lash_core::ToolProvider>)
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -456,7 +250,6 @@ pub(crate) async fn prove_pending_tool_completion_on(
     )?;
     let session_id = result.state.session_id.clone();
     let turn_index = result.state.turn_index;
-    engine.restate().server().settle().await;
 
     Ok(PendingToolCompletionProof {
         schema: "lash.sim.pending-tool-completion-proof.v1",
@@ -819,74 +612,4 @@ pub(super) fn pending_tool_roundtrip_provider(
         })
         .build()
         .into_handle()
-}
-
-/// A sim tool that registers its await key in a shared slot the generated world
-/// can read, then returns `ToolOutcome::pending` so the calling turn parks until
-/// the scheduler resolves the key. Generalizes `PendingToolProvider` for the
-/// generated suspend sessions (Tool / DurableEffect / ExecCode).
-pub(super) struct SuspendToolProvider {
-    tool_name: String,
-    key_slot: Arc<tokio::sync::Mutex<Option<lash_core::AwaitEventKey>>>,
-    observer: crate::invariants::ToolObserver,
-}
-
-impl SuspendToolProvider {
-    pub(super) fn new(
-        tool_name: String,
-        key_slot: Arc<tokio::sync::Mutex<Option<lash_core::AwaitEventKey>>>,
-        observer: crate::invariants::ToolObserver,
-    ) -> Self {
-        Self {
-            tool_name,
-            key_slot,
-            observer,
-        }
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "this module declares the tool or payload schema and admission checks its invariant"
-    )]
-    fn definition(&self) -> lash_core::ToolDefinition {
-        lash_core::ToolDefinition::raw(
-            format!("tool:{}", self.tool_name),
-            self.tool_name.clone(),
-            "Await an externally-resolved completion.",
-            json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-            }),
-            json!({ "type": "object" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_declaration(lash_core::ToolDeclaration::deferring())
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::ToolProvider for SuspendToolProvider {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![self.definition().manifest()]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == self.tool_name).then(|| Arc::new(self.definition().contract()))
-    }
-
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() != self.tool_name {
-            return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name()))
-                .into();
-        }
-        let observed = self.observer.executed(call.context);
-        let key = match call.context.completion_key() {
-            Ok(key) => key,
-            Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
-        };
-        self.observer.registered(observed, &key);
-        *self.key_slot.lock().await = Some(key);
-        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new()).into()
-    }
 }

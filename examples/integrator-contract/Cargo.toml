@@ -12,4 +12,4 @@ doctest = false
 workspace = true
 
 [dependencies]
-lash = { workspace = true, features = ["testing", "restate"] }
+lash = { workspace = true, features = ["testing"] }

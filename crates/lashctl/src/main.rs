@@ -4,22 +4,16 @@
 // This binary reads argv and the environment on behalf of the operator.
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_execution::ClockWallTime;
 use lash_core_execution::engine::BuildGeneration;
-use lash_core_execution::store::generation_drain::GenerationDrainStatus;
 use lash_core_store::compat::DESCRIPTORS;
-use lash_core_store::store::fleet_finalize::{
-    FinalizeError, FinalizeHold, FinalizeMode, FinalizeRefusal,
-};
-use lash_core_store::store::plugin_writers::PluginWriterRegistration;
+use lash_core_store::store::fleet_finalize::FinalizeHold;
 use lash_core_store::store::{
     FLEET_WRITABLE_RANGE, StorePreflight, StoreSchemaOutcome, StoreSchemaStatus,
 };
-use lash_core_store::store::{ObligationKey, ObligationKind, StalledObligation, StoreError};
+use lash_core_store::store::{ObligationKey, StalledObligation, StoreError};
 use lash_postgres_store::{
-    FinalizeReport, MigrateError, MigrationPhase, MigrationReport, MigrationStep,
-    PostgresConnectionBudget, PostgresConnectionBudgetReport, PostgresStorage, PostgresStoreConfig,
-    PostgresStorePreflight,
+    MigrateError, MigrationPhase, MigrationReport, MigrationStep, PostgresConnectionBudget,
+    PostgresConnectionBudgetReport, PostgresStorage, PostgresStoreConfig, PostgresStorePreflight,
 };
 mod recovery;
 
@@ -29,13 +23,10 @@ use serde_json::{Value, json};
 /// version_guard(
 ///     shapes(cover(StepDto, PreflightJson)),
 ///     roots(Exit, CliError),
-///     roots(path = "crates/lash-core-store/src/store/fleet_finalize.rs", FinalizeRefusal),
 ///     roots(path = "crates/lash-postgres-store/src/postgres/migrate.rs", MigrationRefusal),
-///     roots(path = "crates/lash-restate/src/object_upgrade.rs", ObjectUpgradeError),
 ///     items(
-///         name, from, run, output, error_json, objects_preflight_result, objects_sweep_result,
-///         finalize_result, hold_result, migration_result, stalled_row, stalled_result,
-///         drain_status_result, version_result, preflight_result,
+///         name, from, run, output, error_json, hold_result, migration_result, stalled_row,
+///         stalled_result, version_result, preflight_result,
 ///     ),
 ///     shapes(
 ///         path = "crates/lash-postgres-store/src/connection_budget.rs",
@@ -46,10 +37,7 @@ use serde_json::{Value, json};
 /// format_outside_manifest = "operator CLI wire: gates a --json consumer, not state lash reopens"
 const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
 const OPERATOR_POOL_MAX: u32 = 2;
-/// The most stalled obligations `drain-status` lists per kind, first by id;
-/// `stalled_obligations` still counts every one.
-const STALLED_LISTED_PER_KIND: std::num::NonZeroUsize = std::num::NonZeroUsize::new(100).unwrap();
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> --restate-admin-url <url> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] [--plugin-registrations <json-file>] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | park list|events [--after <json>] [--limit <n>] | park redrive|cancel|fork --target <json> --park-id <n> | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery and drain commands accept --sqlite-path <database-file>) | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | end-drain <generation> | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | park list|events [--after <json>] [--limit <n>] | park redrive|cancel|fork --target <json> --park-id <n> | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> (recovery and drain commands accept --sqlite-path <database-file>) | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -58,7 +46,6 @@ enum Exit {
     Usage = 2,
     Refused = 3,
     Incompatible = 4,
-    NotYet = 5,
 }
 
 impl Exit {
@@ -69,7 +56,6 @@ impl Exit {
             Self::Usage => "usage",
             Self::Refused => "refused_precondition",
             Self::Incompatible => "incompatible_store",
-            Self::NotYet => "not_yet",
         }
     }
 }
@@ -124,47 +110,6 @@ impl CliError {
             MigrateError::Store(error) => Self::store(error),
         }
     }
-
-    /// An undrained generation is a drain still pending, exit 5; a retained
-    /// deployment or an operator hold is a refused precondition, exit 3. A
-    /// deployment registry that cannot be read fails closed.
-    fn finalize(error: FinalizeError) -> Self {
-        match error {
-            FinalizeError::Refused(refusal) => {
-                let exit = match &refusal {
-                    FinalizeRefusal::GenerationNotDrained { .. } => Exit::NotYet,
-                    _ => Exit::Refused,
-                };
-                Self::refused(exit, refusal.to_string(), &refusal)
-            }
-            FinalizeError::Registry(error) => Self::new(Exit::Unexpected, error.to_string()),
-            FinalizeError::Store(error) => Self::store(error),
-        }
-    }
-}
-
-/// Read the successor deployment's registrar-derived writer declarations.
-fn parse_plugin_registrations(bytes: &[u8]) -> Result<Vec<PluginWriterRegistration>, CliError> {
-    let registrations: Vec<PluginWriterRegistration> = serde_json::from_slice(bytes)
-        .map_err(|error| CliError::new(Exit::Usage, format!("plugin registrations: {error}")))?;
-    let mut plugins = std::collections::BTreeSet::new();
-    for registration in &registrations {
-        let writable: std::collections::BTreeSet<_> = registration.writable.iter().collect();
-        if registration.plugin.is_empty()
-            || !plugins.insert(&registration.plugin)
-            || !writable.contains(&registration.native)
-            || writable.len() != registration.writable.len()
-        {
-            return Err(CliError::new(
-                Exit::Usage,
-                format!(
-                    "invalid or duplicate plugin registration: {}",
-                    registration.plugin
-                ),
-            ));
-        }
-    }
-    Ok(registrations)
 }
 
 enum Command {
@@ -179,42 +124,15 @@ enum Command {
         generation: BuildGeneration,
         sqlite_path: Option<std::path::PathBuf>,
     },
-    DrainStatus {
-        generation: BuildGeneration,
-        /// The engine's admin API: the unfinished invocations still pinned
-        /// to the generation's deployments are read there (FIG-4454).
-        restate_admin_url: String,
-        sqlite_path: Option<std::path::PathBuf>,
-    },
     EndDrain {
         generation: BuildGeneration,
         sqlite_path: Option<std::path::PathBuf>,
     },
-    Finalize {
-        retired: BuildGeneration,
-        restate_admin_url: String,
-        mode: FinalizeMode,
-        plugin_registrations: Option<std::path::PathBuf>,
-    },
     FinalizeHold(HoldAction),
-    ObjectsPreflight {
-        restate: RestateTarget,
-    },
-    ObjectsSweep {
-        restate: RestateTarget,
-    },
     Preflight {
         budget: Option<PostgresConnectionBudget>,
     },
     Version,
-}
-
-/// The Restate server an object command reads, and calls through for a
-/// sweep, in one namespace.
-struct RestateTarget {
-    admin_url: String,
-    ingress_url: Option<String>,
-    namespace: lash_restate::RestateNamespace,
 }
 
 enum HoldAction {
@@ -229,12 +147,8 @@ impl Command {
             Self::Recovery(invocation) => invocation.command.name(),
             Self::Migrate { .. } => "migrate",
             Self::Drain { .. } => "drain",
-            Self::DrainStatus { .. } => "drain-status",
             Self::EndDrain { .. } => "end-drain",
-            Self::Finalize { .. } => "finalize",
             Self::FinalizeHold(_) => "finalize-hold",
-            Self::ObjectsPreflight { .. } => "objects-preflight",
-            Self::ObjectsSweep { .. } => "objects-sweep",
             Self::Preflight { .. } => "preflight",
             Self::Version => "version",
         }
@@ -286,7 +200,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
             }
             Command::Migrate { phase, dry_run }
         }
-        "drain" | "end-drain" | "drain-status" => {
+        "drain" | "end-drain" => {
             let (words, sqlite_path) = recovery::split_sqlite_path(rest)?;
             let Some((generation, options)) = words.split_first() else {
                 return Err(CliError::new(Exit::Usage, USAGE));
@@ -302,59 +216,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
                     generation,
                     sqlite_path,
                 },
-                ("drain-status", ["--restate-admin-url", url]) => Command::DrainStatus {
-                    generation,
-                    restate_admin_url: (*url).to_owned(),
-                    sqlite_path,
-                },
-                ("drain-status", []) => {
-                    return Err(CliError::new(
-                        Exit::Usage,
-                        "drain-status needs --restate-admin-url: undrained group children are read from the engine",
-                    ));
-                }
                 _ => return Err(CliError::new(Exit::Usage, USAGE)),
-            }
-        }
-        "finalize" if !rest.is_empty() => {
-            let retired = BuildGeneration::parse(&rest[0])
-                .map_err(|_| CliError::new(Exit::Usage, "invalid build generation"))?;
-            let mut restate_admin_url = None;
-            let mut mode = FinalizeMode::Automatic;
-            let mut plugin_registrations = None;
-            let mut index = 1;
-            while index < rest.len() {
-                match rest[index].as_str() {
-                    "--restate-admin-url"
-                        if index + 1 < rest.len() && restate_admin_url.is_none() =>
-                    {
-                        restate_admin_url = Some(rest[index + 1].clone());
-                        index += 2;
-                    }
-                    "--plugin-registrations"
-                        if index + 1 < rest.len() && plugin_registrations.is_none() =>
-                    {
-                        plugin_registrations = Some(std::path::PathBuf::from(&rest[index + 1]));
-                        index += 2;
-                    }
-                    "--override-hold" if mode == FinalizeMode::Automatic => {
-                        mode = FinalizeMode::OverrideHold;
-                        index += 1;
-                    }
-                    _ => return Err(CliError::new(Exit::Usage, USAGE)),
-                }
-            }
-            let restate_admin_url = restate_admin_url.ok_or_else(|| {
-                CliError::new(
-                    Exit::Usage,
-                    "finalize needs --restate-admin-url: retirement is read from the engine's deployments",
-                )
-            })?;
-            Command::Finalize {
-                retired,
-                restate_admin_url,
-                mode,
-                plugin_registrations,
             }
         }
         "finalize-hold" => match rest.iter().map(String::as_str).collect::<Vec<_>>()[..] {
@@ -367,14 +229,6 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
             }
             _ => return Err(CliError::new(Exit::Usage, USAGE)),
         },
-        "objects-preflight" | "objects-sweep" => {
-            let restate = parse_restate_target(rest, verb == "objects-sweep")?;
-            if verb == "objects-sweep" {
-                Command::ObjectsSweep { restate }
-            } else {
-                Command::ObjectsPreflight { restate }
-            }
-        }
         "preflight" => Command::Preflight {
             budget: parse_connection_budget(rest)?,
         },
@@ -428,118 +282,6 @@ fn parse_connection_budget(rest: &[String]) -> Result<Option<PostgresConnectionB
         .peak_connections()
         .map_err(|error| CliError::new(Exit::Usage, error.to_string()))?;
     Ok(Some(budget))
-}
-
-/// `--restate-admin-url <url> [--restate-ingress-url <url>] [--namespace <ns>]`;
-/// a sweep calls `upgrade` through ingress, so it needs the ingress URL.
-fn parse_restate_target(rest: &[String], sweep: bool) -> Result<RestateTarget, CliError> {
-    let mut admin_url = None;
-    let mut ingress_url = None;
-    let mut namespace = None;
-    let mut index = 0;
-    while index + 1 < rest.len() {
-        let value = rest[index + 1].clone();
-        let slot = match rest[index].as_str() {
-            "--restate-admin-url" => &mut admin_url,
-            "--restate-ingress-url" if sweep => &mut ingress_url,
-            "--namespace" => &mut namespace,
-            _ => return Err(CliError::new(Exit::Usage, USAGE)),
-        };
-        if slot.replace(value).is_some() {
-            return Err(CliError::new(Exit::Usage, USAGE));
-        }
-        index += 2;
-    }
-    if index != rest.len() {
-        return Err(CliError::new(Exit::Usage, USAGE));
-    }
-    let admin_url = admin_url.ok_or_else(|| {
-        CliError::new(
-            Exit::Usage,
-            "object commands need --restate-admin-url: objects are read from the engine's state",
-        )
-    })?;
-    if sweep && ingress_url.is_none() {
-        return Err(CliError::new(
-            Exit::Usage,
-            "objects-sweep needs --restate-ingress-url: each object's `upgrade` handler is called there",
-        ));
-    }
-    let namespace = lash_restate::RestateNamespace::new(namespace.unwrap_or_default())
-        .map_err(|error| CliError::new(Exit::Usage, format!("--namespace: {error}")))?;
-    Ok(RestateTarget {
-        admin_url,
-        ingress_url,
-        namespace,
-    })
-}
-
-impl RestateTarget {
-    fn target(&self) -> lash_restate::RestateObjectUpgradeTarget {
-        let admin = lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(
-            self.admin_url.clone(),
-        ));
-        match &self.ingress_url {
-            Some(ingress_url) => lash_restate::RestateObjectUpgradeTarget::new(
-                admin,
-                lash_restate::RestateIngressClient::new(lash_restate::RestateConnection::new(
-                    ingress_url.clone(),
-                )),
-                self.namespace.clone(),
-            ),
-            None => {
-                lash_restate::RestateObjectUpgradeTarget::read_only(admin, self.namespace.clone())
-            }
-        }
-    }
-}
-
-impl CliError {
-    /// Before finalize the sweep is a refused precondition, exit 3; an
-    /// object whose `_compat` refuses this build is an incompatible store,
-    /// exit 4; an engine that cannot be read or called fails, exit 1.
-    fn objects(error: lash_restate::ObjectUpgradeError) -> Self {
-        let exit = match &error {
-            lash_restate::ObjectUpgradeError::NotFinalized { .. } => Exit::Refused,
-            lash_restate::ObjectUpgradeError::Incompatible { .. } => Exit::Incompatible,
-            lash_restate::ObjectUpgradeError::Engine { .. } => Exit::Unexpected,
-        };
-        match &error {
-            lash_restate::ObjectUpgradeError::Engine { .. } => Self::new(exit, error.to_string()),
-            _ => Self::refused(exit, error.to_string(), &error),
-        }
-    }
-}
-
-fn objects_preflight_result(preflight: &lash_restate::ObjectPreflight) -> Value {
-    json!({
-        "upgraded": preflight.upgraded(),
-        "families": preflight.families.iter().map(|family| json!({
-            "service": family.service,
-            "component": family.component,
-            "newest": family.newest,
-            "objects": family.objects,
-            "pending": family.pending.iter().map(|pending| json!({
-                "key": pending.key,
-                "format": pending.format,
-            })).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>(),
-    })
-}
-
-fn objects_sweep_result(report: &lash_restate::SweepReport) -> Value {
-    json!({
-        "swept": report.swept.iter().map(|object| json!({
-            "service": object.service,
-            "key": object.key,
-            "outcome": object.outcome,
-        })).collect::<Vec<_>>(),
-        "remaining": report.remaining.iter().map(|pending| json!({
-            "service": pending.service,
-            "key": pending.key,
-            "format": pending.format,
-        })).collect::<Vec<_>>(),
-    })
 }
 
 /// `preflight`'s result body: the facade's typed schema report, with the
@@ -597,15 +339,6 @@ impl<'a> From<&'a MigrationStep> for StepDto<'a> {
             backfill_rows: step.backfill_rows,
         }
     }
-}
-
-fn finalize_result(report: &FinalizeReport) -> Value {
-    json!({
-        "retired_generation": report.drain.generation.as_str(),
-        "flip": report.flip,
-        "fleet_format": report.flip.fleet(),
-        "backfills": report.backfills.iter().map(StepDto::from).collect::<Vec<_>>(),
-    })
 }
 
 fn hold_result(hold: Option<&FinalizeHold>) -> Value {
@@ -675,22 +408,6 @@ fn stalled_result(stalled: &StalledObligation) -> Value {
     })
 }
 
-fn drain_status_result(status: &GenerationDrainStatus, stalled: &[StalledObligation]) -> Value {
-    json!({
-        "generation": status.generation.as_str(),
-        "draining_since_ms": status.draining_since_ms,
-        "live_processes": status.live_processes,
-        "parked_processes": status.parked_processes,
-        "parked_turns": status.parked_turns,
-        "in_flight_turns": status.in_flight_turns,
-        "closing_sessions": status.closing_sessions,
-        "stalled_obligations": status.stalled_obligations.iter().map(|(kind, count)| (kind.label(), *count)).collect::<std::collections::BTreeMap<_, _>>(),
-        "stalled": stalled.iter().map(stalled_result).collect::<Vec<_>>(),
-        "drained": status.drained(),
-        "checked_at_ms": status.checked_at,
-    })
-}
-
 fn version_result(fleet_generations: &[(BuildGeneration, bool)]) -> Value {
     json!({
         "release": env!("CARGO_PKG_VERSION"),
@@ -707,7 +424,6 @@ fn version_result(fleet_generations: &[(BuildGeneration, bool)]) -> Value {
         })).collect::<Vec<_>>(),
         "wires": {
             "remote_protocol": lash_remote_protocol::REMOTE_PROTOCOL,
-            "restate": lash_restate::RESTATE_WIRE,
         },
     })
 }
@@ -724,28 +440,6 @@ fn database_url() -> Result<String, CliError> {
 async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
     let outcome = match command {
         Command::Recovery(invocation) => (invocation.run().await?, Exit::Done),
-        Command::ObjectsPreflight { restate } => {
-            let preflight = lash_restate::preflight_objects(&restate.target())
-                .await
-                .map_err(CliError::objects)?;
-            let exit = if preflight.upgraded() {
-                Exit::Done
-            } else {
-                Exit::NotYet
-            };
-            (objects_preflight_result(&preflight), exit)
-        }
-        Command::ObjectsSweep { restate } => {
-            let report = lash_restate::sweep_objects(&restate.target(), |_| {})
-                .await
-                .map_err(CliError::objects)?;
-            let exit = if report.remaining.is_empty() {
-                Exit::Done
-            } else {
-                Exit::NotYet
-            };
-            (objects_sweep_result(&report), exit)
-        }
         Command::Version => {
             let storage = PostgresStorage::connect_with(
                 &database_url()?,
@@ -768,48 +462,6 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             }
             .map_err(CliError::migrate)?;
             (migration_result(&report, *dry_run), Exit::Done)
-        }
-        Command::Finalize {
-            retired,
-            restate_admin_url,
-            mode,
-            plugin_registrations,
-        } => {
-            let registrations = plugin_registrations
-                .as_ref()
-                .map(|path| {
-                    let bytes = std::fs::read(path).map_err(|error| {
-                        CliError::new(Exit::Usage, format!("read {}: {error}", path.display()))
-                    })?;
-                    parse_plugin_registrations(&bytes)
-                })
-                .transpose()?
-                .unwrap_or_default();
-            let storage = PostgresStorage::connect_with(
-                &database_url()?,
-                PostgresStoreConfig {
-                    max_connections: OPERATOR_POOL_MAX,
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(CliError::store)?;
-            let registry = lash_restate::RestateDeploymentRegistry::new(
-                lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(
-                    restate_admin_url.clone(),
-                )),
-            );
-            let report = storage
-                .finalize(
-                    retired,
-                    &registry,
-                    *mode,
-                    &registrations,
-                    lash_core_execution::facade_support::SystemClock.timestamp_ms(),
-                )
-                .await
-                .map_err(CliError::finalize)?;
-            (finalize_result(&report), Exit::Done)
         }
         Command::FinalizeHold(action) => {
             let storage = PostgresStorage::connect_with(
@@ -888,7 +540,7 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             // The same drain a core runs: the mark, then the hand-over that
             // wakes turns parked on durable waits (FIG-5059).
             let stores = recovery::open_stores(sqlite_path.as_deref()).await?;
-            let backend = recovery::restate_backend(stores)?;
+            let backend = recovery::durable_backend(stores)?;
             let changed = lash::drain_generation(&backend, generation)
                 .await
                 .map_err(|error| match error {
@@ -914,48 +566,6 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
                 json!({"generation":generation.as_str(),"cleared":changed}),
                 Exit::Done,
             )
-        }
-        Command::DrainStatus {
-            generation,
-            restate_admin_url,
-            sqlite_path,
-        } => {
-            let stores = recovery::open_stores(sqlite_path.as_deref()).await?;
-            let registry = lash_restate::RestateDeploymentRegistry::new(
-                lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(
-                    restate_admin_url.clone(),
-                )),
-            );
-            let status = GenerationDrainStatus::collect(
-                stores.generation_drain().as_ref(),
-                stores.session_delete_ledger().as_ref(),
-                |kind| stores.obligation_ledger(kind),
-                &registry,
-                generation,
-                lash_core_execution::facade_support::SystemClock.timestamp_ms(),
-            )
-            .await
-            .map_err(CliError::store)?;
-            // Stalled obligations never hold the drain, so each is
-            // listed for the operator to settle before retirement.
-            let mut stalled = Vec::new();
-            for kind in ObligationKind::ALL {
-                if status.stalled_obligations.get(&kind).copied().unwrap_or(0) > 0 {
-                    stalled.extend(
-                        stores
-                            .obligation_ledger(kind)
-                            .list_stalled(None, STALLED_LISTED_PER_KIND)
-                            .await
-                            .map_err(CliError::store)?,
-                    );
-                }
-            }
-            let exit = if status.drained() {
-                Exit::Done
-            } else {
-                Exit::NotYet
-            };
-            (drain_status_result(&status, &stalled), exit)
         }
     };
     Ok(outcome)
@@ -1015,15 +625,6 @@ async fn main() -> std::process::ExitCode {
                 Ok((result, status)) => {
                     let status_error = match status {
                         Exit::Done => None,
-                        Exit::NotYet => Some(CliError::new(
-                            status,
-                            match invocation.command {
-                                Command::ObjectsPreflight { .. } | Command::ObjectsSweep { .. } => {
-                                    "objects remain at an older family format"
-                                }
-                                _ => "the generation is not yet drained",
-                            },
-                        )),
                         Exit::Incompatible => Some(CliError::new(
                             status,
                             "the store schema is incompatible with this build",
@@ -1214,89 +815,10 @@ mod tests {
     }
 
     #[test]
-    fn finalize_rejects_invalid_successor_registrations_before_opening_storage() {
-        for input in [
-            r#"[{"plugin":"counter","native":0,"writable":[1]}]"#,
-            r#"[{"plugin":"counter","native":2,"writable":[1]}]"#,
-            r#"[{"plugin":"counter","native":1,"writable":[1,1]}]"#,
-            r#"[{"plugin":"","native":1,"writable":[1]}]"#,
-            r#"[{"plugin":"counter","native":1,"writable":[1]},{"plugin":"counter","native":2,"writable":[1,2]}]"#,
-        ] {
-            let error =
-                parse_plugin_registrations(input.as_bytes()).expect_err("refused registration");
-            assert_eq!(error.exit as u8, Exit::Usage as u8);
-        }
-    }
-
-    #[test]
-    fn finalize_names_its_retired_generation_the_engine_and_the_hold_override() {
-        let parsed = parse(words(&[
-            "finalize",
-            "0123456789ab",
-            "--restate-admin-url",
-            "http://admin",
-            "--override-hold",
-        ]))
-        .unwrap_or_else(|error| panic!("{}", error.message));
-        match parsed.command {
-            Command::Finalize {
-                retired,
-                restate_admin_url,
-                mode,
-                ..
-            } => {
-                assert_eq!(retired.as_str(), "0123456789ab");
-                assert_eq!(restate_admin_url, "http://admin");
-                assert_eq!(mode, FinalizeMode::OverrideHold);
-            }
-            _ => panic!("finalize parses to Finalize"),
-        }
-        let automatic = parse(words(&[
-            "finalize",
-            "0123456789ab",
-            "--restate-admin-url",
-            "http://admin",
-        ]))
-        .unwrap_or_else(|error| panic!("{}", error.message));
-        assert!(matches!(
-            automatic.command,
-            Command::Finalize {
-                mode: FinalizeMode::Automatic,
-                ..
-            }
-        ));
-        for refused in [
-            words(&["finalize"]),
-            words(&["finalize", "0123456789ab"]),
-            words(&["finalize", "0123456789ab", "--restate-admin-url"]),
-            words(&[
-                "finalize",
-                "0123456789ab",
-                "--restate-admin-url",
-                "a",
-                "--restate-admin-url",
-                "b",
-            ]),
-            words(&["finalize-hold"]),
-            words(&["finalize-hold", "set", "--reason"]),
-            words(&["finalize-hold", "clear", "now"]),
-        ] {
-            let Err(error) = parse(refused.clone()) else {
-                panic!("{refused:?} must be a usage error");
-            };
-            assert_eq!(error.exit as u8, 2, "{refused:?}");
-        }
-        assert!(matches!(
-            parse(words(&["finalize-hold", "set", "--reason", "watch"]))
-                .unwrap_or_else(|error| panic!("{}", error.message))
-                .command,
-            Command::FinalizeHold(HoldAction::Set { reason }) if reason == "watch"
-        ));
-    }
-
-    #[test]
     fn a_stalled_obligation_lists_its_identity_and_typed_reason() {
-        use lash_core_store::store::{KeyColumn, ObligationId, StallReason, UndecodableObligation};
+        use lash_core_store::store::{
+            KeyColumn, ObligationId, ObligationKind, StallReason, UndecodableObligation,
+        };
 
         let decoded = StalledObligation {
             kind: ObligationKind::ControlIntent,

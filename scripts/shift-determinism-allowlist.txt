@@ -33,17 +33,6 @@ crates/lash-lashlang-runtime/src/lib.rs  |  ) -> lash_sansio::future::SendBoxFut
 crates/lash-lashlang-runtime/src/process.rs  |  lash_sansio::future::SendBoxFuture<'a, Result<lashlang::AbilityOutcome, ExecutionHostError>>;  |  1  # RECORDED SB3 ability-call reply box; the reply arrives through the journaled ability protocol
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  ) -> lash_sansio::future::SendBoxFuture<'a, Result<(), ExecutionHostError>> {  |  1  # RECORDED SB-pure collect_printed_images_inner recursion box; the images it resolves ride the journaled print output
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  lash_sansio::future::SendBoxFuture<'a, Result<AbilityOutcome, ExecutionHostError>>;  |  1  # RECORDED SB2 host-ability reply box; the reply arrives through the journaled ability protocol
-crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::JournaledStepFuture<  |  1  # RECORDED SB30 boxed ctx.run step body; the journal keeps its output
-crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::JournaledStepFuture<'run, JournaledEffectRecord>,  |  1  # RECORDED SB30 boxed ctx.run step body; the journal keeps its output
-crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::JournaledStepFuture<'run, RecordedRuntimeEffect>,  |  1  # RECORDED SB30 boxed ctx.run step body; the journal keeps its output
-crates/lash-restate/src/process/admission.rs  |  nonce: crate::journaled_nonce(),  |  1  # RECORDED minted inside the journaled ADMIT_STEP; deliberately unreproducible (ADR 0110)
-crates/lash-restate/src/process/admission.rs  |  started.started_at_ms = super::restate_now_ms();  |  1  # RECORDED stamped inside the journaled START_STEP
-crates/lash-restate/src/process/admission.rs  |  started_at_ms: super::restate_now_ms(),  |  1  # RECORDED stamped inside the journaled START_STEP
-crates/lash-restate/src/process/mod.rs  |  crate::system_clock().timestamp_ms()  |  1  # RECORDED restate_now_ms seam body; every caller is a journaled step or out-of-workflow evidence
-crates/lash-restate/src/process/mod.rs  |  fn restate_now_ms() -> u64 {  |  1  # RECORDED seam; every caller is a journaled step or out-of-workflow evidence
-crates/lash-restate/src/process/park_reconcile.rs  |  epoch_ms: super::restate_now_ms(),  |  1  # BENIGN out-of-workflow park reconciler evidence stamp; no workflow decision reads it
-crates/lash-restate/src/process/workflow.rs  |  epoch_ms: restate_now_ms(),  |  1  # RECORDED stamped inside the journaled COMPLETE_STEP
-crates/lash-restate/src/process/workflow.rs  |  restate_now_ms(),  |  1  # RECORDED stamped inside the journaled PARENT_END_STEP
 crates/lashlang/src/runtime/vm/control.rs  |  .map(|_| (instruction.profile_tag(), ProfileMark::now()));  |  1  # BENIGN profiler mark; feeds observe_profile only, no replayed decision
 crates/lashlang/src/runtime/vm/mod.rs  |  let start = self.profile.as_ref().map(|_| ProfileMark::now());  |  1  # BENIGN profiler mark; feeds observe_profile only, no replayed decision
 crates/lashlang/src/runtime/instance/step.rs  |  type RunFuture = Pin<Box<dyn Future<Output = (RunEnd, Option<State>)> + Send>>;  |  1  # BENIGN the VM's own run, polled by the stepper with a no-op waker; it suspends only on a request the host answers, so no race or clock decides anything
@@ -62,4 +51,3 @@ crates/lash-core-execution/src/tool_dispatch/singleton_run.rs  |  Box<dyn std::f
 crates/lash-core-execution/src/tool_dispatch/singleton_run.rs  |  Box<dyn std::future::Future<Output = Result<RunStartPrepared, String>> + Send + 'run>,  |  1  # RECORDED the boxed start:prepare run body; its journaled run keeps the launch and discharge events
 crates/lash-core/src/runtime/turn_driver/machine.rs  |  dyn std::future::Future<Output = Result<(crate::MessageSequence, usize), RuntimeError>>  |  1  # BENIGN boxes the driver's own effect loop to bound the Send proof; the same future runs unchanged, with no race or clock
 crates/lashlang/src/runtime/vm/effects.rs  |  Box<dyn std::future::Future<Output = Result<Awaited<Value>, RuntimeError>> + Send + 'vm>,  |  1  # BENIGN recursion box for the VM's own handle traversal; every value it awaits arrives through the host's journaled effects
-crates/lash-restate/src/process/admission.rs  |  dyn std::future::Future<  |  1  # RECORDED plugin admission answer awaited only inside the journaled START_STEP

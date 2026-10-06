@@ -22,22 +22,22 @@ class CargoBinEnvTests(unittest.TestCase):
 
     def test_test_emits_only_enabled_binary_dependencies(self):
         metadata = sync.metadata()
-        for features in ([], ["rlm"], ["testing"], ["rlm", "testing", "restate", "sqlite"]):
+        for features in ([], ["testing"], ["synthetic-next", "testing"]):
             with self.subTest(features=features):
                 graph = generator.FeatureLaneGraph(metadata, {}, {})
                 resolved = feature_variants.resolve_request(
-                    graph.workspace, "lash-runtime", default_features=False,
+                    graph.workspace, "lash-internal-vm-worker", default_features=False,
                     requested=features, with_dev=True,
                 )
                 resolution = resolved.sorted_features()
                 # `FeatureLaneGraph.build` records each command's activations
                 # before it emits the command's targets.
                 graph.record_activations(resolved)
-                target = next(target for target in graph.by_name["lash-runtime"]["targets"]
-                              if target["name"] == "seam_proof_dialect")
-                label = graph.emit_target("lash-runtime", resolution, target, "test", True, [])
-                text = "".join(chunk for _, chunk in graph.chunks["lash-runtime"])
-                outputs = {generator.ROOT / "crates/lash/BUCK": text}
+                target = next(target for target in graph.by_name["lash-internal-vm-worker"]["targets"]
+                              if target["name"] == "pool_laws")
+                label = graph.emit_target("lash-internal-vm-worker", resolution, target, "test", True, [])
+                text = "".join(chunk for _, chunk in graph.chunks["lash-internal-vm-worker"])
+                outputs = {generator.ROOT / "crates/lash-vm-worker/BUCK": text}
                 self.assertEqual(generator.reconcile_cargo_bin_env(outputs), [])
                 rules = {}
                 for node in ast.parse(text).body:
@@ -46,10 +46,10 @@ class CargoBinEnvTests(unittest.TestCase):
                     rules[args["name"]] = args
                 test = rules[label.split(":")[1]]
                 env = test.get("rustc_env", {})
-                enabled = {"rlm", "testing"} <= set(resolution["lash-runtime"])
-                self.assertEqual("CARGO_BIN_EXE_lash-seam-proof-worker" in env, enabled)
+                enabled = "testing" in set(resolution["lash-internal-vm-worker"])
+                self.assertEqual("CARGO_BIN_EXE_lash-vm-worker-fixture" in env, enabled)
                 if enabled:
-                    label = env["CARGO_BIN_EXE_lash-seam-proof-worker"].removeprefix("$(location :").removesuffix(")")
+                    label = env["CARGO_BIN_EXE_lash-vm-worker-fixture"].removeprefix("$(location :").removesuffix(")")
                     self.assertIn(":" + label, test["extra_compile_data"])
                     self.assertEqual(rules[label]["crate_features"], test["crate_features"])
                     self.assertTrue(label.endswith(test["name"].split("__fv_")[1]))

@@ -3,8 +3,6 @@
 
 mod distribution;
 mod generator;
-#[cfg(test)]
-mod load_turn_tests;
 mod payload;
 mod provider;
 mod schema;

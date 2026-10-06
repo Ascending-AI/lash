@@ -83,12 +83,6 @@ pub use lash_protocol_rlm::{
     NATIVE_TRANSPORT_VERSION, RLM_DRIVER_STATE_VERSION, RLM_PROTOCOL_EVENT_VERSION,
     RLM_SNAPSHOT_VERSION,
 };
-#[cfg(feature = "restate")]
-pub use lash_restate::{
-    DURABLE_WAIT_REGISTRY_FORMAT_VERSION, EFFECT_JOURNAL_VERSION, JOURNAL_LOGIC_EPOCH,
-    LASH_SESSION_SHIFT_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION,
-    PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION, RESTATE_PROCESS_JOURNAL_VERSION, RESTATE_WIRE_VERSION,
-};
 pub use lash_sansio::{LASHLANG_SEMANTIC_HASH_VERSION, TURN_CHECKPOINT_SCHEMA_VERSION};
 #[cfg(feature = "rlm")]
 pub use lashlang::{
@@ -562,16 +556,7 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
         .chain(engine_durable_formats())
 }
 
-/// The durable-format rows this build's effect engine registers
-/// (ADR 0104 §2): the `restate` module is the engine's registry, and a
-/// build that links no engine lists no engine formats.
-#[cfg(feature = "restate")]
-fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
-    crate::restate::durable_format_entries()
-}
-
 /// A build with no effect engine registers no engine formats.
-#[cfg(not(feature = "restate"))]
 fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
     std::iter::empty()
 }
@@ -619,16 +604,8 @@ pub fn composed_generation(composition: &PluginComposition) -> BuildGeneration {
     )
 }
 
-/// The epoch input to [`composed_generation`]: the Restate journal handlers'
-/// logic epoch when this build carries them, absent when it does not — a
-/// no-Restate build serves no journals and its `G` says so.
-#[cfg(feature = "restate")]
-fn journal_logic_epoch() -> Option<u32> {
-    Some(JOURNAL_LOGIC_EPOCH)
-}
-
-/// See [`journal_logic_epoch`].
-#[cfg(not(feature = "restate"))]
+/// The epoch input to [`composed_generation`]: absent, since this build
+/// serves no journals.
 fn journal_logic_epoch() -> Option<u32> {
     None
 }
@@ -702,10 +679,6 @@ pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
 mod tests {
     use super::*;
     use lash_core::plugin::{BehaviorRevision, PluginDeclaration};
-
-    #[cfg(feature = "restate")]
-    #[path = "plugin_transition_generation.rs"]
-    mod plugin_transition_generation;
 
     /// The composition of no plugins.
     fn bare() -> PluginComposition {

@@ -101,11 +101,6 @@ impl AppState {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn messages_snapshot(&self) -> Vec<ChatMessage> {
-        self.messages.lock_recover().clone()
-    }
-
     pub(crate) fn trace(&self, name: &str, payload: Value) {
         self.trace_for_session(&self.current_session_id(), name, payload);
     }
@@ -206,168 +201,6 @@ impl AppState {
         );
     }
 
-    pub(crate) fn publish_trigger_dispatch_done(&self, session_id: &SessionId, operation_id: &str) {
-        if self.active_turns.for_session(session_id).is_none() {
-            self.publish_for_session_identified(
-                session_id,
-                format!("operation:{operation_id}:done"),
-                StreamItem::Done {
-                    turn_id: None,
-                    outcome: TurnDoneOutcome::Completed,
-                },
-            );
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn track_turn(&self, session_id: &SessionId, turn_id: &TurnId) {
-        self.active_turns
-            .insert(session_id, turn_id, WorkbenchTurnKind::User);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn track_turn_prompt(
-        &self,
-        session_id: &SessionId,
-        turn_id: &TurnId,
-        prompt: String,
-        attachment_id: Option<String>,
-    ) {
-        self.active_turns.insert_with_prompt(
-            session_id,
-            turn_id,
-            WorkbenchTurnKind::User,
-            Some(prompt),
-            attachment_id,
-        );
-    }
-
-    /// Both halves live in one place, but only the runtime delete decides the
-    /// session fence: it durably retires the id, then the retention lever
-    /// reclaims globally-owned process rows the delete deliberately only
-    /// detaches. Cleanup failures and a delete Lash still owes are retryable.
-    /// The workflow deliberately replays this idempotent delete before
-    /// retrying retention so its Restate journal command sequence remains stable.
-    pub(crate) async fn delete_session_and_reclaim_processes(
-        &self,
-        context: lash::SessionDeleteContext<'_>,
-    ) -> Result<lash::process::ProcessPruneReport, AppError> {
-        let session_id = context.session_id().clone();
-        let deletion = lash::LashCore::delete_session(context)
-            .await
-            // Audited: delete_session lowers component and factory failures to non-tombstone EmbedError variants.
-            .map_err(AppError::internal)?;
-        let report = physically_deleted(&session_id, deletion)?;
-        #[cfg(test)]
-        if let Some(turn_id) = SESSION_DELETE_RETENTION_FAULTS
-            .lock_recover()
-            .remove(&session_id)
-        {
-            // Model a turn appearing after the first attempt's journaled
-            // snapshot, then fail retention once. A correct redrive reuses the
-            // snapshot instead of turning this post-tombstone retry terminal.
-            self.active_turns.insert(
-                &session_id,
-                TurnId::fixture(&turn_id),
-                WorkbenchTurnKind::User,
-            );
-            return Err(AppError::retryable_internal(
-                "injected post-tombstone process-retention failure",
-            ));
-        }
-        let retention = self
-            .prune_processes_originated_by(&session_id)
-            .await
-            .map_err(AppError::retryable_internal)?;
-        self.trace_for_session(
-            &session_id,
-            "reset.restate.session_deleted",
-            json!({
-                "session_id": session_id,
-                "report": report,
-                "process_retention": {
-                    "pruned_processes": retention.pruned_processes,
-                    "pruned_events": retention.pruned_events,
-                    "pruned_trigger_deliveries": retention.pruned_trigger_deliveries,
-                },
-            }),
-        );
-        Ok(retention)
-    }
-
-    /// Reclaim the terminal process rows `session_id` originated, as the
-    /// retention half of deleting that session.
-    ///
-    /// Deleting a session deliberately detaches rather than deletes its process
-    /// state: rows in the process registry are runtime-global and record the
-    /// creating session only as provenance, so the delete discards the wakes
-    /// aimed at the session and drops its observer edges while leaving the rows
-    /// themselves. Reclaiming them is this separate host lever, and a host that
-    /// never pulls it accumulates every deleted session's finished work in the
-    /// runtime-wide registry the work rail reads.
-    ///
-    /// Two choices this workbench has to make explicitly:
-    ///
-    /// * No age bound. Retention normally protects rows a late
-    ///   `await_terminal` could still replay, and age is the host's proxy for
-    ///   "nobody is coming back for this". Here the bound is identity, not age:
-    ///   the originating session is gone, its awaits were revoked before the
-    ///   delete, and its observer edges no longer exist, so every one of its
-    ///   terminal rows is eligible the moment the delete commits. A `now`
-    ///   cutoff would express the same set while also needing a wall-clock read
-    ///   inside a durable workflow handler.
-    /// * [`ProjectionWatermark::NoProjector`](lash::process::ProjectionWatermark::NoProjector).
-    ///   The workbench installs a best-effort
-    ///   [`ProcessEventSink`](lash::process::ProcessEventSink) that pushes
-    ///   events straight to the UI stream for freshness (ADR 0017), and reads
-    ///   the registry live for every rail render. It never folds the process
-    ///   change feed into a store of its own, so it holds no acknowledged
-    ///   cursor and has no unprojected history for a watermark to protect.
-    ///
-    /// Live processes are untouched by construction: the lever only ever
-    /// deletes terminal rows, and processes this session started that are still
-    /// running deliberately outlive it as global work. This is one reclamation
-    /// at delete time, not a standing sweep, so work that was live at the delete
-    /// and terminates afterwards stays observable on the rail — the property the
-    /// `workbench-process-lifecycle` runbook judges.
-    pub(crate) async fn prune_processes_originated_by(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<lash::process::ProcessPruneReport, lash::EmbedError> {
-        self.core
-            .processes()
-            .prune(
-                u64::MAX,
-                Some(&lash::process::ProcessListFilter {
-                    status: lash::process::ProcessStatusFilter::Any,
-                    originator: Some(lash::process::ProcessOriginatorFilter::session(
-                        session_id.clone(),
-                    )),
-                    ..lash::process::ProcessListFilter::default()
-                }),
-                lash::process::ProjectionWatermark::NoProjector,
-            )
-            .await
-        // Audited: process retention reads and writes the global registry and never consults a session tombstone.
-    }
-
-    /// Fan out exact-address cooperative cancellation to the active turns the
-    /// UI submitted for `session_id`.
-    #[cfg(test)]
-    pub(crate) async fn cancel_turns_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<TurnCancelReceipt>, AppError> {
-        let driver = self.core.turn_work_driver();
-        self.cancel_turns_for_session_with_driver(
-            session_id,
-            &driver,
-            WorkbenchTurnCancelMode::Abort,
-            TURN_TERMINAL_ATTACH_TIMEOUT,
-        )
-        .await
-    }
-
     pub(crate) async fn cancel_turns_for_session_with_driver(
         &self,
         session_id: &SessionId,
@@ -443,28 +276,12 @@ impl AppState {
                     address: address.clone(),
                 },
             };
-            // A pending terminal keeps the claim while the run still runs (its
-            // follower releases it); a claim with no running run is pruned.
+            // A pending terminal keeps the claim: the run's follower releases
+            // it once the run settles. The engine liveness probe that pruned a
+            // claim with no running run went with Restate (FIG-5190); I0
+            // (FIG-5194) names the durable engine's.
             let routing_retained = if receipt.terminal_is_pending() {
-                match self.lash_turn_is_active(&address).await {
-                    Ok(true) => true,
-                    Ok(false) => {
-                        self.active_turns.remove(&run.session_id, &run.turn_id);
-                        false
-                    }
-                    Err(err) => {
-                        self.trace_for_session(
-                            &address.session_id,
-                            "turn.cancel_liveness_unknown",
-                            json!({
-                                "session_id": address.session_id,
-                                "turn_id": address.turn_id,
-                                "error": err.to_string(),
-                            }),
-                        );
-                        true
-                    }
-                }
+                true
             } else {
                 self.active_turns.remove(&run.session_id, &run.turn_id);
                 false
@@ -493,32 +310,6 @@ impl AppState {
             receipts.push(receipt);
         }
         Ok(receipts)
-    }
-
-    /// Whether Restate still reports the run's `LashTurn` invocation (the one
-    /// lash's engine runs it in, keyed by its recorded shift admission) as running.
-    pub(crate) async fn lash_turn_is_active(
-        &self,
-        address: &lash::TurnAddress,
-    ) -> AnyhowResult<bool> {
-        let admin =
-            lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::with_client(
-                self.restate_admin_url.clone(),
-                self.restate_http.clone(),
-            ));
-        let Some(key) = lash::restate::recorded_turn_invocation_key(
-            self.core.backend().session_store_factory().as_ref(),
-            &address.session_id,
-            &address.turn_id,
-        )
-        .await?
-        else {
-            return Ok(false);
-        };
-        Ok(admin
-            .workflow_invocation_status("LashTurn", &key, "run")
-            .await?
-            .is_some_and(|status| status.is_still_active()))
     }
 
     pub(crate) fn push_message(
@@ -577,25 +368,6 @@ impl AppState {
         )
     }
 
-    #[cfg(test)]
-    pub(crate) fn push_user_message_for_turn(
-        &self,
-        session_id: &SessionId,
-        turn_id: &TurnId,
-        text: impl Into<String>,
-    ) -> ChatMessage {
-        self.push_message_with_id_and_attachments_and_provenance_for_session(
-            session_id,
-            format!("fixture-user:{turn_id}"),
-            "user",
-            text,
-            Vec::new(),
-            Some(ChatMessageProvenance::TurnInput {
-                turn_id: turn_id.clone(),
-            }),
-        )
-    }
-
     pub(crate) fn push_assistant_message_for_turn(
         &self,
         session_id: &SessionId,
@@ -612,37 +384,6 @@ impl AppState {
             Some(ChatMessageProvenance::TurnOutput {
                 turn_id: turn_id.clone(),
             }),
-        )
-    }
-
-    /// Publish the one row a host trigger occurrence shows (FIG-5036).
-    ///
-    /// The occurrence id is the row's id, so a workflow replay republishes
-    /// the same row instead of adding a second one. The row is stamped `at`
-    /// the moment the occurrence happened (a button's press), not when the
-    /// workflow got round to publishing it, so the page places it where it
-    /// happened.
-    pub(crate) fn push_trigger_occurrence_for_session(
-        &self,
-        session_id: &SessionId,
-        label: impl Into<String>,
-        report: &lash::triggers::TriggerEmitReport,
-        at: impl Into<String>,
-    ) -> ChatMessage {
-        self.push_prepared_message_for_session(
-            session_id,
-            ChatMessage {
-                id: report.occurrence_id.clone(),
-                role: "event".into(),
-                text: label.into(),
-                at: at.into(),
-                attachments: Vec::new(),
-                provenance: Some(ChatMessageProvenance::TriggerOccurrence {
-                    occurrence_id: report.occurrence_id.clone(),
-                    process_ids: report.started_process_ids(),
-                }),
-                client_nonce: None,
-            },
         )
     }
 
@@ -1081,29 +822,15 @@ impl AppError {
         Self::conflict(message)
     }
 
-    pub(crate) fn retryable_internal(error: impl std::fmt::Display) -> Self {
-        eprintln!("agent-workbench retryable internal request failure: {error}");
+    /// A request that needs the durable engine, which serves nothing until
+    /// L3 (FIG-5172) lands.
+    pub(crate) fn no_engine(what: &str) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
-            message: "internal server error".to_string(),
-            verdict: AppErrorVerdict::Retryable,
-            retirement: None,
-        }
-    }
-
-    pub(crate) fn session_delete_unconfirmed(
-        session_id: &SessionId,
-        call_error: impl std::fmt::Display,
-        probe_error: impl std::fmt::Display,
-    ) -> Self {
-        let message = format!(
-            "session deletion outcome for `{session_id}` could not be confirmed; refresh session state before submitting more work: Restate call failed ({call_error}); durable fence probe failed ({probe_error})"
-        );
-        eprintln!("agent-workbench session deletion outcome unconfirmed: {message}");
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            message,
-            verdict: AppErrorVerdict::Ambiguous,
+            message: format!(
+                "{what} needs the durable engine, which serves nothing until L3 (FIG-5172)"
+            ),
+            verdict: AppErrorVerdict::Terminal,
             retirement: None,
         }
     }

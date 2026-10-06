@@ -38,12 +38,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s01_workbench_singleton"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -68,12 +65,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s01_workbench_singleton_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "postgresql-live-replay",
@@ -98,12 +92,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s01_workbench_singleton"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "live_replay": "postgresql"
         }
       ],
@@ -149,12 +140,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s02_cold_partial"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -179,12 +167,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s02_cold_partial_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -209,12 +194,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s02_cold_partial_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -239,12 +221,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s02_cold_partial_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "postgresql-live-replay",
@@ -269,12 +248,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s02_cold_partial"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "live_replay": "postgresql"
         }
       ],
@@ -319,12 +295,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:h1_recovery__test",
-            "test": "s03_ambiguous_acceptance_survives_host_sigkill"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -349,12 +322,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:h1_recovery__test",
-            "test": "s03_ambiguous_acceptance_survives_host_sigkill_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Tool sends a keyed write to persistent HTTP effect fixture.",
@@ -399,12 +369,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "proposal::s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -456,12 +423,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "proposal::s04_dropped_ack_leaves_the_proposal_unpublished_until_cold_recovery_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -533,12 +497,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s05_opposite_batch_order"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -563,12 +524,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s05_opposite_batch_order_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -593,12 +551,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s05_opposite_batch_order_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -623,12 +578,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "tools::s05_opposite_batch_order_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Standard batch A/B/C; each body reaches barrier.",
@@ -671,12 +623,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:h1_recovery__test",
-            "test": "s06_reported_retries_preserve_backoff_and_reverse_ready_order"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -748,12 +697,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:h1_recovery__test",
-            "test": "s07_cancellation_during_backoff_survives_cold_restart"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -824,12 +770,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s08_pre_final"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -854,12 +797,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s08_pre_final_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -884,12 +824,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s08_pre_final_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -914,12 +851,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s08_pre_final_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Tool held before D; declared keyed external intent.",
@@ -962,12 +896,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s09_before_intent"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "after-intent",
@@ -992,12 +923,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s09_after_intent"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "before-intent",
@@ -1022,12 +950,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s09_before_intent_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "after-intent",
@@ -1052,12 +977,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s09_after_intent_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "before-intent",
@@ -1082,12 +1004,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s09_before_intent_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "after-intent",
@@ -1112,12 +1031,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s09_after_intent_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "before-intent",
@@ -1142,12 +1058,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s09_before_intent_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "after-intent",
@@ -1172,16 +1085,13 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s09_after_intent_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "D final durable; declaration blocked, then presentation.",
-      "fault": "Cancel and kill at D\u2192intent and intent\u2192V cuts.",
+      "fault": "Cancel and kill at D→intent and intent→V cuts.",
       "observable": "Exact final retained; keyed intent once; presentation/incorporation once in order; cancellation cannot abandon committed work.",
       "arc_guards": []
     },
@@ -1221,12 +1131,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s10_empty_middle_rank"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -1251,12 +1158,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s10_empty_middle_rank_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -1281,12 +1185,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s10_empty_middle_rank_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -1311,12 +1212,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s10_empty_middle_rank_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Rank1 blocked intent, rank2 intent-free, rank3 intent; unrelated program effect.",
@@ -1360,12 +1258,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s11_inline_loser"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "deferred",
@@ -1390,12 +1285,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s11_deferred_loser"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "inline",
@@ -1474,12 +1366,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s11_inline_loser_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "deferred",
@@ -1504,12 +1393,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "cancel::s11_deferred_loser_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "inline",
@@ -1609,12 +1495,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s12_deferred_survives_removal_of_n"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -1639,12 +1522,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s12_deferred_survives_removal_of_n_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -1669,12 +1549,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s12_deferred_survives_removal_of_n_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -1699,12 +1576,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s12_deferred_survives_removal_of_n_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Pending source in turn and process, N+1 adopts transfer.",
@@ -1753,12 +1627,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -1787,12 +1658,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -1821,12 +1689,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -1855,17 +1720,14 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "transfer::s13_pinned_work_refuses_retirement_until_drained_on_upgrade_nodes_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Real invocation remains pinned to N; N+1 present.",
       "fault": "Attempt retirement/finalize; separately sever admin query.",
-      "observable": "Typed refusal, N retained, no \u201cdrained\u201d from query failure; after terminal/drain, removal succeeds.",
+      "observable": "Typed refusal, N retained, no “drained” from query failure; after terminal/drain, removal succeeds.",
       "arc_guards": [
         {
           "ticket": "FIG-4900",
@@ -1910,12 +1772,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "fleet::s14_leader_loss_reuses_durable_x_and_original_run"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Three-node local cluster, two Lash workers, PG, acknowledged input plus unfinished tool.",
@@ -1960,12 +1819,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "fleet::s15_minority_tool_cancel_race_has_one_winner_after_heal"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Three-node cluster + shared PG; same Run visible to clients.",
@@ -2010,12 +1866,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "fleet::s16_in_flight_terminal_blocks_drain_and_disconnect_keeps_fence"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "sigkill-redrive",
@@ -2040,12 +1893,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "fleet::s16_sigkill_redrives_same_invocation_without_a_second_seal"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "terminal-publication",
@@ -2070,12 +1920,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "fleet::s16_in_flight_terminal_blocks_drain_and_disconnect_keeps_fence_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "sigkill-redrive",
@@ -2100,12 +1947,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "fleet::s16_sigkill_redrives_same_invocation_without_a_second_seal_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Two hosts share session/store; old execution held at publication.",
@@ -2150,12 +1994,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "operation::s17_workbench_operation_drop_and_follow"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -2180,12 +2021,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "operation::s17_workbench_operation_drop_and_follow_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -2210,12 +2048,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "operation::s17_workbench_operation_drop_and_follow_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -2240,12 +2075,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "operation::s17_workbench_operation_drop_and_follow_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "postgresql-live-replay",
@@ -2270,12 +2102,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "operation::s17_workbench_operation_drop_and_follow"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "live_replay": "postgresql"
         }
       ],
@@ -2323,12 +2152,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s18_workbench_cancel_suspended_application_timer"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "postgresql-live-replay",
@@ -2353,12 +2179,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s18_workbench_cancel_suspended_application_timer"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "live_replay": "postgresql"
         }
       ],
@@ -2414,12 +2237,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "process::s21_source_seal_stays_immutable_on_the_upgrade_node"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -2448,12 +2268,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "process::s21_source_seal_stays_immutable_on_the_upgrade_node_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -2482,12 +2299,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "process::s21_source_seal_stays_immutable_on_the_upgrade_node_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -2516,12 +2330,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "process::s21_source_seal_stays_immutable_on_the_upgrade_node_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Resolve before subscribe; second variant resolves during transfer.",
@@ -2569,12 +2380,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -2603,12 +2411,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -2637,12 +2442,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -2671,12 +2473,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_h3__test",
-            "test": "park::s22_parked_runs_redrive_and_cancel_without_a_catalogue_on_upgrade_nodes_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Turn/process/operation owners; park before and after persisted commit on file SQLite/PG.",
@@ -2741,12 +2540,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s23_cancel_between_capture_and_adoption"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "post-adoption",
@@ -2771,12 +2567,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s23_cancel_after_adoption"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "capture-adoption",
@@ -2801,12 +2594,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s23_cancel_between_capture_and_adoption_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "post-adoption",
@@ -2831,12 +2621,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s23_cancel_after_adoption_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "capture-adoption",
@@ -2861,12 +2648,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s23_cancel_between_capture_and_adoption_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "post-adoption",
@@ -2891,12 +2675,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s23_cancel_after_adoption_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "capture-adoption",
@@ -2921,12 +2702,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s23_cancel_between_capture_and_adoption_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "post-adoption",
@@ -2951,16 +2729,13 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s23_cancel_after_adoption_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Capture old turn/process then admit successor; identical new input.",
-      "fault": "Cancel at capture\u2192adoption and post-adoption cuts.",
+      "fault": "Cancel at capture→adoption and post-adoption cuts.",
       "observable": "Old owner terminal/continuation cleared; new Run has new owner and no inherited old effects/state; material ownership remains fenced.",
       "arc_guards": [],
       "host": "workbench"
@@ -3005,12 +2780,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -3070,12 +2842,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "plugin_upgrade::s24_plugin_revision_rolls_back_without_reentering_completed_work_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -3154,12 +2923,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "disjoint-keys",
@@ -3188,12 +2954,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "namespaces",
@@ -3222,12 +2985,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "same-key",
@@ -3349,12 +3109,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "plugin_upgrade::s25_same_key_cold_reopen_preserves_the_durable_sibling_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "disjoint-keys",
@@ -3383,12 +3140,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "plugin_upgrade::s25_disjoint_keys_cold_reopen_preserves_the_durable_sibling_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "namespaces",
@@ -3417,12 +3171,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "plugin_upgrade::s25_namespaces_cold_reopen_preserves_the_durable_sibling_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "same-key",
@@ -3561,12 +3312,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "recorded-429-retry",
@@ -3591,12 +3339,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "partial-stream-reset",
@@ -3621,12 +3366,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s26_workbench_partial_stream_disconnect_refuses_unsafe_regeneration"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "partial-stream-reset",
@@ -3651,12 +3393,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s26_workbench_partial_stream_disconnect_refuses_unsafe_regeneration_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "observer-reconnect",
@@ -3681,12 +3420,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "observer-reconnect",
@@ -3711,12 +3447,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "postgresql-live-replay",
@@ -3741,12 +3474,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s26_workbench_rate_limit_and_observer_reconnect_commit_one_answer"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "live_replay": "postgresql"
         }
       ],
@@ -3790,12 +3520,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s27_workbench_authentication_failure_permits_the_next_run"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -3820,12 +3547,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s27_workbench_authentication_failure_permits_the_next_run_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Same production HTTP provider fixture.",
@@ -3871,12 +3595,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s28_workbench_mcp_peer_restart"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "host": "workbench"
         },
         {
@@ -3902,12 +3623,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s28_workbench_mcp_peer_restart_replay"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "host": "workbench"
         },
         {
@@ -3933,12 +3651,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s28_workbench_mcp_peer_restart_postgresql"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "host": "workbench"
         },
         {
@@ -3964,12 +3679,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s28_workbench_mcp_peer_restart_postgresql_replay"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "host": "workbench"
         }
       ],
@@ -4014,12 +3726,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s29_workbench_kill_after_acceptance"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -4044,12 +3753,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s29_workbench_kill_after_acceptance_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Workbench deterministic transcript and known tool output.",
@@ -4096,12 +3802,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s30_external_consumer_accept_follow_cancel"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -4126,12 +3829,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s30_external_consumer_accept_follow_cancel_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Small consumer with only public `lash`; real host transport, one task/tool.",
@@ -4177,12 +3877,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s31_publication_crash_hands_over_once"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -4207,12 +3904,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s31_publication_crash_hands_over_once_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -4237,12 +3931,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s31_publication_crash_hands_over_once_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -4267,12 +3958,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s31_publication_crash_hands_over_once_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "RLM process with pending source, held loser, state, retained material and declared start.",
@@ -4318,12 +4006,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s32_missing_retained_material_refuses_without_body_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -4348,12 +4033,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s32_missing_retained_material_refuses_without_body_replay_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -4378,12 +4060,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s32_missing_retained_material_refuses_without_body_replay_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -4408,12 +4087,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e__test",
-            "test": "handover::s32_missing_retained_material_refuses_without_body_replay_postgresql_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Transfer real retained result to successor; ensure owner-qualified reference published.",
@@ -4600,12 +4276,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_telemetry__test",
-            "test": "s34_otlp_retry_transfer_and_shutdown"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "default",
@@ -4630,12 +4303,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_telemetry__test",
-            "test": "s34_otlp_retry_transfer_and_shutdown_replay"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         }
       ],
       "setup": "Real host installs adapter and OTLP exporter; local receiver plus JSONL trace.",
@@ -4679,12 +4349,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s35_file_edit_bugfix"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         },
         {
@@ -4709,12 +4376,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s35_missing_helper_file"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         },
         {
@@ -4739,12 +4403,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s35_config_contract_edit"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "note": "Paid, live-only row: runs only with OPENROUTER_API_KEY, OPENROUTER_MODEL, LASH_E2E_LIVE_BUDGET and LASH_E2E_OUTPUT_TOKEN_CAP, and fails without them; passed with z-ai/glm-5.3-flash (FIG-5150)."
         }
       ],
@@ -4833,12 +4494,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s37_replica_feed_memory_live_replay_postgresql"
-          }
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null
         },
         {
           "variant": "postgresql-live-replay",
@@ -4863,12 +4521,9 @@
             "junit",
             "provenance"
           ],
-          "state": "ready",
-          "hold_reason": null,
-          "registration": {
-            "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
-            "test": "s37_replica_feed_postgresql_live_replay_postgresql"
-          },
+          "state": "held",
+          "hold_reason": "no engine until L3 (FIG-5172) and L9h (FIG-5186)",
+          "registration": null,
           "live_replay": "postgresql"
         }
       ],

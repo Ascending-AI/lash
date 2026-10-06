@@ -12,8 +12,6 @@ mod provider_trace_tests;
 #[cfg(test)]
 mod replay_provenance_tests;
 mod request;
-#[cfg(test)]
-mod runtime_reasoning_tests;
 mod stream;
 mod support;
 #[cfg(feature = "testing")]

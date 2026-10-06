@@ -436,7 +436,7 @@ impl StoreSnapshot {
             "SELECT session_id FROM session_meta ORDER BY session_id",
         )?;
         for session in sessions.iter().map(|row| required(row, "session_id")) {
-            let messages = crate::crash_matrix::invariants::transcript_from(
+            let messages = transcript_from(
                 factory.as_ref(),
                 &lash_core::SessionId::fixture(session.as_str()),
             )
@@ -491,4 +491,62 @@ impl StoreSnapshot {
             .iter()
             .find(|transcript| transcript.session == session)
     }
+}
+
+/// Read an active transcript directly from its store, including child sessions.
+async fn transcript_from(
+    factory: &dyn lash_core::DeploymentStore,
+    session: &lash_core::SessionId,
+) -> Result<Vec<(String, String)>, String> {
+    if !matches!(
+        factory
+            .lookup_session(session)
+            .await
+            .map_err(|error| error.to_string())?,
+        lash_core::SessionLookup::Live(_)
+    ) {
+        return Ok(Vec::new());
+    }
+    let mut anchor = lash_core::store::HistoryAnchor::Head;
+    let mut messages = Vec::new();
+    loop {
+        let first = matches!(anchor, lash_core::store::HistoryAnchor::Head);
+        let page = match factory
+            .load_ancestors(
+                session,
+                anchor,
+                lash_core::store::HistoryBudget {
+                    max_nodes: std::num::NonZeroU32::MIN.saturating_add(128 - 1),
+                    max_bytes: std::num::NonZeroU64::MIN.saturating_add(32 * 1024 * 1024 - 1),
+                },
+            )
+            .await
+        {
+            Ok(page) => page,
+            // An admitted session that never committed has no head to page
+            // from (ADR 0112 §6): its transcript is empty.
+            Err(lash_core::StoreError::SessionNotFound { .. }) if first => break,
+            Err(error) => return Err(format!("read session `{session}` ancestry: {error}")),
+        };
+        for node in page.nodes {
+            if let lash_core::SessionNodePayload::Event {
+                event: lash_core::SessionHistoryRecord::Conversation(message),
+            } = node.record.payload
+            {
+                let value = serde_json::to_value(message)
+                    .map_err(|error| format!("encode a message of `{session}`: {error}"))?;
+                let role = value
+                    .get("role")
+                    .map(|role| role.to_string().trim_matches('"').to_ascii_lowercase())
+                    .unwrap_or_default();
+                messages.push((role, value.to_string()));
+            }
+        }
+        match page.next {
+            Some(next) => anchor = lash_core::store::HistoryAnchor::Cursor(next),
+            None => break,
+        }
+    }
+    messages.reverse();
+    Ok(messages)
 }

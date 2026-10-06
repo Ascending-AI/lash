@@ -114,6 +114,10 @@ name = "lash-model-facing-composition/v2"
 reason = "the v2 model-facing composition hash was superseded by v3"
 
 [[retired_hash_domain]]
+name = "lash-journal-payload/v1"
+reason = "FIG-5190: the Restate journal payload identity went with lash-restate"
+
+[[retired_hash_domain]]
 name = "lash-plugin-snapshot-revision/v2"
 reason = "FIG-2113: the plugin snapshot revision is no longer hashed"
 

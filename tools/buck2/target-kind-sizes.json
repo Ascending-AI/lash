@@ -59,24 +59,6 @@
       "samples": 32
     }
   },
-  "lash-internal-restate/lash_restate": {
-    "target": {
-      "cpu_count": 1,
-      "memory_kb": 1572864,
-      "p95_cores": 1.19,
-      "p99_peak_bytes": 1164697600,
-      "peak_bytes": 1164697600,
-      "samples": 54
-    },
-    "test": {
-      "cpu_count": 1,
-      "memory_kb": 6291456,
-      "p95_cores": 1.33,
-      "p99_peak_bytes": 5013770240,
-      "peak_bytes": 5013770240,
-      "samples": 28
-    }
-  },
   "lash-internal-sqlite-store/lash_sqlite_store": {
     "target": {
       "cpu_count": 1,
@@ -95,16 +77,6 @@
       "p99_peak_bytes": 1355526144,
       "peak_bytes": 1355526144,
       "samples": 40
-    }
-  },
-  "lash-restate-postgres-workers-e2e/lash_restate_postgres_workers_e2e": {
-    "target": {
-      "cpu_count": 1,
-      "memory_kb": 1572864,
-      "p95_cores": 1.16,
-      "p99_peak_bytes": 571756544,
-      "peak_bytes": 571756544,
-      "samples": 23
     }
   },
   "lash-runtime/lash": {

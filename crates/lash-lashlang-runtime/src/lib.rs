@@ -25,10 +25,9 @@ mod replay_commands;
 pub use replay_commands::{CommandInFlight, ReplayCommands, retype_replay_mismatch};
 mod replay_run;
 pub use replay_run::{
-    CommandAdmission, CommandShape, DispatchedOrdinalsDigest, IssuedCommand,
-    LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION, LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
-    LashlangReplayNamespace, LashlangReplayRun, LashlangRunOrdinals, ReplayDivergence, RunSeal,
-    SealAttribution, lashlang_cell_generation,
+    CommandShape, DispatchedOrdinalsDigest, IssuedCommand, LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
+    LASHLANG_REPLAY_KEY_GRAMMAR_VERSION, LashlangReplayNamespace, LashlangReplayRun,
+    LashlangRunOrdinals, ReplayDivergence, RunSeal, SealAttribution, lashlang_cell_generation,
 };
 mod language_trace_host;
 pub use language_trace_host::{LanguageTraceHost, trace_failure};
@@ -1506,8 +1505,6 @@ pub use process::{
 
 #[cfg(test)]
 mod lib_tests;
-#[cfg(test)]
-mod session_surface_tests;
 
 #[cfg(any(test, feature = "testing"))]
 #[path = "argument_admission_testing.rs"]

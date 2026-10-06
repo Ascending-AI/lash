@@ -27,7 +27,7 @@ chrono-tz = { workspace = true }
 croner = { workspace = true }
 dotenvy = "0.15"
 futures-util = { workspace = true }
-lash = { workspace = true, features = ["rlm", "restate", "sqlite", "postgres", "mcp", "subagents", "http-transport", "openai"] }
+lash = { workspace = true, features = ["rlm", "sqlite", "postgres", "mcp", "subagents", "http-transport", "openai"] }
 # Opt-in provider wire test fixtures; never selected by the teaching host.
 lash-sim = { path = "../../crates/lash-sim", optional = true }
 percent-encoding = { workspace = true }
@@ -51,7 +51,6 @@ lash = { workspace = true, features = ["rlm", "testing", "typescript"] }
 # turn an accidentally-exhausted Lashlang execution bound into a test failure.
 # The judged host must not carry them — see `[profile.judged]` in the workspace
 # manifest and the build-geometry rule in `runbooks/RULES.md`.
-lash-restate-test = { workspace = true }
 lash-sim = { path = "../../crates/lash-sim" }
 sqlx = { workspace = true }
 tempfile = { workspace = true }

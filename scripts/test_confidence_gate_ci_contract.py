@@ -363,8 +363,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         functions = {
             "harnesses": ["run_scenario_harnesses", "run_state_machine_and_fault_matrix", "run_sim_unit_suite",
                           "write_provider_transport_exclusion_evidence", "write_sim_lane_declarations",
-                          "write_full_lane_prerequisites",
-                          "write_restate_postgres_workers_e2e_lane_status"],
+                          "write_full_lane_prerequisites"],
             "generated": ["run_sim_generated_lane"],
             "minimizer": ["run_minimizer_fixture_suite"],
             "backends": ["run_local_backend_conformance", "run_backend_contention_evidence",
@@ -401,21 +400,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertEqual(["run", "-p", "lash-sim", "--locked", "--", "run", "--out", "/tmp/evidence/sim",
                               "--profile", "full-random", "--shard", f"{shard}/9"], result.stdout.splitlines())
 
-
-    def test_worker_profiles_retain_workspace_outputs_without_changing_segments(self):
-        jobs = yaml.safe_load(WORKFLOW.read_text())["jobs"]
-        producer = jobs["worker-artifacts"]
-        workers = jobs["restate-postgres-workers"]
-        for job, key in ((producer, "linux-worker-release"), (workers, "linux-worker-tests")):
-            cache = next(s["with"] for s in job["steps"] if "rust-cache@" in s.get("uses", ""))
-            self.assertEqual(key, cache["shared-key"])
-            self.assertIs(True, cache["cache-workspace-crates"])
-            self.assertNotEqual(False, cache["save-if"])
-        self.assertEqual([1, 2], workers["strategy"]["matrix"]["segment"])
-        self.assertIn("worker-artifacts", workers["needs"])
-        self.assertIn("cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins",
-                      next(s["run"] for s in producer["steps"] if s["name"] == "Build worker binaries once"))
-        self.assertIn("LASH_E2E_PREBUILT_BIN_DIR", str(workers["steps"]))
 
     def test_seal_cache_writer_mirrors_the_seal_lane(self) -> None:
         # seal-cache.yml is the only main-scoped writer of the seal lane's
@@ -493,7 +477,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # The key -> path map is the gate's, not a second copy: a row names a
         # key and nothing else, so two rows cannot disagree about a path.
         artifact_paths = shell_assoc_array(gate, "confidence_artifact_paths")
-        self.assertEqual(14, len(artifact_paths), artifact_paths)
+        self.assertEqual(13, len(artifact_paths), artifact_paths)
         for key, path in artifact_paths.items():
             self.assertRegex(key, r"^[a-z0-9_]+$")
             self.assertRegex(path, r"^[a-z0-9./-]+\.json$")
@@ -665,11 +649,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         """
         workflow = WORKFLOW.read_text(encoding="utf-8")
         dispatch_only = {
-            "restate-suites",
             "heavy-tests",
             "stack-budget",
             "s3-store",
-            "functional-e2e-process-operations",
             "fuzz-smoke",
             # Deferred Unicode and the lashlang consumer left the
             # PR/merge-group board entirely: the queue runs the same minimal
@@ -705,23 +687,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "pr_host_restate": "false",
         }
         # This scenario exercises deferral. The fast pull-request board runs
-        # no live suite at all — the workers jobs are dispatch-only and the
-        # store suite is merge-group and dispatch work.
-        needs["plan"]["outputs"]["restate_suites"] = "false"
+        # no live suite at all — the store suite is merge-group and dispatch
+        # work.
         needs["workspace-tests"]["result"] = "skipped"
         # Trusted events seal the API inside `buck2-tests`.
         needs["check"]["result"] = "skipped"
         for job in dispatch_only:
             needs[job] = {"result": "skipped", "outputs": {}}
-        workers = (
-            "worker-artifacts",
-            "restate-postgres-workers",
-            "restate-postgres-workers-summary",
-        )
-        for job in workers:
-            needs[job] = {"result": "skipped", "outputs": {}}
         needs["functional-e2e"] = {"result": "skipped", "outputs": {}}
-        needs["pr-host-workers"] = {"result": "skipped", "outputs": {}}
         for job in plan["POSTGRES_STORE_JOBS"]:
             needs[job] = {"result": "skipped", "outputs": {}}
         needs["buck2-tests-tail"] = {"result": "skipped", "outputs": {}}
@@ -729,29 +702,17 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         needs["buck2-tests-tail"] = {"result": "success", "outputs": {}}
         for job in plan["POSTGRES_STORE_JOBS"]:
             needs[job] = {"result": "success", "outputs": {}}
-        self.assertEqual(evaluate(needs, "merge_group", False), [])
-        # A pull request keeps the live Restate legs skipped even when the
-        # diff selects `restate_suites` — the selection is dispatch work now —
-        # and running them is the violation, not skipping them. The merge
-        # group defers them as before.
-        restate_needs = {
-            job: {**value, "outputs": dict(value.get("outputs", {}))}
-            for job, value in needs.items()
-        }
-        restate_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
-        restate_needs["plan"]["outputs"]["restate_suites"] = "true"
-        self.assertEqual(evaluate(restate_needs, "merge_group", False), [])
-        restate_needs["buck2-tests-tail"]["result"] = "skipped"
-        for job in plan["POSTGRES_STORE_JOBS"]:
-            restate_needs[job]["result"] = "skipped"
-        self.assertEqual(evaluate(restate_needs, "pull_request"), [])
-        restate_needs["functional-e2e"]["result"] = "success"
+        self.assertEqual(evaluate(needs, "merge_group"), [])
+        # Running the functional legs on a merge group, which defers them,
+        # is the violation, not skipping them.
+        needs["functional-e2e"]["result"] = "success"
         self.assertEqual(
-            evaluate(restate_needs, "pull_request"),
+            evaluate(needs, "merge_group"),
             [
-                "functional-e2e ended with 'success' on a pull_request event, expected skipped"
+                "functional-e2e ended with 'success' on a merge_group event, expected skipped"
             ],
         )
+        needs["functional-e2e"]["result"] = "skipped"
         dispatch_needs = {
             job: {"result": "success", "outputs": dict(value.get("outputs", {}))}
             for job, value in needs.items()
@@ -759,34 +720,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         dispatch_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
         dispatch_needs["workspace-tests"]["result"] = "skipped"
         dispatch_needs["check"]["result"] = "skipped"
-        dispatch_needs["pr-host-workers"]["result"] = "skipped"
         self.assertEqual(evaluate(dispatch_needs, "workflow_dispatch"), [])
-        for job in workers:
-            needs[job] = {"result": "skipped", "outputs": {}}
-        needs["buck2-tests-tail"]["result"] = "skipped"
-        for job in plan["POSTGRES_STORE_JOBS"]:
-            needs[job]["result"] = "skipped"
-        self.assertEqual([], evaluate(needs, "pull_request"))
-        needs["restate-postgres-workers"]["result"] = "success"
-        self.assertIn(
-            "workers E2E job restate-postgres-workers ended with 'success' on a"
-            " pull_request event that does not run it, expected skipped",
-            evaluate(needs, "pull_request"),
-        )
-
-        # Workers E2E runs on the full-profile dispatch and nowhere else: the
-        # `ci:workers` pull-request opt-in is retired with the rest of the PR
-        # board's breadth.
-        workers_guard = "github.event_name == 'workflow_dispatch'"
-        self.assertIn(
-            workers_guard, workflow_job_block(workflow, "restate-postgres-workers")
-        )
-        self.assertIn(
-            workers_guard,
-            workflow_job_block(workflow, "restate-postgres-workers-summary"),
-        )
-        self.assertNotIn("'ci:workers'", workflow)
-
         # The matrix now comes from `scripts/ci_plan.py postgres-matrix`, so the
         # bracket is asserted where it is decided. PG16 is the sole primary lane
         # and runs on every event; the PG14/PG18 compatibility lanes only compare
@@ -843,8 +777,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "fail_open": "false",
         }
         for job in dispatch_only:
-            pr_needs[job] = {"result": "skipped", "outputs": {}}
-        for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             pr_needs[job] = {"result": "skipped", "outputs": {}}
         for job in plan["GATED_JOBS"]:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
@@ -976,22 +908,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 )
         justfile = sources["justfile"]
         self.assertIn("kiln run //examples/toolbench:toolbench", justfile)
-        chaos = justfile.split("chaos-soak duration='90m' seed='':", 1)[1].split(
-            "# Opt-in three-backend", 1
-        )[0]
-        self.assertIn("kiln test --local-test-execution --no-test-cache", chaos)
-        self.assertIn('test_timeout="$(python3 scripts/chaos_soak_timeout.py', chaos)
-        self.assertIn('--test_timeout="$test_timeout"', chaos)
-        for value in (
-            "LASH_CHAOS_SOAK_DURATION={{duration}}",
-            "LASH_CHAOS_SOAK_SEED={{seed}}",
-            "LASH_CHAOS_SOAK_EPOCHS",
-            "LASH_CHAOS_SOAK_STEPS",
-            "--test_arg=chaos_soak_release",
-            "--test_arg=--exact",
-            "--test_arg=--ignored",
-        ):
-            self.assertIn(value, chaos)
         attachment = sources["scripts/agent-workbench-attachment-usage-gate.sh"]
         self.assertIn("kiln test --test_timeout=300 --test_output=all", attachment)
         self.assertIn(
@@ -999,32 +915,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             attachment,
         )
         self.assertIn("--test_arg=--exact", attachment)
-
-    def test_chaos_soak_timeout_uses_the_runtime_duration_grammar(self) -> None:
-        parser = ROOT / "scripts" / "chaos_soak_timeout.py"
-        for value, expected in (
-            ("2h", "7800"),
-            ("90m", "6000"),
-            ("120s", "720"),
-            ("45", "645"),
-            (" 2m ", "720"),
-        ):
-            with self.subTest(value=value):
-                result = subprocess.run(
-                    [sys.executable, str(parser), value],
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout.strip(), expected)
-        for value in ("", "m", "2d", "-1m", "1.5h"):
-            with self.subTest(value=value):
-                result = subprocess.run(
-                    [sys.executable, str(parser), value],
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertEqual(result.returncode, 2)
 
     def test_soak_callers_forward_only_declared_runtime_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1182,48 +1072,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 self.assertIn(argument, rows[0])
             self.assertNotIn(database, rows[0])
 
-            result, rows = run("chaos-soak", "2m")
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(len(rows), 1)
-            for argument in (
-                "--local-test-execution",
-                "--no-test-cache",
-                "--test_timeout=720",
-                "--test_env=LASH_CHAOS_SOAK_DURATION=2m",
-                "--test_env=LASH_CHAOS_SOAK_SEED=",
-            ):
-                self.assertIn(argument, rows[0])
-
-            result, rows = run(
-                "chaos-soak",
-                "2h",
-                "42",
-                LASH_CHAOS_SOAK_EPOCHS="epoch-secret-value",
-                LASH_CHAOS_SOAK_STEPS="step-secret-value",
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(len(rows), 1)
-            for argument in (
-                "--local-test-execution",
-                "--no-test-cache",
-                "--test_timeout=7800",
-                "--test_output=all",
-                "--test_env=LASH_CHAOS_SOAK_DURATION=2h",
-                "--test_env=LASH_CHAOS_SOAK_SEED=42",
-                "--test_env=LASH_CHAOS_SOAK_EPOCHS",
-                "--test_env=LASH_CHAOS_SOAK_STEPS",
-                "--test_arg=chaos_soak_release",
-                "--test_arg=--exact",
-                "--test_arg=--ignored",
-            ):
-                self.assertIn(argument, rows[0])
-            self.assertNotIn("epoch-secret-value", rows[0])
-            self.assertNotIn("step-secret-value", rows[0])
-
-            result, rows = run("chaos-soak", "not-a-duration", "42")
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(rows, [])
-
             calls.unlink(missing_ok=True)
             result = subprocess.run(
                 ["bash", "scripts/agent-workbench-attachment-usage-gate.sh", "3030"],
@@ -1333,8 +1181,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 self.assertTrue(reason.strip(), "every exclusion needs a reason")
         self.assertEqual(
             set(exclusions) - BUCK2_TEST_NAMED_TOOLS,
-            {"scripts/test-gate-worktree-concurrency.sh", "scripts/test-mcp-catalog.sh",
-             "scripts/test-restate-workers-trace-scrub.sh",
+            {"scripts/test-gate-worktree-concurrency.sh",
              "scripts/test_landing_gates.py"},
         )
         self.assertGreater(len(candidates), 5, "discovery found nothing")
@@ -1449,28 +1296,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "env -u LASH_POSTGRES_DATABASE_URL",
             workspace,
         )
-
-    def test_asserting_operator_e2es_are_in_functional_matrix(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        functional = (workflow_job_block(workflow, "functional-e2e")
-                      + workflow_job_block(workflow, "functional-e2e-process-operations"))
-
-        for name, recipe in (
-            ("process-operations", "process-operations-e2e"),
-        ):
-            self.assertIn(f"- name: {name}", functional)
-            self.assertIn(f"recipe: {recipe}", functional)
-            self.assertIn(f"artifact: {name}", functional)
-
-        for artifact_dir in (
-            "process-operations",
-        ):
-            self.assertIn(
-                f"target/functional-e2e-artifacts/{artifact_dir}", functional
-            )
-        self.assertIn("if: failure() && matrix.artifact != 'none'", functional)
-        self.assertIn("Upload functional E2E failure artifacts", functional)
-
 
     def test_mutation_packages_bounded_leg_rotates_slices(self) -> None:
         """The leg coordinate plus the run index must pick distinct slices."""
@@ -1892,7 +1717,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         for writer in (
             "write_sim_lane_declarations",
             "write_full_lane_prerequisites",
-            "write_restate_postgres_workers_e2e_lane_status",
         ):
             self.assertIn(writer, evidence, writer)
             self.assertEqual(
@@ -1959,7 +1783,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             release_assets["files"].splitlines(),
         )
         self.assertIn(
-            "needs: [prepare-release, validate-release-preconditions, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]",
+            "needs: [prepare-release, validate-release-preconditions, validate-release-ref, package-crates, latency-gate]",
             publish_crates,
         )
         self.assertIn("runs-on: ubuntu-24.04", validate_release)
@@ -2141,7 +1965,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             "full_mutation_suites_complete()",
             "mutation_evidence_status()",
             "coverage_evidence_status()",
-            "restate_postgres_workers_e2e_status()",
             '"artifact_contract": {',
             '"schema": "lash.confidence.summary-artifact-contract.v1"',
             '"full_lane": {',
@@ -2156,11 +1979,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             '"mutation_evidence": "$(mutation_evidence_path)"',
             '"mutation_evidence_status": "$(mutation_evidence_status)"',
             '"full_mutation_status": "$(full_mutation_status)"',
-            '"required_restate_postgres_workers_e2e": "$(scheduled_artifact_path restate_postgres_workers_e2e',
-            '"restate_postgres_workers_e2e_status": "$(restate_postgres_workers_e2e_status)"',
-            "run_restate_postgres_workers_e2e",
             '"status": "not_run"',
-            '"reason": "distributed Restate/Postgres/S3 worker e2e is full-lane-only"',
         ]
 
         for snippet in required_snippets:
@@ -2292,14 +2111,12 @@ finalize_mutation_gate
         smoke = main.index("run_mutation_smoke")
         broad_postgres = main.index("run_broad_postgres_evidence")
         conformance = main.index("run_postgres_conformance")
-        workers_e2e = main.index("run_restate_postgres_workers_e2e")
         full_mutation = main.index("run_mutation_full")
         aggregate = main.index("finalize_mutation_gate")
 
         self.assertLess(smoke, broad_postgres)
         self.assertLess(broad_postgres, conformance)
-        self.assertLess(conformance, workers_e2e)
-        self.assertLess(workers_e2e, full_mutation)
+        self.assertLess(conformance, full_mutation)
         self.assertLess(full_mutation, aggregate)
         self.assertEqual(main.count("finalize_mutation_gate"), 1)
         self.assertIn("if ! finalize_mutation_gate; then\n    exit 1\n  fi", main)
@@ -2504,11 +2321,6 @@ derive_mutation_jobs() {{
             )
         ]
         self.assertGreater(len(conformance_calls), 0)
-        store_suites = STORE_TESTS.read_text(encoding="utf-8")
-        for suite in ("pg-artifact-referrers", "pg-attachment-referrers"):
-            selection = next(line for line in store_suites.splitlines() if f"[{suite}]=" in line)
-            self.assertIn("|postgres|", selection)
-            self.assertIn("include-ignored", selection)
 
     def test_buck2_store_runtime_flags_and_reports_are_forwarded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2814,7 +2626,6 @@ derive_mutation_jobs() {{
                 "upgrade-harness-synthetic-next",
                 "lashctl-synthetic-next",
                 "loadtest-worker-synthetic-next",
-                "turn-admission-synthetic-next",
                 "regress-stable-features",
                 "host-features",
             },
@@ -2830,12 +2641,12 @@ derive_mutation_jobs() {{
             frozenset(unit["features"])
             for unit in inventory["feature_lane_units"]
             if unit["label"] in worker_labels
-            and unit["package"] == "lash-restate-postgres-workers-e2e"
+            and unit["package"] == "lash-internal-vm-worker"
             and unit["kind"] == "bin"
-            and ":lash-e2e-worker__bin" in unit["label"]
+            and ":lash-vm-worker__bin" in unit["label"]
         }
         self.assertEqual(
-            {frozenset(), frozenset({"synthetic-next"})},
+            {frozenset({"testing"}), frozenset({"synthetic-next", "testing"})},
             worker_features,
             "the rolling-deploy lane must compile the predecessor and successor workers",
         )
@@ -2851,7 +2662,7 @@ derive_mutation_jobs() {{
         lanes = feature_lane_table()
         worker_labels = [
             label for label in lanes["loadtest-worker-synthetic-next"]
-            if ":lash-e2e-worker__bin__fv_" in label
+            if ":lash-vm-worker__bin__fv_" in label
         ]
         self.assertEqual(2, len(worker_labels))
         for removed in worker_labels:
@@ -3270,8 +3081,8 @@ class ReleaseDryRunTests(unittest.TestCase):
         self.assertEqual({"description": "Run release validation without publishing", "required": False,
                           "type": "boolean", "default": False}, inputs["dry_run"])
         jobs = workflow["jobs"]
-        validators = {"validate-release-preconditions", "validate-release-ref", "crash-matrix-restate",
-                      "latency-gate", "package-crates", "chaos-soak", "worker-artifacts"}
+        validators = {"validate-release-preconditions", "validate-release-ref",
+                      "latency-gate", "package-crates", "worker-artifacts"}
         self.assertEqual(validators | {"prepare-release", "publish-crates", "publish"}, set(jobs))
         for name in validators:
             with self.subTest(job=name):
@@ -3310,21 +3121,6 @@ class ReleaseDryRunTests(unittest.TestCase):
         self.assertTrue(any(step.get("if") == "always()" for step in job["steps"]))
         upload = next(step for step in job["steps"] if "upload-artifact@" in step.get("uses", ""))
         self.assertEqual("sdk-worker-linux", upload["with"]["name"])
-
-    def test_chaos_soak_uses_shared_builds_and_local_long_running_test(self):
-        job = yaml.safe_load(RELEASE_WORKFLOW.read_text())["jobs"]["chaos-soak"]
-        self.assertEqual("build-cache", job["environment"])
-        steps = job["steps"]
-        self.assertTrue(any(step.get("uses") == "./.github/actions/buck2-shared-cache" for step in steps))
-        run = next(step["run"] for step in steps if step.get("name") == "Run the chaos soak")
-        for argument in ("kiln test", "--local-test-execution", "--no-test-cache", "--test_timeout=6300",
-                         "--test_env=LASH_CHAOS_SOAK_DURATION", "--test_arg=chaos_soak_release",
-                         "--test_arg=--exact", "--test_arg=--ignored", "--test_arg=--nocapture",
-                         "//crates/lash-sim:chaos_soak__test"):
-            self.assertIn(argument, run)
-        self.assertNotIn("cargo test", run)
-        self.assertTrue(any(step.get("if") == "always()" and 'rm -rf -- "$RUNNER_TEMP/build-cache"' in step.get("run", "")
-                            for step in steps))
 
 
 if __name__ == "__main__":

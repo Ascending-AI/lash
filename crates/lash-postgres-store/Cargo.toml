@@ -59,9 +59,6 @@ lashlang = { workspace = true, features = ["testing"] }
 # Integration tests need this crate's own `testing` seams (the conformance
 # factory and probe impls), the same way lash-sqlite-store wires itself.
 lash-postgres-store = { package = "lash-internal-postgres-store", path = ".", features = ["testing"] }
-# The promise authority and handler-bound turn runner the ported storage laws
-# shift through: lash-restate's engine on the in-process server double.
-lash-restate-test = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }

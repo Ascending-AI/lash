@@ -454,12 +454,10 @@ def verify_build(rows: list[dict], report: Path, synthetic: bool):
     actual = {row["constant"]: row["value"] for row in built["formats"]}
     if actual != expected or len(actual) != len(built["formats"]):
         raise BaselineError(f"{tier} durable_formats differs from source: expected={expected}, actual={actual}")
-    for name, wire in (("REMOTE_PROTOCOL_VERSION", "remote_protocol"), ("RESTATE_WIRE_VERSION", "restate")):
-        value = next(row[tier] for row in rows if row["key"].endswith(":" + name))
-        bound = "min" if wire == "remote_protocol" else "max"
-        if built["version"]["wires"][wire][bound] != value:
-            raise BaselineError(f"lashctl version's {wire} differs from source")
-    print(f"build probe agrees on {len(actual)} durable formats and 2 lashctl wires", file=sys.stderr)
+    value = next(row[tier] for row in rows if row["key"].endswith(":REMOTE_PROTOCOL_VERSION"))
+    if built["version"]["wires"]["remote_protocol"]["min"] != value:
+        raise BaselineError("lashctl version's remote_protocol differs from source")
+    print(f"build probe agrees on {len(actual)} durable formats and 1 lashctl wire", file=sys.stderr)
 
 
 def main():

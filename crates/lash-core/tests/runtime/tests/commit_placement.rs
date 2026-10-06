@@ -17,58 +17,6 @@ fn engine_commit_host(backend: &lash_core::Backend) -> Arc<dyn lash_core::Effect
     effect::layered_effect_host(backend, Arc::new(EngineOwnedCommitLayer))
 }
 
-#[tokio::test]
-async fn durable_journaled_engine_commits_bypass_local_admission() {
-    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let session_id = SessionId::from("engine-commit-placement");
-    let store = double_unbound_recording_store(&double).await;
-    let transport = mock_provider(vec![MockCall {
-        stream_events: Vec::new(),
-        response: Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: "committed".into(),
-                response_meta: None,
-            }],
-            ..LlmResponse::default()
-        }),
-    }]);
-    let host = EmbeddedRuntimeHost::new(
-        test_runtime_host_config(&backend).with_effect_host(engine_commit_host(&backend)),
-    );
-    let mut runtime = TestRuntime::new(&backend, transport)
-        .host(host)
-        .store(store.clone())
-        .with_session_id(&session_id)
-        .build()
-        .await;
-    let _ = lash_core::runtime::commit_admission::take_product_commit_admission_observations(
-        &session_id,
-    );
-    let handler = double
-        .open_handler(AdmittedScope::turn(&session_id, "placement-turn"))
-        .await
-        .expect("open the scope's handler");
-    let scope = lash_core::testing::LayeredEffectHost::layer_scoped(
-        handler.scoped(),
-        Arc::new(EngineOwnedCommitLayer),
-    )
-    .expect("layer the handler's scope");
-    runtime
-        .execute_turn(
-            TurnInput::text("commit"),
-            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), scope),
-        )
-        .await
-        .expect("commit real turn");
-    handler.close().await.expect("close the scope's handler");
-    let observations =
-        lash_core::runtime::commit_admission::take_product_commit_admission_observations(
-            &session_id,
-        );
-    assert_eq!(observations.len(), 0, "turn commit coordinator entries");
-}
-
 /// Passes every operation through untouched.
 struct PassThrough;
 

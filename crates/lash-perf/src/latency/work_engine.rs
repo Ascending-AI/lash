@@ -19,11 +19,6 @@
 //! untouched, only the host-side wait is stubbed, and the real shift runs to
 //! completion on the worker either way.
 
-use std::sync::Arc;
-
-use lash_core::engine::{ShiftAbort, ShiftOutcome, ShiftRequestId, ShiftStop};
-use lash_sansio::SessionId;
-
 /// How a host's `await_shift` answers in a latency case.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -35,64 +30,4 @@ pub(crate) enum AwaitShiftMode {
     Answered,
     /// Never answer, as a shift that outlives the run does.
     Pending,
-}
-
-/// A `SessionWorkEngine` that forwards everything but `await_shift`, which
-/// answers per `mode`. Installed on the host's backend through
-/// `LayeredBackend::with_session_work`.
-pub(crate) struct LatencySessionWork {
-    inner: Arc<dyn lash_core::SessionWorkEngine>,
-    mode: AwaitShiftMode,
-}
-
-impl LatencySessionWork {
-    /// Wrap `inner`'s port with `mode`'s `await_shift` answer.
-    pub(crate) fn wrap(
-        backend: &lash::Backend,
-        mode: AwaitShiftMode,
-    ) -> Arc<dyn lash_core::SessionWorkEngine> {
-        let inner = backend.session_work();
-        Arc::new(Self { inner, mode })
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::SessionWorkEngine for LatencySessionWork {
-    fn schedule_shift(&self, session: &SessionId, request: ShiftRequestId) {
-        self.inner.schedule_shift(session, request);
-    }
-
-    async fn request_shift(
-        &self,
-        session: &SessionId,
-        request: ShiftRequestId,
-    ) -> Result<(), lash_core::engine::EngineRefusal> {
-        self.inner.request_shift(session, request).await
-    }
-
-    fn install_session_shifts(
-        &self,
-        shifts: Arc<dyn lash_core::SessionShifts>,
-    ) -> Arc<dyn lash_core::SessionShifts> {
-        self.inner.install_session_shifts(shifts)
-    }
-
-    fn control(&self) -> Arc<dyn lash_core::engine::SessionControlEngine> {
-        self.inner.control()
-    }
-
-    async fn await_shift(
-        &self,
-        session: &SessionId,
-        request: &ShiftRequestId,
-    ) -> Result<ShiftOutcome, ShiftAbort> {
-        match self.mode {
-            AwaitShiftMode::Real => self.inner.await_shift(session, request).await,
-            AwaitShiftMode::Answered => Ok(ShiftOutcome {
-                ran: Vec::new(),
-                stop: ShiftStop::Idle,
-            }),
-            AwaitShiftMode::Pending => std::future::pending().await,
-        }
-    }
 }

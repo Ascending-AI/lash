@@ -62,8 +62,9 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 MANIFEST = Path("crates/lash/src/formats.rs")
 # An engine contributes its durable formats under its own crate
 # (ADR 0104 §2), so the rows are parsed where the engine declares them; a
-# surface claims such a row as ``format_manifest = "engine:<id>"``.
-ENGINE_REGISTRIES = (Path("crates/lash-restate/src/formats.rs"),)
+# surface claims such a row as ``format_manifest = "engine:<id>"``. No engine
+# registers one until the durable engine does.
+ENGINE_REGISTRIES: tuple[Path, ...] = ()
 SWEPT_ROOTS = ("crates", "examples")
 
 VERSION_CONSTANT = re.compile(

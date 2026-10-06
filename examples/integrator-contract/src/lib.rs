@@ -470,12 +470,6 @@ impl RuntimeEffectController for Integrator {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         unreachable!("external signature witness")
     }
-    async fn read_recorded_journal(
-        &self,
-        range: &RecordedKeyRange,
-    ) -> Result<RecordedJournal, RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
 }
 
 #[lash::async_trait]
@@ -1315,11 +1309,4 @@ pub async fn generic_aggregate_witness(
     run.consume_aggregate(&plan.key, lash::plugins::AggregateConsumer::Race)
         .await?;
     run.close().await
-}
-
-/// Lash and the host bind handlers on the same SDK Endpoint.
-pub fn shared_endpoint_witness(
-    endpoint: lash::restate::restate_sdk::endpoint::Endpoint,
-) -> lash::restate::restate_sdk::endpoint::Endpoint {
-    endpoint
 }
