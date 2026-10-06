@@ -222,15 +222,16 @@ async fn drive(
         .await
         .unwrap();
     if let Some(step) = crash {
-        // A `schedule:N` step is the Run's schedule record (every V now is
-        // one, and a one-member round records its decision in the one at
-        // ordinal 1); any other step is the call's own record.
-        let name = match step.strip_prefix("schedule:") {
-            Some(ordinal) => format!("lash:run:schedule:{ordinal}"),
-            None => match step {
-                "decide" => "lash:run:schedule:1".to_owned(),
-                _ => format!("lash:run:{}:{step}", call.call_id),
-            },
+        // `decide` is the one-member round's deciding schedule record, at
+        // ordinal 1; any other step is the call's own record. Each is named
+        // through its typed journal step (FIG-5032): an attempt under the
+        // Run's attempt kind, every other record under its record kind.
+        let record = lash_restate::JournalStepKind::RunRecord;
+        let name = match step {
+            "decide" => record.journal_name("lash:run:schedule:1"),
+            _ if step.starts_with("attempt:") => lash_restate::JournalStepKind::RunAttempt
+                .journal_name(&format!("lash:run:{}:{step}", call.call_id)),
+            _ => record.journal_name(&format!("lash:run:{}:{step}", call.call_id)),
         };
         backend
             .server()
@@ -284,8 +285,8 @@ async fn l02_mcp_replays_only_unrecorded_attempts_and_remote_dedup_is_explicit()
             Some("admit"),
             Some("attempt:1"),
             Some("decide"),
-            // V is the schedule record after the three per-call records.
-            Some("schedule:3"),
+            // V: the call's presentation record, after its deciding schedule.
+            Some("present"),
         ] {
             let mut trace = tempfile::NamedTempFile::new().unwrap();
             let mut effects = tempfile::NamedTempFile::new().unwrap();
@@ -351,7 +352,7 @@ async fn l03_mcp_run_cancellation_withholds_undecided_results_and_preserves_fina
             cancel_before_decision,
             presentations: AtomicUsize::new(0),
         });
-        let terminal = drive(probe.clone(), call, Some("schedule:3")).await;
+        let terminal = drive(probe.clone(), call, Some("present")).await;
         if cancel_before_decision {
             assert_eq!(
                 terminal,
