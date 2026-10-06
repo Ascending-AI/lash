@@ -500,21 +500,34 @@ impl HandOff {
     }
 
     /// Whether segment `ordinal` of `process_id` sits parked in its wait —
-    /// suspended, or blocked on the server — with the process's wait state
-    /// armed.
+    /// started, suspended or blocked on the server, with the process's wait
+    /// state armed.
+    ///
+    /// The start is checked first: a successor blocks on the server before
+    /// it marks its start, which stamps the generation the drain counts,
+    /// while the predecessor's wait is still armed.
     async fn waiting_in(&self, process_id: &ProcessId, ordinal: u64) -> bool {
         let suspended = self.segment_runs(process_id, ordinal).iter().any(|view| {
             view.status == "suspended"
                 || (view.status == "running" && view.blocked_on_server == Some(true))
         });
-        suspended
-            && self
-                .registry
-                .get_process(process_id)
+        let Some(record) = self.registry.get_process(process_id).await.ok().flatten() else {
+            return false;
+        };
+        let started = if ordinal == 0 {
+            record.first_started.is_some()
+        } else {
+            self.continuations
+                .segment_start(&lash_core::ProcessSegmentKey::new(
+                    process_id.clone(),
+                    ordinal,
+                ))
                 .await
                 .ok()
                 .flatten()
-                .is_some_and(|record| record.wait().is_some())
+                .is_some()
+        };
+        started && suspended && record.wait().is_some()
     }
 
     async fn ended(&self, process_id: &ProcessId) -> bool {
