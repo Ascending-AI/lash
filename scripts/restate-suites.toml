@@ -333,3 +333,23 @@ timeout_seconds = 300
 
 [suites.mcp-catalog-postgres.env]
 MCP_CATALOG_ENDPOINTS_FILE = "{LASH_RESTATE_SUITE_ARTIFACTS}/native-endpoints-{shard}"
+
+# Work past the invoker's inactivity plus abort timeouts (FIG-5149): a tool
+# body that outlives them reruns on every aborted attempt until the turn
+# parks, and an isolated worker is adopted, never relaunched. Both legs
+# shorten the abort timeout to 2 s; the live leg also shortens the inactivity
+# timeout to 1 s.
+[suites.long-tool-body]
+label = "//crates/lash:lash__unit_test"
+cwd = "crates/lash"
+filters = ["tests::long_tool_body::live_"]
+endpoints = ["LTB"]
+shards = 1
+timeout_seconds = 300
+
+[suites.long-tool-body.live.server_env]
+RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT = "1s"
+RESTATE_WORKER__INVOKER__ABORT_TIMEOUT = "2s"
+
+[suites.long-tool-body.replay.server_env]
+RESTATE_WORKER__INVOKER__ABORT_TIMEOUT = "2s"

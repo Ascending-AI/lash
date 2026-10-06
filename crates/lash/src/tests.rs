@@ -1100,6 +1100,7 @@ mod failure_settlement;
 mod finalize_fault;
 #[cfg(feature = "rlm")]
 mod isolated_tool_route;
+mod long_tool_body;
 #[cfg(all(feature = "mcp", feature = "restate"))]
 mod mcp_run_attempts;
 mod output_retention;

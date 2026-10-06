@@ -55242,6 +55242,10 @@
       "live": "//runbooks/restate-postgres-workers:restate_load_behavior_replay_live",
       "replay": "//runbooks/restate-postgres-workers:restate_load_behavior_replay_replay"
     },
+    "long-tool-body": {
+      "live": "//crates/lash:restate_long_tool_body_live",
+      "replay": "//crates/lash:restate_long_tool_body_replay"
+    },
     "mcp-catalog": {
       "live": "//crates/lash:restate_mcp_catalog_live",
       "replay": "//crates/lash:restate_mcp_catalog_replay"
@@ -55365,6 +55369,8 @@
       "//crates/lash:restate_drain_hand_over_replay",
       "//crates/lash:restate_live_replay_bounds_live",
       "//crates/lash:restate_live_replay_bounds_replay",
+      "//crates/lash:restate_long_tool_body_live",
+      "//crates/lash:restate_long_tool_body_replay",
       "//crates/lash:restate_mcp_catalog_live",
       "//crates/lash:restate_mcp_catalog_postgres_live",
       "//crates/lash:restate_mcp_catalog_postgres_replay",

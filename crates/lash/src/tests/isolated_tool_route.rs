@@ -13,14 +13,14 @@ use lash_core::PhysicalProcessWorker as _;
 use lash_core::tool_dispatch::IsolatedProcessDescriptor;
 use lash_restate_test::{CrashCount, CrashPoint};
 
-const KIND: &str = "fig4997-worker";
+pub(super) const KIND: &str = "fig4997-worker";
 const TOOL: &str = "iso_run";
 /// How long a law waits on a step that only a wedge delays.
 const WEDGE: std::time::Duration = std::time::Duration::from_secs(120);
 
-struct IsolatedTools {
-    bound: bool,
-    executions: AtomicUsize,
+pub(super) struct IsolatedTools {
+    pub(super) bound: bool,
+    pub(super) executions: AtomicUsize,
 }
 
 fn isolated_definition() -> lash_core::ToolDefinition {
@@ -82,7 +82,7 @@ impl lash_core::plugin::SessionPlugin for WorkerEnginePlugin {
 }
 
 /// Contributes the law's one engine instance from every call.
-struct WorkerEngineFactory(Arc<lash_core::WorkerProcessEngine>);
+pub(super) struct WorkerEngineFactory(pub(super) Arc<lash_core::WorkerProcessEngine>);
 
 impl lash_core::plugin::PluginFactory for WorkerEngineFactory {
     fn id(&self) -> &'static str {

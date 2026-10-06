@@ -21631,6 +21631,26 @@ lash_restate_suite(
 )
 
 lash_restate_suite(
+    name = "restate_long_tool_body_live",
+    test = ":lash__unit_test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "long-tool-body",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_long_tool_body_replay",
+    test = ":lash__unit_test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "long-tool-body",
+    leg = "replay",
+    shard_count = 1,
+)
+
+lash_restate_suite(
     name = "restate_mcp_catalog_live",
     test = ":integration__test__fv_396cc7df__rust_test",
     env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
