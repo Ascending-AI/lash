@@ -1543,7 +1543,9 @@ impl EffectBackedProcessService {
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
                 &self.registry,
             ))),
-            crate::ProcessEngineRegistry::new(),
+            // The executor admits an engine start against its registry
+            // (FIG-1520): the fixture engine is the one these services run.
+            process_engine_fixture(),
             crate::runtime::HostStartAdmission::default(),
         )
         .with_process_env_store(Arc::clone(&self.process_env_store))
