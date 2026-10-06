@@ -160,6 +160,33 @@ impl RestateProcessRunner for LawProcessRunner {
     }
 }
 
+/// Protected intents realize in their own invocation on the deployment's
+/// worker (FIG-4987), as a production endpoint's default realizer does: the
+/// worker a law installed. A law that installed none admits no realization.
+#[async_trait::async_trait]
+impl lash_core::tool_dispatch::ToolRealizer for LawProcessRunner {
+    async fn realize(
+        &self,
+        request: lash_core::tool_dispatch::RealizationRequest,
+        scoped: lash_core::ScopedEffectController<'_>,
+    ) -> Result<lash_core::tool_dispatch::RealizationReceipt, lash_core::RuntimeEffectControllerError>
+    {
+        match self.installed() {
+            Some(runner) => {
+                lash_core::tool_dispatch::ToolRealizer::realize(&runner, request, scoped).await
+            }
+            None => {
+                lash_core::tool_dispatch::ToolRealizer::realize(
+                    &crate::tests::NoIntentsRealizer,
+                    request,
+                    scoped,
+                )
+                .await
+            }
+        }
+    }
+}
+
 /// Which Restate server a harness executes its endpoint through.
 #[derive(Clone)]
 pub(super) enum HarnessServer {
@@ -303,7 +330,8 @@ impl LiveConformanceHarness {
         let endpoint = crate::services::bind_lash_services(
             Endpoint::builder(),
             crate::services::LashServiceParts {
-                tool_realizer: Arc::new(crate::tests::NoIntentsRealizer),
+                tool_realizer: Arc::clone(&process_runner)
+                    as Arc<dyn lash_core::tool_dispatch::ToolRealizer>,
                 effect_host: &host,
                 admin: invocation_admin,
                 materials: stores.tool_material_store(),

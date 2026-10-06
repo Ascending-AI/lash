@@ -1250,7 +1250,6 @@
     "tests::process_workflow::runtime_handler_error_classification_keeps_restate_ingress_retryable": 1,
     "tests::process_workflow::runtime_handler_error_classification_makes_terminal_runtime_error_terminal": 1,
     "tests::process_workflow::runtime_handler_error_classification_makes_unregistered_service_terminal": 1,
-    "tests::process_workflow::sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_cancel": 610,
     "tests::remote_turn_cancel::remote_after_step_waits_for_committed_boundary": 272,
     "tests::replay_corpus::an_added_run_step_with_unchanged_epoch_requires_the_exact_bump_message": 1,
     "tests::replay_corpus::replay_corpus_fixtures_match_current_controller": 291,

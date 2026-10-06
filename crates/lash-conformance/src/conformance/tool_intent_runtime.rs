@@ -187,6 +187,34 @@ pub async fn public_signal_intent_wakes_parked_process(
             }
         })
         .build();
+    // The call's signal intent realizes in its own invocation on the
+    // deployment's process worker (FIG-4987), so the tier serves it with this
+    // law's worker.
+    let worker_host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
+        .host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
+    let watched = crate::facade_support::watch_process_registry(stores.process_registry());
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::new(
+            Arc::new(crate::facade_support::PluginHost::new(
+                crate::testing::test_standard_protocol_factories()
+                    .into_iter()
+                    .chain([Arc::clone(&tool_plugin)])
+                    .collect(),
+            )),
+            worker_host,
+            crate::ProcessWorkWiring::new(
+                watched.clone(),
+                Arc::new(crate::NoProcessWork::new(&watched)),
+            ),
+            Arc::new(crate::NoSessionWork::new()),
+            crate::testing::runtime_lease_owner(),
+        ),
+    )
+    .expect("build the public signal-intent process worker");
+    let tier_process_work = turn_runner.process_work(watched, worker);
     // Restate re-runs the turn's handler from the top on every replay, so
     // each execution builds its runtime afresh from these inputs, which
     // outlive it; the store is the durable state they share.
@@ -199,12 +227,13 @@ pub async fn public_signal_intent_wakes_parked_process(
         Arc::clone(&effect_host),
         Arc::clone(&stores),
         session_id.clone(),
+        tier_process_work,
     );
     turn_runner
         .run_turn(
             admitted,
             Arc::new(move |turn_scope| {
-                let (effect_host, stores, session_id) = turn_parts.clone();
+                let (effect_host, stores, session_id, process_work) = turn_parts.clone();
                 let store = Arc::clone(&store);
                 let model = model.clone();
                 let tool_plugin = Arc::clone(&tool_plugin);
@@ -242,9 +271,7 @@ pub async fn public_signal_intent_wakes_parked_process(
                                 &store,
                                 session_id.clone(),
                             ))
-                            .with_process_work(crate::testing::process_work_wiring_for_registry(
-                                stores.process_registry(),
-                            ))
+                            .with_process_work(process_work)
                             .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                             .build(),
                     )

@@ -848,11 +848,9 @@ pub(super) fn assert_lashlang_engine_record(
 /// left non-terminal in the durable registry; a subsequent worker reopening
 /// that registry must execute it to completion through its armed `ProcessStart`
 /// obligation — the same durable re-execution guarantee a turn-started
-/// process has (invariant 3).
-///
-/// Mirrors `sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_cancel`
-/// but the process is started by a trigger occurrence (a `lashlang` engine row
-/// with trigger provenance), not by a live turn's tool call.
+/// process has (invariant 3). The process is started by a trigger occurrence
+/// (a `lashlang` engine row with trigger provenance), not by a live turn's
+/// tool call.
 #[tokio::test]
 pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen() {
     let temp = tempfile::tempdir().expect("tempdir");

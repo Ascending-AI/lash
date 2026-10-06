@@ -22,7 +22,6 @@ pub(super) use turn_cancel_gate::*;
 pub(super) struct RecordingContext {
     /// The attempt this context runs, which a step's retried fault ends.
     pub(super) attempt: AttemptEnd,
-    endpoint: Option<Endpoint>,
     pub(super) block_sleeps: AtomicBool,
     pub(super) sleeps: Mutex<Vec<u64>>,
     pub(super) runs: Mutex<Vec<String>>,
@@ -127,13 +126,6 @@ impl RecordingContext {
         })
         .await
         .expect("the Restate durable waiter is registered before the reconcile");
-    }
-
-    pub(super) fn with_endpoint(endpoint: Endpoint) -> Self {
-        Self {
-            endpoint: Some(endpoint),
-            ..Default::default()
-        }
     }
 
     pub(super) fn resolve_process_terminal(
@@ -404,19 +396,18 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
-        sender_generation: lash_core::engine::BuildGeneration,
+        _sender_generation: lash_core::engine::BuildGeneration,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        let endpoint = self.endpoint.clone();
         self.process_command_log
             .lock_recover()
             .push(format!("send:{process_id}"));
-        self.started.lock_recover().push(registration.clone());
+        self.started.lock_recover().push(registration);
         self.started_execution_contexts
             .lock_recover()
-            .push(execution_context.clone());
+            .push(execution_context);
         Box::pin(async move {
             if self
                 .fail_process_workflow_starts
@@ -473,25 +464,6 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                     "injected refusal of a start another delivery already started",
                 )));
             }
-            if let Some(endpoint) = endpoint {
-                // Every run completes: the handler's admission steps are
-                // runs (FIG-3588), ahead of whatever the process does.
-                invoke_process_workflow_endpoint(
-                    &endpoint,
-                    "run",
-                    process_id.as_str(),
-                    &RestateProcessWorkflowInput {
-                        process_id: process_id.clone(),
-                        registration,
-                        execution_context,
-                        segment_ordinal: 0,
-                        sender_generation,
-                    },
-                    true,
-                )
-                .await
-                .map_err(ProcessWorkflowStartFailure::Rejected)?;
-            }
             Ok(format!("invocation-{process_id}"))
         })
     }
@@ -504,22 +476,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     where
         'ctx: 'run,
     {
-        let endpoint = self.endpoint.clone();
-        let process_id = request.process_id.clone();
-        self.cancelled.lock_recover().push(request.clone());
-        Box::pin(async move {
-            if let Some(endpoint) = endpoint {
-                invoke_process_workflow_endpoint(
-                    &endpoint,
-                    "cancel",
-                    process_id.as_str(),
-                    &request,
-                    false,
-                )
-                .await?;
-            }
-            Ok(())
-        })
+        self.cancelled.lock_recover().push(request);
+        Box::pin(std::future::ready(Ok(())))
     }
 
     fn await_event<'run>(
@@ -750,9 +708,81 @@ pub(super) struct ReplayableRecordingContext {
     /// Source select keys this context hands out: a counter stands in for
     /// the engine's notification handles.
     pub(super) select_keys: AtomicU64,
+    /// The realization invocations this context's Runs issued, by
+    /// invocation id: each one's request and, once it answered, its receipt
+    /// (ADR 0130).
+    pub(super) realizations: Mutex<HashMap<String, IssuedRealizationRecord>>,
+}
+
+/// One realization invocation a recording context stands in for: a send
+/// under the same key reaches it rather than starting another.
+#[derive(Clone)]
+pub(super) struct IssuedRealizationRecord {
+    request: lash_core::tool_dispatch::RealizationRequest,
+    receipt: Option<lash_core::tool_dispatch::RealizationReceipt>,
 }
 
 impl ReplayableRecordingContext {
+    /// The receipt of the realization invocation `invocation_id`: its recorded
+    /// answer, or the installed worker realizing its intents in a journal of
+    /// its own, as the realization service does on a deployment.
+    async fn realization_receipt(
+        self: Arc<Self>,
+        invocation_id: String,
+    ) -> Result<lash_core::tool_dispatch::RealizationReceipt, lash_core::RuntimeEffectControllerError>
+    {
+        let issued = self
+            .realizations
+            .lock_recover()
+            .get(&invocation_id)
+            .cloned()
+            .ok_or_else(|| {
+                lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::EngineEffectController,
+                    format!("no realization invocation `{invocation_id}` was issued"),
+                )
+            })?;
+        if let Some(receipt) = issued.receipt {
+            return Ok(receipt);
+        }
+        let worker = self.process_worker.lock_recover().clone().ok_or_else(|| {
+            lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::EngineControlUnsupported,
+                "this context has no process worker to realize intents",
+            )
+        })?;
+        let invocation = Arc::new(ReplayableRecordingContext {
+            events: Arc::clone(&self.events),
+            process_worker: Mutex::new(Some(worker.clone())),
+            ..ReplayableRecordingContext::default()
+        });
+        let controller = RestateRuntimeEffectController::new_for_test(invocation);
+        let scoped = controller
+            .realization_controller(issued.request.scope.clone())
+            .map_err(lash_core::RuntimeEffectControllerError::from)?;
+        let receipt =
+            lash_core::tool_dispatch::ToolRealizer::realize(&worker, issued.request, scoped)
+                .await?;
+        if let Some(issued) = self.realizations.lock_recover().get_mut(&invocation_id) {
+            issued.receipt = Some(receipt.clone());
+        }
+        Ok(receipt)
+    }
+
+    fn realization_selectable<'run>(
+        self: &Arc<Self>,
+        invocation_id: String,
+    ) -> lash_core::tool_dispatch::RunSelectable<'run, lash_core::tool_dispatch::RealizationReceipt>
+    {
+        let key = self.select_keys.fetch_add(1, Ordering::SeqCst) as u32;
+        lash_core::tool_dispatch::RunSelectable {
+            key: Box::pin(std::future::ready(Ok(
+                lash_core::tool_dispatch::SelectKey::from_engine(key),
+            ))),
+            value: Box::pin(Arc::clone(self).realization_receipt(invocation_id)),
+        }
+    }
+
     pub(super) fn park_sleeps(&self) {
         self.park_sleeps.store(true, Ordering::SeqCst);
     }
@@ -1202,6 +1232,51 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         'ctx: 'run,
     {
         select_first_offered(keys)
+    }
+
+    fn issue_run_realization<'run>(
+        &'run self,
+        _namespace: &'run crate::RestateNamespace,
+        request: lash_core::tool_dispatch::RealizationRequest,
+    ) -> crate::JournaledFuture<
+        'run,
+        lash_core::tool_dispatch::IssuedRealization<'run>,
+        lash_core::RuntimeEffectControllerError,
+    >
+    where
+        'ctx: 'run,
+    {
+        let invocation_id = format!("realization-{}", request.key);
+        self.realizations
+            .lock_recover()
+            .entry(invocation_id.clone())
+            .or_insert(IssuedRealizationRecord {
+                request,
+                receipt: None,
+            });
+        let receipt = self.realization_selectable(invocation_id.clone());
+        Box::pin(std::future::ready(Ok(
+            lash_core::tool_dispatch::IssuedRealization {
+                invocation_id,
+                receipt,
+            },
+        )))
+    }
+
+    fn attach_run_realization<'run>(
+        &'run self,
+        invocation_id: String,
+    ) -> crate::JournaledFuture<
+        'run,
+        lash_core::tool_dispatch::RunSelectable<'run, lash_core::tool_dispatch::RealizationReceipt>,
+        lash_core::RuntimeEffectControllerError,
+    >
+    where
+        'ctx: 'run,
+    {
+        Box::pin(std::future::ready(Ok(
+            self.realization_selectable(invocation_id)
+        )))
     }
 
     fn start_process_workflow<'run>(
