@@ -35,11 +35,16 @@ use super::*;
 /// v10 checkpoint's cells were fenced by a per-iteration stamp this build no
 /// longer reads, so it is refused.
 ///
+/// Version 11 changed in place before the 1.0 cut (FIG-5171, ruling #68): the
+/// checkpoint holds bounded machine state and names its transcript (messages,
+/// prompt view, history events and a pending model request) by content
+/// digest; the content travels beside it as [`TurnCheckpointContent`].
+///
 /// version_guard(
 ///     shapes(
 ///         path = "crates/lash-sansio/src/sansio/machine_state.rs",
 ///         path = "crates/lash-sansio/src/sansio/turn_protocol.rs",
-///         cover(TurnCheckpoint, MachineState, Effect),
+///         cover(TurnCheckpoint, CheckpointState, CheckpointWork, Effect),
 ///     ),
 ///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
 /// )
@@ -74,20 +79,146 @@ pub(super) enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
     Finished,
 }
 
+/// The machine state a checkpoint records. A wait on a model call names its
+/// request by content digest; every other wait is held as it is.
+#[derive(Debug, Serialize, serde::Deserialize)]
+pub(super) enum CheckpointState<M: TurnProtocol = UnitTurnProtocol> {
+    PreparingProtocol,
+    PrepareIteration,
+    Waiting {
+        effect_id: EffectId,
+        work: CheckpointWork<M>,
+    },
+    Finished,
+}
+
+#[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(super) enum CheckpointWork<M: TurnProtocol = UnitTurnProtocol> {
+    /// A model call: its request is content-addressed.
+    Llm {
+        request: CheckpointContentRef,
+        driver_state: Option<M::DriverState>,
+    },
+    /// Any other work, which holds no transcript.
+    Work { work: PendingWork<M> },
+}
+
+impl<M: TurnProtocol> Clone for CheckpointState<M> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::PreparingProtocol => Self::PreparingProtocol,
+            Self::PrepareIteration => Self::PrepareIteration,
+            Self::Waiting { effect_id, work } => Self::Waiting {
+                effect_id: *effect_id,
+                work: match work {
+                    CheckpointWork::Llm {
+                        request,
+                        driver_state,
+                    } => CheckpointWork::Llm {
+                        request: request.clone(),
+                        driver_state: driver_state.clone(),
+                    },
+                    CheckpointWork::Work { work } => CheckpointWork::Work { work: work.clone() },
+                },
+            },
+            Self::Finished => Self::Finished,
+        }
+    }
+}
+
+impl<M: TurnProtocol> CheckpointState<M> {
+    /// Record `state`, storing a pending model request in `content`.
+    pub(super) fn record(state: &MachineState<M>, content: &mut TurnCheckpointContent) -> Self {
+        match state {
+            MachineState::PreparingProtocol => Self::PreparingProtocol,
+            MachineState::PrepareIteration => Self::PrepareIteration,
+            MachineState::Waiting {
+                effect_id, work, ..
+            } => Self::Waiting {
+                effect_id: *effect_id,
+                work: match work {
+                    PendingWork::Llm {
+                        request,
+                        driver_state,
+                    } => CheckpointWork::Llm {
+                        request: content.put_value(request.as_ref()),
+                        driver_state: driver_state.clone(),
+                    },
+                    work => CheckpointWork::Work { work: work.clone() },
+                },
+            },
+            MachineState::Finished => Self::Finished,
+        }
+    }
+
+    /// The machine state this records, its model request read back from
+    /// `content`. A restored wait is always re-delivered.
+    pub(super) fn restore(
+        self,
+        content: &TurnCheckpointContent,
+    ) -> Result<MachineState<M>, TurnCheckpointRestoreError> {
+        Ok(match self {
+            Self::PreparingProtocol => MachineState::PreparingProtocol,
+            Self::PrepareIteration => MachineState::PrepareIteration,
+            Self::Waiting { effect_id, work } => MachineState::Waiting {
+                effect_id,
+                work: match work {
+                    CheckpointWork::Llm {
+                        request,
+                        driver_state,
+                    } => PendingWork::Llm {
+                        request: Arc::new(content.value(&request)?),
+                        driver_state,
+                    },
+                    CheckpointWork::Work {
+                        work: PendingWork::Llm { .. },
+                    } => {
+                        return Err(TurnCheckpointRestoreError::IncompatibleFormat {
+                            message: "a checkpoint holds a model request inline".to_string(),
+                        });
+                    }
+                    CheckpointWork::Work { work } => work,
+                },
+                delivery: EffectDeliveryStatus::Pending,
+            },
+            Self::Finished => MachineState::Finished,
+        })
+    }
+
+    /// Whether this waits on driver work other than the environment sync.
+    pub(super) fn waits_on_driver_work(&self) -> bool {
+        match self {
+            Self::Waiting {
+                work: CheckpointWork::Llm { .. },
+                ..
+            } => true,
+            Self::Waiting {
+                work: CheckpointWork::Work { work },
+                ..
+            } => !matches!(work, PendingWork::SyncExecutionEnvironment),
+            Self::PreparingProtocol | Self::PrepareIteration | Self::Finished => false,
+        }
+    }
+}
+
+/// A turn machine's bounded checkpoint: its machine state and counters, with
+/// the transcript named by content digest. Its size does not grow with the
+/// transcript; the content it names is [`TurnCheckpointContent`].
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     #[serde(default = "legacy_turn_checkpoint_schema_version")]
     pub(super) schema_version: u32,
-    pub(super) state: MachineState<M>,
+    pub(super) state: CheckpointState<M>,
     pub(super) pending_effects: Vec<Effect<M>>,
     pub(super) next_effect_id: u64,
     #[serde(default)]
     pub(super) next_synthetic_message_id: u64,
-    pub(super) messages: Vec<Message>,
+    pub(super) messages: CheckpointContentRef,
     /// The ephemeral model-call view, retained independently for resume.
-    pub(super) prompt_messages: Vec<Message>,
-    pub(super) events: Vec<SessionHistoryRecord<M::Event>>,
+    pub(super) prompt_messages: CheckpointContentRef,
+    pub(super) events: CheckpointContentRef,
     #[serde(default)]
     pub(super) turn_causes: Vec<TurnCause>,
     #[serde(default)]
@@ -135,6 +266,16 @@ impl<M: TurnProtocol> TurnCheckpoint<M> {
     }
 }
 
+/// A checkpoint with the content it names: what [`TurnMachine::checkpoint`]
+/// answers and [`TurnMachine::restore_from_checkpoint`] takes. A host stores
+/// the checkpoint as its row and the content beside it, content-addressed.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedTurn<M: TurnProtocol = UnitTurnProtocol> {
+    pub checkpoint: TurnCheckpoint<M>,
+    pub content: TurnCheckpointContent,
+}
+
 /// Failure to decode or restore an incompatible turn checkpoint.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TurnCheckpointRestoreError {
@@ -142,6 +283,10 @@ pub enum TurnCheckpointRestoreError {
     IncompatibleSchemaVersion { actual: u32, expected: u32 },
     /// The bytes do not match the current closed checkpoint shape.
     IncompatibleFormat { message: String },
+    /// The checkpoint names content that is not present.
+    MissingContent { content: String },
+    /// Content present under a digest is not the bytes the digest names.
+    CorruptContent { content: String },
 }
 
 impl std::fmt::Display for TurnCheckpointRestoreError {
@@ -157,6 +302,16 @@ impl std::fmt::Display for TurnCheckpointRestoreError {
                     "turn checkpoint has an incompatible format: {message}"
                 )
             }
+            Self::MissingContent { content } => {
+                write!(
+                    formatter,
+                    "turn checkpoint content `{content}` is not stored"
+                )
+            }
+            Self::CorruptContent { content } => write!(
+                formatter,
+                "turn checkpoint content `{content}` is not the bytes its digest names"
+            ),
         }
     }
 }
@@ -183,12 +338,6 @@ impl<M: TurnProtocol> Clone for MachineState<M> {
 }
 
 impl<M: TurnProtocol> MachineState<M> {
-    pub(super) fn schedule_outstanding_effect(&mut self) {
-        if let Self::Waiting { delivery, .. } = self {
-            *delivery = EffectDeliveryStatus::Pending;
-        }
-    }
-
     pub(super) fn poll_outstanding_effect(&mut self) -> Option<Effect<M>> {
         match self {
             Self::Waiting {

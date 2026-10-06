@@ -2328,6 +2328,25 @@
       ],
       "type": "object"
     },
+    "Duration": {
+      "properties": {
+        "nanos": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "secs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "secs",
+        "nanos"
+      ],
+      "type": "object"
+    },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
@@ -4898,6 +4917,41 @@
           },
           "required": [
             "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RegistrationRefused": {
+      "description": "Why registration refused a tool.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "An inline-only tool declares more execution than the ceiling allows.",
+          "properties": {
+            "ceiling": {
+              "$ref": "#/$defs/Duration"
+            },
+            "declared": {
+              "$ref": "#/$defs/Duration"
+            },
+            "hint": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "inline_budget_exceeds_ceiling",
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "tool",
+            "declared",
+            "ceiling",
+            "hint"
           ],
           "type": "object"
         }
@@ -7679,6 +7733,23 @@
               },
               "required": [
                 "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "The call's limit expired: the model total ends every further attempt.",
+              "properties": {
+                "cause": {
+                  "const": "timed_out",
+                  "type": "string"
+                },
+                "limit": {
+                  "$ref": "#/$defs/LimitCause"
+                }
+              },
+              "required": [
+                "cause",
+                "limit"
               ],
               "type": "object"
             },
@@ -13083,6 +13154,27 @@
             "DuplicateName"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A member's declared execution is refused against the deployment's\nexecution budgets.",
+          "properties": {
+            "RegistrationRefused": {
+              "properties": {
+                "refusal": {
+                  "$ref": "#/$defs/RegistrationRefused"
+                }
+              },
+              "required": [
+                "refusal"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "RegistrationRefused"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -13778,6 +13870,33 @@
             },
             "type": {
               "const": "resident_tool_duplicate_name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A catalog member's declared execution is refused against the runtime's\nexecution budgets: an inline-only tool declared above the ceiling.",
+          "properties": {
+            "message": {
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "$ref": "#/$defs/RegistrationRefused"
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "tool_registration_refused",
               "type": "string"
             }
           },

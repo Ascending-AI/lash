@@ -90,8 +90,8 @@ impl LashCoreBuilder {
         if let Some(policy) = self.tool_source_policy.take() {
             core.control.tool_source_policy = policy;
         }
-        if let Some(grace) = self.abort_drain_grace.take() {
-            core.control.abort_drain_grace = grace;
+        if let Some(budgets) = self.execution_budgets.take() {
+            core.control.execution_budgets = budgets;
         }
         if let Some(coalescing) = self.delta_coalescing.take() {
             core.control.delta_coalescing = coalescing;

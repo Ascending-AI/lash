@@ -3,8 +3,6 @@ use lash_sansio::llm::capability::{CacheRetention, ReasoningRetentionSelection};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
-pub const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 300_000;
-pub const DEFAULT_CHUNK_TIMEOUT_MS: u64 = 120_000;
 pub const DEFAULT_THROTTLE_WAIT_BUDGET_MS: u64 = 90_000;
 
 /// A shorter `Retry-After` (including a past HTTP-date) consumes the ordinary retry ladder and
@@ -29,11 +27,35 @@ pub struct LlmTimeouts {
 }
 
 impl Default for LlmTimeouts {
+    /// The default [`ProviderAttemptLimits`](lash_sansio::ProviderAttemptLimits).
     fn default() -> Self {
+        let limits = lash_sansio::ProviderAttemptLimits::default();
         Self {
-            request_timeout: Some(Duration::from_millis(DEFAULT_REQUEST_TIMEOUT_MS)),
-            response_start_timeout: Duration::from_millis(DEFAULT_CHUNK_TIMEOUT_MS),
-            chunk_timeout: Duration::from_millis(DEFAULT_CHUNK_TIMEOUT_MS),
+            request_timeout: Some(limits.per_request()),
+            response_start_timeout: limits.response_start(),
+            chunk_timeout: limits.chunk_idle(),
+        }
+    }
+}
+
+impl LlmTimeouts {
+    /// These timeouts with every bound clipped to `limits` and to `window`,
+    /// what remains of the model call's total for this attempt.
+    #[must_use]
+    pub fn clipped(self, limits: &lash_sansio::ProviderAttemptLimits, window: Duration) -> Self {
+        let request = self
+            .request_timeout
+            .map_or(limits.per_request(), |timeout| {
+                timeout.min(limits.per_request())
+            })
+            .min(window);
+        Self {
+            request_timeout: Some(request),
+            response_start_timeout: self
+                .response_start_timeout
+                .min(limits.response_start())
+                .min(request),
+            chunk_timeout: self.chunk_timeout.min(limits.chunk_idle()).min(request),
         }
     }
 }
@@ -441,8 +463,10 @@ impl ResolvedGenerationPolicy {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ProviderReliability {
-    /// Whole-request timeout. `None` applies [`DEFAULT_REQUEST_TIMEOUT_MS`];
-    /// use [`RequestTimeout::Disabled`] to wait indefinitely.
+    /// Whole-request timeout. `None` applies the default provider attempt
+    /// limits' per-request bound. [`RequestTimeout::Disabled`] leaves the
+    /// route unbounded, so only the runtime's provider attempt limits and the
+    /// model call's remaining total bound it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_timeout: Option<RequestTimeout>,
     /// Streaming response-start timeout in milliseconds. `None` (or `0`)
@@ -456,7 +480,7 @@ pub struct ProviderReliability {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_start_timeout: Option<u64>,
     /// Inter-chunk stream timeout in milliseconds. `None` (or `0`) applies
-    /// [`DEFAULT_CHUNK_TIMEOUT_MS`].
+    /// the default provider attempt limits' chunk-idle bound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chunk_timeout: Option<u64>,
     #[serde(default)]
@@ -489,16 +513,16 @@ impl ProviderReliability {
     }
 
     pub fn llm_timeouts(&self) -> LlmTimeouts {
+        let defaults = lash_sansio::ProviderAttemptLimits::default();
         let request_timeout = match self.request_timeout {
             Some(RequestTimeout::Disabled) => None,
             Some(RequestTimeout::Millis(ms)) => Some(Duration::from_millis(ms)),
-            None => Some(Duration::from_millis(DEFAULT_REQUEST_TIMEOUT_MS)),
+            None => Some(defaults.per_request()),
         };
-        let chunk_timeout_ms = self
+        let chunk_timeout = self
             .chunk_timeout
             .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_CHUNK_TIMEOUT_MS);
-        let chunk_timeout = Duration::from_millis(chunk_timeout_ms);
+            .map_or(defaults.chunk_idle(), Duration::from_millis);
         let derived_response_start_timeout = match request_timeout {
             Some(timeout) => timeout.min(chunk_timeout),
             None => chunk_timeout,
@@ -512,6 +536,27 @@ impl ProviderReliability {
             request_timeout,
             response_start_timeout,
             chunk_timeout,
+        }
+    }
+
+    /// This route's reliability for one attempt: every timeout clipped to
+    /// the runtime's provider attempt limits and to `window`, what remains
+    /// of the model call's total.
+    #[must_use]
+    pub fn clipped(&self, limits: &lash_sansio::ProviderAttemptLimits, window: Duration) -> Self {
+        let clipped = self.llm_timeouts().clipped(limits, window);
+        let millis = |duration: Duration| {
+            u64::try_from(duration.as_millis())
+                .unwrap_or(u64::MAX)
+                .max(1)
+        };
+        Self {
+            request_timeout: clipped
+                .request_timeout
+                .map(|timeout| RequestTimeout::Millis(millis(timeout))),
+            response_start_timeout: Some(millis(clipped.response_start_timeout)),
+            chunk_timeout: Some(millis(clipped.chunk_timeout)),
+            ..self.clone()
         }
     }
 
@@ -619,7 +664,7 @@ impl Default for ProviderRetryPolicy {
     fn default() -> Self {
         Self {
             enabled: true,
-            max_attempts: 4,
+            max_attempts: lash_sansio::ProviderAttemptLimits::default().max_attempts(),
             base_delay_ms: 2_000,
             max_delay_ms: 10_000,
             jitter_ms: 500,

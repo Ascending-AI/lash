@@ -284,6 +284,25 @@
         }
       ]
     },
+    "Duration": {
+      "properties": {
+        "nanos": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "secs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "secs",
+        "nanos"
+      ],
+      "type": "object"
+    },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
@@ -981,6 +1000,41 @@
         "credential_scope"
       ],
       "type": "object"
+    },
+    "RegistrationRefused": {
+      "description": "Why registration refused a tool.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "An inline-only tool declares more execution than the ceiling allows.",
+          "properties": {
+            "ceiling": {
+              "$ref": "#/$defs/Duration"
+            },
+            "declared": {
+              "$ref": "#/$defs/Duration"
+            },
+            "hint": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "inline_budget_exceeds_ceiling",
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "tool",
+            "declared",
+            "ceiling",
+            "hint"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "RemoteAbandonEvidence": {
       "description": "Wire mirror of Abandoned-terminal evidence.",
@@ -2137,6 +2191,27 @@
           },
           "required": [
             "DuplicateName"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A member's declared execution is refused against the deployment's\nexecution budgets.",
+          "properties": {
+            "RegistrationRefused": {
+              "properties": {
+                "refusal": {
+                  "$ref": "#/$defs/RegistrationRefused"
+                }
+              },
+              "required": [
+                "refusal"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "RegistrationRefused"
           ],
           "type": "object"
         }

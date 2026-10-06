@@ -288,6 +288,13 @@ pub use lash_core::{
     facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
     facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
 };
+/// Every execution bound the runtime enforces (`LashCoreBuilder::execution_budgets`),
+/// the limit one executable stretch runs under, and the registration refusal
+/// of an inline tool declared above the ceiling.
+pub use lash_core::{
+    ExecutionBudgets, ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit,
+    ProviderAttemptLimits, RegistrationRefused,
+};
 // A host's head write is a session command it submits, settles and may
 // withdraw (FIG-4202): the settlement and the typed outcomes it carries.
 pub use lash_core::runtime::{
@@ -450,6 +457,10 @@ pub mod tools {
     pub use crate::tool_intent_ingress::{
         ToolIntentIngress, ToolIntentIngressKey, ToolIntentIngressOutcome, ToolIntentIngressRefusal,
     };
+    /// A tool's expected inline execution, carried by
+    /// [`ToolDefinition::with_expected_execution`] and admitted against the
+    /// runtime's inline ceiling at registration.
+    pub use lash_core::ExpectedExecution;
     /// Typed cancellation evidence constructed by tool implementors; pass it to
     /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
     pub use lash_core::ToolCancellation;

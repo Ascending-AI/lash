@@ -14,6 +14,7 @@ pub mod json_decode;
 pub mod json_schema;
 mod run_aggregate;
 pub use json_schema::{InvalidSchemaKind, JsonSchema, SchemaAdmissionError, ValueMismatch};
+mod execution_budgets;
 pub mod llm;
 pub mod llm_profile;
 pub mod module_artifact_refusal;
@@ -118,6 +119,10 @@ pub use definition_id::{
 pub use effect_identity::{
     EffectAddress, EffectIdentityError, EffectJournalIdentity, ExecutionScope,
 };
+pub use execution_budgets::{
+    ExecutionBudgets, ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit,
+    MAX_EXECUTION_BUDGET, MAX_PROVIDER_ATTEMPTS, ProviderAttemptLimits, RegistrationRefused,
+};
 pub use frame_key::{FrameKey, FrameKeyError};
 pub use handle::{
     HANDLE_FIELD, HANDLE_KIND, HandleId, HandleTarget, is_handle_shape, parse_handle,
@@ -143,12 +148,13 @@ pub use redacted::Redacted;
 pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput};
 pub use run_aggregate::RunAggregateWakePolicy;
 pub use sansio::{
-    ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
-    ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExpandedRow,
-    ExpandedWrapper, LlmCallError, ModelToolCalls, PendingToolCall, PendingWork, ProjectorContext,
-    ProtocolDriverHandle, Response, ResponseToolCalls, TURN_CHECKPOINT_SCHEMA_VERSION,
-    ToolExpansionPlan, TurnCause, TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine,
-    TurnMachineConfig, TurnProtocol, UnitTurnProtocol, render_turn_causes_prompt,
+    ChatContextProjector, CheckpointContentRef, CheckpointDelivery, CheckpointResumeAction,
+    CompletedToolCall, ContextProjector, DriverAction, DriverContextView, Effect, EffectId,
+    ExpandedRow, ExpandedWrapper, LlmCallError, ModelToolCalls, PendingToolCall, PendingWork,
+    ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SavedTurn,
+    TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, TurnCause, TurnCheckpoint,
+    TurnCheckpointContent, TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig,
+    TurnProtocol, UnitTurnProtocol, render_turn_causes_prompt,
 };
 pub use schema_contract::{
     OmissionNullPath, OmissionNullPathSegment, ProjectionMode, ProviderSchemaCapabilities,
@@ -184,12 +190,12 @@ pub use tool_catalog::{
 #[cfg(feature = "schema-validation")]
 pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
-    Backoff, BoundedRetry, CompactToolContract, ExecutionPolicy, ExtraKeys, LimitCause, ModelTool,
-    ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints, ShapeField,
-    ShapeKind, ShapeRow, TOOL_BINDING_KEY, ToolArgumentProjectionPolicy, ToolBinding, ToolContract,
-    ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery, ToolId, ToolManifest, ToolModule,
-    ToolOutputContract, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
-    is_named_type_reference, schema_for,
+    Backoff, BoundedRetry, CompactToolContract, ExecutionPolicy, ExpectedExecution, ExtraKeys,
+    LimitCause, ModelTool, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape,
+    ShapeConstraints, ShapeField, ShapeKind, ShapeRow, TOOL_BINDING_KEY,
+    ToolArgumentProjectionPolicy, ToolBinding, ToolContract, ToolDefinition,
+    ToolDefinitionBindingExt, ToolDiscovery, ToolId, ToolManifest, ToolModule, ToolOutputContract,
+    X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType, is_named_type_reference, schema_for,
 };
 pub use tool_declaration::{
     DeclarationRefusal, OutcomeShape, ToolAdmissionRefusal, ToolDeclaration,

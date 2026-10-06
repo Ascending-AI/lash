@@ -112,9 +112,6 @@ pub struct RuntimeProviderConfig {
     pub run_definitions: crate::RunDefinitions,
 }
 
-/// Default [`RuntimeControlConfig::abort_drain_grace`].
-pub const DEFAULT_ABORT_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_millis(2_000);
-
 /// How a turn coalesces the prose and reasoning deltas of a stream block
 /// before they reach the host sinks and the live replay store (FIG-5098).
 ///
@@ -246,14 +243,15 @@ pub struct RuntimeControlConfig {
     /// The termination policy a run records on its first execution. Terminal
     /// assembly reads the run's record, never this field (FIG-4389).
     pub termination: TerminationPolicy,
-    /// How long a protocol-owned stream abort (a protocol boundary that ends
-    /// the model's turn under ADR 0036's no-wire-stop rule) keeps draining the
-    /// provider stream before the task is aborted. The drain exists so a
-    /// cooperative provider's trailing usage event still lands on the aborted
-    /// attempt; past the grace the attempt is sealed with a typed unreported
-    /// disposition (ADR 0031). Defaults to
-    /// [`DEFAULT_ABORT_DRAIN_GRACE`] (2 s).
-    pub abort_drain_grace: std::time::Duration,
+    /// Every execution bound this runtime enforces (spec v3 Part C): the
+    /// tool default and inline ceiling, the model call's hard total, the
+    /// control-phase bound, the stop grace, the wait bounds and the provider
+    /// attempt limits. The stop grace is also how long a protocol-owned
+    /// stream abort (ADR 0036) keeps draining the provider stream, so a
+    /// cooperative provider's trailing usage still lands on the aborted
+    /// attempt; past it the attempt is sealed with a typed unreported
+    /// disposition (ADR 0031). Defaults to [`crate::ExecutionBudgets::default`].
+    pub execution_budgets: crate::ExecutionBudgets,
     /// How a turn coalesces its stream deltas into frames before they reach
     /// the host sinks and the live replay store (FIG-5098). Defaults to
     /// [`DeltaCoalescing::default`]: 50 ms frames of at most 8 KiB, the first
@@ -353,7 +351,7 @@ impl RuntimeHostConfig {
             },
             control: RuntimeControlConfig {
                 termination: TerminationPolicy::default(),
-                abort_drain_grace: DEFAULT_ABORT_DRAIN_GRACE,
+                execution_budgets: crate::ExecutionBudgets::default(),
                 delta_coalescing: DeltaCoalescing::default(),
                 effect_host,
                 trigger_route_restorer: None,

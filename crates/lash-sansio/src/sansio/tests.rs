@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::*;
 
+mod bounded_checkpoint;
 mod fold;
 use crate::TurnFinish;
 use crate::llm::types::{LlmOutputPart, LlmRequest, LlmResponse, LlmTerminalReason};
@@ -186,7 +187,7 @@ fn find_execution_environment_sync(effects: &[Effect]) -> Option<EffectId> {
     })
 }
 
-fn roundtrip_checkpoint(checkpoint: TurnCheckpoint) -> TurnCheckpoint {
+fn roundtrip_checkpoint(checkpoint: SavedTurn) -> SavedTurn {
     let encoded = serde_json::to_string(&checkpoint).expect("serialize checkpoint");
     serde_json::from_str(&encoded).expect("deserialize checkpoint")
 }
@@ -203,8 +204,8 @@ fn turn_checkpoint_restore_refuses_every_non_current_version() {
 
     for actual in [1, 2, 5, 99, u32::MAX] {
         let mut incompatible = encoded.clone();
-        incompatible["schema_version"] = serde_json::json!(actual);
-        let checkpoint: TurnCheckpoint =
+        incompatible["checkpoint"]["schema_version"] = serde_json::json!(actual);
+        let checkpoint: SavedTurn =
             serde_json::from_value(incompatible).expect("well-formed incompatible checkpoint");
         let Err(error) =
             TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
@@ -229,7 +230,8 @@ fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
         crate::AppendVec::new(),
         0,
     );
-    let mut encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint JSON");
+    let mut encoded =
+        serde_json::to_value(machine.checkpoint().checkpoint).expect("checkpoint JSON");
     encoded["termination"] = serde_json::json!({"turn_limit_final_scheduled": false});
     let bytes = serde_json::to_vec(&encoded).expect("checkpoint bytes");
 
@@ -303,7 +305,10 @@ fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
     }]);
 
     let checkpoint = roundtrip_checkpoint(machine.checkpoint());
-    assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
+    assert_eq!(
+        checkpoint.checkpoint.schema_version(),
+        TURN_CHECKPOINT_SCHEMA_VERSION
+    );
     let mut restored =
         TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
             .expect("supported checkpoint");
@@ -633,7 +638,7 @@ fn machine_at_protocol_iteration(
         protocol_run_offset,
     );
     let mut checkpoint = machine.checkpoint();
-    checkpoint.protocol_iteration = protocol_iteration;
+    checkpoint.checkpoint.protocol_iteration = protocol_iteration;
 
     let mut config = test_config(Arc::new(CellEveryIterationDriver));
     config.turn_budget = turn_budget;
@@ -1670,7 +1675,8 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         delivered: &Effect,
         expected_state: serde_json::Value,
     ) {
-        let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
+        let saved = machine.checkpoint();
+        let encoded = serde_json::to_value(&saved.checkpoint).expect("checkpoint json");
         assert_eq!(encoded["state"], expected_state);
 
         let bytes = serde_json::to_vec(&encoded).expect("checkpoint bytes");
@@ -1681,8 +1687,14 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
             encoded
         );
 
-        let mut restored = TurnMachine::restore_from_checkpoint(test_config(driver()), decoded)
-            .expect("supported checkpoint");
+        let mut restored = TurnMachine::restore_from_checkpoint(
+            test_config(driver()),
+            SavedTurn {
+                checkpoint: decoded,
+                content: saved.content,
+            },
+        )
+        .expect("supported checkpoint");
         let redelivered = drain_unsynced_effects(&mut restored);
         assert_eq!(redelivered.len(), 1, "{redelivered:?}");
         assert_eq!(
@@ -1702,7 +1714,10 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         &mut machine,
         || Arc::new(ProseDriver),
         effects.last().expect("sync effect"),
-        serde_json::json!({"Waiting": {"effect_id": 1, "work": "SyncExecutionEnvironment"}}),
+        serde_json::json!({"Waiting": {"effect_id": 1, "work": {
+            "kind": "work",
+            "work": "SyncExecutionEnvironment",
+        }}}),
     );
 
     let mut machine = TurnMachine::new(
@@ -1717,10 +1732,13 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         &mut machine,
         || Arc::new(SyncThenAdvanceDriver),
         effects.last().expect("llm effect"),
-        serde_json::json!({"Waiting": {"effect_id": 2, "work": {"Llm": {
-            "request": serde_json::to_value(request).expect("request json"),
+        serde_json::json!({"Waiting": {"effect_id": 2, "work": {
+            "kind": "llm",
+            "request": super::checkpoint_content::CheckpointContentRef::of_bytes(
+                serde_json::to_string(request).expect("request json").as_bytes(),
+            ),
             "driver_state": null,
-        }}}}),
+        }}}),
     );
     machine.handle_response(Response::LlmComplete {
         id: *llm_id,
@@ -1732,10 +1750,10 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         &mut machine,
         || Arc::new(SyncThenAdvanceDriver),
         effects.last().expect("checkpoint effect"),
-        serde_json::json!({"Waiting": {"effect_id": 3, "work": {"Checkpoint": {
+        serde_json::json!({"Waiting": {"effect_id": 3, "work": {"kind": "work", "work": {"Checkpoint": {
             "checkpoint": "before_completion",
             "on_empty": "PrepareIteration",
-        }}}}),
+        }}}}}),
     );
 
     let mut machine = TurnMachine::new(
@@ -1760,9 +1778,9 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         &mut machine,
         || Arc::new(ToolBatchDriver),
         tool_calls,
-        serde_json::json!({"Waiting": {"effect_id": 3, "work": {"WaitingForToolResults": {
+        serde_json::json!({"Waiting": {"effect_id": 3, "work": {"kind": "work", "work": {"WaitingForToolResults": {
             "calls": serde_json::to_value(calls).expect("calls json"),
-        }}}}),
+        }}}}}),
     );
 
     let mut machine = TurnMachine::new(
@@ -1776,11 +1794,11 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         &mut machine,
         || Arc::new(ExecDriver),
         effects.last().expect("exec effect"),
-        serde_json::json!({"Waiting": {"effect_id": 2, "work": {"Exec": {
+        serde_json::json!({"Waiting": {"effect_id": 2, "work": {"kind": "work", "work": {"Exec": {
             "language": "code",
             "code": "print 1",
             "driver_state": "exec-state",
-        }}}}),
+        }}}}}),
     );
 }
 
@@ -1916,12 +1934,15 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
     });
 
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
-    assert_eq!(encoded["environment"]["protocol_iteration"], 0);
     assert_eq!(
-        encoded["environment"]["sync"]["system_prompt"],
+        encoded["checkpoint"]["environment"]["protocol_iteration"],
+        0
+    );
+    assert_eq!(
+        encoded["checkpoint"]["environment"]["sync"]["system_prompt"],
         "recorded prompt"
     );
-    let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
+    let checkpoint: SavedTurn = serde_json::from_value(encoded).expect("checkpoint");
     let mut restored =
         TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
             .expect("supported checkpoint");
@@ -1956,8 +1977,8 @@ fn a_checkpoint_waiting_on_driver_work_without_an_environment_is_refused() {
     let effects = drain_effects(&mut machine);
     assert!(find_llm_call(&effects).is_some());
     let mut encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
-    encoded["environment"] = serde_json::Value::Null;
-    let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
+    encoded["checkpoint"]["environment"] = serde_json::Value::Null;
+    let checkpoint: SavedTurn = serde_json::from_value(encoded).expect("checkpoint");
 
     let Err(error) =
         TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)

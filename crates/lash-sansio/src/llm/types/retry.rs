@@ -41,6 +41,10 @@ pub enum RetryDeclineCause {
     NotRetryable,
     RetryBudgetExhausted,
     RetryAfterExceedsCap,
+    /// The call's limit expired: the model total ends every further attempt.
+    TimedOut {
+        limit: crate::LimitCause,
+    },
     ChargeSafety {
         tokens_at_stake: u64,
         attempt_number: u8,
@@ -81,7 +85,8 @@ impl RetryDecision {
             | Self::Declined(
                 RetryDeclineCause::NotRetryable
                 | RetryDeclineCause::RetryBudgetExhausted
-                | RetryDeclineCause::RetryAfterExceedsCap,
+                | RetryDeclineCause::RetryAfterExceedsCap
+                | RetryDeclineCause::TimedOut { .. },
             ) => None,
         }
     }
@@ -121,7 +126,8 @@ impl RetryDecision {
             | Self::Declined(
                 RetryDeclineCause::NotRetryable
                 | RetryDeclineCause::RetryBudgetExhausted
-                | RetryDeclineCause::RetryAfterExceedsCap,
+                | RetryDeclineCause::RetryAfterExceedsCap
+                | RetryDeclineCause::TimedOut { .. },
             ) => None,
         }
     }

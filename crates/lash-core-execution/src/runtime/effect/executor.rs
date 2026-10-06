@@ -186,6 +186,9 @@ pub(super) struct LocalDirectEffectRunner {
     /// Bound only when this body runs, never on a replay (FIG-4404).
     binding: crate::LlmProfileBinding,
     charge_safety: crate::ChargeSafetyPolicy,
+    /// The runtime's execution budgets and the enclosing limit the call is
+    /// clipped to.
+    bounds: lash_core_llm::core_internal::ModelCallBounds,
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
     /// Who the call spends for (ADR 0127).
     owner: crate::RuntimeOwner,
@@ -849,6 +852,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub fn direct(
         binding: crate::LlmProfileBinding,
         charge_safety: crate::ChargeSafetyPolicy,
+        budgets: crate::ExecutionBudgets,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         owner: crate::RuntimeOwner,
         tracing: crate::trace::TraceRuntime,
@@ -859,6 +863,10 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 LocalDirectEffectRunner {
                     binding,
                     charge_safety,
+                    bounds: lash_core_llm::core_internal::ModelCallBounds {
+                        budgets,
+                        enclosing: None,
+                    },
                     attachment_store,
                     owner,
                     tracing,

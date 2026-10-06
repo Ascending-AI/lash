@@ -329,6 +329,7 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
                 bindings: _,
                 argument_projection: _,
                 execution_policy: _,
+                expected_execution: _,
                 // The declaration is admission policy, like the retry policy:
                 // it never names the logical call.
                 declaration: _,

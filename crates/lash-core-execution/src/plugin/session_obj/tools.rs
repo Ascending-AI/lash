@@ -195,6 +195,7 @@ impl PluginSession {
             tools,
             resolve_contract,
             contributions,
+            budgets: self.host.execution_budgets(),
         })
         .map_err(|err| match err {
             source @ lash_sansio::ToolCatalogBuildError::UnusableSchema { .. } => {
@@ -210,6 +211,11 @@ impl PluginSession {
             }
             lash_sansio::ToolCatalogBuildError::DuplicateName { name } => {
                 PluginError::ResidentToolDuplicateName { name }
+            }
+            lash_sansio::ToolCatalogBuildError::RegistrationRefused { refusal } => {
+                PluginError::ToolRegistrationRefused {
+                    source: Box::new(refusal),
+                }
             }
         })
     }

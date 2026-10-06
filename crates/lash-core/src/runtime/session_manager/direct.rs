@@ -236,6 +236,7 @@ impl DirectCompletionCapability {
         let local_executor = crate::RuntimeEffectLocalExecutor::direct(
             binding,
             current.policy.charge_safety.clone(),
+            current.host.core.control.execution_budgets.clone(),
             Arc::clone(&current.host.core.durability.attachment_store),
             current.runtime_owner(),
             tracing.clone(),

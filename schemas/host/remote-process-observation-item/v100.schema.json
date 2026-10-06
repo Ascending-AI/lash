@@ -436,6 +436,14 @@
       ],
       "type": "string"
     },
+    "LimitCause": {
+      "enum": [
+        "execution_slice",
+        "execution_total",
+        "wait_deadline"
+      ],
+      "type": "string"
+    },
     "LlmTerminalReason": {
       "enum": [
         "stop",
@@ -4826,6 +4834,23 @@
               },
               "required": [
                 "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "The call's limit expired: the model total ends every further attempt.",
+              "properties": {
+                "cause": {
+                  "const": "timed_out",
+                  "type": "string"
+                },
+                "limit": {
+                  "$ref": "#/$defs/LimitCause"
+                }
+              },
+              "required": [
+                "cause",
+                "limit"
               ],
               "type": "object"
             },

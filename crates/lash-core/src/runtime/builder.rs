@@ -38,7 +38,9 @@ impl EmbeddedRuntimeBuilder {
             policy: None,
             initial_state: None,
             plugin_source: PluginSource::Host(
-                PluginHost::empty().with_trace_runtime(core.tracing.clone()),
+                PluginHost::empty()
+                    .with_trace_runtime(core.tracing.clone())
+                    .with_execution_budgets(core.control.execution_budgets.clone()),
             ),
             core,
             store: None,
@@ -75,7 +77,9 @@ impl EmbeddedRuntimeBuilder {
     }
 
     pub fn with_plugin_factories(mut self, factories: Vec<Arc<dyn PluginFactory>>) -> Self {
-        let host = PluginHost::new(factories).with_trace_runtime(self.core.tracing.clone());
+        let host = PluginHost::new(factories)
+            .with_trace_runtime(self.core.tracing.clone())
+            .with_execution_budgets(self.core.control.execution_budgets.clone());
         self.plugin_source = PluginSource::Host(host);
         self
     }
@@ -228,6 +232,7 @@ impl EmbeddedRuntimeBuilder {
                 };
                 host.clone()
                     .with_trace_runtime(self.core.tracing.clone())
+                    .with_execution_budgets(self.core.control.execution_budgets.clone())
                     .isolated_registry()
                     .defer_session(PluginSessionRequest {
                         parent_session_id,

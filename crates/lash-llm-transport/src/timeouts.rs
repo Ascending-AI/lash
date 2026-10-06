@@ -2,27 +2,6 @@ use std::time::Duration;
 
 pub use lash_http_transport::{build_http_client, header_pairs, run_with_timeout};
 
-pub const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 300_000;
-pub const DEFAULT_CHUNK_TIMEOUT_MS: u64 = 120_000;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LlmTimeouts {
-    pub request_timeout: Option<Duration>,
-    /// The whole-request timeout still wins when it is shorter.
-    pub response_start_timeout: Duration,
-    pub chunk_timeout: Duration,
-}
-
-impl Default for LlmTimeouts {
-    fn default() -> Self {
-        Self {
-            request_timeout: Some(Duration::from_millis(DEFAULT_REQUEST_TIMEOUT_MS)),
-            response_start_timeout: Duration::from_millis(DEFAULT_CHUNK_TIMEOUT_MS),
-            chunk_timeout: Duration::from_millis(DEFAULT_CHUNK_TIMEOUT_MS),
-        }
-    }
-}
-
 /// Resolves the timeout applied while waiting for an HTTP response to start.
 ///
 /// Streaming calls use `response_start_timeout`, capped by the remaining

@@ -278,6 +278,9 @@ impl DirectLlmClient {
             traced
                 .as_ref()
                 .and_then(|(standing, _)| standing.body_permit()),
+            // A host's own completion runs under no lash execution, so the
+            // default budgets bound it.
+            lash_core_llm::core_internal::ModelCallBounds::default(),
         )
         .await
         {

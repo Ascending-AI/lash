@@ -95,20 +95,12 @@ impl ProviderRateLimiter {
         Arc::clone(&self.state.lock_recover().clock)
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the gate semaphore is never closed (no close() anywhere in this crate), and acquire_owned only fails on a closed semaphore"
-    )]
     pub async fn admit(
         &self,
         provider: &dyn Provider,
         request: &LlmRequest,
     ) -> ProviderRateLimitPermit {
-        let semaphore = self.concurrency_gate(&provider.options().reliability.rate_limits);
-        let concurrency = match semaphore {
-            Some(semaphore) => Some(semaphore.acquire_owned().await.expect("semaphore open")),
-            None => None,
-        };
+        let concurrency = self.acquire_concurrency(provider).await;
         self.wait_for_buckets(provider, 1, estimate_request_tokens(request))
             .await;
         ProviderRateLimitPermit {
@@ -116,7 +108,54 @@ impl ProviderRateLimiter {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the gate semaphore is never closed (no close() anywhere in this crate), and acquire_owned only fails on a closed semaphore"
+    )]
+    async fn acquire_concurrency(
+        &self,
+        provider: &dyn Provider,
+    ) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        let semaphore = self.concurrency_gate(&provider.options().reliability.rate_limits)?;
+        Some(semaphore.acquire_owned().await.expect("semaphore open"))
+    }
+
+    /// Admit a call whose model total expires at `deadline` on this
+    /// limiter's clock. `None` when a throttle window would hold the call
+    /// past its deadline: the call settles at once instead of waiting it out.
+    pub(super) async fn admit_within(
+        &self,
+        provider: &dyn Provider,
+        request: &LlmRequest,
+        deadline: std::time::Instant,
+    ) -> Option<ProviderRateLimitPermit> {
+        let concurrency = self.acquire_concurrency(provider).await;
+        self.wait_for_buckets_within(
+            provider,
+            1,
+            estimate_request_tokens(request),
+            Some(deadline),
+        )
+        .await
+        .then_some(ProviderRateLimitPermit {
+            _concurrency: concurrency,
+        })
+    }
+
     async fn wait_for_buckets(&self, provider: &dyn Provider, requests: u32, tokens: u32) {
+        self.wait_for_buckets_within(provider, requests, tokens, None)
+            .await;
+    }
+
+    /// Wait until the buckets admit the call; `false` when the next wait
+    /// would reach `deadline`.
+    async fn wait_for_buckets_within(
+        &self,
+        provider: &dyn Provider,
+        requests: u32,
+        tokens: u32,
+        deadline: Option<std::time::Instant>,
+    ) -> bool {
         loop {
             let policy = provider.options().reliability.rate_limits;
             let wait = {
@@ -141,13 +180,17 @@ impl ProviderRateLimiter {
                 state.request_bucket = request_decision.commit(admitted);
                 state.token_bucket = token_decision.commit(admitted);
                 match waits {
-                    (None, None) => return,
+                    (None, None) => return true,
                     (Some(a), Some(b)) => Some(a.max(b)),
                     (Some(a), None) | (None, Some(a)) => Some(a),
                 }
             };
             if let Some(wait) = wait {
-                self.clock().sleep(wait).await;
+                let clock = self.clock();
+                if deadline.is_some_and(|deadline| clock.now() + wait >= deadline) {
+                    return false;
+                }
+                clock.sleep(wait).await;
             }
         }
     }

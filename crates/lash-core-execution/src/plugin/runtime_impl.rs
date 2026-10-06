@@ -19,6 +19,7 @@ pub struct PluginHost {
     config_registry: Arc<
         std::sync::OnceLock<Result<Arc<super::ConfigRegistry>, super::ConfigRegistrationError>>,
     >,
+    execution_budgets: crate::ExecutionBudgets,
 }
 
 /// Inputs shared by new-session creation and reconstruction from durable
@@ -147,6 +148,7 @@ impl PluginHost {
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
             config_registry,
             trace_runtime: crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
+            execution_budgets: crate::ExecutionBudgets::default(),
         }
     }
 
@@ -178,6 +180,17 @@ impl PluginHost {
         &self.trace_runtime
     }
 
+    /// The runtime's execution budgets, stamped from its host config: every
+    /// catalog this host's sessions build admits its tools against them.
+    pub fn with_execution_budgets(mut self, execution_budgets: crate::ExecutionBudgets) -> Self {
+        self.execution_budgets = execution_budgets;
+        self
+    }
+
+    pub fn execution_budgets(&self) -> crate::ExecutionBudgets {
+        self.execution_budgets.clone()
+    }
+
     pub fn with_extensions(mut self, extensions: PluginExtensions) -> Self {
         self.extensions = extensions;
         self
@@ -192,6 +205,7 @@ impl PluginHost {
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
             config_registry: Arc::clone(&self.config_registry),
             trace_runtime: self.trace_runtime.clone(),
+            execution_budgets: self.execution_budgets.clone(),
         }
     }
 

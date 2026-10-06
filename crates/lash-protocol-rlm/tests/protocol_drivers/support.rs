@@ -171,8 +171,8 @@ pub(crate) fn find_done(effects: &[Effect]) -> Option<(&lash_sansio::MessageSequ
     reason = "test support: the checkpoint is a crate-owned serde round-trip fixture; serialization cannot fail"
 )]
 pub(crate) fn roundtrip_turn_checkpoint(
-    checkpoint: lash_sansio::TurnCheckpoint<lash_core::HostTurnProtocol>,
-) -> lash_sansio::TurnCheckpoint<lash_core::HostTurnProtocol> {
+    checkpoint: lash_sansio::SavedTurn<lash_core::HostTurnProtocol>,
+) -> lash_sansio::SavedTurn<lash_core::HostTurnProtocol> {
     let encoded = serde_json::to_string(&checkpoint).expect("serialize checkpoint");
     serde_json::from_str(&encoded).expect("deserialize checkpoint")
 }

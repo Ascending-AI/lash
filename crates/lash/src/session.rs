@@ -257,7 +257,7 @@ impl SessionBuilder {
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
-            &self.core.env.core.tracing,
+            &self.core.env.core,
         )?;
         // Creation is an adoption point of its own (FIG-4747): the created
         // head's namespaces are written in the formats the fleet record
@@ -454,7 +454,7 @@ impl SessionBuilder {
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
-            &self.core.env.core.tracing,
+            &self.core.env.core,
         )?;
         env.core = plugin_host.install_process_engine_contributions(
             env.core.clone(),

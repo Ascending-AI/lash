@@ -97,13 +97,35 @@ async fn duplicate_cost_bound_denies_and_projects_typed_trace() {
 async fn provider_handle_enforces_the_supplied_retry_limit_without_a_second_ceiling() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let mut handle = paid_partial_handle(Arc::clone(&attempts), 100, 10, None);
+    // The deployment's attempt limit (FIG-5171) is stated above the policy
+    // under test, so the supplied charge-safety limit is the one that binds.
+    let budgets = lash_sansio::ExecutionBudgets::new(lash_sansio::ExecutionBudgetsConfig {
+        provider: lash_sansio::ProviderAttemptLimits::new(
+            Duration::from_secs(300),
+            Duration::from_secs(120),
+            Duration::from_secs(120),
+            lash_sansio::MAX_PROVIDER_ATTEMPTS,
+        )
+        .expect("valid provider limits"),
+        ..lash_sansio::ExecutionBudgetsConfig::default()
+    })
+    .expect("valid budgets");
+    let mut request = empty_request();
+    let sideband = handle.prepare_completion(&mut request);
 
     let failure = handle
-        .complete_with_charge_safety(
-            empty_request(),
+        .complete_prepared(
+            request,
+            sideband,
             crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                 max_unsafe_retries: 6,
                 max_duplicate_cost_tokens: None,
+            },
+            &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
+            None,
+            super::handle::ModelCallBounds {
+                budgets,
+                enclosing: None,
             },
         )
         .await

@@ -286,6 +286,7 @@ impl ProviderHandle {
             crate::ChargeSafetyPolicy::default(),
             &TelemetryMetrics::default(),
             None,
+            ModelCallBounds::default(),
         )
         .await
     }
@@ -310,6 +311,7 @@ impl ProviderHandle {
             charge_safety,
             &TelemetryMetrics::default(),
             None,
+            ModelCallBounds::default(),
         )
         .await
     }
@@ -364,6 +366,7 @@ impl ProviderHandle {
         charge_safety: crate::ChargeSafetyPolicy,
         metrics: &TelemetryMetrics,
         permit: Option<&EmissionPermit>,
+        bounds: ModelCallBounds,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let call_id = call_id_for_scope(&request.scope);
         let serving_route = sideband.serving_route();
@@ -384,27 +387,92 @@ impl ProviderHandle {
                 error,
             });
         }
-        let reliability = self.options().reliability;
+        let provider_limits = bounds.budgets.provider();
+        let mut reliability = self.options().reliability;
+        reliability.retry.max_attempts = reliability
+            .retry
+            .max_attempts
+            .min(provider_limits.max_attempts());
         let attempts = reliability.retry.attempts();
+        // The model total is a hard cap over throttle, backoff and every
+        // attempt (spec v3 L-C2). The limit is minted on lash's clock; the
+        // granted remainder is then enforced on the monotonic clock.
+        let clock = self.components.rate_limiter.clock();
+        let limit = bounds
+            .budgets
+            .model_call_limit(clock.timestamp_ms(), bounds.enclosing.as_ref());
+        let deadline = clock.now() + limit.remaining(clock.timestamp_ms());
+        let remaining = |clock: &dyn crate::Clock| deadline.saturating_duration_since(clock.now());
         let mut budget = RetryBudget::default();
         let mut records = Vec::new();
         loop {
             let attempt_ordinal = records.len() as u32 + 1;
-            let _permit = self
+            if remaining(clock.as_ref()).is_zero() {
+                return Err(model_total_exceeded(
+                    call_id,
+                    &sideband,
+                    records,
+                    attempt_ordinal,
+                    limit,
+                    None,
+                ));
+            }
+            // A throttle window that would outlast the total settles the
+            // call now instead of being waited out.
+            let Some(_permit) = self
                 .components
                 .rate_limiter
-                .admit(self.components.provider.as_ref(), &request)
-                .await;
+                .admit_within(self.components.provider.as_ref(), &request, deadline)
+                .await
+            else {
+                return Err(model_total_exceeded(
+                    call_id,
+                    &sideband,
+                    records,
+                    attempt_ordinal,
+                    limit,
+                    None,
+                ));
+            };
             let attempt_started_at_ms = sideband
                 .attempt_clock
                 .as_ref()
                 .map(|clock| clock.timestamp_ms());
-            let (mut result, panic_payload) = match std::panic::AssertUnwindSafe(async {
-                self.components.provider.complete(request.clone()).await
-            })
-            .catch_unwind()
-            .await
-            {
+            // Every provider sublimit of this attempt is clipped to what
+            // remains of the total; the route's own bounds come back after.
+            let route = self.options().reliability;
+            let mut attempt_options = self.options();
+            attempt_options.reliability =
+                route.clipped(&provider_limits, remaining(clock.as_ref()));
+            self.components.provider.set_options(attempt_options);
+            let attempt = {
+                let attempt = std::panic::AssertUnwindSafe(
+                    self.components.provider.complete(request.clone()),
+                )
+                .catch_unwind();
+                let expiry = clock.sleep_until(deadline);
+                futures_util::pin_mut!(attempt, expiry);
+                match futures_util::future::select(attempt, expiry).await {
+                    futures_util::future::Either::Left((attempt, _)) => Some(attempt),
+                    futures_util::future::Either::Right(((), _)) => None,
+                }
+            };
+            let mut restored = self.options();
+            restored.reliability.request_timeout = route.request_timeout;
+            restored.reliability.response_start_timeout = route.response_start_timeout;
+            restored.reliability.chunk_timeout = route.chunk_timeout;
+            self.components.provider.set_options(restored);
+            let Some(attempt) = attempt else {
+                return Err(model_total_exceeded(
+                    call_id,
+                    &sideband,
+                    records,
+                    attempt_ordinal,
+                    limit,
+                    Some(ProtocolPosition::NoResponse),
+                ));
+            };
+            let (mut result, panic_payload) = match attempt {
                 Ok(result) => (result, None),
                 Err(payload) => {
                     let message = crate::panic_containment::payload_message(payload.as_ref());
@@ -584,6 +652,20 @@ impl ProviderHandle {
                             true,
                         ),
                     };
+                    // A wait that would outlast the total skips every
+                    // further attempt: the call settles as timed out now.
+                    let (decision, verdict) = match decision.delay() {
+                        Some(delay) if delay >= remaining(clock.as_ref()) => {
+                            let cause = RetryDeclineCause::TimedOut {
+                                limit: lash_sansio::LimitCause::ExecutionTotal,
+                            };
+                            (
+                                RetryDecision::Declined(cause),
+                                RetryVerdict::Declined(cause),
+                            )
+                        }
+                        _ => (decision, verdict),
+                    };
                     let delay = decision.delay();
                     let unsafe_retry = charge_safety_decision.is_some();
                     records.push(failure_attempt_record(
@@ -598,6 +680,9 @@ impl ProviderHandle {
                             let error = match cause {
                                 RetryDeclineCause::ChargeSafety { reason, .. } => {
                                     charge_safety_refusal(failure, protocol_position, reason)
+                                }
+                                RetryDeclineCause::TimedOut { .. } => {
+                                    model_total_error(limit, Some(&failure))
                                 }
                                 RetryDeclineCause::NotRetryable
                                 | RetryDeclineCause::RetryBudgetExhausted
@@ -710,6 +795,67 @@ fn provider_close_panicked(
         .with_retry_verdict(TransportRetryVerdict::NotRetryable));
     crate::panic_containment::enforce_loudness(payload);
     failure
+}
+
+/// The bounds one model call runs under: the runtime's execution budgets
+/// and, for a call nested in another executable stretch, that stretch's
+/// limit, which clips the call's total (spec v3 L-C2).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ModelCallBounds {
+    pub budgets: lash_sansio::ExecutionBudgets,
+    pub enclosing: Option<lash_sansio::ExecutionLimit>,
+}
+
+/// The typed model timeout a call settles with once its total expires.
+fn model_total_error(
+    limit: lash_sansio::ExecutionLimit,
+    last_failure: Option<&LlmTransportError>,
+) -> LlmTransportError {
+    let mut message = format!(
+        "the model call reached its total limit (expired at {} ms)",
+        limit.expires_at
+    );
+    if let Some(failure) = last_failure {
+        message = format!("{message}; last provider failure: {}", failure.message);
+    }
+    LlmTransportError::new(message)
+        .with_kind(ProviderFailureKind::Timeout)
+        .with_lash_code(TurnFailureCode::ModelTotalExceeded)
+        .with_retry_verdict(TransportRetryVerdict::NotRetryable)
+}
+
+/// Settle a call whose total expired before or during attempt `ordinal`:
+/// `TimedOut { ExecutionTotal }`. An attempt cut while it ran is recorded at
+/// `cut_at`; a call that expired between attempts records none.
+fn model_total_exceeded(
+    call_id: LlmCallId,
+    sideband: &ProviderCompletionSideband,
+    mut records: Vec<AttemptRecord>,
+    ordinal: u32,
+    limit: lash_sansio::ExecutionLimit,
+    cut_at: Option<ProtocolPosition>,
+) -> ProviderCompletionError {
+    let error = model_total_error(limit, None);
+    if let Some(position) = cut_at {
+        records.push(failure_attempt_record(
+            ordinal,
+            &error,
+            true,
+            position,
+            Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
+                limit: lash_sansio::LimitCause::ExecutionTotal,
+            })),
+        ));
+    }
+    ProviderCompletionError {
+        error,
+        call_record: Box::new(LlmCallRecord {
+            call_id,
+            label: None,
+            replay_drops: sideband.replay_drops(),
+            attempts: records,
+        }),
+    }
 }
 
 fn success_outcome(reason: LlmTerminalReason) -> AttemptOutcome {
@@ -1269,9 +1415,10 @@ pub async fn complete_prepared(
     charge_safety: crate::ChargeSafetyPolicy,
     metrics: &TelemetryMetrics,
     permit: Option<&EmissionPermit>,
+    bounds: ModelCallBounds,
 ) -> Result<ProviderCompletion, ProviderCompletionError> {
     handle
-        .complete_prepared(request, sideband, charge_safety, metrics, permit)
+        .complete_prepared(request, sideband, charge_safety, metrics, permit, bounds)
         .await
 }
 

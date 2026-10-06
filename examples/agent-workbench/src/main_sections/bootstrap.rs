@@ -702,7 +702,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //         attempt: Duration::from_secs(30), tick_wait: Duration::from_secs(1),
     //     })
     //     .termination(lash::runtime::TerminationPolicy::default())
-    //     .abort_drain_grace(Duration::from_secs(2))
+    //     .execution_budgets(lash::ExecutionBudgets::default())
     //     .trigger_route_restorer(host_trigger_route_restorer)
     //     .process_observation_config(lash::process_observation::ProcessObservationConfig::default())
     //     .live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new(

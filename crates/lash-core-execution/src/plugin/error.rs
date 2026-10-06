@@ -387,6 +387,16 @@ define_plugin_errors! {
         => Self::ResidentToolDuplicateName { .. }
         => "resident_tool_duplicate_name"
         => crate::ToolFailureClass::Internal;
+/// A catalog member's declared execution is refused against the runtime's
+    /// execution budgets: an inline-only tool declared above the ceiling.
+    #[error("{source}")]
+    ToolRegistrationRefused { source: Box<crate::RegistrationRefused> }
+        => PluginError::ToolRegistrationRefused { source }
+        => { source: Box<crate::RegistrationRefused> }
+        => Self::ToolRegistrationRefused { source: source.clone() }
+        => Self::ToolRegistrationRefused { .. }
+        => "tool_registration_refused"
+        => crate::ToolFailureClass::InvalidRequest;
 /// An effective resident catalog member has no executable route in the pinned registry.
     #[error("resident tool `{name}` ({tool_id}) has no pinned execution route: {reason}")]
     ResidentToolRouteUnavailable {
@@ -1112,6 +1122,7 @@ impl PluginError {
             | Self::ResidentToolContractUnavailable { .. }
             | Self::ResidentToolDuplicateId { .. }
             | Self::ResidentToolDuplicateName { .. }
+            | Self::ToolRegistrationRefused { .. }
             | Self::ResidentToolRouteUnavailable { .. }
             | Self::SessionAlreadyExists { .. }
             | Self::SessionInitTooLarge { .. }

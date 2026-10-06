@@ -167,6 +167,7 @@ mod tests {
                 }))
             })),
             contributions: Vec::new(),
+            budgets: lash_core::ExecutionBudgets::default(),
         })
         .expect("first resident definition is pinned");
 
@@ -349,6 +350,7 @@ mod tests {
                 contracts.get(&manifest.id).cloned()
             })),
             contributions: vec![contribution],
+            budgets: lash_core::ExecutionBudgets::default(),
         })
         .expect("complete resident definitions");
 
@@ -489,6 +491,7 @@ mod tests {
                 move |_| Some(Arc::clone(&contract))
             })),
             contributions: vec![ToolCatalogContribution::default()],
+            budgets: lash_core::ExecutionBudgets::default(),
         })
         .expect("complete resident definition");
         let docs = rlm_prompt_tool_docs(

@@ -102,6 +102,14 @@ plugin_error_samples! {
     ResidentToolDuplicateName { .. } => PluginError::ResidentToolDuplicateName {
         name: "sampled".to_string(),
     },
+    ToolRegistrationRefused { .. } => PluginError::ToolRegistrationRefused {
+        source: Box::new(crate::RegistrationRefused::InlineBudgetExceedsCeiling {
+            tool: "sampled".to_string(),
+            declared: std::time::Duration::from_secs(600),
+            ceiling: std::time::Duration::from_secs(300),
+            hint: "sampled".to_string(),
+        }),
+    },
     ResidentToolRouteUnavailable { .. } => PluginError::ResidentToolRouteUnavailable {
         tool_id: crate::ToolId::from("tool:sampled"),
         name: "sampled".to_string(),

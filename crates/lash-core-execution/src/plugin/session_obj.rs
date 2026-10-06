@@ -268,6 +268,11 @@ pub(super) struct PluginSessionCapabilities {
 }
 
 impl PluginSession {
+    /// The runtime's execution budgets this session's tools run under.
+    pub fn execution_budgets(&self) -> crate::ExecutionBudgets {
+        self.host.execution_budgets()
+    }
+
     pub fn materialize(self: &Arc<Self>) -> Result<(), PluginError> {
         self.host.materialize_session(self)
     }

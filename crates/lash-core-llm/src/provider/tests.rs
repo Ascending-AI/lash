@@ -659,6 +659,8 @@ impl crate::Clock for RecordingClock {
 mod classifier_tests;
 #[path = "tests/generation_policy_tests.rs"]
 mod generation_policy_tests;
+#[path = "tests/model_total_tests.rs"]
+mod model_total_tests;
 
 pub(super) fn empty_request() -> LlmRequest {
     LlmRequest {
@@ -962,7 +964,7 @@ fn provider_reliability_without_response_start_timeout_preserves_derived_bound()
     let defaults = ProviderReliability::default().llm_timeouts();
     assert_eq!(
         defaults.response_start_timeout,
-        Duration::from_millis(DEFAULT_CHUNK_TIMEOUT_MS)
+        lash_sansio::ProviderAttemptLimits::default().chunk_idle()
     );
 
     let request_wins = ProviderReliability::default()
@@ -1438,6 +1440,7 @@ async fn provider_handle_retries_retryable_failures_in_shared_executor() {
             crate::ChargeSafetyPolicy::default(),
             &instruments,
             Some(&permit),
+            super::handle::ModelCallBounds::default(),
         )
         .await
         .expect("eventual success");
@@ -1691,6 +1694,7 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
             crate::ChargeSafetyPolicy::default(),
             &instruments,
             Some(&permit),
+            super::handle::ModelCallBounds::default(),
         )
         .await
         .expect("success after deferred throttle waits");

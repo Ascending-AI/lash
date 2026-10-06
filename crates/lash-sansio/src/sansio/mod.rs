@@ -48,10 +48,13 @@ pub use turn_protocol::{
     SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachineConfig, render_turn_causes_prompt,
     stored_history_refusal_actions,
 };
+mod checkpoint_content;
+pub use checkpoint_content::{CheckpointContentRef, TurnCheckpointContent};
 mod machine_state;
-use machine_state::{EffectDeliveryStatus, MachineState, RunAbort};
+use machine_state::{CheckpointState, EffectDeliveryStatus, MachineState, RunAbort};
 pub use machine_state::{
-    TURN_CHECKPOINT_SCHEMA_VERSION, TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine,
+    SavedTurn, TURN_CHECKPOINT_SCHEMA_VERSION, TurnCheckpoint, TurnCheckpointRestoreError,
+    TurnMachine,
 };
 mod helpers;
 mod turn_machine;

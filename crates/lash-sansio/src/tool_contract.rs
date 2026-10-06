@@ -99,6 +99,55 @@ impl ExecutionPolicy {
     }
 }
 
+/// How long one inline execution of a tool is expected to run: the tool's
+/// duration policy, declared beside its [`ExecutionPolicy`] and never inside
+/// the closed [`ToolDeclaration`]. Registration admits it against the
+/// deployment's inline ceiling
+/// ([`ExecutionBudgets::admit_tool`](crate::ExecutionBudgets::admit_tool)).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ExpectedExecution {
+    /// The deployment's `tool_default`.
+    #[default]
+    Default,
+    /// The tool's own expectation, in milliseconds.
+    Declared { millis: std::num::NonZeroU64 },
+}
+
+impl ExpectedExecution {
+    /// The tool expects `duration`; anything under a millisecond rounds up to one.
+    #[must_use]
+    pub fn declared(duration: std::time::Duration) -> Self {
+        let millis = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+        Self::Declared {
+            millis: std::num::NonZeroU64::new(millis).unwrap_or(std::num::NonZeroU64::MIN),
+        }
+    }
+
+    /// The expected duration, with `tool_default` standing in for none.
+    #[must_use]
+    pub fn resolve(self, tool_default: std::time::Duration) -> std::time::Duration {
+        match self {
+            Self::Default => tool_default,
+            Self::Declared { millis } => std::time::Duration::from_millis(millis.get()),
+        }
+    }
+
+    fn is_default(&self) -> bool {
+        *self == Self::Default
+    }
+}
+
 fn default_tool_execution_policy() -> ExecutionPolicy {
     ExecutionPolicy::default()
 }
@@ -350,6 +399,8 @@ pub struct ToolManifest {
         skip_serializing_if = "is_default_tool_execution_policy"
     )]
     pub execution_policy: ExecutionPolicy,
+    #[serde(default, skip_serializing_if = "ExpectedExecution::is_default")]
+    pub expected_execution: ExpectedExecution,
     /// The author's three-capability declaration. Admission records it with
     /// this manifest; dispatch, recovery and replay read the recorded answer,
     /// never the live provider.
@@ -819,6 +870,7 @@ impl ToolDefinition {
                 bindings: std::collections::BTreeMap::new(),
                 argument_projection: ToolArgumentProjectionPolicy::default(),
                 execution_policy: default_tool_execution_policy(),
+                expected_execution: ExpectedExecution::Default,
                 declaration: ToolDeclaration::default(),
             },
             contract: ToolContract {
@@ -863,6 +915,12 @@ impl ToolDefinition {
 
     pub fn with_execution_policy(mut self, execution_policy: ExecutionPolicy) -> Self {
         self.manifest.execution_policy = execution_policy;
+        self
+    }
+
+    /// Declares how long one inline execution of the tool is expected to run.
+    pub fn with_expected_execution(mut self, expected_execution: ExpectedExecution) -> Self {
+        self.manifest.expected_execution = expected_execution;
         self
     }
 

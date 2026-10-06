@@ -205,10 +205,10 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    /// Bound the provider-stream drain after a protocol-owned abort. See
-    /// [`crate::RuntimeControlConfig::abort_drain_grace`].
-    pub fn with_abort_drain_grace(mut self, grace: std::time::Duration) -> Self {
-        self.env.core.control.abort_drain_grace = grace;
+    /// Every execution bound the runtime enforces. See
+    /// [`crate::RuntimeControlConfig::execution_budgets`].
+    pub fn with_execution_budgets(mut self, budgets: crate::ExecutionBudgets) -> Self {
+        self.env.core.control.execution_budgets = budgets;
         self
     }
 

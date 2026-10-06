@@ -581,7 +581,7 @@ impl LashCore {
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
-            &self.env.core.tracing,
+            &self.env.core,
         )?;
         let mut env = binding.apply_owner(self.env.clone());
         env.core = plugin_host.install_process_engine_contributions(
@@ -828,7 +828,7 @@ impl LashCore {
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
-            &self.env.core.tracing,
+            &self.env.core,
         )?;
         let runtime_host = plugin_host.install_process_engine_contributions(
             self.env.core.clone(),
@@ -868,7 +868,7 @@ pub struct LashCoreBuilder {
     trace_context: Option<lash_trace::TraceContext>,
     termination: Option<TerminationPolicy>,
     tool_source_policy: Option<lash_core::ToolSourcePolicy>,
-    abort_drain_grace: Option<std::time::Duration>,
+    execution_budgets: Option<lash_core::ExecutionBudgets>,
     delta_coalescing: Option<crate::DeltaCoalescing>,
     tool_providers: Vec<Arc<dyn ToolProvider>>,
     plugin_stack: PluginStack,
@@ -902,7 +902,7 @@ impl LashCoreBuilder {
             trace_context: None,
             termination: None,
             tool_source_policy: None,
-            abort_drain_grace: None,
+            execution_budgets: None,
             delta_coalescing: None,
             tool_providers: Vec::new(),
             plugin_stack: PluginStack::default(),
@@ -1120,14 +1120,15 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Bound how long a protocol-owned stream abort (an RLM cell boundary
-    /// ending the model's turn) keeps draining the provider stream before the
-    /// provider task is aborted. The drain lets a cooperative provider's
-    /// trailing usage event land on the aborted attempt; past the grace the
-    /// attempt is sealed with a typed unreported usage disposition and the
-    /// recorded attempt preserves that disposition. Defaults to 2 seconds.
-    pub fn abort_drain_grace(mut self, grace: std::time::Duration) -> Self {
-        self.abort_drain_grace = Some(grace);
+    /// Set every execution bound the runtime enforces: the tool default and
+    /// inline ceiling, the model call's hard total, the control-phase bound,
+    /// the stop grace, the wait bounds and the provider attempt limits. The
+    /// stop grace also bounds how long a protocol-owned stream abort (an RLM
+    /// cell boundary ending the model's turn) keeps draining the provider
+    /// stream, so a cooperative provider's trailing usage lands on the
+    /// aborted attempt. Defaults to [`ExecutionBudgets::default`](lash_core::ExecutionBudgets::default).
+    pub fn execution_budgets(mut self, budgets: lash_core::ExecutionBudgets) -> Self {
+        self.execution_budgets = Some(budgets);
         self
     }
 
@@ -1243,7 +1244,7 @@ impl LashCoreBuilder {
         let default_plugin_host = Arc::new(build_plugin_host(
             protocol_factory.as_ref(),
             &plugin_factories,
-            &core.tracing,
+            &core,
         )?);
         // The generation exists only now that the plugins are registered:
         // it folds in their declarations in hook order, and the engine runs
@@ -1413,7 +1414,7 @@ fn refuse_foreign_backend_factories<'a>(
 pub(crate) fn build_plugin_host(
     protocol_factory: Option<&Arc<dyn PluginFactory>>,
     plugin_factories: &[Arc<dyn PluginFactory>],
-    tracing: &lash_core::runtime::TraceRuntime,
+    core: &RuntimeHostConfig,
 ) -> Result<PluginHost> {
     let mut factories =
         Vec::with_capacity(usize::from(protocol_factory.is_some()) + plugin_factories.len());
@@ -1421,7 +1422,9 @@ pub(crate) fn build_plugin_host(
         factories.push(Arc::clone(protocol_factory));
     }
     factories.extend(plugin_factories.iter().cloned());
-    let mut host = PluginHost::new(factories).with_trace_runtime(tracing.clone());
+    let mut host = PluginHost::new(factories)
+        .with_trace_runtime(core.tracing.clone())
+        .with_execution_budgets(core.control.execution_budgets.clone());
     if let Some(protocol) = protocol_factory {
         host = host.with_protocol_plugin(Arc::clone(protocol));
     }

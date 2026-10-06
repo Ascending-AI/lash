@@ -1646,7 +1646,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         });
         drain(&mut machine);
         let saved = serde_json::to_value(machine.checkpoint()).unwrap();
-        let usage = saved["cumulative_usage"].clone();
+        let usage = saved["checkpoint"]["cumulative_usage"].clone();
         machine = TurnMachine::restore_from_checkpoint(
             config(native, RlmTermination::Natural { schema: None }),
             serde_json::from_value(saved).unwrap(),
@@ -1708,7 +1708,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
             })
             .expect("terminal checkpoint");
         let saved = serde_json::to_value(machine.checkpoint()).unwrap();
-        assert_eq!(saved["cumulative_usage"], usage);
+        assert_eq!(saved["checkpoint"]["cumulative_usage"], usage);
         machine = TurnMachine::restore_from_checkpoint(
             config(native, RlmTermination::Natural { schema: None }),
             serde_json::from_value(saved).unwrap(),
@@ -1744,7 +1744,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
             )
         );
         assert_eq!(
-            serde_json::to_value(machine.checkpoint()).unwrap()["cumulative_usage"],
+            serde_json::to_value(machine.checkpoint()).unwrap()["checkpoint"]["cumulative_usage"],
             usage
         );
         assert!(

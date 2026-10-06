@@ -149,7 +149,7 @@ async fn open_admission_runtime(
     let plugin_host = build_plugin_host(
         config.protocol_factory.as_ref(),
         config.plugin_factories.as_ref(),
-        &config.env.core.tracing,
+        &config.env.core,
     )
     .map_err(|error| OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string())))?;
     let mut env = config.env.clone();

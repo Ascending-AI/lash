@@ -14,6 +14,8 @@ pub struct ToolCatalogBuildInput {
     pub tools: Vec<ToolManifest>,
     pub resolve_contract: Option<ToolContractResolver>,
     pub contributions: Vec<ToolCatalogContribution>,
+    /// The budgets every member's declared execution is admitted against.
+    pub budgets: crate::ExecutionBudgets,
 }
 
 /// A trusted plugin's contribution to catalog assembly. Membership is the
@@ -184,6 +186,7 @@ impl ToolCatalog {
                 resolver_contracts.get(&manifest.id).cloned()
             })),
             contributions: Vec::new(),
+            budgets: crate::ExecutionBudgets::default(),
         })
     }
 
@@ -259,6 +262,11 @@ pub enum ToolCatalogBuildError {
     DuplicateName {
         name: String,
     },
+    /// A member's declared execution is refused against the deployment's
+    /// execution budgets.
+    RegistrationRefused {
+        refusal: crate::RegistrationRefused,
+    },
 }
 
 impl std::fmt::Display for ToolCatalogBuildError {
@@ -287,6 +295,7 @@ impl std::fmt::Display for ToolCatalogBuildError {
             Self::DuplicateName { name } => {
                 write!(formatter, "resident catalog repeats tool name `{name}`")
             }
+            Self::RegistrationRefused { refusal } => write!(formatter, "{refusal}"),
         }
     }
 }
@@ -313,6 +322,10 @@ pub fn build_tool_catalog(
                 name: manifest.name.clone(),
             });
         }
+        input
+            .budgets
+            .admit_tool(manifest)
+            .map_err(|refusal| ToolCatalogBuildError::RegistrationRefused { refusal })?;
     }
     let entries = tools
         .into_iter()
@@ -372,6 +385,7 @@ mod tests {
                 contracts.get(&manifest.id).cloned()
             })),
             contributions,
+            budgets: crate::ExecutionBudgets::default(),
         }
     }
 
@@ -478,6 +492,7 @@ mod tests {
             tools: vec![missing.clone()],
             resolve_contract: None,
             contributions: vec![ToolCatalogContribution::remove_tools(["missing"])],
+            budgets: crate::ExecutionBudgets::default(),
         })
         .expect("suppressed manifests are not resident members");
         assert!(hidden.tools.is_empty());
@@ -486,6 +501,7 @@ mod tests {
             tools: vec![missing.clone()],
             resolve_contract: None,
             contributions: Vec::new(),
+            budgets: crate::ExecutionBudgets::default(),
         })
         .expect_err("an effective resident member requires a contract");
         assert_eq!(
@@ -511,6 +527,7 @@ mod tests {
                 None
             })),
             contributions: Vec::new(),
+            budgets: crate::ExecutionBudgets::default(),
         })
         .expect_err("a duplicate effective ToolId is ambiguous authority");
         assert_eq!(

@@ -168,6 +168,7 @@ impl LocalDirectEffectRunner {
             self.charge_safety.clone(),
             self.tracing.metrics(),
             traced.and_then(|(standing, _, _)| standing.body_permit()),
+            self.bounds.clone(),
         )
         .await
         {

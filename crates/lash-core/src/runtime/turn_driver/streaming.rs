@@ -294,6 +294,10 @@ impl RuntimeTurnDriver<'_> {
         );
         let task_sideband = completion_sideband.clone();
         let charge_safety = self.policy.charge_safety.clone();
+        let bounds = crate::provider::ModelCallBounds {
+            budgets: self.host.core.control.execution_budgets.clone(),
+            enclosing: None,
+        };
         let call_id = crate::provider::call_id_for_scope(&llm_request.scope);
         // The provider task holds the call's dispatch gate; the body keeps
         // the call and seals it with whatever record this body settles on,
@@ -307,6 +311,7 @@ impl RuntimeTurnDriver<'_> {
                 charge_safety,
                 trace.runtime().metrics(),
                 trace.body_permit(),
+                bounds,
             )
             .await
         });
@@ -1415,7 +1420,7 @@ impl RuntimeTurnDriver<'_> {
     /// If the deadline wins, an uncooperative provider's late usage is unavailable for this
     /// attempt and the sealed record says so
     /// (`AttemptUsageOutcome::UnreportedAfterAbort`).
-    /// The deadline is the host's `abort_drain_grace` lever, not a literal.
+    /// The deadline is the host's execution budgets' stop grace, not a literal.
     async fn collect_trailing_stream_events_before_abort<T>(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
@@ -1424,7 +1429,7 @@ impl RuntimeTurnDriver<'_> {
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
         let clock = self.host.core.clock.clone();
-        let deadline = clock.now() + self.host.core.control.abort_drain_grace;
+        let deadline = clock.now() + self.host.core.control.execution_budgets.stop_grace();
         loop {
             let deadline_wait = clock.sleep_until(deadline);
             futures_util::pin_mut!(deadline_wait);

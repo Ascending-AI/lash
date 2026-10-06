@@ -95,20 +95,18 @@ pub(crate) fn presented_intent_outcomes(
         .map(|presented| presented.intent_outcomes)
 }
 
-/// How long a stopped inline body may keep running to observe its token and
-/// return its own outcome, settling the nested work it owns, before X drops
-/// it. Only a body that ignores its stop meets this bound.
-const INLINE_STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
-
 fn stopped_before_completion() -> crate::ToolAttemptOutcome {
     crate::ToolOutcome::cancelled("the inline attempt stopped before its body completed").into()
 }
 
-/// Run an inline body to its own end; once `stop` fires it has
-/// [`INLINE_STOP_GRACE`] to return before it is dropped.
+/// Run an inline body to its own end; once `stop` fires it has the
+/// budgets' `stop_grace` to observe its token and return its own outcome,
+/// settling the nested work it owns, before it is dropped. Only a body that
+/// ignores its stop meets this bound.
 async fn until_stopped(
     execute: impl std::future::Future<Output = crate::ToolAttemptOutcome>,
     stop: &tokio_util::sync::CancellationToken,
+    stop_grace: std::time::Duration,
 ) -> crate::ToolAttemptOutcome {
     tokio::pin!(execute);
     tokio::select! {
@@ -116,7 +114,7 @@ async fn until_stopped(
         outcome = &mut execute => return outcome,
         () = stop.cancelled() => {}
     }
-    tokio::time::timeout(INLINE_STOP_GRACE, execute)
+    tokio::time::timeout(stop_grace, execute)
         .await
         .unwrap_or_else(|_| stopped_before_completion())
 }
@@ -637,6 +635,12 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             let authority = &authority;
             let call = &prepared.call;
             let execution_policy = prepared.input.definition.manifest.execution_policy;
+            let stop_grace = self
+                .context
+                .dispatch()
+                .plugins
+                .execution_budgets()
+                .stop_grace();
             async move {
                 if let Some(stop) = &stop {
                     context = context.with_step_stop(stop.clone());
@@ -651,7 +655,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 ));
                 let outcome = match &stop {
                     Some(stop) if stop.is_cancelled() => stopped_before_completion(),
-                    Some(stop) => until_stopped(execute, stop).await,
+                    Some(stop) => until_stopped(execute, stop, stop_grace).await,
                     None => execute.await,
                 };
                 let origin = if matches!(&outcome, crate::ToolAttemptOutcome::HostFailed(_)) {

@@ -168,6 +168,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ResidentToolContractUnavailable { .. }
             | PluginError::ResidentToolDuplicateId { .. }
             | PluginError::ResidentToolDuplicateName { .. }
+            | PluginError::ToolRegistrationRefused { .. }
             | PluginError::ResidentToolRouteUnavailable { .. }
             | PluginError::SessionAlreadyExists { .. }
             | PluginError::SessionInitTooLarge { .. }

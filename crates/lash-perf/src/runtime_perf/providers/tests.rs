@@ -77,6 +77,7 @@ fn rlm_large_tool_catalog_pins_each_contract_once() {
                 .map(|definition| Arc::new(definition.contract()))
         })),
         contributions: Vec::new(),
+        budgets: lash_core::ExecutionBudgets::default(),
     })
     .expect("complete resident definitions");
 

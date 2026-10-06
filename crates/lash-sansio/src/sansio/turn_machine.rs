@@ -177,12 +177,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.protocol_iteration
     }
 
-    pub fn checkpoint(&self) -> TurnCheckpoint<M> {
-        let mut state = self.state.clone();
-        state.schedule_outstanding_effect();
-        TurnCheckpoint {
+    /// The machine's bounded checkpoint, with the transcript content it
+    /// names by digest.
+    pub fn checkpoint(&self) -> SavedTurn<M> {
+        let mut content = TurnCheckpointContent::default();
+        let checkpoint = TurnCheckpoint {
             schema_version: TURN_CHECKPOINT_SCHEMA_VERSION,
-            state,
+            state: CheckpointState::record(&self.state, &mut content),
             pending_effects: self
                 .side_effect_outbox
                 .iter()
@@ -208,22 +209,34 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 .collect(),
             next_effect_id: self.next_effect_id,
             next_synthetic_message_id: self.next_synthetic_message_id,
-            messages: self.messages.iter().cloned().collect(),
-            prompt_messages: self.prompt_messages.iter().cloned().collect(),
-            events: self.events.to_vec(),
+            messages: content.put_sequence(self.messages.iter()),
+            prompt_messages: content.put_sequence(self.prompt_messages.iter()),
+            events: content.put_sequence(self.events.to_vec().iter()),
             turn_causes: self.turn_causes.clone(),
             progress_event_cursor: self.progress_event_cursor,
             protocol_iteration: self.protocol_iteration,
             protocol_run_offset: self.protocol_run_offset,
             cumulative_usage: self.cumulative_usage.clone(),
             environment: self.environment.clone(),
+        };
+        SavedTurn {
+            checkpoint,
+            content,
         }
     }
 
+    /// Re-hydrate a machine from a checkpoint and the content it names. The
+    /// schema version and environment are validated before any content is
+    /// read; content that is missing or not the bytes its digest names is
+    /// refused.
     pub fn restore_from_checkpoint(
         config: TurnMachineConfig<M>,
-        checkpoint: TurnCheckpoint<M>,
+        saved: SavedTurn<M>,
     ) -> Result<Self, TurnCheckpointRestoreError> {
+        let SavedTurn {
+            checkpoint,
+            content,
+        } = saved;
         if checkpoint.schema_version != TURN_CHECKPOINT_SCHEMA_VERSION {
             return Err(TurnCheckpointRestoreError::IncompatibleSchemaVersion {
                 actual: checkpoint.schema_version,
@@ -232,13 +245,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
         // Only a machine that has yet to sync holds no environment: every
         // other wait was started by a driver that projected from one.
-        if checkpoint.environment.is_none()
-            && matches!(
-                &checkpoint.state,
-                MachineState::Waiting { work, .. }
-                    if !matches!(work, PendingWork::SyncExecutionEnvironment)
-            )
-        {
+        if checkpoint.environment.is_none() && checkpoint.state.waits_on_driver_work() {
             return Err(TurnCheckpointRestoreError::IncompatibleFormat {
                 message: "a checkpoint waiting on driver work records no execution environment"
                     .to_string(),
@@ -248,15 +255,18 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .pending_effects
             .into_iter()
             .collect::<VecDeque<_>>();
+        let messages = content.sequence(&checkpoint.messages)?;
+        let prompt_messages = content.sequence(&checkpoint.prompt_messages)?;
+        let events = content.sequence(&checkpoint.events)?;
         Ok(Self {
             config,
-            state: checkpoint.state,
+            state: checkpoint.state.restore(&content)?,
             side_effect_outbox,
             next_effect_id: checkpoint.next_effect_id,
             next_synthetic_message_id: checkpoint.next_synthetic_message_id,
-            messages: MessageSequence::from_owned(checkpoint.messages),
-            prompt_messages: MessageSequence::from_owned(checkpoint.prompt_messages),
-            events: crate::AppendVec::from(checkpoint.events),
+            messages: MessageSequence::from_owned(messages),
+            prompt_messages: MessageSequence::from_owned(prompt_messages),
+            events: crate::AppendVec::from(events),
             turn_causes: checkpoint.turn_causes,
             progress_event_cursor: checkpoint.progress_event_cursor,
             protocol_iteration: checkpoint.protocol_iteration,
