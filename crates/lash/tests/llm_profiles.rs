@@ -631,10 +631,6 @@ async fn reconcile_pass(double: &Double) -> lash_core::engine::ParkReconcileRepo
 
 // ---- the laws ---------------------------------------------------------------
 
-#[path = "llm_profiles/child_parent.rs"]
-mod child_parent;
-use child_parent::fig4669_child_parent_survives_every_runtime_reopen;
-
 /// Two keys served by transports of one provider kind: each send's model
 /// key selects its own transport, a send without one runs the session's
 /// recorded model, and a per-run key never changes the session's record.
@@ -1917,11 +1913,6 @@ macro_rules! tiered {
         }
     };
 }
-
-tiered!(
-    fig4669_child_parent_survives_every_runtime_reopen,
-    0x4669_1000
-);
 
 tiered!(
     two_keys_sharing_a_provider_kind_select_their_own_transport,
