@@ -54,3 +54,7 @@ law!(mail_from_non_owners_wakes_the_actor, |store, advance| {
 law!(no_write_through_a_stale_epoch, |store, advance| {
     laws::no_write_through_a_stale_epoch(store, advance)
 });
+law!(
+    a_turn_cancel_is_a_first_winner_row_with_a_wake,
+    |store, _advance| { laws::a_turn_cancel_is_a_first_winner_row_with_a_wake(store) }
+);

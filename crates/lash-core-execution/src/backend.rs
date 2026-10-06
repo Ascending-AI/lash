@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use lash_durable::runner::Hints;
 use lash_durable::{
     DurableConfig, DurableConfigError, DurableError, DurableSettings, DurableStore,
 };
@@ -99,6 +100,10 @@ struct BackendInner {
     secrets: crate::runtime::actor::waits::CompletionKeySecrets,
     engines: BTreeMap<String, Arc<dyn crate::ProcessEngine>>,
     providers: Arc<dyn ProjectionProviders>,
+    /// The in-process half of a wake: the node runner this backend serves
+    /// under, when it serves, takes its hints from here, so a mailbox commit
+    /// made on this node reaches its actors without waiting for a poll.
+    hints: Hints,
 }
 
 impl Backend {
@@ -135,6 +140,7 @@ impl Backend {
                 secrets,
                 engines,
                 providers,
+                hints: Hints::default(),
             }),
         })
     }
@@ -172,6 +178,7 @@ impl Backend {
                 secrets: self.inner.secrets.clone(),
                 engines: self.inner.engines.clone(),
                 providers: Arc::clone(&self.inner.providers),
+                hints: self.inner.hints.clone(),
             }),
         }
     }
@@ -207,6 +214,31 @@ impl Backend {
     /// The projection providers.
     pub fn projection_providers(&self) -> &Arc<dyn ProjectionProviders> {
         &self.inner.providers
+    }
+
+    /// The hints a node runner serving this backend wakes its actors by.
+    #[must_use]
+    pub fn hints(&self) -> &Hints {
+        &self.inner.hints
+    }
+
+    /// Commit the mailbox transaction `tx` under `label`, then hint every
+    /// actor it woke to this node's runner. A hint is only a hint: another
+    /// node's actor sees the commit at its next poll or scan.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal; nothing was written.
+    pub async fn commit_mail(
+        &self,
+        tx: lash_durable::MailTx,
+        label: lash_durable::CommitLabel,
+    ) -> Result<lash_durable::MailCommit, DurableError> {
+        let commit = self.durable().commit_mail(tx, label).await?;
+        for woken in &commit.woken {
+            self.inner.hints.wake(woken);
+        }
+        Ok(commit)
     }
 
     /// Wake `session`'s actor from outside a store transaction: a mailbox

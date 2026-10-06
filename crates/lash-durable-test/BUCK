@@ -52,6 +52,23 @@ lash_rust_unit_test(
 )
 
 lash_rust_integration_test(
+    name = "turn_phases__test",
+    crate_features = [],
+    crate_name = "turn_phases",
+    crate_root = "tests/turn_phases.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "turn_phases", "//crates/lash-durable-test:turn_phases__test"),
+    extra_compile_data = [],
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "vertical_crash_proof__test",
     crate_features = [],
     crate_name = "vertical_crash_proof",
@@ -68,6 +85,18 @@ lash_rust_integration_test(
         "hermetic-postgres",
     ],
     version = "0.0.0-dev",
+)
+
+load("//tools/buck2:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    budget = test_batch_budget("//crates/lash-durable-test:test_batch"),
+    jobs = 2,
+    tests = [
+        ":lash-durable-test__unit_test",
+        ":turn_phases__test",
+    ],
 )
 
 filegroup(

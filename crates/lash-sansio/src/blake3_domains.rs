@@ -36,6 +36,7 @@ pub(crate) const BLAKE3_DOMAINS: &[&str] = &[
     "lash-llm-request-content/v1",
     "lash-model-facing-composition/v2",
     "lash-model-facing-composition/v3",
+    "lash-model-request-pin/v1",
     "lash-openai-responses-request/v2",
     "lash-plugin-snapshot-revision/v2",
     "lash-process-env/v4",

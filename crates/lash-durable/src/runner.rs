@@ -34,6 +34,8 @@ pub struct RunnerConfig {
     pub lease: LeaseConfig,
     /// How many actors the node runs at once; claims never take more.
     pub max_active: usize,
+    /// The most actors one claim takes.
+    pub claim_batch: usize,
 }
 
 /// Why a runner stopped serving.
@@ -117,9 +119,17 @@ impl Owned {
     /// claim-poll interval, whichever comes first. A hint is only a hint;
     /// the next [`Owned::begin`] reads what actually arrived.
     pub async fn wait_for_mail(&self) {
-        tokio::select! {
-            () = self.hint.notified() => {}
-            () = self.clock.sleep(self.poll) => {}
+        self.mail_waker().wait().await;
+    }
+
+    /// What [`Owned::wait_for_mail`] waits on, for the activation's context
+    /// to wait on while it runs: a wake hint, or one claim-poll interval.
+    #[must_use]
+    pub fn mail_waker(&self) -> MailWaker {
+        MailWaker {
+            hint: Arc::clone(&self.hint),
+            clock: Arc::clone(&self.clock),
+            poll: self.poll,
         }
     }
 
@@ -134,6 +144,35 @@ impl Owned {
     #[must_use]
     pub fn store(&self) -> &Arc<dyn DurableStore> {
         &self.store
+    }
+}
+
+/// Waits until mail may have arrived for one owned actor: a wake hint, or
+/// one claim-poll interval, whichever comes first. The per-actor poll is
+/// the correctness backstop for a hint that never came (a wake committed on
+/// another node); a hint only shortens the wait.
+#[derive(Clone)]
+pub struct MailWaker {
+    hint: Arc<Notify>,
+    clock: Arc<dyn Clock>,
+    poll: std::time::Duration,
+}
+
+impl MailWaker {
+    /// Wait for a hint or one poll interval.
+    pub async fn wait(&self) {
+        tokio::select! {
+            () = self.hint.notified() => {}
+            () = self.clock.sleep(self.poll) => {}
+        }
+    }
+}
+
+impl std::fmt::Debug for MailWaker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MailWaker")
+            .field("poll", &self.poll)
+            .finish_non_exhaustive()
     }
 }
 
@@ -221,6 +260,14 @@ impl Runner {
         }
     }
 
+    /// This runner taking its wake hints from `hints`, which this node's
+    /// mailbox writers already hold.
+    #[must_use]
+    pub fn with_hints(mut self, hints: Hints) -> Self {
+        self.hints = hints;
+        self
+    }
+
     /// The runner's hint handle, for this node's mailbox writers.
     #[must_use]
     pub fn hints(&self) -> Hints {
@@ -297,7 +344,11 @@ impl Runner {
                             .collect()
                     })
                 } else {
-                    let room = self.config.max_active.saturating_sub(active.len());
+                    let room = self
+                        .config
+                        .max_active
+                        .saturating_sub(active.len())
+                        .min(self.config.claim_batch);
                     if room == 0 {
                         continue;
                     }

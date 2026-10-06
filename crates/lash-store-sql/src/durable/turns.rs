@@ -1,4 +1,4 @@
-//! Turn phase state and the session commit: the neutral statements of the `turns` domain (I0, FIG-5194).
+//! Turn phase state, the session commit and turn cancel requests: the neutral statements of the `turns` domain (I0, FIG-5194).
 //!
 //! Owned by V0 (FIG-5170), then L3 (FIG-5172): its statements, and its table's DDL in each
 //! dialect's `durable` module, are that lane's. This file and the matching
@@ -12,8 +12,8 @@
 pub const TABLE: &str = "turn_phases";
 
 crate::statements! {
-    /// `turn_phases`, `session_runs`, `session_revisions` and `session_head`
-    /// statements both backends issue verbatim.
+    /// `turn_phases`, `session_runs`, `session_revisions`, `session_head` and
+    /// `turn_cancel_requests` statements both backends issue verbatim.
     pub struct TurnStatements @ "durable_turn" {
         /// Whether session `?1` has an unfinished admitted run.
         open_run = "SELECT run FROM session_runs
@@ -62,6 +62,28 @@ crate::statements! {
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL
                AND r.terminal_kind IS NULL";
+
+        /// Whether run `?2` is session `?1`'s unfinished admitted run.
+        open_named_run = "SELECT run FROM session_runs
+             WHERE session_id = ?1 AND run = ?2
+               AND admission_json IS NOT NULL AND terminal_kind IS NULL";
+
+        /// The cancel request run `?2` of session `?1` accepted.
+        cancel_of = "SELECT request_id, origin, reason, disposition, mode
+             FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2";
+
+        /// Record run `?2` of session `?1`'s first cancel request: request id
+        /// `?3`, origin `?4`, reason `?5`, disposition `?6`, mode `?7`.
+        insert_cancel = "INSERT INTO turn_cancel_requests
+                 (session_id, turn_id, request_id, origin, reason, disposition, mode,
+                  intent_revision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)";
+
+        /// Escalate run `?2` of session `?1`'s accepted cancel request to mode
+        /// `?3`.
+        escalate_cancel = "UPDATE turn_cancel_requests
+             SET mode = ?3, intent_revision = intent_revision + 1
+             WHERE session_id = ?1 AND turn_id = ?2";
 
         /// Session `?1`'s head revision.
         head = "SELECT head_revision FROM session_head WHERE session_id = ?1";

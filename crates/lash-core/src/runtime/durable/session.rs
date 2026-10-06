@@ -22,24 +22,29 @@
 
 use std::sync::Arc;
 
-use lash_durable::domain::{CellId, ExecKey, RunSeq, SessionCommitWrite, TurnWrite};
+use lash_durable::domain::{
+    CellId, ExecKey, MailAnswer, MailDomainWrite, RunSeq, SessionCommitWrite, TurnWrite,
+};
 use lash_durable::runner::{Activation, Owned};
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailKind,
-    Release,
+    MailTx, Release,
 };
 use lash_sansio::SavedTurn;
 use lash_sansio::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
+use super::{model_call, turn_cancel};
 use crate::{
     ActorContext, AdmittedScope, Backend, Effect, ExecCodeFailure, ExecResponse, HostTurnProtocol,
     InputId, LlmCallError, LlmRequest, LlmResponse, Message, Response, SessionId,
     SessionStreamEvent, TurnId, TurnMachine, TurnMachineConfig, TurnOutcome,
 };
 
-pub use lash_durable::domain::{ModelPin, TurnCancelRequest, TurnPhase, TurnRow, TurnTerminal};
+pub use lash_durable::domain::{
+    ModelPin, TurnCancelAnswer, TurnCancelRequest, TurnPhase, TurnRow, TurnTerminal,
+};
 
 /// The mail kind a producer admits a turn with until L3s's (FIG-5196) mail
 /// drain owns the session's mailbox: its body is
@@ -79,13 +84,35 @@ pub trait TurnServices: Send + Sync {
         run: &TurnId,
     ) -> Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>;
 
-    /// One attempt of a pinned model call.
+    /// The budgets `session`'s turns run under: a model call's
+    /// `model_total` among them.
+    fn execution_budgets(&self, session: &SessionId) -> crate::ExecutionBudgets;
+
+    /// One attempt of a pinned model call, bounded by `limit`: its deadline
+    /// is the pinned one, never refreshed. Deltas it streams go to the
+    /// session's live stream; only the completed response is durable.
     async fn call_model(
         &self,
         cx: &ActorContext,
         request: Arc<LlmRequest>,
         attempt: u32,
+        limit: crate::ExecutionLimit,
     ) -> Result<LlmResponse, LlmCallError>;
+
+    /// Restart `session`'s live stream before a re-sent model call streams:
+    /// existing cursors gap and observers reload (the live replay store's
+    /// `invalidate_session`), so no one sees an abandoned attempt's partial
+    /// text joined to the new attempt's.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the live stream cannot restart; the call is not
+    /// sent.
+    async fn restart_live_stream(
+        &self,
+        cx: &ActorContext,
+        session: &SessionId,
+    ) -> Result<(), TurnError>;
 
     /// Run the code cell `exec` from its latest snapshot, or from the start,
     /// to its end. `with` are the turn's rows that commit with the cell's
@@ -143,8 +170,14 @@ impl SessionActivation {
     }
 
     /// One pass over the session's rows: admit a turn from its mail, run an
-    /// unfinished turn to its commit, or release the actor.
-    async fn pass(&self, cx: &ActorContext, session: &SessionId) -> Result<Pass, TurnError> {
+    /// unfinished turn to its commit, or, with nothing to do, stay hot
+    /// ([`Pass::Idle`]) or release the actor when `release`.
+    async fn pass(
+        &self,
+        cx: &ActorContext,
+        session: &SessionId,
+        release: bool,
+    ) -> Result<Pass, TurnError> {
         let mut tx = cx.begin().await?;
         let open = cx.durable_reads()?.turn(session).await?;
         let Some(row) = open else {
@@ -163,25 +196,33 @@ impl SessionActivation {
                     cx.commit(tx, CommitLabel::TURN_ADMIT).await?;
                     Ok(Pass::Again)
                 }
-                None => {
+                None if release => {
                     tx.ack_seen().give_up(Release::Idle);
                     cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
                     Ok(Pass::Released)
                 }
+                None => Ok(Pass::Idle),
             };
         };
         drop(tx);
+        // An accepted cancel request ends the turn before anything else
+        // runs: the live owner stopped its work for it, or a crash left it.
+        if let Some(request) = row.cancel.clone() {
+            turn_cancel::finalize(cx, &row, &request).await?;
+            return Ok(Pass::Again);
+        }
         let config = self.services.machine_config(session, &row.run);
         let turn = match row.checkpoint_ref {
             Some(_) => restore_turn(cx, config, &row).await?,
             None => start_turn(config, row)?,
         };
         match run_phases(cx, self.services.as_ref(), turn).await? {
-            PhaseExit::Committed(_) => Ok(Pass::Again),
+            PhaseExit::Committed(_) | PhaseExit::CancelRequested => Ok(Pass::Again),
             PhaseExit::Lost => Ok(Pass::Lost),
             PhaseExit::Suspended { due } => {
+                let next_due = due.into_iter().chain(cx.next_due()).min();
                 let mut tx = cx.begin().await?;
-                tx.give_up(Release::Waiting { next_due: due });
+                tx.give_up(Release::Waiting { next_due });
                 cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
                 Ok(Pass::Released)
             }
@@ -193,6 +234,8 @@ impl SessionActivation {
 enum Pass {
     /// Run another pass.
     Again,
+    /// Nothing to do: the actor stays hot until mail or idle eviction.
+    Idle,
     /// The actor is released.
     Released,
     /// Ownership was lost.
@@ -248,9 +291,20 @@ impl Activation for SessionActivation {
             CancellationToken::new(),
             Arc::clone(&self.probe),
         );
+        // An owner with nothing to do keeps the actor hot for `idle_evict`,
+        // reading its mailbox at every hint or poll, then releases it.
+        let idle_evict = self.backend.config().settings().idle_evict;
+        let mut idle_since = None;
         loop {
-            match self.pass(&cx, &session).await {
-                Ok(Pass::Again) => {}
+            let release = idle_since.is_some_and(|since: std::time::Instant| {
+                owned.clock().now().saturating_duration_since(since) >= idle_evict
+            });
+            match self.pass(&cx, &session, release).await {
+                Ok(Pass::Again) => idle_since = None,
+                Ok(Pass::Idle) => {
+                    idle_since.get_or_insert_with(|| owned.clock().now());
+                    owned.wait_for_mail().await;
+                }
                 Ok(Pass::Released | Pass::Lost)
                 | Err(TurnError::Durable(DurableError::OwnershipLost(_))) => return,
                 // Anything else did not commit, or committed with its answer
@@ -300,6 +354,9 @@ pub enum PhaseExit {
     },
     /// Ownership was lost: drop everything held for the actor.
     Lost,
+    /// The turn accepted a cancel request it honours here: its in-memory
+    /// work stopped, and the next pass finalizes it from its row.
+    CancelRequested,
 }
 
 /// Why a turn was not admitted; nothing was recorded.
@@ -347,6 +404,15 @@ pub enum TurnError {
     /// The turn could not be restored.
     #[error(transparent)]
     Restore(#[from] TurnRestoreError),
+    /// A pinned model call was re-delivered with another request: its
+    /// checkpoint no longer re-yields the call it pinned.
+    #[error("the pinned model request {pinned} was re-delivered as {redelivered}")]
+    ModelPinBroken {
+        /// The pinned request's reference.
+        pinned: String,
+        /// The re-delivered request's reference.
+        redelivered: String,
+    },
     /// An effect the turn yielded could not run, or its lane does not run it
     /// on this path yet.
     #[error("{0}")]
@@ -385,6 +451,7 @@ pub async fn admit_turn(
         model: None,
         turn_deadline: None,
         written_epoch: cx.epoch(),
+        cancel: None,
     })
 }
 
@@ -514,39 +581,48 @@ pub async fn run_phases(
                 });
             }
             Effect::LlmCall { id, request } => {
+                if turn_cancel::requested(cx, &session).await?.is_some() {
+                    return Ok(PhaseExit::CancelRequested);
+                }
                 let current = iteration(&machine);
-                let pin = match model.take() {
-                    Some((pinned, pin)) if pinned == current => ModelPin {
-                        attempt: pin.attempt + 1,
-                        ..pin
-                    },
-                    _ => {
-                        let budget = lash_sansio::ExecutionBudgets::default().model_total();
-                        let now = cx.durable_now().await?;
-                        ModelPin {
-                            attempt: 1,
-                            request_ref: format!("checkpoint:effect/{}", id.0),
-                            deadline: DurableInstant(now.0.saturating_add(
-                                i64::try_from(budget.as_millis()).unwrap_or(i64::MAX),
-                            )),
-                        }
-                    }
+                let pinned = match model.take() {
+                    Some((pinned, pin)) if pinned == current => Some(pin),
+                    _ => None,
                 };
-                let mut tx = cx.begin().await?;
-                tx.write(DomainWrite::Turn(TurnWrite::Advance {
-                    session: session.clone(),
-                    run: run.clone(),
-                    phase: TurnPhase::Model {
-                        attempt: pin.attempt,
-                    },
-                    iteration: current,
-                    checkpoint_ref: Some(encode_checkpoint(&machine)?),
-                    model: Some(pin.clone()),
-                }));
-                cx.commit(tx, CommitLabel::MODEL_START).await?;
-                let attempt = pin.attempt;
-                model = Some((current, pin));
-                let result = services.call_model(cx, request, attempt).await;
+                let start = model_call::start(
+                    &services.execution_budgets(&session),
+                    cx.durable_now().await?,
+                    row.turn_deadline,
+                    pinned,
+                    &request,
+                )?;
+                if let model_call::ModelStart::Send { pin, .. } = &start {
+                    let mut tx = cx.begin().await?;
+                    tx.write(DomainWrite::Turn(TurnWrite::Advance {
+                        session: session.clone(),
+                        run: run.clone(),
+                        phase: TurnPhase::Model {
+                            attempt: pin.attempt,
+                        },
+                        iteration: current,
+                        checkpoint_ref: Some(encode_checkpoint(&machine)?),
+                        model: Some(pin.clone()),
+                    }));
+                    cx.commit(tx, CommitLabel::MODEL_START).await?;
+                }
+                // `model` is spent: only the first call after a restore
+                // re-delivers the pinned one, and a later call of the same
+                // iteration is a new call.
+                let sent = turn_cancel::unless_cancelled(
+                    cx,
+                    &session,
+                    model_call::send(cx, services, &session, request, &start),
+                )
+                .await?;
+                let Some(result) = sent else {
+                    return Ok(PhaseExit::CancelRequested);
+                };
+                let result = result?;
                 machine.handle_response(Response::LlmComplete {
                     id,
                     result,
@@ -554,6 +630,9 @@ pub async fn run_phases(
                 });
             }
             Effect::ExecCode { id, language, code } => {
+                if turn_cancel::requested(cx, &session).await?.is_some() {
+                    return Ok(PhaseExit::CancelRequested);
+                }
                 model = None;
                 let exec = ExecKey::Cell(
                     session.clone(),
@@ -610,15 +689,76 @@ pub async fn run_phases(
     }
 }
 
-/// Request a cancel of `session`'s turn: mail plus a control wake.
+/// Request a cancel of one of a session's turns, from outside the session
+/// actor: one mailbox transaction records it on the turn's cancel-request
+/// row and control-wakes the session (`mail.session`). The owner sees it on
+/// the turn's row at its next fenced read, through the wake hint or its
+/// poll; the next owner sees it after a crash.
 ///
 /// # Errors
 ///
-/// The store's refusal.
+/// The store's refusal; nothing was written.
 pub async fn request_turn_cancel(
-    _backend: &Backend,
-    _session: &SessionId,
-    _request: TurnCancelRequest,
-) -> Result<(), DurableError> {
-    todo!("L3 (FIG-5172): request a turn cancel as session mail")
+    backend: &Backend,
+    request: TurnCancelRequest,
+) -> Result<TurnCancelAnswer, DurableError> {
+    let mut tx = MailTx::new();
+    tx.write(MailDomainWrite::RequestTurnCancel(request));
+    let mut commit = backend.commit_mail(tx, CommitLabel::MAIL_SESSION).await?;
+    match commit.answers.pop() {
+        Some(MailAnswer::RequestTurnCancel(answer)) if commit.answers.is_empty() => Ok(answer),
+        other => Err(DurableError::Store(lash_durable::StoreFailure {
+            kind: lash_durable::StoreFailureKind::Corrupt,
+            message: format!("a turn cancel request was answered with {other:?}"),
+        })),
+    }
+}
+
+/// Cancel the session's unfinished turn from inside the session actor, in
+/// the caller's transaction: its `Cancelled` terminal, with `cause` as its
+/// typed cause. The caller commits `tx` under its own label.
+///
+/// It touches no in-memory state: the session activation runs one thing at
+/// a time, so no phase of the turn runs while the caller holds `tx`.
+///
+/// # Errors
+///
+/// [`TurnError::Durable`] when the turn row cannot be read.
+pub async fn cancel_open_turn(
+    cx: &ActorContext,
+    tx: &mut ActorTx,
+    cause: &crate::runtime::TurnCancellationEvidence,
+) -> Result<Option<TurnRow>, TurnError> {
+    let Some(row) = cx.durable_reads()?.turn(&session_of(cx)).await? else {
+        return Ok(None);
+    };
+    tx.write(DomainWrite::Turn(TurnWrite::Terminal {
+        session: row.session.clone(),
+        run: row.run.clone(),
+        terminal: TurnTerminal::Cancelled,
+        cause_json: Some(cancel_cause_json(cause)?),
+        head_revision: None,
+    }));
+    Ok(Some(row))
+}
+
+/// The `Cancelled` terminal's typed cause.
+fn cancel_cause_json(
+    cause: &crate::runtime::TurnCancellationEvidence,
+) -> Result<String, TurnError> {
+    serde_json::to_string(cause)
+        .map_err(|error| TurnError::Exec(format!("the cancel cause does not encode: {error}")))
+}
+
+/// The evidence of the cancel `request` the turn accepted.
+#[must_use]
+pub fn cancel_evidence(request: &TurnCancelRequest) -> crate::runtime::TurnCancellationEvidence {
+    crate::runtime::TurnCancellationEvidence {
+        request_id: request.request_id.clone(),
+        origin: request.origin.clone(),
+        reason: request.reason.clone(),
+        undelivered: request.undelivered,
+        mode: request.mode,
+        honoured_after_step: None,
+    }
 }

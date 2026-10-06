@@ -79,6 +79,9 @@ pub(super) struct Inner {
     durable: Option<Arc<dyn DurableStore>>,
     actor: ActorKey,
     epoch: Epoch,
+    /// What the claim's activation waits on for mail; a context that owns
+    /// no claim polls on the backend's claim interval.
+    mail: Option<lash_durable::runner::MailWaker>,
     clock: Arc<dyn Clock>,
     cancel: CancellationToken,
     probe: Arc<dyn DurableProbe>,
@@ -119,6 +122,7 @@ impl ActorContext {
                 durable: None,
                 actor,
                 epoch,
+                mail: None,
                 clock,
                 cancel,
                 probe,
@@ -146,6 +150,7 @@ impl ActorContext {
                 durable: Some(Arc::clone(owned.store())),
                 actor: owned.actor().clone(),
                 epoch: owned.epoch(),
+                mail: Some(owned.mail_waker()),
                 clock: Arc::clone(owned.clock()),
                 cancel,
                 probe,
@@ -171,6 +176,7 @@ impl ActorContext {
                 durable: None,
                 actor: ActorKey::session("unavailable").expect("a constant actor id"),
                 epoch: Epoch(0),
+                mail: None,
                 clock: Arc::new(crate::SystemClock),
                 cancel: CancellationToken::new(),
                 probe: Arc::new(lash_durable::NoProbe),
@@ -247,6 +253,25 @@ impl ActorContext {
     /// The store's refusal.
     pub async fn durable_now(&self) -> Result<DurableInstant, DurableError> {
         self.durable()?.now().await
+    }
+
+    /// Wait until mail may have arrived for the actor: its claim's wake
+    /// hint, or one claim-poll interval. What arrived shows at the next
+    /// fenced read, never here.
+    pub async fn wait_for_mail(&self) {
+        match &self.inner.mail {
+            Some(mail) => mail.wait().await,
+            None => {
+                let poll = self
+                    .inner
+                    .backend
+                    .as_ref()
+                    .map_or(std::time::Duration::from_secs(1), |backend| {
+                        backend.config().lease().settings().claim_poll
+                    });
+                self.inner.clock.sleep(poll).await;
+            }
+        }
     }
 
     /// Cancelled when the activation must stop.

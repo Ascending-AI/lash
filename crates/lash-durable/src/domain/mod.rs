@@ -95,7 +95,8 @@ pub enum MailDomainWrite {
     /// timestamp; it wakes the process as a control wake, which readies even
     /// a parked actor.
     RequestProcessCancel(CancelRequest),
-    /// L3: request a turn's cancel: a mailbox row plus a control wake.
+    /// L3: request a turn's cancel: its cancel-request row (first policy
+    /// wins, a stronger mode escalates) plus a control wake.
     RequestTurnCancel(TurnCancelRequest),
 }
 

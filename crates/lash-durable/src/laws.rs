@@ -565,3 +565,177 @@ pub async fn no_write_through_a_stale_epoch(
     );
     Ok(())
 }
+
+/// L3 (FIG-5172): a turn cancel request is a row on the turn plus a control
+/// wake, written by a non-owner in one mailbox transaction. The first
+/// request holds the undelivered-input policy; a request with that policy
+/// and a stronger mode escalates it; any other repeat writes nothing; a turn
+/// that is not unfinished answers `AlreadyEnded`. The owner reads the
+/// accepted request on the turn's row.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
+    store: &dyn DurableStore,
+) -> LawResult {
+    use crate::domain::{
+        DomainWrite, MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnCancelRequest,
+        TurnTerminal, TurnWrite,
+    };
+    use lash_sansio::{SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId};
+
+    let id = SessionId::try_from("cancelled-session".to_owned())
+        .map_err(|_| LawBroken("a constant session id".into()))?;
+    let turn = |name: &str| {
+        TurnId::try_from(name.to_owned()).map_err(|_| LawBroken(format!("turn id {name}")))
+    };
+    let run = turn("cancelled-turn")?;
+    let actor = session(id.as_str())?;
+    create(store, std::slice::from_ref(&actor)).await?;
+    let owner = node(store, "cancel-owner").await?;
+    let claimed = store.claim(&owner, 1).await?;
+    ensure!(claimed.len() == 1, "the session was not claimed");
+    let mut tx = store.begin(&actor, claimed[0].epoch).await?;
+    tx.write(DomainWrite::Turn(TurnWrite::Admit {
+        session: id.clone(),
+        run: run.clone(),
+        admission_json: "{}".to_owned(),
+        turn_deadline: None,
+    }))
+    .ack_seen()
+    .give_up(Release::Idle);
+    store.commit(tx, LABEL).await?;
+
+    let request = |request_id: &str,
+                   run: &TurnId,
+                   undelivered: TurnCancelUndeliveredInputPolicy,
+                   mode: TurnCancelMode| TurnCancelRequest {
+        session: id.clone(),
+        run: run.clone(),
+        request_id: request_id.to_owned(),
+        origin: Some("law".to_owned()),
+        reason: None,
+        undelivered,
+        mode,
+    };
+    let ask = |request: TurnCancelRequest| async move {
+        let mut tx = MailTx::new();
+        tx.write(MailDomainWrite::RequestTurnCancel(request));
+        store.commit_mail(tx, CommitLabel::new("law.cancel")).await
+    };
+    let defer = TurnCancelUndeliveredInputPolicy::Defer;
+    let first = request("first", &run, defer, TurnCancelMode::AfterStep);
+
+    let receipt = ask(first.clone()).await?;
+    ensure!(
+        receipt.answers == [MailAnswer::RequestTurnCancel(TurnCancelAnswer::Requested)]
+            && receipt.woken.len() == 1
+            && receipt.woken[0].actor == actor
+            && receipt.woken[0].state == ActorState::Ready,
+        "the first request answered {receipt:?}"
+    );
+    let row = store
+        .turn(&id)
+        .await?
+        .ok_or_else(|| LawBroken("the admitted turn vanished".into()))?;
+    ensure!(
+        row.cancel.as_ref() == Some(&first),
+        "the owner read the turn's cancel as {:?}",
+        row.cancel
+    );
+
+    let conflicting = request(
+        "conflicting",
+        &run,
+        TurnCancelUndeliveredInputPolicy::Drop,
+        TurnCancelMode::Immediate,
+    );
+    let receipt = ask(conflicting).await?;
+    ensure!(
+        receipt.answers
+            == [MailAnswer::RequestTurnCancel(
+                TurnCancelAnswer::PolicyConflict {
+                    accepted: first.clone()
+                }
+            )]
+            && receipt.woken.is_empty(),
+        "a request with another policy answered {receipt:?}"
+    );
+    let receipt = ask(request("repeat", &run, defer, TurnCancelMode::AfterStep)).await?;
+    ensure!(
+        receipt.answers
+            == [MailAnswer::RequestTurnCancel(
+                TurnCancelAnswer::AlreadyRequested {
+                    accepted: first.clone()
+                }
+            )]
+            && receipt.woken.is_empty(),
+        "a repeat answered {receipt:?}"
+    );
+    let mut escalated = first.clone();
+    escalated.mode = TurnCancelMode::Immediate;
+    let receipt = ask(request("stronger", &run, defer, TurnCancelMode::Immediate)).await?;
+    ensure!(
+        receipt.answers
+            == [MailAnswer::RequestTurnCancel(TurnCancelAnswer::Escalated {
+                accepted: escalated.clone()
+            })]
+            && receipt.woken.len() == 1,
+        "a stronger mode answered {receipt:?}"
+    );
+    let row = store.turn(&id).await?;
+    ensure!(
+        row.as_ref().and_then(|row| row.cancel.as_ref()) == Some(&escalated),
+        "the escalated request reads back as {row:?}"
+    );
+
+    let unknown = turn("never-admitted")?;
+    let receipt = ask(request(
+        "unknown",
+        &unknown,
+        defer,
+        TurnCancelMode::Immediate,
+    ))
+    .await?;
+    ensure!(
+        receipt.answers
+            == [MailAnswer::RequestTurnCancel(
+                TurnCancelAnswer::AlreadyEnded
+            )]
+            && receipt.woken.is_empty(),
+        "a request for a turn never admitted answered {receipt:?}"
+    );
+
+    let claimed = store.claim(&owner, 1).await?;
+    ensure!(claimed.len() == 1, "the woken session was not claimed");
+    let mut tx = store.begin(&actor, claimed[0].epoch).await?;
+    tx.write(DomainWrite::Turn(TurnWrite::Terminal {
+        session: id.clone(),
+        run: run.clone(),
+        terminal: TurnTerminal::Cancelled,
+        cause_json: Some("{}".to_owned()),
+        head_revision: None,
+    }))
+    .ack_seen()
+    .give_up(Release::Idle);
+    store.commit(tx, LABEL).await?;
+    let receipt = ask(request("late", &run, defer, TurnCancelMode::Immediate)).await?;
+    ensure!(
+        receipt.answers
+            == [MailAnswer::RequestTurnCancel(
+                TurnCancelAnswer::AlreadyEnded
+            )]
+            && receipt.woken.is_empty(),
+        "a request for an ended turn answered {receipt:?}"
+    );
+    let snapshot = store
+        .actor(&actor)
+        .await?
+        .ok_or_else(|| LawBroken("the session actor vanished".into()))?;
+    ensure!(
+        snapshot.state == ActorState::Idle,
+        "a request for an ended turn woke the session: {snapshot:?}"
+    );
+    Ok(())
+}

@@ -101,6 +101,7 @@ impl SimNodes {
                 decodes: self.config.decodes.clone(),
                 lease: self.config.lease,
                 max_active: self.config.max_active,
+                claim_batch: self.config.max_active,
             },
             Arc::clone(&self.activation),
         );

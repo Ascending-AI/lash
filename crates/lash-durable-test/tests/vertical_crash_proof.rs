@@ -382,11 +382,24 @@ impl TurnServices for V0Services {
 
     /// The scripted model: before the transcript holds a cell result it
     /// answers with the cell; after, with a final answer that quotes it.
+    fn execution_budgets(&self, _session: &SessionId) -> lash_core::ExecutionBudgets {
+        lash_core::ExecutionBudgets::default()
+    }
+
+    async fn restart_live_stream(
+        &self,
+        _cx: &ActorContext,
+        _session: &SessionId,
+    ) -> Result<(), TurnError> {
+        Ok(())
+    }
+
     async fn call_model(
         &self,
         _cx: &ActorContext,
         request: Arc<LlmRequest>,
         _attempt: u32,
+        _limit: ExecutionLimit,
     ) -> Result<LlmResponse, LlmCallError> {
         let rendered = serde_json::to_string(&*request).expect("a request encodes");
         let text = match rendered.find(RESULT_PREFIX) {

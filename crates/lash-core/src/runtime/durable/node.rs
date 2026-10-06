@@ -1,0 +1,72 @@
+//! The node runtime: one serving lash process on the durable substrate
+//! (ADR 0132 §3). Owned by L3 (FIG-5172).
+//!
+//! [`serve`] runs the production runner over a backend's durable store:
+//! it keeps the node's lease (heartbeat, and self-stop when renewals fail),
+//! reaps dead nodes, claims ready and due actors, and runs each claimed
+//! actor's activation by its kind. Tests run the same runner through
+//! `lash_durable_test::SimNodes`.
+//!
+//! - **Claims** take at most `claim_batch` actors at once and never more
+//!   than `max_active` in all.
+//! - **Mail** reaches a hot owner by the wake hint of a mailbox commit made
+//!   on this node ([`Backend::commit_mail`]), or by the owner's own read at
+//!   every claim poll: the poll is the correctness backstop, the hint only
+//!   cuts latency.
+//! - **Idle eviction and release** belong to each activation: a session
+//!   stays hot for `idle_evict` with nothing to do, and releases as
+//!   `waiting` with the earliest due time its sources noted.
+
+use std::future::Future;
+use std::sync::Arc;
+
+use lash_durable::runner::{Activation, Runner, RunnerConfig, Stopped};
+use lash_durable::{ActorDispatch, DurableError, FormatSet, NodeId};
+
+use super::session::SessionActivation;
+use crate::Backend;
+
+/// What one node serves.
+pub struct NodeServe {
+    /// The node's stable name: a new boot of the same name fences the old.
+    pub node: NodeId,
+    /// The format sets this build decodes; it claims only actors in one.
+    pub decodes: Vec<FormatSet>,
+    /// Runs the claimed sessions.
+    pub sessions: Arc<SessionActivation>,
+    /// Runs the claimed processes.
+    pub processes: Arc<dyn Activation>,
+}
+
+/// Serve `backend` as one node until `stop` completes or the node loses its
+/// lease, under the backend's validated substrate parameters.
+///
+/// # Errors
+///
+/// The store's refusal of the node's registration.
+pub async fn serve(
+    backend: &Backend,
+    serve: NodeServe,
+    stop: impl Future<Output = ()> + Send,
+) -> Result<Stopped, DurableError> {
+    let settings = backend.config().settings();
+    let dispatch = ActorDispatch {
+        session: serve.sessions,
+        process: serve.processes,
+    };
+    Runner::new(
+        Arc::clone(backend.durable()),
+        backend.clock(),
+        RunnerConfig {
+            node: serve.node,
+            decodes: serve.decodes,
+            lease: backend.config().lease(),
+            max_active: settings.max_active,
+            claim_batch: settings.claim_batch,
+        },
+        Arc::new(dispatch),
+    )
+    .with_hints(backend.hints().clone())
+    .run(stop)
+    .await
+}

@@ -1,4 +1,4 @@
-//! Turn phase state, the session commit and turn-cancel mail on SQLite: the `turns` domain's statements, apply and read
+//! Turn phase state, the session commit and turn cancel requests on SQLite: the `turns` domain's statements, apply and read
 //! (I0, FIG-5194).
 //!
 //! Owned by V0 (FIG-5170), then L3 (FIG-5172). The dispatch in `durable/mod.rs` calls these inside the
@@ -7,11 +7,15 @@
 
 use std::sync::LazyLock;
 
+use lash_core_execution::store_backend_support::turn_cancel::{
+    turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
+    turn_cancel_undelivered_wire,
+};
 use lash_durable::domain::{
     DomainRefusal, ModelPin, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnPhase,
     TurnRow, TurnWrite,
 };
-use lash_durable::{DurableError, DurableInstant, Epoch, Woken};
+use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
 use lash_store_sql::durable::turns::TurnStatements;
 use rusqlite::{Connection, OptionalExtension};
@@ -207,11 +211,102 @@ pub(super) fn apply_session_commit(
 }
 
 pub(super) fn request_cancel(
-    _tx: &Connection,
-    _request: &TurnCancelRequest,
-    _now: lash_durable::DurableInstant,
+    tx: &Connection,
+    request: &TurnCancelRequest,
+    now: DurableInstant,
 ) -> Answer<(TurnCancelAnswer, Option<Woken>)> {
-    todo!("L3 (FIG-5172): record a turn cancel request and wake the session on SQLite")
+    let session = request.session.as_str();
+    let run = request.run.as_str();
+    let open = tx
+        .prepare_cached(SQL.open_named_run.sql())?
+        .query_row([session, run], |_| Ok(()))
+        .optional()?;
+    if open.is_none() {
+        return Ok(Ok((TurnCancelAnswer::AlreadyEnded, None)));
+    }
+    let accepted = match cancel_of(tx, &request.session, &request.run)? {
+        Ok(accepted) => accepted,
+        Err(error) => return Ok(Err(error)),
+    };
+    let answer = match accepted {
+        None => {
+            cached_execute(
+                tx,
+                SQL.insert_cancel.sql(),
+                rusqlite::params![
+                    session,
+                    run,
+                    request.request_id,
+                    request.origin,
+                    request.reason,
+                    turn_cancel_undelivered_wire(request.undelivered),
+                    turn_cancel_mode_wire(request.mode),
+                ],
+            )?;
+            TurnCancelAnswer::Requested
+        }
+        Some(mut accepted) if request.escalates(&accepted) => {
+            cached_execute(
+                tx,
+                SQL.escalate_cancel.sql(),
+                rusqlite::params![session, run, turn_cancel_mode_wire(request.mode)],
+            )?;
+            accepted.mode = request.mode;
+            TurnCancelAnswer::Escalated { accepted }
+        }
+        Some(accepted) if accepted.undelivered != request.undelivered => {
+            return Ok(Ok((TurnCancelAnswer::PolicyConflict { accepted }, None)));
+        }
+        Some(accepted) => {
+            return Ok(Ok((TurnCancelAnswer::AlreadyRequested { accepted }, None)));
+        }
+    };
+    let actor = match ActorKey::session(session) {
+        Ok(actor) => actor,
+        Err(_) => return Ok(Err(corrupt("session id", session))),
+    };
+    Ok(super::wake_within(tx, &actor, true, now)?.map(|(woken, _)| (answer, Some(woken))))
+}
+
+/// The cancel request run `run` of `session` accepted.
+fn cancel_of(
+    tx: &Connection,
+    session: &SessionId,
+    run: &TurnId,
+) -> Answer<Option<TurnCancelRequest>> {
+    let stored = tx
+        .prepare_cached(SQL.cancel_of.sql())?
+        .query_row([session.as_str(), run.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .optional()?;
+    let Some((request_id, origin, reason, disposition, mode)) = stored else {
+        return Ok(Ok(None));
+    };
+    let (Ok(undelivered), Ok(mode)) = (
+        turn_cancel_undelivered_from_wire(&disposition),
+        turn_cancel_mode_from_wire(&mode),
+    ) else {
+        return Ok(Err(corrupt(
+            "turn cancel request",
+            &format!("{disposition}/{mode}"),
+        )));
+    };
+    Ok(Ok(Some(TurnCancelRequest {
+        session: session.clone(),
+        run: run.clone(),
+        request_id,
+        origin,
+        reason,
+        undelivered,
+        mode,
+    })))
 }
 
 pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRow>> {
@@ -264,6 +359,10 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         }),
         _ => None,
     };
+    let cancel = match cancel_of(tx, session, &run)? {
+        Ok(cancel) => cancel,
+        Err(error) => return Ok(Err(error)),
+    };
     Ok(Ok(Some(TurnRow {
         session: session.clone(),
         run,
@@ -274,5 +373,6 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         model,
         turn_deadline: stored.turn_deadline.map(DurableInstant),
         written_epoch: Epoch(stored.epoch),
+        cancel,
     })))
 }

@@ -1,4 +1,4 @@
-//! Turn rows (V0, then L3) and the turn-cancel mail (L3).
+//! Turn rows (V0, then L3) and turn cancel requests (L3).
 //!
 //! A turn is a sequence of committed phases of the sans-io `TurnMachine`
 //! (ADR 0132 §4). Its row names the phase, the encoded checkpoint, the
@@ -6,7 +6,7 @@
 //! unfinished.
 
 use crate::ids::{DurableInstant, Epoch};
-use lash_sansio::{SessionId, TurnId};
+use lash_sansio::{SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId};
 
 use super::keys::RunSeq;
 
@@ -129,6 +129,8 @@ pub struct TurnRow {
     pub turn_deadline: Option<DurableInstant>,
     /// The epoch of the commit that last wrote the row.
     pub written_epoch: Epoch,
+    /// The cancel request the turn accepted, if any (L3).
+    pub cancel: Option<TurnCancelRequest>,
 }
 
 /// A turn-row write inside an owner commit.
@@ -205,23 +207,66 @@ pub struct SessionCommitWrite {
     pub commit_json: String,
 }
 
-/// A request to cancel a session's turn (L3): a mailbox row plus a
-/// control wake.
+/// A request to cancel one of a session's turns (L3).
+///
+/// It is not a mail row: a [`MailDomainWrite::RequestTurnCancel`](super::MailDomainWrite::RequestTurnCancel)
+/// records it on the turn's cancel-request row and control-wakes the session
+/// in the producer's mailbox transaction. The session's owner reads it back
+/// on the turn's row ([`TurnRow::cancel`]) at its next fenced read, so a
+/// request survives the owner that saw it: the next owner finalizes the turn.
+///
+/// The first request a turn accepts holds the undelivered-input policy; a
+/// later one with the same policy and a stronger mode escalates it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnCancelRequest {
     /// The session.
     pub session: SessionId,
-    /// The turn to cancel; `None` for whichever is unfinished.
-    pub run: Option<TurnId>,
-    /// The request (reason, affected inputs), encoded by its owner.
-    pub request_json: String,
+    /// The turn to cancel.
+    pub run: TurnId,
+    /// The host's request id.
+    pub request_id: String,
+    /// Opaque host-domain data, recorded and returned unchanged.
+    pub origin: Option<String>,
+    /// The host's reason.
+    pub reason: Option<String>,
+    /// What becomes of input the turn did not deliver.
+    pub undelivered: TurnCancelUndeliveredInputPolicy,
+    /// When the owner honours it.
+    pub mode: TurnCancelMode,
+}
+
+impl TurnCancelRequest {
+    /// Whether this request escalates `accepted`: the same policy with a
+    /// stronger mode. A request that disagrees about the policy never does.
+    #[must_use]
+    pub fn escalates(&self, accepted: &Self) -> bool {
+        self.undelivered == accepted.undelivered && self.mode.is_stronger_than(accepted.mode)
+    }
 }
 
 /// The answer to a [`TurnCancelRequest`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TurnCancelAnswer {
-    /// Recorded, and the session woken.
-    Recorded,
-    /// The named turn is already terminal; nothing was written.
+    /// The turn's first request: recorded, and the session woken.
+    Requested,
+    /// The accepted request took this request's stronger mode, and the
+    /// session was woken. `accepted` is the request as it now stands.
+    Escalated {
+        /// The accepted request, escalated.
+        accepted: TurnCancelRequest,
+    },
+    /// The turn already holds a request with the same policy and a mode at
+    /// least as strong; nothing was written.
+    AlreadyRequested {
+        /// The accepted request.
+        accepted: TurnCancelRequest,
+    },
+    /// The turn already accepted another undelivered-input policy; nothing
+    /// was written.
+    PolicyConflict {
+        /// The accepted request.
+        accepted: TurnCancelRequest,
+    },
+    /// The turn is not the session's unfinished turn; nothing was written.
     AlreadyEnded,
 }
