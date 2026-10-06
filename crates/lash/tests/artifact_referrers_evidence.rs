@@ -313,10 +313,12 @@ fn last_cell_finish(output: &TurnOutput) -> Option<serde_json::Value> {
         .nodes
         .iter()
         .filter_map(|node| match &node.payload {
+            // The RLM event rides its format-stamped envelope (FIG-5028).
             lash_core::SessionNodePayload::Event {
                 event: lash_core::SessionHistoryRecord::Protocol(event),
             } if event.plugin_id == "rlm_protocol" => event
                 .payload
+                .get("event")?
                 .get("RlmTrajectoryEntry")?
                 .get("final_output")
                 .cloned(),
