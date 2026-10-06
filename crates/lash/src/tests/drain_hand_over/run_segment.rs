@@ -730,14 +730,25 @@ impl RunRoll {
             (0, 0),
             "the draining build holds none of the run"
         );
-        assert!(
-            self.core
-                .generation_drain_status(&self.old)
-                .await?
-                .drained(),
-            "N's drain is complete"
-        );
-        Ok(())
+        // The run answers when its outcome is published; N's turn and shift
+        // invocations return after that, and the drain counts them until
+        // they do.
+        let mut last = None;
+        let drained = tokio::time::timeout(WEDGE, async {
+            loop {
+                let status = self.core.generation_drain_status(&self.old).await?;
+                if status.drained() {
+                    return Ok::<_, crate::EmbedError>(());
+                }
+                last = Some(status);
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        match drained {
+            Ok(result) => result,
+            Err(_) => panic!("N's drain is complete: {last:?}"),
+        }
     }
 }
 
