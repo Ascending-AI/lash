@@ -85,6 +85,16 @@ struct Presented {
     intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
 }
 
+/// The realized intents a production presentation retains, or `None` for
+/// presentation text these handlers did not write.
+pub(crate) fn presented_intent_outcomes(
+    text: &str,
+) -> Option<Vec<crate::ToolIntentExecutionOutcome>> {
+    decode::<Presented>(text)
+        .ok()
+        .map(|presented| presented.intent_outcomes)
+}
+
 /// How long a stopped inline body may keep running to observe its token and
 /// return its own outcome, settling the nested work it owns, before X drops
 /// it. Only a body that ignores its stop meets this bound.

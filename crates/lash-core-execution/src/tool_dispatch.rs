@@ -11,7 +11,7 @@ mod preparation;
 mod production;
 mod realization;
 mod retry;
-pub(crate) use production::ProductionToolHandlers;
+pub(crate) use production::{ProductionToolHandlers, presented_intent_outcomes};
 mod run_coordinator;
 mod singleton_run;
 

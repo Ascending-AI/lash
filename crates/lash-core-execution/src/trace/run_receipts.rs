@@ -2,8 +2,8 @@
 
 use crate::store::{SessionCommitStore, ToolCompletionReceipt, ToolRequestReceipt};
 use crate::tool_run::{
-    BusinessReceipt, LogicalTerminal, ObservationPermit, ObservedFact, RunEvent, RunEventOrdinal,
-    RunJournalEntry, RunRecord, RunTraceFacts,
+    BusinessReceipt, LogicalTerminal, MaterialEntry, ObservationPermit, ObservedFact, RunEvent,
+    RunEventOrdinal, RunJournalEntry, RunTraceFacts,
 };
 use crate::{
     AdmittedScope, EffectOpener, RunRecordStep, RuntimeEffectController,
@@ -90,7 +90,7 @@ impl RunRecordObserver {
         let (body, observations) = self.recording_step(engine, step)?;
         let entry = engine.record_run_record(name, body).await?;
         if let Some(observations) = observations {
-            observations.observe(&entry.record).await?;
+            observations.observe(&entry).await?;
         }
         Ok(entry)
     }
@@ -122,7 +122,7 @@ impl RunRecordObserver {
                 value: Box::pin(async move {
                     let entry = result.value.await?;
                     if let Some(observations) = observations {
-                        observations.observe(&entry.record).await?;
+                        observations.observe(&entry).await?;
                     }
                     Ok(entry)
                 }),
@@ -231,7 +231,8 @@ fn request_key(
 }
 
 impl RunObservations {
-    async fn observe(&self, record: &RunRecord) -> Result<(), RuntimeEffectControllerError> {
+    async fn observe(&self, entry: &RunJournalEntry) -> Result<(), RuntimeEffectControllerError> {
+        let record = &entry.record;
         let Some(trace) = &record.trace else {
             return Ok(());
         };
@@ -298,16 +299,38 @@ impl RunObservations {
                     LogicalTerminal::Cancelled => TraceToolTerminal::Cancelled,
                     LogicalTerminal::Aborted => TraceToolTerminal::Aborted,
                 };
-                self.complete(store.as_ref(), trace, call_id, terminal, event)
+                self.complete(store.as_ref(), trace, call_id, terminal, event, Vec::new())
                     .await?;
             }
-            if let RunEvent::Presented { call_id, .. } = event {
+            if let RunEvent::Presented {
+                call_id,
+                presentation,
+                ..
+            } = event
+            {
+                // The presentation the record owns retains the call's
+                // realized intents.
+                let outcomes = presentation
+                    .as_ref()
+                    .and_then(|reference| {
+                        entry.materials.iter().find_map(|material| match material {
+                            MaterialEntry::Available {
+                                reference: held,
+                                payload,
+                            } if held == reference => {
+                                crate::tool_dispatch::presented_intent_outcomes(&payload.text)
+                            }
+                            _ => None,
+                        })
+                    })
+                    .unwrap_or_default();
                 self.complete(
                     store.as_ref(),
                     trace,
                     call_id,
                     TraceToolTerminal::Final,
                     event,
+                    outcomes,
                 )
                 .await?;
             }
@@ -322,6 +345,7 @@ impl RunObservations {
         call_id: &ToolCallId,
         terminal: TraceToolTerminal,
         event: &RunEvent,
+        intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
     ) -> Result<(), RuntimeEffectControllerError> {
         let key = request_key(&trace.owner, call_id)?;
         let accepted = self
@@ -341,10 +365,34 @@ impl RunObservations {
                 request_key: request.request_key.clone(),
                 payload_digest: request.payload_digest.clone(),
                 result: serde_json::to_value(event).map_err(encoding_error)?,
-                intent_outcomes: serde_json::Value::Null,
+                intent_outcomes: serde_json::to_value(&intent_outcomes).map_err(encoding_error)?,
                 completed_at_ms: trace.at_ms,
             })
             .await?;
+        // Counted once, under the completion's first writer.
+        for outcome in &intent_outcomes {
+            let Some(kind) = outcome.kind() else {
+                continue;
+            };
+            match outcome {
+                crate::ToolIntentExecutionOutcome::Executed { .. } => {
+                    crate::operational_metrics::record_tool_intent_executed(
+                        self.runtime.metrics(),
+                        receipt.permit().as_ref(),
+                        kind.as_str(),
+                    );
+                }
+                crate::ToolIntentExecutionOutcome::Refused { refusal, .. } => {
+                    crate::operational_metrics::record_tool_intent_refused(
+                        self.runtime.metrics(),
+                        receipt.permit().as_ref(),
+                        kind.as_str(),
+                        refusal.code().as_ref(),
+                    );
+                }
+                crate::ToolIntentExecutionOutcome::ProtocolRefused { .. } => {}
+            }
+        }
         self.emit(
             &request,
             call_id,
