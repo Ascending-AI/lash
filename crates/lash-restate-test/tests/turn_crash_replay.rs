@@ -27,11 +27,9 @@ use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core::store::RunStore as _;
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::protocol::generated::CallCommandMessage;
 use lash_restate_test::{
     CrashPoint, CrashRule, RestateTestBackend, ServerConfig, TURN_DRIVER_SERVICE,
 };
-use prost::Message as _;
 use serde_json::json;
 
 const TOOL: &str = "count_call";
@@ -129,9 +127,9 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>, config: ServerConfig) -> 
         .await
         .expect("build the Restate test backend");
     let server = backend.server();
-    // A completed tool skips wait-registration commands. Hold its body
-    // until the opener has registered its wait, so all sweep cells take the
-    // same journal path regardless of how quickly the tool would finish.
+    // The tool runs inside its Run's journaled attempt. Hold its body until
+    // the run has journaled that attempt, so every sweep cell reaches the
+    // tool before it can finish, however quickly it would.
     let tool_gate = Arc::new(lash_core::testing::Gate::new("turn crash matrix tool"));
     let crash = crash.inspect(|rule| backend.server().crash_on(rule.clone()));
     let llm_calls = Arc::new(AtomicUsize::new(0));
@@ -197,10 +195,11 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>, config: ServerConfig) -> 
             .unwrap_or_default()
             .into_iter()
             .any(|entry| {
-                entry.ty == MessageType::CallCommand
-                    && CallCommandMessage::decode(entry.payload).is_ok_and(|call| {
-                        call.service_name == "LashDurableWaitIndex"
-                            && call.handler_name == "register_awakeable"
+                entry.ty == MessageType::RunCommand
+                    && entry.name.as_deref().is_some_and(|name| {
+                        lash_restate::JournalStepKind::RunAttempt
+                            .instance_of(name)
+                            .is_some()
                     })
             })
         {
@@ -208,7 +207,7 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>, config: ServerConfig) -> 
         }
     })
     .await
-    .expect("the opener registers its wait while the tool is held");
+    .expect("the run journals the tool's attempt while the tool is held");
     assert_eq!(tool_executions.load(Ordering::SeqCst), 0);
     tool_gate.open_all();
     let shift = tokio::time::timeout(
