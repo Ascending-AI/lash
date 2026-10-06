@@ -957,17 +957,20 @@ pub mod plugins {
     };
     /// A source seal's typed refusal, distinct from engine admission refusal.
     pub use lash_core::tool_run::SealRefusal as SourceSealRefusal;
+    /// One recorded Run attempt's outcome, distinct from the provider's
+    /// [`crate::provider::AttemptOutcome`].
+    pub use lash_core::tool_run::run_event::AttemptOutcome as RunAttemptOutcome;
     pub use lash_core::tool_run::run_event::{
-        AttemptOutcome, AvailableEvidence, CallDecision, CompletionSource, KnownFailure,
-        KnownFailureReason, PendingStart, RealizationKey, ResultSource, RunAttemptEntry, RunEvent,
-        RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger, RunRecord, RunTraceFacts,
+        AvailableEvidence, CallDecision, CompletionSource, KnownFailure, KnownFailureReason,
+        PendingStart, RealizationKey, ResultSource, RunAttemptEntry, RunEvent, RunEventOrdinal,
+        RunEventRefusal, RunJournalEntry, RunLedger, RunRecord, RunTraceFacts,
     };
     pub use lash_core::tool_run::{
         AdmissionRefusal as ToolRunAdmissionRefusal, AdmittedBinding, AdmittedCall, AdmittedRound,
         AdoptedRun, AfterCheckVerdict, AggregateConsumer, AggregateLeaf, AggregatePlan,
-        AttributedVerdict, Backoff, BeforeCheckVerdict, BeforeSelection, BoundedRetry,
-        CapacityScope, Cut, CutPhase, ExecutionPolicy, LimitCause, RoundAdmission, RunLifecycle,
-        RunTransfer, RuntimeCallPolicy, SegmentOrdinal, TransferBundle,
+        AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CapacityScope, Cut, CutPhase,
+        RoundAdmission, RunLifecycle, RunTransfer, RuntimeCallPolicy, SegmentOrdinal,
+        TransferBundle,
     };
     /// Recorded Run data needed by engine extensions and effect-host journals.
     pub use lash_core::tool_run::{
