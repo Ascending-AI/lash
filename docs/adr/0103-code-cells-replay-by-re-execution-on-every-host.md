@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted.
+Accepted for the Restate path that serves production on main. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md)
+replaces this decision entirely: code cells resume from VM snapshots under
+ADR 0132 §8. The Restate deletion lane deletes this ADR.
 
 ## Context
 

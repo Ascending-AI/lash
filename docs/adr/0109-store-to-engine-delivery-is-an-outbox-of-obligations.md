@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted.
+Accepted. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) reduces this outbox to `SessionDelete` and
+`ArtifactCleanup` once its lanes land. It replaces §1 to §3 and §5 to §7 for
+the other seven kinds; the session-delete phases of §4 stay without the
+engine half.
 
 ## Context
 

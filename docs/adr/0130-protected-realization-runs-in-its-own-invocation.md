@@ -1,6 +1,8 @@
 # ADR 0130: Protected realization runs in its own invocation
 
-Status: Accepted
+Status: Accepted. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) replaces this separate realization
+invocation once its lanes land: the store half of realization commits with the
+tool result, and intent identities and their exactly-once fences carry over.
 
 ## Problem
 

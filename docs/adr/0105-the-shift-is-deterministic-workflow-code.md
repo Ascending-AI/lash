@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted.
+Accepted. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) replaces §1, §3, §5 to §12 and the shift seal
+and run-start nonce of §2 once its lanes land. The Run's ownership of
+concurrent calls (§4) and run admission's binding of rows and base head (§2)
+carry over onto persisted records.
 
 ## Context
 

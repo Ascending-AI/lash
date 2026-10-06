@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted.
+Accepted. [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) replaces §2 to §4 and §7 once its lanes land:
+recovery loads state instead of replaying a journal, and phase rows record
+`Once` and `Repeatable` executions. §1, §5 and §6 carry over.
 
 ## Context
 

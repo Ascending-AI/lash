@@ -164,4 +164,5 @@ The generated region below is checked against the live filenames and headings.
 | 0129 | [The transcript row stream is the only chat projection](0129-the-transcript-row-stream-is-the-only-chat-projection.md) |
 | 0130 | [Protected realization runs in its own invocation](0130-protected-realization-runs-in-its-own-invocation.md) |
 | 0131 | [Durable types declare their version surface](0131-durable-types-declare-their-version-surface.md) |
+| 0132 | [Durability is state-first over the lash store: actors, epoch fences, no replay](0132-durability-is-state-first-over-the-lash-store.md) |
 <!-- adr-index:end -->
