@@ -430,7 +430,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Live-only fixture shape under REVISIT #53: A is held executing inside its X until B's D proposal and ACK are observed. Under INACTIVITY_TIMEOUT=0 the executing A prevents suspension while B needs its X ACK, so the DProposed/BeforeAck cut cannot be reached. Preserve the held-body and dropped-ACK oracles; replay requires a different setup oracle.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         },
         {
@@ -487,7 +487,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Live-only fixture shape under REVISIT #53: A is held executing inside its X until B's D proposal and ACK are observed. Under INACTIVITY_TIMEOUT=0 the executing A prevents suspension while B needs its X ACK, so the DProposed/BeforeAck cut cannot be reached. Preserve the held-body and dropped-ACK oracles; replay requires a different setup oracle.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         }
       ],
@@ -702,7 +702,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "REVISIT #53: B held executing inside its X while A's ACK is needed under INACTIVITY_TIMEOUT=0; FIG-5002 wire capture .kiln/FIG-5002/s6-wire.txt. Live-only fixture shape; executing B prevents suspension and A's RetryScheduleDurable barrier cannot be reached.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         }
       ],
@@ -779,7 +779,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "REVISIT #53: B held executing inside its X while A's ACK is needed under INACTIVITY_TIMEOUT=0; FIG-5002 wire capture .kiln/FIG-5002/s6-wire.txt. Live-only fixture shape; executing B prevents suspension and A's RetryScheduleDurable barrier cannot be reached.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         }
       ],
@@ -1421,7 +1421,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "REVISIT #53: cancel::live_loser releases the winner while the loser body is held executing inline. On the always-suspending replay leg the winner's proposed completion waits for its ACK, the executing loser prevents Suspension, and the Run never reaches `after` (sqlite_file replay receipts .kiln/FIG-5055/dev-s11-inline-replay and dev-s11-deferred-replay, FIG-5055: last attempt proposes with requested ACK, sends no Suspension, receives no ACK).",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         },
         {
@@ -1448,7 +1448,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "REVISIT #53: cancel::live_loser releases the winner while the loser body is held executing inline. On the always-suspending replay leg the winner's proposed completion waits for its ACK, the executing loser prevents Suspension, and the Run never reaches `after` (sqlite_file replay receipts .kiln/FIG-5055/dev-s11-inline-replay and dev-s11-deferred-replay, FIG-5055: last attempt proposes with requested ACK, sends no Suspension, receives no ACK).",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         },
         {
@@ -1535,7 +1535,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "REVISIT #53: cancel::live_loser releases the winner while the loser body is held executing inline. On the always-suspending replay leg the winner's proposed completion waits for its ACK, the executing loser prevents Suspension, and the Run never reaches `after` (sqlite_file replay receipts .kiln/FIG-5055/dev-s11-inline-replay and dev-s11-deferred-replay, FIG-5055: last attempt proposes with requested ACK, sends no Suspension, receives no ACK).",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         },
         {
@@ -1562,7 +1562,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "REVISIT #53: cancel::live_loser releases the winner while the loser body is held executing inline. On the always-suspending replay leg the winner's proposed completion waits for its ACK, the executing loser prevents Suspension, and the Run never reaches `after` (sqlite_file replay receipts .kiln/FIG-5055/dev-s11-inline-replay and dev-s11-deferred-replay, FIG-5055: last attempt proposes with requested ACK, sends no Suspension, receives no ACK).",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         }
       ],
@@ -3377,7 +3377,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         },
         {
@@ -3442,7 +3442,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         }
       ],
@@ -3594,7 +3594,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         },
         {
@@ -3625,7 +3625,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         },
         {
@@ -3656,7 +3656,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         },
         {
@@ -3789,7 +3789,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         },
         {
@@ -3820,7 +3820,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         },
         {
@@ -3851,7 +3851,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Unreachable under the always-suspending server: the scenario holds A's body inside its X until B's D is durable, but with RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0s input is closed after the replayed prefix, A's executing X keeps the invocation from suspending (SDK fork progress.rs unions executing runs into every await; shared core waits instead of suspending), so X_B's ACK never arrives and D may not select an unacknowledged proposal (K0, L19). Live-only setup by ruling on FIG-5003; replay determinism for this shape is covered by the double laws.",
+          "hold_reason": "Excluded from 1.0 (Sam, ruling #53): always-suspend replay cannot suspend while a sibling tool body executes in-invocation (SDK/shared-core limitation); the scenario certifies on its live legs. Tracked post-1.0 by FIG-5155.",
           "registration": null
         }
       ],

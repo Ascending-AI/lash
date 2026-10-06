@@ -94,6 +94,15 @@ replayed command, and every resumed attempt's replayed entries must match that
 invocation's `sys_journal` entry for entry (`h2_replay_wire` in the store
 evidence).
 
+2026-10-06: the forced-replay legs held by ruling #53 are excluded from the
+1.0 tier (S04/default, S06/default, S07/default, S11/inline and S11/deferred,
+S24/default, and S25/same-key, S25/disjoint-keys, S25/namespaces — the
+always-suspend replay rows on sqlite_file and, where declared, postgresql).
+Always-suspend replay cannot suspend while a sibling tool body executes
+in-invocation (SDK/shared-core limitation), so these cuts are unreachable;
+each scenario certifies on its live legs. FIG-5155 tracks running tool bodies
+as child invocations post-1.0, which makes these legs runnable again.
+
 The producer writes `receipt.json` using
 `scripts/lash-e2e-receipt.schema.json`. It carries the source SHA, manifest
 digest, tier, exactly one receipt per selected case, aggregate counts and counts
