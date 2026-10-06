@@ -32,6 +32,8 @@ impl CommitLabel {
     pub const ROUND_OUTCOME: Self = Self::new("round.outcome");
     /// `round.retry`: A retry record with its due time.
     pub const ROUND_RETRY: Self = Self::new("round.retry");
+    /// `round.start`: A retried member's next attempt started, before its body runs.
+    pub const ROUND_START: Self = Self::new("round.start");
 
     // Waits (L5).
     /// `wait.mint`: A wait pinned.
@@ -129,6 +131,7 @@ impl CommitLabel {
         Self::SESSION_RELEASE,
         Self::ROUND_OUTCOME,
         Self::ROUND_RETRY,
+        Self::ROUND_START,
         Self::WAIT_MINT,
         Self::WAIT_RESOLVE,
         Self::WAIT_TIMEOUT,

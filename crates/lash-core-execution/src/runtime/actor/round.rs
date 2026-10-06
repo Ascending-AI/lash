@@ -71,10 +71,12 @@ mod context;
 mod fold;
 mod records;
 mod rounds;
+mod runner;
 mod store_local;
 
 pub use fold::{MemberState, RoundMember, RoundView, fold};
 pub use rounds::{admit_round, present, settle_retry, start_retry};
+pub use runner::{MemberBodies, MemberBody, MemberResult, RoundEnd, RoundError, RoundRunner};
 
 use records::{OutcomeBody, append, encode, first_start};
 
