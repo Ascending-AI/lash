@@ -97,6 +97,15 @@ referrers and reclaims after the last edge. These contracts keep captures
 under the environment port and its existing referrer kinds. Attachment
 delivery has its own ownership and publication rules (ADR 0124).
 
+A turn's recorded preparation (FIG-5133) is a `TurnPrelude` artifact
+addressed by the digest of its bytes. The environment sync's step body
+publishes it through `TurnPreludeStore` under its turn journal's guarded
+`execution` claim before the sync's outcome completes, and the outcome
+journals only the digest. Replay reads it by digest and verifies it; bytes
+that are gone or are not the recorded ones refuse the run, typed. The relay
+ends the journal's edges with every other store's once the journal settles
+(`crates/lash-core-execution/src/runtime/effect/turn_prelude.rs`).
+
 #### 2.2 Process engines
 
 Every `ProcessEngine` must implement `start_artifacts`,

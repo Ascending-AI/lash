@@ -160,6 +160,8 @@ pub struct ArtifactCleanupPorts {
     pub process_env: Arc<dyn ProcessExecutionEnvStore>,
     pub modules: Arc<dyn ModuleArtifactStore>,
     pub definitions: Arc<dyn ProcessDefinitionStore>,
+    /// Turns' recorded preludes, held by their turn journals.
+    pub turn_preludes: Arc<dyn crate::TurnPreludeStore>,
     /// Every installed engine: a start's engine names, and each engine's own
     /// store.
     pub engines: ProcessEngineRegistry,
@@ -572,6 +574,15 @@ impl ArtifactCleanupRelay {
             ))
             .await
             .map_err(store_failure("process-definition store"))?;
+        self.ports
+            .turn_preludes
+            .end_turn_prelude_referrer(&ResolvedArtifactCleanup::for_store(
+                referrer,
+                carries,
+                &ArtifactStoreId::TurnPrelude,
+            ))
+            .await
+            .map_err(store_failure("turn-prelude store"))?;
         let engine_carries: Vec<ArtifactCarry> = carries
             .iter()
             .filter(|carry| matches!(carry.artifact.store, ArtifactStoreId::Engine(_)))

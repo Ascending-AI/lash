@@ -489,6 +489,10 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         SqliteStoreSet::process_env_store(self)
     }
 
+    fn turn_prelude_store(&self) -> Arc<dyn lash_core_execution::TurnPreludeStore> {
+        SqliteStoreSet::process_env_store(self)
+    }
+
     fn worker_recovery(
         &self,
     ) -> Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore> {

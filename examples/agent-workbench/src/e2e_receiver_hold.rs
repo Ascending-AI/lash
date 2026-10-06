@@ -63,6 +63,10 @@ impl lash::StoreSet for ReceiverHoldStores {
         self.inner.process_env_store()
     }
 
+    fn turn_prelude_store(&self) -> Arc<dyn lash::persistence::TurnPreludeStore> {
+        self.inner.turn_prelude_store()
+    }
+
     fn tool_material_store(&self) -> Arc<dyn ToolMaterialStore> {
         self.inner.tool_material_store()
     }

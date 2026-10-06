@@ -305,6 +305,19 @@
             "store"
           ],
           "type": "object"
+        },
+        {
+          "description": "A turn's recorded preparation, by digest, held by the turn journal's\n`execution` referrer until the journal cannot replay (FIG-5133).",
+          "properties": {
+            "store": {
+              "const": "turn_prelude",
+              "type": "string"
+            }
+          },
+          "required": [
+            "store"
+          ],
+          "type": "object"
         }
       ]
     },

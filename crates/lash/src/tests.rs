@@ -1109,6 +1109,7 @@ mod processes_endstate;
 mod recorded_execution_controls;
 mod recorded_protocol_prompt;
 mod recorded_request_defaults;
+mod recorded_turn_prelude;
 #[cfg(feature = "rlm")]
 mod redrive_residue;
 mod response_phase_replay;

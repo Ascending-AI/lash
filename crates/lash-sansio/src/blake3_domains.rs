@@ -72,6 +72,7 @@ pub(crate) const BLAKE3_DOMAINS: &[&str] = &[
     "lash-tool-output-spill/v2",
     "lash-tool-schema-cache/v2",
     "lash-turn-input/v2",
+    "lash-turn-prelude/v1",
     "lash-usage-fact-payload/v4",
     "lash-usage-ledger-request/v1",
     "lash-workflow-edge/v2",

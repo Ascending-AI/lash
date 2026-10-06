@@ -102,6 +102,7 @@ pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
+pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
 
 mod tool_material;
 pub(crate) use tool_material::commit_run_material_tx;
@@ -114,6 +115,7 @@ pub(crate) fn store_namespace(store: &ArtifactStoreId) -> Option<&'static str> {
         ArtifactStoreId::ProcessEnv => Some(PROCESS_ENV_NAMESPACE),
         ArtifactStoreId::ProcessDefinition => Some(PROCESS_DEFINITION_NAMESPACE),
         ArtifactStoreId::ToolMaterial => Some(TOOL_MATERIAL_NAMESPACE),
+        ArtifactStoreId::TurnPrelude => Some(TURN_PRELUDE_NAMESPACE),
         ArtifactStoreId::Engine(_) => None,
     }
 }
@@ -130,6 +132,7 @@ pub(crate) fn artifact_namespace_kind(
         PROCESS_ENV_NAMESPACE => Ok(PersistedArtifactKind::ProcessExecutionEnv),
         PROCESS_DEFINITION_NAMESPACE => Ok(PersistedArtifactKind::ProcessDefinition),
         TOOL_MATERIAL_NAMESPACE => Ok(PersistedArtifactKind::ToolMaterial),
+        TURN_PRELUDE_NAMESPACE => Ok(PersistedArtifactKind::TurnPrelude),
         unknown => Err(stored_data_corrupt(
             "artifact_refs namespace",
             format!("unknown artifact namespace `{unknown}`"),
@@ -396,6 +399,7 @@ impl SqliteStore {
             MODULE_ARTIFACT_NAMESPACE => ArtifactStoreId::LashlangModule,
             PROCESS_ENV_NAMESPACE => ArtifactStoreId::ProcessEnv,
             PROCESS_DEFINITION_NAMESPACE => ArtifactStoreId::ProcessDefinition,
+            TURN_PRELUDE_NAMESPACE => ArtifactStoreId::TurnPrelude,
             _ => {
                 return Err(ArtifactStoreError::Backend(
                     "unknown artifact namespace".into(),
@@ -750,6 +754,62 @@ impl lash_core_execution::ProcessExecutionEnvStore for SqliteStore {
             PROCESS_ENV_NAMESPACE,
             env_ref.as_str().to_owned(),
             format!("process execution env `{env_ref}`"),
+        )
+        .await
+        .map_err(Into::into)
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core_execution::TurnPreludeStore for SqliteStore {
+    async fn publish_turn_prelude(
+        &self,
+        claim: &ReferrerClaim,
+        prelude_ref: &lash_core_execution::TurnPreludeRef,
+        bytes: &[u8],
+    ) -> Result<(), ArtifactStoreError> {
+        if !prelude_ref.matches_store_bytes(bytes) {
+            return Err(ArtifactStoreError::Immutable {
+                artifact_ref: prelude_ref.as_str().to_owned(),
+            });
+        }
+        // A prelude is journal-scoped turn state, not a plugin publication:
+        // it carries no namespace the fleet's writer ranges admit.
+        self.publish_artifact_ref_blob(
+            TURN_PRELUDE_NAMESPACE,
+            prelude_ref.as_str().to_owned(),
+            BlobArtifactDescriptor::turn_prelude(),
+            bytes.to_vec(),
+            claim.clone(),
+            lash_core_execution::store::plugin_writers::PluginPublication::default(),
+        )
+        .await
+    }
+
+    async fn end_turn_prelude_referrer(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        self.end_artifact_referrer(TURN_PRELUDE_NAMESPACE, cleanup.clone())
+            .await
+    }
+
+    async fn get_turn_prelude(
+        &self,
+        prelude_ref: &lash_core_execution::TurnPreludeRef,
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(prelude_ref.as_str()) {
+            return Err(ArtifactStoreError::StoredDataCorrupt {
+                source: lash_core_execution::ModuleArtifactCorruption::InvalidReference {
+                    record_kind: "turn prelude".into(),
+                    reference: prelude_ref.as_str().into(),
+                },
+            });
+        }
+        self.get_artifact_ref_blob(
+            TURN_PRELUDE_NAMESPACE,
+            prelude_ref.as_str().to_owned(),
+            format!("turn prelude `{prelude_ref}`"),
         )
         .await
         .map_err(Into::into)

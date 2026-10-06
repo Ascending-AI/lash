@@ -2,22 +2,12 @@
 
 use super::*;
 
-/// Preparation facts retained with the environment render. Pressure hooks
-/// replay through nested effects; consumers adopt these recorded facts.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct TurnPrelude {
-    pub configuration: crate::EffectAddress,
-    pub pressure: Vec<crate::plugin::DecidedContextPressure>,
-    /// Real turn history, independent of the ephemeral Prompt View.
-    pub history: crate::MessageSequence,
-    pub context: crate::session_model::context::PreparedContext,
-    pub before_turn: Option<crate::EffectAddress>,
-}
-
 /// A journaled environment's preparation, render result and tool surface.
+/// The preparation is journaled by digest; its consumer reads it from the
+/// store set ([`TurnPreludeRef::read`]).
 #[derive(Debug)]
 pub struct ServedExecutionEnvironmentSync {
-    pub prelude: Box<TurnPrelude>,
+    pub prelude: TurnPreludeRef,
     pub result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
     pub tool_surface: Vec<crate::ToolDefinition>,
 }

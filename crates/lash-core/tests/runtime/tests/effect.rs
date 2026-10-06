@@ -956,6 +956,11 @@ async fn replay_adopts_the_recorded_prelude_despite_changed_live_preparation_and
             .expect("recorded prelude");
         (configuration, prelude)
     };
+    // The outcome recorded the prelude by digest; its bytes are in the store.
+    let prelude = prelude
+        .read(backend.turn_prelude_store().as_ref())
+        .await
+        .expect("the recorded prelude reads back by its digest");
     assert!(configuration.termination.treat_missing_done_as_failure);
     assert_eq!(prelude.pressure.len(), 1);
     assert!(!prelude.context.messages.is_empty());

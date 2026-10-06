@@ -173,6 +173,20 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 let mut prelude = runner.driver.prelude.clone();
                 prelude.history = runner.messages.clone();
                 prelude.context.messages = runner.prompt_messages.clone();
+                // The prelude is stored before this outcome completes, and
+                // the outcome journals only its digest (FIG-5133).
+                let prelude = prelude
+                    .record(
+                        runner
+                            .driver
+                            .host
+                            .core
+                            .durability
+                            .turn_prelude_store
+                            .as_ref(),
+                        envelope.invocation.execution_scope(),
+                    )
+                    .await?;
                 Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
                     prelude,
                     result: Box::new(result),

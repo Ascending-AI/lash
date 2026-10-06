@@ -171,6 +171,13 @@ impl ArtifactReferrerPorts {
                         name.artifact_ref
                     )));
                 }
+                // A recorded prelude is held by its turn's journal only.
+                ArtifactStoreId::TurnPrelude => {
+                    return Err(crate::PluginError::Session(format!(
+                        "a start cannot hold the recorded turn prelude `{}`",
+                        name.artifact_ref
+                    )));
+                }
             };
             if let Some(ended) = held_or_ended(claim, acquired.map_err(crate::PluginError::from))? {
                 return Ok(ended);

@@ -371,6 +371,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         process_env: Arc::clone(ports.env()),
         modules: Arc::clone(ports.modules()),
         definitions: Arc::clone(ports.definitions()),
+        turn_preludes: Arc::new(crate::testing::UnavailableTurnPreludeStore),
         engines: engines(),
         attachments: Arc::clone(ports.attachments()),
         clock: Arc::new(crate::SystemClock),

@@ -622,7 +622,8 @@ fn artifact_store_handles(
     let store = backend.blocking_store();
     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
         artifacts: Arc::clone(&store) as Arc<dyn lash_core::ModuleArtifactStore>,
-        process_env: store as Arc<dyn ProcessExecutionEnvStore>,
+        process_env: Arc::clone(&store) as Arc<dyn ProcessExecutionEnvStore>,
+        turn_preludes: store as Arc<dyn lash_core::TurnPreludeStore>,
     }
 }
 

@@ -69,18 +69,9 @@ fn catalog_refusal() -> lash_core::sansio::ExecutionEnvironmentSyncFailure {
     }
 }
 
-fn test_prelude() -> Box<lash_core::runtime::effect::TurnPrelude> {
-    Box::new(lash_core::runtime::effect::TurnPrelude {
-        configuration: lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::turn("session", "turn"),
-            "turn-config:turn",
-        )
-        .expect("config record address"),
-        pressure: Vec::new(),
-        history: Default::default(),
-        context: Default::default(),
-        before_turn: None,
-    })
+/// The digest a sync's outcome journals: these laws read no prelude back.
+fn test_prelude() -> lash_core::runtime::effect::TurnPreludeRef {
+    lash_core::runtime::effect::TurnPreludeRef::of_store_bytes(b"fig3726 prelude")
 }
 
 fn synced_environment() -> RuntimeEffectOutcome {

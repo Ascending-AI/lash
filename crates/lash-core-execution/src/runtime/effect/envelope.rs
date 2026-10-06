@@ -1336,7 +1336,10 @@ pub enum RuntimeEffectOutcome {
         admitted: Box<CheckpointAdmittedSet>,
     },
     SyncExecutionEnvironment {
-        prelude: Box<TurnPrelude>,
+        /// The digest of the prelude the sync's body wrote to the store set
+        /// before this outcome completed (FIG-5133): the journal holds the
+        /// reference, never the transcript.
+        prelude: TurnPreludeRef,
         result: Box<Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>>,
         /// The tool surface the sync built: every tool of the catalog the
         /// iteration's calls resolve against, as its definition. The shift
@@ -1499,7 +1502,10 @@ async fn durable_attachment_source(
 
 #[path = "envelope_outcomes.rs"]
 mod outcomes;
-pub use outcomes::{ServedExecutionEnvironmentSync, TurnPrelude};
+pub use outcomes::ServedExecutionEnvironmentSync;
+#[path = "turn_prelude.rs"]
+mod turn_prelude;
+pub use turn_prelude::{TurnPrelude, TurnPreludeRef, TurnPreludeStore};
 
 impl From<RuntimeEffectInvocation> for crate::RuntimeInvocation {
     fn from(invocation: RuntimeEffectInvocation) -> Self {

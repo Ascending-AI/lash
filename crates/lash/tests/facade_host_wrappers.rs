@@ -138,6 +138,10 @@ impl lash::StoreSet for HostStores {
         self.inner.process_env_store()
     }
 
+    fn turn_prelude_store(&self) -> Arc<dyn lash::persistence::TurnPreludeStore> {
+        self.inner.turn_prelude_store()
+    }
+
     fn definition_store(&self) -> Arc<dyn lash::persistence::ProcessDefinitionStore> {
         self.definition_reads.fetch_add(1, Ordering::SeqCst);
         self.inner.definition_store()

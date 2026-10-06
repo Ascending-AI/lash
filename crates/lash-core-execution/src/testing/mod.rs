@@ -1001,6 +1001,42 @@ impl crate::ProcessExecutionEnvStore for UnavailableProcessExecutionEnvStore {
     }
 }
 
+/// The turn-prelude port of a context with no store: a publication is
+/// refused, a cleanup has nothing to sever, and reads find nothing.
+///
+/// It keeps nothing, so it is not a persistence store: it stands where a test
+/// needs *a* port its runtime never runs a turn through.
+#[derive(Debug, Default)]
+pub struct UnavailableTurnPreludeStore;
+
+#[async_trait::async_trait]
+impl crate::TurnPreludeStore for UnavailableTurnPreludeStore {
+    async fn publish_turn_prelude(
+        &self,
+        _claim: &crate::ReferrerClaim,
+        _prelude_ref: &crate::TurnPreludeRef,
+        _bytes: &[u8],
+    ) -> Result<(), crate::ArtifactStoreError> {
+        Err(crate::ArtifactStoreError::Backend(
+            "this context has no turn prelude store".into(),
+        ))
+    }
+
+    async fn end_turn_prelude_referrer(
+        &self,
+        _cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError> {
+        Ok(())
+    }
+
+    async fn get_turn_prelude(
+        &self,
+        _prelude_ref: &crate::TurnPreludeRef,
+    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
+        Ok(None)
+    }
+}
+
 /// Runtime services with no attachment port and no process-exec-env store,
 /// for a test of plugin or catalog wiring that never writes through either.
 pub fn runtime_services_without_ports(

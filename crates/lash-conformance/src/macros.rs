@@ -1216,6 +1216,8 @@ macro_rules! artifact_store_reopenable_tests {
             (slow_process_env_writer_is_fenced, "process-env-slow-writer"),
             (process_env_survives_reopen, "process-env-reopen"),
             (artifact_store_cross_namespace_isolation, "artifact-store-cross-namespace"),
+            (turn_prelude_reads_back_by_digest, "turn-prelude-read-by-digest"),
+            (turn_prelude_is_released_with_its_journal, "turn-prelude-journal-release"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

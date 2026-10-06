@@ -845,6 +845,9 @@ pub enum ArtifactStoreId {
     /// Retained tool material bundles (K2), held by Run-segment and source
     /// leases until their last dependency ends.
     ToolMaterial,
+    /// A turn's recorded preparation, by digest, held by the turn journal's
+    /// `execution` referrer until the journal cannot replay (FIG-5133).
+    TurnPrelude,
 }
 
 impl ArtifactStoreId {

@@ -366,6 +366,16 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
+        // The journal recorded the prelude by digest; live or replayed, it
+        // is read back from the store and never re-derived (FIG-5133). A
+        // prelude that cannot be read ends the attempt rather than the turn:
+        // the journal already holds what followed the sync, so settling the
+        // turn here would diverge from it. A live fault is retried; a prelude
+        // that is gone or not the recorded one refuses the run, typed.
+        let prelude = prelude
+            .read(self.host.core.durability.turn_prelude_store.as_ref())
+            .await
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
         let providers = self
             .session
             .plugins()

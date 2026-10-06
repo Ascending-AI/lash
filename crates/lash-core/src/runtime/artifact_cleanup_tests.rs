@@ -478,6 +478,7 @@ fn harness() -> Harness {
         process_env: Arc::new(EnvStore(Arc::clone(&applied))),
         modules: Arc::new(Modules(Arc::clone(&applied))),
         definitions: Arc::new(Definitions(Arc::clone(&applied))),
+        turn_preludes: Arc::new(crate::testing::UnavailableTurnPreludeStore),
         engines,
         attachments: Arc::new(crate::attachments::NoopAttachmentReferrers),
         clock: Arc::new(crate::runtime::SystemClock),

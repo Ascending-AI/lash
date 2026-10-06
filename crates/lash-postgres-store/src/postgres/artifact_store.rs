@@ -60,6 +60,7 @@ pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
+pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
 
 #[path = "artifact_store/tool_material.rs"]
 mod tool_material;
@@ -76,6 +77,7 @@ pub(crate) fn store_namespace(
         ArtifactStoreId::ProcessEnv => Some(PROCESS_ENV_NAMESPACE),
         ArtifactStoreId::ProcessDefinition => Some(PROCESS_DEFINITION_NAMESPACE),
         ArtifactStoreId::ToolMaterial => Some(TOOL_MATERIAL_NAMESPACE),
+        ArtifactStoreId::TurnPrelude => Some(TURN_PRELUDE_NAMESPACE),
         ArtifactStoreId::Engine(_) => None,
     }
 }
@@ -695,6 +697,49 @@ impl lash_core_execution::ProcessExecutionEnvStore for PostgresLashlangArtifactS
             ));
         }
         self.get_namespaced(PROCESS_ENV_NAMESPACE, env_ref.as_str())
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core_execution::TurnPreludeStore for PostgresLashlangArtifactStore {
+    async fn publish_turn_prelude(
+        &self,
+        claim: &ReferrerClaim,
+        prelude_ref: &lash_core_execution::TurnPreludeRef,
+        bytes: &[u8],
+    ) -> Result<(), ArtifactStoreError> {
+        if !prelude_ref.matches_store_bytes(bytes) {
+            return Err(ArtifactStoreError::Immutable {
+                artifact_ref: prelude_ref.as_str().to_owned(),
+            });
+        }
+        self.write_namespaced(
+            TURN_PRELUDE_NAMESPACE,
+            prelude_ref.as_str(),
+            Some(bytes),
+            claim,
+        )
+        .await
+    }
+
+    async fn end_turn_prelude_referrer(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        self.end_namespaced(TURN_PRELUDE_NAMESPACE, cleanup).await
+    }
+
+    async fn get_turn_prelude(
+        &self,
+        prelude_ref: &lash_core_execution::TurnPreludeRef,
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(prelude_ref.as_str()) {
+            return Err(ArtifactStoreError::Encode(
+                "invalid turn prelude reference".into(),
+            ));
+        }
+        self.get_namespaced(TURN_PRELUDE_NAMESPACE, prelude_ref.as_str())
             .await
     }
 }

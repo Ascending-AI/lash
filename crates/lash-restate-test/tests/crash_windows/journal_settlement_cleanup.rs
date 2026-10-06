@@ -208,6 +208,7 @@ fn cleanup_relay(backend: &lash_core::Backend) -> ArtifactCleanupRelay {
         process_env: backend.process_env_store(),
         modules: backend.module_artifacts(),
         definitions: backend.definition_store(),
+        turn_preludes: backend.turn_prelude_store(),
         engines: lash_core::ProcessEngineRegistry::new(),
         attachments: backend.attachment_referrers(),
         clock: backend.clock(),

@@ -465,6 +465,10 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.process_env_store)
     }
 
+    fn turn_prelude_store(&self) -> Arc<dyn crate::TurnPreludeStore> {
+        self.inner.turn_prelude_store()
+    }
+
     fn worker_recovery(
         &self,
     ) -> Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore> {

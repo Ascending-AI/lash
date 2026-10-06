@@ -252,3 +252,170 @@ pub async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionE
         None
     );
 }
+
+/// A recorded prelude of turn `turn`: its history carries `text`.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture validates its setup"
+)]
+fn sample_turn_prelude(turn: &'static str, text: &str) -> crate::TurnPrelude {
+    crate::TurnPrelude {
+        configuration: crate::EffectAddress::new(
+            crate::ExecutionScope::turn("prelude-session", turn),
+            format!("turn-config:{turn}"),
+        )
+        .expect("turn config address"),
+        pressure: Vec::new(),
+        history: crate::MessageSequence::from(vec![crate::Message {
+            id: format!("{turn}-input"),
+            role: crate::MessageRole::User,
+            parts: Arc::new(vec![crate::Part::text(
+                format!("{turn}-input-part"),
+                text.to_owned(),
+                None,
+            )]),
+            origin: None,
+            reply_marker: None,
+        }]),
+        context: Default::default(),
+        before_turn: None,
+    }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture validates its setup"
+)]
+fn turn_journal(turn: &'static str) -> (crate::ExecutionScope, crate::ArtifactReferrer) {
+    let scope = crate::ExecutionScope::turn("prelude-session", turn);
+    let journal = scope.journal_identity().expect("turn journal identity");
+    (scope, crate::ArtifactReferrer::Execution(journal))
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture validates its setup"
+)]
+fn prelude_json(prelude: &crate::TurnPrelude) -> serde_json::Value {
+    serde_json::to_value(prelude).expect("encode prelude")
+}
+
+/// FIG-5133: a turn's environment sync writes its prelude under its digest,
+/// held by the turn's journal, before the outcome that names the digest
+/// completes. A reader on another handle reads the same prelude back by the
+/// digest alone and verifies it; bytes other than the digest's are refused,
+/// and a digest nothing wrote reads as missing, typed, never as a prelude.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store operation"
+)]
+pub async fn turn_prelude_reads_back_by_digest(
+    open: Arc<dyn crate::TurnPreludeStore>,
+    reopen: Arc<dyn Fn() -> Arc<dyn crate::TurnPreludeStore> + Send + Sync>,
+) {
+    let prelude = sample_turn_prelude("recorded-turn", "the recorded transcript");
+    let (scope, _) = turn_journal("recorded-turn");
+    let prelude_ref = prelude
+        .record(open.as_ref(), &scope)
+        .await
+        .expect("record the prelude");
+    assert_eq!(
+        prelude
+            .record(open.as_ref(), &scope)
+            .await
+            .expect("a redriven body records the same prelude again"),
+        prelude_ref
+    );
+    let reopened = reopen();
+    let bytes = reopened
+        .get_turn_prelude(&prelude_ref)
+        .await
+        .expect("read")
+        .expect("the recorded prelude is stored");
+    assert!(prelude_ref.matches_store_bytes(&bytes));
+    let read = prelude_ref
+        .read(reopened.as_ref())
+        .await
+        .expect("the prelude reads back by its digest");
+    assert_eq!(prelude_json(&read), prelude_json(&prelude));
+
+    let (_, claim_referrer) = turn_journal("recorded-turn");
+    let crate::ArtifactReferrer::Execution(journal) = claim_referrer else {
+        unreachable!("a turn journal is an execution referrer");
+    };
+    let claim = crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(journal));
+    let refusal = open
+        .publish_turn_prelude(&claim, &prelude_ref, b"other bytes")
+        .await
+        .expect_err("bytes that are not the digest's are refused");
+    assert!(
+        matches!(refusal, crate::ArtifactStoreError::Immutable { .. }),
+        "{refusal:?}"
+    );
+
+    let unrecorded = crate::TurnPreludeRef::of_store_bytes(b"never recorded");
+    assert_eq!(
+        reopened.get_turn_prelude(&unrecorded).await.expect("read"),
+        None
+    );
+    let missing = unrecorded
+        .read(reopened.as_ref())
+        .await
+        .expect_err("a digest nothing wrote is no prelude");
+    assert_eq!(missing.code, crate::RuntimeErrorCode::ArtifactMissing);
+}
+
+/// FIG-5133: a recorded prelude lives exactly as long as a turn journal that
+/// recorded it. Ending one journal keeps the bytes another journal holds;
+/// ending the last reclaims them, after which a replay reading the digest
+/// meets a typed `ArtifactMissing`, and the ended journal records nothing
+/// again.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store operation"
+)]
+pub async fn turn_prelude_is_released_with_its_journal(store: Arc<dyn crate::TurnPreludeStore>) {
+    let prelude = sample_turn_prelude("shared-turn", "a prelude two journals recorded");
+    let (first_scope, first) = turn_journal("first-turn");
+    let (second_scope, second) = turn_journal("second-turn");
+    let prelude_ref = prelude
+        .record(store.as_ref(), &first_scope)
+        .await
+        .expect("the first journal records the prelude");
+    assert_eq!(
+        prelude
+            .record(store.as_ref(), &second_scope)
+            .await
+            .expect("the second journal records the same bytes"),
+        prelude_ref
+    );
+    store
+        .end_turn_prelude_referrer(&cleanup(first))
+        .await
+        .expect("end the first journal");
+    let read = prelude_ref
+        .read(store.as_ref())
+        .await
+        .expect("the second journal still holds the prelude");
+    assert_eq!(prelude_json(&read), prelude_json(&prelude));
+    for _ in 0..2 {
+        store
+            .end_turn_prelude_referrer(&cleanup(second.clone()))
+            .await
+            .expect("ending the last journal is idempotent");
+        assert_eq!(
+            store.get_turn_prelude(&prelude_ref).await.expect("read"),
+            None
+        );
+    }
+    let missing = prelude_ref
+        .read(store.as_ref())
+        .await
+        .expect_err("a released prelude is never re-derived");
+    assert_eq!(missing.code, crate::RuntimeErrorCode::ArtifactMissing);
+    let fenced = prelude
+        .record(store.as_ref(), &second_scope)
+        .await
+        .expect_err("an ended journal records nothing");
+    assert_eq!(fenced.code, crate::RuntimeErrorCode::ArtifactReferrerEnded);
+}

@@ -82,6 +82,8 @@ const STORE_TAG_PROCESS_DEFINITION: u8 = 4;
 /// Never in a stored definition, which refuses tool material; tagged so the
 /// preimage stays total.
 const STORE_TAG_TOOL_MATERIAL: u8 = 5;
+/// Never in a stored definition, which refuses a turn's recorded prelude.
+const STORE_TAG_TURN_PRELUDE: u8 = 6;
 
 /// The canonical descriptor of one immutable process definition.
 ///
@@ -127,6 +129,10 @@ pub enum ProcessDefinitionDraftError {
     /// definition's manifest.
     #[error("a process definition cannot name retained tool material")]
     ToolMaterialArtifact,
+    /// A turn's recorded prelude belongs to the turn's journal, never to a
+    /// definition's manifest.
+    #[error("a process definition cannot name a turn's recorded prelude")]
+    TurnPreludeArtifact,
 }
 
 impl ProcessDefinitionDraft {
@@ -157,6 +163,9 @@ impl ProcessDefinitionDraft {
             }
             if artifact.store == ArtifactStoreId::ToolMaterial {
                 return Err(ProcessDefinitionDraftError::ToolMaterialArtifact);
+            }
+            if artifact.store == ArtifactStoreId::TurnPrelude {
+                return Err(ProcessDefinitionDraftError::TurnPreludeArtifact);
             }
             framed.push((artifact_preimage(&artifact), artifact));
         }
@@ -297,6 +306,7 @@ fn artifact_preimage(artifact: &ArtifactName) -> Vec<u8> {
         }
         ArtifactStoreId::ProcessDefinition => bytes.push(STORE_TAG_PROCESS_DEFINITION),
         ArtifactStoreId::ToolMaterial => bytes.push(STORE_TAG_TOOL_MATERIAL),
+        ArtifactStoreId::TurnPrelude => bytes.push(STORE_TAG_TURN_PRELUDE),
     }
     push_framed(&mut bytes, artifact.artifact_ref.as_bytes());
     bytes

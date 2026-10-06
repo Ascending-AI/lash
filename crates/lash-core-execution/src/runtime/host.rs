@@ -97,6 +97,9 @@ pub struct RuntimeDurabilityConfig {
     /// start. Before rebinding it is an ephemeral facade with no boundary guard.
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+    /// Where a turn's environment sync records its preparation, which the
+    /// sync's outcome journals by digest (FIG-5133).
+    pub turn_prelude_store: Arc<dyn crate::TurnPreludeStore>,
 }
 
 #[derive(Clone)]
@@ -329,6 +332,7 @@ impl RuntimeHostConfig {
         let effect_host = backend.effect_host();
         let attachment_store = backend.attachment_store();
         let process_env_store = backend.process_env_store();
+        let turn_prelude_store = backend.turn_prelude_store();
         let clock = backend.clock();
         let artifact_ports = ArtifactReferrerPorts::of_backend(&backend);
         Self {
@@ -340,6 +344,7 @@ impl RuntimeHostConfig {
                     attachment_store,
                 )),
                 process_env_store,
+                turn_prelude_store,
             },
             process_engines: ProcessEngineRegistry::new().with_artifact_ports(artifact_ports),
             providers: RuntimeProviderConfig {
@@ -387,6 +392,7 @@ impl RuntimeHostConfig {
                 .with_upload_expiry_ms(upload_expiry_ms)
                 .with_output_retention(output_retention),
         );
+        self.durability.turn_prelude_store = backend.turn_prelude_store();
         let mut config = self
             .with_process_env_store(backend.process_env_store())
             .with_effect_host(backend.effect_host())

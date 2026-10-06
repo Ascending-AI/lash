@@ -837,14 +837,15 @@ pub use runtime::{
     TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
     TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
     TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputState, TurnLaneAdmissionPolicy, TurnPrelude, WaitKind, WaitState, WakeDelivery,
-    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle,
-    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry,
-    WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, WorkerCommand,
-    WorkerProcessEngine, WorkerTerminationReceipt, admit_session_state_generation,
-    admit_session_view, apply_parent_end_plan, artifact_referrer_ended, end_parent_scope,
-    end_session_runs, lifetime, live_session_view, mint_process_id, parent_end_delivery_key,
-    parent_end_requester, park_turn_refused_by_generation, session_is_live,
+    TurnInputState, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore,
+    WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason, WakeId, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError,
+    WorkCadencePolicy, WorkerCommand, WorkerProcessEngine, WorkerTerminationReceipt,
+    admit_session_state_generation, admit_session_view, apply_parent_end_plan,
+    artifact_referrer_ended, end_parent_scope, end_session_runs, lifetime, live_session_view,
+    mint_process_id, parent_end_delivery_key, parent_end_requester,
+    park_turn_refused_by_generation, session_is_live,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

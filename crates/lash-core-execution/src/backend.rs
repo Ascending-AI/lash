@@ -186,6 +186,11 @@ impl Backend {
         self.stores().process_env_store()
     }
 
+    /// The store of turns' recorded preparation.
+    pub fn turn_prelude_store(&self) -> Arc<dyn crate::TurnPreludeStore> {
+        self.stores().turn_prelude_store()
+    }
+
     /// Retained results published by process-terminal sources.
     pub fn tool_material_store(&self) -> Arc<dyn crate::store::ToolMaterialStore> {
         self.stores().tool_material_store()
@@ -314,6 +319,10 @@ pub trait StoreSet: Send + Sync {
 
     /// The store of process execution environments.
     fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore>;
+
+    /// The store of turns' recorded preparation, journaled by digest
+    /// (FIG-5133), over the artifact referrer edges the cleanup relay ends.
+    fn turn_prelude_store(&self) -> Arc<dyn crate::TurnPreludeStore>;
 
     /// Retained results published by Deferred sources.
     fn tool_material_store(&self) -> Arc<dyn crate::store::ToolMaterialStore>;

@@ -193,6 +193,7 @@ impl World {
             process_env: Arc::clone(ports.env()),
             modules: Arc::clone(ports.modules()),
             definitions: Arc::clone(ports.definitions()),
+            turn_preludes: Arc::new(crate::testing::UnavailableTurnPreludeStore),
             engines: engines.clone(),
             attachments: Arc::clone(ports.attachments()),
             clock: Arc::new(crate::SystemClock),

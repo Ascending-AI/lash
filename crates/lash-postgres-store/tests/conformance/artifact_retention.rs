@@ -59,6 +59,8 @@ lash_conformance::artifact_referrer_tests!({
                     as Arc<dyn lash_core::ModuleArtifactStore>,
                 process_env: Arc::new(open_storage.process_env_store())
                     as Arc<dyn ProcessExecutionEnvStore>,
+                turn_preludes: Arc::new(open_storage.process_env_store())
+                    as Arc<dyn lash_core::TurnPreludeStore>,
             };
             let reopen_url = database_url.clone();
             lash_conformance::fused_artifact_store::ReopenableArtifactStore {
@@ -75,6 +77,8 @@ lash_conformance::artifact_referrer_tests!({
                             as Arc<dyn lash_core::ModuleArtifactStore>,
                         process_env: Arc::new(reopened.process_env_store())
                             as Arc<dyn ProcessExecutionEnvStore>,
+                        turn_preludes: Arc::new(reopened.process_env_store())
+                            as Arc<dyn lash_core::TurnPreludeStore>,
                     }
                 }),
             }

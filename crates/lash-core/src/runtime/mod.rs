@@ -231,7 +231,8 @@ pub use effect::{
     ServedOnlyRange, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
     TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
     TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnPrelude,
-    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
+    TurnPreludeRef, TurnPreludeStore, turn_control_binding_id_for_scope,
+    validate_replayed_effect_envelope,
 };
 pub use environment::{ParkRefused, ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;

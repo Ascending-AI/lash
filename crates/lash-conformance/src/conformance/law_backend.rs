@@ -306,6 +306,10 @@ impl crate::StoreSet for StoreLawStores {
         Arc::new(crate::testing::UnavailableProcessExecutionEnvStore)
     }
 
+    fn turn_prelude_store(&self) -> Arc<dyn crate::TurnPreludeStore> {
+        Arc::new(crate::testing::UnavailableTurnPreludeStore)
+    }
+
     fn attachment_store(&self) -> Arc<dyn crate::AttachmentStore> {
         Arc::new(crate::attachments::UnavailableAttachmentStore)
     }

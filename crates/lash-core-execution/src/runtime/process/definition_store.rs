@@ -257,7 +257,9 @@ fn partition_manifest(
                 store_set.push(artifact.clone());
             }
             ArtifactStoreId::Engine(_) => engine_names.push(artifact.clone()),
-            ArtifactStoreId::ProcessDefinition | ArtifactStoreId::ToolMaterial => {
+            ArtifactStoreId::ProcessDefinition
+            | ArtifactStoreId::ToolMaterial
+            | ArtifactStoreId::TurnPrelude => {
                 return Err(definition_refused(format!(
                     "definition `{}` names `{}` from store {:?} in its manifest",
                     draft.id(),

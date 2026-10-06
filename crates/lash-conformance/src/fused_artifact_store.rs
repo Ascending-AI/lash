@@ -23,6 +23,7 @@ use pretty_assertions::assert_eq;
 pub struct ArtifactStoreHandles {
     pub artifacts: Arc<dyn lash_core::ModuleArtifactStore>,
     pub process_env: Arc<dyn ProcessExecutionEnvStore>,
+    pub turn_preludes: Arc<dyn lash_core::TurnPreludeStore>,
 }
 
 /// Writers plus a factory that constructs post-write handles over the same
@@ -185,6 +186,29 @@ where
             open: handles.open.process_env,
             reopen: Arc::new(move || (reopen)().process_env),
         },
+    )
+    .await;
+}
+
+pub async fn turn_prelude_reads_back_by_digest<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let handles = make();
+    let reopen = Arc::clone(&handles.reopen);
+    crate::registration_macro_support::turn_prelude_reads_back_by_digest(
+        handles.open.turn_preludes,
+        Arc::new(move || (reopen)().turn_preludes),
+    )
+    .await;
+}
+
+pub async fn turn_prelude_is_released_with_its_journal<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    crate::registration_macro_support::turn_prelude_is_released_with_its_journal(
+        make().open.turn_preludes,
     )
     .await;
 }

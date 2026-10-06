@@ -515,6 +515,7 @@ pub enum PersistedArtifactKind {
     ProcessExecutionEnv,
     ProcessDefinition,
     ToolMaterial,
+    TurnPrelude,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -569,6 +570,13 @@ impl BlobArtifactDescriptor {
     }
 
     pub fn tool_material() -> Self {
+        Self::new(vec![
+            BlobStorageHint::Compressible,
+            BlobStorageHint::LargePayload,
+        ])
+    }
+
+    pub fn turn_prelude() -> Self {
         Self::new(vec![
             BlobStorageHint::Compressible,
             BlobStorageHint::LargePayload,

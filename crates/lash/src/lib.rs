@@ -757,9 +757,9 @@ pub mod persistence {
         AttachmentStoreFailureClass, AttachmentStorePersistence, AttachmentSweepGeneration,
         AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
         MAX_ATTACHMENT_DELETE_ATTEMPTS, ProcessExecutionEnvStore, StoredAttachment, StoredBlobRef,
-        attachments::AttachmentReclamationFailure, facade_support::AttachmentGcFence,
-        facade_support::AttachmentReclamationReport, facade_support::RuntimeAttachmentStore,
-        facade_support::reclaim_unreferenced_attachments,
+        TurnPreludeStore, attachments::AttachmentReclamationFailure,
+        facade_support::AttachmentGcFence, facade_support::AttachmentReclamationReport,
+        facade_support::RuntimeAttachmentStore, facade_support::reclaim_unreferenced_attachments,
     };
     /// The Lashlang module-artifact port a backend's store set supplies.
     pub use lash_core::{
@@ -1328,7 +1328,7 @@ pub mod runtime {
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
         RuntimeProviderConfig, ScopedEffectController, SessionWorkEngine, SleepSpec, TraceEmitter,
-        TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding, TurnPrelude,
+        TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding, TurnPrelude, TurnPreludeRef,
         WorkCadenceError, WorkCadencePolicy,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used

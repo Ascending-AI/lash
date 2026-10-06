@@ -896,6 +896,7 @@ pub async fn a_missing_engine_carry_stalls_the_cleanup_row(fixture: ObligationLa
         process_env: fixture.stores.process_env_store(),
         modules: fixture.stores.module_artifacts(),
         definitions: fixture.stores.definition_store(),
+        turn_preludes: fixture.stores.turn_prelude_store(),
         engines,
         attachments: fixture.stores.attachment_referrers(),
         clock: fixture.stores.clock(),

@@ -358,6 +358,7 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
                 process_env: stores.process_env_store(),
                 modules: stores.module_artifacts(),
                 definitions: stores.definition_store(),
+                turn_preludes: stores.turn_prelude_store(),
                 engines: lash_core::ProcessEngineRegistry::new(),
                 attachments: stores.attachment_referrers(),
                 clock: stores.clock(),

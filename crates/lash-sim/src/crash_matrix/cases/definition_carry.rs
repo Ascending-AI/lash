@@ -279,6 +279,7 @@ async fn deferred_cleanup(
         process_env: backend.process_env_store(),
         modules: backend.module_artifacts(),
         definitions: backend.definition_store(),
+        turn_preludes: backend.turn_prelude_store(),
         engines: administration.process_engines().clone(),
         attachments: backend.attachment_referrers(),
         clock: backend.clock(),

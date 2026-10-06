@@ -78,7 +78,8 @@ pub use effect::{
     ToolAttemptCapture, ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
     TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
     TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnPrelude,
-    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
+    TurnPreludeRef, TurnPreludeStore, turn_control_binding_id_for_scope,
+    validate_replayed_effect_envelope,
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
