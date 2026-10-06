@@ -16,7 +16,7 @@
 //! The law crashes the shift after the switched turn's commit and redrives
 //! it on the tier's runner. The run must end with the follow-on frame's
 //! answer, ask the model once per frame in total, run its tool once, and
-//! commit each physical turn once.
+//! commit its plugin transition and each physical turn once.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -292,10 +292,12 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
         .await
         .expect("read the committed head")
         .expect("the run committed");
+    // The run publishes its plugin transition as a head commit before its
+    // first turn (FIG-4857); then each physical turn commits.
     assert_eq!(
         committed.head_revision,
-        before + 2,
-        "the switched turn and its follow-on each commit once"
+        before + 3,
+        "the run's transition, the switched turn and its follow-on each commit once"
     );
     let pending = store
         .list_pending_turn_inputs(&session_id)
