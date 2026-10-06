@@ -105,6 +105,14 @@ packages = ["lash-internal-restate"]
 kinds = ["unit-test"]
 shards = 4
 
+# The lash unit suite's 702 run cases add up to about 1120 s on four test
+# threads; whole, it ran 299 s and then hit the 300 s watchdog with a store-fault
+# sweep still running (FIG-5146).
+[[rule]]
+packages = ["lash-runtime"]
+kinds = ["unit-test"]
+shards = 4
+
 [[rule]]
 packages = ["lash-runtime"]
 kinds = ["test"]

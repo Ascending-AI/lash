@@ -44900,7 +44900,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_0e644d23",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_113c8a42",
@@ -44911,7 +44912,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_113c8a42",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_231c5f1b",
@@ -44922,7 +44924,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_231c5f1b",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_28d2f230",
@@ -44934,7 +44937,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_28d2f230",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_396cc7df",
@@ -44945,7 +44949,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_396cc7df",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_523013b0",
@@ -44956,7 +44961,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_523013b0",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_780a6e68",
@@ -44967,7 +44973,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_780a6e68",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_818c5ef4",
@@ -44978,7 +44985,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_818c5ef4",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_8b156cfb",
@@ -44989,7 +44997,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_8b156cfb",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_94a26ac9",
@@ -44998,7 +45007,8 @@
       "features": [],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_94a26ac9",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_94a26ac9",
@@ -45007,7 +45017,8 @@
       "features": [],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_94a26ac9",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_a8c2f420",
@@ -45018,7 +45029,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_a8c2f420",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_c1b67086",
@@ -45029,7 +45041,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_c1b67086",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_dff31976",
@@ -45040,7 +45053,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_dff31976",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_e2fd384f",
@@ -45057,7 +45071,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_e2fd384f",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_e77898e8",
@@ -45068,7 +45083,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_e77898e8",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_ef0eaee1",
@@ -45079,7 +45095,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_ef0eaee1",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_faa72d85",
@@ -45092,7 +45109,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_faa72d85",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:lash__unit_test__fv_fb476678",
@@ -45103,7 +45121,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash:lash__unit_test__fv_fb476678",
-      "package": "lash-runtime"
+      "package": "lash-runtime",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash:llm_profiles__test__fv_0e644d23",
@@ -54150,6 +54169,7 @@
           "clippy_label": "//crates/lash:lash__unit_test__clippy[clippy.txt]",
           "kind": "unit-test",
           "label": "//crates/lash:lash__unit_test",
+          "shard_count": 4,
           "tags": []
         },
         {

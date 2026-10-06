@@ -121,6 +121,7 @@ lash_rust_unit_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
@@ -9141,6 +9142,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9206,6 +9208,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9272,6 +9275,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9339,6 +9343,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9399,6 +9404,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9464,6 +9470,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9530,6 +9537,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9590,6 +9598,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9656,6 +9665,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9719,6 +9729,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9785,6 +9796,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9848,6 +9860,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9913,6 +9926,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -9984,6 +9998,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -10040,6 +10055,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -10105,6 +10121,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -10179,6 +10196,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_9d9d9794)"},
     tags = [
         "feature-lane",
@@ -10245,6 +10263,7 @@ lash_rust_feature_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
+    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
