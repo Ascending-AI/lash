@@ -386,6 +386,14 @@ pub(super) async fn admitted_shift_reuses_graph_across_follow_on_and_rechecks_ne
             async move {
                 match call_index.fetch_add(1, Ordering::SeqCst) {
                     0 => Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::Text {
+                            text: "resident warm-up".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    1 => Ok(LlmResponse {
                         parts: vec![LlmOutputPart::ToolCall {
                             call_id: "resident-switch".to_string(),
                             tool_name: "terminal_tool_0".to_string(),
@@ -395,7 +403,7 @@ pub(super) async fn admitted_shift_reuses_graph_across_follow_on_and_rechecks_ne
                         response_metadata: Default::default(),
                         ..LlmResponse::default()
                     }),
-                    1 => Ok(LlmResponse {
+                    2 => Ok(LlmResponse {
                         parts: vec![LlmOutputPart::Text {
                             text: "retained lease follow-on".to_string(),
                             response_meta: None,
@@ -403,7 +411,7 @@ pub(super) async fn admitted_shift_reuses_graph_across_follow_on_and_rechecks_ne
                         response_metadata: Default::default(),
                         ..LlmResponse::default()
                     }),
-                    2 => Ok(LlmResponse {
+                    3 => Ok(LlmResponse {
                         parts: vec![LlmOutputPart::Text {
                             text: "reacquired lease turn".to_string(),
                             response_meta: None,
@@ -433,6 +441,25 @@ pub(super) async fn admitted_shift_reuses_graph_across_follow_on_and_rechecks_ne
         runtime_store,
     )
     .await;
+    // A runtime's first run opens its session from the durable head (ADR
+    // 0112 §14.6): the law starts from a resident that holds the head.
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root").clone(),
+            TurnId::from("resident-warm-up").clone(),
+        ))
+        .await
+        .expect("open the warm-up's handler");
+    runtime
+        .execute_turn_frames(
+            TurnInput::text("open the resident session"),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
+        .await
+        .expect("the warm-up turn runs");
+    handler.close().await.expect("close the warm-up's handler");
+    let window_loads = store.load_session_count();
+    let head_probes = store.load_session_head_meta_count();
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
@@ -461,17 +488,17 @@ pub(super) async fn admitted_shift_reuses_graph_across_follow_on_and_rechecks_ne
         "a follow-on frame of the same run was not separately admitted"
     );
     assert_eq!(
-        store.load_session_count(),
+        store.load_session_count() - window_loads,
         0,
         "the admitted run and its follow-on must not hydrate an unchanged graph"
     );
-    // The admission's pending-follow-on probe answers from the head, the
-    // run checks its epoch against it, and the follow-on rechecks it.
+    // The atomic root admission reads the head inside its one store decision
+    // (FIG-4848); the run checks its epoch against the head, and the
+    // follow-on rechecks it.
     assert_eq!(
-        store.load_session_head_meta_count(),
-        3,
-        "the admitted shift probes its follow-on, checks its epoch and rechecks head freshness \
-         for the follow-on"
+        store.load_session_head_meta_count() - head_probes,
+        2,
+        "the admitted shift checks its epoch and rechecks head freshness for the follow-on"
     );
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -501,14 +528,14 @@ pub(super) async fn admitted_shift_reuses_graph_across_follow_on_and_rechecks_ne
         .expect("turn in the next shift succeeds");
     handler.close().await.expect("close the scope's handler");
     assert_eq!(
-        store.load_session_count(),
+        store.load_session_count() - window_loads,
         0,
         "reacquiring an unchanged durable head must not hydrate its graph"
     );
     assert_eq!(
-        store.load_session_head_meta_count(),
-        5,
-        "the next admitted shift probes its follow-on and checks the durable head once more"
+        store.load_session_head_meta_count() - head_probes,
+        3,
+        "the next admitted shift checks the durable head once more"
     );
 }
 
@@ -653,8 +680,21 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
             }),
         }]);
         let clock = double.test_clock();
-        let (mut runtime, store) =
-            standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
+        let store = double_unbound_recording_store(&double).await;
+        // The engine's admission reads the queue through its store, so the
+        // script counts each admission's one selection read.
+        let script = lash_core::testing::Script::new();
+        let runtime_store: Arc<dyn lash_core::store::RuntimeStore> =
+            script.wrap("engine", Arc::clone(&store));
+        let backend = double.lash_backend();
+        let mut runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
+            Vec::new(),
+            Arc::new(EmptyTools),
+            transport,
+            test_host_config(&backend),
+            runtime_store,
+        ))
+        .await;
         for index in 0..backlog_depth {
             enqueue_session_command(
                 store.as_ref(),
@@ -692,10 +732,13 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
             drained.assistant_output.safe_text,
             format!("answer after {backlog_depth} commands")
         );
+        // One admission takes the whole command backlog and one takes the
+        // turn; each selects with one read, whatever the backlog's depth.
         assert_eq!(
-            store.list_queued_work_count(),
-            1,
-            "engine admission reads the queue once regardless of command depth {backlog_depth}"
+            script.calls(lash_core::testing::StoreOp::prepare_shift_admission),
+            2,
+            "engine admission reads the queue once per admission regardless of command depth \
+             {backlog_depth}"
         );
     }
 }

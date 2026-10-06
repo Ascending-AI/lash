@@ -1,7 +1,6 @@
 use super::*;
 use lash_core::store::{QueuedWorkStore as _, TurnInputStore as _};
 use lash_core::testing::TestTurnExecution as _;
-use lash_core::testing::{Script, StoreOp};
 
 const SEED: u64 = 0x5_f460;
 
@@ -13,15 +12,14 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     const TURN_ID: &str = "turn-that-cannot-finish";
 
     let inner_store = double_unbound_recording_store(&double).await;
-    let script = Script::new();
-    script
-        .on(StoreOp::authorize_turn_cancel_closure)
-        .before()
-        .fail(|| lash_core::StoreError::RecordEncodingFailed {
-            record_kind: "turn cancel closure".to_string(),
-            message: "injected finish-time cancellation authorization failure".to_string(),
-        });
-    let store = script.wrap("owner", Arc::clone(&inner_store));
+    // The owner fails at its finish: the run's cancellation authority was
+    // bound at its admission (FIG-4848), so the commit that writes the
+    // stopped turn's terminal is the finish-time write that can fail.
+    inner_store.fail_next_turn_terminal_commit(lash_core::StoreError::RecordEncodingFailed {
+        record_kind: "turn terminal".to_string(),
+        message: "injected finish-time terminal commit failure".to_string(),
+    });
+    let store = Arc::clone(&inner_store);
     let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel::<()>();
     let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
@@ -125,7 +123,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
             while !effect_loop_ended.load(Ordering::SeqCst) {
                 tokio::task::yield_now().await;
             }
-        }) => result.expect("turn should seal cancellation before finish-time authorization"),
+        }) => result.expect("turn should seal cancellation before its finish-time commit"),
     }
     release_effect_loop.store(true, Ordering::SeqCst);
 
@@ -133,7 +131,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         .await
         .expect("failed owner turn should return")
         .expect("turn task")
-        .expect_err("injected owner failure must reject finish-time authorization");
+        .expect_err("injected owner failure must reject the finish-time commit");
     assert_eq!(
         error.code,
         lash_core::RuntimeErrorCode::RecordEncodingFailed
@@ -146,13 +144,15 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     assert!(
         error
             .message
-            .contains("injected finish-time cancellation authorization failure")
+            .contains("injected finish-time terminal commit failure")
     );
-    assert_eq!(
-        script.calls(StoreOp::authorize_turn_cancel_closure),
-        1,
-        "the finish-time authorization fails once and nothing authorizes after it: \
-         the owner's end repairs nothing (FIG-3927 §2.6); the run's end applies the Drop"
+    assert!(
+        inner_store
+            .runtime_commits()
+            .iter()
+            .all(|commit| commit.outcome.is_none()),
+        "the finish-time commit fails once and no terminal lands after it: the \
+         owner's end repairs nothing (FIG-3927 §2.6); the run's end applies the Drop"
     );
 
     // The refused execution ended its run before it returned (FIG-4018): the

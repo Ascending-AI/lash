@@ -38,7 +38,6 @@ pub struct RecordingStore {
     commit_attempt_count: AtomicUsize,
     load_session_count: AtomicUsize,
     load_session_head_meta_count: AtomicUsize,
-    list_queued_work_count: AtomicUsize,
     fail_next_runtime_commit: Mutex<Option<StoreError>>,
     fail_next_turn_terminal_commit: Mutex<Option<StoreError>>,
     fail_next_end_refused_run: Mutex<Option<StoreError>>,
@@ -72,7 +71,6 @@ impl RecordingStore {
             commit_attempt_count: AtomicUsize::new(0),
             load_session_count: AtomicUsize::new(0),
             load_session_head_meta_count: AtomicUsize::new(0),
-            list_queued_work_count: AtomicUsize::new(0),
             fail_next_runtime_commit: Mutex::new(None),
             fail_next_turn_terminal_commit: Mutex::new(None),
             fail_next_end_refused_run: Mutex::new(None),
@@ -157,10 +155,6 @@ impl RecordingStore {
 
     pub fn load_session_head_meta_count(&self) -> usize {
         self.load_session_head_meta_count.load(Ordering::SeqCst)
-    }
-
-    pub fn list_queued_work_count(&self) -> usize {
-        self.list_queued_work_count.load(Ordering::SeqCst)
     }
 
     /// Refuse the next runtime commit with `error`, before the wrapped store
@@ -367,14 +361,6 @@ impl RuntimeStoreDecorator for RecordingStore {
         self.session_admission_count.fetch_add(1, Ordering::SeqCst);
         *self.session_id.lock_recover() = Some(request.session_id.clone());
         self.inner.admit_session(request).await
-    }
-
-    async fn list_queued_work(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
-        self.list_queued_work_count.fetch_add(1, Ordering::SeqCst);
-        self.inner.list_queued_work(session_id).await
     }
 }
 
