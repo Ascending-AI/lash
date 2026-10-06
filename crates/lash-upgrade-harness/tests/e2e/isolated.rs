@@ -36,6 +36,7 @@ const BOUNDARY_REFUSAL: &str =
 /// admission and launch, and between registration and send, recovers the same
 /// StartKey and one admitted process identity; no ordinary body ever runs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the upgrade node binary and a private Restate server supplied by the E2E gate"]
 async fn s19_isolated_start_cuts_recover_one_worker() -> Result<()> {
     let mut host = Host::boot("s19-isolated").await?;
     let result = s19(&mut host).await;
@@ -47,6 +48,7 @@ async fn s19_isolated_start_cuts_recover_one_worker() -> Result<()> {
 /// worker's death but before the discharge ACK recovers the recorded receipt
 /// and releases the hold only after termination.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the upgrade node binary and a private Restate server supplied by the E2E gate"]
 async fn s20_isolated_cancel_terminates_and_reaps_worker() -> Result<()> {
     let mut host = Host::boot("s20-isolated").await?;
     let result = s20(&mut host).await;
