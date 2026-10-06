@@ -234,18 +234,29 @@ async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<(
     let encoded = serde_json::to_value(&remote).unwrap();
     let expected = serde_json::to_value(calls).unwrap();
     let mut ledger = encoded["llm_calls"].clone();
-    for (wire_call, native_call) in ledger
+    for ((wire_call, native_call), call) in ledger
         .as_array_mut()
         .unwrap()
         .iter_mut()
         .zip(expected.as_array().unwrap())
+        .zip(calls)
     {
-        for (wire_attempt, native_attempt) in wire_call["attempts"]
+        for ((wire_attempt, native_attempt), attempt) in wire_call["attempts"]
             .as_array_mut()
             .unwrap()
             .iter_mut()
             .zip(native_call["attempts"].as_array().unwrap())
+            .zip(&call.attempts)
         {
+            // The native record derives its usage disposition from its
+            // outcome and usage; the wire states it.
+            assert_eq!(
+                wire_attempt
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("usage_disposition"),
+                Some(serde_json::to_value(attempt.usage_disposition()).unwrap()),
+            );
             if let Some(evidence) = native_attempt.get("evidence") {
                 for (key, value) in evidence.as_object().unwrap() {
                     if value.is_null() {
