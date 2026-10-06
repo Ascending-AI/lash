@@ -160,8 +160,11 @@ fn attempts(directory: &Path) -> Result<Vec<Attempt>> {
 /// attempt ended in a V7 Suspension, and every resumed attempt received its
 /// invocation's recorded journal prefix, entry for entry, before running.
 ///
-/// The wire is read before the journal, so the journal covers every entry a
-/// relayed attempt replayed even while an invocation is still running.
+/// Call it only after every proxy writing into `directory` has stopped: a
+/// listing taken while frames are still being written can miss an earlier
+/// frame of an attempt yet hold a later one. The wire is read before the
+/// journal, so the journal covers every entry a relayed attempt replayed even
+/// while an invocation is still running.
 pub(super) async fn assert_replayed(
     directory: &Path,
     view: &RestateView,
