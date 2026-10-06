@@ -1035,6 +1035,8 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Register tools under [`crate::tools::PLUGIN_TOOL_SOURCE_ID`], the owning
+    /// plugin identity that deferred grants for these tools must name.
     pub fn tools(mut self, tools: Arc<dyn ToolProvider>) -> Self {
         self.tool_providers.push(tools);
         self
@@ -1227,7 +1229,9 @@ impl LashCoreBuilder {
                 .into_iter()
                 .fold(PluginSpec::new(), PluginSpec::with_tool_provider);
             plugin_factories.push(Arc::new(StaticPluginFactory::new(
-                lash_core::plugin::PluginDeclaration::initial("embed_tools"),
+                lash_core::plugin::PluginDeclaration::initial(
+                    facade_support::PLUGIN_TOOL_SOURCE_ID,
+                ),
                 spec,
             )) as Arc<dyn PluginFactory>);
         }

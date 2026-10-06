@@ -461,6 +461,9 @@ pub mod tools {
     pub use lash_core::ToolControl;
     /// Per-tool retry policy carried by [`ToolDefinition::with_retry_policy`].
     pub use lash_core::ToolRetryPolicy;
+    /// Source and owning plugin identity of tools registered with
+    /// [`crate::LashCoreBuilder::tools`]. Use it in deferred grants for those tools.
+    pub use lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID;
     /// The pending model call passed to a tool's preparation hook.
     pub use lash_core::sansio::PendingToolCall;
     /// Collected replies returned by a runtime tool batch.
@@ -501,11 +504,10 @@ pub mod tools {
     /// dialect executes a bound tool is decided inside lash.
     pub use lash_core::{TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
     pub use lash_core::{
-        ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,
-        facade_support::SupersededToolIdentity, facade_support::ToolMembershipUpdate,
-        facade_support::ToolRestoreReport, facade_support::ToolSourcePolicy,
-        facade_support::ToolStateChange, facade_support::ToolStateChangeOutcome,
-        facade_support::ToolStateEntry,
+        ToolId, ToolState, facade_support::SupersededToolIdentity,
+        facade_support::ToolMembershipUpdate, facade_support::ToolRestoreReport,
+        facade_support::ToolSourcePolicy, facade_support::ToolStateChange,
+        facade_support::ToolStateChangeOutcome, facade_support::ToolStateEntry,
     };
     /// Engine-owned tool-intent admission records used by process-registry integrators.
     pub use lash_core::{

@@ -12,6 +12,8 @@ Standard protocol presents all catalog members when discovery is absent. With di
 
 RLM's host-provided `DeferredToolResolver` resolves missing call paths during linking, in the context of the execution that links: its owner, its logical Run, and the capability refs that Run's spec recorded. The runtime gathers unresolved paths, excludes recorded outcomes, resolves one batch, folds grants into the link environment, and links. Missing answers become `NotAvailable`. Outcomes, including negative answers and Tool Execution Bindings, are frozen under the stable `ExecCode` address. Replay reinstalls recorded routing through the host hook and reuses the outcomes; a different code effect starts a fresh record. Resolution does not mutate the session catalog.
 
+A deferred grant's source names its owning plugin. Providers registered with `LashCoreBuilder::tools` belong to `lash::tools::PLUGIN_TOOL_SOURCE_ID` (`embed_tools`); the builder's plugin declaration and the tool registry use that same identity. Grants for other plugins name those plugins' ids. Grant execution and restore resolve that exact source, without searching other plugins for a matching tool.
+
 ## Why and alternatives
 
 An availability ladder mixes callability, prompt presentation and discovery into one ordering even though they vary independently. A resident-but-searchable tier changes request budgeting without changing the runtime's ability to call the tool. Both are rejected. Resolver enumeration and preview methods are rejected because ranking, discovery and previews belong to host tools and the host's protocol prompt config.

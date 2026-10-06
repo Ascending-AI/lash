@@ -105,24 +105,6 @@ impl ToolRegistry {
         let leaf_source_key = ToolSourceKey::new(source_id);
         let source = match sources.get(&leaf_source_key) {
             Some(source) => Arc::clone(source),
-            None if source_id == PLUGIN_TOOL_SOURCE_ID => {
-                let mut matches = sources.values().filter(|source| {
-                    source
-                        .resolve_manifest_by_id(tool_id)
-                        .is_some_and(|manifest| manifest.id == *tool_id)
-                });
-                let Some(source) = matches.next().cloned() else {
-                    return Err(ToolOutcome::err_fmt(format_args!(
-                        "Tool source `{source_id}` missing for granted tool id `{tool_id}`"
-                    )));
-                };
-                if matches.next().is_some() {
-                    return Err(ToolOutcome::err_fmt(format_args!(
-                        "Tool source `{source_id}` is ambiguous for granted tool id `{tool_id}`"
-                    )));
-                }
-                source
-            }
             None => {
                 return Err(ToolOutcome::err_fmt(format_args!(
                     "Tool source `{source_id}` missing for granted tool id `{tool_id}`"

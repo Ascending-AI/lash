@@ -135,7 +135,7 @@ async fn grant_probe_dispatch<'h>(
         crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
         definition,
     )
-    .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
+    .with_source_id("test_tools")
     .with_execution_binding(json!({ "kind": "grant-probe" }));
     (exact_dispatch_context(ports, provider).await, grant)
 }
@@ -236,7 +236,7 @@ async fn a_grant_admits_its_own_declaration_never_a_same_id_catalog_tools() {
         crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
         grant_probe_tool(ToolRetryPolicy::Never),
     )
-    .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
+    .with_source_id("test_tools")
     .with_execution_binding(json!({ "kind": "grant-probe" }));
     assert!(!grant.manifest().declaration.may_defer);
     let prepared = grant_prepared_call("grant_probe");

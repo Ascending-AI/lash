@@ -947,7 +947,7 @@ finish({ probed });"#,
         },
     )]);
     let run = TurnId::fixture("deferred-resolve-context-run");
-    session
+    let output = session
         .send(TurnInput::text("probe through a deferred grant"))
         .id(run.clone())
         .run(crate::RunSpec {
@@ -956,6 +956,13 @@ finish({ probed });"#,
         })
         .output()
         .await?;
+    assert_eq!(
+        output.final_value(),
+        Some(&serde_json::json!({ "probed": "recorded" })),
+        "the grant naming the builder tools' source must execute through its plugin owner: {:?}; {:?}",
+        output.result.outcome,
+        output.result.errors,
+    );
     assert_eq!(
         resolved_for.lock_recover().clone(),
         vec![(Some(session_id), Some(run), capabilities)],
