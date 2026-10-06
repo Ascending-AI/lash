@@ -213,6 +213,8 @@ struct RoundOwner {
     backend: Backend,
     members: Vec<Member>,
     limit_ms: u64,
+    /// The turn's cancel, fired this long after the round starts running.
+    cancel_after_ms: Option<u64>,
     bodies: Arc<Catalog>,
     tripwire: Arc<Tripwire>,
 }
@@ -274,6 +276,19 @@ impl RoundOwner {
                 .await
                 .map_err(Pass::from)?;
             RoundRunner::admitted(cx, &admitted, self.policies(), bodies).unwrap()
+        };
+        let runner = match self.cancel_after_ms {
+            Some(after) => {
+                let cancel = CancellationToken::new();
+                let fire = cancel.clone();
+                let clock = Arc::clone(cx.clock());
+                tokio::spawn(async move {
+                    clock.sleep(Duration::from_millis(after)).await;
+                    fire.cancel();
+                });
+                runner.cancelled_by(cancel)
+            }
+            None => runner,
         };
         let end = runner.run().await.map_err(Pass::from)?;
         if end.round().presented().is_none() {
@@ -360,6 +375,7 @@ impl From<round::AdmissionRefusal> for Pass {
 struct RoundScenario {
     members: Vec<Member>,
     limit_ms: u64,
+    cancel_after_ms: Option<u64>,
     world: Arc<ExternalWorld>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<(Backend, Arc<SimClock>)>>,
@@ -374,6 +390,7 @@ impl RoundScenario {
         Self {
             members,
             limit_ms: 60_000,
+            cancel_after_ms: None,
             world: Arc::default(),
             tripwire: Arc::default(),
             backend: Mutex::default(),
@@ -417,6 +434,7 @@ impl Scenario for RoundScenario {
             backend,
             members: self.members.clone(),
             limit_ms: self.limit_ms,
+            cancel_after_ms: self.cancel_after_ms,
             bodies: Arc::new(Catalog {
                 world: Arc::clone(&self.world),
                 tools: self
@@ -478,6 +496,7 @@ impl Scenario for RoundScenario {
         }
         violations.extend(round_laws(
             &self.members,
+            self.cancel_after_ms.is_some(),
             &fold,
             &self.world,
             &self.tripwire,
@@ -508,6 +527,7 @@ impl Scenario for RoundScenario {
 /// The laws every run of a round must hold after it ends.
 fn round_laws(
     members: &[Member],
+    cancelled: bool,
     fold: &RunFold,
     world: &ExternalWorld,
     tripwire: &Tripwire,
@@ -557,6 +577,7 @@ fn round_laws(
                 match outcome {
                     AttemptOutcome::Completed(_) if writes.len() == 1 => {}
                     AttemptOutcome::Interrupted => {}
+                    AttemptOutcome::Cancelled { .. } if cancelled => {}
                     other => violations.push(format!(
                         "F2: Once {call} settled {other:?} after writing {writes:?}"
                     )),
@@ -864,5 +885,45 @@ async fn an_expired_limit_settles_at_once_on_resume_and_is_never_refreshed() {
             }
         )),
         "no cut resumed the call after its limit expired"
+    );
+}
+
+/// Member cancel: once the turn is cancelled, a member still running gets
+/// its token and the stop grace, then records `Cancelled`; a member that
+/// already finished keeps its outcome.
+#[tokio::test]
+async fn a_turn_cancel_ends_unfinished_members_as_cancelled() {
+    let members = vec![
+        Member {
+            call: call("call-slow"),
+            tool: Tool::Write { millis: 30_000 },
+        },
+        Member {
+            call: call("call-fast"),
+            tool: Tool::Write { millis: 0 },
+        },
+    ];
+    let settled: Arc<Mutex<Vec<AttemptOutcome>>> = Arc::default();
+    let shared = Arc::clone(&settled);
+    let report = Matrix::new()
+        .faults(&[])
+        .run(move || {
+            let mut fresh = RoundScenario::new(members.clone());
+            fresh.cancel_after_ms = Some(1_000);
+            fresh.settled = Arc::clone(&shared);
+            fresh
+        })
+        .await;
+    report.assert_held();
+    let settled = settled.lock_recover().clone();
+    assert!(
+        matches!(
+            settled.as_slice(),
+            [
+                AttemptOutcome::Cancelled { .. },
+                AttemptOutcome::Completed(_)
+            ]
+        ),
+        "{settled:?}"
     );
 }
