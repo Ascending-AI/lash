@@ -112,6 +112,16 @@ impl<'a> RunCoordinator<'a> {
     }
 
     pub(super) async fn drain_starts(&mut self) -> Result<(), SingletonRunError> {
+        for (_, (waiting, output)) in std::mem::take(&mut self.refused_starts) {
+            Box::pin(self.settle_refused_start(
+                &waiting.call,
+                &waiting.member,
+                waiting.handlers,
+                waiting.attempt,
+                output,
+            ))
+            .await?;
+        }
         for (_, (waiting, source)) in std::mem::take(&mut self.pending_starts) {
             let start = waiting
                 .start
@@ -194,25 +204,44 @@ impl<'a> RunCoordinator<'a> {
             });
         }
         // A start the call declared as its pending resolver is the call's
-        // intent; its launch records the call's receipt.
-        let identity = self.pending_metadata(&call.call_id)?.and_then(|pending| {
-            match pending.completion.resolved_by {
+        // intent; its launch records the call's receipt. A refused launch
+        // settles the call, which emits the stream its parked attempt
+        // recorded.
+        let pending = self.pending_metadata(&call.call_id)?;
+        let identity = pending
+            .as_ref()
+            .and_then(|pending| match &pending.completion.resolved_by {
                 Some(crate::PendingResolver::DeclaredStart(start)) => {
                     Some(start.identity().clone())
                 }
                 _ => None,
-            }
-        });
+            });
         let launch = Box::pin(launch_start(
             &mut self.journal,
-            &call.call_id,
+            ParkedStart {
+                call_id: &call.call_id,
+                attempt,
+                stream: pending.map(|pending| pending.stream),
+            },
             &obligation,
             identity,
             binding,
         ))
         .await?;
-        let (process_id, receipt) = served_launch(&launch, &call.call_id, &start.start_key)?;
+        let served = served_launch(&launch, &call.call_id, &start.start_key)?;
         self.journal.accept(launch)?;
+        let (process_id, receipt) = match served {
+            ServedLaunch::Launched {
+                process_id,
+                receipt,
+            } => (process_id, receipt),
+            ServedLaunch::Refused { output } => {
+                return Box::pin(
+                    self.settle_refused_start(call, &member, handlers, attempt, output),
+                )
+                .await;
+            }
+        };
         if let Some(receipt) = receipt {
             let receipt: RealizationReceipt = self.journal.materials.decode(&receipt)?;
             binding.adopt_realization(&call.call_id, &receipt)?;
@@ -255,6 +284,33 @@ impl<'a> RunCoordinator<'a> {
         Ok(DecidedCall::Deferred { source })
     }
 
+    /// Settle a deferred call whose admitted start the registrar refused: no
+    /// source was armed, and the call's deferred completion is the failure
+    /// capture its `StartRefused` record owns.
+    async fn settle_refused_start(
+        &mut self,
+        call: &SingletonToolCall,
+        member: &AdmittedCall,
+        handlers: Handlers<'a>,
+        attempt: AttemptOrdinal,
+        output: MaterialRef,
+    ) -> Result<DecidedCall, SingletonRunError> {
+        let capture: SingletonCapture = self.journal.materials.decode(&output)?;
+        self.decide_candidate(
+            call,
+            handlers,
+            member,
+            Some((
+                ResultSource::DeferredCompletion {
+                    attempt,
+                    resolved: Box::new(output),
+                },
+                capture,
+            )),
+        )
+        .await
+    }
+
     /// Wait at the Run for the real seals of every open Deferred call.
     /// Dispatch descriptors take no rank and never reach presentation.
     /// A resolution that won before cancellation remains protected.
@@ -263,7 +319,10 @@ impl<'a> RunCoordinator<'a> {
     /// Journal, source authority and typed retained-material refusals. A
     /// handover leaves every call open for the successor's same source.
     pub async fn await_deferred(&mut self) -> Result<(), SingletonRunError> {
-        while !self.waiting.is_empty() || !self.pending_starts.is_empty() {
+        while !self.waiting.is_empty()
+            || !self.pending_starts.is_empty()
+            || !self.refused_starts.is_empty()
+        {
             self.await_one_deferred().await?;
         }
         Ok(())

@@ -14,7 +14,7 @@ use lash::plugins::{
     PluginOperation, PluginOperationOutcome, PluginRegistrar, PluginRevision, PluginSessionContext,
     PluginTask, PluginTaskContext, RunCoordinator, SegmentOrdinal, SessionParam, SessionPlugin,
     SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest,
-    SingletonPresentationError, SingletonToolCall, SingletonToolHandlers,
+    SingletonPresentationError, SingletonToolCall, SingletonToolHandlers, StartLaunch,
 };
 use lash::runtime::{ExecutionScope, ExternalCancelPolicy, PresentationBinding};
 use lash::sync::MutexExt as _;
@@ -279,10 +279,7 @@ impl SingletonToolHandlers for Echo {
         Ok(capture.output().unwrap_or_default().to_owned())
     }
     fn emit_stream(&self, _: &lash::ToolCallId, _: &AttemptStream) {}
-    async fn launch_start(
-        &self,
-        _: &DeclaredStartObligation,
-    ) -> Result<lash::process::ProcessHandleView, String> {
+    async fn launch_start(&self, _: &DeclaredStartObligation) -> Result<StartLaunch, String> {
         Err("workbench echo admits no process start".into())
     }
     async fn discharge_start(

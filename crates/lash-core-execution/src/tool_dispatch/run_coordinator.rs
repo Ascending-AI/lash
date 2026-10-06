@@ -53,7 +53,8 @@ mod parallel;
 mod realization;
 mod start;
 use start::{
-    bind_start, cancels_work, discharge_start, launch_start, recorded_obligation, served_launch,
+    ParkedStart, ServedLaunch, bind_start, cancels_work, discharge_start, launch_start,
+    recorded_obligation, served_launch,
 };
 
 pub use aggregate::RunAggregateOutcome;
@@ -742,6 +743,9 @@ pub struct RunCoordinator<'a> {
     waiting: BTreeMap<ToolCallId, Waiting<'a>>,
     process_sources: BTreeMap<ToolCallId, AwaitEventKey>,
     pending_starts: BTreeMap<ToolCallId, (Waiting<'a>, AwaitEventKey)>,
+    /// Deferred calls whose start a predecessor segment recorded refused
+    /// before it decided them, with the failure capture the refusal owns.
+    refused_starts: BTreeMap<ToolCallId, (Waiting<'a>, MaterialRef)>,
     environment: Option<crate::ProcessExecutionEnvRef>,
 }
 
@@ -897,6 +901,7 @@ impl<'a> RunCoordinator<'a> {
             waiting: BTreeMap::new(),
             process_sources: BTreeMap::new(),
             pending_starts: BTreeMap::new(),
+            refused_starts: BTreeMap::new(),
             environment: None,
         }
     }

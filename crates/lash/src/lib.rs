@@ -954,7 +954,7 @@ pub mod plugins {
         RunBodies, RunCoordinator, RunCutRefusal, SingletonAttempt, SingletonBodyOutcome,
         SingletonCapture, SingletonDrift, SingletonPreparedRequest, SingletonPresentationError,
         SingletonRunError, SingletonStart, SingletonTerminal, SingletonToolCall,
-        SingletonToolHandlers, ToolRealizer,
+        SingletonToolHandlers, StartLaunch, ToolRealizer,
     };
     /// A source seal's typed refusal, distinct from engine admission refusal.
     pub use lash_core::tool_run::SealRefusal as SourceSealRefusal;

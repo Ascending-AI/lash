@@ -66,6 +66,10 @@ struct Captured {
     triggers: Vec<super::ToolTriggerEffectOutcome>,
     occurrence: crate::plugin::ToolHookOccurrence,
     intents: ToolIntents,
+    /// The typed refusal of the start the call declared, which settled the
+    /// call as this failure: reported as the call's intent outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start_refusal: Option<crate::ToolIntentExecutionOutcome>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -287,6 +291,7 @@ impl<'run> ProductionToolHandlers<'run> {
             intents,
             messages,
             triggers,
+            start_refusal: None,
         })
     }
 }
@@ -553,6 +558,11 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .with_tool_attempt_parent_invocation(invocation.clone())
             .with_effect_attempt(Some(effect_attempt.clone()));
         let dispatch = Arc::new(dispatch);
+        // The attempt is the declaring attempt of any start it parks on: its
+        // own invocation mints the identity that start is bound to (ADR 0116
+        // §3.1).
+        let declaring =
+            super::intent_executor::declaring_identity(&dispatch, attempt.call_id, &invocation);
         let mut builder = crate::ToolContext::from_dispatch(dispatch.clone(), &prepared.call)
             .runtime_execution_context(
                 self.context
@@ -681,6 +691,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     attempt: attempt.attempt,
                 },
                 intents: ToolIntents::default(),
+                start_refusal: None,
             };
             return Ok(SingletonBodyOutcome::Failed {
                 output: encode(&capture)?,
@@ -733,6 +744,34 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                             dispatch.trigger_outcomes.drain(),
                         )
                         .await?;
+                    Ok(SingletonBodyOutcome::Failed {
+                        output: encode(&capture)?,
+                    })
+                } else if let Some(crate::PendingResolver::DeclaredStart(start)) =
+                    &pending.resolved_by
+                    && let Err(refusal) = start.bound_to(&declaring)
+                {
+                    // A declared start decodes without its constructor, so
+                    // its bytes may name another session, another call or a
+                    // nonzero index. It is refused before anything of it is
+                    // admitted or registered, and settles the call.
+                    let outcome =
+                        super::pending_resolver::unbound_declaration(&declaring, refusal).outcome;
+                    let mut capture = self
+                        .capture_output(
+                            prepared,
+                            ToolCallOutput::failure(super::pending_resolver::launch_refusal(
+                                &outcome,
+                            )),
+                            crate::plugin::ToolHookOccurrence::Attempt {
+                                attempt: attempt.attempt,
+                            },
+                            ToolIntents::default(),
+                            dispatch.checkpoint_messages.drain(),
+                            dispatch.trigger_outcomes.drain(),
+                        )
+                        .await?;
+                    capture.start_refusal = Some(outcome);
                     Ok(SingletonBodyOutcome::Failed {
                         output: encode(&capture)?,
                     })
@@ -1123,11 +1162,11 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     async fn launch_start(
         &self,
         obligation: &DeclaredStartObligation,
-    ) -> Result<crate::ProcessHandleView, String> {
+    ) -> Result<StartLaunch, String> {
         let parent = self
             .context
             .language_runtime_invocation(&format!("run:start:{}", obligation.start_key()));
-        let record = self
+        let started = self
             .context
             .dispatch()
             .processes
@@ -1138,13 +1177,53 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     &obligation.call_id,
                 ),
             )
-            .await
-            .map_err(|error| {
+            .await;
+        match started {
+            Ok(record) => Ok(StartLaunch::Launched(
+                crate::ProcessHandleView::from_record(record),
+            )),
+            // A terminal refusal, such as a closed starter scope's, is the
+            // start's own: a retry would only meet it again (ADR 0116 §3.2).
+            Err(error) if super::intent_executor::declared_start_fault(&error).is_none() => Ok(
+                StartLaunch::Refused(crate::ToolIntentRefusalReason::CommandFailed {
+                    cause: crate::ToolIntentCommandFailure::from(&error),
+                }),
+            ),
+            Err(error) => {
                 self.context
                     .record_nested_effect_error(error.clone().into());
-                error.to_string()
-            })?;
-        Ok(crate::ProcessHandleView::from_record(record))
+                Err(error.to_string())
+            }
+        }
+    }
+
+    async fn refused_start(
+        &self,
+        call_id: &crate::ToolCallId,
+        attempt: AttemptOrdinal,
+        outcome: &crate::ToolIntentExecutionOutcome,
+    ) -> Result<SingletonCapture, String> {
+        let prepared = self
+            .prepared
+            .lock_recover()
+            .get(call_id)
+            .cloned()
+            .ok_or("the refused start's call has no admitted preparation")?;
+        let mut captured = self
+            .capture_output(
+                prepared,
+                ToolCallOutput::failure(super::pending_resolver::launch_refusal(outcome)),
+                crate::plugin::ToolHookOccurrence::DeferredCompletion { attempt },
+                ToolIntents::default(),
+                Vec::new(),
+                Vec::new(),
+            )
+            .await?;
+        captured.start_refusal = Some(outcome.clone());
+        Ok(SingletonCapture::Failed {
+            output: encode(&captured)?,
+            stream: Default::default(),
+        })
     }
 
     async fn attach_start_terminal(

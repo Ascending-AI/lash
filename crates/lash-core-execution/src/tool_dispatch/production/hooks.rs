@@ -101,6 +101,7 @@ impl ProductionToolHandlers<'_> {
                             original: None,
                             occurrence: crate::plugin::ToolHookOccurrence::Cached,
                             intents: ToolIntents::default(),
+                            start_refusal: None,
                         })
                     };
                     BeforeCheckReply::Cached {
@@ -240,11 +241,12 @@ impl ProductionToolHandlers<'_> {
             .cloned()
             .ok_or_else(|| fault("the final has no hydrated admission".to_owned()))?;
         let dispatch = self.dispatch(&prepared.input).await.map_err(fault)?;
-        let outcomes = self
+        let mut outcomes = self
             .declarations
             .lock_recover()
             .remove(call_id)
             .unwrap_or_default();
+        outcomes.extend(captured.start_refusal.clone());
         let mut output = captured.output.clone();
         super::super::attempt_coordinator::project_recorded_intent_outcomes(&mut output, &outcomes);
         let facts = Arc::new(crate::plugin::ToolPresentationFacts {

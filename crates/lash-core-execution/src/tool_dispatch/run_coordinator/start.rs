@@ -3,7 +3,7 @@ use super::*;
 use crate::runtime::process::{
     DeclaredStartPhase, StartCancelDecision, StartKey, WorkerTerminationReceipt,
 };
-use crate::tool_dispatch::{RunStartPrepared, RunStepHandle};
+use crate::tool_dispatch::{RunStartPrepared, RunStepHandle, StartLaunch};
 
 /// The hold key of a call's declared start: the call's own id, so a call
 /// holds at most one process.
@@ -62,26 +62,58 @@ pub(super) fn recorded_obligation(
     Ok(obligation)
 }
 
+/// What a deferred start's served or produced launch carrier recorded.
+pub(super) enum ServedLaunch {
+    /// The process the start registered and, for a start its call declared,
+    /// the launch receipt the record owns.
+    Launched {
+        process_id: ProcessId,
+        receipt: Option<MaterialRef>,
+    },
+    /// The registrar refused the start: the call's failure capture, which
+    /// the record owns.
+    Refused { output: MaterialRef },
+}
+
 /// The served or produced launch carrier, checked to be exactly this
-/// call's `StartLaunched`: its process and, for a start its call declared,
-/// the launch receipt the record owns.
+/// call's `StartLaunched` or `StartRefused`.
 pub(super) fn served_launch(
     entry: &RunJournalEntry,
     call_id: &ToolCallId,
     start_key: &StartKey,
-) -> Result<(ProcessId, Option<MaterialRef>), SingletonRunError> {
-    let Some(RunEvent::StartLaunched {
-        call_id: served_call,
-        start_key: served_key,
-        process_id,
-        receipt,
-    }) = entry.record.events.first()
-    else {
-        return Err(RunEventRefusal::StartOrder {
-            call_id: call_id.clone(),
-            start_key: start_key.clone(),
+) -> Result<ServedLaunch, SingletonRunError> {
+    let (served_call, served_key, launch) = match entry.record.events.first() {
+        Some(RunEvent::StartLaunched {
+            call_id,
+            start_key,
+            process_id,
+            receipt,
+        }) => (
+            call_id,
+            start_key,
+            ServedLaunch::Launched {
+                process_id: process_id.clone(),
+                receipt: receipt.clone(),
+            },
+        ),
+        Some(RunEvent::StartRefused {
+            call_id,
+            start_key,
+            output,
+        }) => (
+            call_id,
+            start_key,
+            ServedLaunch::Refused {
+                output: output.clone(),
+            },
+        ),
+        _ => {
+            return Err(RunEventRefusal::StartOrder {
+                call_id: call_id.clone(),
+                start_key: start_key.clone(),
+            }
+            .into());
         }
-        .into());
     };
     if entry.record.events.len() != 1 || served_call != call_id || served_key != start_key {
         return Err(RunEventRefusal::StartOrder {
@@ -90,7 +122,15 @@ pub(super) fn served_launch(
         }
         .into());
     }
-    Ok((process_id.clone(), receipt.clone()))
+    Ok(launch)
+}
+
+/// The deferred call whose start a launch registers: the attempt that
+/// parked on the start, and the stream that attempt recorded.
+pub(super) struct ParkedStart<'c> {
+    pub(super) call_id: &'c ToolCallId,
+    pub(super) attempt: AttemptOrdinal,
+    pub(super) stream: Option<crate::runtime::effect::AttemptStream>,
 }
 
 /// Register a deferred start inside its VM run. A served launch does not
@@ -100,14 +140,21 @@ pub(super) fn served_launch(
 /// A start its call declared under `identity` records the call's
 /// `StartProcess` intent outcome with the launch, naming the handle the
 /// registrar answered, so every replay reads back the receipt the first
-/// launch produced.
+/// launch produced. A start the registrar refused records the call's
+/// failure capture instead, reporting the refusal as that outcome; the
+/// call's deferred completion resolves to it.
 pub(super) async fn launch_start(
     journal: &mut RunJournal<'_>,
-    call_id: &ToolCallId,
+    parked: ParkedStart<'_>,
     obligation: &DeclaredStartObligation,
     identity: Option<crate::ToolIntentIdentity>,
     handlers: &dyn SingletonToolHandlers,
 ) -> Result<RunJournalEntry, SingletonRunError> {
+    let ParkedStart {
+        call_id,
+        attempt,
+        stream,
+    } = parked;
     let template = journal.record(Vec::new());
     let owner = journal.materials.owner.clone();
     let start_key = obligation.start_key().clone();
@@ -117,35 +164,73 @@ pub(super) async fn launch_start(
         .wait_record(
             record_name(call_id, "start:launch"),
             Box::pin(async move {
-                let handle = handlers.launch_start(obligation).await?;
-                let process_id = handle.process_id.clone();
                 let mut materials = Vec::new();
-                let receipt = match identity {
-                    Some(identity) => {
-                        let (reference, entry) = mint(
-                            &owner,
-                            MaterialRole::RealizationReceipt,
-                            encode(&RealizationReceipt {
-                                outcomes: vec![crate::ToolIntentExecutionOutcome::Executed {
-                                    identity,
-                                    realized: crate::ToolIntentRealized::StartProcess(handle),
-                                }],
-                            })?,
-                        )?;
-                        materials.push(entry);
-                        Some(reference)
-                    }
-                    None => None,
-                };
-                Ok(RunJournalEntry {
-                    state: Vec::new(),
-                    record: RunRecord {
-                        events: vec![RunEvent::StartLaunched {
+                let event = match handlers.launch_start(obligation).await? {
+                    StartLaunch::Launched(handle) => {
+                        let process_id = handle.process_id.clone();
+                        let receipt = match identity {
+                            Some(identity) => {
+                                let (reference, entry) = mint(
+                                    &owner,
+                                    MaterialRole::RealizationReceipt,
+                                    encode(&RealizationReceipt {
+                                        outcomes: vec![
+                                            crate::ToolIntentExecutionOutcome::Executed {
+                                                identity,
+                                                realized: crate::ToolIntentRealized::StartProcess(
+                                                    handle,
+                                                ),
+                                            },
+                                        ],
+                                    })?,
+                                )?;
+                                materials.push(entry);
+                                Some(reference)
+                            }
+                            None => None,
+                        };
+                        RunEvent::StartLaunched {
                             call_id: launched_call,
                             start_key: key,
                             process_id,
                             receipt,
-                        }],
+                        }
+                    }
+                    StartLaunch::Refused(refusal) => {
+                        let outcome = crate::ToolIntentExecutionOutcome::Refused {
+                            intent_index: identity
+                                .as_ref()
+                                .map_or(0, |identity| identity.intent_index),
+                            identity,
+                            kind: ToolIntentKind::StartProcess,
+                            refusal,
+                        };
+                        let mut capture = handlers
+                            .refused_start(&launched_call, attempt, &outcome)
+                            .await?;
+                        if let (
+                            Some(recorded),
+                            SingletonCapture::Done { stream, .. }
+                            | SingletonCapture::Failed { stream, .. }
+                            | SingletonCapture::RetryableFailure { stream, .. },
+                        ) = (stream, &mut capture)
+                        {
+                            *stream = recorded;
+                        }
+                        let (output, entry) =
+                            mint(&owner, MaterialRole::AttemptOutput, encode(&capture)?)?;
+                        materials.push(entry);
+                        RunEvent::StartRefused {
+                            call_id: launched_call,
+                            start_key: key,
+                            output,
+                        }
+                    }
+                };
+                Ok(RunJournalEntry {
+                    state: Vec::new(),
+                    record: RunRecord {
+                        events: vec![event],
                         ..template
                     },
                     materials,
@@ -173,7 +258,12 @@ pub(super) fn issue_prepare<'a>(
         name,
         Box::pin(async move {
             let handlers = handlers.get();
-            let process_id = handlers.launch_start(&obligation).await?.process_id;
+            // A start a final declares is admitted with its declarations;
+            // nothing settles its call after them, so a refusal is a fault.
+            let process_id = match handlers.launch_start(&obligation).await? {
+                StartLaunch::Launched(handle) => handle.process_id,
+                StartLaunch::Refused(refusal) => return Err(refusal.describe()),
+            };
             let cancelled = decide_discharge(&obligation, handlers, closing).await?;
             let termination = discharge_effects(
                 &call_id,

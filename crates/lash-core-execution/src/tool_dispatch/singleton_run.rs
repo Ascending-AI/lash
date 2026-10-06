@@ -548,11 +548,29 @@ pub trait SingletonToolHandlers: Send + Sync {
     /// hold, and arms its delivery. The launch runs again on every replay
     /// that reaches it, under the same key, so the registrar must answer
     /// the process it registered first. The answer is the registered
-    /// process's handle, which a declared start's launch receipt names.
+    /// process's handle, which a declared start's launch receipt names, or
+    /// the registrar's typed refusal of a start no retry could launch. An
+    /// `Err` is a fault: the launch runs again.
     async fn launch_start(
         &self,
         obligation: &DeclaredStartObligation,
-    ) -> Result<crate::ProcessHandleView, String>;
+    ) -> Result<StartLaunch, String>;
+
+    /// The final of a deferred call whose admitted start the registrar
+    /// refused: the refusal as the call's failure, reporting `outcome`, the
+    /// start's typed refusal, as the call's intent outcome. A handler whose
+    /// launches are never refused has none.
+    async fn refused_start(
+        &self,
+        call_id: &ToolCallId,
+        attempt: AttemptOrdinal,
+        outcome: &crate::ToolIntentExecutionOutcome,
+    ) -> Result<SingletonCapture, String> {
+        let _ = (attempt, outcome);
+        Err(format!(
+            "call {call_id}'s handler has no final for a refused start"
+        ))
+    }
 
     /// Arm a short process-terminal subscription after the K5 launch is durable.
     async fn attach_start_terminal(
@@ -574,6 +592,17 @@ pub trait SingletonToolHandlers: Send + Sync {
         process_id: &ProcessId,
         cancel: bool,
     ) -> Result<(), String>;
+}
+
+/// What a declared start's launch answered.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StartLaunch {
+    /// The registrar registered the process under the start's key, or
+    /// answered the one that key registered first.
+    Launched(crate::ProcessHandleView),
+    /// The registrar refused the start for good, registering nothing: a
+    /// retry would only meet the refusal again (ADR 0116 §3.2).
+    Refused(crate::ToolIntentRefusalReason),
 }
 
 /// How a call ended.

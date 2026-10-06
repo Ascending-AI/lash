@@ -39,7 +39,7 @@ pub use singleton_run::{
     RunSourceWake, RunStartPrepareStep, RunStartPrepared, RunStepHandle, SelectKey,
     SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
     SingletonPreparedRequest, SingletonPresentationError, SingletonRunError, SingletonStart,
-    SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
+    SingletonTerminal, SingletonToolCall, SingletonToolHandlers, StartLaunch,
 };
 
 pub(crate) use atomic_attempt::AtomicToolAttempt;

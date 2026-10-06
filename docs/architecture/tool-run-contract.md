@@ -431,7 +431,13 @@ reserved process-terminal source distinct from the external completion key.
 The protected start drain decides cancellation before admission, then records
 `StartAdmitted` and `StartLaunched` under the stable `StartKey`. It arms a K4
 `ProcessTerminal` descriptor using the minted `ProcessId`, and the call stays
-open without a rank. Short terminal registrations retain records at the process
+open without a rank. A registrar refusal no retry could change, such as a
+closed starter scope's, records `StartRefused` instead: nothing is registered
+or owed, and the record owns the call's failure capture, which reports the
+refusal as the call's `StartProcess` intent outcome and is the call's
+deferred completion. A pending call's declared start that does not belong to
+its call (another session, call or index; ADR 0116 §3.1) is refused in X,
+before anything of it is admitted, and settles the call the same way. Short terminal registrations retain records at the process
 and receiver indexes; no `ProcessAttach` or terminal-wait invocation runs.
 Delivery acquires the receiver's attachment ownership, retains the canonical
 capture and seals the source through the existing K4 writer. The Run accepts

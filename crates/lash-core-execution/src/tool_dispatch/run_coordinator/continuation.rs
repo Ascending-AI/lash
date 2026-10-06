@@ -308,6 +308,7 @@ impl<'a> RunCoordinator<'a> {
         let mut decisions = BTreeMap::new();
         let mut presented = BTreeMap::new();
         let mut launched = BTreeMap::new();
+        let mut refused = BTreeMap::new();
         let mut receipts = BTreeMap::new();
         let mut attempts = BTreeMap::new();
         let mut elapsed = std::collections::BTreeSet::new();
@@ -363,6 +364,11 @@ impl<'a> RunCoordinator<'a> {
                     if let Some(receipt) = receipt {
                         receipts.insert(call_id.clone(), receipt.clone());
                     }
+                }
+                RunEvent::StartRefused {
+                    call_id, output, ..
+                } => {
+                    refused.insert(call_id.clone(), output.clone());
                 }
                 RunEvent::TimerElapsed { aggregate, leaf } => {
                     elapsed.insert((aggregate.clone(), *leaf));
@@ -516,7 +522,9 @@ impl<'a> RunCoordinator<'a> {
                     attempt: *attempt,
                     start,
                 };
-                if pending_start {
+                if let Some(output) = refused.remove(&id) {
+                    run.refused_starts.insert(id, (waiting, output));
+                } else if pending_start {
                     let source = match result {
                         AttemptResult::DeferredStart { source, .. }
                         | AttemptResult::Pending { source, .. } => source,

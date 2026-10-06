@@ -375,7 +375,7 @@ impl SingletonToolHandlers for Probe {
     async fn launch_start(
         &self,
         obligation: &DeclaredStartObligation,
-    ) -> Result<lash_core::ProcessHandleView, String> {
+    ) -> Result<lash_core::tool_dispatch::StartLaunch, String> {
         self.seen
             .lock()
             .unwrap()
@@ -406,10 +406,12 @@ impl SingletonToolHandlers for Probe {
             .lock()
             .unwrap()
             .push((obligation.call_id.clone(), process.clone()));
-        Ok(lash_core::ProcessHandleView::new(
-            process,
-            lash_core::ProcessIdentity::new("fig4977.probe"),
-            lash_core::ProcessStatus::Running,
+        Ok(lash_core::tool_dispatch::StartLaunch::Launched(
+            lash_core::ProcessHandleView::new(
+                process,
+                lash_core::ProcessIdentity::new("fig4977.probe"),
+                lash_core::ProcessStatus::Running,
+            ),
         ))
     }
 

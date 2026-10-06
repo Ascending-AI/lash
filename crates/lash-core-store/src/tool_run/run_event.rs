@@ -339,6 +339,16 @@ pub enum RunEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         receipt: Option<MaterialRef>,
     },
+    /// The registrar refused a deferred call's admitted start for good, so
+    /// no process exists and nothing is owed: a retry would only meet the
+    /// refusal again, as a closed starter scope does. `output` is the call's
+    /// failure capture, which reports the refusal as the call's
+    /// `StartProcess` intent outcome; the call's deferred completion is it.
+    StartRefused {
+        call_id: ToolCallId,
+        start_key: StartKey,
+        output: MaterialRef,
+    },
     /// The start's recorded cancel policy is followed and its consumer hold
     /// released. `cancelled` when a cancellation of the Run made that policy
     /// cancel the process.
@@ -1019,6 +1029,24 @@ impl RunLedger {
                     start_key,
                     &StartProgress::Admitted,
                     StartProgress::Launched,
+                )
+            }
+            RunEvent::StartRefused {
+                call_id,
+                start_key,
+                output,
+            } => {
+                if output.role != super::MaterialRole::AttemptOutput {
+                    return Err(RunEventRefusal::StartOrder {
+                        call_id: call_id.clone(),
+                        start_key: start_key.clone(),
+                    });
+                }
+                self.advance_start(
+                    call_id,
+                    start_key,
+                    &StartProgress::Admitted,
+                    StartProgress::Discharged,
                 )
             }
             RunEvent::StartDischarged {

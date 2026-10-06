@@ -259,7 +259,7 @@ async fn launch_declared_start(
 /// The launch receipt of a declaration that does not belong to its call:
 /// refused under the call's own identity for index 0, before anything was
 /// journaled or registered.
-fn unbound_declaration(
+pub(super) fn unbound_declaration(
     declaring: &crate::ToolIntentIdentity,
     refusal: crate::ToolIntentRefusalReason,
 ) -> LaunchReceipt {
@@ -321,7 +321,7 @@ fn launch_parent(
 /// or its scope refused keeps that refusal's own code; a declaration refused
 /// because it does not belong to its call is the declaring tool's fault, and
 /// fails under the refusal's typed code.
-fn launch_refusal(outcome: &crate::ToolIntentExecutionOutcome) -> crate::ToolFailure {
+pub(super) fn launch_refusal(outcome: &crate::ToolIntentExecutionOutcome) -> crate::ToolFailure {
     let (class, code, message) = match outcome {
         crate::ToolIntentExecutionOutcome::Refused {
             refusal: crate::ToolIntentRefusalReason::CommandFailed { cause },
