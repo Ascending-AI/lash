@@ -52,7 +52,7 @@ mod drain;
 mod parallel;
 mod realization;
 mod start;
-use start::{bind_start, discharge_start, launch_start, recorded_obligation};
+use start::{bind_start, discharge_start, launch_start, recorded_obligation, served_launch};
 
 pub use aggregate::RunAggregateOutcome;
 pub use bodies::RunBodies;

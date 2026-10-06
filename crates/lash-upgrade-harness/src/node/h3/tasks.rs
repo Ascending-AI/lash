@@ -189,7 +189,7 @@ impl SingletonToolHandlers for Pending {
     async fn launch_start(
         &self,
         obligation: &DeclaredStartObligation,
-    ) -> Result<lash_core::ProcessId, String> {
+    ) -> Result<lash_core::ProcessHandleView, String> {
         self.0.launch_start(obligation).await
     }
     async fn discharge_start(

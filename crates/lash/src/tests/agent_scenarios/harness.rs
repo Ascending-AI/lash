@@ -120,7 +120,8 @@ pub(super) struct AgentScenarioRun {
     /// commit order. Observed at the store seam, never reconstructed.
     pub(super) checkpoint_writes:
         Vec<lash_core::testing::checkpoint_observer::CheckpointWriteEvent>,
-    /// Attachment roots submitted by the root turn's runtime-checkpoint commit.
+    /// Attachment roots submitted by the runtime-checkpoint commit that settles
+    /// the root turn.
     pub(super) committed_attachment_ids: Vec<lash_core::AttachmentId>,
 }
 
@@ -390,17 +391,28 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     )
     .await;
     assert_remote_process_summaries_round_trip(&final_process_list);
+    let checkpoint_writes = runtime.checkpoint_writes.events();
+    // The turn opens with its start commit; the commit that settles it, the
+    // session's last, is the one that persists its tool calls.
+    let settling_revision = checkpoint_writes
+        .iter()
+        .filter(|write| write.session_id == case.session_id)
+        .map(|write| write.revision_before)
+        .max();
     let run = AgentScenarioRun {
         session_id: case.session_id.clone(),
         turn_output: Some(turn_output),
         streamed_events: events.snapshot().await,
         graph_snapshots: runtime.graph_store.graphs(),
         final_process_list,
-        checkpoint_writes: runtime.checkpoint_writes.events(),
-        committed_attachment_ids: runtime
-            .checkpoint_writes
-            .committed_attachment_ids(&case.session_id, 0)
+        committed_attachment_ids: settling_revision
+            .and_then(|revision| {
+                runtime
+                    .checkpoint_writes
+                    .committed_attachment_ids(&case.session_id, revision)
+            })
             .unwrap_or_default(),
+        checkpoint_writes,
     };
 
     super::transcript::assert_typed_checkpoint_transcript(&run.checkpoint_writes);

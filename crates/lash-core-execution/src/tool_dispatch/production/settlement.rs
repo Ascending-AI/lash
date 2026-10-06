@@ -49,10 +49,18 @@ impl ProductionToolHandlers<'_> {
             .get(call_id)
             .cloned()
             .unwrap_or_default();
-        let outcomes = presented
-            .as_ref()
-            .map(|presented| presented.intent_outcomes.clone())
-            .unwrap_or_default();
+        // A presented call reports its recorded outcomes. A call that ends
+        // unpresented after its declared start launched still possesses the
+        // child its launch receipt names.
+        let outcomes = match (&presented, presentation) {
+            (Some(presented), _) => presented.intent_outcomes.clone(),
+            (None, None) => self
+                .declarations
+                .lock_recover()
+                .remove(call_id)
+                .unwrap_or_default(),
+            (None, Some(_)) => Vec::new(),
+        };
         let possession = outcomes
             .iter()
             .filter_map(|outcome| match outcome {

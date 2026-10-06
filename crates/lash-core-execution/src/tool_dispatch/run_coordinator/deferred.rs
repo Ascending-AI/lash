@@ -116,14 +116,14 @@ impl<'a> RunCoordinator<'a> {
             let start = waiting
                 .start
                 .ok_or_else(|| boundary(&waiting.call.call_id))?;
-            self.defer_start(
+            Box::pin(self.defer_start(
                 &waiting.call,
                 waiting.member,
                 waiting.handlers,
                 waiting.attempt,
                 source,
                 start,
-            )
+            ))
             .await?;
         }
         Ok(())
@@ -193,12 +193,30 @@ impl<'a> RunCoordinator<'a> {
                 decision: CallDecision::Cancelled,
             });
         }
-        let launch = launch_start(&mut self.journal, &call.call_id, &obligation, binding).await?;
-        let Some(RunEvent::StartLaunched { process_id, .. }) = launch.record.events.first() else {
-            return Err(boundary(&call.call_id));
-        };
-        let process_id = process_id.clone();
+        // A start the call declared as its pending resolver is the call's
+        // intent; its launch records the call's receipt.
+        let identity = self.pending_metadata(&call.call_id)?.and_then(|pending| {
+            match pending.completion.resolved_by {
+                Some(crate::PendingResolver::DeclaredStart(start)) => {
+                    Some(start.identity().clone())
+                }
+                _ => None,
+            }
+        });
+        let launch = Box::pin(launch_start(
+            &mut self.journal,
+            &call.call_id,
+            &obligation,
+            identity,
+            binding,
+        ))
+        .await?;
+        let (process_id, receipt) = served_launch(&launch, &call.call_id, &start.start_key)?;
         self.journal.accept(launch)?;
+        if let Some(receipt) = receipt {
+            let receipt: RealizationReceipt = self.journal.materials.decode(&receipt)?;
+            binding.adopt_realization(&call.call_id, &receipt)?;
+        }
         let descriptor = crate::tool_run::SourceDescriptor {
             source: source.clone(),
             call_id: call.call_id.clone(),

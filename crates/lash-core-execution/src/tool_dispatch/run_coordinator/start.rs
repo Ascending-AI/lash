@@ -54,16 +54,18 @@ pub(super) fn recorded_obligation(
 }
 
 /// The served or produced launch carrier, checked to be exactly this
-/// call's `StartLaunched`.
+/// call's `StartLaunched`: its process and, for a start its call declared,
+/// the launch receipt the record owns.
 pub(super) fn served_launch(
     entry: &RunJournalEntry,
     call_id: &ToolCallId,
     start_key: &StartKey,
-) -> Result<ProcessId, SingletonRunError> {
+) -> Result<(ProcessId, Option<MaterialRef>), SingletonRunError> {
     let Some(RunEvent::StartLaunched {
         call_id: served_call,
         start_key: served_key,
         process_id,
+        receipt,
     }) = entry.record.events.first()
     else {
         return Err(RunEventRefusal::StartOrder {
@@ -79,19 +81,26 @@ pub(super) fn served_launch(
         }
         .into());
     }
-    Ok(process_id.clone())
+    Ok((process_id.clone(), receipt.clone()))
 }
 
 /// Register a deferred start inside its VM run. A served launch does not
 /// invoke the registrar; crash-before-ACK remains idempotent by StartKey.
 /// The launch is a Run record wait, so it keeps the acknowledgement queue.
+///
+/// A start its call declared under `identity` records the call's
+/// `StartProcess` intent outcome with the launch, naming the handle the
+/// registrar answered, so every replay reads back the receipt the first
+/// launch produced.
 pub(super) async fn launch_start(
     journal: &mut RunJournal<'_>,
     call_id: &ToolCallId,
     obligation: &DeclaredStartObligation,
+    identity: Option<crate::ToolIntentIdentity>,
     handlers: &dyn SingletonToolHandlers,
 ) -> Result<RunJournalEntry, SingletonRunError> {
     let template = journal.record(Vec::new());
+    let owner = journal.materials.owner.clone();
     let start_key = obligation.start_key().clone();
     let launched_call = call_id.clone();
     let key = start_key.clone();
@@ -99,7 +108,26 @@ pub(super) async fn launch_start(
         .wait_record(
             record_name(call_id, "start:launch"),
             Box::pin(async move {
-                let process_id = handlers.launch_start(obligation).await?;
+                let handle = handlers.launch_start(obligation).await?;
+                let process_id = handle.process_id.clone();
+                let mut materials = Vec::new();
+                let receipt = match identity {
+                    Some(identity) => {
+                        let (reference, entry) = mint(
+                            &owner,
+                            MaterialRole::RealizationReceipt,
+                            encode(&RealizationReceipt {
+                                outcomes: vec![crate::ToolIntentExecutionOutcome::Executed {
+                                    identity,
+                                    realized: crate::ToolIntentRealized::StartProcess(handle),
+                                }],
+                            })?,
+                        )?;
+                        materials.push(entry);
+                        Some(reference)
+                    }
+                    None => None,
+                };
                 Ok(RunJournalEntry {
                     state: Vec::new(),
                     record: RunRecord {
@@ -107,10 +135,11 @@ pub(super) async fn launch_start(
                             call_id: launched_call,
                             start_key: key,
                             process_id,
+                            receipt,
                         }],
                         ..template
                     },
-                    materials: Vec::new(),
+                    materials,
                 })
             }),
         )
@@ -135,7 +164,7 @@ pub(super) fn issue_prepare<'a>(
         name,
         Box::pin(async move {
             let handlers = handlers.get();
-            let process_id = handlers.launch_start(&obligation).await?;
+            let process_id = handlers.launch_start(&obligation).await?.process_id;
             let cancelled = decide_discharge(&obligation, handlers, closing).await?;
             let termination = discharge_effects(
                 &call_id,
@@ -153,6 +182,7 @@ pub(super) fn issue_prepare<'a>(
                         call_id: call_id.clone(),
                         start_key: obligation.start_key().clone(),
                         process_id,
+                        receipt: None,
                     },
                     RunEvent::StartDischarged {
                         call_id,

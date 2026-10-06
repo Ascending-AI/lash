@@ -1123,7 +1123,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     async fn launch_start(
         &self,
         obligation: &DeclaredStartObligation,
-    ) -> Result<crate::ProcessId, String> {
+    ) -> Result<crate::ProcessHandleView, String> {
         let parent = self
             .context
             .language_runtime_invocation(&format!("run:start:{}", obligation.start_key()));
@@ -1144,8 +1144,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     .record_nested_effect_error(error.clone().into());
                 error.to_string()
             })?;
-        self.context.record_started_process(&record.id);
-        Ok(record.id)
+        Ok(crate::ProcessHandleView::from_record(record))
     }
 
     async fn attach_start_terminal(

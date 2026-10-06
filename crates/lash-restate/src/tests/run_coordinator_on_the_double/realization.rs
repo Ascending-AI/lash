@@ -126,7 +126,7 @@ impl SingletonToolHandlers for NestedRealization {
     async fn launch_start(
         &self,
         obligation: &DeclaredStartObligation,
-    ) -> Result<lash_core::ProcessId, String> {
+    ) -> Result<lash_core::ProcessHandleView, String> {
         self.probe.launch_start(obligation).await
     }
 

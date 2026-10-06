@@ -557,9 +557,19 @@ async fn cancel_owned_process(
 pub fn model_visible_intent_outcomes(
     outcome: &super::ToolDispatchOutcome,
 ) -> &[crate::ToolIntentExecutionOutcome] {
-    let launch_receipt = outcome.intents.intents.is_empty()
+    model_visible_outcomes(&outcome.intents, &outcome.intent_outcomes)
+}
+
+/// The outcomes of `outcomes` a model-facing return reports, for a call that
+/// declared `intents`: a parked call's lone launch receipt is left out (see
+/// [`model_visible_intent_outcomes`]).
+pub(crate) fn model_visible_outcomes<'a>(
+    intents: &crate::ToolIntents,
+    outcomes: &'a [crate::ToolIntentExecutionOutcome],
+) -> &'a [crate::ToolIntentExecutionOutcome] {
+    let launch_receipt = intents.intents.is_empty()
         && matches!(
-            outcome.intent_outcomes.as_slice(),
+            outcomes,
             [crate::ToolIntentExecutionOutcome::Executed {
                 realized: crate::ToolIntentRealized::StartProcess(_),
                 ..
@@ -568,11 +578,7 @@ pub fn model_visible_intent_outcomes(
                 ..
             }]
         );
-    if launch_receipt {
-        &[]
-    } else {
-        &outcome.intent_outcomes
-    }
+    if launch_receipt { &[] } else { outcomes }
 }
 
 #[cfg(test)]

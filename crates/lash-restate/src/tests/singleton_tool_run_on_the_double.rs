@@ -1236,7 +1236,7 @@ impl SingletonToolHandlers for Probe {
     async fn launch_start(
         &self,
         _obligation: &DeclaredStartObligation,
-    ) -> Result<lash_core::ProcessId, String> {
+    ) -> Result<lash_core::ProcessHandleView, String> {
         Err("these laws declare no start".to_owned())
     }
 
@@ -1834,7 +1834,7 @@ async fn l04_a_journaled_intent_replays_before_its_protected_presentation() {
         async fn launch_start(
             &self,
             _: &DeclaredStartObligation,
-        ) -> Result<lash_core::ProcessId, String> {
+        ) -> Result<lash_core::ProcessHandleView, String> {
             Err("the witness declares no start".into())
         }
         async fn discharge_start(

@@ -257,7 +257,7 @@ impl SingletonToolHandlers for Echo {
     async fn launch_start(
         &self,
         _: &DeclaredStartObligation,
-    ) -> Result<lash_core::ProcessId, String> {
+    ) -> Result<lash_core::ProcessHandleView, String> {
         Err("H3 echo admits no process start".into())
     }
     async fn discharge_start(

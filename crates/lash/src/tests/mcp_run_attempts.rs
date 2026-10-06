@@ -152,7 +152,7 @@ impl SingletonToolHandlers for Probe {
     async fn launch_start(
         &self,
         _: &DeclaredStartObligation,
-    ) -> Result<lash_core::ProcessId, String> {
+    ) -> Result<lash_core::ProcessHandleView, String> {
         panic!("an MCP socket is no process implementation")
     }
 

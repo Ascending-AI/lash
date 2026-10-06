@@ -547,9 +547,12 @@ pub trait SingletonToolHandlers: Send + Sync {
     /// registration fixes its binding, lifetime, environment and consumer
     /// hold, and arms its delivery. The launch runs again on every replay
     /// that reaches it, under the same key, so the registrar must answer
-    /// the process it registered first.
-    async fn launch_start(&self, obligation: &DeclaredStartObligation)
-    -> Result<ProcessId, String>;
+    /// the process it registered first. The answer is the registered
+    /// process's handle, which a declared start's launch receipt names.
+    async fn launch_start(
+        &self,
+        obligation: &DeclaredStartObligation,
+    ) -> Result<crate::ProcessHandleView, String>;
 
     /// Arm a short process-terminal subscription after the K5 launch is durable.
     async fn attach_start_terminal(

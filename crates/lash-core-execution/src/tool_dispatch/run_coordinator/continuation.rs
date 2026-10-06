@@ -308,6 +308,7 @@ impl<'a> RunCoordinator<'a> {
         let mut decisions = BTreeMap::new();
         let mut presented = BTreeMap::new();
         let mut launched = BTreeMap::new();
+        let mut receipts = BTreeMap::new();
         let mut attempts = BTreeMap::new();
         let mut elapsed = std::collections::BTreeSet::new();
         for event in &events {
@@ -355,9 +356,13 @@ impl<'a> RunCoordinator<'a> {
                 RunEvent::StartLaunched {
                     call_id,
                     process_id,
+                    receipt,
                     ..
                 } => {
                     launched.insert(call_id.clone(), process_id.clone());
+                    if let Some(receipt) = receipt {
+                        receipts.insert(call_id.clone(), receipt.clone());
+                    }
                 }
                 RunEvent::TimerElapsed { aggregate, leaf } => {
                     elapsed.insert((aggregate.clone(), *leaf));
@@ -380,6 +385,14 @@ impl<'a> RunCoordinator<'a> {
                 isolation: recorded.isolation,
             };
             handlers.restore_request(&id, &member.binding, &request)?;
+            // A launched declared start's receipt is the call's until a
+            // presentation records it.
+            let presented_final = presented.contains_key(&id)
+                && matches!(decisions.get(&id), Some((_, CallDecision::Final { .. })));
+            if !presented_final && let Some(receipt) = receipts.get(&id) {
+                let receipt: RealizationReceipt = run.journal.materials.decode(receipt)?;
+                handlers.adopt_realization(&id, &receipt)?;
+            }
             if let Some((rank, decision)) = decisions.get(&id) {
                 if let Some(presentation) = presented.get(&id) {
                     run.presented.insert(

@@ -279,7 +279,10 @@ impl SingletonToolHandlers for Echo {
         Ok(capture.output().unwrap_or_default().to_owned())
     }
     fn emit_stream(&self, _: &lash::ToolCallId, _: &AttemptStream) {}
-    async fn launch_start(&self, _: &DeclaredStartObligation) -> Result<lash::ProcessId, String> {
+    async fn launch_start(
+        &self,
+        _: &DeclaredStartObligation,
+    ) -> Result<lash::ProcessHandleView, String> {
         Err("workbench echo admits no process start".into())
     }
     async fn discharge_start(

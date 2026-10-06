@@ -364,7 +364,7 @@ impl SingletonToolHandlers for Starter {
     async fn launch_start(
         &self,
         obligation: &DeclaredStartObligation,
-    ) -> Result<ProcessId, String> {
+    ) -> Result<lash_core::ProcessHandleView, String> {
         if self.cancel_at == CancelAt::Launch {
             self.cancel.store(true, Ordering::SeqCst);
         }
@@ -404,7 +404,7 @@ impl SingletonToolHandlers for Starter {
                 .map_err(|error| error.to_string())?;
         }
         self.launches.lock().unwrap().push(record.id.clone());
-        Ok(record.id)
+        Ok(lash_core::ProcessHandleView::from_record(record))
     }
 
     async fn discharge_start(
@@ -697,6 +697,7 @@ fn drained(
             call_id: call_id.clone(),
             start_key: key.clone(),
             process_id: process.clone(),
+            receipt: None,
         },
         RunEvent::StartDischarged {
             call_id: call_id.clone(),

@@ -321,11 +321,17 @@ pub enum RunEvent {
         call_id: ToolCallId,
         start_key: StartKey,
     },
-    /// The start's process is registered under its key.
+    /// The start's process is registered under its key. A start its call
+    /// declared as an intent records its launch receipt, the call's
+    /// `StartProcess` intent outcome, as a realization receipt this record
+    /// owns; the call's presentation reports it and the session possesses
+    /// the process from it.
     StartLaunched {
         call_id: ToolCallId,
         start_key: StartKey,
         process_id: ProcessId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        receipt: Option<MaterialRef>,
     },
     /// The start's recorded cancel policy is followed and its consumer hold
     /// released. `cancelled` when a cancellation of the Run made that policy
@@ -968,13 +974,27 @@ impl RunLedger {
             }
             RunEvent::StartAdmitted { call_id, start_key } => self.admit_start(call_id, start_key),
             RunEvent::StartLaunched {
-                call_id, start_key, ..
-            } => self.advance_start(
                 call_id,
                 start_key,
-                &StartProgress::Admitted,
-                StartProgress::Launched,
-            ),
+                receipt,
+                ..
+            } => {
+                if receipt
+                    .as_ref()
+                    .is_some_and(|receipt| receipt.role != super::MaterialRole::RealizationReceipt)
+                {
+                    return Err(RunEventRefusal::StartOrder {
+                        call_id: call_id.clone(),
+                        start_key: start_key.clone(),
+                    });
+                }
+                self.advance_start(
+                    call_id,
+                    start_key,
+                    &StartProgress::Admitted,
+                    StartProgress::Launched,
+                )
+            }
             RunEvent::StartDischarged {
                 call_id, start_key, ..
             } => self.advance_start(

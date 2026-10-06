@@ -608,13 +608,19 @@ impl<'run> ProductionToolHandlers<'run> {
                             );
                             // V retains the realized declarations separately from
                             // presentation. Report them after the presented value
-                            // when the consumer builds its model-facing return.
+                            // when the consumer builds its model-facing return; a
+                            // declared start's launch receipt is host-facing only.
                             let mut model_return = presented.presentation.model_return;
-                            model_return
-                                .parts
-                                .extend(presented.intent_outcomes.iter().map(|outcome| {
+                            model_return.parts.extend(
+                                super::super::pending_resolver::model_visible_outcomes(
+                                    &captured.intents,
+                                    &presented.intent_outcomes,
+                                )
+                                .iter()
+                                .map(|outcome| {
                                     crate::ModelToolReturnPart::text(outcome.model_addendum())
-                                }));
+                                }),
+                            );
                             (output, model_return, presented.intent_outcomes)
                         };
                     let record = ToolCallRecord {

@@ -694,7 +694,7 @@ impl SingletonToolHandlers for IsolatedHandlers {
     async fn launch_start(
         &self,
         obligation: &DeclaredStartObligation,
-    ) -> Result<ProcessId, String> {
+    ) -> Result<lash_core::ProcessHandleView, String> {
         self.host.gate(self.args.hold_launch.as_ref()).await?;
         let registration = obligation
             .registration
@@ -711,7 +711,7 @@ impl SingletonToolHandlers for IsolatedHandlers {
             .launch(&self.args.worker_dir, &record.id)
             .await?;
         self.host.gate(self.args.hold_registered.as_ref()).await?;
-        Ok(record.id)
+        Ok(lash_core::ProcessHandleView::from_record(record))
     }
 
     async fn discharge_start(

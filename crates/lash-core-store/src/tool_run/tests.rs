@@ -1037,6 +1037,7 @@ fn a_declared_start_drains_inside_its_declarations_under_one_key() {
         call_id: ids[0].clone(),
         start_key: key.clone(),
         process_id: ProcessId::fixture("fig4884-process"),
+        receipt: None,
     };
     let discharged = RunEvent::StartDischarged {
         call_id: ids[0].clone(),
@@ -1118,6 +1119,7 @@ fn a_declared_start_drains_inside_its_declarations_under_one_key() {
         call_id: ids[0].clone(),
         start_key: key.clone(),
         process_id: ProcessId::fixture("fig4884-process"),
+        receipt: None,
     };
     assert_eq!(
         serde_json::to_value(&event).unwrap(),
