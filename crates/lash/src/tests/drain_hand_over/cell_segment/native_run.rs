@@ -434,6 +434,11 @@ async fn sleep_resume(storage: Storage, (): ()) -> Result<()> {
     ] {
         let run = CellRun::start(storage, SLEEP, cut).await?;
         let original = run.double().server().now_ms() + 60_000;
+        // The double turns the wall time between its last time move and the
+        // SDK stamping a sleep into virtual time (FIG-4447), so the
+        // successor's timer lands at the deadline plus at most the wall time
+        // the hand-over took after this move.
+        let moved = std::time::Instant::now();
         run.double()
             .server()
             .advance(std::time::Duration::from_secs(10));
@@ -446,6 +451,7 @@ async fn sleep_resume(storage: Storage, (): ()) -> Result<()> {
             .find(|timer| timer.invocation == successor.id && timer.kind == "sleep")
             .expect("the successor timer")
             .fire_at_ms;
+        let flowed = u64::try_from(moved.elapsed().as_millis()).unwrap_or(u64::MAX);
         let session = run.core.session(run.session.clone()).open().await?;
         let snapshot = session.admin().state().snapshot_execution().await?.unwrap();
         #[derive(serde::Deserialize)]
@@ -495,12 +501,11 @@ async fn sleep_resume(storage: Storage, (): ()) -> Result<()> {
             "the absolute deadline survives {cut:?}"
         );
         assert!(
-            resumed - run.double().server().now_ms() < 51_000,
-            "resume uses the remaining duration"
+            (original..=original.saturating_add(flowed + 1)).contains(&resumed),
+            "resume sleeps to the original deadline, not a fresh duration: \
+             {resumed} outside {original}+{flowed}ms ({cut:?})"
         );
-        run.double()
-            .server()
-            .advance(std::time::Duration::from_secs(51));
+        run.double().server().advance_to(resumed);
         run.finish(serde_json::json!(42), cut).await?;
     }
     Ok(())
