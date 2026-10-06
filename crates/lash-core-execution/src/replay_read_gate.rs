@@ -78,8 +78,13 @@ const STORE_READS: &[&str] = &[
     "list_trigger_delivery_pins",
     // ProcessRegistrationProbe
     "process_is_registered",
+    // ProcessRegistrar: the read half of a registration, which plans the
+    // actual id and composition from today's rows without writing.
+    "prepare_process_registration",
     // TriggerStore
     "list_subscriptions",
+    "subscriptions_changed_since",
+    "list_subscriptions_with_cursor",
     "list_occurrences",
     "list_deliveries_by_occurrence_id",
     "list_deliveries_by_subscription_id",
@@ -124,6 +129,7 @@ const STORE_WRITES: &[&str] = &[
     "register_process",
     "register_process_with_observers",
     "register_process_reporting_outcome",
+    "commit_process_registration",
     "bind_effect_host",
     "set_external_ref",
     // ProcessObserverRegistry
@@ -180,6 +186,7 @@ const STORE_WRITES: &[&str] = &[
     "reclaim_trigger_occurrences",
     "forget_trigger_tombstones",
     "prune_non_fired_occurrences",
+    "compact_subscription_tombstones",
 ];
 
 /// The traits whose methods make up the surface, with the source that
@@ -250,9 +257,6 @@ enum PinClass {
     /// A read that decides nothing recorded or returned: a host listing, a
     /// snapshot, a cursor.
     Observation(&'static str),
-    /// A live revalidation that can only stop stale work before its next
-    /// effect, never choose different work (ADR 0105 §1).
-    StopOnly(&'static str),
     /// Outside the rule, for the stated reason.
     Exempt(&'static str),
     /// A known violation another ticket owns; its fix deletes the pin.
@@ -269,18 +273,6 @@ struct Pin {
 }
 
 const PINS: &[Pin] = &[
-    // The generation gate at an invocation's entry refuses a session whose
-    // marker this build cannot admit, before any journal read; it never
-    // chooses different work.
-    Pin {
-        file: "crates/lash-core-execution/src/runtime/vocabulary.rs",
-        text: "if !session_is_live(store, session_id).await? {",
-        count: 2,
-        class: PinClass::StopOnly(
-            "the session-generation gate refuses before any journal read, and the refused \
-             group child's park is a store-side fact of a child that recorded nothing",
-        ),
-    },
     Pin {
         file: "crates/lash-core-execution/src/tool_provider/process_events.rs",
         text: "if let Ok(true) = crate::session_is_live(factory.as_ref(), &target_session_id).await {",
@@ -325,7 +317,7 @@ const PINS: &[Pin] = &[
         ),
     },
     Pin {
-        file: "crates/lash-restate/src/process/workflow.rs",
+        file: "crates/lash-restate/src/process/workflow/park.rs",
         text: "let parked = match self.registry.get_process(process_id).await {",
         count: 1,
         class: PinClass::Exempt(
@@ -507,10 +499,8 @@ fn check(hits: &[scan::Hit], pins: &[Pin]) -> Vec<String> {
     let mut failures = Vec::new();
     let mut pinned: BTreeMap<(&str, &str), usize> = BTreeMap::new();
     for pin in pins {
-        if let PinClass::Observation(reason)
-        | PinClass::StopOnly(reason)
-        | PinClass::Exempt(reason)
-        | PinClass::Ticket(reason) = pin.class
+        if let PinClass::Observation(reason) | PinClass::Exempt(reason) | PinClass::Ticket(reason) =
+            pin.class
             && reason.trim().is_empty()
         {
             failures.push(format!(
@@ -1156,7 +1146,7 @@ mod self_test {
     fn the_real_tree_fails_with_an_unrecorded_promotion_lookup() {
         let failures = planted_tree(
             LOAD_BEHAVIORS,
-            r#"journal_read(controller, "load.promotion""#,
+            "journal_read(controller, PromotionStep,",
             "let _planted = core.process_registry().get_process(&lash_core::ProcessId::new()).await;",
         );
         assert!(
