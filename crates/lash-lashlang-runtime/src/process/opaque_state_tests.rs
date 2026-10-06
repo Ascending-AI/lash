@@ -178,6 +178,18 @@ async fn a_continuation_the_worker_refuses_ends_the_process_and_is_never_retried
     );
     let artifact = lashlang::ModuleArtifact::from_program(b::program(vec![b::finish(b::null())]))
         .expect("module artifact");
+    // The worker refuses the start: nothing parks, so nothing commits.
+    let cx = lash_core::ActorContext::unavailable();
+    let snapshots = lash_vm_broker::DurableSnapshotStore::new(
+        &cx,
+        lash_vm_broker::ExecKey::Process(process_id.clone()),
+    );
+    let admissions = crate::RunAdmissions {
+        opener: lash_core::EffectOpener::process(process_id.clone()),
+        limit: crate::run_operation_limit(&cx),
+        policy: &|_, _| None,
+        host_state: &|| Ok(None),
+    };
     let failure = crate::WorkerRun {
         service: &lash_vm_client::service::Service::default(),
         host: &SleepHost,
@@ -196,6 +208,9 @@ async fn a_continuation_the_worker_refuses_ends_the_process_and_is_never_retried
             lashlang::ExecutionBound::Unbounded,
         ),
         state: lash_vm_protocol::StartState::Continuation(vm),
+        from: None,
+        snapshots: &snapshots,
+        admissions: &admissions,
         boundary: &|| false,
         hand_over: None,
         providers: lashlang::ProjectionCatalog::new(),
@@ -242,7 +257,7 @@ async fn a_continuation_the_worker_refuses_ends_the_process_and_is_never_retried
 /// redriven.
 #[test]
 fn only_a_refusal_or_a_run_limit_ends_the_process() {
-    use lash_vm_broker::{BrokerFailure, CheckoutRefusal, Settlement};
+    use lash_vm_broker::{BrokerFailure, CheckoutRefusal};
     use lash_vm_protocol::{
         InfrastructureOutcome, OpaqueStateRefusal, ProtocolBreach, RunRefusal, SequenceFault,
         SupervisorEvidence, WorkerLimit,
@@ -256,10 +271,7 @@ fn only_a_refusal_or_a_run_limit_ends_the_process() {
             other => panic!("a settled terminal, got {other:?}"),
         })
     };
-    let lost = |outcome| BrokerFailure::WorkerLost {
-        outcome,
-        settlement: Settlement::default(),
-    };
+    let lost = |outcome| BrokerFailure::WorkerLost { outcome };
     let unavailable = |outcome| BrokerFailure::Unavailable {
         refusal: CheckoutRefusal::Infrastructure(outcome),
     };
@@ -321,7 +333,7 @@ async fn worker_continuation_info(
 
 #[test]
 fn schema_admission_remains_typed_in_a_process_terminal() {
-    use lash_vm_broker::{BrokerFailure, CheckoutRefusal, Settlement};
+    use lash_vm_broker::{BrokerFailure, CheckoutRefusal};
     use lash_vm_protocol::{InfrastructureOutcome, RunRefusal};
     let source = lash_core::JsonSchema::admit(serde_json::Value::Null)
         .expect_err("null cannot enter as a payload schema");
@@ -331,7 +343,6 @@ fn schema_admission_remains_typed_in_a_process_terminal() {
     for failure in [
         BrokerFailure::WorkerLost {
             outcome: outcome.clone(),
-            settlement: Settlement::default(),
         },
         BrokerFailure::Unavailable {
             refusal: CheckoutRefusal::Infrastructure(outcome),

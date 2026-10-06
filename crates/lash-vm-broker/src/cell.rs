@@ -10,39 +10,48 @@
 //! answered with that outcome.
 //!
 //! A runner that finds a snapshot resumes from it, never from instruction 0:
-//! it folds the cell's run records once, records `Interrupted` for a started
-//! `Once` without an outcome, and answers the parked operation with the
-//! folded outcome by its admitted identity. No earlier host operation runs
-//! again, and no code runs against a recorded outcome: the only stretch
-//! computed again is the effect-free one after the last snapshot.
+//! the store recovers the operation the VM stands on by its admitted
+//! identity (its saved outcome; `Interrupted`, committed as `cell.inject`,
+//! for a started `Once`; or its body again for a started `Repeatable`), and
+//! the VM is answered with it when it re-issues the operation. No earlier
+//! host operation runs again, and no code runs against a recorded outcome:
+//! the only stretch computed again is the effect-free one after the last
+//! snapshot.
 //!
 //! When the cell ends, its result commits as the execution's last snapshot
 //! (`cell.snapshot`), so a turn restored later reads the result instead of
 //! running the cell.
+//!
+//! This is the in-process driver of the quiet-point protocol the
+//! [`Broker`](crate::Broker) drives for a worker: both commit through one
+//! [`DurableSnapshotStore`], in one stored form.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
-    self, AdmittedExecution, BodyOutput, ExecutionDraft, PolicyView, Recovery, ToolBody,
+    self, BodyOutput, ExecutionDraft, PolicyView, ToolBody,
 };
 use lash_core_store::tool_run::AttemptOutcome;
 use lash_durable::domain::ExecKey;
-use lash_durable::{CommitLabel, DomainWrite, DurableError};
+use lash_durable::{DomainWrite, DurableError};
 use lash_sansio::ToolCallId;
-use lash_vm_protocol::{FrameEpoch, OpaqueVmState, VmOwner, VmStateKind};
+use lash_vm_protocol::{
+    EffectKind, EncodedPayload, FrameEpoch, OpaqueVmState, VmOwner, VmStateKind,
+};
 use lashlang::{
     AbilityOp, AbilityOutcome, CompiledProgram, ExecutionBound, ExecutionBounds,
     ExecutionHostError, ExecutionMode, ExecutionOutcome, ResourceOperation, Value,
     VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
 };
 
+use crate::authority::{RequestFingerprint, ResolvedRequest};
 use crate::identity::CodeCallIdentities;
-use crate::ledger::Checkpoint;
+use crate::ledger::{Checkpoint, RecordedEnd};
 use crate::snapshot::{
-    BrokerLedger, DurableSnapshotStore, IssuedOperation, OperationId, QuietPoint, StoredSnapshot,
-    outcomes_to_inject,
+    BrokerLedger, DurableSnapshotStore, OperationId, PendingOperation, QuietPoint, Recovered,
+    SnapshotStore as _,
 };
 
 /// One host operation a cell issued, as its host resolved it: what to admit
@@ -94,21 +103,33 @@ pub enum CellEnd {
 }
 
 impl CellEnd {
-    fn encode(&self) -> serde_json::Value {
-        match self {
-            Self::Finished(value) => serde_json::json!({ "finished": value }),
-            Self::Failed(error) => serde_json::json!({ "failed": error }),
-        }
+    /// The end as its last snapshot records it: the value, or the error, as
+    /// JSON.
+    fn recorded(&self) -> Result<RecordedEnd, CellError> {
+        Ok(match self {
+            Self::Finished(value) => RecordedEnd::Complete {
+                value: EncodedPayload(serde_json::to_vec(value).map_err(vm_error)?),
+            },
+            Self::Failed(error) => RecordedEnd::GuestError {
+                error: EncodedPayload(error.clone().into_bytes()),
+            },
+        })
     }
 
-    fn decode(stored: &serde_json::Value) -> Option<Self> {
-        if let Some(value) = stored.get("finished") {
-            return Some(Self::Finished(value.clone()));
+    /// The end `recorded` holds.
+    ///
+    /// # Errors
+    ///
+    /// [`CellError::Vm`] when it does not decode.
+    pub fn of(recorded: &RecordedEnd) -> Result<Self, CellError> {
+        match recorded {
+            RecordedEnd::Complete { value } => serde_json::from_slice(&value.0)
+                .map(Self::Finished)
+                .map_err(vm_error),
+            RecordedEnd::GuestError { error } => String::from_utf8(error.0.clone())
+                .map(Self::Failed)
+                .map_err(vm_error),
         }
-        stored
-            .get("failed")
-            .and_then(serde_json::Value::as_str)
-            .map(|error| Self::Failed(error.to_owned()))
     }
 }
 
@@ -150,6 +171,15 @@ fn host_value(value: Value) -> VmResume {
     VmResume::Effect(Ok(AbilityOutcome::Value(value)))
 }
 
+/// What the operation a resumed VM stands on is answered with when it
+/// re-issues it.
+enum Answer {
+    /// Its outcome.
+    Output(Box<BodyOutput>),
+    /// Its body, run again under its identity.
+    Rerun,
+}
+
 /// Run `cell` from its latest snapshot, or from the start when it has none,
 /// to its end. `with` are the owner's rows that commit with the cell's first
 /// commit (its first quiet point, or its end when it resumed); a cell that
@@ -165,27 +195,32 @@ pub async fn run_cell(
     cell: Cell<'_>,
     mut with: Vec<DomainWrite>,
 ) -> Result<CellEnd, CellError> {
-    let store = DurableSnapshotStore::new(cx, cell.exec.clone());
+    let store =
+        DurableSnapshotStore::new(cx, cell.exec.clone()).with_policies(cell.operations.policies());
     let config = VmRunConfig::new(
         ExecutionMode::Foreground,
         ExecutionBounds::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded),
     );
-    let executable = cell.program.executable_identity().as_str().to_owned();
+    let owner = VmOwner::new(cell.exec.stored());
     let mut instance = VmInstance::pristine();
-    // Outcomes the parked operation is answered with, by admitted identity.
-    let mut settled: BTreeMap<OperationId, BodyOutput> = BTreeMap::new();
-    // The operation the VM stands on when it resumes from a continuation.
-    let mut parked: Option<OperationId> = None;
-    let mut resumed = false;
-    let (mut broker, mut step) = match store.stored().await? {
-        Some((_, StoredSnapshot::Ended { result, .. })) => {
-            return CellEnd::decode(&result)
-                .ok_or_else(|| CellError::Vm("the stored end does not decode".to_owned()));
-        }
-        Some((_, StoredSnapshot::Parked { checkpoint, broker })) => {
-            resumed = true;
-            recover(cx, &cell, &broker, &mut settled).await?;
-            parked = broker.operations.keys().next_back().copied();
+    let mut answer: Option<Answer> = None;
+    // The cell's ledger keeps every operation it admitted: it grants no
+    // handle that would let an earlier one go.
+    let (mut ledger, mut parked_state, mut step) = match store.latest().await? {
+        Some((_, checkpoint)) => {
+            if let Some(end) = &checkpoint.end {
+                return CellEnd::of(end);
+            }
+            if let Some(pending) = &checkpoint.ledger.pending {
+                answer = Some(match store.recover_output(pending).await? {
+                    Recovered::Settled(output) => Answer::Output(Box::new(output)),
+                    Recovered::Interrupted => Answer::Output(Box::new(BodyOutput {
+                        outcome: AttemptOutcome::Interrupted,
+                        material: None,
+                    })),
+                    Recovered::Rerun { .. } => Answer::Rerun,
+                });
+            }
             let continuation = instance
                 .open_continuation(checkpoint.vm.bytes())
                 .map_err(vm_error)?;
@@ -196,14 +231,16 @@ pub async fn run_cell(
                     config.clone(),
                 )
                 .map_err(vm_error)?;
-            (broker, step)
+            (checkpoint.ledger, Some(checkpoint.vm), step)
         }
         None => {
             cx.probe().vm_program_entered(&cell.exec);
-            let broker = BrokerLedger {
+            let ledger = BrokerLedger {
                 operations: BTreeMap::new(),
                 next_admission: 0,
                 frame_epoch: FrameEpoch(0),
+                grants: BTreeMap::new(),
+                pending: None,
             };
             let step = instance
                 .start(
@@ -212,27 +249,40 @@ pub async fn run_cell(
                     config.clone(),
                 )
                 .map_err(vm_error)?;
-            (broker, step)
+            (ledger, None, step)
         }
     };
     // The operation issued since the last quiet point, waiting for its park.
-    let mut issued: Option<(OperationId, ResolvedOperation)> = None;
+    let mut issued: Option<ResolvedOperation> = None;
     let end = loop {
         step = match step {
             VmStep::Suspended(suspended) => {
                 let resume = match suspended.request {
                     VmRequest::Effect(AbilityOp::ResourceOperation(operation)) => {
-                        match parked.take() {
-                            Some(operation_id) => answer(&cell, &settled, operation_id),
-                            None => {
-                                let operation_id = OperationId {
-                                    run: broker.next_admission,
-                                    ordinal: round::member_ordinal(0).0,
-                                };
-                                let call = cell.identities.call_id(operation_id.run);
+                        match answer.take() {
+                            Some(Answer::Output(output)) => {
+                                ledger.pending = None;
+                                respond(&cell, &output)
+                            }
+                            Some(Answer::Rerun) => {
+                                let (call, id) = standing(&cell, &ledger)?;
                                 match cell.operations.resolve(call, &operation) {
                                     Ok(resolved) => {
-                                        issued = Some((operation_id, resolved));
+                                        let output = execute(cx, &store, id, resolved.body).await?;
+                                        ledger.pending = None;
+                                        respond(&cell, &output)
+                                    }
+                                    Err(error) => VmResume::Effect(Err(error)),
+                                }
+                            }
+                            None => {
+                                let run = ledger.next_admission;
+                                let call = cell.identities.call_id(run);
+                                match cell.operations.resolve(call, &operation) {
+                                    Ok(resolved) => {
+                                        ledger.next_admission += 1;
+                                        ledger.pending = Some(pending(run, &operation)?);
+                                        issued = Some(resolved);
                                         VmResume::Park
                                     }
                                     Err(error) => VmResume::Effect(Err(error)),
@@ -255,42 +305,37 @@ pub async fn run_cell(
                 instance.resume(resume).map_err(vm_error)?
             }
             VmStep::Parked(parked_vm) => {
-                let Some((operation_id, resolved)) = issued.take() else {
+                let Some(resolved) = issued.take() else {
                     return Err(CellError::Vm(
                         "the VM parked on no operation it issued".to_owned(),
                     ));
                 };
                 let bytes = parked_vm.continuation.to_bytes().map_err(vm_error)?;
-                broker
-                    .operations
-                    .insert(operation_id, resolved.draft.call().clone());
-                broker.next_admission += 1;
-                let checkpoint = Checkpoint {
-                    vm: OpaqueVmState::seal(
-                        VmStateKind::Continuation,
-                        VmOwner::new(cell.exec.stored()),
-                        lashlang::vm_contract_versions(),
-                        bytes.clone(),
-                    ),
-                    ledger: crate::ledger::LedgerSnapshot::default(),
-                    frame_epoch: broker.frame_epoch,
-                };
-                let (_, admitted) = store
-                    .commit_admitting(QuietPoint {
-                        checkpoint,
-                        broker: broker.clone(),
-                        executable_identity: executable.clone(),
-                        issued: vec![IssuedOperation {
-                            operation: operation_id,
-                            draft: resolved.draft,
-                        }],
+                let state = OpaqueVmState::seal(
+                    VmStateKind::Continuation,
+                    owner.clone(),
+                    lashlang::vm_contract_versions(),
+                    bytes.clone(),
+                );
+                let committed = store
+                    .commit_quiet_point(QuietPoint {
+                        checkpoint: Checkpoint {
+                            vm: state.clone(),
+                            ledger: ledger.clone(),
+                            host: None,
+                            end: None,
+                        },
+                        admit: Some(resolved.draft),
                         waits: Vec::new(),
                         with: std::mem::take(&mut with),
                     })
                     .await?;
-                let output = execute(cx, &admitted, resolved.body).await?;
-                settled.insert(operation_id, output);
-                parked = Some(operation_id);
+                ledger = committed.checkpoint.ledger;
+                parked_state = Some(state);
+                let (_, id) = standing(&cell, &ledger)?;
+                answer = Some(Answer::Output(Box::new(
+                    execute(cx, &store, id, resolved.body).await?,
+                )));
                 let continuation = instance.open_continuation(&bytes).map_err(vm_error)?;
                 instance
                     .start(
@@ -314,82 +359,78 @@ pub async fn run_cell(
             VmStep::GuestError(error) => break CellEnd::Failed(error.failure.error.to_string()),
         };
     };
-    if resumed || !broker.operations.is_empty() {
+    // A cell that resumed or admitted anything has a snapshot: its end
+    // replaces it.
+    if let Some(state) = parked_state {
         store
-            .commit_end(end.encode(), broker, executable, with)
+            .commit_quiet_point(QuietPoint {
+                checkpoint: Checkpoint {
+                    vm: state,
+                    ledger,
+                    host: None,
+                    end: Some(end.recorded()?),
+                },
+                admit: None,
+                waits: Vec::new(),
+                with,
+            })
             .await?;
     }
     Ok(end)
 }
 
-/// Fold the cell's records once: record `Interrupted` for every started
-/// `Once` without an outcome, in one `round.outcome` transaction, and keep
-/// each admitted operation's outcome to answer it with.
-async fn recover(
-    cx: &ActorContext,
+/// The operation a cell's VM stands on: the call it settles and its
+/// admitted identity.
+fn standing(
     cell: &Cell<'_>,
-    broker: &BrokerLedger,
-    settled: &mut BTreeMap<OperationId, BodyOutput>,
-) -> Result<(), CellError> {
-    let rows = cx.durable_reads()?.run_records(&cell.exec.owner()).await?;
-    let fold = round::fold(&rows, &cell.operations.policies())?;
-    let interrupted: Vec<_> = fold
-        .recoveries()
-        .iter()
-        .filter(|(_, recovery)| matches!(recovery, Recovery::Interrupt))
-        .map(|(id, _)| id.clone())
-        .collect();
-    if !interrupted.is_empty() {
-        let mut tx = cx.begin().await?;
-        for id in &interrupted {
-            round::settle_interrupted(&mut tx, &fold, id).map_err(vm_error)?;
-        }
-        cx.commit(tx, CommitLabel::ROUND_OUTCOME).await?;
-    }
-    for (operation, outcome) in outcomes_to_inject(broker, &fold) {
-        let material = round::outcome_material(&outcome)
-            .and_then(|material| fold.material(material))
-            .map(str::to_owned);
-        settled.insert(operation, BodyOutput { outcome, material });
-    }
-    Ok(())
+    ledger: &BrokerLedger,
+) -> Result<(ToolCallId, OperationId), CellError> {
+    let pending = ledger
+        .pending
+        .as_ref()
+        .ok_or_else(|| CellError::Vm("the VM stands on no operation".to_owned()))?;
+    let id = pending
+        .operation
+        .ok_or_else(|| CellError::Vm("the VM's operation was never admitted".to_owned()))?;
+    Ok((cell.identities.call_id(pending.run), id))
 }
 
-/// Run an admitted operation's body and commit its outcome.
+/// The ledger's entry for `operation`, issued as admission `run`.
+fn pending(run: u64, operation: &ResourceOperation) -> Result<PendingOperation, CellError> {
+    let request = EncodedPayload(rmp_serde::to_vec_named(operation).map_err(vm_error)?);
+    Ok(PendingOperation {
+        run,
+        kind: EffectKind::ResourceOperation,
+        fingerprint: RequestFingerprint::of(&ResolvedRequest::Control {
+            kind: EffectKind::ResourceOperation,
+            payload: request.clone(),
+        }),
+        request,
+        operation: None,
+        waits: Vec::new(),
+    })
+}
+
+/// Run admitted `operation`'s body and commit its outcome.
 async fn execute(
     cx: &ActorContext,
-    admitted: &[AdmittedExecution],
+    store: &DurableSnapshotStore,
+    operation: OperationId,
     body: ToolBody,
 ) -> Result<BodyOutput, CellError> {
-    let [admitted] = admitted else {
-        return Err(CellError::Vm(
-            "a quiet point admits one operation".to_owned(),
-        ));
-    };
-    let output = round::run_body(cx, admitted, body).await;
-    let mut tx = cx.begin().await?;
-    round::settle(&mut tx, admitted, output.clone(), None).map_err(vm_error)?;
-    cx.commit(tx, CommitLabel::ROUND_OUTCOME).await?;
+    let admitted = store.admitted(operation).ok_or_else(|| {
+        CellError::Vm(format!("operation {operation:?} has no admitted execution"))
+    })?;
+    let output = round::run_body(cx, &admitted, body).await;
+    store.settle_output(operation, output.clone()).await?;
     Ok(output)
 }
 
-/// The answer to the operation a resumed VM stands on: its outcome, by the
-/// identity it was admitted under.
-fn answer(
-    cell: &Cell<'_>,
-    settled: &BTreeMap<OperationId, BodyOutput>,
-    operation: OperationId,
-) -> VmResume {
-    match settled.get(&operation) {
-        Some(output) => VmResume::Effect(
-            cell.operations
-                .value(&output.outcome, output.material.as_deref())
-                .map(AbilityOutcome::Value),
-        ),
-        // Started and neither settled nor interrupted: a `Repeatable` that
-        // runs again at its ordinal is L4's (FIG-5174) to drive.
-        None => VmResume::Effect(Err(ExecutionHostError::new(
-            "the parked operation has no outcome to resume with",
-        ))),
-    }
+/// The VM's answer for an operation's outcome.
+fn respond(cell: &Cell<'_>, output: &BodyOutput) -> VmResume {
+    VmResume::Effect(
+        cell.operations
+            .value(&output.outcome, output.material.as_deref())
+            .map(AbilityOutcome::Value),
+    )
 }

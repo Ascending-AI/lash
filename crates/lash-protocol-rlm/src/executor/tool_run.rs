@@ -18,7 +18,7 @@ pub(crate) fn execute_code_with_channel_and_bounds_with_trigger_resolver(
 ) -> impl std::future::Future<Output = ExecResponse> {
     Box::pin(async move {
         if ctx.has_tool_run_owner() {
-            return execute_owned_code(
+            return Box::pin(execute_owned_code(
                 dialect,
                 state,
                 ctx,
@@ -31,14 +31,14 @@ pub(crate) fn execute_code_with_channel_and_bounds_with_trigger_resolver(
                 execution_bounds,
                 channel,
                 code_renderer,
-            )
+            ))
             .await;
         }
         let owner = ctx.clone();
         match owner
             .drive_tool_run(None, |ctx| async move {
                 let closing = ctx.clone();
-                let mut response = execute_owned_code(
+                let mut response = Box::pin(execute_owned_code(
                     dialect,
                     state,
                     ctx,
@@ -51,7 +51,7 @@ pub(crate) fn execute_code_with_channel_and_bounds_with_trigger_resolver(
                     execution_bounds,
                     channel,
                     code_renderer,
-                )
+                ))
                 .await;
                 if !response.suspended
                     && !closing.has_nested_effect_error()

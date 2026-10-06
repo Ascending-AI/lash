@@ -31,12 +31,6 @@ pub(super) struct RlmSnapshotRoot {
     /// heap objects it carries (`lashlang::DurableParts`).
     globals: BTreeMap<String, PersistedValue>,
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
-    /// The cell a segment boundary stopped inside (FIG-4739): its encoded
-    /// [`CellSegmentState`](super::cell_segment::CellSegmentState), which the
-    /// Run's successor segment resumes. `None` between cells and for every
-    /// cell that ran to its end, and then absent from the root.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    suspended_cell: Option<PersistedValue>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -198,7 +192,6 @@ enum RootNode {
     Root,
     Globals,
     Global,
-    SuspendedCell,
     DeferredTrigger,
     LinkKey,
     Resolutions,
@@ -221,7 +214,6 @@ impl RootNode {
         match (self, segment.key()) {
             (Root, Some("globals")) => Globals,
             (Root, Some("deferred_trigger_resolutions")) => DeferredTrigger,
-            (Root, Some("suspended_cell")) => SuspendedCell,
             (Globals, Some(_)) => Global,
             (DeferredTrigger, Some("link_key")) => LinkKey,
             (DeferredTrigger, Some("resolutions")) => Resolutions,
@@ -256,7 +248,7 @@ fn root_map_order(path: &[CanonicalPathSegment]) -> CanonicalMapOrder {
     match root_node(path) {
         Root => CanonicalMapOrder::Declared(ROOT_FIELDS),
         Globals | Resolutions | Json => CanonicalMapOrder::Sorted,
-        Global | SuspendedCell => CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS),
+        Global => CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS),
         DeferredTrigger => CanonicalMapOrder::Declared(DEFERRED_TRIGGER_RESOLUTION_FIELDS),
         LinkKey => CanonicalMapOrder::Declared(DEFERRED_LINK_KEY_FIELDS),
         Resolution => CanonicalMapOrder::Declared(TRIGGER_RESOLUTION_FIELDS),
@@ -388,11 +380,7 @@ fn resolve_leaf<'a>(
 }
 
 fn root_leaf_keys(root: &RlmSnapshotRoot) -> BTreeSet<ExecutionLeafName> {
-    let mut keys = leaf_keys_for_values(&root.globals);
-    if let Some(PersistedValue::Leaf { component }) = &root.suspended_cell {
-        keys.insert(component.clone());
-    }
-    keys
+    leaf_keys_for_values(&root.globals)
 }
 
 fn leaf_keys_for_values(values: &BTreeMap<String, PersistedValue>) -> BTreeSet<ExecutionLeafName> {
@@ -467,7 +455,6 @@ pub(super) struct RlmExecutionCheckpoint {
     capture_dirty: bool,
     capture_rollback: Option<CaptureRollback>,
     pending_snapshot: Option<lash_core::plugin::ExecutionStateCapture>,
-    suspended_cell: Option<Arc<[u8]>>,
     #[cfg(test)]
     encoded_globals_in_last_snapshot: usize,
 }
@@ -506,11 +493,6 @@ pub struct RlmExecutionState {
     pending_snapshot: Option<lash_core::plugin::ExecutionStateCapture>,
     active_execution_checkpoint: Option<RlmExecutionCheckpoint>,
     execution_response_returned: bool,
-    /// The cell a segment boundary stopped inside (FIG-4739), encoded: the
-    /// next execution of the same cell resumes it. It is part of the durable
-    /// root, so it reaches the Run's successor segment with the turn commit
-    /// that ends this one.
-    suspended_cell: Option<Arc<[u8]>>,
     #[cfg(test)]
     encoded_globals_in_last_snapshot: usize,
 }
@@ -544,33 +526,9 @@ impl RlmExecutionState {
             pending_snapshot: None,
             active_execution_checkpoint: None,
             execution_response_returned: false,
-            suspended_cell: None,
             #[cfg(test)]
             encoded_globals_in_last_snapshot: 0,
         }
-    }
-
-    /// The cell a segment boundary stopped inside, if one is waiting to be
-    /// resumed.
-    pub(crate) fn suspended_cell(&self) -> Option<&[u8]> {
-        self.suspended_cell.as_deref()
-    }
-
-    /// Takes the suspended cell for the execution that resumes it. The cell
-    /// is running again: a capture taken from here on holds none until a
-    /// boundary stops it again.
-    pub(super) fn take_suspended_cell(&mut self) -> Option<Arc<[u8]>> {
-        let cell = self.suspended_cell.take();
-        if cell.is_some() {
-            self.capture_dirty = true;
-        }
-        cell
-    }
-
-    /// Records the cell a segment boundary stopped inside.
-    pub(super) fn suspend_cell(&mut self, cell: Vec<u8>) {
-        self.suspended_cell = Some(cell.into());
-        self.capture_dirty = true;
     }
 
     /// Whether `frame` is known to hold an edge of `module_ref`.
@@ -624,7 +582,6 @@ impl RlmExecutionState {
             capture_dirty: self.capture_dirty,
             capture_rollback: self.capture_rollback.clone(),
             pending_snapshot: self.pending_snapshot.clone(),
-            suspended_cell: self.suspended_cell.clone(),
             #[cfg(test)]
             encoded_globals_in_last_snapshot: self.encoded_globals_in_last_snapshot,
         }
@@ -640,7 +597,6 @@ impl RlmExecutionState {
         self.capture_dirty = checkpoint.capture_dirty;
         self.capture_rollback = checkpoint.capture_rollback;
         self.pending_snapshot = checkpoint.pending_snapshot;
-        self.suspended_cell = checkpoint.suspended_cell;
         #[cfg(test)]
         {
             self.encoded_globals_in_last_snapshot = checkpoint.encoded_globals_in_last_snapshot;
@@ -683,11 +639,10 @@ impl RlmExecutionState {
         self.restore_execution_checkpoint(checkpoint);
     }
 
-    /// Cancellation ends continuation ownership; a discarded attempt only
-    /// rolls back, so its next retry still has the committed suspension.
+    /// Cancellation rolls the execution back; the cell's snapshot is its
+    /// execution's, not the session's.
     pub(crate) fn terminate_code_execution(&mut self) {
         self.rollback_code_execution();
-        self.take_suspended_cell();
     }
 
     /// Encode the canonical RLM root and only the leaf bodies whose logical
@@ -851,17 +806,12 @@ impl RlmExecutionState {
             next_globals.insert(name, persisted);
         }
 
-        let suspended_cell = self
-            .suspended_cell
-            .as_ref()
-            .map(|cell| persist_value_body(cell.to_vec(), &prior_leaf_keys, &mut changed_leaves));
         let root = RlmSnapshotRoot {
             version: fleet_format.writer_version(lash_core::surface_format!(RLM_SNAPSHOT_VERSION)),
             engine: self.engine_id.to_string(),
             state_header: capture.state_header.into_vec(),
             globals: next_globals.clone(),
             deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
-            suspended_cell,
         };
         let encoded = rmp_serde::to_vec_named(&root).map_err(|error| {
             SessionError::Protocol(format!("failed to encode RLM snapshot root: {error}"))
@@ -1000,13 +950,6 @@ impl RlmExecutionState {
             });
         }
 
-        let suspended_cell = match &parsed.suspended_cell {
-            Some(PersistedValue::Inline { body }) => Some(Arc::from(body.as_slice())),
-            Some(PersistedValue::Leaf { component }) => {
-                Some(Arc::from(resolve_leaf(state, "suspended_cell", component)?))
-            }
-            None => None,
-        };
         let envelope = worker_bound_envelope(state, &parsed)?;
         let mut restored = lash_vm_client::RemoteState::pristine(self.vm.state().service().clone());
         let baseline = restored
@@ -1044,7 +987,6 @@ impl RlmExecutionState {
         self.persisted_leaf_keys = expected_leaf_keys;
         self.persisted_globals = parsed.globals;
         self.persisted_baseline = baseline;
-        self.suspended_cell = suspended_cell;
         self.capture_dirty = pruned_reserved;
         self.capture_rollback = None;
         self.pending_snapshot = None;

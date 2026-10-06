@@ -31,10 +31,6 @@ lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 # not only the laws' synthetic compactor (FIG-4134).
 lash-plugin-standard-compaction.workspace = true
 lash-sansio = { workspace = true, features = ["schema-validation"] }
-# The worker-broker laws run a real broker over its in-process fake worker
-# (FIG-4159).
-lash-vm-broker = { workspace = true, features = ["testing"] }
-lash-vm-protocol.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 serde.workspace = true

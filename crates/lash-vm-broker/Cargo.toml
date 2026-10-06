@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Parent-side broker for lash's model-code workers: authority, ordinals, recovery and slot release."
+description = "Parent-side broker for lash's model-code workers: authority, admissions, VM snapshots and slot release."
 
 [lib]
 name = "lash_vm_broker"
@@ -45,4 +45,10 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+# The durable laws drive the broker's fake worker over the durable store,
+# cut by the substrate harness at every commit.
+lash-vm-broker = { package = "lash-internal-vm-broker", path = ".", features = ["testing"] }
+lash-core-execution = { workspace = true, features = ["testing"] }
+lash-durable-test = { workspace = true }
+lash-sqlite-store = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

@@ -1,11 +1,15 @@
-//! The runtime's admitted effect bodies behind the parent broker.
+//! The runtime's operation bodies behind the parent broker.
+//!
+//! Every operation a run blocks on is admitted with a snapshot of the VM
+//! that issued it, through the run's [`SnapshotStore`] (ADR 0132 §8), before
+//! its body runs; [`OperationAdmissions`] says what admitting it records.
 use lash_vm_broker::*;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_vm_client::{PoolSlots, service::Service};
 use lash_vm_protocol::*;
 use lashlang::{ExecutionBounds, ExecutionHost};
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 pub struct WorkerRun<'a, H> {
     pub service: &'a Service,
@@ -17,22 +21,55 @@ pub struct WorkerRun<'a, H> {
     pub context: lash_vm_client::RunContext,
     pub projected: lashlang::ProjectedBindings,
     pub bounds: ExecutionBounds,
+    /// What a run with no committed snapshot starts from: fresh, or the
+    /// session's VM snapshot.
     pub state: StartState,
+    /// The execution's latest committed snapshot, which the run resumes
+    /// from.
+    pub from: Option<Checkpoint>,
+    /// Where the run's quiet points commit.
+    pub snapshots: &'a dyn SnapshotStore,
+    /// What admitting each operation the run blocks on records.
+    pub admissions: &'a dyn OperationAdmissions,
     pub boundary: &'a (dyn Fn() -> bool + Send + Sync),
-    /// The gate a foreground run hands an operation over through: a run that
-    /// has one ends [`BrokeredEnd::Suspended`] when its host answers
-    /// [`lashlang::AbilityOutcome::HandedOver`] to an operation the run is
-    /// parked on. A process body has none: its signal wait hands over through
-    /// the worker, which suspends on the answer.
+    /// The gate a foreground run's host reads while it performs an operation
+    /// the run is parked on: its state is committed, so the host may leave a
+    /// wait open beyond this activation ([`lashlang::AbilityOutcome::HandedOver`]).
     pub hand_over: Option<&'a HandOverGate>,
     /// The providers that answer the run's projection reads, on this node
     /// (ADR 0132 §9).
     pub providers: lashlang::ProjectionCatalog,
 }
 
+/// What admitting an operation a run blocks on records: decided by the host
+/// that performs it, which knows its tool and policy.
+pub trait OperationAdmissions: Send + Sync {
+    /// The admission of `call`, the command `request` takes: its execution
+    /// (none for a wait the host performs again on restore) and its waits.
+    ///
+    /// # Errors
+    ///
+    /// Why the operation cannot be admitted; the run stops.
+    fn admission(
+        &self,
+        call: &lash_sansio::ToolCallId,
+        request: &OperationRequest,
+    ) -> Result<Admission, String>;
+
+    /// The host's own state at a quiet point, committed with the VM's
+    /// snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Why the state cannot be encoded; the run stops.
+    fn host_state(&self) -> Result<Option<EncodedPayload>, String> {
+        Ok(None)
+    }
+}
+
 /// Whether the operation a foreground run's host is performing is one the
-/// run parked on, so its state is captured and the operation can be left open
-/// for the segment that resumes it.
+/// run parked on, so its state is committed and a wait can be left open
+/// beyond this activation.
 #[derive(Debug, Default)]
 pub struct HandOverGate {
     parked: std::sync::atomic::AtomicBool,
@@ -52,9 +89,22 @@ impl HandOverGate {
 struct Effects<'a, H> {
     host: &'a H,
     projections: lash_vm_client::Projections,
+    context: &'a AdmittedContext,
+    admissions: &'a dyn OperationAdmissions,
     boundary: &'a (dyn Fn() -> bool + Send + Sync),
     hand_over: Option<&'a HandOverGate>,
 }
+
+impl<H> Effects<'_, H> {
+    fn request(&self, operation: &AdmittedOperation) -> Result<OperationRequest, ParentFault> {
+        let payload = operation
+            .request
+            .as_ref()
+            .ok_or_else(|| ParentFault("admitted request is missing".into()))?;
+        OperationRequest::decode(payload).map_err(|e| ParentFault(e.to_string()))
+    }
+}
+
 #[async_trait::async_trait]
 impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
     fn resolve(
@@ -64,7 +114,6 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
         _frame: FrameEpoch,
         request: &EffectRequest,
     ) -> Result<authority::ResolvedRequest, AuthorityRefusal> {
-        use OperationRequestCodec;
         let decoded = OperationRequest::decode(&request.payload)?;
         if decoded.kind() != request.kind {
             return Err(AuthorityRefusal::KindMismatch {
@@ -73,33 +122,45 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
             });
         }
         // The admitted runtime host owns the complete resource/grant checks.
-        // Its effect body checks before journal admission or tool dispatch.
+        // Its effect body checks before admission or tool dispatch.
         Ok(authority::ResolvedRequest::Control {
             kind: request.kind,
             payload: request.payload.clone(),
         })
     }
-    async fn retain(
+    fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
+        self.admissions
+            .admission(
+                &operation.command_id(self.context),
+                &self.request(operation)?,
+            )
+            .map_err(ParentFault)
+    }
+    fn host_state(&self) -> Result<Option<EncodedPayload>, ParentFault> {
+        self.admissions.host_state().map_err(ParentFault)
+    }
+    async fn perform(
         &self,
         operation: &AdmittedOperation,
-    ) -> Result<RequestFingerprint, ParentFault> {
-        // The existing run grammar retains each full command inside its
-        // effect body, under its parent-issued ordinal, before dispatch.
-        Ok(operation.fingerprint)
-    }
-    async fn perform(&self, operation: &AdmittedOperation) -> Result<Performed, ParentFault> {
-        use OperationRequestCodec;
-        let payload = operation
-            .request
-            .as_ref()
-            .ok_or_else(|| ParentFault("admitted request is missing".into()))?;
-        let request = OperationRequest::decode(payload).map_err(|e| ParentFault(e.to_string()))?;
+        _waits: &[(WaitRef, Option<PinnedKey>)],
+    ) -> Result<Performed, ParentFault> {
         let request = self
             .projections
-            .materialize_operation(request)
+            .materialize_operation(self.request(operation)?)
             .await
             .map_err(ParentFault)?;
+        // An operation the run blocks on was parked first: its state is
+        // committed, so the host may leave a wait open beyond the activation.
+        let parked =
+            matches!(&operation.kind, AdmittedKind::Control { kind, .. } if kind.parkable());
+        if let Some(gate) = self.hand_over.filter(|_| parked) {
+            gate.parked.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         let result = self.host.perform(request).await;
+        if let Some(gate) = self.hand_over {
+            gate.parked
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+        }
         let outcome = if self.host.is_cancelled() {
             EffectOutcome::Cancelled
         } else {
@@ -115,34 +176,22 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
         };
         Ok(Performed::outcome(outcome))
     }
-    async fn perform_parked(
-        &self,
-        operation: &AdmittedOperation,
-    ) -> Result<ParkedPerformed, ParentFault> {
-        let Some(gate) = self.hand_over else {
-            return self
-                .perform(operation)
-                .await
-                .map(ParkedPerformed::Performed);
-        };
-        gate.parked.store(true, std::sync::atomic::Ordering::SeqCst);
-        let performed = self.perform(operation).await;
-        gate.parked
-            .store(false, std::sync::atomic::Ordering::SeqCst);
-        Ok(match performed? {
-            Performed {
-                outcome: EffectOutcome::HandedOver,
-                ..
-            } => ParkedPerformed::HandedOver,
-            performed => ParkedPerformed::Performed(performed),
-        })
+    fn interrupted(&self, operation: &AdmittedOperation) -> EffectOutcome {
+        let call = operation.command_id(self.context);
+        let failure = lash_sansio::ToolFailure::tool(
+            lash_sansio::ToolFailureClass::Unavailable,
+            "lash_operation_interrupted",
+            "the operation started and never answered; it is not run again",
+        );
+        let error = lashlang::ExecutionHostError::from_tool_failure(&failure, call.to_string());
+        match rmp_serde::to_vec_named(&error) {
+            Ok(bytes) => EffectOutcome::Failed(EncodedPayload(bytes)),
+            Err(_) => EffectOutcome::Cancelled,
+        }
     }
     async fn observe_cancellation(&self, checkpoint: u64) -> Result<bool, ParentFault> {
         self.host.cancel_checkpoint(checkpoint).await;
         Ok(self.host.is_cancelled())
-    }
-    fn needs_worker(&self, operation: &AdmittedOperation) -> bool {
-        matches!(&operation.kind, AdmittedKind::Control { kind, .. } if kind.parkable())
     }
     async fn projection(&self, payload: &EncodedPayload) -> Result<EncodedPayload, ParentFault> {
         let read: lash_vm_client::ProjectionRead =
@@ -166,37 +215,6 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
     }
     fn park_declined(&self, reason: &str) {
         crate::process::record_segment_boundary_decline(&reason, "worker declined segment capture");
-    }
-}
-/// The in-memory capture of a run's last quiet point. L7 (FIG-5177) deletes
-/// it for `DurableSnapshotStore` on the durable path.
-struct Capture(Mutex<Option<Checkpoint>>);
-#[async_trait::async_trait]
-impl SnapshotStore for Capture {
-    async fn commit_quiet_point(
-        &self,
-        point: QuietPoint,
-    ) -> Result<SnapshotRev, QuietPointRefusal> {
-        *self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(point.checkpoint);
-        Ok(SnapshotRev(1))
-    }
-    async fn latest(&self) -> Result<Option<(SnapshotRev, Checkpoint)>, QuietPointRefusal> {
-        Ok(self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-            .map(|checkpoint| (SnapshotRev(1), checkpoint)))
-    }
-    async fn open_frame(&self, _frame: FrameEpoch) -> Result<(), QuietPointRefusal> {
-        *self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        Ok(())
     }
 }
 impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
@@ -235,14 +253,6 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
             memory_limit_bytes: bound(self.bounds.memory_limit),
             max_frame_depth: self.bounds.max_frame_depth.get(),
         };
-        let state = match self.state {
-            StartState::Fresh => None,
-            StartState::Snapshot(vm) | StartState::Continuation(vm) => Some(Checkpoint {
-                vm,
-                ledger: LedgerSnapshot::default(),
-                frame_epoch: self.frame_epoch,
-            }),
-        };
         let start = RunStart {
             program: self.program,
             contexts: vec![ContextDescription {
@@ -251,7 +261,8 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
                 body: EncodedPayload(bytes),
             }],
             limits,
-            from: state,
+            from: self.from,
+            fresh: self.state,
         };
         let pool = self.service.pool_accounted().await.map_err(pool_failure)?;
         let slots = PoolSlots {
@@ -268,14 +279,15 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
         let effects = Effects {
             host: self.host,
             projections: lash_vm_client::Projections::new(self.providers),
+            context: &context,
+            admissions: self.admissions,
             boundary: self.boundary,
             hand_over: self.hand_over,
         };
-        let captures = Capture(Mutex::new(None));
         let broker = Broker {
             context: &context,
             effects: &effects,
-            checkpoints: &captures,
+            checkpoints: self.snapshots,
             slots: &slots,
             codec: FrameCodec::new(self.service.config().protocol.decode),
             contract: lashlang::vm_contract_reads(),
@@ -302,6 +314,3 @@ fn pool_failure(error: lash_vm_client::PoolError) -> BrokerFailure {
         refusal: CheckoutRefusal::Infrastructure(error.into_outcome()),
     }
 }
-
-#[cfg(test)]
-mod tests {}

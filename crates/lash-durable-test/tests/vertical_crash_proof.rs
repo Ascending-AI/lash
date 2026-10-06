@@ -67,7 +67,7 @@ use lash_sansio::{
     ExecutionLimit, ExecutionPolicy, LlmCallError, SessionId, ToolCallId, ToolId, TurnId,
 };
 use lash_vm_broker::cell::{Cell, CellEnd, CellOperations, ResolvedOperation, run_cell};
-use lash_vm_broker::{CodeCallIdentities, StoredSnapshot};
+use lash_vm_broker::{Checkpoint, CodeCallIdentities};
 use lashlang::{ExecutionHostError, ResourceOperation, Value};
 
 const FORMATS: &str = "v0";
@@ -717,9 +717,20 @@ impl Scenario for V0 {
             }
         };
         let stored = cell_end(database, &exec).await;
-        let end = match &stored {
-            Some(StoredSnapshot::Ended { result, .. }) => result.to_string(),
-            other => {
+        let end = match stored
+            .as_ref()
+            .and_then(|checkpoint| checkpoint.end.as_ref())
+        {
+            Some(recorded) => match CellEnd::of(recorded) {
+                Ok(CellEnd::Finished(value)) => value.to_string(),
+                Ok(CellEnd::Failed(error)) => error,
+                Err(error) => {
+                    violations.push(format!("the cell's stored end does not decode: {error}"));
+                    String::new()
+                }
+            },
+            None => {
+                let other = &stored;
                 violations.push(format!("the cell has no stored end: {other:?}"));
                 String::new()
             }
@@ -750,7 +761,7 @@ impl Scenario for V0 {
         if let (Some(snapshot), Ok(_)) = (&stored, &fold) {
             for row in rows.iter().filter(|row| row.kind == RunRecordKind::Admit) {
                 let named = snapshot
-                    .broker()
+                    .ledger
                     .operations
                     .keys()
                     .any(|operation| operation.run == row.run.0);
@@ -809,7 +820,7 @@ impl Scenario for V0 {
 }
 
 /// The cell's last snapshot.
-async fn cell_end(database: &Arc<dyn DurableStore>, exec: &ExecKey) -> Option<StoredSnapshot> {
+async fn cell_end(database: &Arc<dyn DurableStore>, exec: &ExecKey) -> Option<Checkpoint> {
     let row = database.snapshot(exec).await.ok()??;
     serde_json::from_str(&row.snapshot_ref).ok()
 }

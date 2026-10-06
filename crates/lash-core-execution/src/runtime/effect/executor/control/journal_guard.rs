@@ -1,6 +1,9 @@
 //! A replayed language command's journal guard (FIG-3586), split out of the
-//! deleted scoped controller verbatim. L7 (FIG-5177) deletes it with
-//! language-command replay: a cell resumes from its snapshot instead.
+//! deleted scoped controller verbatim. A cell resumes from its snapshot
+//! (L7, FIG-5177) and never replays a command; the guard goes with the
+//! commands' issue path, once a cell's operation runs as its tool's own
+//! admitted execution (L4, FIG-5174) and a process resumes from its snapshot
+//! (L7b, FIG-5198).
 
 use std::sync::Arc;
 

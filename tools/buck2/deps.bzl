@@ -72,8 +72,6 @@ PACKAGE_DEPS = {
             "lash_plugin_standard_compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction",
             "lash_remote_protocol": "//crates/lash-remote-protocol:lash-remote-protocol",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
-            "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
-            "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lashlang": "//crates/lashlang:lashlang",
             "pretty_assertions": "//third-party/rust:p0245",
             "proptest": "//third-party/rust:p0248",
@@ -846,6 +844,10 @@ PACKAGE_DEPS = {
     "lash-internal-vm-broker": {
         "build": {},
         "dev": {
+            "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
+            "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
+            "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "tokio": "//third-party/rust:p0371"
         },
         "normal": {

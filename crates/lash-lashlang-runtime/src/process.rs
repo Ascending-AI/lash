@@ -575,6 +575,17 @@ async fn execute_lashlang(
     // No context asks for a segment boundary (I0, FIG-5194): a segment
     // suspends only when its guest hands over.
     let boundary = || false;
+    let snapshots = lash_vm_broker::DurableSnapshotStore::new(
+        host.ctx.actor_context(),
+        lash_vm_broker::ExecKey::Process(host.process_id.clone()),
+    );
+    let no_policy = |_: &str, _: &str| None;
+    let admissions = crate::RunAdmissions {
+        opener: lash_core::EffectOpener::process(host.process_id.clone()),
+        limit: crate::run_operation_limit(host.ctx.actor_context()),
+        policy: &no_policy,
+        host_state: &|| Ok(None),
+    };
     let run = crate::WorkerRun {
         service: workers,
         host,
@@ -599,6 +610,9 @@ async fn execute_lashlang(
         projected: lashlang::ProjectedBindings::new(),
         bounds,
         state: start,
+        from: None,
+        snapshots: &snapshots,
+        admissions: &admissions,
         boundary: &boundary,
         hand_over: None,
         providers: lashlang::ProjectionCatalog::of_backend(

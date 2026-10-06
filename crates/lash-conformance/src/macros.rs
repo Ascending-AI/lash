@@ -7,7 +7,6 @@ mod tool_batch;
 mod tool_call_identity;
 mod turn_ingress;
 mod turn_runner;
-mod vm_broker;
 
 /// Expansion machinery for the runtime-persistence registration macros.
 #[macro_export]

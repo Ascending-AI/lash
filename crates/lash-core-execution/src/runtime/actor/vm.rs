@@ -15,19 +15,30 @@ use super::ActorContext;
 
 /// The VM methods of the context.
 impl ActorContext {
-    /// The VM effects: `ExecCode` (a cell resumed from its snapshot) and
-    /// `LanguageRuntimeValue`. Any other command is refused.
+    /// The VM effects, run in place and recorded nowhere. A code cell
+    /// (`ExecCode`) is durable through its own snapshot: its executor resumes
+    /// it from `DurableSnapshotStore::latest` and admits each operation it
+    /// issues at a quiet point. A `LanguageRuntimeValue` is computed where it
+    /// is asked: a cell resumed from its snapshot never asks again for a value
+    /// its heap already holds. Any other command is refused.
     ///
     /// # Errors
     ///
-    /// The effect's refusal.
+    /// The effect's refusal, or the body's.
     pub async fn vm_effect(
         &self,
-        _envelope: crate::RuntimeEffectEnvelope,
-        _local: crate::RuntimeEffectLocalExecutor<'_>,
+        envelope: crate::RuntimeEffectEnvelope,
+        local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        todo!(
-            "L7 (FIG-5177): run a cell from its snapshot, admitting its operations at quiet points"
-        )
+        match &envelope.command {
+            crate::RuntimeEffectCommand::ExecCode { .. }
+            | crate::RuntimeEffectCommand::LanguageRuntimeValue { .. } => {
+                local.run_in_place(envelope).await
+            }
+            other => Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!("{:?} is not a VM effect", other.kind()),
+            )),
+        }
     }
 }

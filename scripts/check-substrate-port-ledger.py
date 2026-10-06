@@ -53,7 +53,7 @@ GATE_FILES = frozenset({
 
 TEST_ATTRIBUTE = re.compile(r"#\[(?:tokio::)?test\b")
 CLASSES = ("mechanical", "semantic", "delete", "replace")
-LANES = ("L1b", "L5", "L7p", "L9b", "L9c", "L9d", "L9e", "L9f", "L9g", "L9h", "L11", "L8", "L10a", "L10g", "I0", "L4")
+LANES = ("L1b", "L4", "L5", "L7", "L7p", "L9b", "L9c", "L9d", "L9e", "L9f", "L9g", "L9h", "L11", "L8", "L10a", "L10g", "I0")
 NEEDS = ("turn", "round", "wait", "process", "cell", "multinode")
 STATUSES = ("todo", "ported", "deleted")
 REQUIRED = ("path", "test", "area", "needs", "class", "lane", "laws", "disposition", "status")

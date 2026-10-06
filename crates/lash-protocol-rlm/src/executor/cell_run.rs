@@ -1,13 +1,10 @@
-//! The replay run of one code cell (FIG-3586): the identities it mints, its
-//! issue-ordinal mint and recorded frontier, and the seal it journals as its
-//! last nested effect.
+//! The run of one code cell (FIG-3586): the identities it mints and its
+//! issue-ordinal mint, and the execution its snapshot is filed under.
 //!
-//! A cell replays by re-execution (ADR 0103), so every nested effect it
-//! issues is served from the journal on a redrive only if the redrive reaches
-//! the same key. The key is the command's issue ordinal under the cell's own
-//! replay key — never the call site that issued it — and the run refuses,
-//! with zero dispatch, any command the journal does not hold where the
-//! redrive issued it.
+//! Every command the cell issues is keyed by its issue ordinal under the
+//! cell's own replay key, never the call site that issued it. A cell resumes
+//! from its snapshot (ADR 0132 §8), with the ordinals its last quiet point
+//! committed, and never runs its earlier code again.
 
 use lash_core::RuntimeExecutionContext;
 use lash_lashlang_runtime::{LashlangHostIdentities, LashlangReplayRun, LashlangRunOrdinals};
@@ -91,18 +88,6 @@ impl CellRun {
         })
     }
 
-    /// A retained cell owns its original namespace, even on a new physical turn.
-    pub(super) fn resume(state: &super::cell_segment::CellSegmentState) -> Self {
-        let identities =
-            LashlangHostIdentities::cell(state.cell_opener.clone(), state.cell_execution.clone());
-        let run = LashlangReplayRun::new(identities.namespace(), state.ordinals.clone());
-        Self {
-            identities,
-            run,
-            module_ref: std::sync::Mutex::new(None),
-        }
-    }
-
     pub(super) fn identities(&self) -> &LashlangHostIdentities {
         &self.identities
     }
@@ -125,21 +110,6 @@ impl CellRun {
             "vm_abi": lashlang::LASHLANG_VM_ABI_VERSION,
             "module_ref": self.module_ref.lock_recover().clone(),
         })
-    }
-
-    /// Journals the cell's seal as its last nested effect.
-    ///
-    /// Written whenever the executor returns a response — a setup failure
-    /// included — and never after a controller abort. A redrive of a
-    /// completed cell must meet the same seal, which refuses a run that ended
-    /// early, one that issued a different number of commands, and one that no
-    /// longer writes a command the journal holds as written.
-    pub(super) async fn seal(
-        &self,
-        ctx: &RuntimeExecutionContext<'_>,
-        cancellation: &lash_lashlang_runtime::ExecutionCancellation,
-    ) {
-        self.commands(ctx, cancellation).seal(self.producer()).await;
     }
 
     /// The command protocol for this run over `ctx`.
@@ -174,4 +144,57 @@ pub(super) fn setup_effect_error(
         ),
         Err(_) => error,
     }
+}
+
+/// The execution a cell's snapshot is filed under (ADR 0132 §8): its
+/// opener's run, and the replay key of the effect that runs it. A cell with
+/// no opener runs pure, under a key no other cell resumes.
+///
+/// # Errors
+///
+/// An opener whose run names no valid turn identity.
+pub(super) fn cell_exec(
+    ctx: &RuntimeExecutionContext<'_>,
+    cell: &Result<CellRun, LashlangCellOpener>,
+) -> Result<lash_vm_broker::ExecKey, String> {
+    let (opener, execution) = match cell {
+        Ok(cell) => (
+            cell.identities.opener().clone(),
+            cell.identities
+                .code()
+                .execution()
+                .ok_or_else(|| "the cell has no execution identity".to_owned())?
+                .to_owned(),
+        ),
+        Err(_) => (
+            lash_core::EffectOpener::for_scope(&ctx.admitted_scope())
+                .map_err(|error| error.to_string())?,
+            "pure-cell".to_owned(),
+        ),
+    };
+    let (session, run) = match opener {
+        lash_core::EffectOpener::Turn {
+            session_id,
+            turn_id,
+        } => (session_id, turn_id),
+        lash_core::EffectOpener::SessionOperation {
+            session_id,
+            operation_id,
+        } => (
+            session_id,
+            lash_core::TurnId::try_from(operation_id).map_err(|error| error.to_string())?,
+        ),
+        lash_core::EffectOpener::Process { process_id } => (
+            ctx.session_scope()
+                .map_err(|error| error.to_string())?
+                .session_id,
+            lash_core::TurnId::try_from(process_id.to_string())
+                .map_err(|error| error.to_string())?,
+        ),
+    };
+    Ok(lash_vm_broker::ExecKey::Cell(
+        session,
+        run,
+        lash_vm_broker::CellId::new(execution),
+    ))
 }

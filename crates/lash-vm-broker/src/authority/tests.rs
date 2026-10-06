@@ -90,7 +90,7 @@ fn every_unauthorised_request_is_refused_typed() {
 #[test]
 fn a_handle_is_honoured_only_in_the_frame_that_granted_it() {
     let grant = HandleGrant {
-        ordinal: 0,
+        run: 0,
         call_id: context().identities.call_id(0),
         frame_epoch: FrameEpoch(0),
     };

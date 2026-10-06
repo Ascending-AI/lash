@@ -117,11 +117,6 @@ impl<'run> HostBridge<'run> {
         }
     }
 
-    /// The context the cell's commands run under, for the ledgers it owns.
-    pub(super) fn ctx(&self) -> &RuntimeExecutionContext<'run> {
-        &self.ctx
-    }
-
     fn next_index(&self) -> usize {
         let mut guard = self.next_tool_index.lock_recover();
         let next = *guard;

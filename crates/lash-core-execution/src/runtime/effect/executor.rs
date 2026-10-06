@@ -940,6 +940,24 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self.replay_trace.as_ref()
     }
 
+    /// Run the effect's body in place, recording nothing: what a VM effect
+    /// does, whose durability is its execution's snapshot (ADR 0132 §8).
+    /// Boxed and erased, so a caller's future neither carries the body's size
+    /// nor its type.
+    pub(crate) fn run_in_place(
+        self,
+        envelope: RuntimeEffectEnvelope,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+                > + Send
+                + 'run,
+        >,
+    > {
+        Box::pin(self.run_body(envelope, None))
+    }
+
     async fn run_body(
         self,
         envelope: RuntimeEffectEnvelope,

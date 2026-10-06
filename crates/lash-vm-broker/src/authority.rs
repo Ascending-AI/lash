@@ -213,11 +213,12 @@ pub struct AdmittedContext {
 }
 
 /// A handle the parent granted when an operation it performed answered one:
-/// which command granted it, and the frame it is scoped to.
+/// which admission granted it, and the frame it is scoped to.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HandleGrant {
-    pub ordinal: u64,
+    /// The admission of the operation whose outcome granted it.
+    pub run: u64,
     pub call_id: ToolCallId,
     pub frame_epoch: FrameEpoch,
 }
@@ -252,13 +253,9 @@ pub enum AuthorityRefusal {
     #[error("handle `{handle}` belongs to a retired frame")]
     RetiredScope { handle: String },
     #[error(
-        "the request differs from the one retained under its call {call_id} (retained {retained}, requested {requested})"
+        "the run cannot be captured where it issued this request, so the request cannot be admitted durably: {reason}"
     )]
-    RetainedRequestDrift {
-        call_id: ToolCallId,
-        retained: String,
-        requested: String,
-    },
+    NotCapturable { reason: String },
 }
 
 impl AuthorityRefusal {
@@ -282,7 +279,7 @@ pub struct ResolvedCall {
 }
 
 /// A request resolved against the admitted context, before the parent gives
-/// it an ordinal.
+/// it an admission.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ResolvedRequest {
     Invoke(ResolvedCall),

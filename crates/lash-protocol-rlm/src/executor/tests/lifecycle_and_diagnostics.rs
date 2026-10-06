@@ -225,6 +225,19 @@ pub(super) async fn execute_with_projected(
             ))
         })
         .unwrap_or(lash_vm_protocol::StartState::Fresh);
+    // The witness reads projections and parks nowhere, so nothing commits.
+    let process_id = lash_sansio::ProcessId::fixture("projection-witness");
+    let cx = lash_core::ActorContext::unavailable();
+    let snapshots = lash_vm_broker::DurableSnapshotStore::new(
+        &cx,
+        lash_vm_broker::ExecKey::Process(process_id.clone()),
+    );
+    let admissions = lash_lashlang_runtime::RunAdmissions {
+        opener: lash_core::EffectOpener::process(process_id),
+        limit: lash_lashlang_runtime::run_operation_limit(&cx),
+        policy: &|_, _| None,
+        host_state: &|| Ok(None),
+    };
     let run = lash_lashlang_runtime::WorkerRun {
         service: &service,
         host: &NoopHost,
@@ -245,6 +258,9 @@ pub(super) async fn execute_with_projected(
             lashlang::ExecutionBound::Unbounded,
         ),
         state: snapshot,
+        from: None,
+        snapshots: &snapshots,
+        admissions: &admissions,
         boundary: &|| false,
         hand_over: None,
         providers: lashlang::testing::projection::test_catalog(),

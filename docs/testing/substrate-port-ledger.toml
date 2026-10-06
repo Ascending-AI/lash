@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1152 rows over 708 files, 3304 laws.
-# By class: mechanical 142, semantic 99, delete 596, replace 315.
-# By lane: L1b 11, L5 2, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49, L4 7.
-# By status: todo 491, ported 40, deleted 621.
+# 1177 rows over 713 files, 3329 laws.
+# By class: mechanical 142, semantic 99, delete 621, replace 315.
+# By lane: L1b 11, L4 7, L5 2, L7 25, L7p 8, L9b 66, L9c 241, L9d 70, L9e 91, L9f 124, L9g 64, L9h 102, L11 92, L8 26, L10a 184, L10g 15, I0 49.
+# By status: todo 491, ported 40, deleted 646.
 #
 # New laws owed (replace rows), by owning lane:
 # - L11: crates/lash-conformance/src/conformance/generation_drain.rs::in_flight_turns_follow_their_admitting_generation
@@ -18829,3 +18829,353 @@ laws = [
 disposition = "port"
 status = "ported"
 note = "L4 (FIG-5174) deleted the segment-holder laws (their own rows); the Deferred source law runs on the store alone"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "worker_kill_before_start_runs_no_effect"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "worker_kill_before_start_runs_no_effect",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::a_worker_lost_before_its_request_is_admitted_admits_and_runs_nothing"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "worker_kill_mid_compute_redrives_through_the_substrate"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "worker_kill_mid_compute_redrives_through_the_substrate",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::a_worker_lost_mid_compute_resumes_from_its_last_quiet_point_and_reruns_nothing"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "worker_kill_after_request_before_record_settles_the_admitted_operation_once"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "worker_kill_after_request_before_record_settles_the_admitted_operation_once",
+]
+disposition = "covered-by:crates/lash-vm-broker/tests/snapshot_matrix.rs::a_cell_resumes_from_its_quiet_points_at_every_cut_on_sqlite_memory"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "worker_kill_after_record_before_delivery_replays_with_zero_dispatch"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "worker_kill_after_record_before_delivery_replays_with_zero_dispatch",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::an_outcome_lost_in_delivery_is_injected_again_by_identity_not_redispatched"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "worker_kill_mid_serialization_keeps_the_last_checkpoint"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "worker_kill_mid_serialization_keeps_the_last_checkpoint",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::a_partial_frame_is_refused_and_the_last_checkpoint_stands"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "worker_kill_after_complete_before_commit_commits_once"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "worker_kill_after_complete_before_commit_commits_once",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::a_whole_complete_wins_over_the_end_that_follows_it"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "unauthorized_worker_effect_request_is_refused_without_invoking_a_tool"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "unauthorized_worker_effect_request_is_refused_without_invoking_a_tool",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/authority/tests.rs::every_unauthorised_request_is_refused_typed"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "stale_epoch_and_duplicate_worker_messages_are_refused"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "stale_epoch_and_duplicate_worker_messages_are_refused",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::stale_and_repeated_worker_messages_are_never_applied"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "a_refused_run_is_terminal_and_a_broken_exchange_is_redriven"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "a_refused_run_is_terminal_and_a_broken_exchange_is_redriven",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::a_worker_lost_mid_compute_resumes_from_its_last_quiet_point_and_reruns_nothing"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "cancellation_winner_is_the_journaled_checkpoint_across_worker_kill"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "cancellation_winner_is_the_journaled_checkpoint_across_worker_kill",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "L7 (FIG-5177): a cancel checkpoint is answered in place and recorded nowhere, so there is no journaled observation to win"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/frames.rs"
+test = "frame_open_retires_worker_state_and_old_globals_are_undefined"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "frame_open_retires_worker_state_and_old_globals_are_undefined",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::opening_a_frame_retires_the_old_frames_state"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "one_slot_nested_effect_does_not_deadlock"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "one_slot_nested_effect_does_not_deadlock",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::every_operation_commits_its_admission_with_a_snapshot_before_its_body_runs"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker conformance suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-vm-broker/src/broker/tests.rs"
+test = "a_declined_park_reissues_and_completes_for_every_operation_family"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "a_declined_park_reissues_and_completes_for_every_operation_family",
+]
+disposition = "replaced-by:crates/lash-vm-broker/src/broker/tests.rs::a_declined_park_refuses_the_operation_without_admitting_it"
+status = "deleted"
+note = "a declined park no longer completes in place: an operation without its snapshot is refused typed (NotCapturable)"
+
+[[row]]
+path = "crates/lash-vm-broker/src/broker/tests.rs"
+test = "a_drifted_request_is_refused_before_dispatch"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "a_drifted_request_is_refused_before_dispatch",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "retained requests are deleted: a restored operation is resolved again from its ledger entry and checked against its fingerprint"
+
+[[row]]
+path = "crates/lash-vm-broker/src/broker/tests.rs"
+test = "an_operation_unsettled_at_the_bound_is_parked_not_redispatched"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "an_operation_unsettled_at_the_bound_is_parked_not_redispatched",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the settle deadline is deleted: an admitted operation's outcome settles through the store, and restore folds it"
+
+[[row]]
+path = "crates/lash-vm-broker/src/broker/tests.rs"
+test = "an_oversized_journaled_effect_result_is_a_typed_run_limit"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "an_oversized_journaled_effect_result_is_a_typed_run_limit",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::an_oversized_effect_result_stays_recorded_and_is_a_typed_run_limit"
+status = "deleted"
+note = "L7 (FIG-5177) rewrote the broker's laws on quiet points: the journal-era law's subject is the law named"
+
+[[row]]
+path = "crates/lash-vm-broker/src/broker/tests.rs"
+test = "an_unobserved_stop_interrupts_and_a_journaled_one_cancels"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "an_unobserved_stop_interrupts_and_a_journaled_one_cancels",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::an_unobserved_stop_interrupts_and_an_observed_one_cancels"
+status = "deleted"
+note = "L7 (FIG-5177) rewrote the broker's laws on quiet points: the journal-era law's subject is the law named"
+
+[[row]]
+path = "crates/lash-vm-broker/src/broker/tests.rs"
+test = "a_run_awaiting_work_that_needs_a_worker_parks_releases_its_slot_and_resumes"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "a_run_awaiting_work_that_needs_a_worker_parks_releases_its_slot_and_resumes",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::every_operation_commits_its_admission_with_a_snapshot_before_its_body_runs"
+status = "deleted"
+note = "every parkable request parks and releases its slot now, not only work that needs a worker"
+
+[[row]]
+path = "crates/lash-vm-broker/src/broker/tests.rs"
+test = "a_run_completes_with_parent_issued_ordinals_and_commits_them_with_its_state"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "a_run_completes_with_parent_issued_ordinals_and_commits_them_with_its_state",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::every_operation_commits_its_admission_with_a_snapshot_before_its_body_runs"
+status = "deleted"
+note = "L7 (FIG-5177) rewrote the broker's laws on quiet points: the journal-era law's subject is the law named"
+
+[[row]]
+path = "crates/lash-vm-broker/src/broker/tests.rs"
+test = "a_worker_lost_after_its_request_settles_the_operation_before_failing_retryably"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "a_worker_lost_after_its_request_settles_the_operation_before_failing_retryably",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs::an_outcome_lost_in_delivery_is_injected_again_by_identity_not_redispatched"
+status = "deleted"
+note = "L7 (FIG-5177) rewrote the broker's laws on quiet points: the journal-era law's subject is the law named"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker.rs"
+test = "*"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "(no test functions) defines: codec, contract, bounds, limits, bindings, echo, ToolRun, Probe, Scenario, TierEffects, within_budget",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the journal-era worker-broker suite's fixtures, deleted with it by L7 (FIG-5177)"
+
+[[row]]
+path = "crates/lash-conformance/src/macros/vm_broker.rs"
+test = "*"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "lash_conformance::vm_broker_tests!",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "registered nowhere since the Restate double went (FIG-5190); L7 (FIG-5177) deleted it, and each law it named has its own row"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/laws.rs"
+test = "*"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "every law of the file, each with its own row and disposition",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-conformance/src/conformance/vm_broker/frames.rs"
+test = "*"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "every law of the file, each with its own row and disposition",
+]
+disposition = "covered-by:crates/lash-vm-broker/src/broker/tests.rs"
+status = "deleted"
+note = "L7 (FIG-5177) deleted the journal-era worker-broker suite: a worker's run resumes from its committed snapshot, never by redriving a journal"
+
+[[row]]
+path = "crates/lash-vm-broker/src/broker/tests.rs"
+test = "*"
+area = "vm-broker"
+needs = ["cell"]
+class = "delete"
+lane = "L7"
+laws = [
+  "the journal-era laws L7 rewrote on quiet points, each with its own row and disposition",
+]
+disposition = "covered-by:crates/lash-vm-broker/tests/snapshot_matrix.rs"
+status = "deleted"
+note = "L7 (FIG-5177) rewrote the broker's unit laws on quiet points; the file's other laws stay"

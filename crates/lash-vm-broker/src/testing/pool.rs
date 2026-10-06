@@ -19,6 +19,9 @@ pub struct PoolStats {
     pub discards: usize,
     /// Runs a worker started: a `Start` it accepted.
     pub starts: usize,
+    /// Program entries: starts from the program's first instruction (fresh,
+    /// or over a session snapshot), as opposed to resuming a continuation.
+    pub entries: usize,
     /// Workers that died, killed or crashed.
     pub deaths: usize,
     /// Workers that reached a step that computes forever.
@@ -31,13 +34,17 @@ pub struct PoolStats {
 #[derive(Default)]
 pub(super) struct PoolShared {
     starts: AtomicUsize,
+    entries: AtomicUsize,
     deaths: AtomicUsize,
     hung: AtomicUsize,
 }
 
 impl PoolShared {
-    pub(super) fn record_start(&self) {
+    pub(super) fn record_start(&self, entry: bool) {
         self.starts.fetch_add(1, Ordering::SeqCst);
+        if entry {
+            self.entries.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     pub(super) fn record_hang(&self) {
@@ -110,6 +117,7 @@ impl FakeWorkerPool {
             .stats
             .clone();
         stats.starts = self.shared.starts.load(Ordering::SeqCst);
+        stats.entries = self.shared.entries.load(Ordering::SeqCst);
         stats.deaths = self.shared.deaths.load(Ordering::SeqCst);
         stats.hung = self.shared.hung.load(Ordering::SeqCst);
         stats

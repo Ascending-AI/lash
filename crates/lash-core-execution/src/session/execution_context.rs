@@ -282,6 +282,12 @@ impl<'run> RuntimeExecutionContext<'run> {
         )
     }
 
+    /// The owned actor's context this execution runs under: what its VM
+    /// snapshots and their operations' admissions commit through.
+    pub fn actor_context(&self) -> &ActorContext {
+        &self.dispatch.effect_controller
+    }
+
     pub async fn journaled_language_runtime_value(
         &self,
         effect_id: String,

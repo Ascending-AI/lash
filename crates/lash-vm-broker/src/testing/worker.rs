@@ -248,7 +248,8 @@ impl FakeWorker {
                     self.die(SupervisorEvidence::Exited { code: 1 });
                     return;
                 }
-                self.shared.record_start();
+                self.shared
+                    .record_start(!matches!(start.state, StartState::Continuation(_)));
                 self.owner = Some(start.owner.clone());
                 self.program = ScriptedProgram::from_source(&start.program);
                 self.state = match start.state {

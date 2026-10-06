@@ -113,9 +113,8 @@ pub(super) fn process_worker_failure(
                 | CheckoutRefusal::RestartStorm
                 | CheckoutRefusal::Closed,
         }
-        | BrokerFailure::Interrupted { .. }
+        | BrokerFailure::Interrupted
         | BrokerFailure::FrameRetired
-        | BrokerFailure::RetainedRequestDrift { .. }
         | BrokerFailure::Parent { .. }
         | BrokerFailure::Checkpoint { .. } => return None,
     };

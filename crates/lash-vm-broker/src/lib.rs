@@ -1,22 +1,22 @@
 //! The parent side of lash's worker boundary (ADR 0123).
 //!
 //! Model code runs in a worker process that holds guest state only. The
-//! parent holds every grant, binding, route, ordinal and ledger, and brokers
+//! parent holds every grant, binding, route, admission and ledger, and brokers
 //! every effect the worker asks for. This crate is that broker:
 //!
 //! - [`authority`]: what a worker may request, resolved against the
 //!   parent's admitted context. Worker ids, bytes and claims confer nothing.
-//! - [`ledger`]: the parent-issued ordinals and grants of a run, and the
-//!   [`Checkpoint`](ledger::Checkpoint) that commits them atomically with the
-//!   VM state they match.
+//! - [`ledger`]: the parent-issued admissions and grants of an execution,
+//!   and the [`Checkpoint`](ledger::Checkpoint) that commits them atomically
+//!   with the VM state they match.
 //! - [`snapshot`]: quiet points, admitted operation identities and the
 //!   [`SnapshotStore`] a VM's snapshots commit to.
 //! - [`cell`]: a code cell run from its snapshot, its operations admitted
 //!   at quiet points.
 //! - [`identity`]: the one derivation of a code command's `ToolCallId`.
-//! - [`effects`]: the journaled parent work behind every admitted operation.
-//! - [`broker`]: the run loop, worker-loss recovery through the substrate,
-//!   terminal precedence, cancellation, frame fencing and slot release.
+//! - [`effects`]: the parent's admission and body behind every operation.
+//! - [`broker`]: the run loop, quiet points, restore by identity, terminal
+//!   precedence, cancellation, frame fencing and slot release.
 //! - [`session`]: an owner's frames: opening one (F5) fences old responses,
 //!   resets persisted state, then retires live state.
 //! - [`transport`]: the seams a worker pool implements.
@@ -42,20 +42,19 @@ pub use authority::{
     HandleGrant, Invocation, OperationRequest, OperationRequestCodec, RequestFingerprint,
     ToolRoute,
 };
-pub use broker::{
-    Broker, BrokerBounds, BrokerFailure, BrokeredEnd, FrameFence, ParkedOperation, RunStart,
-    SettledOperation, Settlement,
-};
-pub use effects::{ParentEffects, ParentFault, ParkedPerformed, Performed};
+pub use broker::{Broker, BrokerBounds, BrokerFailure, BrokeredEnd, FrameFence, RunStart};
+pub use effects::{Admission, ParentEffects, ParentFault, Performed, operation_draft, waits_only};
 pub use identity::CodeCallIdentities;
-pub use lash_durable::domain::SnapshotRev;
+pub use lash_core_execution::runtime::actor::round::ExecutionDraft;
+pub use lash_core_execution::runtime::actor::waits::{PinnedKey, WaitRef, WaitSpec};
+pub use lash_durable::domain::{CellId, ExecKey, SnapshotRev};
 pub use ledger::{
-    AdmittedCall, AdmittedKind, AdmittedOperation, Checkpoint, LedgerSnapshot, ParentLedger,
-    QuietPointRefusal,
+    AdmittedCall, AdmittedKind, AdmittedOperation, Checkpoint, ParentLedger, QuietPointRefusal,
+    RecordedEnd,
 };
 pub use session::VmSession;
 pub use snapshot::{
-    BrokerLedger, DurableSnapshotStore, InjectedOutcome, IssuedOperation, OperationId, QuietPoint,
-    SnapshotStore, StoredSnapshot, outcomes_to_inject,
+    BrokerLedger, Committed, DurableSnapshotStore, OperationId, PendingOperation, QuietPoint,
+    Recovered, SnapshotStore, outcomes_to_inject,
 };
 pub use transport::{CheckoutRefusal, WorkerCheckout, WorkerRead, WorkerSlots, WorkerTransport};

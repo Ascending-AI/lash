@@ -1,8 +1,8 @@
-//! Unit laws of the broker over the fake worker and an in-memory journal.
-//! The tier laws (lash-conformance `vm_broker`) state the same contracts over
-//! every engine's real journal.
+//! Unit laws of the broker over the fake worker and an in-memory snapshot
+//! store. The durable laws (`tests/snapshot_matrix.rs`) state the same
+//! contracts over the lash store, with a crash at every commit.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -18,36 +18,45 @@ use crate::authority::{
     OperationRequestCodec, ToolRoute, decode_value, encode_value,
 };
 use crate::identity::CodeCallIdentities;
-use crate::snapshot::SnapshotStore;
+use crate::snapshot::{OperationId, SnapshotStore};
 use crate::testing::{
     FAKE_VM_CONTRACT, FakeWorkerPool, Fault, MemoryCheckpoints, ScriptedProgram, Step,
+    operation_draft,
 };
 
-/// An in-memory journal: first write wins, and a recorded outcome is served
-/// on every later perform of the same command.
-#[derive(Default)]
-struct Journal {
-    outcomes: Mutex<BTreeMap<String, Performed>>,
-    retained: Mutex<BTreeMap<String, RequestFingerprint>>,
-    observations: Mutex<BTreeMap<u64, bool>>,
-    /// Every dispatch, by call id.
-    dispatches: Mutex<Vec<String>>,
+/// The parent: it admits every operation as a `Once` execution but the
+/// waits, and records each body it runs with how many quiet points had
+/// committed when it ran.
+struct Host {
+    context: AdmittedContext,
+    checkpoints: Arc<MemoryCheckpoints>,
+    /// Every body run, by command id, with the quiet points committed then.
+    dispatches: Mutex<Vec<(String, usize)>>,
     cancelled: AtomicBool,
-    /// Operations whose dispatch never ends.
-    stuck: BTreeSet<String>,
-    needs_worker: BTreeSet<String>,
+    /// Operations whose body leaves them open beyond the activation.
+    hand_over: Mutex<BTreeSet<String>>,
     /// Resolves as the runtime adapter does: every decodable request is the
     /// control envelope of its own bytes, whatever its family.
     envelopes: bool,
-    context: Option<AdmittedContext>,
 }
 
-impl Journal {
+impl Host {
     fn dispatches(&self) -> Vec<String> {
         self.dispatches
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+            .iter()
+            .map(|(call, _)| call.clone())
+            .collect()
+    }
+
+    fn commits_at_dispatch(&self) -> Vec<usize> {
+        self.dispatches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|(_, commits)| *commits)
+            .collect()
     }
 }
 
@@ -73,7 +82,7 @@ fn operation_name(operation: &AdmittedOperation) -> String {
 }
 
 #[async_trait::async_trait]
-impl ParentEffects for Journal {
+impl ParentEffects for Host {
     fn resolve(
         &self,
         context: &AdmittedContext,
@@ -97,69 +106,67 @@ impl ParentEffects for Journal {
         })
     }
 
-    async fn retain(
-        &self,
-        operation: &AdmittedOperation,
-    ) -> Result<RequestFingerprint, ParentFault> {
-        let key = format!("{}", operation.ordinal);
-        Ok(*self
-            .retained
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(key)
-            .or_insert(operation.fingerprint))
+    fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
+        let name = operation_name(operation);
+        let wait = matches!(name.as_str(), "await" | "sleep" | "control");
+        Ok(Admission {
+            draft: (!wait).then(|| {
+                operation_draft(
+                    &self.context,
+                    operation,
+                    &format!("tool:{name}"),
+                    lash_sansio::ExecutionPolicy::Once,
+                    0,
+                )
+            }),
+            waits: Vec::new(),
+        })
     }
 
-    async fn perform(&self, operation: &AdmittedOperation) -> Result<Performed, ParentFault> {
-        let key = format!("{}", operation.ordinal);
-        if let Some(recorded) = self
-            .outcomes
+    async fn perform(
+        &self,
+        operation: &AdmittedOperation,
+        _waits: &[(
+            lash_core_execution::runtime::actor::waits::WaitRef,
+            Option<lash_core_execution::runtime::actor::waits::PinnedKey>,
+        )],
+    ) -> Result<Performed, ParentFault> {
+        let name = operation_name(operation);
+        if self
+            .hand_over
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&key)
+            .contains(&name)
         {
-            return Ok(recorded.clone());
+            return Ok(Performed::outcome(EffectOutcome::HandedOver));
         }
-        let name = operation_name(operation);
-        for call_id in operation.call_ids() {
-            self.dispatches
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(call_id.to_string());
-        }
-        if self.stuck.contains(&name) {
-            std::future::pending::<()>().await;
-        }
-        let _ = &self.context;
+        self.dispatches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((
+                operation.command_id(&self.context).to_string(),
+                self.checkpoints.commits().len(),
+            ));
         // A spawn grants the handle its value names.
-        let granted = (name == "spawn").then(|| format!("handle-{}", operation.ordinal));
-        let performed = Performed {
+        let granted = (name == "spawn").then(|| format!("handle-{}", operation.run));
+        Ok(Performed {
             outcome: EffectOutcome::Value(encode_value(&serde_json::json!({
-                "ordinal": operation.ordinal,
+                "run": operation.run,
                 "calls": operation.call_ids().iter().map(ToString::to_string).collect::<Vec<_>>(),
                 "handle": granted,
             }))),
             granted,
-        };
-        self.outcomes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(key, performed.clone());
-        Ok(performed)
+        })
     }
 
-    async fn observe_cancellation(&self, checkpoint: u64) -> Result<bool, ParentFault> {
-        let live = self.cancelled.load(Ordering::SeqCst);
-        Ok(*self
-            .observations
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(checkpoint)
-            .or_insert(live))
+    fn interrupted(&self, operation: &AdmittedOperation) -> EffectOutcome {
+        EffectOutcome::Failed(encode_value(
+            &serde_json::json!({ "interrupted": operation.run }),
+        ))
     }
 
-    fn needs_worker(&self, operation: &AdmittedOperation) -> bool {
-        self.needs_worker.contains(&operation_name(operation))
+    async fn observe_cancellation(&self, _checkpoint: u64) -> Result<bool, ParentFault> {
+        Ok(self.cancelled.load(Ordering::SeqCst))
     }
 }
 
@@ -202,7 +209,6 @@ fn contract() -> lash_vm_protocol::VmContractReads {
 
 fn bounds() -> BrokerBounds {
     BrokerBounds {
-        settle_deadline: Duration::from_millis(200),
         cancel_grace: Duration::from_millis(50),
         ..BrokerBounds::standard()
     }
@@ -218,23 +224,34 @@ fn start(program: &ScriptedProgram) -> RunStart {
             max_frame_depth: 64,
         },
         from: None,
+        fresh: StartState::Fresh,
     }
 }
 
 struct Fixture {
-    context: AdmittedContext,
-    journal: Journal,
-    checkpoints: MemoryCheckpoints,
+    host: Host,
+    checkpoints: Arc<MemoryCheckpoints>,
     pool: FakeWorkerPool,
     frames: FrameFence,
 }
 
 impl Fixture {
     fn new(slots: usize) -> Self {
+        Self::with_envelopes(slots, false)
+    }
+
+    fn with_envelopes(slots: usize, envelopes: bool) -> Self {
+        let checkpoints = Arc::new(MemoryCheckpoints::default());
         Self {
-            context: context(),
-            journal: Journal::default(),
-            checkpoints: MemoryCheckpoints::default(),
+            host: Host {
+                context: context(),
+                checkpoints: Arc::clone(&checkpoints),
+                dispatches: Mutex::default(),
+                cancelled: AtomicBool::new(false),
+                hand_over: Mutex::default(),
+                envelopes,
+            },
+            checkpoints,
             pool: FakeWorkerPool::new(codec(), slots, Duration::from_millis(500)),
             frames: FrameFence::new(FrameEpoch(0)),
         }
@@ -242,9 +259,9 @@ impl Fixture {
 
     fn broker(&self) -> Broker<'_> {
         Broker {
-            context: &self.context,
-            effects: &self.journal,
-            checkpoints: &self.checkpoints,
+            context: &self.host.context,
+            effects: &self.host,
+            checkpoints: &*self.checkpoints,
             slots: &self.pool,
             codec: codec(),
             contract: contract(),
@@ -253,9 +270,23 @@ impl Fixture {
         }
     }
 
+    /// Runs `program` from the execution's latest snapshot, as an activation
+    /// that resumes it does.
     async fn run(&self, program: &ScriptedProgram) -> Result<BrokeredEnd, BrokerFailure> {
+        let from = self
+            .checkpoints
+            .latest()
+            .await
+            .expect("the store reads")
+            .map(|(_, checkpoint)| checkpoint);
         self.broker()
-            .run(start(program), &CancellationToken::new())
+            .run(
+                RunStart {
+                    from,
+                    ..start(program)
+                },
+                &CancellationToken::new(),
+            )
             .await
     }
 }
@@ -271,96 +302,207 @@ fn results(end: &BrokeredEnd) -> Vec<serde_json::Value> {
 }
 
 #[tokio::test]
-async fn a_run_completes_with_parent_issued_ordinals_and_commits_them_with_its_state() {
+async fn every_operation_commits_its_admission_with_a_snapshot_before_its_body_runs() {
     let fixture = Fixture::new(1);
     let program = ScriptedProgram::new(vec![echo(1), Step::Compute, echo(2)]);
     let end = fixture.run(&program).await.expect("the run completes");
     let results = results(&end);
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0]["ordinal"], 0);
-    assert_eq!(results[1]["ordinal"], 1);
+    assert_eq!(results[0]["run"], 0);
+    assert_eq!(results[1]["run"], 1);
     assert_eq!(
         results[0]["calls"][0],
-        fixture.context.identities.call_id(0).to_string(),
-        "the parent derives the call's identity from its ordinal"
+        fixture.host.context.identities.call_id(0).to_string(),
+        "the parent derives the call's identity from its admission"
+    );
+    assert_eq!(
+        fixture.host.commits_at_dispatch(),
+        vec![1, 2],
+        "each body ran after its own quiet point committed"
     );
     let commits = fixture.checkpoints.commits();
-    assert_eq!(commits.len(), 1, "one checkpoint, committed once");
     assert_eq!(
-        commits[0].ledger.next_ordinal, 2,
-        "the ledger matches the state it commits with"
+        commits.len(),
+        3,
+        "a quiet point per operation, then the end"
     );
-    assert_eq!(fixture.pool.stats().releases, 1);
+    for (run, point) in commits.iter().take(2).enumerate() {
+        let pending = point
+            .checkpoint
+            .ledger
+            .pending
+            .as_ref()
+            .expect("the VM stands on its operation");
+        assert_eq!(
+            pending.operation,
+            Some(OperationId {
+                run: run as u64,
+                ordinal: 1
+            }),
+            "the snapshot carries the identity its admission minted"
+        );
+        assert!(point.admit.is_some(), "the admission commits with it");
+    }
+    assert!(matches!(
+        commits[2].checkpoint.end,
+        Some(RecordedEnd::Complete { .. })
+    ));
+    assert_eq!(fixture.checkpoints.settled().len(), 2);
+    let stats = fixture.pool.stats();
+    assert_eq!(stats.entries, 1, "the program was entered once");
+    assert_eq!(stats.checkouts, 3, "each operation released its slot");
 }
 
 #[tokio::test]
-async fn a_worker_lost_after_its_request_settles_the_operation_before_failing_retryably() {
+async fn a_worker_lost_mid_compute_resumes_from_its_last_quiet_point_and_reruns_nothing() {
+    let fixture = Fixture::new(1);
+    fixture.pool.plan(None);
+    fixture.pool.plan(Some(Fault::DieMidCompute));
+    let program = ScriptedProgram::new(vec![echo(1), Step::Compute, echo(2)]);
+    let failure = fixture.run(&program).await.expect_err("the worker is lost");
+    assert!(failure.is_retryable(), "{failure:?}");
+    assert!(matches!(
+        failure,
+        BrokerFailure::WorkerLost {
+            outcome: InfrastructureOutcome::WorkerCrashed { .. }
+        }
+    ));
+    assert_eq!(fixture.host.dispatches().len(), 1);
+    let end = fixture
+        .run(&program)
+        .await
+        .expect("the resumed run completes");
+    assert_eq!(results(&end).len(), 2);
+    assert_eq!(
+        fixture.host.dispatches().len(),
+        2,
+        "the completed operation ran once"
+    );
+    assert_eq!(
+        fixture.pool.stats().entries,
+        1,
+        "the resume entered no program: it continued the snapshot"
+    );
+}
+
+#[tokio::test]
+async fn a_worker_lost_before_its_request_is_admitted_admits_and_runs_nothing() {
     let fixture = Fixture::new(1);
     fixture.pool.plan(Some(Fault::DieAfterRequest(0)));
     let program = ScriptedProgram::new(vec![echo(1)]);
     let failure = fixture.run(&program).await.expect_err("the worker is lost");
     assert!(failure.is_retryable());
-    let BrokerFailure::WorkerLost {
-        outcome,
-        settlement,
-    } = &failure
-    else {
-        panic!("a lost worker: {failure:?}");
-    };
-    assert!(matches!(
-        outcome,
-        InfrastructureOutcome::WorkerCrashed { .. }
-    ));
-    assert_eq!(
-        settlement.settled.len(),
-        1,
-        "the admitted operation settled"
-    );
-    assert_eq!(fixture.journal.dispatches().len(), 1);
-    assert_eq!(fixture.pool.stats().discards, 1);
-    // The substrate redrives: the recorded operation is served, not run.
-    let end = fixture.run(&program).await.expect("the redrive completes");
+    assert!(fixture.checkpoints.commits().is_empty(), "nothing admitted");
+    assert!(fixture.host.dispatches().is_empty(), "nothing dispatched");
+    let end = fixture.run(&program).await.expect("the rerun completes");
     assert_eq!(results(&end).len(), 1);
+    assert_eq!(fixture.host.dispatches().len(), 1);
+}
+
+#[tokio::test]
+async fn an_outcome_lost_in_delivery_is_injected_again_by_identity_not_redispatched() {
+    let fixture = Fixture::new(1);
+    fixture.pool.plan(None);
+    fixture.pool.plan(Some(Fault::DieBeforeDelivery(0)));
+    let program = ScriptedProgram::new(vec![echo(1), echo(2)]);
+    fixture
+        .run(&program)
+        .await
+        .expect_err("the worker dies as the outcome arrives");
+    assert_eq!(fixture.host.dispatches().len(), 1);
+    let end = fixture
+        .run(&program)
+        .await
+        .expect("the resumed run completes");
+    let results = results(&end);
+    assert_eq!(results[0]["run"], 0, "the saved outcome was fed back");
     assert_eq!(
-        fixture.journal.dispatches().len(),
-        1,
-        "no recorded effect re-executes"
+        fixture.host.dispatches().len(),
+        2,
+        "the first operation was never dispatched again"
     );
 }
 
 #[tokio::test]
-async fn an_operation_unsettled_at_the_bound_is_parked_not_redispatched() {
-    let mut fixture = Fixture::new(1);
-    fixture.journal.stuck = ["echo".to_string()].into();
-    fixture.pool.plan(Some(Fault::DieAfterRequest(0)));
-    let failure = fixture
-        .run(&ScriptedProgram::new(vec![echo(1)]))
+async fn a_restored_end_answers_without_starting_the_vm() {
+    let fixture = Fixture::new(1);
+    let program = ScriptedProgram::new(vec![echo(1)]);
+    let first = fixture.run(&program).await.expect("the run completes");
+    let starts = fixture.pool.stats().starts;
+    let again = fixture.run(&program).await.expect("the end is answered");
+    assert_eq!(results(&again), results(&first));
+    assert_eq!(fixture.pool.stats().starts, starts, "no worker started");
+    assert_eq!(fixture.host.dispatches().len(), 1);
+}
+
+#[tokio::test]
+async fn an_operation_handed_over_suspends_on_its_quiet_point_and_runs_again_on_restore() {
+    let fixture = Fixture::new(1);
+    fixture
+        .host
+        .hand_over
+        .lock()
+        .expect("hand-over set")
+        .insert("sleep".into());
+    let program = ScriptedProgram::new(vec![Step::Sleep(5), echo(1)]);
+    let end = fixture.run(&program).await.expect("the run suspends");
+    let BrokeredEnd::Suspended { checkpoint } = end else {
+        panic!("suspended: {end:?}");
+    };
+    let pending = checkpoint
+        .ledger
+        .pending
+        .expect("the VM stands on the sleep");
+    assert_eq!(
+        pending.operation, None,
+        "a wait is admitted as no execution"
+    );
+    fixture
+        .host
+        .hand_over
+        .lock()
+        .expect("hand-over set")
+        .clear();
+    let end = fixture
+        .run(&program)
         .await
-        .expect_err("the worker is lost");
-    let settlement = failure.settlement().expect("a settlement");
-    assert!(settlement.settled.is_empty());
-    assert_eq!(
-        settlement.parked.len(),
-        1,
-        "the unsettled operation is parked"
-    );
-    assert_eq!(
-        settlement.parked[0].call_ids,
-        vec![fixture.context.identities.call_id(0)],
-        "addressable by the identity it was admitted under"
-    );
+        .expect("the resumed run completes");
+    assert_eq!(results(&end).len(), 2);
+    assert_eq!(fixture.pool.stats().entries, 1);
 }
 
 #[tokio::test]
 async fn a_whole_complete_wins_over_the_end_that_follows_it() {
     let fixture = Fixture::new(1);
+    fixture.pool.plan(None);
     fixture.pool.plan(Some(Fault::DieAfterComplete));
     let end = fixture
         .run(&ScriptedProgram::new(vec![echo(1)]))
         .await
         .expect("the complete wins");
     assert!(matches!(end, BrokeredEnd::Complete { .. }));
-    assert_eq!(fixture.checkpoints.commits().len(), 1, "committed once");
+    assert_eq!(fixture.checkpoints.commits().len(), 2, "committed once");
+}
+
+#[tokio::test]
+async fn an_effect_free_run_commits_nothing_and_runs_again_from_its_start() {
+    let fixture = Fixture::new(1);
+    let program = ScriptedProgram::new(vec![Step::Compute]);
+    let end = fixture.run(&program).await.expect("the run completes");
+    assert!(matches!(end, BrokeredEnd::Complete { .. }));
+    assert!(
+        fixture.checkpoints.commits().is_empty(),
+        "no snapshot, so no end over it"
+    );
+    fixture
+        .run(&program)
+        .await
+        .expect("the run completes again");
+    assert_eq!(
+        fixture.pool.stats().entries,
+        2,
+        "the effect-free stretch runs again from its start"
+    );
 }
 
 #[tokio::test]
@@ -370,30 +512,35 @@ async fn a_partial_frame_is_refused_and_the_last_checkpoint_stands() {
     let BrokeredEnd::Suspended { checkpoint } = fixture.run(&program).await.expect("parks") else {
         panic!("the run parks at its boundary");
     };
+    let committed = fixture.checkpoints.commits().len();
     fixture.pool.plan(Some(Fault::DieMidSerialization));
-    let resumed = RunStart {
-        from: Some(checkpoint.clone()),
-        ..start(&program)
-    };
     let failure = fixture
-        .broker()
-        .run(resumed.clone(), &CancellationToken::new())
+        .run(&program)
         .await
         .expect_err("the cut-off frame loses the worker");
     assert!(failure.is_retryable());
+    let commits = fixture.checkpoints.commits();
     assert_eq!(
-        fixture.checkpoints.commits(),
-        vec![checkpoint],
-        "nothing is committed from a partial frame"
+        commits.len(),
+        committed,
+        "nothing committed from a partial frame"
+    );
+    assert_eq!(
+        fixture
+            .checkpoints
+            .latest()
+            .await
+            .expect("reads")
+            .map(|(_, c)| c),
+        Some(checkpoint)
     );
     let end = fixture
-        .broker()
-        .run(resumed, &CancellationToken::new())
+        .run(&program)
         .await
-        .expect("the redrive from the last checkpoint completes");
+        .expect("the resume from the last checkpoint completes");
     assert_eq!(results(&end).len(), 2);
     assert_eq!(
-        fixture.journal.dispatches().len(),
+        fixture.host.dispatches().len(),
         2,
         "each operation ran once"
     );
@@ -418,63 +565,27 @@ async fn stale_and_repeated_worker_messages_are_never_applied() {
                 failure,
                 BrokerFailure::WorkerLost {
                     outcome: InfrastructureOutcome::ProtocolViolation { .. },
-                    ..
                 }
             ),
             "{fault:?}: {failure:?}"
         );
         assert!(
-            fixture.journal.dispatches().len() <= 1,
+            fixture.host.dispatches().is_empty(),
             "{fault:?}: a refused message dispatches nothing"
         );
     }
 }
 
+/// A run that cannot be captured where it issues an operation has no
+/// snapshot to admit it with: the operation is refused to the guest, typed,
+/// whatever its family, and nothing is admitted or dispatched for it.
 #[tokio::test]
-async fn a_run_awaiting_work_that_needs_a_worker_parks_releases_its_slot_and_resumes() {
-    let mut fixture = Fixture::new(1);
-    fixture.journal.needs_worker = ["compile".to_string()].into();
-    let program = ScriptedProgram::new(vec![
-        echo(1),
-        Step::Invoke(Invocation {
-            binding: "tools".into(),
-            operation: "compile".into(),
-            arguments: serde_json::json!({ "source": "x" }),
-        }),
-        echo(3),
-    ]);
-    let end = fixture.run(&program).await.expect("the run completes");
-    assert_eq!(results(&end).len(), 3);
-    let stats = fixture.pool.stats();
-    assert_eq!(stats.max_active, 1);
-    assert_eq!(
-        stats.checkouts, 2,
-        "the run parked and resumed on a worker again"
-    );
-    assert_eq!(
-        fixture.journal.dispatches().len(),
-        3,
-        "the parked operation ran once"
-    );
-}
-
-/// A declined park reissues and completes whatever the request's family and
-/// however the parent resolves it (FIG-4706): the reissued request is
-/// resolved as admission resolved it, by the configured resolver over the
-/// ledger's grants, so a granted await and the runtime adapter's envelopes
-/// are recognised as the requests they were admitted from.
-#[tokio::test]
-async fn a_declined_park_reissues_and_completes_for_every_operation_family() {
+async fn a_declined_park_refuses_the_operation_without_admitting_it() {
     let compile = || Invocation {
         binding: "tools".into(),
         operation: "compile".into(),
         arguments: serde_json::json!({ "source": "x" }),
     };
-    let spawn = Step::Invoke(Invocation {
-        binding: "tools".into(),
-        operation: "spawn".into(),
-        arguments: serde_json::json!({ "value": 0 }),
-    });
     let wait_signal = Step::Raw {
         kind: EffectKind::WaitSignal,
         payload: OperationRequest::WaitSignal {
@@ -484,62 +595,41 @@ async fn a_declined_park_reissues_and_completes_for_every_operation_family() {
         .encode()
         .0,
     };
-    // Each family's program: the spawn that grants the awaited handle is
-    // never parked on, and the family's own request always is.
     let families = [
-        ("resource operation", vec![Step::Invoke(compile())]),
+        ("resource operation", Step::Invoke(compile())),
         (
             "resource operation batch",
-            vec![Step::Aggregate(vec![compile(), compile()])],
+            Step::Aggregate(vec![compile(), compile()]),
         ),
-        ("await", vec![spawn, Step::AwaitHandleOf { from: 0 }]),
-        ("sleep", vec![Step::Sleep(5)]),
-        ("signal wait", vec![wait_signal]),
+        ("sleep", Step::Sleep(5)),
+        ("signal wait", wait_signal),
     ];
-    let mut lost = Vec::new();
     for envelopes in [false, true] {
-        for (family, steps) in &families {
+        for (family, step) in &families {
             let case = format!("{family}, envelopes: {envelopes}");
-            let mut fixture = Fixture::new(2);
-            fixture.journal.envelopes = envelopes;
-            fixture.journal.needs_worker = ["compile", "aggregate", "await", "sleep", "control"]
-                .map(str::to_string)
-                .into();
+            let fixture = Fixture::with_envelopes(1, envelopes);
             fixture.pool.plan(Some(Fault::DeclinePark));
-            let mut steps = steps.clone();
-            steps.push(echo(9));
-            let program = ScriptedProgram::new(steps);
-            let end = match fixture.run(&program).await {
-                Ok(end) => end,
-                Err(failure) => {
-                    lost.push(format!("{case}: {failure}"));
-                    continue;
-                }
-            };
+            let end = fixture
+                .run(&ScriptedProgram::new(vec![step.clone()]))
+                .await
+                .unwrap_or_else(|failure| panic!("{case}: {failure}"));
             let results = results(&end);
-            assert_eq!(results.len(), program.steps.len(), "{case}");
-            assert!(
-                results.iter().all(|result| result.get("failed").is_none()),
-                "{case}: no request was refused: {results:?}"
-            );
-            let stats = fixture.pool.stats();
             assert_eq!(
-                stats.checkouts, 1,
-                "{case}: a declined park keeps its worker"
+                results[0]["failed"]["refusal"]["refusal"], "not_capturable",
+                "{case}: {results:?}"
             );
-            assert_eq!(stats.discards, 0, "{case}");
-            // The reissued request took no ordinal of its own: each step was
-            // answered by the one operation admitted for it.
-            for (ordinal, result) in results.iter().enumerate() {
-                assert_eq!(result["ordinal"], ordinal, "{case}: {results:?}");
-            }
+            assert!(fixture.host.dispatches().is_empty(), "{case}");
+            assert!(
+                fixture.checkpoints.commits().is_empty(),
+                "{case}: nothing admitted, so no snapshot and no end over one"
+            );
+            assert_eq!(fixture.pool.stats().checkouts, 1, "{case}");
         }
     }
-    assert!(lost.is_empty(), "every run completes: {lost:#?}");
 }
 
 #[tokio::test]
-async fn an_unobserved_stop_interrupts_and_a_journaled_one_cancels() {
+async fn an_unobserved_stop_interrupts_and_an_observed_one_cancels() {
     let fixture = Fixture::new(1);
     let stop = CancellationToken::new();
     stop.cancel();
@@ -547,48 +637,19 @@ async fn an_unobserved_stop_interrupts_and_a_journaled_one_cancels() {
         .broker()
         .run(start(&ScriptedProgram::new(vec![Step::Hang])), &stop)
         .await
-        .expect_err("a stop the journal never observed decides nothing");
-    assert!(
-        matches!(failure, BrokerFailure::Interrupted { .. }),
-        "{failure:?}"
-    );
-    fixture.journal.cancelled.store(true, Ordering::SeqCst);
+        .expect_err("a stop the parent never observed decides nothing");
+    assert!(matches!(failure, BrokerFailure::Interrupted), "{failure:?}");
+    fixture.host.cancelled.store(true, Ordering::SeqCst);
     let end = fixture
-        .run(&ScriptedProgram::new(vec![Step::Checkpoint(1), echo(1)]))
+        .broker()
+        .run(
+            start(&ScriptedProgram::new(vec![Step::Checkpoint(1), echo(1)])),
+            &CancellationToken::new(),
+        )
         .await
-        .expect("the journaled observation decides");
+        .expect("the observation decides");
     assert_eq!(end, BrokeredEnd::Cancelled);
-    assert!(fixture.journal.dispatches().is_empty());
-}
-
-#[tokio::test]
-async fn a_drifted_request_is_refused_before_dispatch() {
-    let fixture = Fixture::new(1);
-    fixture
-        .run(&ScriptedProgram::new(vec![echo(1)]))
-        .await
-        .expect("the first run completes");
-    // Same ordinal, other content: the redrive's request drifted.
-    fixture
-        .journal
-        .outcomes
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clear();
-    let failure = fixture
-        .run(&ScriptedProgram::new(vec![echo(2)]))
-        .await
-        .expect_err("the drifted request is refused");
-    assert!(matches!(
-        failure,
-        BrokerFailure::RetainedRequestDrift { .. }
-    ));
-    assert!(!failure.is_retryable());
-    assert_eq!(
-        fixture.journal.dispatches().len(),
-        1,
-        "the drifted request dispatched nothing"
-    );
+    assert!(fixture.host.dispatches().is_empty());
 }
 
 #[tokio::test]
@@ -608,7 +669,7 @@ async fn opening_a_frame_retires_the_old_frames_state() {
         .await
         .expect("the first frame's run completes");
     session
-        .open_frame(FrameEpoch(1), &fixture.checkpoints, Duration::from_secs(1))
+        .open_frame(FrameEpoch(1), &*fixture.checkpoints, Duration::from_secs(1))
         .await
         .expect("the frame opens");
     assert_eq!(fixture.checkpoints.latest().await.expect("reads"), None);
@@ -617,73 +678,77 @@ async fn opening_a_frame_retires_the_old_frames_state() {
         name: "planted".into(),
     }]);
     let end = broker
-        .run(
-            RunStart {
-                from: fixture
-                    .checkpoints
-                    .latest()
-                    .await
-                    .expect("reads")
-                    .map(|(_, checkpoint)| checkpoint),
-                ..start(&read)
-            },
-            &CancellationToken::new(),
-        )
+        .run(start(&read), &CancellationToken::new())
         .await
         .expect("the new frame's run completes");
     assert_eq!(results(&end), vec![serde_json::json!("undefined")]);
 }
 
 #[tokio::test]
-async fn an_oversized_journaled_effect_result_is_a_typed_run_limit() {
-    for needs_worker in [false, true] {
-        for failed in [false, true] {
-            let mut fixture = Fixture::new(1);
-            if needs_worker {
-                fixture.journal.needs_worker.insert("echo".into());
-            }
-            let payload = encode_value(&serde_json::json!("x".repeat(1024)));
-            let size = payload.0.len() as u64;
-            let outcome = if failed {
-                EffectOutcome::Failed(payload)
-            } else {
-                EffectOutcome::Value(payload)
-            };
-            fixture
-                .journal
-                .outcomes
-                .lock()
-                .expect("journal")
-                .insert("0".into(), Performed::outcome(outcome));
-            let mut broker = fixture.broker();
-            broker.bounds.protocol.max_effect_value_bytes = 512;
-            let failure = broker
-                .run(
-                    start(&ScriptedProgram::new(vec![echo(1)])),
-                    &CancellationToken::new(),
-                )
-                .await
-                .expect_err("an oversized result ends the run");
-            assert!(!failure.is_retryable());
-            let BrokerFailure::WorkerLost {
-                outcome,
-                settlement,
-            } = failure
-            else {
-                panic!("typed run limit")
-            };
-            assert_eq!(
-                serde_json::to_value(&outcome).expect("cause"),
-                serde_json::json!({
-                    "worker_limit_exceeded": { "limit": { "effect_value": { "size": size, "bound": 512 } } }
-                })
-            );
-            assert_eq!(settlement.settled.len(), 1, "the effect stays journaled");
-            assert_eq!(fixture.journal.outcomes.lock().expect("journal").len(), 1);
-            assert!(
-                fixture.journal.dispatches().is_empty(),
-                "the recorded effect was not dispatched again"
-            );
+async fn an_oversized_effect_result_stays_recorded_and_is_a_typed_run_limit() {
+    for failed in [false, true] {
+        let fixture = Fixture::new(1);
+        let payload = encode_value(&serde_json::json!("x".repeat(1024)));
+        let size = payload.0.len() as u64;
+        let outcome = if failed {
+            EffectOutcome::Failed(payload)
+        } else {
+            EffectOutcome::Value(payload)
+        };
+        struct Oversized<'a> {
+            host: &'a Host,
+            outcome: EffectOutcome,
         }
+        #[async_trait::async_trait]
+        impl ParentEffects for Oversized<'_> {
+            fn admission(&self, operation: &AdmittedOperation) -> Result<Admission, ParentFault> {
+                self.host.admission(operation)
+            }
+            async fn perform(
+                &self,
+                _operation: &AdmittedOperation,
+                _waits: &[(
+                    lash_core_execution::runtime::actor::waits::WaitRef,
+                    Option<lash_core_execution::runtime::actor::waits::PinnedKey>,
+                )],
+            ) -> Result<Performed, ParentFault> {
+                Ok(Performed::outcome(self.outcome.clone()))
+            }
+            fn interrupted(&self, operation: &AdmittedOperation) -> EffectOutcome {
+                self.host.interrupted(operation)
+            }
+            async fn observe_cancellation(&self, _checkpoint: u64) -> Result<bool, ParentFault> {
+                Ok(false)
+            }
+        }
+        let effects = Oversized {
+            host: &fixture.host,
+            outcome,
+        };
+        let mut broker = fixture.broker();
+        broker.effects = &effects;
+        broker.bounds.protocol.max_effect_value_bytes = 512;
+        let failure = broker
+            .run(
+                start(&ScriptedProgram::new(vec![echo(1)])),
+                &CancellationToken::new(),
+            )
+            .await
+            .expect_err("an oversized result ends the run");
+        assert!(!failure.is_retryable());
+        let BrokerFailure::WorkerLost { outcome } = failure else {
+            panic!("typed run limit")
+        };
+        assert_eq!(
+            serde_json::to_value(&outcome).expect("cause"),
+            serde_json::json!({
+                "worker_limit_exceeded": { "limit": { "effect_value": { "size": size, "bound": 512 } } }
+            })
+        );
+        assert_eq!(
+            fixture.checkpoints.settled().len(),
+            1,
+            "the outcome stays recorded"
+        );
     }
 }

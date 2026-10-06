@@ -320,7 +320,6 @@ fn version_26_root_encodes_to_golden_bytes() {
         globals,
         deferred_trigger_resolutions:
             lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
-        suspended_cell: None,
     };
 
     let encoded = rmp_serde::to_vec_named(&root).expect("encode the golden root");

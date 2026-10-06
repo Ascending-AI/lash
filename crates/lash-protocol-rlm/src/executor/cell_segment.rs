@@ -1,17 +1,14 @@
-//! The state of a code cell stopped at a segment boundary inside it
-//! (FIG-4739).
+//! A code cell's envelope: the host's half of its snapshot (ADR 0132 §8).
 //!
-//! A Run on a draining build hands over at its next quiet point, and a cell
-//! parked on a durable wait is one: the worker has already captured the VM
-//! there and released its slot (FIG-4159). The cell's parent then holds the
-//! rest of the cell in ledgers, and this envelope carries every one of them
-//! to the segment that resumes the cell, so the resumed cell issues the wait
-//! it stopped on again and runs on as if it had never stopped.
+//! Every quiet point of a cell commits the VM's state with the broker ledger
+//! that matches it, and this envelope beside them as the checkpoint's host
+//! state. The cell's parent holds the rest of the cell in ledgers, and the
+//! envelope carries every one of them to the activation that resumes the
+//! cell from that snapshot, so the resumed cell issues the operation it
+//! stopped on again and runs on as if it had never stopped.
 //!
-//! What a process segment hands over, a cell hands over too: the VM
-//! continuation, the command ordinals and the started children. The kernel's
-//! Run continuation carries the opener's incorporation ledger and held groups.
-//! A cell owns more than a process body does, and all of it is plain data:
+//! The envelope holds the command ordinals and the started children. A cell
+//! owns more than a process body does, and all of it is plain data:
 //! its prints and printed images,
 //! the calls it made, the tool calls it counts against `max_tool_calls`, and
 //! everything it linked against, which its journal recorded before its first
@@ -36,22 +33,17 @@ const LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-rlm-cell-segment-c
 #[serde(transparent)]
 pub(super) struct RecordedPrint(#[serde(with = "lashlang::effect_value")] pub lashlang::Value);
 
-/// A cell stopped at a segment boundary, as its successor segment resumes it.
+/// A cell's envelope at a quiet point, as the activation that resumes the
+/// cell reads it.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CellSegmentState {
-    /// The logical Run that owns this continuation across physical segments.
-    pub owner: lash_core_worker::TurnAddress,
-    /// The digest of the cell's source, checked after Run ownership.
+    /// The digest of the cell's source: a snapshot under the cell's
+    /// execution holds this source's state.
     pub code: String,
-    /// The worker's continuation, opaque to the parent (ADR 0123).
-    pub vm: lash_vm_protocol::OpaqueVmState,
     /// The run's issue-ordinal state. The command the cell stopped on has
     /// returned its ordinal, so the resumed cell issues it under the same key.
     pub ordinals: lash_lashlang_runtime::LashlangRunOrdinals,
-    /// Native call identities keep the admitting cell across physical turns.
-    pub cell_opener: lash_core::EffectOpener,
-    pub cell_execution: String,
     /// The session's projected bindings as the cell recorded them.
     pub projected_bindings: BTreeMap<String, crate::projection::bindings::RecordedProjection>,
     /// The host environment the cell linked against.
@@ -77,19 +69,82 @@ impl CellSegmentState {
         rmp_serde::to_vec_named(self).map_err(|error| error.to_string())
     }
 
-    /// Another Run or another cell starts fresh, even with identical source.
-    pub(super) fn decode_for(
-        bytes: &[u8],
-        owner: Option<&lash_core_worker::TurnAddress>,
-        code: &str,
-    ) -> Result<Option<Self>, String> {
+    /// The envelope of a snapshot of the cell running `code`: a snapshot
+    /// under the cell's execution of other source is refused.
+    fn decode_for(bytes: &[u8], code: &str) -> Result<Self, String> {
         let state: Self = rmp_serde::from_slice(bytes).map_err(|error| error.to_string())?;
-        Ok((owner == Some(&state.owner) && state.code == Self::code_digest(code)).then_some(state))
+        if state.code != Self::code_digest(code) {
+            return Err("the snapshot under this cell's execution holds other source".to_owned());
+        }
+        Ok(state)
+    }
+
+    /// The envelope of `cell` now: what its parent holds of it at a quiet
+    /// point.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn at_quiet_point(
+        ctx: &RuntimeExecutionContext<'_>,
+        cell: &super::cell_run::CellRun,
+        host: &super::host_bridge::HostBridge<'_>,
+        code: &str,
+        linked: (
+            BTreeMap<String, crate::projection::bindings::RecordedProjection>,
+            lash_lashlang_runtime::RecordedCellToolBindings,
+            lashlang::LashlangHostEnvironment,
+        ),
+        deferred_execution_grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
+        prints: &std::sync::Mutex<Vec<lashlang::Value>>,
+    ) -> Self {
+        let (projected_bindings, cell_bindings, host_environment) = linked;
+        Self {
+            code: Self::code_digest(code),
+            ordinals: cell.ordinals(),
+            projected_bindings,
+            host_environment,
+            cell_bindings,
+            deferred_execution_grants,
+            prints: prints
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .cloned()
+                .map(RecordedPrint)
+                .collect(),
+            host: host.ledgers(),
+            started_process_ids: ctx.started_process_ids(),
+        }
     }
 
     /// The parent ledgers of `ctx` a boundary hands over.
     pub(super) fn restore_context(&self, ctx: &RuntimeExecutionContext<'_>) {
         ctx.restore_started_process_ids(&self.started_process_ids);
+    }
+}
+
+/// A cell resumed from its latest snapshot: the checkpoint the broker runs
+/// on from, and the envelope its host runs on with.
+pub(super) struct ResumedCell {
+    pub from: lash_vm_broker::Checkpoint,
+    pub envelope: CellSegmentState,
+}
+
+impl ResumedCell {
+    /// The cell running `code` as its latest snapshot holds it, if it has
+    /// one.
+    pub(super) async fn latest(
+        snapshots: &lash_vm_broker::DurableSnapshotStore,
+        code: &str,
+    ) -> Result<Option<Self>, String> {
+        use lash_vm_broker::SnapshotStore as _;
+        let Some((_, from)) = snapshots.latest().await.map_err(|refusal| refusal.0)? else {
+            return Ok(None);
+        };
+        let host = from
+            .host
+            .as_ref()
+            .ok_or_else(|| "the cell's snapshot has no envelope".to_owned())?;
+        let envelope = CellSegmentState::decode_for(&host.0, code)?;
+        Ok(Some(Self { from, envelope }))
     }
 }
 

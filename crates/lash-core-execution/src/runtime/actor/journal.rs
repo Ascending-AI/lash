@@ -3,8 +3,11 @@
 //! token, the shift's journal frontier and the effect count.
 //!
 //! None of it is a substrate seam. L4 (FIG-5174) deletes the owner-step
-//! token and the frontier with the run coordinator's journal, and L7
-//! (FIG-5177) deletes the command guard with language-command replay.
+//! token and the frontier with the run coordinator's journal. The command
+//! guard goes with the commands' issue path: a cell already resumes from its
+//! snapshot (L7, FIG-5177), and its operations become their tools' own
+//! admitted executions with L4; a process resumes from its snapshot with
+//! L7b (FIG-5198).
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;

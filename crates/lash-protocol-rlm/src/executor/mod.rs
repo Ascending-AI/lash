@@ -65,44 +65,65 @@ async fn execute_owned_code(
     code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
     let clean_code = clean_model_code(&request.code);
-    // A cell a segment boundary stopped inside is resumed by the next
-    // execution of the same cell by its owning Run: the Run's successor segment
-    // restored the turn at the effect that ran it, and issues it again.
-    let resumed = match state.suspended_cell().map(|bytes| {
-        cell_segment::CellSegmentState::decode_for(bytes, ctx.logical_run(), &clean_code)
-    }) {
-        Some(Ok(resumed)) => resumed,
-        Some(Err(error)) => {
-            let mut response = exec_setup_failure(lash_core::CellFailure::new(
+    // The cell's run (FIG-3586): every command it issues is keyed by its
+    // issue ordinal under the cell's own replay key. A cell is durable through
+    // its snapshot (ADR 0132 §8): one with a committed snapshot under its
+    // execution resumes from it, with the envelope its last quiet point
+    // committed, and never runs its earlier code again.
+    let opened = cell_run::CellRun::open(&ctx);
+    let exec = match cell_run::cell_exec(&ctx, &opened) {
+        Ok(exec) => exec,
+        Err(error) => {
+            return exec_setup_failure(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Host,
-                format!("the suspended cell cannot be resumed: {error}"),
+                format!("the cell has no execution to file its snapshot under: {error}"),
             ));
-            fail_cell_on_nested_error(
-                &ctx,
-                &mut response,
-                lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
-                    format!("the suspended cell cannot be resumed: {error}"),
-                ),
-            );
-            return response;
         }
-        None => None,
     };
-    // The cell's replay run (FIG-3586): every command it issues is keyed by
-    // its issue ordinal under the cell's own replay key, and the cell seals
-    // its run as its last nested effect once it has an answer.
+    let snapshots = Arc::new(lash_vm_broker::DurableSnapshotStore::new(
+        ctx.actor_context(),
+        exec,
+    ));
+    let resumed = match &opened {
+        Ok(_) => match cell_segment::ResumedCell::latest(&snapshots, &clean_code).await {
+            Ok(resumed) => resumed,
+            Err(error) => {
+                let mut response = exec_setup_failure(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Host,
+                    format!("the cell's snapshot cannot be resumed: {error}"),
+                ));
+                fail_cell_on_nested_error(
+                    &ctx,
+                    &mut response,
+                    lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
+                        format!("the cell's snapshot cannot be resumed: {error}"),
+                    ),
+                );
+                return response;
+            }
+        },
+        Err(_) => None,
+    };
     let cell = Arc::new(match &resumed {
-        Some(resumed) => Ok(cell_run::CellRun::resume(resumed)),
-        None => cell_run::CellRun::open(&ctx),
+        Some(resumed) => cell_run::CellRun::open_at(&ctx, resumed.envelope.ordinals.clone()),
+        None => opened,
     });
-    // Boxed: the seal runs under the same context after the cell, and an
-    // unboxed context held across the cell would size every caller's future.
+    // Boxed: the cell's outputs are recorded under the same context after the
+    // cell, and an unboxed context held across the cell would size every
+    // caller's future.
     let seal_ctx = Box::new(ctx.clone());
     let prints = Arc::new(std::sync::Mutex::new(
         resumed
             .as_ref()
-            .map(|resumed| resumed.prints.iter().map(|print| print.0.clone()).collect())
+            .map(|resumed| {
+                resumed
+                    .envelope
+                    .prints
+                    .iter()
+                    .map(|print| print.0.clone())
+                    .collect()
+            })
             .unwrap_or_default(),
     ));
     let mut response = Box::pin(execute_code_inner(
@@ -119,11 +140,12 @@ async fn execute_owned_code(
         execution_bounds,
         channel,
         Arc::clone(&prints),
+        &snapshots,
         resumed.map(Box::new),
     ))
     .await;
     // A cell stopped at a segment boundary has no answer yet: it records no
-    // outputs and seals nothing. The segment that ends it does both.
+    // outputs. The segment that ends it does.
     if response.suspended {
         return response;
     }
@@ -152,15 +174,6 @@ async fn execute_owned_code(
         if !values.is_empty() || response.terminal_finish.is_some() {
             record_cell_outputs(&seal_ctx, cell, &code_renderer, values, &mut response).await;
         }
-    }
-    if let Ok(cell) = cell.as_ref()
-        && !seal_ctx.is_cancelled()
-    {
-        Box::pin(cell.seal(
-            &seal_ctx,
-            &lash_lashlang_runtime::ExecutionCancellation::new(),
-        ))
-        .await;
     }
     response
 }
@@ -334,7 +347,8 @@ async fn execute_code_inner(
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
     prints: Arc<std::sync::Mutex<Vec<lashlang::Value>>>,
-    resumed: Option<Box<cell_segment::CellSegmentState>>,
+    snapshots: &lash_vm_broker::DurableSnapshotStore,
+    resumed: Option<Box<cell_segment::ResumedCell>>,
 ) -> ExecResponse {
     let identities = match cell.as_ref() {
         Ok(cell) => cell.identities().code().clone(),
@@ -382,6 +396,7 @@ async fn execute_code_inner(
         channel,
         prints,
         recovery.service().clone(),
+        snapshots,
         resumed,
     ))
     .await;
@@ -408,18 +423,15 @@ async fn execute_code_in_worker_scope(
     channel: crate::plugin::RlmChannel,
     prints: Arc<std::sync::Mutex<Vec<lashlang::Value>>>,
     workers: lash_vm_client::service::Service,
-    resumed: Option<Box<cell_segment::CellSegmentState>>,
+    snapshots: &lash_vm_broker::DurableSnapshotStore,
+    resumed: Option<Box<cell_segment::ResumedCell>>,
 ) -> ExecResponse {
     state.mark_execution_started();
     let execution_checkpoint = state.execution_checkpoint();
     state.begin_code_execution(execution_checkpoint);
-    // The suspended cell, if the session holds one, runs again from here or
-    // is abandoned by the cell that runs in its place. A discarded execution
-    // restores it with the rest of the checkpoint.
-    state.take_suspended_cell();
     select_deferred_resolution_link(state, &ctx);
     if let Some(resumed) = &resumed {
-        resumed.restore_context(&ctx);
+        resumed.envelope.restore_context(&ctx);
     }
     // A resumed cell links against what its first segment recorded: those
     // records live in that segment's journal, so their contents came with
@@ -428,13 +440,17 @@ async fn execute_code_in_worker_scope(
         &resumed
     {
         let projected = crate::projection::RlmProjectedBindings::from_recorded(
-            resumed.projected_bindings.clone(),
+            resumed.envelope.projected_bindings.clone(),
         );
         let bindings = lash_lashlang_runtime::CellToolBindings::from_record(
-            resumed.cell_bindings.clone(),
+            resumed.envelope.cell_bindings.clone(),
             ctx.live_tool_catalog().as_ref(),
         );
-        (projected, bindings, resumed.host_environment.clone())
+        (
+            projected,
+            bindings,
+            resumed.envelope.host_environment.clone(),
+        )
     } else {
         // A frame handoff changes the session's live projections. Re-execution
         // links against this cell's recorded inputs, under the exec_code address
@@ -758,7 +774,7 @@ async fn execute_code_in_worker_scope(
         return worker_setup_failure(state, &ctx, error);
     }
     let deferred_execution_grants = match &resumed {
-        Some(resumed) => resumed.deferred_execution_grants.clone(),
+        Some(resumed) => resumed.envelope.deferred_execution_grants.clone(),
         None => match state
             .deferred_link
             .as_ref()
@@ -794,7 +810,7 @@ async fn execute_code_in_worker_scope(
         workers: workers.clone(),
         ledgers: resumed
             .as_ref()
-            .map(|resumed| resumed.host.clone())
+            .map(|resumed| resumed.envelope.host.clone())
             .unwrap_or_default(),
     });
     let scope = match ctx.session_scope() {
@@ -812,9 +828,11 @@ async fn execute_code_in_worker_scope(
         "rlm:{}:{:?}",
         scope.session_id, scope.agent_frame_id
     ));
-    let start_state = match resumed {
+    // A resumed cell runs on from its snapshot; a fresh one starts from the
+    // session's VM state.
+    let from = match resumed {
         Some(resumed) => {
-            if let Err(error) = hold_continuation_definitions(&ctx, &resumed.vm).await {
+            if let Err(error) = hold_continuation_definitions(&ctx, &resumed.from.vm).await {
                 return exec_setup_failure_or_stop(
                     state,
                     &ctx,
@@ -822,21 +840,38 @@ async fn execute_code_in_worker_scope(
                     error,
                 );
             }
-            lash_vm_protocol::StartState::Continuation(resumed.vm)
+            Some(resumed.from)
         }
-        None => state
-            .vm
-            .state()
-            .bytes()
-            .map(|bytes| {
-                lash_vm_protocol::StartState::Snapshot(lash_vm_protocol::OpaqueVmState::seal(
-                    lash_vm_protocol::VmStateKind::Snapshot,
-                    owner.clone(),
-                    lashlang::vm_contract_versions(),
-                    bytes.to_vec(),
-                ))
-            })
-            .unwrap_or(lash_vm_protocol::StartState::Fresh),
+        None => None,
+    };
+    let start_state = state
+        .vm
+        .state()
+        .bytes()
+        .map(|bytes| {
+            lash_vm_protocol::StartState::Snapshot(lash_vm_protocol::OpaqueVmState::seal(
+                lash_vm_protocol::VmStateKind::Snapshot,
+                owner.clone(),
+                lashlang::vm_contract_versions(),
+                bytes.to_vec(),
+            ))
+        })
+        .unwrap_or(lash_vm_protocol::StartState::Fresh);
+    // What each quiet point commits beside the VM: the cell's envelope, every
+    // parent ledger a resumed cell runs on with.
+    let envelope = || -> Result<Option<lash_vm_protocol::EncodedPayload>, String> {
+        let cell = cell.as_ref().as_ref().map_err(|error| error.to_string())?;
+        cell_segment::CellSegmentState::at_quiet_point(
+            &ctx,
+            cell,
+            &host,
+            code,
+            linked.clone(),
+            deferred_execution_grants.clone(),
+            &prints,
+        )
+        .encode()
+        .map(|bytes| Some(lash_vm_protocol::EncodedPayload(bytes)))
     };
     let identities = match cell.as_ref() {
         Ok(cell) => cell.identities().code().clone(),
@@ -851,6 +886,15 @@ async fn execute_code_in_worker_scope(
                 );
             }
         },
+    };
+    // Until a cell's operation runs as its tool's own admitted execution
+    // (L4, FIG-5174), its admission takes `Once`: a crash inside it is
+    // `Interrupted`, never a second run.
+    let admissions = lash_lashlang_runtime::RunAdmissions {
+        opener: identities.opener().clone(),
+        limit: lash_lashlang_runtime::run_operation_limit(ctx.actor_context()),
+        policy: &|_, _| None,
+        host_state: &envelope,
     };
     let run = lash_lashlang_runtime::WorkerRun {
         service: &workers,
@@ -872,6 +916,9 @@ async fn execute_code_in_worker_scope(
         projected,
         bounds: execution_bounds,
         state: start_state,
+        from,
+        snapshots,
+        admissions: &admissions,
         boundary: &|| false,
         hand_over: Some(host.hand_over_gate()),
         providers,
@@ -943,29 +990,17 @@ async fn execute_code_in_worker_scope(
             (Err(lashlang::RuntimeError::HostCancelled), None)
         }
         // The cell stopped on a wait its Run's successor segment takes over
-        // (FIG-4739): everything the cell holds is handed to that segment
-        // with the session's execution state, and the cell has no answer yet.
+        // (FIG-4739): its snapshot, committed with its envelope, holds
+        // everything the cell holds, and the cell has no answer yet.
         Ok(lash_vm_broker::BrokeredEnd::Suspended { checkpoint }) => {
-            let captured = suspend_cell(
-                state,
-                &ctx,
-                &cell,
-                &host,
-                code,
-                checkpoint.vm,
-                linked,
-                deferred_execution_grants,
-                &prints,
-            )
-            .await;
-            return match captured {
+            return match hold_continuation_definitions(&ctx, &checkpoint.vm).await {
                 Ok(()) => ExecResponse {
                     output_archive: None,
                     suspended: true,
                     ..exec_response_from(host.into_collected(), None, None)
                 },
                 Err(error) => {
-                    let error = format!("the cell's segment state was not captured: {error}");
+                    let error = format!("the cell's continuation was not held: {error}");
                     ctx.record_nested_effect_error(lash_core::RuntimeEffectControllerError::new(
                         lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
                         error.clone(),
@@ -1117,61 +1152,6 @@ async fn execute_code_in_worker_scope(
         }
     };
     exec_response_from(host.into_collected(), None, terminal_finish)
-}
-
-/// Records the cell as stopped at a segment boundary: its continuation and
-/// every parent ledger of it, as the session's suspended cell.
-#[allow(clippy::too_many_arguments)]
-async fn suspend_cell(
-    state: &mut RlmExecutionState,
-    ctx: &RuntimeExecutionContext<'_>,
-    cell: &Result<cell_run::CellRun, cell_run::LashlangCellOpener>,
-    host: &HostBridge<'_>,
-    code: &str,
-    vm: lash_vm_protocol::OpaqueVmState,
-    linked: (
-        BTreeMap<String, crate::projection::bindings::RecordedProjection>,
-        lash_lashlang_runtime::RecordedCellToolBindings,
-        lashlang::LashlangHostEnvironment,
-    ),
-    deferred_execution_grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
-    prints: &std::sync::Mutex<Vec<lashlang::Value>>,
-) -> Result<(), String> {
-    let cell = cell.as_ref().map_err(|error| error.to_string())?;
-    let (projected_bindings, cell_bindings, host_environment) = linked;
-    hold_continuation_definitions(ctx, &vm).await?;
-    let ctx = host.ctx();
-    let segment = cell_segment::CellSegmentState {
-        owner: ctx
-            .logical_run()
-            .cloned()
-            .ok_or_else(|| "a suspended foreground cell has no admitted logical Run".to_owned())?,
-        code: cell_segment::CellSegmentState::code_digest(code),
-        vm,
-        ordinals: cell.ordinals(),
-        cell_opener: cell.identities().opener().clone(),
-        cell_execution: cell
-            .identities()
-            .code()
-            .execution()
-            .ok_or_else(|| "a suspended cell has no execution identity".to_owned())?
-            .to_owned(),
-        projected_bindings,
-        host_environment,
-        cell_bindings,
-        deferred_execution_grants,
-        prints: prints
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-            .cloned()
-            .map(cell_segment::RecordedPrint)
-            .collect(),
-        host: host.ledgers(),
-        started_process_ids: ctx.started_process_ids(),
-    };
-    state.suspend_cell(segment.encode()?);
-    Ok(())
 }
 
 /// The environment of the frame this execution was admitted on: the

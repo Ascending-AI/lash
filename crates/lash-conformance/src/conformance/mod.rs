@@ -133,7 +133,6 @@ mod turn_config;
 mod turn_control;
 mod turn_park_feed;
 mod turn_runner;
-mod vm_broker;
 mod wake_delivery;
 
 pub use admission_support::prepare_final_commit;
