@@ -121,45 +121,31 @@ async fn turn_receipts(side: CrashSide) {
                     )
                     .await
                     .unwrap();
-                    let committed = store
-                        .load_session_head_meta(&lash_core::SessionId::from("session"))
-                        .await
-                        .unwrap()
-                        .and_then(|head| head.pending_follow_on);
-                    let snapshot = if let Some(owed) = committed {
-                        // Replay the same issued handles, but publication has
-                        // already ended the predecessor's material holder.
-                        run.request_cut(reason);
-                        run.quiesce().await.unwrap();
-                        match owed.owes {
-                            lash_core::store::FollowOnWork::Continuation(c) => c,
-                            _ => panic!("continuation"),
-                        }
-                        .opener
-                    } else {
-                        let capturing = later_cell.capture_run(&mut run, reason, store.as_ref());
-                        tokio::pin!(capturing);
-                        if !probe.gate_open.load(Ordering::SeqCst) {
-                            std::future::poll_fn(|cx| {
-                                assert!(matches!(
-                                    std::future::Future::poll(capturing.as_mut(), cx),
-                                    Poll::Pending
-                                ));
-                                Poll::Ready(())
-                            })
-                            .await;
-                            let refused = opener.boundary_snapshot().unwrap_err();
-                            assert!(refused.turn_failure_cause().aborts_invocation());
-                            assert!(
-                                matches!(refused.cause, Some(lash_core::RuntimeErrorCause::RunContinuationRefused { refusal }) if *refusal == lash_core::tool_run::ContinuationRefusal::NotQuiescent)
-                            );
-                            assert!(probe.cancelled_calls.lock().unwrap().is_empty());
-                            probe.gate_open.store(true, Ordering::SeqCst);
-                            probe.gate_wake.notify_waiters();
-                        }
-                        capturing.await.unwrap();
-                        opener.boundary_snapshot().unwrap()
-                    };
+                    // The capture is the same on a replay after publication: its
+                    // retention is served from the journal, never redone under
+                    // the predecessor's ended holder (FIG-4976).
+                    let capturing = later_cell.capture_run(&mut run, reason, store.as_ref());
+                    tokio::pin!(capturing);
+                    if !probe.gate_open.load(Ordering::SeqCst) {
+                        std::future::poll_fn(|cx| {
+                            assert!(matches!(
+                                std::future::Future::poll(capturing.as_mut(), cx),
+                                Poll::Pending
+                            ));
+                            Poll::Ready(())
+                        })
+                        .await;
+                        let refused = opener.boundary_snapshot().unwrap_err();
+                        assert!(refused.turn_failure_cause().aborts_invocation());
+                        assert!(
+                            matches!(refused.cause, Some(lash_core::RuntimeErrorCause::RunContinuationRefused { refusal }) if *refusal == lash_core::tool_run::ContinuationRefusal::NotQuiescent)
+                        );
+                        assert!(probe.cancelled_calls.lock().unwrap().is_empty());
+                        probe.gate_open.store(true, Ordering::SeqCst);
+                        probe.gate_wake.notify_waiters();
+                    }
+                    capturing.await.unwrap();
+                    let snapshot = opener.boundary_snapshot().unwrap();
                     let transfer = snapshot.run.as_ref().unwrap();
                     assert_eq!(transfer.attempts.len(), 3);
                     assert_eq!(transfer.sources.len(), 1);
