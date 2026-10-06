@@ -361,6 +361,14 @@ fn run_fast_gate_with_fake_cargo_inheriting(
     permissions.set_mode(0o755);
     std::fs::set_permissions(&cargo_path, permissions).expect("make fake cargo executable");
     let log_path = temp.path().join("cargo.log");
+    // The gate refuses to route without a built VM worker, and wraps a
+    // PostgreSQL store command in a throwaway database service when it has no
+    // database. The probe only records which commands the gate would run and
+    // never runs a test: the worker must exist but is never executed, so it
+    // points at the recorder, where any execution would show up as an
+    // unexpected command, and a stated database keeps every command on the
+    // recorder rather than a started service.
+    let worker_path = cargo_path.clone();
     let out_dir = temp.path().join("confidence");
 
     // The gate itself prepends `$HOME/.cargo/bin`; prepending the fixture
@@ -395,6 +403,11 @@ fn run_fast_gate_with_fake_cargo_inheriting(
         .env_remove("LASH_CONFIDENCE_PACKAGE")
         .env_remove("LASH_SIM_SHARD")
         .env("PATH", path)
+        .env("LASH_VM_WORKER", &worker_path)
+        .env(
+            "LASH_POSTGRES_DATABASE_URL",
+            "postgres://fault-matrix-probe.invalid/lash",
+        )
         .env("LASH_FAKE_CARGO_LOG", &log_path)
         .env("LASH_CONFIDENCE_OUT_DIR", &out_dir)
         .output()
