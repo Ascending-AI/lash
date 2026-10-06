@@ -54,6 +54,22 @@ pub(super) async fn apply(
                     ordinal: *ordinal,
                 }));
             }
+            if let Some(previous) = ordinal.0.checked_sub(1) {
+                let follows: Option<i32> = sqlx::query_scalar(SQL.ordinal_taken.sql())
+                    .bind(&owner_key)
+                    .bind(signed(run.0))
+                    .bind(signed(previous))
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(sqlx_failure)?;
+                if follows.is_none() {
+                    return Err(DurableError::Domain(DomainRefusal::RunOrdinalGap {
+                        owner: owner.clone(),
+                        run: *run,
+                        ordinal: *ordinal,
+                    }));
+                }
+            }
             if *kind == RunRecordKind::XOutcome
                 && let Some(call) = call
             {

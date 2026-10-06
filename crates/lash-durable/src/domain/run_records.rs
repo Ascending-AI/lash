@@ -81,7 +81,9 @@ pub struct RunRecordRow {
 pub enum RunRecordWrite {
     /// Append one record. Refused with
     /// [`DomainRefusal::RunOrdinalTaken`](super::DomainRefusal::RunOrdinalTaken)
-    /// when its ordinal is taken, and an outcome with
+    /// when its ordinal is taken, with
+    /// [`DomainRefusal::RunOrdinalGap`](super::DomainRefusal::RunOrdinalGap)
+    /// when the run has no record at the ordinal before it, and an outcome with
     /// [`DomainRefusal::OutcomeExists`](super::DomainRefusal::OutcomeExists)
     /// when its call already has one.
     Append {

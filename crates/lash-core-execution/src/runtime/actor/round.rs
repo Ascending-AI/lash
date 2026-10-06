@@ -22,29 +22,43 @@
 //!
 //! # Record layout
 //!
-//! One admission is one run of its owner. Its records sit at fixed ordinals,
-//! so every writer knows its row's ordinal without reading the others:
+//! One admission is one run of its owner. Its records take the run's
+//! ordinals in sequence, from 0, without a gap: the owner is the only writer
+//! under its epoch, and the store refuses an append that does not follow a
+//! record ([`DomainRefusal::RunOrdinalGap`]), so a gap is never committed and
+//! the fold refuses one it finds.
 //!
 //! | Ordinal | Kind | Body |
 //! |---|---|---|
 //! | 0 | `admit` | every member's call, tool, request, policy, limit and wait |
-//! | 1 + 2i | `x_start` | member i, committed with the admission |
-//! | 2 + 2i | `x_outcome` | member i's outcome and the material it names |
+//! | 1 + i | `x_start` | member i's first attempt, committed with the admission |
+//! | next | `x_outcome` | an attempt's final outcome and the material it names |
+//! | next | `retry` | a `Repeatable` attempt's failure and the due time of the next |
+//! | next | `x_start` | the next attempt of a retried member, once its retry is due |
+//! | next | `present` | the round's presentation, in declared order |
 //!
-//! An outcome's material payload rides in its row: the record is the
-//! payload's journal-local home, and the fold hands it back by digest.
+//! "next" is the run's next ordinal when its transaction is built. An
+//! [`AdmittedExecution`] carries the cursor its run's appends take ordinals
+//! from; [`admit`] and [`fold`] build it. A transaction that is refused, or
+//! whose acknowledgement is lost, leaves the cursor ahead of the rows: the
+//! owner folds again before it writes that run again.
+//!
+//! A call has at most one `x_outcome`: a `retry` settles a failed attempt
+//! without ending the call. An outcome's material payload rides in its row:
+//! the record is the payload's journal-local home, and the fold hands it back
+//! by digest.
+//!
+//! [`DomainRefusal::RunOrdinalGap`]: lash_durable::domain::DomainRefusal::RunOrdinalGap
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_core_store::tool_run::{AttemptOutcome, AvailableEvidence, MaterialRef};
-use lash_durable::domain::{AdmittedId, Ordinal, RunRecordKind, RunRecordRow, RunRecordWrite};
-use lash_durable::{ActorTx, DomainWrite};
+use lash_durable::ActorTx;
+use lash_durable::domain::{AdmittedId, Ordinal, RunRecordKind};
 use lash_sansio::{ExecutionBudgets, ExecutionLimit, ExecutionPolicy, LimitCause};
-use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use super::ActorContext;
@@ -52,6 +66,17 @@ use super::waits::WaitDeadline;
 use crate::{ToolCallId, ToolId};
 
 pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
+
+mod context;
+mod fold;
+mod records;
+mod rounds;
+mod store_local;
+
+pub use fold::{MemberState, RoundMember, RoundView, fold};
+pub use rounds::{admit_round, present, settle_retry, start_retry};
+
+use records::{OutcomeBody, append, encode, first_start};
 
 /// One execution to admit: a call, its tool, its request material, the
 /// policy and limit pinned now, and the wait deadline of a Pending call.
@@ -124,18 +149,79 @@ impl ExecutionDraft {
     }
 }
 
+/// Where a run's next record goes: the run's next ordinal, shared by every
+/// execution of the run an [`admit`] or a [`fold`] handed out.
+#[derive(Debug)]
+pub(crate) struct RunCursor {
+    next: AtomicU64,
+}
+
+impl PartialEq for RunCursor {
+    fn eq(&self, other: &Self) -> bool {
+        self.peek() == other.peek()
+    }
+}
+
+impl Eq for RunCursor {}
+
+impl RunCursor {
+    pub(crate) fn at(next: Ordinal) -> Arc<Self> {
+        Arc::new(Self {
+            next: AtomicU64::new(next.0),
+        })
+    }
+
+    /// Take the next ordinal for a record about to be written.
+    pub(crate) fn take(&self) -> Ordinal {
+        Ordinal(self.next.fetch_add(1, Ordering::SeqCst))
+    }
+
+    /// The next ordinal, untaken.
+    pub(crate) fn peek(&self) -> Ordinal {
+        Ordinal(self.next.load(Ordering::SeqCst))
+    }
+}
+
 /// One execution whose admission and `x_start` are recorded on a
 /// transaction. Its body may run once that transaction commits.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct AdmittedExecution {
     id: AdmittedId,
     draft: ExecutionDraft,
+    member: u64,
+    attempt: u32,
+    cursor: Arc<RunCursor>,
 }
 
+impl PartialEq for AdmittedExecution {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.draft == other.draft
+            && self.member == other.member
+            && self.attempt == other.attempt
+    }
+}
+
+impl Eq for AdmittedExecution {}
+
 impl AdmittedExecution {
-    /// What [`admit`] records: `draft` admitted as `id`.
-    pub(crate) fn admitted(id: AdmittedId, draft: ExecutionDraft) -> Self {
-        Self { id, draft }
+    /// What [`admit`], a retry's start or a [`fold`] records: `draft`,
+    /// member `member` of its admission, admitted as `id` for its
+    /// `attempt`, its run's records taking ordinals from `cursor`.
+    pub(crate) fn admitted(
+        id: AdmittedId,
+        draft: ExecutionDraft,
+        member: u64,
+        attempt: u32,
+        cursor: Arc<RunCursor>,
+    ) -> Self {
+        Self {
+            id,
+            draft,
+            member,
+            attempt,
+            cursor,
+        }
     }
 
     /// Its identity: owner, run and ordinal.
@@ -156,6 +242,12 @@ impl AdmittedExecution {
         self.draft.call()
     }
 
+    /// The draft its admission pinned.
+    #[must_use]
+    pub fn draft(&self) -> &ExecutionDraft {
+        &self.draft
+    }
+
     /// The policy pinned at admission.
     #[must_use]
     pub fn policy(&self) -> ExecutionPolicy {
@@ -166,6 +258,23 @@ impl AdmittedExecution {
     #[must_use]
     pub fn limit(&self) -> ExecutionLimit {
         self.draft.limit()
+    }
+
+    /// Its member index in its admission.
+    #[must_use]
+    pub fn member(&self) -> u64 {
+        self.member
+    }
+
+    /// Which attempt of its call it is, from 1. A crash rerun keeps it; only
+    /// a retry advances it.
+    #[must_use]
+    pub fn attempt(&self) -> u32 {
+        self.attempt
+    }
+
+    pub(crate) fn cursor(&self) -> &Arc<RunCursor> {
+        &self.cursor
     }
 }
 
@@ -223,8 +332,9 @@ pub enum AdmissionRefusal {
 /// Why a settle was refused; nothing was recorded.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum SettleRefusal {
-    /// The store-local effect does not belong to this execution's tool.
-    #[error("call {0}'s store-local effect does not match its tool")]
+    /// The store-local effect does not belong to this execution's outcome:
+    /// an effect commits only with the completion that performed it.
+    #[error("call {0}'s store-local effect does not match its outcome")]
     ForeignEffect(ToolCallId),
     /// The fold names no started execution under this identity.
     #[error("no started execution is admitted as run {run:?} ordinal {ordinal:?}")]
@@ -234,6 +344,10 @@ pub enum SettleRefusal {
         /// The ordinal.
         ordinal: Ordinal,
     },
+    /// A retry was asked of an attempt its pinned policy does not repeat:
+    /// a `Once` call, an outcome that may not repeat, or the last attempt.
+    #[error("call {0}'s attempt may not be retried")]
+    NotRetryable(ToolCallId),
 }
 
 /// Why rows did not fold; the owner's state is unreadable.
@@ -250,6 +364,16 @@ pub enum FoldRefusal {
     /// A call has a second final or cancel record.
     #[error("call {0} has a second final record")]
     SecondFinal(ToolCallId),
+    /// A record is out of its call's order: an outcome or retry of an
+    /// attempt that is not the call's open one, or an attempt no retry
+    /// issued.
+    #[error("record {ordinal:?} of run {run:?} is out of its call's order")]
+    OutOfOrder {
+        /// The run.
+        run: RunSeq,
+        /// The ordinal.
+        ordinal: Ordinal,
+    },
     /// A record's body does not decode.
     #[error("record {ordinal:?} of run {run:?} does not decode: {reason}")]
     Undecodable {
@@ -283,6 +407,15 @@ impl PolicyView {
     pub fn policy(&self, tool: &ToolId) -> Option<ExecutionPolicy> {
         self.current.get(tool).copied()
     }
+
+    /// Whether a stored `pinned` policy of `tool` may run again: it is
+    /// `Repeatable`, and the current declaration does not veto it with
+    /// `Once`. A stored `Once` is never upgraded.
+    #[must_use]
+    pub fn permits_repeat(&self, tool: &ToolId, pinned: ExecutionPolicy) -> bool {
+        matches!(pinned, ExecutionPolicy::Repeatable { .. })
+            && self.policy(tool) != Some(ExecutionPolicy::Once)
+    }
 }
 
 /// What an admitted execution's rows say to do on resume.
@@ -300,13 +433,17 @@ pub enum Recovery {
     /// A `Repeatable` started without an outcome: run again at this same
     /// ordinal, uncounted.
     RerunAtOrdinal(Ordinal),
-    /// A retry is due at `at`; its next attempt takes ordinal `next`.
+    /// A retry is due at `at`; its next attempt is `attempt`, which takes
+    /// the run's next ordinal when it starts.
     RetryDue {
         /// When.
         at: lash_durable::DurableInstant,
-        /// The next attempt's ordinal.
-        next: Ordinal,
+        /// The attempt it starts, from 1.
+        attempt: u32,
     },
+    /// A retry was recorded, but the current declaration vetoes the repeat:
+    /// the failed attempt's outcome becomes the call's final one.
+    Vetoed(AttemptOutcome),
     /// Admitted but never started.
     NotStarted,
 }
@@ -315,8 +452,8 @@ pub enum Recovery {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RunFold {
     recoveries: Vec<(AdmittedId, Recovery)>,
-    calls: BTreeMap<AdmittedId, ToolCallId>,
-    materials: BTreeMap<String, String>,
+    rounds: std::collections::BTreeMap<RunSeq, RoundView>,
+    materials: std::collections::BTreeMap<String, String>,
 }
 
 impl RunFold {
@@ -325,8 +462,8 @@ impl RunFold {
     pub fn new(recoveries: Vec<(AdmittedId, Recovery)>) -> Self {
         Self {
             recoveries,
-            calls: BTreeMap::new(),
-            materials: BTreeMap::new(),
+            rounds: std::collections::BTreeMap::new(),
+            materials: std::collections::BTreeMap::new(),
         }
     }
 
@@ -345,10 +482,34 @@ impl RunFold {
             .map(|(_, recovery)| recovery)
     }
 
-    /// The call `id` settles.
+    /// The call `id` executes, if it was started.
     #[must_use]
     pub fn call(&self, id: &AdmittedId) -> Option<&ToolCallId> {
-        self.calls.get(id)
+        self.admitted_member(id).map(|member| member.draft.call())
+    }
+
+    /// The execution `id` names, rebuilt with its pinned draft and its run's
+    /// cursor, if it was started: what a rerun or a recovery settles
+    /// through.
+    #[must_use]
+    pub fn admitted(&self, id: &AdmittedId) -> Option<AdmittedExecution> {
+        let round = self.rounds.get(&id.run)?;
+        round.admitted(id)
+    }
+
+    fn admitted_member(&self, id: &AdmittedId) -> Option<&RoundMember> {
+        self.rounds.get(&id.run)?.member_started_at(id.ordinal)
+    }
+
+    /// One admission's state: its members in declared order.
+    #[must_use]
+    pub fn round(&self, run: RunSeq) -> Option<&RoundView> {
+        self.rounds.get(&run)
+    }
+
+    /// Every admission's state, by run.
+    pub fn rounds(&self) -> impl Iterator<Item = &RoundView> {
+        self.rounds.values()
     }
 
     /// The journal-local payload a settled outcome's `material` names.
@@ -406,7 +567,6 @@ pub struct AdmittedRound {
 
 impl AdmittedRound {
     /// The round of `members` in `run`.
-    #[expect(dead_code, reason = "L4 (FIG-5174): admit_round constructs it")]
     pub(crate) fn admitted(run: RunSeq, members: Vec<AdmittedExecution>) -> Self {
         Self { run, members }
     }
@@ -422,6 +582,12 @@ impl AdmittedRound {
     pub fn members(&self) -> &[AdmittedExecution] {
         &self.members
     }
+
+    /// Its owner.
+    #[must_use]
+    pub fn owner(&self) -> Option<&OwnerKey> {
+        self.members.first().map(|member| &member.id.owner)
+    }
 }
 
 /// What a round presents to the next model call, in declared order: a pure
@@ -429,13 +595,20 @@ impl AdmittedRound {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Presentation {
     calls: Vec<ToolCallId>,
+    outcomes: Vec<Option<AttemptOutcome>>,
 }
 
 impl Presentation {
     /// The presentation of `calls`, in declared order.
     #[must_use]
     pub fn new(calls: Vec<ToolCallId>) -> Self {
-        Self { calls }
+        let outcomes = vec![None; calls.len()];
+        Self { calls, outcomes }
+    }
+
+    pub(crate) fn of(entries: Vec<(ToolCallId, Option<AttemptOutcome>)>) -> Self {
+        let (calls, outcomes) = entries.into_iter().unzip();
+        Self { calls, outcomes }
     }
 
     /// The presented calls, in declared order.
@@ -443,75 +616,14 @@ impl Presentation {
     pub fn calls(&self) -> &[ToolCallId] {
         &self.calls
     }
-}
 
-/// The admission record's body.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AdmitBody {
-    members: Vec<AdmittedMember>,
-}
-
-/// One member as its admission pinned it.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AdmittedMember {
-    call: ToolCallId,
-    tool: String,
-    request: MaterialRef,
-    policy: ExecutionPolicy,
-    limit_expires_at_ms: u64,
-    limit_max_slice_ms: u64,
-    wait_deadline_ms: Option<i64>,
-}
-
-/// An `x_start` record's body.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StartBody {
-    member: u64,
-}
-
-/// An `x_outcome` record's body.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct OutcomeBody {
-    outcome: AttemptOutcome,
-    material: Option<String>,
-}
-
-const ADMIT_ORDINAL: Ordinal = Ordinal(0);
-
-/// The ordinal of member `member`'s `x_start` in its admission's run: the
-/// ordinal its [`AdmittedId`] takes.
-#[must_use]
-pub fn member_ordinal(member: u64) -> Ordinal {
-    Ordinal(1 + 2 * member)
-}
-
-fn start_ordinal(member: u64) -> Ordinal {
-    member_ordinal(member)
-}
-
-fn outcome_ordinal(start: Ordinal) -> Ordinal {
-    Ordinal(start.0 + 1)
-}
-
-/// The member a start ordinal belongs to, if it is one.
-fn member_of(start: Ordinal) -> Option<u64> {
-    (start.0 % 2 == 1).then_some(start.0 / 2)
-}
-
-fn millis(duration: Duration) -> u64 {
-    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-}
-
-fn encode<T: Serialize>(body: &T) -> String {
-    #[expect(
-        clippy::expect_used,
-        reason = "the record bodies are plain data whose encoding cannot fail"
-    )]
-    serde_json::to_string(body).expect("a run record body encodes")
+    /// Each presented call with its committed outcome, in declared order;
+    /// `None` for a call with none yet.
+    pub fn entries(&self) -> impl Iterator<Item = (&ToolCallId, Option<&AttemptOutcome>)> {
+        self.calls
+            .iter()
+            .zip(self.outcomes.iter().map(Option::as_ref))
+    }
 }
 
 /// Record the admission and an `x_start` of every draft on `tx`, as
@@ -536,37 +648,14 @@ pub fn admit(
             return Err(AdmissionRefusal::DuplicateCall(draft.call().clone()));
         }
     }
-    let members = drafts
-        .iter()
-        .map(|draft| AdmittedMember {
-            call: draft.call().clone(),
-            tool: draft.tool().as_str().to_owned(),
-            request: draft.request().clone(),
-            policy: draft.policy(),
-            limit_expires_at_ms: draft.limit().expires_at,
-            limit_max_slice_ms: millis(draft.limit().max_slice),
-            wait_deadline_ms: draft.wait().map(|wait| wait.at().0),
-        })
-        .collect();
-    tx.write(DomainWrite::RunRecord(RunRecordWrite::Append {
-        owner: owner.clone(),
-        run,
-        ordinal: ADMIT_ORDINAL,
-        kind: RunRecordKind::Admit,
-        call: None,
-        record_json: encode(&AdmitBody { members }),
-    }));
+    tx.write(records::admit_record(owner, run, &drafts));
+    let cursor = RunCursor::at(first_start(drafts.len() as u64));
     let mut admitted = Vec::with_capacity(drafts.len());
     for (member, draft) in (0_u64..).zip(drafts) {
-        let ordinal = start_ordinal(member);
-        tx.write(DomainWrite::RunRecord(RunRecordWrite::Append {
-            owner: owner.clone(),
-            run,
-            ordinal,
-            kind: RunRecordKind::XStart,
-            call: Some(draft.call().clone()),
-            record_json: encode(&StartBody { member }),
-        }));
+        let ordinal = first_start(member);
+        tx.write(records::start_record(
+            owner, run, ordinal, &draft, member, 1,
+        ));
         admitted.push(AdmittedExecution::admitted(
             AdmittedId {
                 owner: owner.clone(),
@@ -574,9 +663,31 @@ pub fn admit(
                 ordinal,
             },
             draft,
+            member,
+            1,
+            Arc::clone(&cursor),
         ));
     }
     Ok(admitted)
+}
+
+/// The ordinal of member `member`'s first `x_start` in its admission's run:
+/// the ordinal its [`AdmittedId`] takes.
+#[must_use]
+pub fn member_ordinal(member: u64) -> Ordinal {
+    first_start(member)
+}
+
+/// How an admitted body's run stopped short of its own answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stop {
+    /// The execution's slice or limit ran out.
+    Limit(LimitCause),
+    /// Its member was cancelled.
+    Cancelled,
+    /// The activation stopped: the node is going away, and nothing may be
+    /// recorded for it.
+    Activation,
 }
 
 /// Run `admitted`'s body under its limit, the context's cancel token and
@@ -593,16 +704,34 @@ pub async fn run_body(
     admitted: &AdmittedExecution,
     body: ToolBody,
 ) -> BodyOutput {
+    match run_bounded(cx, admitted, body, &CancellationToken::new()).await {
+        Ok(output) => output,
+        Err(Stop::Limit(cause)) => AttemptOutcome::TimedOut {
+            cause,
+            evidence: AvailableEvidence::default(),
+        }
+        .into(),
+        Err(Stop::Cancelled | Stop::Activation) => AttemptOutcome::Cancelled {
+            evidence: AvailableEvidence::default(),
+        }
+        .into(),
+    }
+}
+
+/// [`run_body`] with a member cancel besides the activation's: the body's
+/// own answer, or why it stopped without one.
+pub(crate) async fn run_bounded(
+    cx: &ActorContext,
+    admitted: &AdmittedExecution,
+    body: ToolBody,
+    member_cancel: &CancellationToken,
+) -> Result<BodyOutput, Stop> {
     let clock = Arc::clone(cx.clock());
     let now = u64::try_from(cx.now().0).unwrap_or(0);
     let limit = admitted.limit();
     let remaining = limit.remaining(now);
     if remaining.is_zero() {
-        return AttemptOutcome::TimedOut {
-            cause: LimitCause::ExecutionTotal,
-            evidence: AvailableEvidence::default(),
-        }
-        .into();
+        return Err(Stop::Limit(LimitCause::ExecutionTotal));
     }
     let (slice, cause) = if limit.max_slice < remaining {
         (limit.max_slice, LimitCause::ExecutionSlice)
@@ -613,25 +742,24 @@ pub async fn run_body(
     let token = cx.cancel().child_token();
     let mut running = body(token.clone());
     let stopped = tokio::select! {
-        output = &mut running => return output,
-        () = clock.sleep(slice) => AttemptOutcome::TimedOut {
-            cause,
-            evidence: AvailableEvidence::default(),
-        },
-        () = cx.cancel().cancelled() => AttemptOutcome::Cancelled {
-            evidence: AvailableEvidence::default(),
-        },
+        output = &mut running => return Ok(output),
+        () = clock.sleep(slice) => Stop::Limit(cause),
+        () = member_cancel.cancelled() => Stop::Cancelled,
+        () = cx.cancel().cancelled() => Stop::Activation,
     };
     token.cancel();
+    if stopped == Stop::Activation {
+        return Err(stopped);
+    }
     let grace = ExecutionBudgets::default().stop_grace();
     tokio::select! {
-        output = running => output,
-        () = clock.sleep(grace) => stopped.into(),
+        output = running => Ok(output),
+        () = clock.sleep(grace) => Err(stopped),
     }
 }
 
 /// Record `admitted`'s outcome on `tx`, with the store-local effect that
-/// commits with it.
+/// commits with it, at its run's next ordinal.
 ///
 /// # Errors
 ///
@@ -642,13 +770,14 @@ pub fn settle(
     output: impl Into<BodyOutput>,
     store_local: Option<StoreLocalEffect>,
 ) -> Result<(), SettleRefusal> {
+    let output = output.into();
     if let Some(effect) = store_local {
-        // Each store-local effect is L4's (FIG-5174) to write, with the
-        // tool that owns it; none is admitted before then.
-        let _ = effect;
-        return Err(SettleRefusal::ForeignEffect(admitted.call().clone()));
+        if !matches!(output.outcome, AttemptOutcome::Completed(_)) {
+            return Err(SettleRefusal::ForeignEffect(admitted.call().clone()));
+        }
+        store_local::write(tx, admitted, effect)?;
     }
-    record_outcome(tx, admitted.id(), admitted.call(), output.into());
+    record_outcome(tx, admitted, output);
     Ok(())
 }
 
@@ -665,329 +794,26 @@ pub fn settle_interrupted(
     fold: &RunFold,
     id: &AdmittedId,
 ) -> Result<(), SettleRefusal> {
-    let call = fold.call(id).ok_or(SettleRefusal::NotStarted {
+    let admitted = fold.admitted(id).ok_or(SettleRefusal::NotStarted {
         run: id.run,
         ordinal: id.ordinal,
     })?;
-    record_outcome(tx, id, call, AttemptOutcome::Interrupted.into());
+    record_outcome(tx, &admitted, AttemptOutcome::Interrupted.into());
     Ok(())
 }
 
-fn record_outcome(tx: &mut ActorTx, id: &AdmittedId, call: &ToolCallId, output: BodyOutput) {
-    tx.write(DomainWrite::RunRecord(RunRecordWrite::Append {
-        owner: id.owner.clone(),
-        run: id.run,
-        ordinal: outcome_ordinal(id.ordinal),
-        kind: RunRecordKind::XOutcome,
-        call: Some(call.clone()),
-        record_json: encode(&OutcomeBody {
+fn record_outcome(tx: &mut ActorTx, admitted: &AdmittedExecution, output: BodyOutput) {
+    let id = admitted.id();
+    tx.write(append(
+        &id.owner,
+        id.run,
+        admitted.cursor().take(),
+        RunRecordKind::XOutcome,
+        Some(admitted.call()),
+        encode(&OutcomeBody {
+            start: id.ordinal.0,
             outcome: output.outcome,
             material: output.material,
         }),
-    }));
-}
-
-fn undecodable(row: &RunRecordRow, error: &serde_json::Error) -> FoldRefusal {
-    FoldRefusal::Undecodable {
-        run: row.run,
-        ordinal: row.ordinal,
-        reason: error.to_string(),
-    }
-}
-
-/// Fold an owner's run records into what each admitted execution recovers
-/// to, under the policies `current` declares. Calls no producer.
-///
-/// Records of kinds the primitive does not write (`decide`, `present`,
-/// `retry`) are L4's to fold and are passed over here.
-///
-/// # Errors
-///
-/// [`FoldRefusal`] when the rows are inconsistent.
-pub fn fold(rows: &[RunRecordRow], current: &PolicyView) -> Result<RunFold, FoldRefusal> {
-    let mut runs: BTreeMap<RunSeq, Vec<&RunRecordRow>> = BTreeMap::new();
-    for row in rows {
-        runs.entry(row.run).or_default().push(row);
-    }
-    let mut folded = RunFold::default();
-    for (run, records) in runs {
-        let by_ordinal: BTreeMap<Ordinal, &RunRecordRow> =
-            records.iter().map(|row| (row.ordinal, *row)).collect();
-        let Some(admit) = by_ordinal
-            .get(&ADMIT_ORDINAL)
-            .filter(|row| row.kind == RunRecordKind::Admit)
-        else {
-            return Err(FoldRefusal::OrdinalGap {
-                run,
-                missing: ADMIT_ORDINAL,
-            });
-        };
-        let body: AdmitBody =
-            serde_json::from_str(&admit.record_json).map_err(|error| undecodable(admit, &error))?;
-        let owner = admit.owner.clone();
-        let mut finals = std::collections::BTreeSet::new();
-        for row in records
-            .iter()
-            .filter(|row| row.kind == RunRecordKind::XOutcome)
-        {
-            let call = row.call.clone().ok_or_else(|| FoldRefusal::Undecodable {
-                run,
-                ordinal: row.ordinal,
-                reason: "an outcome names no call".to_owned(),
-            })?;
-            if !finals.insert(call.clone()) {
-                return Err(FoldRefusal::SecondFinal(call));
-            }
-        }
-        for (member, admitted) in (0_u64..).zip(&body.members) {
-            let start = start_ordinal(member);
-            let id = AdmittedId {
-                owner: owner.clone(),
-                run,
-                ordinal: start,
-            };
-            let outcome = by_ordinal
-                .get(&outcome_ordinal(start))
-                .filter(|row| row.kind == RunRecordKind::XOutcome);
-            let started = by_ordinal
-                .get(&start)
-                .filter(|row| row.kind == RunRecordKind::XStart);
-            let recovery = match (started, outcome) {
-                (None, Some(_)) => {
-                    return Err(FoldRefusal::OrdinalGap {
-                        run,
-                        missing: start,
-                    });
-                }
-                (None, None) => Recovery::NotStarted,
-                (Some(_), Some(row)) => {
-                    if row.call.as_ref() != Some(&admitted.call) {
-                        return Err(FoldRefusal::SecondFinal(admitted.call.clone()));
-                    }
-                    let settled: OutcomeBody = serde_json::from_str(&row.record_json)
-                        .map_err(|error| undecodable(row, &error))?;
-                    if let (Some(material), Some(payload)) =
-                        (outcome_material(&settled.outcome), settled.material)
-                    {
-                        folded
-                            .materials
-                            .insert(material.digest.as_str().to_owned(), payload);
-                    }
-                    Recovery::Settled(settled.outcome)
-                }
-                (Some(_), None) => {
-                    let vetoed = current.policy(&ToolId::new(admitted.tool.clone()))
-                        == Some(ExecutionPolicy::Once);
-                    match admitted.policy {
-                        ExecutionPolicy::Repeatable { .. } if !vetoed => {
-                            Recovery::RerunAtOrdinal(start)
-                        }
-                        ExecutionPolicy::Once | ExecutionPolicy::Repeatable { .. } => {
-                            Recovery::Interrupt
-                        }
-                    }
-                }
-            };
-            if started.is_some() {
-                folded.calls.insert(id.clone(), admitted.call.clone());
-            }
-            folded.recoveries.push((id, recovery));
-        }
-        // An execution record past the admission's members is not this
-        // admission's: the rows disagree with it.
-        if let Some(stray) = records.iter().find(|row| {
-            matches!(row.kind, RunRecordKind::XStart | RunRecordKind::XOutcome)
-                && member_of(match row.kind {
-                    RunRecordKind::XOutcome => Ordinal(row.ordinal.0.saturating_sub(1)),
-                    _ => row.ordinal,
-                })
-                .is_none_or(|member| member >= body.members.len() as u64)
-        }) {
-            return Err(FoldRefusal::Undecodable {
-                run,
-                ordinal: stray.ordinal,
-                reason: "an execution record outside its admission".to_owned(),
-            });
-        }
-    }
-    Ok(folded)
-}
-
-/// Admit a tool round inside the `model.done` transaction: its membership,
-/// pinned policies, limits and wait deadlines, and an `x_start` for every
-/// member.
-///
-/// # Errors
-///
-/// [`AdmissionRefusal`]; nothing is recorded.
-pub fn admit_round(
-    _tx: &mut ActorTx,
-    _round: RoundDraft,
-) -> Result<AdmittedRound, AdmissionRefusal> {
-    todo!("L4 (FIG-5174): admit a tool round inside model.done")
-}
-
-/// Record a round's presentation inside the `round.present+model.start`
-/// transaction, from its committed records, in declared order.
-pub fn present(_tx: &mut ActorTx, _round: &AdmittedRound, _fold: &RunFold) -> Presentation {
-    todo!("L4 (FIG-5174): present a round in declared order from its committed records")
-}
-
-/// The tool-round methods of the context: what the deleted controller trait's
-/// Run-record family became. Their names keep the meaning that survives.
-impl ActorContext {
-    /// Record one record of a logical Run under `name`, and answer it.
-    ///
-    /// # Errors
-    ///
-    /// The record's refusal.
-    pub async fn record_run_record(
-        &self,
-        _name: String,
-        _step: crate::RunRecordStep<'_>,
-    ) -> Result<lash_core_store::tool_run::RunJournalEntry, crate::RuntimeEffectControllerError>
-    {
-        todo!("L4 (FIG-5174): record a Run record as a run_records row")
-    }
-
-    /// Register a short record now, exposing its notification to the owner.
-    pub fn start_run_record<'run>(
-        &'run self,
-        _name: String,
-        _step: crate::RunRecordStep<'run>,
-    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_run::RunJournalEntry> {
-        todo!("L4 (FIG-5174): start a Run record as an admitted execution")
-    }
-
-    /// Register one independently completing attempt now.
-    pub fn start_run_attempt<'run>(
-        &'run self,
-        _name: String,
-        _step: crate::tool_dispatch::RunAttemptStep<'run>,
-    ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
-        todo!("L4 (FIG-5174): start a Run attempt through admit, run_body and settle")
-    }
-
-    /// Register one declared-start launch and discharge.
-    pub fn start_run_prepare<'run>(
-        &'run self,
-        _name: String,
-        _step: crate::tool_dispatch::RunStartPrepareStep<'run>,
-    ) -> crate::tool_dispatch::RunStepHandle<'run, crate::tool_dispatch::RunStartPrepared> {
-        todo!("L4 (FIG-5174): start a declared-start preparation as an admitted execution")
-    }
-
-    /// Register a retry backoff now, its deadline recorded before it starts.
-    pub fn start_run_retry(&self, _backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
-        todo!("L4 (FIG-5174): record a retry with its due time and register the due source")
-    }
-
-    /// Arm a call's source before its attempt receives the completion key.
-    ///
-    /// # Errors
-    ///
-    /// The source's refusal.
-    pub async fn arm_run_source(
-        &self,
-        _descriptor: crate::tool_run::SourceDescriptor,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        todo!("L4 (FIG-5174): arm a Run source as a pinned wait")
-    }
-
-    /// Attach the process terminal using the exact source admitted by the
-    /// Run.
-    ///
-    /// # Errors
-    ///
-    /// The source's refusal.
-    pub async fn attach_run_process_terminal(
-        &self,
-        _descriptor: crate::tool_run::SourceDescriptor,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        todo!("L4 (FIG-5174): attach a process-terminal source as a process_terminal wait")
-    }
-
-    /// Race the Run's sources, the turn's cancel and the selectable
-    /// notifications through L5's `race`.
-    ///
-    /// # Errors
-    ///
-    /// The race's refusal.
-    pub async fn await_run_sources(
-        &self,
-        _subscriptions: Vec<crate::tool_run::SourceSubscription>,
-        _selectable: Vec<crate::tool_dispatch::SelectKey>,
-        _cancel: crate::TurnCancelWait,
-    ) -> Result<crate::tool_dispatch::RunSourceWake, crate::RuntimeEffectControllerError> {
-        todo!("L4 (FIG-5174): race Run sources through waits::race")
-    }
-
-    /// The index of the first of `keys` to complete.
-    ///
-    /// # Errors
-    ///
-    /// The race's refusal.
-    pub async fn select_run_sources(
-        &self,
-        _keys: Vec<crate::tool_dispatch::SelectKey>,
-    ) -> Result<usize, crate::RuntimeEffectControllerError> {
-        todo!("L4 (FIG-5174): select the first completed Run source")
-    }
-
-    /// Cancel at the source authority and return its winning seal.
-    ///
-    /// # Errors
-    ///
-    /// The source's refusal.
-    pub async fn cancel_run_source(
-        &self,
-        _descriptor: crate::tool_run::SourceDescriptor,
-    ) -> Result<crate::tool_run::SourceSeal, crate::RuntimeEffectControllerError> {
-        todo!("L4 (FIG-5174): cancel a Run source, first resolution wins")
-    }
-
-    /// Issue the store half of an intent realization as a store-local effect.
-    ///
-    /// # Errors
-    ///
-    /// The realization's refusal.
-    pub async fn issue_run_realization<'run>(
-        &'run self,
-        _request: crate::tool_dispatch::RealizationRequest,
-    ) -> Result<crate::tool_dispatch::IssuedRealization<'run>, crate::RuntimeEffectControllerError>
-    {
-        todo!("L4 (FIG-5174): realize an intent as a store-local effect of its call's outcome")
-    }
-
-    /// Attach to previously issued realization work.
-    ///
-    /// # Errors
-    ///
-    /// The realization's refusal.
-    pub async fn attach_run_realization<'run>(
-        &'run self,
-        _invocation_id: String,
-    ) -> Result<
-        crate::tool_dispatch::RunSelectable<'run, crate::tool_dispatch::RealizationReceipt>,
-        crate::RuntimeEffectControllerError,
-    > {
-        todo!("L4 (FIG-5174): read a realization from its call's committed outcome")
-    }
-
-    /// The tool-round effects: `ToolAttempt` and `RestoreRunMaterial`
-    /// (admitted executions), `PresentToolResult` (a write in
-    /// `round.present+model.start`), `Trigger`, `IngestTriggerOccurrence`
-    /// and `AdmitTriggerDelivery` (store-local effects of their call's
-    /// outcome). Any other command is refused.
-    ///
-    /// # Errors
-    ///
-    /// The effect's refusal.
-    pub async fn tool_effect(
-        &self,
-        _envelope: crate::RuntimeEffectEnvelope,
-        _local: crate::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        todo!("L4 (FIG-5174): run a tool-round effect as an admitted execution or a round write")
-    }
+    ));
 }

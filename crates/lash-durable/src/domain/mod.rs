@@ -139,6 +139,17 @@ pub enum DomainRefusal {
         /// The ordinal.
         ordinal: Ordinal,
     },
+    /// A run record would leave a gap: its run has no record at the
+    /// ordinal before it. Ordinals are the owner's, in sequence.
+    #[error("run record {owner} run {run:?} ordinal {ordinal:?} follows no record")]
+    RunOrdinalGap {
+        /// The owner.
+        owner: OwnerKey,
+        /// The run.
+        run: RunSeq,
+        /// The ordinal refused.
+        ordinal: Ordinal,
+    },
     /// An admitted call already has its outcome.
     #[error("call {call} of {owner} run {run:?} already has an outcome")]
     OutcomeExists {

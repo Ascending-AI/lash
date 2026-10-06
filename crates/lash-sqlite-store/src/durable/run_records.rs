@@ -72,6 +72,22 @@ pub(super) fn apply(
                     ordinal: *ordinal,
                 })));
             }
+            if let Some(previous) = ordinal.0.checked_sub(1) {
+                let follows = tx
+                    .prepare_cached(SQL.ordinal_taken.sql())?
+                    .query_row(
+                        rusqlite::params![owner_key, signed(run.0), signed(previous)],
+                        |_| Ok(()),
+                    )
+                    .optional()?;
+                if follows.is_none() {
+                    return Ok(Err(DurableError::Domain(DomainRefusal::RunOrdinalGap {
+                        owner: owner.clone(),
+                        run: *run,
+                        ordinal: *ordinal,
+                    })));
+                }
+            }
             if *kind == RunRecordKind::XOutcome
                 && let Some(call) = call
             {

@@ -244,6 +244,13 @@ impl WaitDeadline {
         Self(at)
     }
 
+    /// The deadline at the stored instant `at`: a deadline read back from
+    /// its row, or an absolute one its caller recorded before.
+    #[must_use]
+    pub fn at_instant(at: DurableInstant) -> Self {
+        Self(at)
+    }
+
     /// The deadline.
     #[must_use]
     pub fn at(self) -> DurableInstant {
