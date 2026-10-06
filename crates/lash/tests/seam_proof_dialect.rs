@@ -291,11 +291,19 @@ fn final_value(output: &TurnOutput) -> Option<serde_json::Value> {
         .filter_map(|node| match &node.payload {
             lash_core::SessionNodePayload::Event {
                 event: lash_core::SessionHistoryRecord::Protocol(event),
-            } if event.plugin_id == "rlm_protocol" => event
-                .payload
-                .get("RlmTrajectoryEntry")?
-                .get("final_output")
-                .cloned(),
+            } => match lash_protocol_rlm::decode_rlm_protocol_event(event)
+                .expect("recorded protocol events decode")
+            {
+                Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(
+                    lash_rlm_types::RlmTrajectoryEntry {
+                        outcome: lash_rlm_types::CellOutcome::Finished(
+                            lash_core::OutputValue::Inline(value),
+                        ),
+                        ..
+                    },
+                )) => Some(value),
+                _ => None,
+            },
             _ => None,
         })
         .next_back()

@@ -1119,7 +1119,9 @@ fn l21_scalar_and_aggregate_record_attempts_in_the_opener() {
             .iter()
             .flat_map(|invocation| double.server().journal(&invocation.id).unwrap_or_default())
             .filter_map(|entry| entry.name)
-            .filter(|name| name.starts_with("lash:run:") && name.ends_with(":attempt:1"))
+            .filter(|name| {
+                name.starts_with("lash.run.attempt:lash:run:") && name.ends_with(":attempt:1")
+            })
             .collect();
         assert_eq!(
             attempts.len(),

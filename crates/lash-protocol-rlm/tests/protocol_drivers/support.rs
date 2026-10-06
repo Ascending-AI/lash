@@ -27,10 +27,8 @@ pub(crate) use lash_sansio::{
 };
 
 pub(crate) fn recorded_rlm_event(event: &lash_core::ProtocolEvent) -> Option<RlmProtocolEvent> {
-    event
-        .decode(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
-        .ok()
-        .flatten()
+    lash_protocol_rlm::decode_rlm_protocol_event(event)
+        .unwrap_or_else(|error| panic!("recorded RLM event is corrupt: {error:?}"))
 }
 
 pub(crate) fn test_config() -> TurnMachineConfig {
