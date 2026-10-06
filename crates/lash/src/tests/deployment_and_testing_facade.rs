@@ -143,6 +143,8 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
                 "final",
             ),
         );
+        // A final commit lands only under its run's admission (FIG-4848).
+        let commit = lash_conformance::prepare_final_commit(store.store(), commit).await;
         lash_core::testing::store_fixtures::commit_runtime_state_for_test(
             store.store(),
             commit,

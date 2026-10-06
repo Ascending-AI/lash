@@ -677,10 +677,11 @@ async fn a_follow_on_recovery_run_executes_its_recorded_decision(
             .unwrap_or_else(|| panic!("the journal holds `{step}`: {evidence}"))
     };
     let follow_on = follow_on_of(&run);
+    // The atomic root admission seals the shift (FIG-4848).
     assert!(
-        position("shift-seal:") < position("shift-follow-on:")
+        position("shift-admission:") < position("shift-follow-on:")
             && position("shift-follow-on:") < position(&format!("turn-config:{follow_on}")),
-        "the decision is recorded between the seal and the follow-on's turn: {evidence}"
+        "the decision is recorded between the sealing admission and the follow-on's turn: {evidence}"
     );
     let head = store
         .load_session_head_meta()

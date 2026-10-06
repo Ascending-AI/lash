@@ -281,7 +281,7 @@ pub(crate) async fn execute_run_to_end(
 /// and calls the store directly, so its transaction and replay assertions
 /// exercise the backend under test.
 #[expect(clippy::expect_used, reason = "store-law admission and closure setup")]
-pub(crate) fn prepare_final_commit(
+pub fn prepare_final_commit(
     store: &Arc<dyn crate::RuntimeStore>,
     mut commit: crate::RuntimeCommit,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::RuntimeCommit> + Send + '_>> {

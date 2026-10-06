@@ -548,11 +548,12 @@ async fn a_run_replayed_after_its_session_was_deleted_replays_its_journal() -> R
     );
     let run = lash_core::TurnId::from("closed-replay-run");
     let server = fixture._double.server();
-    // The run retains its selected admission, then records its start marker
-    // and seal. The first attempt dies before the seal.
+    // The run records its start marker, then the atomic admission that seals
+    // the shift (FIG-4848). The first attempt dies before the admission.
     server.crash_on(
-        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeCommand {
-            index: 4,
+        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRun {
+            name: lash_restate::JournalStepKind::RecordedEffect
+                .journal_name("lash:shift-admission:closed-replay#0"),
         })
         .service(lash_restate_test::TURN_DRIVER_SERVICE)
         .key(lash_restate::turn_invocation_key(
@@ -658,7 +659,8 @@ async fn a_run_replayed_after_its_session_was_deleted_replays_its_journal() -> R
             .collect::<Vec<_>>()
     );
     // The precondition: the first attempt died with the start marker
-    // journaled and the seal not, and the delete committed before the replay.
+    // journaled and the sealing admission not, and the delete committed
+    // before the replay.
     let executed = server
         .invocations()
         .into_iter()
@@ -673,8 +675,8 @@ async fn a_run_replayed_after_its_session_was_deleted_replays_its_journal() -> R
         .collect();
     assert!(
         names.iter().any(|name| name.contains("shift-run-start:"))
-            && names.iter().any(|name| name.contains("shift-seal:")),
-        "the replay issued the start marker and the seal: {names:?}"
+            && names.iter().any(|name| name.contains("shift-admission:")),
+        "the replay issued the start marker and the sealing admission: {names:?}"
     );
     assert!(
         !matches!(&executed.last_failure, Some((570, _))),

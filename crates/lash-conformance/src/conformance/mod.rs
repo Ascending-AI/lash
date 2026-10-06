@@ -147,6 +147,7 @@ mod turn_runner;
 mod vm_broker;
 mod wake_delivery;
 
+pub use admission_support::prepare_final_commit;
 pub(crate) use admission_support::*;
 pub use admitted_head_redrive::*;
 #[cfg(feature = "lashlang")]
