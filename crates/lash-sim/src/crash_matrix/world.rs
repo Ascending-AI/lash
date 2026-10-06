@@ -115,7 +115,6 @@ pub struct CrashWorld {
     killing: Arc<AtomicBool>,
     available: Arc<AtomicBool>,
     build: CoreBuild,
-    serve_processes: bool,
     live: Mutex<Option<Deployment>>,
     /// The live deployment's core, for host handler attempts that replay
     /// onto whichever deployment is up ([`replay_host_handlers`]).
@@ -168,15 +167,15 @@ fn deployment_hooks(available: &Arc<AtomicBool>) -> lash_restate_test::Deploymen
 impl CrashWorld {
     /// A world under `seed` whose deployments `build` builds, on the engine
     /// the environment names ([`EngineKind::from_env`]). No deployment is up
-    /// until [`restart`](Self::restart). `serve_processes` installs each
-    /// deployment's durable process worker on the engine's endpoint.
-    pub async fn new(seed: u64, build: CoreBuild, serve_processes: bool) -> Result<Self, String> {
+    /// until [`restart`](Self::restart). Each deployment installs its core's
+    /// durable process worker on the engine's endpoint: the worker runs the
+    /// deployment's process segments and realizes its protected intents.
+    pub async fn new(seed: u64, build: CoreBuild) -> Result<Self, String> {
         let available = Arc::new(AtomicBool::new(false));
         Self::on_engine(
             seed,
             Engine::start(&EngineKind::from_env()?, seed, deployment_hooks(&available)).await?,
             build,
-            serve_processes,
             available,
         )
         .await
@@ -188,7 +187,6 @@ impl CrashWorld {
     pub async fn on_server(
         seed: u64,
         build: CoreBuild,
-        serve_processes: bool,
         config: lash_restate_test::ServerConfig,
     ) -> Result<Self, String> {
         let available = Arc::new(AtomicBool::new(false));
@@ -201,14 +199,13 @@ impl CrashWorld {
         .await
         .map(|backend| Engine::Double(super::engine::DoubleBackend::sqlite(backend)))
         .map_err(|error| format!("build the Restate test backend: {error}"))?;
-        Self::on_engine(seed, engine, build, serve_processes, available).await
+        Self::on_engine(seed, engine, build, available).await
     }
 
     async fn on_engine(
         seed: u64,
         engine: Engine,
         build: CoreBuild,
-        serve_processes: bool,
         available: Arc<AtomicBool>,
     ) -> Result<Self, String> {
         let clock: Arc<dyn lash_core::Clock> = engine.clock();
@@ -261,7 +258,6 @@ impl CrashWorld {
             killing,
             available,
             build,
-            serve_processes,
             live: Mutex::new(None),
             cores: tokio::sync::watch::channel(None).0,
             host_handlers_replay: AtomicBool::new(false),
@@ -470,15 +466,13 @@ impl CrashWorld {
         );
         let backend = self.deploy.lock_recover().clone();
         let core = (self.build)(backend, owner)?;
-        if self.serve_processes {
-            let config = core
-                .durable_process_worker_config()
-                .map_err(|error| format!("the core's process worker config: {error}"))?;
-            self.engine.install_process_worker(
-                lash::durability::DurableProcessWorker::new(config)
-                    .map_err(|error| format!("build the process worker: {error}"))?,
-            );
-        }
+        let config = core
+            .durable_process_worker_config()
+            .map_err(|error| format!("the core's process worker config: {error}"))?;
+        self.engine.install_process_worker(
+            lash::durability::DurableProcessWorker::new(config)
+                .map_err(|error| format!("build the process worker: {error}"))?,
+        );
         *self.interval.lock().await = Interval::fresh(self.engine.now_ms());
         self.cores.send_replace(Some(core.clone()));
         *self.live.lock_recover() = Some(Deployment {

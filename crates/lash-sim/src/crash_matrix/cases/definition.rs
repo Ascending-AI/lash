@@ -335,7 +335,7 @@ fn started_once(id: lash_core::ProcessDefinitionId, seed: u64) -> CustomCheck {
 }
 
 pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String> {
-    let world = CrashWorld::new(seed, super::process::rlm_core(), true).await?;
+    let world = CrashWorld::new(seed, super::process::rlm_core()).await?;
     world.restart().await?;
     world.replay_host_handlers();
     let published = publish_definition(&world).await?;
@@ -351,13 +351,13 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
     }
     let cut = match point {
         CrashPoint::DuringEngineDelivery => EngineCut::BeforeRunEnding {
-            suffix: "process-start-register:v1".to_owned(),
+            suffix: ".process-start-register".to_owned(),
         },
         CrashPoint::MidJournalStep => EngineCut::BeforeRunResultEnding {
-            suffix: "process-start-register:v1".to_owned(),
+            suffix: ".process-start-register".to_owned(),
         },
         CrashPoint::AfterStateCommit => EngineCut::BeforeRunResultEnding {
-            suffix: "process-start-claim:v1".to_owned(),
+            suffix: ".process-start-claim".to_owned(),
         },
         other => return Err(format!("definition start has no {other:?} cell")),
     };

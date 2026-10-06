@@ -394,7 +394,7 @@ pub async fn lost_input_control(seed: u64) -> Result<Vec<String>, String> {
 /// accepted under two host ids, so two runs commit it. Answers the
 /// violations the checker reports.
 pub async fn double_shift_control(seed: u64) -> Result<Vec<String>, String> {
-    let world = CrashWorld::new(seed, standard_core(), false).await?;
+    let world = CrashWorld::new(seed, standard_core()).await?;
     world.restart().await?;
     let session = session_name(Seam::Ingress, seed);
     let text = invariants::input_text("twice");

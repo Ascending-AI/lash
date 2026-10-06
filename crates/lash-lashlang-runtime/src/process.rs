@@ -1053,7 +1053,7 @@ impl LashlangProcessHost<'_> {
                 let in_flight = commands
                     .enter(command, crate::CommandShape::ToolCall)
                     .await?;
-                let reply = Box::pin(
+                let mut reply = Box::pin(
                     in_flight
                         .ctx
                         .call_command_tool(&in_flight.command.key, invocation),
@@ -1064,6 +1064,14 @@ impl LashlangProcessHost<'_> {
                     return Ok(lashlang::AbilityOutcome::HandedOver);
                 }
                 commands.finish(&in_flight)?;
+                if in_flight.ctx.take_run_cancelled_call() {
+                    // The Run's recorded cancel of the call is the process's
+                    // cancellation: the call settles cancelled, which ends the
+                    // body at the same point on every replay.
+                    reply = lash_core::facade_support::ToolInvocationReply::from_output(
+                        lash_core::ToolCallOutput::cancelled(run_cancelled_call()),
+                    );
+                }
                 self.record_tool_reply(&call.call_site, &call.host_operation, &replay_key, &reply);
                 protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
                     .map(lashlang::AbilityOutcome::Value)
@@ -1498,6 +1506,11 @@ fn process_trace_session_id(originator: &lash_core::ProcessOriginator) -> Option
         lash_core::ProcessOriginator::Session { session_id, .. } => Some(session_id.clone()),
         lash_core::ProcessOriginator::Host { .. } => None,
     }
+}
+
+/// How a call the process's Run cancelled settles in the body.
+fn run_cancelled_call() -> lash_core::ToolCancellation {
+    lash_core::ToolCancellation::runtime("the owning Run cancelled the call")
 }
 
 fn process_lashlang_cancelled(message: impl Into<String>) -> lash_core::ProcessAwaitOutput {

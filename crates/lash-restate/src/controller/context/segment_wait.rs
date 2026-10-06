@@ -115,6 +115,10 @@ pub(super) struct WaitControl<'run> {
 
 /// A segment races its short subscriptions against cancellation and its
 /// generation's drain wake. Retirement and another generation's wake drop out.
+///
+/// The cancel promise leads the race: when it and an event are both complete
+/// by the time the race is decided, as when a signal lands right after an
+/// accepted cancel, the cancel wins, and a replay decides the same.
 pub(super) async fn race_segment_wait<'run, T>(
     mut events: Vec<GateWait<'run, T>>,
     mut cancel: Option<GateWait<'run, String>>,
@@ -125,26 +129,29 @@ pub(super) async fn race_segment_wait<'run, T>(
         return Err(TerminalError::new("a segment race needs an event"));
     }
     loop {
+        let leading = usize::from(cancel.is_some());
         let race = {
-            let mut waits: Vec<&dyn SealedDurableFuture> = events
-                .iter()
-                .map(|event| &**event as &dyn SealedDurableFuture)
-                .collect();
+            let mut waits: Vec<&dyn SealedDurableFuture> = Vec::new();
             if let Some(cancel) = &cancel {
                 waits.push(&**cancel);
             }
+            waits.extend(
+                events
+                    .iter()
+                    .map(|event| &**event as &dyn SealedDurableFuture),
+            );
             if let Some(hand_over) = &hand_over {
                 waits.push(&**hand_over);
             }
             first_completed(&waits)
         };
         let winner = race.await?;
-        if winner < events.len() {
+        if (leading..leading + events.len()).contains(&winner) {
             return Ok(super::TurnGateRace::Ended(
-                RestateTurnCancelRaceOutcome::Completed(events.remove(winner).await?),
+                RestateTurnCancelRaceOutcome::Completed(events.remove(winner - leading).await?),
             ));
         }
-        if winner == events.len() && cancel.is_some() {
+        if winner < leading {
             let payload = cancel
                 .take()
                 .ok_or_else(|| TerminalError::new("invalid cancel race branch"))?

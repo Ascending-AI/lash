@@ -36,6 +36,10 @@ pub enum CrashPoint {
     BeforeRun { name: String },
     /// Before a journal run whose generated name ends with this suffix.
     BeforeRunEnding { suffix: String },
+    /// Before a journal run whose generated name starts with this prefix:
+    /// the point for a run whose name ends in a key the scenario only learns
+    /// as it runs, such as a protected intent's realization step.
+    BeforeRunStarting { prefix: String },
     /// Before the server stores the command with this 0-based journal
     /// command index (the input command is index 0).
     BeforeCommand { index: usize },
@@ -175,6 +179,13 @@ impl CrashRule {
                         .run_name
                         .as_deref()
                         .is_some_and(|name| name.ends_with(suffix))
+            }
+            CrashPoint::BeforeRunStarting { prefix } => {
+                site.ty == MessageType::RunCommand
+                    && site
+                        .run_name
+                        .as_deref()
+                        .is_some_and(|name| name.starts_with(prefix.as_str()))
             }
             CrashPoint::BeforeCommand { index } => {
                 site.ty.is_command() && site.command_index == *index

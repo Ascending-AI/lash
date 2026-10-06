@@ -51,13 +51,14 @@ impl RuntimeExecutionContext<'_> {
         if let (Some(control), Some(host)) = (&self.turn_cancel.control, &self.turn_cancel.host) {
             return control.peek_immediate(host.await_event_resolver()).await;
         }
-        // A process has no turn gate; its own cooperative stop is captured
-        // by this same recorded decision. A lent turn token is never authority.
-        Ok(!self.token_is_lent_stop
-            && self
-                .cancellation_token
-                .as_ref()
-                .is_some_and(CancellationToken::is_cancelled))
+        // A turn answered from its gate above; the stop it lends is never
+        // authority. A process has no turn gate: its own lent stop, which only
+        // its accepted cancel fires, is captured by this same recorded
+        // decision, and replay consumes the record instead of the live stop.
+        Ok(self
+            .cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled))
     }
 }
 
@@ -160,6 +161,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             transferable_waits: false,
             turn_hands_over: false,
             wait_handed_over: Arc::default(),
+            run_cancelled_call: Arc::default(),
             turn_cancel_scope: None,
             tracing: None,
             live_step: None,

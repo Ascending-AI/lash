@@ -401,7 +401,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
     .map_err(|error| error.to_string())?;
     let id = draft.id();
     let hold = Arc::new(OpenTurnHold::new());
-    let world = CrashWorld::new(seed, core(store.clone(), id.clone(), hold.clone()), false).await?;
+    let world = CrashWorld::new(seed, core(store.clone(), id.clone(), hold.clone())).await?;
     world.restart().await?;
     let pin = lash_core::HostArtifactPin::mint();
     world

@@ -101,6 +101,9 @@ pub struct RuntimeExecutionContext<'run> {
     /// Set when a transferable wait this context issued was handed over,
     /// shared with every context derived from this one.
     wait_handed_over: Arc<std::sync::atomic::AtomicBool>,
+    /// Set when a process's logical Run cancelled a call this context
+    /// issued, shared with every context derived from this one.
+    run_cancelled_call: Arc<std::sync::atomic::AtomicBool>,
     /// Durable cancellation authority for waits issued by this execution.
     /// A follow-on physical turn keeps its admitted effect scope but observes
     /// the cancellation gate addressed to its own turn identity.
@@ -473,6 +476,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             transferable_waits: self.transferable_waits,
             turn_hands_over: self.turn_hands_over,
             wait_handed_over: Arc::clone(&self.wait_handed_over),
+            run_cancelled_call: Arc::clone(&self.run_cancelled_call),
             turn_cancel_scope: self.turn_cancel_scope.clone(),
             tracing: self.tracing.clone(),
             live_step: self.live_step.clone(),
@@ -843,6 +847,21 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// segment since the last call; the answer is taken.
     pub fn take_wait_handed_over(&self) -> bool {
         self.wait_handed_over
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Records that this process's logical Run cancelled a call this
+    /// context issued: the recorded answer to the process's accepted cancel.
+    pub(crate) fn record_run_cancelled_call(&self) {
+        self.run_cancelled_call
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Whether this process's logical Run cancelled a call this context
+    /// issued since the last call; the answer is taken. The process body
+    /// ends cancelled on it, as on a sleep its cancel won.
+    pub fn take_run_cancelled_call(&self) -> bool {
+        self.run_cancelled_call
             .swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 

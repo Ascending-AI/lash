@@ -154,7 +154,7 @@ async fn stage_scope_close_with_claim(
     seed: u64,
     claim_before_restart: bool,
 ) -> Result<Staged, String> {
-    let world = CrashWorld::new(seed, standard_core(), true).await?;
+    let world = CrashWorld::new(seed, standard_core()).await?;
     world.restart().await?;
     let session = session_name(Seam::ScopeClose, seed);
     let run = "in-0";
@@ -339,7 +339,7 @@ async fn produce_parent_end(
 const POISONED_PLANS: usize = 65;
 
 pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Staged, String> {
-    let world = CrashWorld::new(seed, standard_core(), false).await?;
+    let world = CrashWorld::new(seed, standard_core()).await?;
     world.restart().await?;
     let session = session_name(Seam::ParentEnd, seed);
     crate::open_created_session(super::MODEL, &world.core()?, session.clone())

@@ -13,6 +13,9 @@ use crate::crash_matrix::invariants::{CustomCheck, Expected};
 use crate::crash_matrix::world::{CoreBuild, CrashWorld};
 use crate::crash_matrix::{CrashPoint, Seam};
 
+/// The run a realized create journals its definition under.
+const CREATE_REALIZATION_STEP: &str = "process-definition:lash:tool-intent:";
+
 const CODE: &str = "const made = await processes.create({ source: 'const answer = async () => 31;', dialect: 'typescript' }); finish(made.id);";
 
 fn core() -> CoreBuild {
@@ -69,23 +72,31 @@ fn published(session: lash_core::SessionId) -> CustomCheck {
                 Ok(page) => page,
                 Err(error) => return vec![format!("create has no committed frame: {error}")],
             };
-            let outputs = page
-                .nodes
-                .into_iter()
-                .filter_map(|node| {
-                    let lash_core::SessionNodePayload::Event {
-                        event: lash_core::SessionHistoryRecord::Protocol(event),
-                    } = node.record.payload
-                    else {
-                        return None;
-                    };
-                    event
-                        .payload
-                        .get("RlmTrajectoryEntry")?
-                        .get("final_output")
-                        .cloned()
-                })
-                .collect::<Vec<_>>();
+            // A committed answer is a finished cell's inline value, read
+            // through the stamped RLM event decoder.
+            let mut outputs = Vec::new();
+            for node in page.nodes {
+                let lash_core::SessionNodePayload::Event {
+                    event: lash_core::SessionHistoryRecord::Protocol(event),
+                } = node.record.payload
+                else {
+                    continue;
+                };
+                match lash_protocol_rlm::decode_rlm_protocol_event(&event) {
+                    Ok(Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry))) => {
+                        if let lash_rlm_types::CellOutcome::Finished(
+                            lash_core::OutputValue::Inline(output),
+                        ) = entry.outcome
+                        {
+                            outputs.push(output);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        return vec![format!("a committed RLM event is corrupt: {error}")];
+                    }
+                }
+            }
             let [output] = outputs.as_slice() else {
                 return vec![format!(
                     "create committed {} answers, expected one",
@@ -128,17 +139,19 @@ fn published(session: lash_core::SessionId) -> CustomCheck {
 }
 
 pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String> {
-    let world = CrashWorld::new(seed, core(), false).await?;
+    let world = CrashWorld::new(seed, core()).await?;
     world.restart().await?;
     let cut = match point {
         CrashPoint::MidJournalStep => EngineCut::BeforeRunResultEnding {
             suffix: ":attempt:1".into(),
         },
-        CrashPoint::AfterStateCommit => EngineCut::BeforeRunEnding {
-            suffix: ".process-definition:v1".into(),
+        // The create is a protected intent: its realization journals the
+        // definition step under the intent's key.
+        CrashPoint::AfterStateCommit => EngineCut::BeforeRunStarting {
+            prefix: CREATE_REALIZATION_STEP.into(),
         },
-        CrashPoint::AfterDeliveryBeforeSettle => EngineCut::BeforeRunResultEnding {
-            suffix: ".process-definition:v1".into(),
+        CrashPoint::AfterDeliveryBeforeSettle => EngineCut::BeforeRunResultStarting {
+            prefix: CREATE_REALIZATION_STEP.into(),
         },
         other => return Err(format!("create has no {other:?} cut")),
     };

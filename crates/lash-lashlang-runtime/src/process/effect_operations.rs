@@ -405,6 +405,15 @@ impl LashlangProcessHost<'_> {
                 );
             }
         }
+        if in_flight.ctx.take_run_cancelled_call() {
+            // The Run's recorded cancel of a call is the process's
+            // cancellation, whichever answer the aggregate gave around it.
+            self.cancellation.cancel();
+            return Err(LashlangHostError::ToolCancelled {
+                message: super::run_cancelled_call().message,
+            }
+            .into());
+        }
         if !self.cancellation.is_cancelled() && dispatched.len() > 1 {
             for call in dispatched.values() {
                 self.lashlang_execution_trace

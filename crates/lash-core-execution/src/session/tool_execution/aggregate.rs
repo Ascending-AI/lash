@@ -238,6 +238,17 @@ impl RuntimeExecutionContext<'_> {
         if let Some(exceeded) = error.tool_call_limit_exceeded() {
             return ToolAggregateOutcome::ToolCallLimitExceeded(exceeded);
         }
+        // A process has no turn gate to read after the abort: the Run's
+        // recorded cancel of its call is the process's own cancellation.
+        if self.process_id().is_some()
+            && error.code == crate::RuntimeErrorCode::RuntimeToolRunAwaitCancelled
+            && matches!(
+                error.cause,
+                Some(crate::RuntimeErrorCause::ToolRunControl { aborted: false, .. })
+            )
+        {
+            self.record_run_cancelled_call();
+        }
         if !error.journaled {
             self.record_nested_effect_error(error.clone());
         }

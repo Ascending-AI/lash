@@ -239,7 +239,7 @@ pub(super) async fn stage_delete(point: CrashPoint, seed: u64) -> Result<Staged,
 
 async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<Staged, String> {
     let held = Arc::new(AtomicUsize::new(0));
-    let world = CrashWorld::new(seed, held_core(Arc::clone(&held)), false).await?;
+    let world = CrashWorld::new(seed, held_core(Arc::clone(&held))).await?;
     world.restart().await?;
     let session = session_name(seam, seed);
     crate::open_created_session(super::MODEL, &world.core()?, session.clone())

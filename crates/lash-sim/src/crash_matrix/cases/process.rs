@@ -44,7 +44,7 @@ pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, 
     if point != CrashPoint::AfterStateCommit {
         return Err(format!("process start has no {point:?} cell"));
     }
-    let world = CrashWorld::new(seed, rlm_core(), true).await?;
+    let world = CrashWorld::new(seed, rlm_core()).await?;
     world.restart().await?;
     let request = publish_process(&world, "500ms")
         .await?
@@ -482,7 +482,7 @@ async fn stage_caller_killed(world: CrashWorld) -> Result<Staged, String> {
 }
 
 pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String> {
-    let world = CrashWorld::new(seed, rlm_core(), true).await?;
+    let world = CrashWorld::new(seed, rlm_core()).await?;
     world.restart().await?;
     if point == CrashPoint::CallerKilled {
         return Box::pin(stage_caller_killed(world)).await;

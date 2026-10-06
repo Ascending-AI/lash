@@ -375,7 +375,6 @@ impl Driver {
                 drain,
                 Arc::clone(&tool),
             ),
-            true,
             config,
         )
         .await?;

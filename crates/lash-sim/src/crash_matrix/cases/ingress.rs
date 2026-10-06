@@ -26,7 +26,7 @@ use crate::crash_matrix::{CrashPoint, Seam};
 const RUN_JOURNAL_CUTS: u64 = 17;
 
 pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String> {
-    let world = CrashWorld::new(seed, standard_core(), false).await?;
+    let world = CrashWorld::new(seed, standard_core()).await?;
     world.restart().await?;
     let session = session_name(Seam::Ingress, seed);
     let inputs = 1 + world.draw(0..2) as usize;
@@ -175,7 +175,7 @@ async fn lose_session_shift(
 /// answer from the store before it follows. Answers what the case found
 /// wrong: empty when the waiter awaited the re-asked shift and answered.
 pub async fn a_waiter_follows_its_input_past_a_lost_ask(seed: u64) -> Result<Vec<String>, String> {
-    let world = CrashWorld::new(seed, standard_core(), false).await?;
+    let world = CrashWorld::new(seed, standard_core()).await?;
     world.restart().await?;
     // A held shift never settles: wait on the engine briefly per tick.
     world.set_quiesce_budget(std::time::Duration::from_millis(100));
@@ -282,7 +282,7 @@ pub async fn a_waiter_follows_its_input_past_a_lost_ask(seed: u64) -> Result<Vec
 pub async fn a_turn_outlasts_an_outage_past_its_attempt_budget(
     seed: u64,
 ) -> Result<Vec<String>, String> {
-    let world = CrashWorld::new(seed, standard_core(), false).await?;
+    let world = CrashWorld::new(seed, standard_core()).await?;
     world.double()?;
     world.restart().await?;
     let session = session_name(Seam::Ingress, seed);
