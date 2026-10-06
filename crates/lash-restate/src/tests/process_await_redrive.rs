@@ -236,9 +236,9 @@ impl Fig1631AwaitEventGate for Fig1631AwaitEventGateImpl {
         let scope = durable_turn_scope(FIG1631_AWAIT_SESSION, "turn");
         let key = test_restate_await_event_key(
             &scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                "fig1631-await-call",
-            )),
+            AwaitEventWaitIdentity::Custom {
+                key: "fig1631-await-event".into(),
+            },
         )
         .map_err(TerminalError::from_error)?;
         let outcome = RestateRuntimeEffectController::new_for_test(ctx)
@@ -276,11 +276,15 @@ pub(super) fn fig1631_resolution_label(resolution: &Resolution) -> String {
     serde_json::to_string(resolution).expect("serialize resolution label")
 }
 
+/// The signal of the turn's gate awakeable: the event's short observer takes
+/// the first awakeable, the gate the second.
+const FIG1631_GATE_SIGNAL: u32 = 18;
+
 /// Park a turn-scoped await-event on its gate and pin the journal positions.
 ///
-/// The migrated gate journals the event call, then its gate awakeable, then the
-/// registration — the same geometry as process await, and the positions every
-/// redrive below lands on.
+/// The gate journals the logical wait's `register`, then the event's short
+/// observer, then the turn gate's registration (FIG-4891) — the positions
+/// every redrive below lands on.
 pub(super) async fn fig1631_parked_await_event_gate(
     endpoint: &Endpoint,
     workflow_key: &str,
@@ -291,7 +295,11 @@ pub(super) async fn fig1631_parked_await_event_gate(
         "run",
         workflow_key,
         &Fig1126PendingToolRedriveInput,
-        vec![("is_revoked".to_string(), serde_json::json!(false))],
+        vec![
+            ("is_revoked".to_string(), serde_json::json!(false)),
+            ("register".to_string(), fig1631_registered_gate()),
+            ("register_awakeable".to_string(), fig1631_registered_gate()),
+        ],
     )
     .await
     .expect("park the turn-scoped await-event on its gate");
@@ -301,8 +309,13 @@ pub(super) async fn fig1631_parked_await_event_gate(
             .iter()
             .map(|call| call.handler.as_str())
             .collect::<Vec<_>>(),
-        vec!["is_revoked", "await_resolution", "register_awakeable"],
-        "the await-event gate replaces the nested workflow hop with one gate registration"
+        vec![
+            "is_revoked",
+            "register",
+            "register_awakeable",
+            "register_awakeable"
+        ],
+        "the await-event registers its logical wait, then its short observer, then its turn gate"
     );
     assert!(
         restate_message_types(&parked)
@@ -313,9 +326,9 @@ pub(super) async fn fig1631_parked_await_event_gate(
     calls
 }
 
-/// Cancel path: the index already dropped the entry, so the waiter must not
-/// unregister it again — but it must release the losing event wait, which the
-/// retired nested workflow used to do from its own journal.
+/// Cancel path: the index already dropped the gate entry, so the waiter must
+/// not unregister it again — but it retires its own event observer and
+/// releases the losing event wait.
 #[tokio::test]
 pub(super) async fn fig1631_turn_cancelled_await_event_releases_the_losing_event_wait() {
     let endpoint = fig1631_await_event_endpoint();
@@ -327,11 +340,12 @@ pub(super) async fn fig1631_turn_cancelled_await_event_releases_the_losing_event
         &Fig1126PendingToolRedriveInput,
         &[
             (calls[0].clone(), Some(serde_json::json!(false))),
-            (calls[1].clone(), None),
+            (calls[1].clone(), Some(fig1631_registered_gate())),
             (calls[2].clone(), Some(fig1631_registered_gate())),
+            (calls[3].clone(), Some(fig1631_registered_gate())),
         ],
         Some((
-            17,
+            FIG1631_GATE_SIGNAL,
             serde_json::to_value(RestateTurnCancelWake::TurnCancelled)
                 .expect("serialize turn cancellation"),
         )),
@@ -342,7 +356,10 @@ pub(super) async fn fig1631_turn_cancelled_await_event_releases_the_losing_event
         "Fig1631AwaitEventGate",
         "run",
         replay,
-        vec![serde_json::to_value(ResolveOutcome::Accepted).expect("serialize resolve outcome")],
+        vec![
+            serde_json::Value::Null,
+            serde_json::to_value(ResolveOutcome::Accepted).expect("serialize resolve outcome"),
+        ],
     )
     .await
     .expect("turn cancellation must resolve the parked await-event");
@@ -352,8 +369,9 @@ pub(super) async fn fig1631_turn_cancelled_await_event_releases_the_losing_event
             .iter()
             .map(|call| call.handler.as_str())
             .collect::<Vec<_>>(),
-        vec!["resolve"],
-        "the cancel path releases the losing event wait and leaves gate retirement to the index"
+        vec!["unregister_awakeable", "resolve"],
+        "the cancel path retires its event observer, releases the losing event wait and \
+         leaves gate retirement to the index"
     );
     assert_eq!(
         restate_output_json::<String>(&cancelled).as_deref(),
@@ -374,9 +392,10 @@ pub(super) async fn fig1631_session_revoked_await_event_unwinds_as_a_deleted_ses
         &Fig1126PendingToolRedriveInput,
         &[
             (calls[0].clone(), Some(serde_json::json!(false))),
-            (calls[1].clone(), None),
+            (calls[1].clone(), Some(fig1631_registered_gate())),
+            (calls[2].clone(), Some(fig1631_registered_gate())),
             (
-                calls[2].clone(),
+                calls[3].clone(),
                 Some(
                     serde_json::to_value(RestateDurableWaitRegistration::Revoked)
                         .expect("serialize revoked registration"),
@@ -386,9 +405,15 @@ pub(super) async fn fig1631_session_revoked_await_event_unwinds_as_a_deleted_ses
         None,
     )
     .expect("splice a revoked gate registration");
-    let revoked = invoke_endpoint_body(&endpoint, "Fig1631AwaitEventGate", "run", replay)
-        .await
-        .expect("a revoked registration must unwind the await-event");
+    let revoked = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "Fig1631AwaitEventGate",
+        "run",
+        replay,
+        vec![serde_json::Value::Null],
+    )
+    .await
+    .expect("a revoked registration must unwind the await-event");
     assert_eq!(
         restate_output_json::<String>(&revoked).as_deref(),
         Some(format!("session_deleted:{FIG1631_AWAIT_SESSION}").as_str())

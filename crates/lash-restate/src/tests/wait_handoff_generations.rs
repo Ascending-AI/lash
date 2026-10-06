@@ -724,10 +724,9 @@ fn success_value(output: &ProcessAwaitOutput) -> Option<serde_json::Value> {
 /// segment, between the wake and the hand-over, between the hand-over and
 /// the successor's registration of the wait, and after it, the process ends
 /// with that signal exactly once; the wait is never resolved `Cancelled` by
-/// the hand-off; the index settles once per key, the orphaned N-side
-/// `await_resolution` included; and a second resolver, on the other build,
-/// is answered with the one terminal. Every hand-over runs its successor
-/// once, on N+1.
+/// the hand-off; no segment leaves a long read on the wait's workflow behind;
+/// and a second resolver, on the other build, is answered with the one
+/// terminal. Every hand-over runs its successor once, on N+1.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn l3_a_wait_signal_crosses_the_drain_hand_off_exactly_once() {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -860,45 +859,20 @@ async fn l3_a_wait_signal_crosses_the_drain_hand_off_exactly_once() {
             "{case}: the successor waits again rather than handing over again"
         );
         let views = roll.server.invocations();
-        // Every waiter on the key — the orphaned N-side call and the
-        // successor's — returns the one resolution, and settles the index
-        // with it: one record per key, whoever writes it.
-        let waits = views
-            .iter()
-            .filter(|view| {
-                view.target.starts_with("LashDurableWaitWorkflow/")
-                    && view.target.ends_with("/await_resolution")
-            })
-            .collect::<Vec<_>>();
-        assert!(!waits.is_empty(), "{case}: the segment waited");
-        for wait in &waits {
-            let returned = roll
-                .server
-                .outcome(&wait.id)
-                .expect("the wait's outcome")
-                .expect("the wait succeeded");
-            assert_eq!(
-                serde_json::from_slice::<crate::Reply<Resolution>>(&returned)
-                    .expect("a resolution")
-                    .body,
-                resolution,
-                "{case}: every waiter on the key returns the signal, never Cancelled"
-            );
-        }
-        let settles = views
-            .iter()
-            .filter(|view| {
-                view.target.starts_with("LashDurableWaitIndex/") && view.target.ends_with("/settle")
-            })
-            .count();
+        // A segment holds only a short observer on the wait's index
+        // (FIG-4891): no long read on the wait's workflow outlives the
+        // hand-off, and the key's one terminal is the index's, read above.
         assert!(
-            settles <= waits.len(),
-            "{case}: the index settles at most once per waiter, each with the one resolution"
+            views.iter().all(|view| {
+                !(view.target.starts_with("LashDurableWaitWorkflow/")
+                    && view.target.ends_with("/await_resolution"))
+            }),
+            "{case}: no segment parks a long read on the wait's workflow: {views:#?}"
         );
         for view in &views {
             assert_eq!(
                 view.status, "completed",
-                "{case}: every invocation completes, the orphaned wait included: {view:#?}"
+                "{case}: every invocation completes: {view:#?}"
             );
         }
     }
