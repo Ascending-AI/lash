@@ -1289,3 +1289,55 @@ CREATE TABLE IF NOT EXISTS lash_wait_receipts (
     retired_at_ms BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_lash_wait_receipts_owner ON lash_wait_receipts(owner_key);
+
+-- The durability engine (ruling #74; crates/lash-durable). A serving node's
+-- lease: one row per node, renewed by its heartbeat, deleted by a reap.
+CREATE TABLE IF NOT EXISTS lash_nodes (
+    node_id TEXT PRIMARY KEY,
+    boot_id TEXT NOT NULL,
+    formats_json TEXT NOT NULL,
+    registered_at_ms BIGINT NOT NULL,
+    heartbeat_expires_at_ms BIGINT NOT NULL
+);
+
+-- One scheduling row per session and per process: the only row a claim, a
+-- wake or a fence touches. `epoch` changes only by claim, reap and release,
+-- and every owner write is fenced on it; an actor has mail exactly when
+-- `mail_seq > acked_seq`.
+CREATE TABLE IF NOT EXISTS lash_actors (
+    actor_key TEXT COLLATE "C" PRIMARY KEY,
+    kind TEXT NOT NULL CONSTRAINT ck_lash_actors_kind CHECK (kind IN ('session', 'process')),
+    state TEXT NOT NULL CONSTRAINT ck_lash_actors_state
+        CHECK (state IN ('idle', 'ready', 'owned', 'waiting', 'terminal')),
+    epoch BIGINT NOT NULL,
+    owner_node TEXT,
+    owner_boot TEXT,
+    ready_at_ms BIGINT,
+    next_due_ms BIGINT,
+    formats TEXT NOT NULL,
+    state_revision BIGINT NOT NULL,
+    mail_seq BIGINT NOT NULL,
+    acked_seq BIGINT NOT NULL,
+    created_at_ms BIGINT NOT NULL,
+    CONSTRAINT ck_lash_actors_owned CHECK ((state = 'owned') = (owner_node IS NOT NULL)),
+    CONSTRAINT ck_lash_actors_owner_boot CHECK ((owner_node IS NULL) = (owner_boot IS NULL)),
+    CONSTRAINT ck_lash_actors_ready CHECK ((state = 'ready') = (ready_at_ms IS NOT NULL)),
+    CONSTRAINT ck_lash_actors_due CHECK (next_due_ms IS NULL OR state = 'waiting'),
+    CONSTRAINT ck_lash_actors_mail CHECK (acked_seq <= mail_seq)
+);
+CREATE INDEX IF NOT EXISTS ix_lash_actors_ready ON lash_actors (ready_at_ms) WHERE state = 'ready';
+CREATE INDEX IF NOT EXISTS ix_lash_actors_due ON lash_actors (next_due_ms)
+    WHERE state = 'waiting' AND next_due_ms IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_lash_actors_owner ON lash_actors (owner_node, owner_boot)
+    WHERE state = 'owned';
+
+-- An actor's mailbox: rows only non-owners append and only the owner
+-- acknowledges, each at the position the append took from `mail_seq`.
+CREATE TABLE IF NOT EXISTS lash_actor_mail (
+    actor_key TEXT COLLATE "C" NOT NULL REFERENCES lash_actors (actor_key),
+    seq BIGINT NOT NULL,
+    kind TEXT NOT NULL,
+    body TEXT NOT NULL,
+    appended_at_ms BIGINT NOT NULL,
+    PRIMARY KEY (actor_key, seq)
+);

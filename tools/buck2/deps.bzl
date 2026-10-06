@@ -258,6 +258,17 @@ PACKAGE_DEPS = {
             "tracing": "//third-party/rust:p0414"
         }
     },
+    "lash-internal-durable": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "async_trait": "//third-party/rust:p0015",
+            "futures_util": "//third-party/rust:p0134",
+            "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
+            "thiserror": "//third-party/rust:p0392",
+            "tokio": "//third-party/rust:p0399"
+        }
+    },
     "lash-internal-http-transport": {
         "build": {},
         "dev": {
@@ -444,6 +455,7 @@ PACKAGE_DEPS = {
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_worker": "//crates/lash-core-worker:lash-core-worker",
+            "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_lashlang_runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
@@ -456,6 +468,7 @@ PACKAGE_DEPS = {
         "normal": {
             "async_trait": "//third-party/rust:p0015",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
+            "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_store_sql": "//crates/lash-store-sql:lash-store-sql",
             "rmp_serde": "//third-party/rust:p0304",
@@ -789,6 +802,7 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_core_worker": "//crates/lash-core-worker:lash-core-worker",
+            "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_lashlang_runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
@@ -803,6 +817,7 @@ PACKAGE_DEPS = {
             "flate2": "//third-party/rust:p0116",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_store_sql": "//crates/lash-store-sql:lash-store-sql",
             "rmp_serde": "//third-party/rust:p0304",

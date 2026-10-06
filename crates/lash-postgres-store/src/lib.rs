@@ -1403,6 +1403,11 @@ impl PostgresStorage {
         }
     }
 
+    /// The durability engine's store over this catalog.
+    pub fn durable_store(&self) -> PostgresDurableStore {
+        PostgresDurableStore::new(self.pool.clone(), self.fence.clone())
+    }
+
     /// The build-generation drain marks and per-generation work reads over
     /// this catalog (FIG-3799, FIG-3884): the port the operator binary and a
     /// store set compose drain status from.
@@ -1512,6 +1517,8 @@ mod backend;
 mod blobs;
 #[path = "postgres/connection_sql.rs"]
 mod connection_sql;
+#[path = "postgres/durable.rs"]
+mod durable;
 #[path = "postgres/evidence_retention.rs"]
 mod evidence_retention;
 #[path = "postgres/finalize.rs"]
@@ -1596,6 +1603,7 @@ mod turn_ingress;
 mod worker_recovery;
 
 pub use backend::PostgresStoreSet;
+pub use durable::PostgresDurableStore;
 use guarded_tx::begin_guarded;
 pub use migrate::{MigrateError, MigrationPhase, MigrationRefusal, MigrationReport, MigrationStep};
 mod connection_budget;

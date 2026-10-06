@@ -25,6 +25,29 @@ table lash_abandoned_consumer_holds
   column owner_scope_id text not-null
   column owner_scope_kind text not-null
   primary-key (hold_key)
+table lash_actor_mail
+  column actor_key text not-null
+  column appended_at_ms bigint not-null
+  column body text not-null
+  column kind text not-null
+  column seq bigint not-null
+  primary-key (actor_key, seq)
+  foreign-key (actor_key) references lash_actors (actor_key) on delete no action
+table lash_actors
+  column acked_seq bigint not-null
+  column actor_key text not-null
+  column created_at_ms bigint not-null
+  column epoch bigint not-null
+  column formats text not-null
+  column kind text not-null
+  column mail_seq bigint not-null
+  column next_due_ms bigint nullable
+  column owner_boot text nullable
+  column owner_node text nullable
+  column ready_at_ms bigint nullable
+  column state text not-null
+  column state_revision bigint not-null
+  primary-key (actor_key)
 table lash_artifact_cleanup_obligations
   column cleanup_json text not-null
   column obligation_attempts integer not-null default
@@ -171,6 +194,13 @@ table lash_migrations
   column state text not-null
   column to_version integer not-null
   primary-key (phase, migration)
+table lash_nodes
+  column boot_id text not-null
+  column formats_json text not-null
+  column heartbeat_expires_at_ms bigint not-null
+  column node_id text not-null
+  column registered_at_ms bigint not-null
+  primary-key (node_id)
 table lash_parent_end_plans
   column ended_at_ms bigint not-null
   column obligation_attempts integer not-null default

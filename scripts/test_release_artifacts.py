@@ -46,7 +46,7 @@ def release_artifact_manifest_contains_only_sdk_and_operator_binary():
     case.assertIn("worker-artifacts/*.sha256", release_action)
     case.assertIn("needs: [prepare-release, publish-crates, worker-artifacts]", workflow)
     case.assertIn("python3 scripts/package_vm_worker.py", workflow)
-    case.assertIn("worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_c2fdb0f7", workflow)
+    case.assertIn("worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_9bcce4a3", workflow)
     case.assertNotIn("--workspace", workflow.split("Build the matching release worker", 1)[1].split("Bundle helper", 1)[0])
     case.assertNotIn("target/release/", release_action)
 

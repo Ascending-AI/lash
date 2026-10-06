@@ -2860,6 +2860,9 @@ jobs:
       - name: Check the code-mode dialect boundary
         run: python3 scripts/check-dialect-boundary.py
 
+      - name: Check the durability engine's SQL boundary
+        run: python3 scripts/check-durable-sql.py
+
       - name: Check operator guide command coverage
         run: python3 scripts/check_operator_guide_commands.py
 

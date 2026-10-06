@@ -1,0 +1,32 @@
+[package]
+name = "lash-internal-durable"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The lash-owned durability port: actors, node leases, epoch-fenced owner and mailbox transactions."
+keywords = ["lash", "agent", "runtime", "durability", "ai"]
+categories = ["database", "asynchronous"]
+
+[lib]
+name = "lash_durable"
+doctest = false
+
+[features]
+default = []
+# The fencing laws every DurableStore keeps, for the dialects' own tests.
+testing = ["dep:futures-util"]
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+futures-util = { workspace = true, optional = true }
+lash-core-ids = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }

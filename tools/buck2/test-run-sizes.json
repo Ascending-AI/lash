@@ -23,7 +23,7 @@
     "peak_bytes": 17788928,
     "samples": 15
   },
-  "//crates/lash-core-execution:effect_model__test__fv_085f1bde": {
+  "//crates/lash-core-execution:effect_model__test__fv_9e81a3c0": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.03,
@@ -39,7 +39,7 @@
     "peak_bytes": 384438272,
     "samples": 397
   },
-  "//crates/lash-core-execution:lash-core-execution__unit_test__fv_6ef4a36c": {
+  "//crates/lash-core-execution:lash-core-execution__unit_test__fv_29e260c3": {
     "cpu_count": 2,
     "memory_kb": 524288,
     "p95_cores": 1.88,
@@ -63,7 +63,7 @@
     "peak_bytes": 16187392,
     "samples": 30
   },
-  "//crates/lash-core-execution:process_model__test__fv_085f1bde": {
+  "//crates/lash-core-execution:process_model__test__fv_9e81a3c0": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 0.73,
@@ -399,7 +399,7 @@
     "peak_bytes": 161525760,
     "samples": 72
   },
-  "//crates/lash-postgres-store:conformance__test__fv_c8af19c8": {
+  "//crates/lash-postgres-store:conformance__test__fv_1295044b": {
     "cpu_count": 2,
     "memory_kb": 262144,
     "p95_cores": 1.86,
@@ -431,7 +431,7 @@
     "peak_bytes": 86110208,
     "samples": 24
   },
-  "//crates/lash-postgres-store:integration__test__fv_c8af19c8": {
+  "//crates/lash-postgres-store:integration__test__fv_1295044b": {
     "cpu_count": 2,
     "memory_kb": 262144,
     "p95_cores": 1.29,
@@ -495,7 +495,7 @@
     "peak_bytes": 193523712,
     "samples": 181
   },
-  "//crates/lash-protocol-rlm:frame_open_redrive__test__fv_85002b36": {
+  "//crates/lash-protocol-rlm:frame_open_redrive__test__fv_e9e42e71": {
     "cpu_count": 2,
     "memory_kb": 262144,
     "p95_cores": 1.8,
@@ -511,7 +511,7 @@
     "peak_bytes": 213356544,
     "samples": 3708
   },
-  "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_56508c28": {
+  "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_273b3c7b": {
     "cpu_count": 2,
     "memory_kb": 262144,
     "p95_cores": 1.88,
@@ -519,7 +519,7 @@
     "peak_bytes": 178327552,
     "samples": 113
   },
-  "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_85002b36": {
+  "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_e9e42e71": {
     "cpu_count": 2,
     "memory_kb": 262144,
     "p95_cores": 1.87,
@@ -535,7 +535,7 @@
     "peak_bytes": 186425344,
     "samples": 199
   },
-  "//crates/lash-protocol-rlm:protocol_drivers__test__fv_85002b36": {
+  "//crates/lash-protocol-rlm:protocol_drivers__test__fv_e9e42e71": {
     "cpu_count": 2,
     "memory_kb": 262144,
     "p95_cores": 1.36,
@@ -551,7 +551,7 @@
     "peak_bytes": 776855552,
     "samples": 303
   },
-  "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_85002b36": {
+  "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_e9e42e71": {
     "cpu_count": 2,
     "memory_kb": 1048576,
     "p95_cores": 1.67,
@@ -687,7 +687,7 @@
     "peak_bytes": 36495360,
     "samples": 171
   },
-  "//crates/lash-provider-google:lash-provider-google__unit_test__fv_4110ab9f": {
+  "//crates/lash-provider-google:lash-provider-google__unit_test__fv_cf6aba1b": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.05,
@@ -711,7 +711,7 @@
     "peak_bytes": 77979648,
     "samples": 208
   },
-  "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_6543fc4d": {
+  "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_b07a552a": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.03,
@@ -1023,7 +1023,7 @@
     "peak_bytes": 2147483648,
     "samples": 3953
   },
-  "//crates/lash-restate:lash-restate__unit_test__fv_74f10271": {
+  "//crates/lash-restate:lash-restate__unit_test__fv_62a18128": {
     "cpu_count": 3,
     "memory_kb": 2359296,
     "p95_cores": 2.89,
@@ -1151,7 +1151,7 @@
     "peak_bytes": 906268672,
     "samples": 565
   },
-  "//crates/lash-sqlite-store:conformance__test__fv_d9992ae4": {
+  "//crates/lash-sqlite-store:conformance__test__fv_de29d061": {
     "cpu_count": 3,
     "memory_kb": 1310720,
     "p95_cores": 2.85,
@@ -1167,7 +1167,7 @@
     "peak_bytes": 864559104,
     "samples": 590
   },
-  "//crates/lash-sqlite-store:conformance_memory__test__fv_d9992ae4": {
+  "//crates/lash-sqlite-store:conformance_memory__test__fv_de29d061": {
     "cpu_count": 2,
     "memory_kb": 1048576,
     "p95_cores": 1.93,
@@ -1183,7 +1183,7 @@
     "peak_bytes": 32538624,
     "samples": 160
   },
-  "//crates/lash-sqlite-store:durable_read_fixture__test__fv_d9992ae4": {
+  "//crates/lash-sqlite-store:durable_read_fixture__test__fv_de29d061": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.06,
@@ -1199,7 +1199,7 @@
     "peak_bytes": 22523904,
     "samples": 159
   },
-  "//crates/lash-sqlite-store:fencing_backstop__test__fv_d9992ae4": {
+  "//crates/lash-sqlite-store:fencing_backstop__test__fv_de29d061": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 0.98,
@@ -1215,7 +1215,7 @@
     "peak_bytes": 53272576,
     "samples": 178
   },
-  "//crates/lash-sqlite-store:integration__test__fv_d9992ae4": {
+  "//crates/lash-sqlite-store:integration__test__fv_de29d061": {
     "cpu_count": 2,
     "memory_kb": 262144,
     "p95_cores": 1.33,
@@ -1231,7 +1231,7 @@
     "peak_bytes": 142086144,
     "samples": 354
   },
-  "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_d9992ae4": {
+  "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_de29d061": {
     "cpu_count": 2,
     "memory_kb": 262144,
     "p95_cores": 1.89,
@@ -1247,7 +1247,7 @@
     "peak_bytes": 26345472,
     "samples": 179
   },
-  "//crates/lash-sqlite-store:process_change_horizon__test__fv_d9992ae4": {
+  "//crates/lash-sqlite-store:process_change_horizon__test__fv_de29d061": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 0.9,
@@ -1519,7 +1519,7 @@
     "peak_bytes": 93216768,
     "samples": 232
   },
-  "//crates/lash-vm-worker:pool_laws__test__fv_9d9d9794": {
+  "//crates/lash-vm-worker:pool_laws__test__fv_e47c2aa8": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.06,
@@ -1535,7 +1535,7 @@
     "peak_bytes": 104493056,
     "samples": 312
   },
-  "//crates/lash:artifact_referrers_evidence__test__fv_94a26ac9": {
+  "//crates/lash:artifact_referrers_evidence__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.05,
@@ -1551,7 +1551,7 @@
     "peak_bytes": 143826944,
     "samples": 239
   },
-  "//crates/lash:attachment_referrers_evidence__test__fv_94a26ac9": {
+  "//crates/lash:attachment_referrers_evidence__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.11,
@@ -1567,7 +1567,7 @@
     "peak_bytes": 16867328,
     "samples": 164
   },
-  "//crates/lash:attachments_evidence__test__fv_94a26ac9": {
+  "//crates/lash:attachments_evidence__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.06,
@@ -1583,7 +1583,7 @@
     "peak_bytes": 55767040,
     "samples": 174
   },
-  "//crates/lash:facade_host_wrappers__test__fv_94a26ac9": {
+  "//crates/lash:facade_host_wrappers__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.09,
@@ -1599,7 +1599,7 @@
     "peak_bytes": 113438720,
     "samples": 186
   },
-  "//crates/lash:integration__test__fv_396cc7df": {
+  "//crates/lash:integration__test__fv_58035f22": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 1.01,
@@ -1607,7 +1607,7 @@
     "peak_bytes": 122249216,
     "samples": 11
   },
-  "//crates/lash:integration__test__fv_94a26ac9": {
+  "//crates/lash:integration__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 0.99,
@@ -1623,7 +1623,7 @@
     "peak_bytes": 3043880960,
     "samples": 706
   },
-  "//crates/lash:lash__unit_test__fv_94a26ac9": {
+  "//crates/lash:lash__unit_test__fv_cac9bdc7": {
     "cpu_count": 4,
     "memory_kb": 3932160,
     "p95_cores": 3.44,
@@ -1639,7 +1639,7 @@
     "peak_bytes": 565014528,
     "samples": 391
   },
-  "//crates/lash:llm_profiles__test__fv_94a26ac9": {
+  "//crates/lash:llm_profiles__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.04,
@@ -1655,7 +1655,7 @@
     "peak_bytes": 16306176,
     "samples": 163
   },
-  "//crates/lash:observation_admin_evidence__test__fv_94a26ac9": {
+  "//crates/lash:observation_admin_evidence__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.06,
@@ -1671,7 +1671,7 @@
     "peak_bytes": 17342464,
     "samples": 163
   },
-  "//crates/lash:otel_trace_evidence__test__fv_94a26ac9": {
+  "//crates/lash:otel_trace_evidence__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.05,
@@ -1687,7 +1687,7 @@
     "peak_bytes": 17027072,
     "samples": 171
   },
-  "//crates/lash:processes_evidence__test__fv_94a26ac9": {
+  "//crates/lash:processes_evidence__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.09,
@@ -1703,7 +1703,7 @@
     "peak_bytes": 16920576,
     "samples": 166
   },
-  "//crates/lash:processes_evidence_b__test__fv_94a26ac9": {
+  "//crates/lash:processes_evidence_b__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.03,
@@ -1719,7 +1719,7 @@
     "peak_bytes": 16596992,
     "samples": 171
   },
-  "//crates/lash:protocol_evidence__test__fv_94a26ac9": {
+  "//crates/lash:protocol_evidence__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.07,
@@ -1735,7 +1735,7 @@
     "peak_bytes": 197726208,
     "samples": 232
   },
-  "//crates/lash:replay_after_advance__test__fv_94a26ac9": {
+  "//crates/lash:replay_after_advance__test__fv_cac9bdc7": {
     "cpu_count": 2,
     "memory_kb": 262144,
     "p95_cores": 1.75,
@@ -1751,7 +1751,7 @@
     "peak_bytes": 76939264,
     "samples": 183
   },
-  "//crates/lash:seam_proof_dialect__test__fv_94a26ac9": {
+  "//crates/lash:seam_proof_dialect__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.06,
@@ -1767,7 +1767,7 @@
     "peak_bytes": 16252928,
     "samples": 172
   },
-  "//crates/lash:sessions_evidence__test__fv_94a26ac9": {
+  "//crates/lash:sessions_evidence__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.03,
@@ -1783,7 +1783,7 @@
     "peak_bytes": 16687104,
     "samples": 170
   },
-  "//crates/lash:triggers_evidence__test__fv_94a26ac9": {
+  "//crates/lash:triggers_evidence__test__fv_cac9bdc7": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.08,

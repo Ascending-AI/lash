@@ -690,7 +690,7 @@ jobs:
           python3 scripts/release_version.py stamp "${RELEASE_TAG#v}"
           kiln() { scripts/hermetic-build.sh "$@"; }
           kiln sync
-          worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_c2fdb0f7
+          worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_9bcce4a3
           kiln build --config=optimized --materializations=final \
             --build-report "${RUNNER_TEMP}/sdk-worker-build.json" "${worker_label}"
           worker="$(python3 tools/buck2/outputs.py \

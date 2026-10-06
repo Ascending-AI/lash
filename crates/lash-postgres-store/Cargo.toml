@@ -35,6 +35,7 @@ synthetic-next = ["lash-core-execution/synthetic-next"]
 
 [dependencies]
 lash-store-sql = { workspace = true }
+lash-durable = { workspace = true }
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 lash-core-execution = { workspace = true }
@@ -47,6 +48,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash-durable = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash.workspace = true
 lash-conformance = { workspace = true, features = ["lashlang"] }

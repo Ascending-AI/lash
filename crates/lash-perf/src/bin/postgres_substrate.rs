@@ -206,28 +206,28 @@ async fn measure(
         held,
     } = scenario;
     let mut setup = connect(options, schema).await?;
-    sqlx::raw_sql("TRUNCATE lash_actors, lash_nodes, phase_state")
+    sqlx::raw_sql("TRUNCATE bench_actors, bench_nodes, phase_state")
         .execute(&mut setup)
         .await?;
     sqlx::query(sql::SEED)
         .bind(actors)
         .execute(&mut setup)
         .await?;
-    sqlx::raw_sql("INSERT INTO phase_state SELECT actor_key, 0, decode(repeat('ab',256),'hex') FROM lash_actors")
+    sqlx::raw_sql("INSERT INTO phase_state SELECT actor_key, 0, decode(repeat('ab',256),'hex') FROM bench_actors")
         .execute(&mut setup).await?;
     for node in 0..nodes {
         sqlx::query(
-            "INSERT INTO lash_nodes VALUES ($1,1,'spike',FALSE,lash_now(),lash_now()+3600000)",
+            "INSERT INTO bench_nodes VALUES ($1,1,'spike',FALSE,lash_now(),lash_now()+3600000)",
         )
         .bind(format!("node-{node}"))
         .execute(&mut setup)
         .await?;
     }
     if matches!(op, Operation::Fence(_)) {
-        sqlx::raw_sql("UPDATE lash_actors SET state='owned', epoch=1, ready_at_ms=NULL, owner_node='node-0', owner_incarnation=1")
+        sqlx::raw_sql("UPDATE bench_actors SET state='owned', epoch=1, ready_at_ms=NULL, owner_node='node-0', owner_incarnation=1")
             .execute(&mut setup).await?;
     }
-    sqlx::raw_sql("ANALYZE lash_actors; ANALYZE lash_nodes")
+    sqlx::raw_sql("ANALYZE bench_actors; ANALYZE bench_nodes")
         .execute(&mut setup)
         .await?;
     let claim_plan = if let Operation::Claim(batch) = op {
@@ -247,7 +247,7 @@ async fn measure(
     // A zero-row SELECT in an idle transaction would still pin an MVCC snapshot.
     let mut held_tx = if held > 0 {
         let mut tx = holder.begin().await?;
-        sqlx::query("SELECT actor_key FROM lash_actors ORDER BY actor_key LIMIT $1 FOR UPDATE")
+        sqlx::query("SELECT actor_key FROM bench_actors ORDER BY actor_key LIMIT $1 FOR UPDATE")
             .bind(held)
             .fetch_all(&mut *tx)
             .await?;
@@ -343,12 +343,12 @@ async fn reap_populated(options: &PgConnectOptions, schema: &str, nodes: usize) 
     let mut times = Vec::new();
     let start = Instant::now();
     for _ in 0..128 {
-        sqlx::raw_sql("TRUNCATE lash_nodes, lash_actors")
+        sqlx::raw_sql("TRUNCATE bench_nodes, bench_actors")
             .execute(&mut conn)
             .await?;
-        sqlx::query("INSERT INTO lash_nodes SELECT 'dead-'||i,1,'spike',FALSE,0,0 FROM generate_series(1,$1) i")
+        sqlx::query("INSERT INTO bench_nodes SELECT 'dead-'||i,1,'spike',FALSE,0,0 FROM generate_series(1,$1) i")
             .bind(i32::try_from(nodes)?).execute(&mut conn).await?;
-        sqlx::query("INSERT INTO lash_actors (actor_key,kind,state,epoch,owner_node,owner_incarnation,formats) SELECT 'p/'||n||'/'||i,'process','owned',1,'dead-'||n,1,'spike' FROM generate_series(1,$1) n CROSS JOIN generate_series(1,16) i")
+        sqlx::query("INSERT INTO bench_actors (actor_key,kind,state,epoch,owner_node,owner_incarnation,formats) SELECT 'p/'||n||'/'||i,'process','owned',1,'dead-'||n,1,'spike' FROM generate_series(1,$1) n CROSS JOIN generate_series(1,16) i")
             .bind(i32::try_from(nodes)?).execute(&mut conn).await?;
         let before = Instant::now();
         let reaped = sqlx::query(sql::REAP).fetch_all(&mut conn).await?;
@@ -357,7 +357,7 @@ async fn reap_populated(options: &PgConnectOptions, schema: &str, nodes: usize) 
             reaped.len() == nodes * 16,
             "reap failed to release all dead owners"
         );
-        let (invalid,): (i64,) = sqlx::query_as("SELECT count(*) FROM lash_actors WHERE epoch<>2 OR state<>'ready' OR owner_node IS NOT NULL OR owner_incarnation IS NOT NULL")
+        let (invalid,): (i64,) = sqlx::query_as("SELECT count(*) FROM bench_actors WHERE epoch<>2 OR state<>'ready' OR owner_node IS NOT NULL OR owner_incarnation IS NOT NULL")
             .fetch_one(&mut conn).await?;
         ensure!(invalid == 0, "reap failed its epoch fence");
     }

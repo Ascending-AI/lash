@@ -75,6 +75,7 @@ mod render;
 pub mod artifact;
 pub mod attachment;
 pub mod draining_generations;
+pub mod durable;
 pub mod obligation;
 pub mod process;
 pub mod recovery_leader;
@@ -108,6 +109,9 @@ pub const TABLES: &[&str] = &[
     attachment::uploads::TABLE,
     attachment::sweep_clock::TABLE,
     draining_generations::TABLE,
+    durable::ACTORS_TABLE,
+    durable::MAIL_TABLE,
+    durable::NODES_TABLE,
     process::abandoned_consumer_holds::TABLE,
     process::change_clock::TABLE,
     process::event_horizons::TABLE,
@@ -245,6 +249,9 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(turn_ingress::turn_park_events::TurnParkEventStatements::NEUTRAL);
     statements.extend_from_slice(recovery_leader::RecoveryLeaderStatements::NEUTRAL);
     statements.extend_from_slice(draining_generations::DrainingGenerationStatements::NEUTRAL);
+    statements.extend_from_slice(durable::NodeStatements::NEUTRAL);
+    statements.extend_from_slice(durable::ActorStatements::NEUTRAL);
+    statements.extend_from_slice(durable::MailStatements::NEUTRAL);
     statements.extend_from_slice(
         turn_ingress::pending_inputs::PendingTurnInputObligationStatements::NEUTRAL,
     );

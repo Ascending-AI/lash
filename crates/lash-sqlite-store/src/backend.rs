@@ -440,6 +440,15 @@ impl SqliteStoreSet {
         Arc::clone(&self.inner.process_env_store)
     }
 
+    /// The durability engine's store over the durable core, on the set's
+    /// writer connection and clock.
+    pub fn durable_store(&self) -> crate::SqliteDurableStore {
+        crate::SqliteDurableStore::new(
+            self.inner.process_env_store.conn.clone(),
+            Arc::clone(&self.inner.clock),
+        )
+    }
+
     /// The attachment byte store over the durable-core catalog, beside the
     /// manifest its garbage collection reads.
     pub fn attachment_store(&self) -> Arc<SqliteAttachmentStore> {

@@ -70,6 +70,15 @@ repos:
         files: '^(crates/.*\.rs|examples/|scripts/(check_transcript_projection\.py|transcript-projection-sites\.toml))'
         pass_filenames: false
 
+      # Mirrors CI Lint "Check the durability engine's SQL boundary": the
+      # engine's tables are written only by their neutral and dialect modules.
+      - id: durable-sql-boundary
+        name: durable SQL boundary
+        language: system
+        entry: python3 scripts/check-durable-sql.py
+        files: '^(crates/.*\.(rs|sql)|examples/.*\.(rs|sql)|runbooks/.*\.(rs|sql)|scripts/check-durable-sql\.py)$'
+        pass_filenames: false
+
       # Mirrors CI Lint "Check substrate boundary" — includes the
       # shift-determinism ratchet (FIG-3672), whose allowlist can only shrink.
       - id: substrate-boundary

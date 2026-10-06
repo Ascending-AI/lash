@@ -10,6 +10,7 @@ members = [
     "crates/lash-core-llm",
     "crates/lash-core-store",
     "crates/lash-store-sql",
+    "crates/lash-durable",
     "crates/lash-core-effect",
     "crates/lash-core-execution",
     "crates/lash-core-worker",
@@ -63,6 +64,7 @@ default-members = [
     "crates/lash-render",
     "crates/lash-core-ids",
     "crates/lash-store-sql",
+    "crates/lash-durable",
     "crates/lash-core-llm",
     "crates/lash-core-store",
     "crates/lash-core-effect",
@@ -306,6 +308,7 @@ lash-restate-test = { package = "lash-internal-restate-test", path = "crates/las
 lash-rlm-types = { package = "lash-internal-rlm-types", path = "crates/lash-rlm-types", version = "=0.0.0-dev" }
 lash-sansio = { package = "lash-internal-sansio", path = "crates/lash-sansio", version = "=0.0.0-dev" }
 lash-store-sql = { package = "lash-internal-store-sql", path = "crates/lash-store-sql", version = "=0.0.0-dev" }
+lash-durable = { package = "lash-internal-durable", path = "crates/lash-durable", version = "=0.0.0-dev" }
 lash-subagents = { package = "lash-internal-subagents", path = "crates/lash-subagents", version = "=0.0.0-dev" }
 lash-tool-support = { package = "lash-internal-tool-support", path = "crates/lash-tool-support", version = "=0.0.0-dev" }
 lash-trace = { package = "lash-internal-trace", path = "crates/lash-trace", version = "=0.0.0-dev" }

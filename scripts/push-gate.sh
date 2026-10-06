@@ -193,6 +193,9 @@ run_rust_source_guards() {
   step "Dialect boundary guard"
   python3 scripts/check-dialect-boundary.py
 
+  step "Durability engine SQL guard"
+  python3 scripts/check-durable-sql.py
+
   step "Workflow graph model guard"
   bash scripts/check-workflow-graph-model.sh
 

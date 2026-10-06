@@ -1,4 +1,5 @@
 use super::{PROCESS_SCHEMA, SCHEMA, TRIGGER_SCHEMA};
+use crate::durable::DURABLE_TABLES;
 use crate::schema_fragments::{SESSION_INGRESS_TABLE, SESSION_RUNS_TABLES};
 
 #[derive(Clone, Copy)]
@@ -17,7 +18,8 @@ struct SqliteDatabaseDefinition {
 /// and operator-facing name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SqliteDatabase {
-    /// Sessions, graph nodes, checkpoints, leases, queued work.
+    /// Sessions, graph nodes, checkpoints, leases, queued work, and the
+    /// durability engine's nodes, actors and mailboxes.
     DurableCore,
     /// The process registry.
     ProcessRegistry,
@@ -53,7 +55,7 @@ impl SqliteDatabase {
             Self::DurableCore => SqliteDatabaseDefinition {
                 name: "durable core",
                 schema: SCHEMA,
-                fragments: &[SESSION_INGRESS_TABLE, SESSION_RUNS_TABLES],
+                fragments: &[SESSION_INGRESS_TABLE, SESSION_RUNS_TABLES, DURABLE_TABLES],
             },
             Self::ProcessRegistry => SqliteDatabaseDefinition {
                 name: "process registry",
