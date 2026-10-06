@@ -52,7 +52,9 @@ mod drain;
 mod parallel;
 mod realization;
 mod start;
-use start::{bind_start, discharge_start, launch_start, recorded_obligation, served_launch};
+use start::{
+    bind_start, cancels_work, discharge_start, launch_start, recorded_obligation, served_launch,
+};
 
 pub use aggregate::RunAggregateOutcome;
 pub use bodies::RunBodies;
@@ -288,10 +290,7 @@ fn admit_live(
     require_isolated_engine(handlers, kind, start.boundary)?;
     bind_start(
         call,
-        &RuntimeCallPolicy {
-            cancel: call.cancel,
-            ..RuntimeCallPolicy::default()
-        },
+        call.cancel == ExternalCancelPolicy::CancelExternalWork,
         start.registration.clone(),
     )
     .map_err(|cause| IsolatedStartRefusal::Start { cause })?;
@@ -365,10 +364,7 @@ async fn prepare_admitted_call(
             let engine_kind = kind.clone();
             let obligation = bind_start(
                 call,
-                &RuntimeCallPolicy {
-                    cancel: call.cancel,
-                    ..RuntimeCallPolicy::default()
-                },
+                call.cancel == ExternalCancelPolicy::CancelExternalWork,
                 start.registration,
             )
             .map_err(|cause| cause.to_string())?;

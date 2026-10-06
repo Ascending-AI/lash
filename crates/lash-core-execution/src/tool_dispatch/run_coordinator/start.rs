@@ -13,10 +13,10 @@ fn start_hold_key(call_id: &ToolCallId) -> String {
 
 /// Bind a body's declared start to the Run: the Run's environment, when lash
 /// executes the process, and a consumer hold, owned by the Run's opener, that
-/// carries the call's recorded cancel policy.
+/// cancels the process with its call when `cancels` (see [`cancels_work`]).
 pub(super) fn bind_start(
     call: &SingletonToolCall,
-    policy: &RuntimeCallPolicy,
+    cancels: bool,
     mut registration: ProcessStartRegistration,
 ) -> Result<DeclaredStartObligation, DeclaredStartObligationRefusal> {
     registration.env_ref = if registration.input.is_externally_owned() {
@@ -27,9 +27,18 @@ pub(super) fn bind_start(
     registration.consumer_hold = Some(ConsumerHold {
         key: start_hold_key(&call.call_id),
         owner: ScopeId::Opener(call.owner.clone()),
-        cancels: policy.cancel == ExternalCancelPolicy::CancelExternalWork,
+        cancels,
     });
     DeclaredStartObligation::new(call.call_id.clone(), registration)
+}
+
+/// Whether cancelling a call cancels the process its start launched: the
+/// call's recorded cancel policy, narrowed by the cancel hint of the wait a
+/// pending call parks on. Under [`crate::CancelHint::Ignore`] a cancelled
+/// wait drops only the wait, and the child runs on (ADR 0116 §3.4).
+pub(super) fn cancels_work(policy: &RuntimeCallPolicy, hint: Option<crate::CancelHint>) -> bool {
+    policy.cancel == ExternalCancelPolicy::CancelExternalWork
+        && hint.is_none_or(|hint| hint == crate::CancelHint::CancelExternalWork)
 }
 
 /// The obligation a recorded attempt owns, checked against the key and call

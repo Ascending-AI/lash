@@ -60,10 +60,12 @@ pub(super) async fn capture_attempt(
                 Err(refusal) => Ok(SingletonCapture::Refused { refusal }),
                 Ok(()) => {
                     let obligation = match &completion.resolved_by {
-                        Some(crate::PendingResolver::DeclaredStart(start)) => {
-                            bind_start(call, &member.policy, start.request().into_registration())
-                                .map(Some)
-                        }
+                        Some(crate::PendingResolver::DeclaredStart(start)) => bind_start(
+                            call,
+                            cancels_work(&member.policy, Some(completion.on_cancel)),
+                            start.request().into_registration(),
+                        )
+                        .map(Some),
                         _ => Ok(None),
                     };
                     match obligation {
@@ -124,7 +126,7 @@ pub(super) async fn capture_attempt(
             });
             match admitted {
                 Err(refusal) => Ok(SingletonCapture::Refused { refusal }),
-                Ok(()) => match bind_start(call, &member.policy, *start) {
+                Ok(()) => match bind_start(call, cancels_work(&member.policy, None), *start) {
                     Err(refusal) => Ok(SingletonCapture::StartRefused { refusal }),
                     Ok(obligation) => {
                         let source = process_source
@@ -168,7 +170,9 @@ pub(super) async fn capture_attempt(
             }
             match declaration.admits(OutcomeShape::Done { intents: &declared }) {
                 Err(refusal) => Ok(SingletonCapture::Refused { refusal }),
-                Ok(()) => match start.map(|start| bind_start(call, &member.policy, *start)) {
+                Ok(()) => match start
+                    .map(|start| bind_start(call, cancels_work(&member.policy, None), *start))
+                {
                     None => Ok(SingletonCapture::Done {
                         output,
                         commands: commands.into_commands(),
