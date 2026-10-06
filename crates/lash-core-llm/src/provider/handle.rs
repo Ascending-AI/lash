@@ -446,9 +446,11 @@ impl ProviderHandle {
                 route.clipped(&provider_limits, remaining(clock.as_ref()));
             self.components.provider.set_options(attempt_options);
             let attempt = {
-                let attempt = std::panic::AssertUnwindSafe(
-                    self.components.provider.complete(request.clone()),
-                )
+                // The call is built inside the caught future: a provider
+                // that panics while constructing its future is contained.
+                let attempt = std::panic::AssertUnwindSafe(async {
+                    self.components.provider.complete(request.clone()).await
+                })
                 .catch_unwind();
                 let expiry = clock.sleep_until(deadline);
                 futures_util::pin_mut!(attempt, expiry);
