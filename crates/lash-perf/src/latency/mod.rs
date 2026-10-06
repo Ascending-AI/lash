@@ -16,6 +16,7 @@
 //! grace, which binds only while a run in the host may still deposit a
 //! report — by fixing the shift-attach wake the follower waits on.
 
+pub mod baseline;
 mod provider;
 mod restate;
 mod runner;

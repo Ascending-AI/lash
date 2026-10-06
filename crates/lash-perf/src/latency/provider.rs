@@ -210,7 +210,7 @@ fn request_has_tool_result(request: &LlmRequest) -> bool {
     })
 }
 
-fn response(parts: Vec<LlmOutputPart>) -> LlmResponse {
+pub(super) fn response(parts: Vec<LlmOutputPart>) -> LlmResponse {
     let usage = LlmUsage {
         input_tokens: 1_024,
         output_tokens: 64,
