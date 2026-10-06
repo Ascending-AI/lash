@@ -994,8 +994,8 @@ CREATE TABLE IF NOT EXISTS tool_intent_retired_owners (
 
 ";
 
-// The database's schema version, and the history of what each value
-// changed, is `lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION`.
+// The database's schema version is
+// `lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION`.
 
 /// The compatibility component of the deployment's one database file.
 pub(crate) const COMPONENT: lash_core_execution::compat::ComponentId =

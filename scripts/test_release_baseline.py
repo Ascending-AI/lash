@@ -171,8 +171,8 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         # build's descriptor writes the version after it.
         compat = "crates/lash-core-store/src/compat.rs"
         for path, constant, default, synthetic in [
-            (compat, "POSTGRES_SCHEMA_VERSION", 141, 141),
-            (compat, "SQLITE_CORE_SCHEMA_VERSION", 99, 99),
+            (compat, "POSTGRES_SCHEMA_VERSION", 1, 1),
+            (compat, "SQLITE_CORE_SCHEMA_VERSION", 1, 1),
             ("crates/lashlang/src/workflow_graph.rs", "WORKFLOW_GRAPH_SCHEMA_VERSION", 21, 22),
         ]:
             row = by_name[f"{path}:{constant}"]
@@ -188,8 +188,7 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
             return
         self.assertEqual(result.returncode, 1, result.stderr)
         for name in ["REMOTE_PROTOCOL_VERSION",
-                     "WORKFLOW_GRAPH_SCHEMA_VERSION", "SQLITE_CORE_SCHEMA_VERSION",
-                     "compat.rs:POSTGRES_SCHEMA_VERSION"]:
+                     "WORKFLOW_GRAPH_SCHEMA_VERSION"]:
             self.assertIn(name, result.stderr)
 
     @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")

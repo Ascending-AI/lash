@@ -54,6 +54,12 @@ pub struct CompatDescriptor {
 /// names and the release stamp carries. Every reader takes it from the
 /// PostgreSQL descriptor below; no backend restates it.
 ///
+/// It is the 1.0 baseline: `schema.sql` provisions the whole catalog at
+/// version 1, and the migrate catalog carries no step before it (FIG-5191).
+/// A catalog stamped below it, or by a newer release whose reader floor is
+/// above it, is refused typed by [`admit`]; it is never upgraded in place or
+/// silently reset.
+///
 /// version_guard(
 ///     file(
 ///         path = "crates/lash-postgres-store/schema.sql",
@@ -87,392 +93,19 @@ pub struct CompatDescriptor {
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
+pub const POSTGRES_SCHEMA_VERSION: u32 = 1;
 
 /// The SQLite database's version: its `lash_compat` row and its entry in the
 /// release stamp. A SQLite deployment is one database file (ADR 0132 §12),
 /// so this one number versions every table the file holds: the durable core,
 /// the process registry and the trigger store.
 ///
-/// Its history follows. Before the catalog existed each value was a
-/// reject-and-recreate boundary: an older database is deleted before
-/// opening, not migrated. The durable-core `SCHEMA` doc comment in
-/// `lash-sqlite-store` has the rationale.
-///
-/// Bumped to 10 for the attachment three-layer cutover (ADR 0028): the
-/// the legacy attachment ownership table this schema gates carried, pre-cutover, committed refs
-/// and canonical URIs that named `sessions/<hash>/...` blob paths the flat
-/// content-addressed layout cannot read. Pre-10 session databases are rejected
-/// at open and recreated; the old `sessions/` blob trees are unreachable garbage
-/// operators delete manually.
-///
-/// Bumped to 11 for claim generation fencing: queued-work and
-/// pending-turn-input rows replace their per-claim claimed-at and expiry
-/// columns with a single column pinning the session-execution-lease generation
-/// the claim was taken under (since replaced by run admission, FIG-3927).
-/// There is no migration chain — pre-11 session databases are rejected at open
-/// and recreated.
-/// Bumped to 12 for FIG-546 owner-bound attachment intents. This is a
-/// reject-and-recreate cutover: pre-12 manifests have no durable execution
-/// owner and cannot participate in reachability-based reclamation.
-///
-/// Bumped to 13 for FIG-636's factory-wide durable-core catalog. Session heads,
-/// metadata, graph rows, and usage deltas are now keyed by `session_id`; node
-/// ids remain globally unique across the one database. Pre-13 per-session
-/// databases are rejected and must be recreated.
-///
-/// Bumped to 14 for FIG-654's reachability model. Parent edges, head roots,
-/// and cached incoming counts are queryable rows;
-/// graph structure no longer lives inside `node_json`.
-///
-/// Bumped to 15 for FIG-634 first-class forks. `node_anchors` makes explicit
-/// continuation pins node and checkpoint roots in the same transaction domain
-/// as heads and graph edges.
-///
-/// Bumped to 16 so an anchor binds the continuation checkpoint and source
-/// session as one immutable snapshot rather than selecting either later.
-///
-/// Bumped to 17 so a reusable session name has a durable per-lifetime
-/// incarnation for node and effect-replay identity.
-///
-/// Bumped to 18 because runtime commit receipts no longer persist the removed
-/// realization digest; stores derive their lookup hash from commit content.
-///
-/// Bumped to 19 to remove cached graph-node reference counts. Node retirement
-/// now derives liveness from parent edges, session heads, and anchors.
-///
-/// Bumped to 20 for permanent session-id tombstones and the removal of
-/// per-lifetime incarnation identity. Pre-20 stores are rejected and recreated.
-///
-/// Bumped to 21 for consumed process-wake source-key evidence that survives
-/// queue drain. Pre-21 durable-core catalogs are rejected and recreated.
-///
-/// Bumped to 22 to replace per-message evidence with monotone consumed
-/// high-water marks. Pre-22 durable-core catalogs are rejected and recreated.
-///
-/// Bumped to 23 for the session-create and process-identity cutover.
-///
-/// Bumped to 24 to rename consumed wake high-water marks as receiver allocation
-/// fences and add durable sender allocation floors. Process-event sequences
-/// remain small and monotone across pruned incarnations.
-///
-/// Bumped to 25 for FIG-850 append-request identity receipts and idempotent
-/// usage publication. Receipt identity columns are nullable so a pre-upgrade
-/// row copied into the new schema retains exact-commit-hash semantics; usage
-/// rows carry a required operation key, ordinal, payload-encoding version, and
-/// canonical payload hash unique within a session. This unreleased schema was
-/// completed in place; operators still use the store family's reject-and-
-/// recreate flow rather than an in-place migration.
-/// Version 25 also rejects session and artifact rows carrying pre-FIG-886
-/// identities as part of the coordinated cutover.
-/// Version 26 rejects pre-FIG-915 usage identities and session rows carrying
-/// the former tool-batch or plugin-message names.
-/// Version 27 adds the required per-turn budget to session-head configuration,
-/// frame policy snapshots, and process execution environment artifacts. Older
-/// databases are rejected and recreated; there is no compatibility read path.
-/// Version 28 adds immutable graph generations and frame pointers plus
-/// zero-copy fork-lineage accelerators. Older databases are rejected and
-/// recreated; there is no backfill or compatibility read path.
-/// Version 29 replaces the fixed checkpoint slots with a complete keyed
-/// component descriptor set carrying per-component encoding versions. Older
-/// runs have no honest compatibility interpretation and are rejected with the
-/// existing recreate-store remedy.
-/// Version 30 removes the CLI-era session name, creation timestamp, model, and
-/// working-directory columns from session metadata. Older databases are
-/// rejected and recreated; there is no compatibility read path.
-/// Version 32 makes nested session metadata strict.
-/// Version 33 replaces that JSON carrier with structural columns and narrow
-/// ordered child tables. Older databases are rejected and recreated; there is
-/// no JSON or compatibility read path.
-/// Version 35 adds queued-work batch identity and coalescing metadata.
-/// Version 36 adds the runtime-minted executor discriminator and store-authored
-/// lease term to session lease rows.
-/// Version 37 adds the attachment GC fence's per-digest condemnation table.
-/// Older databases are rejected and recreated; there is no compatibility read
-/// path.
-/// Version 38 projects checkpoint-manifest component edges into an indexed
-/// relation so owner-delete reclaim can decide blob liveness inside the
-/// severing transaction. Version-37 catalogs are armed in place by decoding
-/// every manifest reachable from a session head or node anchor and inserting
-/// its exact component edges in the same transaction that stamps version 38.
-/// Catalogs below 37 remain reject-and-recreate boundaries.
-/// Version 39 adds core-owned creation and last-commit timestamps to session
-/// catalog rows and preserves their enumeration projection on permanent
-/// deletion tombstones. Older stores cannot reconstruct an honest creation
-/// time and are rejected under the existing recreate-store policy.
-///
-/// An index-only catalog change does **not** bump this version. Every
-/// `CREATE INDEX` above is `IF NOT EXISTS`, obsolete indexes are dropped by
-/// name, and open always runs the whole schema. A same-version file self-heals
-/// into the current index set on first open, and an older binary can still read
-/// the newer file. Bumping would reject-and-recreate live stores for a change
-/// that can be applied in place. The idle-arbitration ordering index
-/// (`idx_queued_work_session_command_order`) was added under exactly this carve-out. It
-/// covers index-only additions and nothing else: any table, column, or
-/// semantic change bumps.
-/// Version 40 persists per-turn cancellation requests and their undelivered
-/// input outcomes.
-/// Version 41 adds the nullable independently readable session-state generation
-/// beside durable session binding metadata. NULL is the version-zero legacy map.
-/// Version 42 removes the graph-node sequence column. Per-session generation is
-/// the sole durable graph ordering authority.
-/// Version 43 makes runtime append receipt identity columns all-or-none and
-/// removes the readerless requested-ancestor receipt column. Older stores are
-/// rejected and recreated; there is no compatibility read or migration path.
-/// Version 44 folds the two pending observer-intent encodings into one
-/// attributed table and removes the relation-wrapper depth counter. Version-43
-/// catalogs are rejected and recreated like every other predecessor: the
-/// in-place fold was deleted under the store-version window.
-/// Version 45 switches content and semantic identities to domain-tagged BLAKE3.
-/// Existing stores are rejected rather than reinterpreting SHA-256 rows.
-/// Version 46 adds DDL-enforced session relation, causal-reference, and observer-
-/// inheritance vocabularies. Existing durable-core catalogs are rejected rather
-/// than migrated.
-/// Version 47 makes session-execution-lease identity all-or-none and removes the
-/// unused owner-liveness column. Existing catalogs are rejected rather than
-/// migrated.
-/// Version 48 constrains queued-work vocabulary and claim correlation while
-/// removing its unread owner columns. Existing catalogs are rejected rather
-/// than migrated.
-/// Version 49 constrains pending-turn-input state and scope correlation while
-/// removing the unread claim-owner-liveness column. SQL CHECK NULL semantics
-/// let ingress JSON without a `scope` key pass both checks; serde cannot emit
-/// that shape, so the behavior is identical across backends. Existing
-/// catalogs are rejected rather than migrated.
-/// Version 50 stores checked `FrameKey` values in every frame-open node. Existing
-/// catalogs contain raw initial-frame keys and are rejected rather than decoded
-/// through a legacy path.
-/// Version 51 admits semantic-boundary receipt identities (FIG-2480): the
-/// runtime-turn-commit identity CHECK now accepts a populated hash and version
-/// with a NULL requested-node count. Existing catalogs are rejected rather
-/// than migrated.
-/// ADR 0078 replaces plugin snapshots with mediated namespace state; older
-/// catalogs are refused before any prior payload can be read.
-/// Version 53 persists each usage delta's typed disposition
-/// (`usage_deltas.usage_disposition_json`, FIG-2765). Version 52 rows carry no
-/// disposition at all and their unreported holes cannot be reconstructed, so
-/// existing catalogs are rejected rather than migrated with a defaulted column.
-/// Version 54 preserves successful attachment deletion as the terminal
-/// `reclaimed` phase so adoption can refuse runs whose bytes are absent.
-/// Version 55 keeps that phase present under an opaque write token associated
-/// with its manifest session until a restoring backend put succeeds, so failed
-/// re-puts and explicit host recovery can restore it exactly.
-/// Version 56 persists full effect addresses in session causal metadata.
-/// Version 57 also requires pending-input claim identity and token to be either
-/// both NULL or both populated; both version-56 parent catalogs are recreated.
-/// Version 58 adds exact owner edges and permanent execution-owner publication
-/// fences. Version-57 catalogs are rejected and recreated.
-/// Version 59 qualifies process-owned attachment intents with the registry-minted
-/// incarnation. Version-58 catalogs are rejected so a bare process id is never
-/// reinterpreted as the current incarnation with the same reusable name.
-/// Bumped to 61 for FIG-2795: attachment adoption requires upload evidence.
-/// the legacy attachment ownership table gains `write_id` and `written_at_ms`, and the
-/// `attachment_condemnations` phase vocabulary drops `reclaimed` — a pre-61
-/// database can hold rows in a phase this schema forbids and manifest rows with
-/// no upload evidence for bytes that are present, so it is rejected at open and
-/// recreated.
-/// Bumped to 62 for FIG-2962/FIG-2963: the parent scope is a registration fact
-/// and the end of a scope is one ledger row. `processes` gains
-/// `parent_scope_kind`, `parent_scope_id`, `on_parent_end` and
-/// a cancel-request column, and `process_parent_end_plans` is replaced by the
-/// scope-keyed `parent_end_plans`. A pre-62 catalog holds children with no
-/// parent scope and plans keyed by a process id, so it is rejected at open and
-/// recreated.
-/// Bumped to 63 for FIG-2965: `processes` carries the cancel request as
-/// `cancel_requested_at_ms` instead of a boolean, and gains the partial index a
-/// pending-cancel list reads. A pre-63 database has the boolean column, so it
-/// is rejected at open and recreated.
-/// Bumped to 65 for FIG-2995's named process-definition registry: a single
-/// new table, the one durable home for a registered definition record. A
-/// pre-65 database holds no registry rows, so the whole catalog is recreated
-/// under the reject-and-recreate policy rather than migrated midwifing a
-/// registry into a database that never had one.
-/// Bumped to 66 for FIG-3092's release stamp: `release_stamp` records the lash
-/// release, the schema-version tuple and the instant that release first wrote
-/// this store, so a host can read which build produced the data before wiring
-/// a runtime. A pre-66 database has no such table and, under the
-/// reject-and-recreate policy, is refused at open rather than midwifed one.
-/// Bumped to 67 for FIG-2885: `session_meta` gains the two family CHECKs that
-/// tie `relation_kind` and `caused_by_kind` to exactly their payload columns,
-/// so a mispaired discriminator is refused at write rather than silently
-/// dropped at decode. `caused_by_process_event_sequence` and
-/// `caused_by_subscription_revision` stay TEXT on purpose: both carry a u64
-/// `CausalRef` field whose full range exceeds SQLite's signed INTEGER, and the
-/// cross-backend differential round-trips u64::MAX through them. A pre-67
-/// database lacks the family guards, so it is rejected at open and recreated.
-/// Bumped to 68 for FIG-3260: the await-event tables moved out of this string
-/// into a shared fragment so the declaration existed once for both carrying
-/// databases. The applied DDL is statement-identical, but the guarded
-/// `SCHEMA` text changed, so a pre-68 database is rejected at open and
-/// recreated like any other schema change.
-/// Bumped to 69 for FIG-3261: every formerly-anonymous CHECK gained a
-/// `ck_<table>_<concern>` name so the required-constraints gate can see it.
-/// Constraint names change the stored DDL text, so a pre-69 database is
-/// rejected at open and recreated.
-/// Version 70 widens `ck_pending_turn_inputs_claim_identity_all_or_none` to
-/// the whole four-column claim identity (FIG-3262): a claim id/token pair
-/// with no owner was representable. A pre-70 database is rejected at open and
-/// recreated.
-/// Version 71 removes the redundant payload-family kind from stored blob
-/// envelopes (FIG-1949 layer 2). The durable-core version guards these bytes
-/// as well as the DDL. Pre-71 catalogs are rejected at open and recreated;
-/// there is no envelope migration or legacy decode path.
-/// Generation 72 cuts over to ordered plugin parts and the standard-compaction identity.
-/// Pre-cutover durable-core catalogs are rejected and recreated.
-/// Bumped to 74 for FIG-1949 layer 2: the stored artifact-blob envelope now
-/// actually drops its `descriptor` field — the pointer table's namespace key
-/// is the sole owner of the payload-family fact. A pre-74 database holds
-/// envelopes that still carry the field, so it is rejected at open and
-/// recreated rather than decoded under the new shape.
-/// Version 75 adds durable queued-run admissions and normalized membership.
-/// Durable-core 74 catalogs require recreation.
-/// Bumped to 76 for FIG-3537: `runtime_turn_commits.result_json` now carries
-/// RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION and every receipt read fails closed
-/// on a missing, invalid, or unsupported version instead of skipping the
-/// row. Pre-versioned receipts are refused; a pre-76 database is rejected at
-/// open and recreated.
-/// Bumped to 77 for FIG-3544: `pending_turn_inputs` gains the immutable
-/// `submitted_ingress_json` and `submission_digest` columns written once at
-/// admission, and source-key replay compares the digest instead of the row's
-/// mutable current ingress. The digest is computed in Rust from the submitted
-/// payload, so no DDL can backfill it; a pre-77 database is rejected at open
-/// and recreated.
-/// Bumped to 78 for FIG-3578: the catalog gains `attachment_blobs`, the bytes
-/// of `SqliteAttachmentStore`, so a SQLite deployment supplies its attachment
-/// port from the same database as the manifest that roots them. A pre-78
-/// database has no such table and, under the reject-and-recreate policy, is
-/// refused at open rather than midwifed one.
-/// Bumped to 79 for FIG-3532: the durable `RuntimeErrorCode` and `TurnOutcome`
-/// vocabularies queued-run terminals persist change (`turn_input_redrive_set_unavailable`
-/// removed, `accepted_turn_input_ceded` and `TurnOutcome::Queued` added). A
-/// pre-79 database is rejected at open and recreated.
-/// Bumped to 80 for FIG-3589: `pending_turn_inputs` gains
-/// `claim_bound_turn_id` and `claim_bound_receipt_input_id`, the aborted direct
-/// turn a row's claim is bound to and the input its receipt names, with
-/// `ck_pending_turn_inputs_bound_claim_is_next_turn` holding the pair
-/// all-or-none and a binding to an open next-turn claim. A pre-80 database is rejected at open and
-/// recreated.
-/// Bumped to 81 for FIG-3586: the catalog gains `turn_parks`, the typed
-/// parked state of an engine-executed turn that `drain_status` counts, and the
-/// durable `RuntimeErrorCode` vocabulary gains
-/// `lashlang_cell_replay_divergence`, `lashlang_cell_replay_key_format_cutover`
-/// and `recorded_journal_read_unsupported`. A pre-81 database is rejected at
-/// open and recreated.
-/// Bumped to 82 for FIG-3598: the durable `RuntimeErrorCode` vocabulary gains
-/// `restate_effect_group_protocol_retired`. No relation changes; a pre-82
-/// database is rejected at open and recreated.
-/// Bumped to 83 for FIG-3587: the durable `RuntimeErrorCode` vocabulary gains
-/// `lashlang_cell_binding_drift`, the replay-mismatch report gains
-/// `effect_kind`, and a `turn_parks` reason may be `binding_drift` or
-/// `effect_replay_divergence`, which a pre-83 build cannot decode. A pre-83
-/// database is rejected at open and recreated.
-/// Bumped to 84: the durable `RuntimeErrorCode` vocabulary replaces
-/// `worker_replacement_abort` with the engine-neutral, parking
-/// `effect_replay_divergence`, and the retired code is not aliased. No
-/// relation changes; a pre-84 database is rejected at open and recreated.
-/// Bumped to 86 for FIG-3540 (S3): the catalog gains `session_ingress`, the
-/// one session ingress of ADR 0101: one row per admitted item, one per-session
-/// order under the database write lock, two class-level lanes. Its
-/// `delivery_*` columns hold the submitted delivery, written once and never
-/// rewritten, and `submission_digest` likewise; a claim's columns are set
-/// exactly on an `accepted` row, and a tombstone carries its closed cause and
-/// no claim. Partial indexes keep tombstones off the claim path. A pre-86
-/// database has no such table and is rejected at open and recreated. The
-/// number is provisional: the ingress store merges with the FIG-3540
-/// cutover, which takes the next free version at its merge.
-/// Bumped to 87 for FIG-3659: `turn_parks` reshapes into the enriched parked
-/// record — `park_id`, `reason_code`, `since_ms`, `last_refused_ms` and
-/// `attempts` — and the catalog gains `turn_park_clock`, the feed's sequence
-/// row, and `turn_park_events`, the durable ledger of park transitions. A
-/// pre-87 database is rejected at open and recreated.
-/// Historical, retired in 60e0e86b2a: bumped to 88 for FIG-3585: the durable `RuntimeErrorCode` vocabulary drops
-/// `runtime_perf_start_gate_retry` and `tool_completion_key_process_lifetime`,
-/// and the durable core no longer carries the await-event tables that
-/// store-delegated turn control used (the effect-replay database keeps its
-/// own). A pre-88 database is rejected at open and recreated; it is not
-/// migrated.
-/// Bumped to 89 for FIG-3682: `session_meta` gains
-/// `admission_base_checkpoint_ref`, the checkpoint of the head the session's
-/// latest turn was admitted on. Maintenance keeps it as a checkpoint root, so
-/// a replay of that turn can rebuild its input state from the head it was
-/// admitted on after its own commit superseded the head. A pre-89 database is
-/// rejected at open and recreated; it is not migrated.
-/// Bumped to 90 for FIG-3735: a `turn_parks` reason may be
-/// `session_state_generation_refused`, the park of an in-flight turn whose
-/// redrive the session-state generation gate refused, which a pre-90 build
-/// cannot decode. No relation changes; a pre-90 database is rejected at open
-/// and recreated; it is not migrated.
-/// Bumped to 91 for FIG-3632: `queued_work_batches.enqueue_seq`,
-/// `pending_turn_inputs.enqueue_seq` and `usage_deltas.seq` are now
-/// `INTEGER PRIMARY KEY AUTOINCREMENT`, so a delete can never let SQLite
-/// reissue the freed maximum rowid the way `session_ingress` already could
-/// not. A pre-91 database still declares the reusable rowid columns and is
-/// rejected at open and recreated; it is not migrated.
-/// Bumped to 92 for FIG-3667: the `postgres_effect_replay_*`,
-/// `postgres_await_event_*` and `postgres_effect_journal_retirement` codes
-/// leave the durable runtime-error vocabulary. No relation changes; a pre-92
-/// database is rejected at open and recreated; it is not migrated.
-/// Bumped to 93 for FIG-3571: a turn's admission records the executable
-/// generation it runs under (the queued-run admission gained `generation`),
-/// a redrive under another one parks with the `retired_generation` reason
-/// (replacing `key_format_cutover`, and the durable `RuntimeErrorCode`
-/// `lashlang_cell_replay_key_format_cutover` becomes `retired_generation`),
-/// and `turn_parks` gains the projected, indexed `park_executable_generation` column the
-/// drain counts retired parks by. A pre-93 database is rejected at open and
-/// recreated; it is not migrated.
-/// Bumped to 94 for FIG-3542: `session_head` gains `pending_follow_on_json`,
-/// the follow-on turn a committed agent-frame switch owes the session (ADR
-/// 0101 §3), and a frame handoff is no longer a queued-work row: the
-/// `agent_frame_task` payload is gone and `runtime_turn_commits.result_json`
-/// carries receipt schema 2. A pre-94 database is rejected at open and
-/// recreated; it is not migrated.
-/// Bumped to 95 for FIG-3796: the catalog gains `fleet_format`, the
-/// deployment's own fleet-format row of ADR 0106 §1, recording the
-/// durable-format generation every writer in the fleet emits. A pre-95
-/// database has no such table and, under the reject-and-recreate policy, is
-/// refused at open rather than midwifed one.
-/// Bumped to 96 for FIG-3814: the `engine_effect_group_protocol_retired` code
-/// leaves the durable runtime-error vocabulary for
-/// `engine_object_state_format_unsupported`, with the effect-group protocol's
-/// exact-version refusal. No relation changes; a pre-96 database is rejected at
-/// open and recreated; it is not migrated.
-/// Bumped to 97 for FIG-3815: `session_meta` gains `shift_run_start`, the
-/// start marker of the execution of an admitted run that sealed the
-/// session's current admission (ADR 0105 L-S8); a later seal of the same
-/// admission by another execution is refused. A pre-97 database is rejected
-/// at open and recreated; it is not migrated.
-/// Bumped to 98 for FIG-3607: a process is named by its minted, never-reused
-/// process id, so the legacy attachment ownership table drops `owner_incarnation` and
-/// `session_meta_pending_observer_intents` drops `process_incarnation`, and
-/// the durable `RuntimeErrorCode` vocabulary drops
-/// `process_incarnation_superseded`. A pre-98 database is rejected at open
-/// and recreated; it is not migrated.
-/// Bumped to 99 for FIG-3600 S7: the logical-run family. `session_runs`
-/// holds each admitted run and its terminal evidence, `session_run_inputs`
-/// binds an accepted input to its run, `control_intents` records operator
-/// verbs and session closes, `session_meta` gains `closing_intent`, a turn
-/// park gains `engine_ref` and `resume_intent`, and a park event may be
-/// `redrive_requested`. A pre-99 database is rejected at open and recreated;
-/// it is not migrated.
-/// Version 99 also has `session_runs` record each run's admission
-/// (`admission_json`), with at most one unfinished run per
-/// session; the queued-run ledger is gone and a queued-work head is admitted
-/// as an ordinary run (FIG-3927). `session_runs` also records the executor
-/// the seal of a run's admission named (`executor_json`, FIG-4814).
-/// `pending_turn_inputs` and `queued_work_batches` retain the trace cause
-/// their first acceptance was given (`trace_cause_json`, written once and
-/// NULL for a root cause, FIG-4829). A database written before these changes
-/// has the old shape; recreate it.
-/// Version 99 also lets tool-intent submissions record process-definition
-/// and trigger registration (FIG-4057, changed in place under the version
-/// freeze): a catalog whose kind CHECK predates them rejects both kinds, so
-/// recreate it.
-/// Version 99 also holds the process registry and the trigger store
-/// (FIG-5195, changed in place under the version freeze): their tables, once
-/// two databases of their own beside this one, are provisioned in the one
-/// database file, so a producer's transaction spans every table it writes. A
-/// store in the three-file layout is refused as
-/// [`CompatRefusal::RetiredSqliteLayout`]; recreate it.
+/// It is the 1.0 baseline: `schema.rs`, `trigger_schema.rs` and
+/// `schema_fragments.rs` provision the whole database at version 1, and the
+/// migration catalog carries no step before it (FIG-5191). A database stamped
+/// below it, or by a newer release whose reader floor is above it, is refused
+/// typed by [`admit`]; it is never upgraded in place or silently recreated. A database file in the retired three-file
+/// layout is refused as [`CompatRefusal::RetiredSqliteLayout`].
 /// version_guard(
 ///     shapes(
 ///         path = "crates/lash-core-execution/src/runtime/effect/envelope.rs",
@@ -503,7 +136,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 99;
+pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 1;
 
 /// What this build declares about a store component whose provisioning DDL
 /// is at `version`: it reads and writes exactly that version.
@@ -530,8 +163,8 @@ const fn store(component: ComponentId, version: u32) -> CompatDescriptor {
 /// Every component this build declares. `lashctl version --json` prints them.
 ///
 /// The versions are the components' compatibility numbers, the `version` a
-/// stamp records. A store component's is its schema-version constant above;
-/// the 1.0 cut resets each of those to 1.
+/// stamp records. A store component's is its schema-version constant above,
+/// 1 at the 1.0 baseline.
 pub const DESCRIPTORS: &[CompatDescriptor] = &[
     store(ComponentId::POSTGRES, POSTGRES_SCHEMA_VERSION),
     store(ComponentId::SQLITE_CORE, SQLITE_CORE_SCHEMA_VERSION),
